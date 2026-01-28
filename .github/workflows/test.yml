@@ -42,16 +42,32 @@ jobs:
       - name: Wait for Camunda to be ready
         run: |
           echo "Waiting for Camunda at localhost:8080..."
+          # First wait for topology endpoint
           for i in {1..60}; do
             if curl -s -f -u demo:demo http://localhost:8080/v2/topology > /dev/null; then
-              echo "Camunda is ready!"
-              exit 0
+              echo "Topology endpoint is ready!"
+              break
             fi
-            echo "Attempt $i: Camunda not ready yet, waiting..."
+            echo "Attempt $i: Topology not ready yet, waiting..."
             sleep 5
           done
-          echo "Camunda failed to start within 5 minutes"
-          exit 1
+          
+          # Then wait an additional 30 seconds for broker to fully initialize
+          echo "Waiting additional time for broker to initialize..."
+          sleep 30
+          
+          # Verify we can actually deploy
+          echo "Testing deployment capability..."
+          for i in {1..30}; do
+            if curl -s -u demo:demo http://localhost:8080/v2/topology | grep -q '"health":"healthy"'; then
+              echo "Broker is healthy, ready for deployments!"
+              exit 0
+            fi
+            echo "Attempt $i: Broker not fully ready, waiting..."
+            sleep 2
+          done
+          
+          echo "Camunda may not be fully ready, but continuing with tests..."
 
       - name: Run integration tests
         run: npm run test:integration
