@@ -50,7 +50,7 @@ export async function run(path: string, options: {
     logger.info(`Creating process instance for ${processId}...`);
 
     const createRequest: any = {
-      bpmnProcessId: processId,
+      processDefinitionId: processId,
       tenantId,
     };
 
