@@ -13,7 +13,8 @@
   "scripts": {
     "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "tsx --test tests/unit/*.test.ts",
-    "test:integration": "tsx --test tests/integration/*.test.ts"
+    "test:integration": "tsx --test tests/integration/*.test.ts",
+    "cli": "tsx src/index.ts"
   },
   "keywords": [
     "camunda",
