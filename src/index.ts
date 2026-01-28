@@ -23,6 +23,7 @@ import { publishMessage, correlateMessage } from './commands/messages.ts';
 import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
+import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
 
 /**
  * Normalize resource aliases
@@ -35,6 +36,8 @@ function normalizeResource(resource: string): string {
     msg: 'message',
     profile: 'profile',
     profiles: 'profile',
+    plugin: 'plugin',
+    plugins: 'plugin',
   };
   return aliases[resource] || resource;
 }
@@ -179,6 +182,30 @@ async function main() {
       process.exit(1);
     }
     removeProfile(args[0]);
+    return;
+  }
+
+  // Handle plugin commands
+  if (verb === 'list' && normalizedResource === 'plugin') {
+    listPlugins();
+    return;
+  }
+
+  if (verb === 'load' && normalizedResource === 'plugin') {
+    if (!args[0]) {
+      logger.error('Package name required. Usage: c8 load plugin <package-name>');
+      process.exit(1);
+    }
+    loadPlugin(args[0]);
+    return;
+  }
+
+  if ((verb === 'unload' || verb === 'remove' || verb === 'rm') && normalizedResource === 'plugin') {
+    if (!args[0]) {
+      logger.error('Package name required. Usage: c8 unload plugin <package-name>');
+      process.exit(1);
+    }
+    unloadPlugin(args[0]);
     return;
   }
 
