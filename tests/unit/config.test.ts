@@ -187,9 +187,14 @@ describe('Config Module', () => {
       mkdirSync(testDir, { recursive: true });
       originalEnv = { ...process.env };
       process.env.XDG_DATA_HOME = testDir;
-      // Clear Camunda env vars
+      // Clear all Camunda env vars to ensure test isolation
       delete process.env.CAMUNDA_BASE_URL;
       delete process.env.CAMUNDA_CLIENT_ID;
+      delete process.env.CAMUNDA_CLIENT_SECRET;
+      delete process.env.CAMUNDA_AUDIENCE;
+      delete process.env.CAMUNDA_OAUTH_URL;
+      delete process.env.CAMUNDA_USERNAME;
+      delete process.env.CAMUNDA_PASSWORD;
       delete process.env.CAMUNDA_DEFAULT_TENANT_ID;
     });
 
@@ -238,7 +243,9 @@ describe('Config Module', () => {
     test('resolveClusterConfig falls back to localhost', () => {
       const config = resolveClusterConfig();
       
-      assert.strictEqual(config.baseUrl, 'http://localhost:8080');
+      assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(config.username, 'demo');
+      assert.strictEqual(config.password, 'demo');
     });
 
     test('resolveTenantId uses session tenant first', () => {

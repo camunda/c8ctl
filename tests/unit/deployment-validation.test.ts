@@ -2,18 +2,49 @@
  * Unit tests for deployment command validation
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { execSync } from 'node:child_process';
+import { join } from 'node:path';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 describe('Deployment Validation', () => {
+  let testDir: string;
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    // Create isolated test directory for session/profile data
+    testDir = join(tmpdir(), `c8ctl-deploy-test-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    originalEnv = { ...process.env };
+    process.env.XDG_DATA_HOME = testDir;
+    // Clear all Camunda env vars to ensure test isolation
+    delete process.env.CAMUNDA_BASE_URL;
+    delete process.env.CAMUNDA_CLIENT_ID;
+    delete process.env.CAMUNDA_CLIENT_SECRET;
+    delete process.env.CAMUNDA_AUDIENCE;
+    delete process.env.CAMUNDA_OAUTH_URL;
+    delete process.env.CAMUNDA_USERNAME;
+    delete process.env.CAMUNDA_PASSWORD;
+    delete process.env.CAMUNDA_DEFAULT_TENANT_ID;
+  });
+
+  afterEach(() => {
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+    process.env = originalEnv;
+  });
+
   test('detects duplicate process IDs', () => {
     // Attempt to deploy directory with duplicate process IDs should fail
     try {
-      execSync('node src/index.ts deploy tests/fixtures/duplicate-ids', {
+      execSync('npm run cli -- deploy tests/fixtures/duplicate-ids', {
         cwd: process.cwd(),
         encoding: 'utf-8',
-        stdio: 'pipe'
+        stdio: 'pipe',
+        env: process.env
       });
       assert.fail('Should have thrown an error for duplicate process IDs');
     } catch (error: any) {
@@ -33,11 +64,12 @@ describe('Deployment Validation', () => {
     // This test requires a running Camunda instance
     // Just verify the command doesn't fail on validation (may fail on connection)
     try {
-      execSync('node src/index.ts deploy tests/fixtures/simple.bpmn', {
+      execSync('npm run cli -- deploy tests/fixtures/simple.bpmn', {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
-        timeout: 5000
+        timeout: 5000,
+        env: process.env
       });
       // If Camunda is running, this should succeed
       assert.ok(true);
@@ -52,11 +84,12 @@ describe('Deployment Validation', () => {
   test('allows deployment of different process IDs', () => {
     // Deploy fixtures that have different process IDs
     try {
-      execSync('node src/index.ts deploy tests/fixtures/sample-project', {
+      execSync('npm run cli -- deploy tests/fixtures/sample-project', {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
-        timeout: 5000
+        timeout: 5000,
+        env: process.env
       });
       // If Camunda is running, this should succeed
       assert.ok(true);

@@ -1,0 +1,91 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        node: [22, 24]
+        camunda: ['8.8', '8.9']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose --profile elasticsearch up -d
+        env:
+          DATABASE: elasticsearch
+
+      - name: Wait for Camunda to be ready
+        run: |
+          echo "Waiting for Camunda at localhost:8080..."
+          # First wait for topology endpoint
+          for i in {1..60}; do
+            if curl -s -f -u demo:demo http://localhost:8080/v2/topology > /dev/null; then
+              echo "Topology endpoint is ready!"
+              break
+            fi
+            echo "Attempt $i: Topology not ready yet, waiting..."
+            sleep 5
+          done
+          
+          # Then wait an additional 30 seconds for broker to fully initialize
+          echo "Waiting additional time for broker to initialize..."
+          sleep 30
+          
+          # Verify we can actually deploy
+          echo "Testing deployment capability..."
+          for i in {1..30}; do
+            if curl -s -u demo:demo http://localhost:8080/v2/topology | grep -q '"health":"healthy"'; then
+              echo "Broker is healthy, ready for deployments!"
+              exit 0
+            fi
+            echo "Attempt $i: Broker not fully ready, waiting..."
+            sleep 2
+          done
+          
+          echo "Camunda may not be fully ready, but continuing with tests..."
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Stop Camunda
+        if: always()
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose --profile elasticsearch down -v
+        env:
+          DATABASE: elasticsearch
+
+      - name: Show Camunda logs on failure
+        if: failure()
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose --profile elasticsearch logs
+        env:
+          DATABASE: elasticsearch
