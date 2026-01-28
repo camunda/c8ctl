@@ -252,6 +252,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   }
 
   // 4. Localhost fallback with basic auth (demo/demo)
+  // These default credentials match the docker-compose configuration
+  // and are intended for local development only
   return {
     baseUrl: 'http://localhost:8080/v2',
     username: 'demo',

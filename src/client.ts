@@ -34,6 +34,10 @@ export function createClient(profileFlag?: string): CamundaClient {
     sdkConfig.CAMUNDA_BASIC_AUTH_USERNAME = config.username;
     sdkConfig.CAMUNDA_BASIC_AUTH_PASSWORD = config.password;
   }
+  // No authentication
+  else {
+    sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
+  }
 
   return createCamundaClient({ config: sdkConfig });
 }
