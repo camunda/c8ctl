@@ -38,15 +38,13 @@ export async function run(path: string, options: {
 
     logger.info(`Deploying ${path}...`);
 
-    // Deploy the BPMN file
+    // Deploy the BPMN file - convert to File object with proper MIME type
+    const fileName = path.split('/').pop() || 'process.bpmn';
     const deployResult = await client.createDeployment({
       tenantId,
-      resources: [{
-        name: path.split('/').pop() || 'process.bpmn',
-        content: Buffer.from(content),
-      }],
+      resources: [new File([Buffer.from(content)], fileName, { type: 'application/xml' })],
     });
-    logger.success('Deployment successful', deployResult.key);
+    logger.success('Deployment successful', deployResult.deploymentKey.toString());
 
     // Create process instance
     logger.info(`Creating process instance for ${processId}...`);

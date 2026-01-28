@@ -225,6 +225,21 @@ c8 deploy ./my-project
 # Order: _bb-* folders first, then other files
 ```
 
+### Important: Duplicate Process IDs
+
+Camunda does not allow deploying multiple resources with the same process/decision ID in a single deployment. If you have multiple BPMN files with the same process definition ID, deploy them separately:
+
+```bash
+# This will fail if both files have the same process ID
+# c8 deploy process-v1.bpmn process-v2.bpmn
+
+# Instead, deploy separately:
+c8 deploy process-v1.bpmn
+c8 deploy process-v2.bpmn
+```
+
+The CLI will detect duplicate IDs and provide a helpful error message showing which files conflict.
+
 ### Run (Deploy + Start)
 
 ```bash

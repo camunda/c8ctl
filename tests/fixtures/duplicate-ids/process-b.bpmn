@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" 
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" 
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  id="Definitions_2" 
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="duplicate-process-id" name="Process B" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_2">
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:endEvent id="EndEvent_2">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="StartEvent_2" targetRef="EndEvent_2" />
+  </bpmn:process>
+</bpmn:definitions>

@@ -10,6 +10,28 @@ import { join, dirname, extname, basename } from 'node:path';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
 
+/**
+ * Extract process/decision IDs from BPMN/DMN files to detect duplicates
+ */
+function extractDefinitionId(content: Buffer, extension: string): string | null {
+  const text = content.toString('utf-8');
+  
+  if (extension === '.bpmn') {
+    // Extract bpmn:process id attribute
+    const match = text.match(/<bpmn\d?:process[^>]+id="([^"]+)"/);
+    return match ? match[1] : null;
+  } else if (extension === '.dmn') {
+    // Extract decision id attribute
+    const match = text.match(/<decision[^>]+id="([^"]+)"/);
+    return match ? match[1] : null;
+  } else if (extension === '.form') {
+    // Forms are identified by filename, not internal ID
+    return null;
+  }
+  
+  return null;
+}
+
 interface ResourceFile {
   path: string;
   name: string;
@@ -134,30 +156,105 @@ export async function deploy(paths: string[], options: {
       return a.path.localeCompare(b.path);
     });
 
+    // Validate for duplicate process/decision IDs
+    const idMap = new Map<string, string[]>();
+    resources.forEach(r => {
+      const ext = extname(r.path);
+      if (ext === '.bpmn' || ext === '.dmn') {
+        const defId = extractDefinitionId(r.content, ext);
+        if (defId) {
+          if (!idMap.has(defId)) {
+            idMap.set(defId, []);
+          }
+          idMap.get(defId)!.push(r.path);
+        }
+      }
+    });
+
+    // Check for duplicates
+    const duplicates: string[] = [];
+    idMap.forEach((paths, id) => {
+      if (paths.length > 1) {
+        duplicates.push(`  Process/Decision ID "${id}" found in: ${paths.join(', ')}`);
+      }
+    });
+
+    if (duplicates.length > 0) {
+      logger.error('Cannot deploy: Multiple files with the same process/decision ID in one deployment');
+      duplicates.forEach(dup => console.error(dup));
+      console.error('\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.');
+      console.error('Please deploy these files separately or ensure each process/decision has a unique ID.');
+      process.exit(1);
+    }
+
     logger.info(`Deploying ${resources.length} resource(s)...`);
 
-    // Create deployment request
+    // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
       tenantId,
-      resources: resources.map(r => ({
-        name: r.name,
-        content: r.content,
-      })),
+      resources: resources.map(r => {
+        // Determine MIME type based on extension
+        const ext = r.name.split('.').pop()?.toLowerCase();
+        const mimeType = ext === 'bpmn' ? 'application/xml' :
+                        ext === 'dmn' ? 'application/xml' :
+                        ext === 'form' ? 'application/json' :
+                        'application/octet-stream';
+        return new File([r.content], r.name, { type: mimeType });
+      }),
     });
     
-    logger.success('Deployment successful', result.key);
+    logger.success('Deployment successful', result.deploymentKey.toString());
     
-    if (result.deployments && result.deployments.length > 0) {
-      const tableData = result.deployments.map((dep: any) => ({
-        Type: dep.resourceType || dep.type,
-        'Process ID': dep.bpmnProcessId || dep.processDefinition?.bpmnProcessId || dep.resourceName,
-        Version: dep.version || dep.processDefinition?.version || '-',
-        Key: dep.key || dep.processDefinition?.processDefinitionKey || '-',
-      }));
+    // Display deployed resources
+    const tableData: Array<{Type: string, ID: string, Version: string | number, Key: string}> = [];
+    
+    result.processes.forEach(proc => {
+      tableData.push({
+        Type: 'Process',
+        ID: proc.processDefinitionId,
+        Version: proc.processDefinitionVersion,
+        Key: proc.processDefinitionKey.toString(),
+      });
+    });
+    
+    result.decisions.forEach(dec => {
+      tableData.push({
+        Type: 'Decision',
+        ID: dec.decisionDefinitionId || '-',
+        Version: dec.version ?? '-',
+        Key: dec.decisionDefinitionKey?.toString() || '-',
+      });
+    });
+    
+    result.forms.forEach(form => {
+      tableData.push({
+        Type: 'Form',
+        ID: form.formId || '-',
+        Version: form.version ?? '-',
+        Key: form.formKey?.toString() || '-',
+      });
+    });
+    
+    if (tableData.length > 0) {
       logger.table(tableData);
     }
   } catch (error) {
-    logger.error('Failed to deploy resources', error as Error);
+    // Log detailed error information
+    if (error && typeof error === 'object') {
+      const err = error as any;
+      logger.error('Failed to deploy resources', error as Error);
+      if (err.response) {
+        console.error('API Response:', err.response);
+      }
+      if (err.message) {
+        console.error('Error message:', err.message);
+      }
+      if (err.cause) {
+        console.error('Error cause:', err.cause);
+      }
+    } else {
+      logger.error('Failed to deploy resources', error as Error);
+    }
     process.exit(1);
   }
 }

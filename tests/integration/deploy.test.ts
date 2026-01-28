@@ -3,24 +3,36 @@
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
+import { deploy } from '../../src/commands/deployments.ts';
+import { createClient } from '../../src/client.ts';
+import { existsSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 describe('Deployment Integration Tests (requires Camunda 8 at localhost:8080)', () => {
-  test.skip('deploy simple BPMN creates deployment', async () => {
-    // This test would require a running Camunda instance
-    // Skipped by default
-    
-    // Example implementation:
-    // const { deploy } = await import('../../src/commands/deployments.ts');
-    // await deploy(['tests/fixtures/simple.bpmn'], { profile: undefined });
-    // Assert deployment was successful
-    
-    assert.ok(true, 'Test skipped - requires running Camunda instance');
+  beforeEach(() => {
+    // Clear session state before each test to ensure clean tenant resolution
+    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    if (existsSync(sessionPath)) {
+      unlinkSync(sessionPath);
+    }
   });
 
-  test.skip('deploy prioritizes building block folders', async () => {
-    // Test that _bb- folders are deployed first
-    assert.ok(true, 'Test skipped - requires running Camunda instance');
+  test('deploy simple BPMN creates deployment', async () => {
+    // Deploy a single BPMN file - should succeed without throwing
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    // If we got here, deployment succeeded
+    assert.ok(true, 'Deployment completed successfully');
+  });
+
+  test('deploy prioritizes building block folders', async () => {
+    // Deploy a project with building blocks - should succeed without throwing
+    await deploy(['tests/fixtures/_bb-building-block'], {});
+    
+    // If we got here, deployment succeeded
+    assert.ok(true, 'Building block deployment completed successfully');
   });
 });

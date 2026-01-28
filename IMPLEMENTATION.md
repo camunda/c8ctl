@@ -42,11 +42,17 @@ All requirements from the plan have been successfully implemented and tested.
    - **Jobs** (`jobs.ts`): list, activate, complete, fail
    - **Messages** (`messages.ts`): publish, correlate
    - **Topology** (`topology.ts`): get cluster topology
-   - **Deployments** (`deployments.ts`): deploy with `_bb-` folder prioritization
+   - **Deployments** (`deployments.ts`): deploy with `_bb-` folder prioritization and duplicate ID validation
    - **Run** (`run.ts`): deploy + create process instance
    - **Profiles** (`profiles.ts`): list, add, remove
    - **Session** (`session.ts`): use profile/tenant, output format
    - **Help** (`help.ts`): version, help, verb-only resource hints
+
+6. **Deployment Validation**
+   - Detects duplicate process/decision IDs across BPMN/DMN files
+   - Prevents `INVALID_ARGUMENT` errors from Camunda API
+   - Provides clear error messages with file paths for duplicates
+   - Note: Camunda does not allow deploying multiple resources with the same definition ID in a single deployment
 
 6. **CLI Entry Point** (`src/index.ts`)
    - Command routing with `parseArgs`
