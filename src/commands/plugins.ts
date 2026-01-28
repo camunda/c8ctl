@@ -6,12 +6,13 @@ import { getLogger } from '../logger.ts';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { clearLoadedPlugins } from '../plugin-loader.ts';
 
 /**
  * Load a plugin (npm install wrapper)
  * Supports either package name or --from flag with URL
  */
-export function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): void {
+export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): Promise<void> {
   const logger = getLogger();
   
   // Validate exclusive usage
@@ -37,6 +38,10 @@ export function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): void {
       execSync(`npm install ${packageNameOrFrom}`, { stdio: 'inherit' });
       logger.success('Plugin loaded successfully', packageNameOrFrom);
     }
+    
+    // Note: Plugin will be available on next CLI invocation
+    // We don't reload in the same process to avoid module cache issues
+    logger.info('Plugin will be available on next command execution');
   } catch (error) {
     logger.error('Failed to load plugin', error as Error);
     process.exit(1);
@@ -46,7 +51,7 @@ export function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): void {
 /**
  * Unload a plugin (npm uninstall wrapper)
  */
-export function unloadPlugin(packageName: string): void {
+export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
   
   if (!packageName) {
@@ -57,7 +62,13 @@ export function unloadPlugin(packageName: string): void {
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
     execSync(`npm uninstall ${packageName}`, { stdio: 'inherit' });
+    
+    // Clear the loaded plugins cache so the plugin is no longer available
+    // This affects the current process - plugin will be gone immediately
+    clearLoadedPlugins();
+    
     logger.success('Plugin unloaded successfully', packageName);
+    logger.info('Plugin commands are no longer available');
   } catch (error) {
     logger.error('Failed to unload plugin', error as Error);
     process.exit(1);
