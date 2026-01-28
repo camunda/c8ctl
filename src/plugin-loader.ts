@@ -43,7 +43,9 @@ export async function loadInstalledPlugins(): Promise<void> {
       if (existsSync(pluginFileJs) || existsSync(pluginFileTs)) {
         try {
           const pluginFile = existsSync(pluginFileJs) ? pluginFileJs : pluginFileTs;
-          const plugin = await import(pluginFile);
+          // Use file:// protocol and add timestamp to bust cache
+          const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
+          const plugin = await import(pluginUrl);
           
           if (plugin.commands && typeof plugin.commands === 'object') {
             loadedPlugins.set(packageName, {

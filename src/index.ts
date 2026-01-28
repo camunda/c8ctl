@@ -422,14 +422,14 @@ async function main() {
     return;
   }
 
-  // Handle verb-only invocations (show available resources)
-  if (!resource) {
-    showVerbResources(verb);
+  // Try to execute plugin command (before verb-only check)
+  if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
     return;
   }
 
-  // Try to execute plugin command
-  if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
+  // Handle verb-only invocations (show available resources)
+  if (!resource) {
+    showVerbResources(verb);
     return;
   }
 

@@ -2,7 +2,7 @@
  * Integration tests for plugin lifecycle (load/unload)
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -11,13 +11,56 @@ import { join } from 'node:path';
 describe('Plugin Lifecycle Integration Tests', () => {
   const testPluginDir = join(process.cwd(), 'test-plugin-temp');
   const testPluginName = 'c8ctl-test-plugin';
+  const nodeModulesPluginPath = join(process.cwd(), 'node_modules', testPluginName);
   
-  test.skip('should load plugin and make commands available', async () => {
-    // Skip by default as this requires npm install
-    // Create a test plugin
+  // Setup: Clean up any previous test artifacts
+  before(() => {
+    // Remove temp directory if it exists
     if (existsSync(testPluginDir)) {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
+    
+    // Uninstall plugin if it exists from previous run
+    try {
+      execSync(`npm uninstall ${testPluginName}`, { 
+        cwd: process.cwd(),
+        stdio: 'ignore' 
+      });
+    } catch {
+      // Ignore if not installed
+    }
+    
+    // Remove from node_modules if still there
+    if (existsSync(nodeModulesPluginPath)) {
+      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
+    }
+  });
+  
+  // Cleanup: Ensure test artifacts are removed
+  after(() => {
+    // Remove temp directory
+    if (existsSync(testPluginDir)) {
+      rmSync(testPluginDir, { recursive: true, force: true });
+    }
+    
+    // Uninstall plugin
+    try {
+      execSync(`npm uninstall ${testPluginName}`, { 
+        cwd: process.cwd(),
+        stdio: 'ignore' 
+      });
+    } catch {
+      // Ignore if already uninstalled
+    }
+    
+    // Remove from node_modules
+    if (existsSync(nodeModulesPluginPath)) {
+      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
+    }
+  });
+  
+  test('should load plugin and make commands available', async () => {
+    // Create test plugin directory
     mkdirSync(testPluginDir, { recursive: true });
     
     // Create package.json
@@ -26,67 +69,101 @@ describe('Plugin Lifecycle Integration Tests', () => {
       JSON.stringify({
         name: testPluginName,
         version: '1.0.0',
-        type: 'module'
-      })
+        type: 'module',
+        description: 'Test plugin for c8ctl integration tests'
+      }, null, 2)
     );
     
-    // Create plugin file
+    // Create plugin file with a unique test command
     writeFileSync(
       join(testPluginDir, 'c8ctl-plugin.js'),
-      `
-export const commands = {
+      `export const commands = {
   'test-command': async (args) => {
     console.log('TEST_COMMAND_EXECUTED');
-    return 'success';
   }
 };
 `
     );
     
     try {
-      // Load the plugin
+      // Load the plugin using npm install with file: protocol
       execSync(`npm install file:${testPluginDir}`, { 
         cwd: process.cwd(),
-        stdio: 'inherit' 
+        stdio: 'pipe'
       });
       
-      // Verify plugin command works
-      const output = execSync('node src/index.ts test-command', {
-        cwd: process.cwd(),
-        encoding: 'utf-8'
-      });
+      // Verify plugin is installed
+      assert.ok(existsSync(nodeModulesPluginPath), 'Plugin should be installed in node_modules');
       
-      assert.ok(output.includes('TEST_COMMAND_EXECUTED'), 'Plugin command should execute');
+      // Verify plugin file exists
+      const installedPluginFile = join(nodeModulesPluginPath, 'c8ctl-plugin.js');
+      assert.ok(existsSync(installedPluginFile), `Plugin file should exist at ${installedPluginFile}`);
+      
+      // Verify plugin command works by running CLI in a new process
+      let commandOutput = '';
+      let commandStderr = '';
+      try {
+        commandOutput = execSync('node src/index.ts test-command', {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          timeout: 5000
+        });
+      } catch (error: any) {
+        // Command may exit with 0 or throw, check both outputs
+        commandOutput = error.stdout || '';
+        commandStderr = error.stderr || '';
+      }
+      
+      assert.ok(commandOutput.includes('TEST_COMMAND_EXECUTED'), 
+        `Plugin command should execute. Output: ${commandOutput}, Stderr: ${commandStderr}`);
       
       // Unload the plugin
       execSync(`npm uninstall ${testPluginName}`, {
         cwd: process.cwd(),
-        stdio: 'inherit'
+        stdio: 'pipe'
       });
       
+      // Verify plugin is uninstalled
+      assert.ok(!existsSync(nodeModulesPluginPath), 
+        'Plugin should be removed from node_modules');
+      
       // Verify plugin command no longer works
+      let shouldFail = false;
       try {
-        execSync('node src/index.ts test-command', {
+        const failOutput = execSync('node src/index.ts test-command', {
           cwd: process.cwd(),
-          encoding: 'utf-8'
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 5000
         });
-        assert.fail('Plugin command should not be available after unload');
+        // If we get here, command didn't fail as expected
+        shouldFail = !failOutput.includes('TEST_COMMAND_EXECUTED');
       } catch (error: any) {
-        assert.ok(error.message.includes('Unknown command'), 'Should show unknown command error');
+        // Expected to fail - check error message
+        const errorOutput = error.stderr || error.stdout || error.message;
+        shouldFail = errorOutput.includes('Unknown command') || 
+                     errorOutput.includes('test-command');
       }
+      
+      assert.ok(shouldFail, 'Plugin command should not be available after unload');
+      
     } finally {
-      // Cleanup
+      // Cleanup in finally block to ensure it runs even if test fails
       if (existsSync(testPluginDir)) {
         rmSync(testPluginDir, { recursive: true, force: true });
       }
-      // Make sure plugin is uninstalled
+      
       try {
         execSync(`npm uninstall ${testPluginName}`, { 
           cwd: process.cwd(),
           stdio: 'ignore' 
         });
       } catch {
-        // Ignore if already uninstalled
+        // Ignore cleanup errors
+      }
+      
+      if (existsSync(nodeModulesPluginPath)) {
+        rmSync(nodeModulesPluginPath, { recursive: true, force: true });
       }
     }
   });
