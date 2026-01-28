@@ -292,10 +292,11 @@ describe('Config Module', () => {
       mkdirSync(testDir, { recursive: true });
       mkdirSync(modelerDir, { recursive: true });
       
-      // Mock directories
+      // Mock directories using platform-agnostic XDG_CONFIG_HOME
+      // This works because getModelerDataDir() respects XDG_CONFIG_HOME on Linux
       originalEnv = { ...process.env };
       process.env.XDG_DATA_HOME = testDir;
-      process.env.HOME = tmpdir();
+      process.env.XDG_CONFIG_HOME = modelerDir;
     });
 
     afterEach(() => {
@@ -432,6 +433,19 @@ describe('Config Module', () => {
       const { constructApiUrl } = await import('../../src/config.ts');
       const url = constructApiUrl({ clusterUrl: 'https://abc123.region.zeebe.camunda.io' });
       assert.strictEqual(url, 'https://abc123.region.zeebe.camunda.io');
+    });
+
+    test('constructApiUrl uses self-managed URLs as-is if no /v2', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      // Self-managed clusters should include /v2 in their URL if needed
+      const url = constructApiUrl({ clusterUrl: 'https://my-camunda-cluster.example.com' });
+      assert.strictEqual(url, 'https://my-camunda-cluster.example.com');
+    });
+
+    test('constructApiUrl handles 127.0.0.1 like localhost', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterUrl: 'http://127.0.0.1:8080' });
+      assert.strictEqual(url, 'http://127.0.0.1:8080/v2');
     });
 
     test('constructApiUrl constructs cloud URL from clusterId', async () => {

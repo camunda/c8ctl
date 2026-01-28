@@ -27,7 +27,14 @@ export function listProfiles(): void {
     return;
   }
 
-  const tableData: any[] = [];
+  interface ProfileTableRow {
+    Name: string;
+    'Base URL': string;
+    'Client ID': string;
+    'Default Tenant': string;
+  }
+  
+  const tableData: ProfileTableRow[] = [];
   
   // Add c8ctl profiles
   for (const p of c8ctlProfiles) {

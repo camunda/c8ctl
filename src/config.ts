@@ -85,7 +85,7 @@ export function getModelerDataDir(): string {
     case 'darwin':
       return join(home, 'Library', 'Application Support', 'camunda-modeler');
     default: // linux and others
-      return join(home, '.config', 'camunda-modeler');
+      return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'camunda-modeler');
   }
 }
 
@@ -342,7 +342,10 @@ export function resolveTenantId(profileFlag?: string): string {
  * Load Camunda Modeler profiles from profiles.json
  * Always reads fresh from disk (no caching)
  * 
- * TODO: Consider introducing caching mechanism for better performance
+ * TODO: Consider introducing caching mechanism for better performance.
+ * Current implementation reads from disk on every call. For commands that
+ * list profiles or look up multiple profiles, this could be optimized by
+ * implementing per-execution memoization or a time-based cache.
  */
 export function loadModelerProfiles(): ModelerProfile[] {
   try {
@@ -383,9 +386,11 @@ export function getModelerProfile(identifier: string): ModelerProfile | undefine
 
 /**
  * Construct REST API URL from modeler profile
- * For cloud: uses clusterUrl as-is or constructs from clusterId if needed
- * For self-managed: supports localhost:PORT/v2 format or any provided URL
+ * For cloud: uses clusterUrl as-is (Camunda cloud URLs don't need /v2)
+ * For self-managed: localhost URLs get /v2 appended
  * Does not derive values - uses what's provided
+ * 
+ * Note: Self-managed clusters should include /v2 in their clusterUrl if needed
  */
 export function constructApiUrl(profile: ModelerProfile): string {
   // If clusterUrl is provided, use it as the base
@@ -397,12 +402,13 @@ export function constructApiUrl(profile: ModelerProfile): string {
       return url;
     }
     
-    // If it's a localhost URL or self-managed without /v2, append /v2
-    if (url.includes('localhost') || !url.includes('zeebe.camunda.io')) {
+    // Only append /v2 for localhost URLs
+    // Self-managed clusters should include /v2 in their clusterUrl if needed
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
       return `${url.replace(/\/$/, '')}/v2`;
     }
     
-    // For cloud URLs, use as-is (they typically don't need /v2)
+    // For all other URLs (including cloud), use as-is
     return url;
   }
   
