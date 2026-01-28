@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  id="Definitions_main"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="main-process" name="Main Process" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_Main" name="Start">
+      <bpmn:outgoing>Flow_Main</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:endEvent id="EndEvent_Main" name="End">
+      <bpmn:incoming>Flow_Main</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Main" sourceRef="StartEvent_Main" targetRef="EndEvent_Main" />
+  </bpmn:process>
+</bpmn:definitions>

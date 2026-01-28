@@ -1,0 +1,35 @@
+{
+  "name": "c8ctl",
+  "version": "1.0.0",
+  "description": "Camunda 8 CLI - minimal-dependency CLI for Camunda 8 operations",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "c8ctl": "./src/index.ts",
+    "c8": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --test tests/unit/*.test.ts",
+    "test:integration": "node --test tests/integration/*.test.ts",
+    "cli": "node src/index.ts"
+  },
+  "keywords": [
+    "camunda",
+    "camunda8",
+    "cli",
+    "bpmn",
+    "workflow",
+    "orchestration"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@camunda8/orchestration-cluster-api": "^8.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}
