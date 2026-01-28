@@ -7,6 +7,8 @@ import {
   loadProfiles,
   addProfile as addProfileToConfig,
   removeProfile as removeProfileFromConfig,
+  loadModelerProfiles,
+  convertModelerProfile,
   type Profile,
 } from '../config.ts';
 
@@ -15,19 +17,38 @@ import {
  */
 export function listProfiles(): void {
   const logger = getLogger();
-  const profiles = loadProfiles();
-
-  if (profiles.length === 0) {
+  const c8ctlProfiles = loadProfiles();
+  const modelerProfiles = loadModelerProfiles();
+  
+  const totalProfiles = c8ctlProfiles.length + modelerProfiles.length;
+  
+  if (totalProfiles === 0) {
     logger.info('No profiles configured');
     return;
   }
 
-  const tableData = profiles.map(p => ({
-    Name: p.name,
-    'Base URL': p.baseUrl,
-    'Client ID': p.clientId || '(none)',
-    'Default Tenant': p.defaultTenantId || '<default>',
-  }));
+  const tableData: any[] = [];
+  
+  // Add c8ctl profiles
+  for (const p of c8ctlProfiles) {
+    tableData.push({
+      Name: p.name,
+      'Base URL': p.baseUrl,
+      'Client ID': p.clientId || '(none)',
+      'Default Tenant': p.defaultTenantId || '<default>',
+    });
+  }
+  
+  // Add modeler profiles with 'modeler:' prefix
+  for (const mp of modelerProfiles) {
+    const converted = convertModelerProfile(mp);
+    tableData.push({
+      Name: converted.name,
+      'Base URL': converted.baseUrl,
+      'Client ID': converted.clientId || '(none)',
+      'Default Tenant': converted.defaultTenantId || '<default>',
+    });
+  }
 
   logger.table(tableData);
 }

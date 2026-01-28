@@ -37,6 +37,25 @@ export interface ClusterConfig {
 }
 
 /**
+ * Camunda Modeler profile structure
+ */
+export interface ModelerProfile {
+  name?: string;
+  clusterId?: string;
+  clusterUrl?: string;
+  audience?: string;
+  clientId?: string;
+  clientSecret?: string;
+}
+
+/**
+ * Camunda Modeler profiles.json structure
+ */
+interface ModelerProfilesFile {
+  profiles?: ModelerProfile[];
+}
+
+/**
  * Get platform-specific user data directory
  */
 export function getUserDataDir(): string {
@@ -50,6 +69,23 @@ export function getUserDataDir(): string {
       return join(home, 'Library', 'Application Support', 'c8ctl');
     default: // linux and others
       return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'c8ctl');
+  }
+}
+
+/**
+ * Get platform-specific Camunda Modeler data directory
+ */
+export function getModelerDataDir(): string {
+  const plat = platform();
+  const home = homedir();
+
+  switch (plat) {
+    case 'win32':
+      return join(process.env.APPDATA || join(home, 'AppData', 'Roaming'), 'camunda-modeler');
+    case 'darwin':
+      return join(home, 'Library', 'Application Support', 'camunda-modeler');
+    default: // linux and others
+      return join(home, '.config', 'camunda-modeler');
   }
 }
 
@@ -104,8 +140,19 @@ export function saveProfiles(profiles: Profile[]): void {
 
 /**
  * Get a profile by name
+ * Supports both c8ctl profiles and modeler profiles (with 'modeler:' prefix)
  */
 export function getProfile(name: string): Profile | undefined {
+  // Check if this is a modeler profile request
+  if (name.startsWith('modeler:')) {
+    const modelerProfile = getModelerProfile(name);
+    if (modelerProfile) {
+      return convertModelerProfile(modelerProfile);
+    }
+    return undefined;
+  }
+  
+  // Check c8ctl profiles
   const profiles = loadProfiles();
   return profiles.find(p => p.name === name);
 }
@@ -289,4 +336,103 @@ export function resolveTenantId(profileFlag?: string): string {
 
   // 4. Default tenant
   return '<default>';
+}
+
+/**
+ * Load Camunda Modeler profiles from profiles.json
+ * Always reads fresh from disk (no caching)
+ * 
+ * TODO: Consider introducing caching mechanism for better performance
+ */
+export function loadModelerProfiles(): ModelerProfile[] {
+  try {
+    const modelerDir = getModelerDataDir();
+    const profilesPath = join(modelerDir, 'profiles.json');
+    
+    if (!existsSync(profilesPath)) {
+      return [];
+    }
+    
+    const data = readFileSync(profilesPath, 'utf-8');
+    const parsed: ModelerProfilesFile = JSON.parse(data);
+    
+    return parsed.profiles || [];
+  } catch (error) {
+    // Silently return empty array if file can't be read or parsed
+    return [];
+  }
+}
+
+/**
+ * Get a modeler profile by name or cluster ID
+ * Accepts 'modeler:name' or 'modeler:id' format, or just 'name'/'id'
+ */
+export function getModelerProfile(identifier: string): ModelerProfile | undefined {
+  const profiles = loadModelerProfiles();
+  
+  // Remove 'modeler:' prefix if present
+  const searchId = identifier.startsWith('modeler:') 
+    ? identifier.substring(8) 
+    : identifier;
+  
+  // Search by name first, then by clusterId
+  return profiles.find(p => 
+    p.name === searchId || p.clusterId === searchId
+  );
+}
+
+/**
+ * Construct REST API URL from modeler profile
+ * For cloud: uses clusterUrl as-is or constructs from clusterId if needed
+ * For self-managed: supports localhost:PORT/v2 format or any provided URL
+ * Does not derive values - uses what's provided
+ */
+export function constructApiUrl(profile: ModelerProfile): string {
+  // If clusterUrl is provided, use it as the base
+  if (profile.clusterUrl) {
+    const url = profile.clusterUrl;
+    
+    // If it already has /v2 endpoint, use as-is
+    if (url.includes('/v2')) {
+      return url;
+    }
+    
+    // If it's a localhost URL or self-managed without /v2, append /v2
+    if (url.includes('localhost') || !url.includes('zeebe.camunda.io')) {
+      return `${url.replace(/\/$/, '')}/v2`;
+    }
+    
+    // For cloud URLs, use as-is (they typically don't need /v2)
+    return url;
+  }
+  
+  // If no clusterUrl but have clusterId, construct cloud URL
+  if (profile.clusterId) {
+    // Cloud cluster URLs follow pattern: https://{clusterId}.{region}.zeebe.camunda.io
+    // We can't derive the region, so just use the clusterId as a fallback base
+    return `https://${profile.clusterId}.zeebe.camunda.io`;
+  }
+  
+  // Fallback to localhost
+  return 'http://localhost:8080/v2';
+}
+
+/**
+ * Convert a modeler profile to a c8ctl Profile
+ */
+export function convertModelerProfile(modelerProfile: ModelerProfile): Profile {
+  const name = modelerProfile.name || modelerProfile.clusterId || 'unknown';
+  const baseUrl = constructApiUrl(modelerProfile);
+  
+  return {
+    name: `modeler:${name}`,
+    baseUrl,
+    clientId: modelerProfile.clientId,
+    clientSecret: modelerProfile.clientSecret,
+    audience: modelerProfile.audience,
+    // Cloud clusters typically use the standard OAuth URL
+    oAuthUrl: modelerProfile.audience ? 
+      'https://login.cloud.camunda.io/oauth/token' : 
+      undefined,
+  };
 }

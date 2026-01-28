@@ -279,4 +279,235 @@ describe('Config Module', () => {
       assert.strictEqual(tenantId, '<default>');
     });
   });
+
+  describe('Modeler Profile Integration', () => {
+    let testDir: string;
+    let modelerDir: string;
+    let originalEnv: NodeJS.ProcessEnv;
+
+    beforeEach(() => {
+      // Create temporary test directories
+      testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
+      modelerDir = join(tmpdir(), `modeler-test-${Date.now()}`);
+      mkdirSync(testDir, { recursive: true });
+      mkdirSync(modelerDir, { recursive: true });
+      
+      // Mock directories
+      originalEnv = { ...process.env };
+      process.env.XDG_DATA_HOME = testDir;
+      process.env.HOME = tmpdir();
+    });
+
+    afterEach(() => {
+      if (existsSync(testDir)) {
+        rmSync(testDir, { recursive: true, force: true });
+      }
+      if (existsSync(modelerDir)) {
+        rmSync(modelerDir, { recursive: true, force: true });
+      }
+      process.env = originalEnv;
+    });
+
+    test('loadModelerProfiles returns empty array if no file', async () => {
+      const { loadModelerProfiles } = await import('../../src/config.ts');
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 0);
+    });
+
+    test('loadModelerProfiles reads profiles.json from modeler directory', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const modelerProfiles = {
+        profiles: [
+          {
+            name: 'Local Dev',
+            clusterId: 'local-cluster',
+            clusterUrl: 'http://localhost:8080',
+            audience: '',
+            clientId: '',
+            clientSecret: ''
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(modelerProfiles, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].name, 'Local Dev');
+      assert.strictEqual(profiles[0].clusterId, 'local-cluster');
+    });
+
+    test('getModelerProfile finds profile by name', async () => {
+      const { loadModelerProfiles, getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const modelerProfiles = {
+        profiles: [
+          { name: 'Cloud Cluster', clusterId: 'abc123', clusterUrl: 'https://abc123.zeebe.camunda.io' }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(modelerProfiles, null, 2),
+        'utf-8'
+      );
+      
+      const profile = getModelerProfile('Cloud Cluster');
+      assert.ok(profile);
+      assert.strictEqual(profile.name, 'Cloud Cluster');
+    });
+
+    test('getModelerProfile finds profile by clusterId', async () => {
+      const { getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const modelerProfiles = {
+        profiles: [
+          { name: 'Cloud Cluster', clusterId: 'abc123', clusterUrl: 'https://abc123.zeebe.camunda.io' }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(modelerProfiles, null, 2),
+        'utf-8'
+      );
+      
+      const profile = getModelerProfile('abc123');
+      assert.ok(profile);
+      assert.strictEqual(profile.clusterId, 'abc123');
+    });
+
+    test('getModelerProfile handles modeler: prefix', async () => {
+      const { getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const modelerProfiles = {
+        profiles: [
+          { name: 'Test Profile', clusterId: 'test123', clusterUrl: 'http://localhost:8080' }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(modelerProfiles, null, 2),
+        'utf-8'
+      );
+      
+      const profile = getModelerProfile('modeler:Test Profile');
+      assert.ok(profile);
+      assert.strictEqual(profile.name, 'Test Profile');
+    });
+
+    test('constructApiUrl appends /v2 for localhost URLs', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterUrl: 'http://localhost:8080' });
+      assert.strictEqual(url, 'http://localhost:8080/v2');
+    });
+
+    test('constructApiUrl supports any port number', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterUrl: 'http://localhost:9090' });
+      assert.strictEqual(url, 'http://localhost:9090/v2');
+    });
+
+    test('constructApiUrl does not modify URLs with /v2', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterUrl: 'http://localhost:8080/v2' });
+      assert.strictEqual(url, 'http://localhost:8080/v2');
+    });
+
+    test('constructApiUrl handles cloud URLs without /v2', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterUrl: 'https://abc123.region.zeebe.camunda.io' });
+      assert.strictEqual(url, 'https://abc123.region.zeebe.camunda.io');
+    });
+
+    test('constructApiUrl constructs cloud URL from clusterId', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({ clusterId: 'abc123-def456' });
+      assert.strictEqual(url, 'https://abc123-def456.zeebe.camunda.io');
+    });
+
+    test('constructApiUrl falls back to localhost', async () => {
+      const { constructApiUrl } = await import('../../src/config.ts');
+      const url = constructApiUrl({});
+      assert.strictEqual(url, 'http://localhost:8080/v2');
+    });
+
+    test('convertModelerProfile creates c8ctl profile with modeler: prefix', async () => {
+      const { convertModelerProfile } = await import('../../src/config.ts');
+      const modelerProfile = {
+        name: 'Test',
+        clusterUrl: 'http://localhost:8080',
+        clientId: 'test-client',
+        clientSecret: 'test-secret'
+      };
+      
+      const c8ctlProfile = convertModelerProfile(modelerProfile);
+      assert.strictEqual(c8ctlProfile.name, 'modeler:Test');
+      assert.strictEqual(c8ctlProfile.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(c8ctlProfile.clientId, 'test-client');
+    });
+
+    test('convertModelerProfile sets OAuth URL for cloud profiles', async () => {
+      const { convertModelerProfile } = await import('../../src/config.ts');
+      const modelerProfile = {
+        name: 'Cloud',
+        clusterUrl: 'https://abc123.zeebe.camunda.io',
+        audience: 'zeebe.camunda.io',
+        clientId: 'cloud-client',
+        clientSecret: 'cloud-secret'
+      };
+      
+      const c8ctlProfile = convertModelerProfile(modelerProfile);
+      assert.strictEqual(c8ctlProfile.oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
+      assert.strictEqual(c8ctlProfile.audience, 'zeebe.camunda.io');
+    });
+
+    test('convertModelerProfile uses clusterId as name fallback', async () => {
+      const { convertModelerProfile } = await import('../../src/config.ts');
+      const modelerProfile = {
+        clusterId: 'fallback-id',
+        clusterUrl: 'http://localhost:8080'
+      };
+      
+      const c8ctlProfile = convertModelerProfile(modelerProfile);
+      assert.strictEqual(c8ctlProfile.name, 'modeler:fallback-id');
+    });
+
+    test('getProfile resolves modeler profiles with modeler: prefix', async () => {
+      const { getProfile, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const modelerProfiles = {
+        profiles: [
+          { name: 'Modeler Test', clusterUrl: 'http://localhost:8080' }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(modelerProfiles, null, 2),
+        'utf-8'
+      );
+      
+      const profile = getProfile('modeler:Modeler Test');
+      assert.ok(profile);
+      assert.strictEqual(profile.name, 'modeler:Modeler Test');
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+    });
+  });
 });
