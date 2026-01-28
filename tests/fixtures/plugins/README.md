@@ -10,7 +10,6 @@ TypeScript implementation demonstrating:
 - TypeScript type annotations
 - Access to c8ctl runtime object
 - Multiple command exports (analyze, validate)
-- Metadata export
 
 **Usage in plugins:**
 ```typescript
@@ -29,7 +28,6 @@ JavaScript implementation demonstrating:
 - Command with hyphens ('deploy-all')
 - Argument handling
 - Multiple commands (deploy-all, status, report)
-- Metadata with command list
 
 **Usage in plugins:**
 ```javascript
@@ -44,9 +42,9 @@ export const commands = {
 
 For a package to be recognized as a c8ctl plugin:
 
-1. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` as main entry
-2. Must export a `commands` object with async functions
-3. Should export `metadata` with name, version, description
+1. Must be a regular Node.js module with proper package.json
+2. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in root directory
+3. Must export a `commands` object with async functions
 4. Can access c8ctl runtime via `import { c8ctl } from 'c8ctl/runtime'`
 
 ## Testing
@@ -54,6 +52,5 @@ For a package to be recognized as a c8ctl plugin:
 These fixtures are used by `tests/unit/plugins.test.ts` to verify:
 - Plugin structure validation
 - Command export format
-- Metadata format
 - Dynamic import capability
 - Runtime object access

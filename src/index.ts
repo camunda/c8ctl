@@ -73,6 +73,7 @@ function parseCliArgs() {
         oAuthUrl: { type: 'string' },
         defaultTenantId: { type: 'string' },
         version_num: { type: 'string' },
+        from: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -192,11 +193,21 @@ async function main() {
   }
 
   if (verb === 'load' && normalizedResource === 'plugin') {
-    if (!args[0]) {
-      logger.error('Package name required. Usage: c8 load plugin <package-name>');
+    const fromUrl = values.from as string | undefined;
+    const packageName = args[0];
+    
+    // Ensure exclusive usage
+    if (packageName && fromUrl) {
+      logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
       process.exit(1);
     }
-    loadPlugin(args[0]);
+    
+    if (!packageName && !fromUrl) {
+      logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
+      process.exit(1);
+    }
+    
+    loadPlugin(packageName, fromUrl);
     return;
   }
 

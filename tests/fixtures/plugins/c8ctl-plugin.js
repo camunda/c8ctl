@@ -37,10 +37,3 @@ export const commands = {
     console.log(`Output format: ${format}`);
   },
 };
-
-export const metadata = {
-  name: 'sample-js-plugin',
-  version: '2.0.0',
-  description: 'A sample JavaScript plugin for c8ctl',
-  commands: ['deploy-all', 'status', 'report'],
-};

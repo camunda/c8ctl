@@ -52,7 +52,8 @@ Commands:
   run       <path>           Deploy and start process
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
-  load      plugin <name>    Load a c8ctl plugin (npm install wrapper)
+  load      plugin <name>    Load a c8ctl plugin from npm registry
+  load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
@@ -60,6 +61,7 @@ Commands:
 
 Flags:
   --profile <name>  Use specific profile for this command
+  --from <url>      Load plugin from URL (use with 'load plugin')
   --version, -v     Show version
   --help, -h        Show help
 
@@ -77,6 +79,8 @@ Examples:
   c8 run ./my-process.bpmn        Deploy and start process
   c8 use profile prod             Set active profile
   c8 output json                  Switch to JSON output
+  c8 load plugin my-plugin        Load plugin from npm registry
+  c8 load plugin --from file:///path/to/plugin  Load plugin from file URL
 `.trim());
 }
 
