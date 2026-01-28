@@ -35,7 +35,7 @@ jobs:
       - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose up -d
+          DATABASE=elasticsearch docker compose --profile elasticsearch up -d
         env:
           DATABASE: elasticsearch
 
@@ -60,7 +60,7 @@ jobs:
         if: always()
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose down -v
+          DATABASE=elasticsearch docker compose --profile elasticsearch down -v
         env:
           DATABASE: elasticsearch
 
@@ -68,6 +68,6 @@ jobs:
         if: failure()
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose logs
+          DATABASE=elasticsearch docker compose --profile elasticsearch logs
         env:
           DATABASE: elasticsearch

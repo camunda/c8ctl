@@ -15,6 +15,8 @@ export interface Profile {
   clientSecret?: string;
   audience?: string;
   oAuthUrl?: string;
+  username?: string;
+  password?: string;
   defaultTenantId?: string;
 }
 
@@ -30,6 +32,8 @@ export interface ClusterConfig {
   clientSecret?: string;
   audience?: string;
   oAuthUrl?: string;
+  username?: string;
+  password?: string;
 }
 
 /**
@@ -203,6 +207,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
         clientSecret: profile.clientSecret,
         audience: profile.audience,
         oAuthUrl: profile.oAuthUrl,
+        username: profile.username,
+        password: profile.password,
       };
     }
   }
@@ -218,6 +224,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
         clientSecret: profile.clientSecret,
         audience: profile.audience,
         oAuthUrl: profile.oAuthUrl,
+        username: profile.username,
+        password: profile.password,
       };
     }
   }
@@ -228,6 +236,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
   const audience = process.env.CAMUNDA_AUDIENCE;
   const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
+  const username = process.env.CAMUNDA_USERNAME;
+  const password = process.env.CAMUNDA_PASSWORD;
 
   if (baseUrl) {
     return {
@@ -236,12 +246,16 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
       clientSecret,
       audience,
       oAuthUrl,
+      username,
+      password,
     };
   }
 
-  // 4. Localhost fallback (no authentication)
+  // 4. Localhost fallback with basic auth (demo/demo)
   return {
     baseUrl: 'http://localhost:8080/v2',
+    username: 'demo',
+    password: 'demo',
   };
 }
 
