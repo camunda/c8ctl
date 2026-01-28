@@ -6,3 +6,8 @@ Cluster API in assets/rest-api.yaml and the npm module https://www.npmjs.com/pac
 ## Commit Message Guidelines
 
 Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
+
+## Implementation Details
+
+- this is a native Node.js project running TS files
+- there is no build step, files are run directly with Node.js >= 22.18.0
