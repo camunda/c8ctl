@@ -40,7 +40,6 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 ### Requirements
 
 - Node.js >= 22.18.0 (for native TypeScript support)
-- For Node.js < 22.18.0, tsx will be used automatically
 
 ### Install Dependencies
 
@@ -50,17 +49,14 @@ npm install
 
 ### Make CLI Executable
 
-The CLI can be run directly with Node.js 22.18+ or tsx for earlier versions:
+The CLI runs directly with Node.js 22.18+ which has native TypeScript support:
 
 ```bash
-# With Node.js 22.18+
+# Run directly with Node.js
 node src/index.ts <command>
 
-# With earlier Node.js versions (using tsx)
-npx tsx src/index.ts <command>
-
 # Or add an alias to your shell (recommended)
-alias c8='npx tsx src/index.ts'
+alias c8='node src/index.ts'
 ```
 
 ## Usage
@@ -195,9 +191,6 @@ c8ctl/
 ```bash
 # With Node.js 22.18+ (native TypeScript)
 node src/index.ts <command>
-
-# With earlier Node.js versions (using tsx)
-npx tsx src/index.ts <command>
 
 # Or using the alias
 c8 <command>

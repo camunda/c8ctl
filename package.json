@@ -11,10 +11,10 @@
     "c8": "./src/index.ts"
   },
   "scripts": {
-    "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "tsx --test tests/unit/*.test.ts",
-    "test:integration": "tsx --test tests/integration/*.test.ts",
-    "cli": "tsx src/index.ts"
+    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --test tests/unit/*.test.ts",
+    "test:integration": "node --test tests/integration/*.test.ts",
+    "cli": "node src/index.ts"
   },
   "keywords": [
     "camunda",
@@ -30,7 +30,6 @@
     "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "tsx": "^4.19.2"
+    "@types/node": "^22.10.0"
   }
 }

@@ -10,9 +10,9 @@ All requirements from the plan have been successfully implemented and tested.
 
 1. **Package Configuration** (`package.json`, `tsconfig.json`)
    - ES modules with `"type": "module"`
-   - Node.js >= 22.18.0 target (with tsx fallback for earlier versions)
+   - Node.js >= 22.18.0 target (native TypeScript support)
    - Single runtime dependency: `@camunda8/orchestration-cluster-api@^8.8.3`
-   - Test scripts using tsx for TypeScript execution
+   - Test scripts using native Node.js test runner
    - CLI bin entries: `c8ctl` and `c8` aliases
 
 2. **Logger Component** (`src/logger.ts`)
@@ -77,7 +77,7 @@ All requirements from the plan have been successfully implemented and tested.
 
 1. **README.md**
    - Architecture overview
-   - Installation instructions (Node.js 22.18+ or tsx)
+   - Installation instructions (Node.js 22.18+ required)
    - Usage examples
    - Configuration details
    - Testing instructions
@@ -209,18 +209,12 @@ All items from `prompts/plan-c8Ctl.prompt.md` have been implemented:
 
 ### Development
 - `@types/node@^22.10.0`
-- `tsx@^4.19.2` (for Node.js < 22.18)
 
 ## Usage Notes
 
-### For Node.js 22.18+
+### Running the CLI (Node.js 22.18+)
 ```bash
 node src/index.ts <command>
-```
-
-### For Earlier Node.js Versions
-```bash
-npx tsx src/index.ts <command>
 # or
 npm run cli -- <command>
 ```
@@ -253,7 +247,7 @@ npm run test:unit  # Unit tests only
    - Verified CLI functionality
 
 5. **docs: update README with correct runtime information**
-   - tsx usage documentation
+   - Native Node.js usage documentation
    - CLI convenience scripts
 
 ## Conclusion
