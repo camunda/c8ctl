@@ -11,6 +11,9 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
+// Wait time for Elasticsearch to index data before search queries
+const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
+
 describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
@@ -26,12 +29,13 @@ describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)',
     await run('tests/fixtures/simple.bpmn', {});
     
     // Verify instance was created by searching for running instances of simple-process
+    // Wait for Elasticsearch to index the data
     const client = createClient();
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
     
     assert.ok(result.items && result.items.length > 0, 'Process instance should exist');
   });
@@ -42,12 +46,13 @@ describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)',
     await run('tests/fixtures/simple.bpmn', {});
     
     // Verify we can find instances of the correct process
+    // Wait for Elasticsearch to index the data
     const client = createClient();
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
     
     // Should have at least one instance with the correct process ID
     assert.ok(result.items && result.items.length > 0, 'Should find instances with extracted process ID');

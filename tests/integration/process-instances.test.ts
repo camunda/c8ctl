@@ -11,6 +11,9 @@ import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
+// Wait time for Elasticsearch to index data before search queries
+const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
+
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
@@ -49,11 +52,12 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     });
     
     // Search for process instances - filter by process definition ID
+    // Wait for Elasticsearch to index the data
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
     
     // Verify we get results
     assert.ok(result, 'Search result should exist');

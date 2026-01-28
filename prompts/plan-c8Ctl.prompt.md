@@ -48,7 +48,7 @@ Build a minimal-dependency CLI on top of `@camunda8/orchestration-cluster-api` t
    - [messages.ts](src/commands/messages.ts): `publish`, `correlate`
    - [topology.ts](src/commands/topology.ts): `get`
 
-7. **Implement deploy with building-block traversal** — In [src/commands/deployments.ts](src/commands/deployments.ts), accept `[path...]` args or `--all` flag. Pass active tenant to deployment. Walk directories recursively, prioritize folders containing `_bb-` in name (deploy first), then deploy remaining `.bpmn`, `.dmn`, `.form` files up the hierarchy.
+7. **Implement deploy with building-block traversal** — In [src/commands/deployments.ts](src/commands/deployments.ts), accept `[path...]` args (defaults to current directory if none provided). Pass active tenant to deployment. Walk directories recursively, prioritize folders containing `_bb-` in name (deploy first), then deploy remaining `.bpmn`, `.dmn`, `.form` files up the hierarchy.
 
 8. **Add `run` convenience command** — In [src/commands/run.ts](src/commands/run.ts), deploy the BPMN file with tenant, extract process ID via regex `/process[^>]+id="([^"]+)"/`, create process instance with that ID and tenant, log created instance key.
 
