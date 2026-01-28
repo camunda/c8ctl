@@ -121,6 +121,22 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
 }
 
 /**
+ * Find duplicate process/decision IDs across resources
+ */
+function findDuplicateDefinitionIds(resources: ResourceFile[]): Map<string, string[]> {
+  const idMap = resources.reduce((map, r) => {
+    const ext = extname(r.path);
+    if (ext === '.bpmn' || ext === '.dmn') {
+      const defId = extractDefinitionId(r.content, ext);
+      if (defId) map.set(defId, [...(map.get(defId) ?? []), r.path]);
+    }
+    return map;
+  }, new Map<string, string[]>());
+
+  return new Map([...idMap].filter(([, paths]) => paths.length > 1));
+}
+
+/**
  * Deploy resources
  */
 export async function deploy(paths: string[], options: {
@@ -157,31 +173,10 @@ export async function deploy(paths: string[], options: {
     });
 
     // Validate for duplicate process/decision IDs
-    const idMap = new Map<string, string[]>();
-    resources.forEach(r => {
-      const ext = extname(r.path);
-      if (ext === '.bpmn' || ext === '.dmn') {
-        const defId = extractDefinitionId(r.content, ext);
-        if (defId) {
-          if (!idMap.has(defId)) {
-            idMap.set(defId, []);
-          }
-          idMap.get(defId)!.push(r.path);
-        }
-      }
-    });
-
-    // Check for duplicates
-    const duplicates: string[] = [];
-    idMap.forEach((paths, id) => {
-      if (paths.length > 1) {
-        duplicates.push(`  Process/Decision ID "${id}" found in: ${paths.join(', ')}`);
-      }
-    });
-
-    if (duplicates.length > 0) {
+    const duplicates = findDuplicateDefinitionIds(resources);
+    if (duplicates.size > 0) {
       logger.error('Cannot deploy: Multiple files with the same process/decision ID in one deployment');
-      duplicates.forEach(dup => console.error(dup));
+      duplicates.forEach((paths, id) => console.error(`  Process/Decision ID "${id}" found in: ${paths.join(', ')}`));
       console.error('\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.');
       console.error('Please deploy these files separately or ensure each process/decision has a unique ID.');
       process.exit(1);
