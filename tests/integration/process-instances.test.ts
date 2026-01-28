@@ -49,11 +49,12 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     });
     
     // Search for process instances - filter by process definition ID
+    // Wait up to 5 seconds for Elasticsearch to index the data
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: 5000 } });
     
     // Verify we get results
     assert.ok(result, 'Search result should exist');

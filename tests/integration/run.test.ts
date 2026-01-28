@@ -26,12 +26,13 @@ describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)',
     await run('tests/fixtures/simple.bpmn', {});
     
     // Verify instance was created by searching for running instances of simple-process
+    // Wait up to 5 seconds for Elasticsearch to index the data
     const client = createClient();
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: 5000 } });
     
     assert.ok(result.items && result.items.length > 0, 'Process instance should exist');
   });
@@ -42,12 +43,13 @@ describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)',
     await run('tests/fixtures/simple.bpmn', {});
     
     // Verify we can find instances of the correct process
+    // Wait up to 5 seconds for Elasticsearch to index the data
     const client = createClient();
     const result = await client.searchProcessInstances({
       filter: {
         processDefinitionId: 'simple-process',
       },
-    }, { consistency: { waitUpToMs: 0 } });
+    }, { consistency: { waitUpToMs: 5000 } });
     
     // Should have at least one instance with the correct process ID
     assert.ok(result.items && result.items.length > 0, 'Should find instances with extracted process ID');
