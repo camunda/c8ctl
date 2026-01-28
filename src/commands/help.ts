@@ -48,7 +48,7 @@ Commands:
   resolve   inc <key>        Resolve incident
   publish   msg <name>       Publish message
   correlate msg <name>       Correlate message
-  deploy    [path...]        Deploy BPMN/DMN/forms (use --all to deploy all from dir)
+  deploy    [path...]        Deploy BPMN/DMN/forms
   run       <path>           Deploy and start process
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
@@ -60,7 +60,6 @@ Commands:
 
 Flags:
   --profile <name>  Use specific profile for this command
-  --all             Deploy all resources from directory
   --version, -v     Show version
   --help, -h        Show help
 

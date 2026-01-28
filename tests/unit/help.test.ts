@@ -65,7 +65,6 @@ describe('Help Module', () => {
     
     // Check for flags
     assert.ok(output.includes('--profile'));
-    assert.ok(output.includes('--all'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
   });

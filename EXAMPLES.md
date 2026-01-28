@@ -221,9 +221,6 @@ c8 deploy ./process1.bpmn ./process2.bpmn ./decision.dmn
 # Deploys all BPMN/DMN/Form files in directory and subdirectories
 c8 deploy ./my-project
 
-# Deploy all resources from a directory using the --all flag
-c8 deploy /path/to/dir --all
-
 # Building block folders (containing _bb- in name) are prioritized
 c8 deploy ./my-project
 # Order: _bb-* folders first, then other files
