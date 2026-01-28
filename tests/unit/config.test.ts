@@ -39,9 +39,9 @@ describe('Config Module', () => {
       testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
       mkdirSync(testDir, { recursive: true });
       
-      // Mock getUserDataDir to use test directory
+      // Override data directory for tests
       originalEnv = { ...process.env };
-      process.env.XDG_DATA_HOME = testDir;
+      process.env.C8CTL_DATA_DIR = testDir;
     });
 
     afterEach(() => {
@@ -131,7 +131,7 @@ describe('Config Module', () => {
       testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
       mkdirSync(testDir, { recursive: true });
       originalEnv = { ...process.env };
-      process.env.XDG_DATA_HOME = testDir;
+      process.env.C8CTL_DATA_DIR = testDir;
     });
 
     afterEach(() => {
@@ -183,10 +183,14 @@ describe('Config Module', () => {
     let originalEnv: NodeJS.ProcessEnv;
 
     beforeEach(() => {
+      // Create temporary test directory
       testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
       mkdirSync(testDir, { recursive: true });
+      
+      // Override data directory and clear Camunda env vars
       originalEnv = { ...process.env };
-      process.env.XDG_DATA_HOME = testDir;
+      process.env.C8CTL_DATA_DIR = testDir;
+      
       // Clear all Camunda env vars to ensure test isolation
       delete process.env.CAMUNDA_BASE_URL;
       delete process.env.CAMUNDA_CLIENT_ID;
@@ -199,6 +203,7 @@ describe('Config Module', () => {
     });
 
     afterEach(() => {
+      // Cleanup
       if (existsSync(testDir)) {
         rmSync(testDir, { recursive: true, force: true });
       }

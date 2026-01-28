@@ -31,9 +31,12 @@ JavaScript implementation demonstrating:
 
 **Usage in plugins:**
 ```javascript
+import { c8ctl } from 'c8ctl/runtime';
+
 export const commands = {
   'my-command': async (args) => {
     console.log(`Args: ${args.join(', ')}`);
+    console.log(`Version: ${c8ctl.env.version}`);
   }
 };
 ```
@@ -45,7 +48,8 @@ For a package to be recognized as a c8ctl plugin:
 1. Must be a regular Node.js module with proper package.json
 2. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in root directory
 3. Must export a `commands` object with async functions
-4. Can access c8ctl runtime via `import { c8ctl } from 'c8ctl/runtime'`
+4. Must declare c8ctl as a peer dependency in package.json
+5. Import c8ctl runtime: `import { c8ctl } from 'c8ctl/runtime'`
 
 ## Testing
 

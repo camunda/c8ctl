@@ -50,8 +50,8 @@ describe('Plugin Structure', () => {
       const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
-      // Verify plugin imports runtime
-      assert.ok(pluginContent.includes("import { c8ctl }"), 'Plugin imports c8ctl runtime');
+      // Verify plugin imports c8ctl
+      assert.ok(pluginContent.includes("import { c8ctl } from 'c8ctl/runtime'"), 'Plugin imports c8ctl runtime');
       assert.ok(pluginContent.includes('c8ctl.env'), 'Plugin uses c8ctl.env');
     });
 

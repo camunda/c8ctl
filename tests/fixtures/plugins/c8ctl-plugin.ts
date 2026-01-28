@@ -3,7 +3,7 @@
  * This demonstrates the expected structure for a c8ctl plugin
  */
 
-import { c8ctl } from '../../../src/runtime.ts';
+import { c8ctl } from 'c8ctl/runtime';
 
 export const commands = {
   /**
