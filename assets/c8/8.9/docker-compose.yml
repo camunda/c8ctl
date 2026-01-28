@@ -75,19 +75,19 @@ services:
     depends_on:
       - postgres
     container_name: keycloak
-    image: bitnami/keycloak:26.3.3
+    image: quay.io/keycloak/keycloak:26.0
+    command: start-dev --http-relative-path=/auth
     ports:
       - '18080:8080'
     environment:
-      KEYCLOAK_HTTP_RELATIVE_PATH: /auth
-      KEYCLOAK_DATABASE_HOST: postgres
-      KEYCLOAK_DATABASE_NAME: identity
-      KEYCLOAK_DATABASE_USER: identity
-      KEYCLOAK_DATABASE_PASSWORD: 't2L@!AqSMg8%I%NmHM'
-      KEYCLOAK_ADMIN_USER: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/identity
+      KC_DB_USERNAME: identity
+      KC_DB_PASSWORD: 't2L@!AqSMg8%I%NmHM'
+      KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
     healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8080/auth']
+      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/8080 && echo -e "GET /auth/health/ready HTTP/1.1\nhost: localhost:8080\n" >&3 && timeout 1 cat <&3 | grep "200 OK"']
       interval: 30s
       timeout: 15s
       retries: 8
