@@ -82,6 +82,9 @@ c8 create pi --bpmnProcessId=myProcess
 # Deploy BPMN file
 c8 deploy ./my-process.bpmn
 
+# Deploy current directory
+c8 deploy
+
 # Deploy and start process (run)
 c8 run ./my-process.bpmn
 ```

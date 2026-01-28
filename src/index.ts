@@ -69,7 +69,6 @@ function parseCliArgs() {
         audience: { type: 'string' },
         oAuthUrl: { type: 'string' },
         defaultTenantId: { type: 'string' },
-        all: { type: 'boolean' },
         version_num: { type: 'string' },
       },
       allowPositionals: true,
@@ -356,10 +355,9 @@ async function main() {
 
   // Handle deploy command
   if (verb === 'deploy') {
-    const paths = resource ? [resource, ...args] : args;
+    const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
     await deploy(paths, {
       profile: values.profile as string | undefined,
-      all: values.all as boolean | undefined,
     });
     return;
   }

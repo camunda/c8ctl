@@ -141,7 +141,6 @@ function findDuplicateDefinitionIds(resources: ResourceFile[]): Map<string, stri
  */
 export async function deploy(paths: string[], options: {
   profile?: string;
-  all?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -151,7 +150,7 @@ export async function deploy(paths: string[], options: {
     const resources: ResourceFile[] = [];
 
     if (paths.length === 0) {
-      logger.error('No paths provided. Use: c8 deploy <path> or c8 deploy --all');
+      logger.error('No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)');
       process.exit(1);
     }
 
