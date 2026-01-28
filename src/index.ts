@@ -24,6 +24,12 @@ import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
+import { 
+  loadInstalledPlugins, 
+  executePluginCommand, 
+  isPluginCommand,
+  clearLoadedPlugins 
+} from './plugin-loader.ts';
 
 /**
  * Normalize resource aliases
@@ -95,6 +101,9 @@ async function main() {
   // Load session state and initialize logger
   const session = loadSessionState();
   const logger = getLogger(session.outputMode);
+
+  // Load installed plugins
+  await loadInstalledPlugins();
 
   // Handle global flags
   if (values.version) {
@@ -207,7 +216,7 @@ async function main() {
       process.exit(1);
     }
     
-    loadPlugin(packageName, fromUrl);
+    await loadPlugin(packageName, fromUrl);
     return;
   }
 
@@ -216,7 +225,7 @@ async function main() {
       logger.error('Package name required. Usage: c8 unload plugin <package-name>');
       process.exit(1);
     }
-    unloadPlugin(args[0]);
+    await unloadPlugin(args[0]);
     return;
   }
 
@@ -416,6 +425,11 @@ async function main() {
   // Handle verb-only invocations (show available resources)
   if (!resource) {
     showVerbResources(verb);
+    return;
+  }
+
+  // Try to execute plugin command
+  if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
     return;
   }
 
