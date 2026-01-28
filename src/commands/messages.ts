@@ -39,7 +39,7 @@ export async function publishMessage(name: string, options: {
       request.timeToLive = options.timeToLive;
     }
 
-    const result = await client.messages.publish(request);
+    const result = await client.publishMessage(request);
     logger.success(`Message '${name}' published`, result.key);
   } catch (error) {
     logger.error(`Failed to publish message '${name}'`, error as Error);

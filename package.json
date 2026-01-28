@@ -11,9 +11,9 @@
     "c8": "./src/index.ts"
   },
   "scripts": {
-    "test": "node --test",
-    "test:unit": "node --test tests/unit/**/*.test.ts",
-    "test:integration": "node --test tests/integration/**/*.test.ts"
+    "test": "tsx --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "tsx --test tests/unit/*.test.ts",
+    "test:integration": "tsx --test tests/integration/*.test.ts"
   },
   "keywords": [
     "camunda",
@@ -26,9 +26,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^0.5.0"
+    "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2"
   }
 }

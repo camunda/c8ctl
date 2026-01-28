@@ -39,15 +39,13 @@ export async function run(path: string, options: {
     logger.info(`Deploying ${path}...`);
 
     // Deploy the BPMN file
-    const deploymentRequest: any = {
+    const deployResult = await client.createDeployment({
       tenantId,
       resources: [{
         name: path.split('/').pop() || 'process.bpmn',
         content: Buffer.from(content),
       }],
-    };
-
-    const deployResult = await client.deployResources(deploymentRequest);
+    });
     logger.success('Deployment successful', deployResult.key);
 
     // Create process instance
@@ -67,7 +65,7 @@ export async function run(path: string, options: {
       }
     }
 
-    const createResult = await client.processInstances.create(createRequest);
+    const createResult = await client.createProcessInstance(createRequest);
     logger.success('Process instance created', createResult.processInstanceKey);
   } catch (error) {
     logger.error('Failed to run process', error as Error);

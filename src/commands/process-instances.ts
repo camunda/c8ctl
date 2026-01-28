@@ -33,7 +33,7 @@ export async function listProcessInstances(options: {
       filter.filter.state = options.state;
     }
 
-    const result = await client.processInstances.search(filter);
+    const result = await client.searchProcessInstances(filter);
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((pi: any) => ({
@@ -63,7 +63,7 @@ export async function getProcessInstance(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.processInstances.getByKey(key);
+    const result = await client.getProcessInstanceByKey(key);
     logger.json(result);
   } catch (error) {
     logger.error(`Failed to get process instance ${key}`, error as Error);
@@ -108,7 +108,7 @@ export async function createProcessInstance(options: {
       }
     }
 
-    const result = await client.processInstances.create(request);
+    const result = await client.createProcessInstance(request);
     logger.success('Process instance created', result.processInstanceKey);
   } catch (error) {
     logger.error('Failed to create process instance', error as Error);
@@ -126,7 +126,7 @@ export async function cancelProcessInstance(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.processInstances.cancel(key);
+    await client.cancelProcessInstance(key);
     logger.success(`Process instance ${key} cancelled`);
   } catch (error) {
     logger.error(`Failed to cancel process instance ${key}`, error as Error);

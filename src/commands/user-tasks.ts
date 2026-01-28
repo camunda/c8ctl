@@ -33,7 +33,7 @@ export async function listUserTasks(options: {
       filter.filter.assignee = options.assignee;
     }
 
-    const result = await client.userTasks.search(filter);
+    const result = await client.searchUserTasks(filter);
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((task: any) => ({
@@ -78,7 +78,7 @@ export async function completeUserTask(key: string, options: {
       }
     }
 
-    await client.userTasks.complete(request);
+    await client.completeUserTask(request);
     logger.success(`User task ${key} completed`);
   } catch (error) {
     logger.error(`Failed to complete user task ${key}`, error as Error);

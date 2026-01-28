@@ -33,7 +33,7 @@ export async function listJobs(options: {
       filter.filter.type = options.type;
     }
 
-    const result = await client.jobs.search(filter);
+    const result = await client.searchJobs(filter);
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((job: any) => ({
@@ -76,7 +76,7 @@ export async function activateJobs(type: string, options: {
       worker: options.worker || 'c8ctl',
     };
 
-    const result = await client.jobs.activate(request);
+    const result = await client.activateJobs(request);
     
     if (result.jobs && result.jobs.length > 0) {
       logger.success(`Activated ${result.jobs.length} jobs of type '${type}'`);
@@ -120,7 +120,7 @@ export async function completeJob(key: string, options: {
       }
     }
 
-    await client.jobs.complete(request);
+    await client.completeJob(request);
     logger.success(`Job ${key} completed`);
   } catch (error) {
     logger.error(`Failed to complete job ${key}`, error as Error);
@@ -146,7 +146,7 @@ export async function failJob(key: string, options: {
       errorMessage: options.errorMessage || 'Job failed via c8ctl',
     };
 
-    await client.jobs.fail(request);
+    await client.failJob(request);
     logger.success(`Job ${key} failed`);
   } catch (error) {
     logger.error(`Failed to fail job ${key}`, error as Error);

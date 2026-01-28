@@ -137,15 +137,13 @@ export async function deploy(paths: string[], options: {
     logger.info(`Deploying ${resources.length} resource(s)...`);
 
     // Create deployment request
-    const deploymentRequest: any = {
+    const result = await client.createDeployment({
       tenantId,
       resources: resources.map(r => ({
         name: r.name,
         content: r.content,
       })),
-    };
-
-    const result = await client.deployResources(deploymentRequest);
+    });
     
     logger.success('Deployment successful', result.key);
     

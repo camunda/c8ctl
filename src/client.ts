@@ -2,13 +2,13 @@
  * SDK client factory using resolved configuration
  */
 
-import { CamundaCluster } from '@camunda8/orchestration-cluster-api';
+import { createCamundaClient, type CamundaClient } from '@camunda8/orchestration-cluster-api';
 import { resolveClusterConfig } from './config.ts';
 
 /**
  * Create a Camunda 8 cluster client with resolved configuration
  */
-export function createClient(profileFlag?: string): CamundaCluster {
+export function createClient(profileFlag?: string): CamundaClient {
   const config = resolveClusterConfig(profileFlag);
   
   // Build options for the SDK
@@ -26,5 +26,5 @@ export function createClient(profileFlag?: string): CamundaCluster {
     };
   }
 
-  return new CamundaCluster(options);
+  return createCamundaClient(options);
 }
