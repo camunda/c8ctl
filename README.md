@@ -119,6 +119,23 @@ c8 output json
 c8 output text
 ```
 
+### Debug Mode
+
+Enable debug logging to see detailed information about plugin loading and other internal operations:
+
+```bash
+# Enable debug mode with environment variable
+DEBUG=1 c8 <command>
+
+# Or use C8CTL_DEBUG
+C8CTL_DEBUG=true c8 <command>
+
+# Example: See plugin loading details
+DEBUG=1 c8 list plugins
+```
+
+Debug output is written to stderr with timestamps and won't interfere with normal command output.
+
 ### Plugin Management
 
 c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.

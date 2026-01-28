@@ -25,11 +25,13 @@ export async function loadInstalledPlugins(): Promise<void> {
   const nodeModulesPath = join(process.cwd(), 'node_modules');
   
   if (!existsSync(nodeModulesPath)) {
+    logger.debug('node_modules directory not found');
     return;
   }
   
   try {
     const packages = readdirSync(nodeModulesPath);
+    logger.debug(`Scanning ${packages.length} packages in node_modules`);
     
     for (const packageName of packages) {
       if (packageName.startsWith('.') || packageName.startsWith('@')) {
@@ -41,10 +43,12 @@ export async function loadInstalledPlugins(): Promise<void> {
       const pluginFileTs = join(packagePath, 'c8ctl-plugin.ts');
       
       if (existsSync(pluginFileJs) || existsSync(pluginFileTs)) {
+        logger.debug(`Found plugin candidate: ${packageName}`);
         try {
           const pluginFile = existsSync(pluginFileJs) ? pluginFileJs : pluginFileTs;
           // Use file:// protocol and add timestamp to bust cache
           const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
+          logger.debug(`Loading plugin from: ${pluginUrl}`);
           const plugin = await import(pluginUrl);
           
           if (plugin.commands && typeof plugin.commands === 'object') {
@@ -52,15 +56,17 @@ export async function loadInstalledPlugins(): Promise<void> {
               name: packageName,
               commands: plugin.commands,
             });
-            logger.debug?.(`Loaded plugin: ${packageName}`);
+            const commandNames = Object.keys(plugin.commands);
+            logger.debug(`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`, commandNames);
           }
         } catch (error) {
-          logger.debug?.(`Failed to load plugin ${packageName}:`, error);
+          logger.debug(`Failed to load plugin ${packageName}:`, error);
         }
       }
     }
+    logger.debug(`Total plugins loaded: ${loadedPlugins.size}`);
   } catch (error) {
-    logger.debug?.('Error scanning for plugins:', error);
+    logger.debug('Error scanning for plugins:', error);
   }
 }
 

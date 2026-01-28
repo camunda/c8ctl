@@ -197,7 +197,7 @@ describe('Logger Module', () => {
   });
 
   describe('Mode Switching', () => {
-    test('setMode switches output mode', () => {
+    test('mode property switches output mode', () => {
       const logger = new Logger('text');
       logger.success('Test');
       
@@ -205,7 +205,7 @@ describe('Logger Module', () => {
       assert.ok(consoleLogSpy[0].includes('✓'));
       
       consoleLogSpy = [];
-      logger.setMode('json');
+      logger.mode = 'json';
       logger.success('Test 2');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -213,12 +213,52 @@ describe('Logger Module', () => {
       assert.strictEqual(output.status, 'success');
     });
 
-    test('getMode returns current mode', () => {
+    test('mode property returns current mode', () => {
       const logger = new Logger('text');
-      assert.strictEqual(logger.getMode(), 'text');
+      assert.strictEqual(logger.mode, 'text');
       
-      logger.setMode('json');
-      assert.strictEqual(logger.getMode(), 'json');
+      logger.mode = 'json';
+      assert.strictEqual(logger.mode, 'json');
+    });
+  });
+
+  describe('Debug Mode', () => {
+    test('debug outputs when debug is enabled', () => {
+      const logger = new Logger('text');
+      logger.debugEnabled = true;
+      logger.debug('Debug message', { key: 'value' });
+      
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      assert.ok(consoleErrorSpy[0].includes('DEBUG'));
+      assert.ok(consoleErrorSpy[0].includes('Debug message'));
+    });
+
+    test('debug does not output when debug is disabled', () => {
+      const logger = new Logger('text');
+      logger.debugEnabled = false;
+      logger.debug('Debug message');
+      
+      assert.strictEqual(consoleErrorSpy.length, 0);
+    });
+
+    test('debug outputs JSON in JSON mode', () => {
+      const logger = new Logger('json');
+      logger.debugEnabled = true;
+      logger.debug('Debug message', { key: 'value' });
+      
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
+      assert.strictEqual(output.level, 'debug');
+      assert.strictEqual(output.message, 'Debug message');
+      assert.ok(output.timestamp);
+    });
+
+    test('debugEnabled property can be set', () => {
+      const logger = new Logger('text');
+      assert.strictEqual(logger.debugEnabled, false);
+      
+      logger.debugEnabled = true;
+      assert.strictEqual(logger.debugEnabled, true);
     });
   });
 
@@ -232,10 +272,10 @@ describe('Logger Module', () => {
 
     test('getLogger updates mode if provided', () => {
       const logger = getLogger('text');
-      assert.strictEqual(logger.getMode(), 'text');
+      assert.strictEqual(logger.mode, 'text');
       
       getLogger('json');
-      assert.strictEqual(logger.getMode(), 'json');
+      assert.strictEqual(logger.mode, 'json');
     });
   });
 });
