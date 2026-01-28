@@ -124,8 +124,14 @@ c8 output text
 c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.
 
 ```bash
-# Load a plugin (wraps npm install)
+# Load a plugin from npm registry
 c8 load plugin <package-name>
+
+# Load a plugin from a URL (including file URLs)
+c8 load plugin --from <url>
+c8 load plugin --from file:///path/to/plugin
+c8 load plugin --from https://github.com/user/repo
+c8 load plugin --from git://github.com/user/repo.git
 
 # Unload a plugin (wraps npm uninstall)
 c8 unload plugin <package-name>
@@ -135,7 +141,9 @@ c8 list plugins
 ```
 
 **Plugin Requirements:**
-- Plugin packages must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file
+- Plugin packages must be regular Node.js modules
+- They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
+- The plugin name must be in the package.json metadata
 - The plugin file should export custom commands
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
@@ -147,6 +155,12 @@ export const commands = {
   analyze: async (args: string[]) => {
     console.log('Analyzing...', args);
   }
+};
+
+export const metadata = {
+  name: 'my-plugin',
+  version: '1.0.0',
+  description: 'My custom c8ctl plugin'
 };
 ```
 

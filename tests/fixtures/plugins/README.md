@@ -44,10 +44,12 @@ export const commands = {
 
 For a package to be recognized as a c8ctl plugin:
 
-1. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` as main entry
-2. Must export a `commands` object with async functions
-3. Should export `metadata` with name, version, description
-4. Can access c8ctl runtime via `import { c8ctl } from 'c8ctl/runtime'`
+1. Must be a regular Node.js module with proper package.json
+2. Plugin name must be defined in package.json metadata
+3. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in root directory
+4. Must export a `commands` object with async functions
+5. Should export `metadata` with name, version, description
+6. Can access c8ctl runtime via `import { c8ctl } from 'c8ctl/runtime'`
 
 ## Testing
 

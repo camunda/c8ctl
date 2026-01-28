@@ -357,8 +357,13 @@ c8 output text
 ### Load Plugin
 
 ```bash
-# Install a c8ctl plugin from npm
+# Install a c8ctl plugin from npm registry
 c8 load plugin my-custom-plugin
+
+# Install a plugin from a URL (file, https, git, etc.)
+c8 load plugin --from https://github.com/user/my-plugin
+c8 load plugin --from file:///path/to/local/plugin
+c8 load plugin --from git://github.com/user/plugin.git
 
 # The plugin is now available
 # (assuming the plugin exports an 'analyze' command)
@@ -381,7 +386,7 @@ c8 list plugins
 
 **Plugin Development:**
 
-Plugins should include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file that exports custom commands. The `c8ctl` runtime object provides environment information:
+Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin name must be in the package.json metadata. The `c8ctl` runtime object provides environment information:
 
 ```typescript
 // c8ctl-plugin.ts
@@ -393,6 +398,12 @@ export const commands = {
     console.log(`Platform: ${c8ctl.env.platform}`);
     // Custom analysis logic here
   }
+};
+
+export const metadata = {
+  name: 'my-plugin',
+  version: '1.0.0',
+  description: 'My custom c8ctl plugin'
 };
 ```
 

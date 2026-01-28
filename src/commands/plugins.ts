@@ -9,19 +9,34 @@ import { join } from 'node:path';
 
 /**
  * Load a plugin (npm install wrapper)
+ * Supports either package name or --from flag with URL
  */
-export function loadPlugin(packageName: string): void {
+export function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): void {
   const logger = getLogger();
   
-  if (!packageName) {
-    logger.error('Package name required. Usage: c8 load plugin <package-name>');
+  // Validate exclusive usage
+  if (packageNameOrFrom && fromUrl) {
+    logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
+    process.exit(1);
+  }
+  
+  if (!packageNameOrFrom && !fromUrl) {
+    logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
     process.exit(1);
   }
   
   try {
-    logger.info(`Loading plugin: ${packageName}...`);
-    execSync(`npm install ${packageName}`, { stdio: 'inherit' });
-    logger.success('Plugin loaded successfully', packageName);
+    if (fromUrl) {
+      // Install from URL (file://, https://, git://, etc.)
+      logger.info(`Loading plugin from: ${fromUrl}...`);
+      execSync(`npm install ${fromUrl}`, { stdio: 'inherit' });
+      logger.success('Plugin loaded successfully from URL', fromUrl);
+    } else {
+      // Install from npm registry by package name
+      logger.info(`Loading plugin: ${packageNameOrFrom}...`);
+      execSync(`npm install ${packageNameOrFrom}`, { stdio: 'inherit' });
+      logger.success('Plugin loaded successfully', packageNameOrFrom);
+    }
   } catch (error) {
     logger.error('Failed to load plugin', error as Error);
     process.exit(1);
