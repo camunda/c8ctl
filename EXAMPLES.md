@@ -386,7 +386,7 @@ c8 list plugins
 
 **Plugin Development:**
 
-Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin name must be in the package.json metadata. The `c8ctl` runtime object provides environment information:
+Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin file must export a `commands` object. The `c8ctl` runtime object provides environment information:
 
 ```typescript
 // c8ctl-plugin.ts
@@ -398,12 +398,6 @@ export const commands = {
     console.log(`Platform: ${c8ctl.env.platform}`);
     // Custom analysis logic here
   }
-};
-
-export const metadata = {
-  name: 'my-plugin',
-  version: '1.0.0',
-  description: 'My custom c8ctl plugin'
 };
 ```
 

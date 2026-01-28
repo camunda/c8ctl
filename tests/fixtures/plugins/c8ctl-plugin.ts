@@ -29,9 +29,3 @@ export const commands = {
     console.log(`Validating files: ${args.join(', ')}`);
   },
 };
-
-export const metadata = {
-  name: 'sample-ts-plugin',
-  version: '1.0.0',
-  description: 'A sample TypeScript plugin for c8ctl',
-};

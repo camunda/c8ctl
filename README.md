@@ -143,8 +143,7 @@ c8 list plugins
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
-- The plugin name must be in the package.json metadata
-- The plugin file should export custom commands
+- The plugin file must export a `commands` object
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
 
@@ -155,12 +154,6 @@ export const commands = {
   analyze: async (args: string[]) => {
     console.log('Analyzing...', args);
   }
-};
-
-export const metadata = {
-  name: 'my-plugin',
-  version: '1.0.0',
-  description: 'My custom c8ctl plugin'
 };
 ```
 

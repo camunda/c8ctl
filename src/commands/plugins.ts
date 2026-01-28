@@ -4,7 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -85,16 +85,13 @@ export function listPlugins(): void {
     for (const [name, version] of Object.entries(allDeps)) {
       try {
         // Try to resolve the package
-        const packagePath = join(process.cwd(), 'node_modules', name, 'package.json');
-        const pkgJson = JSON.parse(readFileSync(packagePath, 'utf-8'));
+        const packageDir = join(process.cwd(), 'node_modules', name);
         
-        // Check if package exports c8ctl-plugin.js or c8ctl-plugin.ts
-        const hasPlugin = pkgJson.main === 'c8ctl-plugin.js' || 
-                         pkgJson.main === 'c8ctl-plugin.ts' ||
-                         pkgJson.exports?.['./c8ctl-plugin.js'] ||
-                         pkgJson.exports?.['./c8ctl-plugin.ts'];
+        // Check if package has c8ctl-plugin.js or c8ctl-plugin.ts file in root
+        const hasPluginFile = existsSync(join(packageDir, 'c8ctl-plugin.js')) ||
+                             existsSync(join(packageDir, 'c8ctl-plugin.ts'));
         
-        if (hasPlugin) {
+        if (hasPluginFile) {
           plugins.push({
             Name: name,
             Version: version as string,
