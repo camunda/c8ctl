@@ -48,16 +48,19 @@ Commands:
   resolve   inc <key>        Resolve incident
   publish   msg <name>       Publish message
   correlate msg <name>       Correlate message
-  deploy    [path...]        Deploy BPMN/DMN/forms
+  deploy    [path...]        Deploy BPMN/DMN/forms (use --all to deploy all from dir)
   run       <path>           Deploy and start process
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
+  load      plugin <name>    Load a c8ctl plugin (npm install wrapper)
+  unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   help                       Show this help
 
 Flags:
   --profile <name>  Use specific profile for this command
+  --all             Deploy all resources from directory
   --version, -v     Show version
   --help, -h        Show help
 
@@ -83,7 +86,7 @@ Examples:
  */
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
-    list: 'process-instances (pi), user-tasks (ut), incidents (inc), jobs, profiles',
+    list: 'process-instances (pi), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
     get: 'process-instance (pi), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
@@ -96,6 +99,8 @@ export function showVerbResources(verb: string): void {
     add: 'profile',
     remove: 'profile',
     rm: 'profile',
+    load: 'plugin',
+    unload: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
   };

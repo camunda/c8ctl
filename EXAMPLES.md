@@ -13,6 +13,7 @@ Comprehensive examples for all c8ctl operations.
 - [Topology](#topology)
 - [Profile Management](#profile-management)
 - [Session Management](#session-management)
+- [Plugin Management](#plugin-management)
 
 ---
 
@@ -220,6 +221,9 @@ c8 deploy ./process1.bpmn ./process2.bpmn ./decision.dmn
 # Deploys all BPMN/DMN/Form files in directory and subdirectories
 c8 deploy ./my-project
 
+# Deploy all resources from a directory using the --all flag
+c8 deploy /path/to/dir --all
+
 # Building block folders (containing _bb- in name) are prioritized
 c8 deploy ./my-project
 # Order: _bb-* folders first, then other files
@@ -345,6 +349,52 @@ c8 list pi
 
 # Switch back to human-readable text
 c8 output text
+```
+
+---
+
+## Plugin Management
+
+### Load Plugin
+
+```bash
+# Install a c8ctl plugin from npm
+c8 load plugin my-custom-plugin
+
+# The plugin is now available
+# (assuming the plugin exports an 'analyze' command)
+c8 analyze
+```
+
+### Unload Plugin
+
+```bash
+# Remove a plugin
+c8 unload plugin my-custom-plugin
+```
+
+### List Plugins
+
+```bash
+# Show all installed c8ctl plugins
+c8 list plugins
+```
+
+**Plugin Development:**
+
+Plugins should include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file that exports custom commands. The `c8ctl` runtime object provides environment information:
+
+```typescript
+// c8ctl-plugin.ts
+import { c8ctl } from 'c8ctl/runtime';
+
+export const commands = {
+  analyze: async (args: string[]) => {
+    console.log(`Running on Node ${c8ctl.env.nodeVersion}`);
+    console.log(`Platform: ${c8ctl.env.platform}`);
+    // Custom analysis logic here
+  }
+};
 ```
 
 ---

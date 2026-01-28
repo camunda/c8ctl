@@ -8,6 +8,7 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 - **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
+- **Plugin System**: Extend c8ctl with custom commands via npm packages
 - **Session State**: Maintain active profile, tenant, and output preferences
 - **Building Block Deployment**: Automatic prioritization of `_bb-` folders during deployment
 - **Flexible Output**: Switch between human-readable text and JSON output modes
@@ -82,6 +83,9 @@ c8 create pi --bpmnProcessId=myProcess
 # Deploy BPMN file
 c8 deploy ./my-process.bpmn
 
+# Deploy all resources from a directory
+c8 deploy /path/to/dir --all
+
 # Deploy and start process (run)
 c8 run ./my-process.bpmn
 ```
@@ -113,6 +117,37 @@ c8 output json
 
 # Switch back to text output
 c8 output text
+```
+
+### Plugin Management
+
+c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.
+
+```bash
+# Load a plugin (wraps npm install)
+c8 load plugin <package-name>
+
+# Unload a plugin (wraps npm uninstall)
+c8 unload plugin <package-name>
+
+# List installed plugins
+c8 list plugins
+```
+
+**Plugin Requirements:**
+- Plugin packages must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file
+- The plugin file should export custom commands
+- Plugins are installed in `node_modules` like regular npm packages
+- The runtime object `c8ctl` provides environment information to plugins
+
+**Example Plugin Structure:**
+```typescript
+// c8ctl-plugin.ts
+export const commands = {
+  analyze: async (args: string[]) => {
+    console.log('Analyzing...', args);
+  }
+};
 ```
 
 ### Resource Aliases

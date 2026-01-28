@@ -54,6 +54,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('create'));
     assert.ok(output.includes('deploy'));
     assert.ok(output.includes('run'));
+    assert.ok(output.includes('load'));
+    assert.ok(output.includes('unload'));
     
     // Check for aliases
     assert.ok(output.includes('pi'));
@@ -63,6 +65,7 @@ describe('Help Module', () => {
     
     // Check for flags
     assert.ok(output.includes('--profile'));
+    assert.ok(output.includes('--all'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
   });
@@ -77,6 +80,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('incidents'));
     assert.ok(output.includes('jobs'));
     assert.ok(output.includes('profiles'));
+    assert.ok(output.includes('plugins'));
   });
 
   test('showVerbResources shows resources for get', () => {
@@ -129,5 +133,21 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('Unknown command'));
     assert.ok(output.includes('c8 help'));
+  });
+
+  test('showVerbResources shows resources for load', () => {
+    showVerbResources('load');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8 load'));
+    assert.ok(output.includes('plugin'));
+  });
+
+  test('showVerbResources shows resources for unload', () => {
+    showVerbResources('unload');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8 unload'));
+    assert.ok(output.includes('plugin'));
   });
 });
