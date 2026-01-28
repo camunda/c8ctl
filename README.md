@@ -8,6 +8,7 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 - **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
+- **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
 - **Session State**: Maintain active profile, tenant, and output preferences
 - **Building Block Deployment**: Automatic prioritization of `_bb-` folders during deployment
@@ -24,10 +25,12 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 
 ### Credential Resolution Order
 
-1. `--profile` flag (one-off override)
+1. `--profile` flag (one-off override, supports both c8ctl and modeler profiles)
 2. Active profile from session state
 3. Environment variables (`CAMUNDA_*`)
-4. Localhost fallback (`http://localhost:8080`)
+4. Localhost fallback (`http://localhost:8080/v2`)
+
+**Note**: Modeler profiles can be used anywhere a c8ctl profile is expected by using the `modeler:` prefix (e.g., `--profile=modeler:Local Dev` or `c8 use profile modeler:Cloud Cluster`).
 
 ### Tenant Resolution Order
 
@@ -92,19 +95,55 @@ c8 run ./my-process.bpmn
 
 ### Profile Management
 
+c8ctl supports two types of profiles:
+1. **c8ctl profiles**: Managed directly by c8ctl
+2. **Camunda Modeler profiles**: Automatically imported from Camunda Modeler (with `modeler:` prefix)
+
 ```bash
-# Add a profile
+# Add a c8ctl profile
 c8 add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
 
-# List profiles
+# List all profiles (includes both c8ctl and modeler profiles)
 c8 list profiles
 
-# Set active profile
+# Set active profile (works with both types)
 c8 use profile prod
+c8 use profile modeler:Local Dev
 
-# Remove profile
+# Remove c8ctl profile (modeler profiles are read-only)
 c8 remove profile prod
 ```
+
+#### Camunda Modeler Integration
+
+c8ctl automatically reads profiles from Camunda Modeler's `profiles.json` file. These profiles are:
+- **Read-only**: Cannot be modified or deleted via c8ctl
+- **Prefixed**: Always displayed with `modeler:` prefix (e.g., `modeler:Local Dev`)
+- **Dynamic**: Loaded fresh on each command execution (no caching)
+- **Platform-specific locations**:
+  - Linux: `~/.config/camunda-modeler/profiles.json`
+  - macOS: `~/Library/Application Support/camunda-modeler/profiles.json`
+  - Windows: `%APPDATA%\camunda-modeler\profiles.json`
+
+**Using modeler profiles:**
+```bash
+# List includes modeler profiles with 'modeler:' prefix
+c8 list profiles
+
+# Use a modeler profile by name
+c8 use profile modeler:Local Dev
+
+# Use a modeler profile by cluster ID
+c8 use profile modeler:abc123-def456
+
+# One-off command with modeler profile
+c8 list pi --profile=modeler:Cloud Cluster
+```
+
+**URL Construction:**
+- **Self-managed** (localhost): Appends `/v2` to the URL (e.g., `http://localhost:8080/v2`)
+- **Cloud**: Uses the cluster URL as-is (e.g., `https://abc123.region.zeebe.camunda.io`)
+- **Any port**: Supports any port number in the URL
 
 ### Session Management
 
@@ -250,6 +289,8 @@ c8 <command>
 
 ## Configuration Files
 
+### c8ctl Configuration
+
 Configuration is stored in platform-specific user data directories:
 
 - **Linux**: `~/.local/share/c8ctl/`
@@ -259,6 +300,20 @@ Configuration is stored in platform-specific user data directories:
 Files:
 - `profiles.json`: Saved cluster configurations
 - `session.json`: Active profile, tenant, and output mode
+
+### Camunda Modeler Configuration
+
+c8ctl automatically reads profiles from Camunda Modeler (if installed):
+
+- **Linux**: `~/.config/camunda-modeler/profiles.json`
+- **macOS**: `~/Library/Application Support/camunda-modeler/profiles.json`
+- **Windows**: `%APPDATA%\camunda-modeler\profiles.json`
+
+Modeler profiles are:
+- Read-only in c8ctl (managed via Camunda Modeler)
+- Automatically loaded on each command execution
+- Prefixed with `modeler:` when used in c8ctl
+- Support both cloud and self-managed clusters
 
 ## License
 

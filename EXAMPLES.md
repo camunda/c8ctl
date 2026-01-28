@@ -267,7 +267,11 @@ c8 get topology
 
 ## Profile Management
 
-### Add Profile
+c8ctl supports two types of profiles:
+1. **c8ctl profiles**: Directly managed by c8ctl commands
+2. **Modeler profiles**: Automatically imported from Camunda Modeler (read-only)
+
+### Add c8ctl Profile
 
 ```bash
 # Add profile with basic auth (localhost)
@@ -289,17 +293,47 @@ c8 add profile dev \
   --defaultTenantId=dev-tenant
 ```
 
-### List Profiles
+### List All Profiles
 
 ```bash
+# Lists both c8ctl and modeler profiles
+# Modeler profiles are shown with 'modeler:' prefix
 c8 list profiles
+
+# Example output:
+# Name                      Base URL                                     Client ID      Default Tenant
+# local                     http://localhost:8080/v2                     (none)         <default>
+# prod                      https://camunda.example.com                  your-client    <default>
+# modeler:Local Dev         http://localhost:8080/v2                     (none)         <default>
+# modeler:Cloud Cluster     https://abc123.zeebe.camunda.io             XYZ            <default>
 ```
 
-### Remove Profile
+### Use Modeler Profiles
 
 ```bash
+# Use a modeler profile by name
+c8 use profile modeler:Local Dev
+
+# Use a modeler profile by cluster ID
+c8 use profile modeler:abc123-def456
+
+# One-off command with modeler profile
+c8 list pi --profile=modeler:Cloud Cluster
+
+# Deploy with modeler profile
+c8 deploy ./process.bpmn --profile=modeler:Local Dev
+```
+
+### Remove c8ctl Profile
+
+```bash
+# Only c8ctl profiles can be removed
+# Modeler profiles are managed via Camunda Modeler
 c8 remove profile local
 c8 rm profile local  # alias
+
+# Attempting to remove a modeler profile will fail
+# c8 remove profile modeler:Local Dev  # Error: Profile not found
 ```
 
 ---
@@ -309,10 +343,13 @@ c8 rm profile local  # alias
 ### Set Active Profile
 
 ```bash
-# Set profile to use for all subsequent commands
+# Set c8ctl profile to use for all subsequent commands
 c8 use profile prod
 
-# All commands now use 'prod' profile automatically
+# Set modeler profile to use for all subsequent commands
+c8 use profile modeler:Local Dev
+
+# All commands now use the active profile automatically
 c8 list pi
 c8 deploy ./process.bpmn
 ```
