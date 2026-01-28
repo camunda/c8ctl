@@ -1,0 +1,73 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        node: [22, 24]
+        camunda: ['8.8', '8.9']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose up -d
+        env:
+          DATABASE: elasticsearch
+
+      - name: Wait for Camunda to be ready
+        run: |
+          echo "Waiting for Camunda at localhost:8080..."
+          for i in {1..60}; do
+            if curl -s -f -u demo:demo http://localhost:8080/v2/topology > /dev/null; then
+              echo "Camunda is ready!"
+              exit 0
+            fi
+            echo "Attempt $i: Camunda not ready yet, waiting..."
+            sleep 5
+          done
+          echo "Camunda failed to start within 5 minutes"
+          exit 1
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Stop Camunda
+        if: always()
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose down -v
+        env:
+          DATABASE: elasticsearch
+
+      - name: Show Camunda logs on failure
+        if: failure()
+        run: |
+          cd assets/c8/${{ matrix.camunda }}
+          DATABASE=elasticsearch docker compose logs
+        env:
+          DATABASE: elasticsearch
