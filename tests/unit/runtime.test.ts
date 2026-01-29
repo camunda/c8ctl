@@ -39,9 +39,10 @@ describe('c8ctl Runtime', () => {
   });
 
   test('should have activeProfile property with undefined default', () => {
-    // Note: This test assumes a fresh runtime state
-    // In a real scenario, the property may have been set by previous tests
-    assert.strictEqual(typeof c8ctl.activeProfile, 'string' as any || 'undefined', 'activeProfile is string or undefined');
+    // Note: This property may have been set by previous tests in the same process
+    // We just verify it's the correct type
+    const profile = c8ctl.activeProfile;
+    assert.ok(profile === undefined || typeof profile === 'string', 'activeProfile is undefined or string');
   });
 
   test('should be able to set and get activeProfile', () => {
@@ -54,7 +55,10 @@ describe('c8ctl Runtime', () => {
   });
 
   test('should have activeTenant property with undefined default', () => {
-    assert.strictEqual(typeof c8ctl.activeTenant, 'string' as any || 'undefined', 'activeTenant is string or undefined');
+    // Note: This property may have been set by previous tests in the same process
+    // We just verify it's the correct type
+    const tenant = c8ctl.activeTenant;
+    assert.ok(tenant === undefined || typeof tenant === 'string', 'activeTenant is undefined or string');
   });
 
   test('should be able to set and get activeTenant', () => {
@@ -66,10 +70,9 @@ describe('c8ctl Runtime', () => {
     c8ctl.activeTenant = undefined;
   });
 
-  test('should have outputMode property with text default', () => {
-    // Reset to default
-    c8ctl.outputMode = 'text';
-    assert.strictEqual(c8ctl.outputMode, 'text', 'outputMode defaults to text');
+  test('should have outputMode property', () => {
+    // Verify outputMode is always set to either 'text' or 'json'
+    assert.ok(c8ctl.outputMode === 'text' || c8ctl.outputMode === 'json', 'outputMode is text or json');
   });
 
   test('should be able to set and get outputMode', () => {

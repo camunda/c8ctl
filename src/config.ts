@@ -207,7 +207,7 @@ export function loadSessionState(): SessionState {
 
 /**
  * Save session state to c8ctl runtime object
- * Note: Session state is no longer persisted to disk
+ * This function updates the c8ctl runtime object properties with the provided session state
  */
 export function saveSessionState(state: SessionState): void {
   c8ctl.activeProfile = state.activeProfile;
