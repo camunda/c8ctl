@@ -23,6 +23,7 @@ import { publishMessage, correlateMessage } from './commands/messages.ts';
 import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
+import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
 import { 
   loadInstalledPlugins, 
@@ -421,6 +422,15 @@ async function main() {
     await run(resource, {
       profile: values.profile as string | undefined,
       variables: values.variables as string | undefined,
+    });
+    return;
+  }
+
+  // Handle watch command
+  if (verb === 'watch' || verb === 'w') {
+    const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
+    await watchFiles(paths, {
+      profile: values.profile as string | undefined,
     });
     return;
   }

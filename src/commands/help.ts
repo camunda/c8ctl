@@ -50,6 +50,7 @@ Commands:
   correlate msg <name>       Correlate message
   deploy    [path...]        Deploy BPMN/DMN/forms
   run       <path>           Deploy and start process
+  watch     [path...]        Watch files for changes and auto-deploy
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
   load      plugin <name>    Load a c8ctl plugin from npm registry
@@ -77,6 +78,7 @@ Examples:
   c8ctl create pi --bpmnProcessId=myProcess
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
+  c8ctl watch ./src                  Watch directory for changes
   c8ctl use profile prod             Set active profile
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
