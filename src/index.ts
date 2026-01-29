@@ -58,6 +58,7 @@ function parseCliArgs() {
       options: {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
+        all: { type: 'boolean' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
@@ -235,6 +236,7 @@ async function main() {
       profile: values.profile as string | undefined,
       bpmnProcessId: values.bpmnProcessId as string | undefined,
       state: values.state as string | undefined,
+      all: values.all as boolean | undefined,
     });
     return;
   }
@@ -277,6 +279,7 @@ async function main() {
       profile: values.profile as string | undefined,
       state: values.state as string | undefined,
       assignee: values.assignee as string | undefined,
+      all: values.all as boolean | undefined,
     });
     return;
   }

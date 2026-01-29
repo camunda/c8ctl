@@ -13,6 +13,7 @@ export async function listUserTasks(options: {
   profile?: string;
   state?: string;
   assignee?: string;
+  all?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -27,6 +28,9 @@ export async function listUserTasks(options: {
 
     if (options.state) {
       filter.filter.state = options.state;
+    } else if (!options.all) {
+      // By default, exclude COMPLETED tasks unless --all is specified
+      filter.filter.state = 'CREATED';
     }
 
     if (options.assignee) {

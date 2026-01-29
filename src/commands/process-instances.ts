@@ -13,6 +13,7 @@ export async function listProcessInstances(options: {
   profile?: string;
   processDefinitionId?: string;
   state?: string;
+  all?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -31,6 +32,9 @@ export async function listProcessInstances(options: {
 
     if (options.state) {
       filter.filter.state = options.state;
+    } else if (!options.all) {
+      // By default, exclude COMPLETED instances unless --all is specified
+      filter.filter.state = 'ACTIVE';
     }
 
     const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
