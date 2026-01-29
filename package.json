@@ -7,17 +7,25 @@
     "node": ">=22.18.0"
   },
   "bin": {
-    "c8ctl": "./src/index.ts",
-    "c8": "./src/index.ts"
+    "c8ctl": "./dist/index.js",
+    "c8": "./dist/index.js"
   },
   "exports": {
-    "./runtime": "./src/runtime.ts"
+    "./runtime": "./dist/runtime.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
     "test:integration": "node --test tests/integration/*.test.ts",
-    "cli": "node src/index.ts"
+    "cli": "node src/index.ts",
+    "dev": "node src/index.ts"
   },
   "keywords": [
     "camunda",
@@ -30,10 +38,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^8.8.3",
-    "my-c8ctl-plugin": "file:../../../_tmp/my-c8ctl-plugin"
+    "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3"
   }
 }
