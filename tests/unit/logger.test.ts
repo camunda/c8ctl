@@ -5,6 +5,7 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { Logger, getLogger } from '../../src/logger.ts';
+import { c8ctl } from '../../src/runtime.ts';
 
 describe('Logger Module', () => {
   let consoleLogSpy: any[];
@@ -25,6 +26,9 @@ describe('Logger Module', () => {
     console.error = (...args: any[]) => {
       consoleErrorSpy.push(args.join(' '));
     };
+    
+    // Reset c8ctl runtime state
+    c8ctl.outputMode = 'text';
   });
 
   afterEach(() => {
@@ -34,7 +38,8 @@ describe('Logger Module', () => {
 
   describe('Text Mode', () => {
     test('info outputs message in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.info('Test message');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -42,7 +47,8 @@ describe('Logger Module', () => {
     });
 
     test('success outputs with checkmark in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.success('Operation successful');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -51,7 +57,8 @@ describe('Logger Module', () => {
     });
 
     test('success outputs with key in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.success('Process created', '123456');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -61,7 +68,8 @@ describe('Logger Module', () => {
     });
 
     test('error outputs with X mark in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.error('Operation failed');
       
       assert.strictEqual(consoleErrorSpy.length, 1);
@@ -70,7 +78,8 @@ describe('Logger Module', () => {
     });
 
     test('error outputs with error object in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       const error = new Error('Something went wrong');
       logger.error('Operation failed', error);
       
@@ -81,7 +90,8 @@ describe('Logger Module', () => {
     });
 
     test('table formats data as table in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       const data = [
         { Name: 'John', Age: 30, City: 'NYC' },
         { Name: 'Jane', Age: 25, City: 'LA' },
@@ -99,7 +109,8 @@ describe('Logger Module', () => {
     });
 
     test('table handles empty data in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.table([]);
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -107,7 +118,8 @@ describe('Logger Module', () => {
     });
 
     test('json outputs formatted JSON in text mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       const data = { key: 'value', nested: { data: 123 } };
       
       logger.json(data);
@@ -120,14 +132,16 @@ describe('Logger Module', () => {
 
   describe('JSON Mode', () => {
     test('info does not output in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       logger.info('Test message');
       
       assert.strictEqual(consoleLogSpy.length, 0);
     });
 
     test('success outputs JSON in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       logger.success('Operation successful');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -137,7 +151,8 @@ describe('Logger Module', () => {
     });
 
     test('success outputs JSON with key in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       logger.success('Process created', 123456);
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -148,7 +163,8 @@ describe('Logger Module', () => {
     });
 
     test('error outputs JSON in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       logger.error('Operation failed');
       
       assert.strictEqual(consoleErrorSpy.length, 1);
@@ -158,7 +174,8 @@ describe('Logger Module', () => {
     });
 
     test('error outputs JSON with error details in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       const error = new Error('Something went wrong');
       logger.error('Operation failed', error);
       
@@ -171,7 +188,8 @@ describe('Logger Module', () => {
     });
 
     test('table outputs JSON array in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       const data = [
         { Name: 'John', Age: 30 },
         { Name: 'Jane', Age: 25 },
@@ -185,7 +203,8 @@ describe('Logger Module', () => {
     });
 
     test('json outputs compact JSON in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       const data = { key: 'value', nested: { data: 123 } };
       
       logger.json(data);
@@ -198,7 +217,8 @@ describe('Logger Module', () => {
 
   describe('Mode Switching', () => {
     test('mode property switches output mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.success('Test');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -206,6 +226,8 @@ describe('Logger Module', () => {
       
       consoleLogSpy = [];
       logger.mode = 'json';
+      // Setting logger.mode should update c8ctl.outputMode
+      assert.strictEqual(c8ctl.outputMode, 'json');
       logger.success('Test 2');
       
       assert.strictEqual(consoleLogSpy.length, 1);
@@ -214,17 +236,19 @@ describe('Logger Module', () => {
     });
 
     test('mode property returns current mode', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       assert.strictEqual(logger.mode, 'text');
       
-      logger.mode = 'json';
+      c8ctl.outputMode = 'json';
       assert.strictEqual(logger.mode, 'json');
     });
   });
 
   describe('Debug Mode', () => {
     test('debug outputs when debug is enabled', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.debugEnabled = true;
       logger.debug('Debug message', { key: 'value' });
       
@@ -234,7 +258,8 @@ describe('Logger Module', () => {
     });
 
     test('debug does not output when debug is disabled', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       logger.debugEnabled = false;
       logger.debug('Debug message');
       
@@ -242,7 +267,8 @@ describe('Logger Module', () => {
     });
 
     test('debug outputs JSON in JSON mode', () => {
-      const logger = new Logger('json');
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
       logger.debugEnabled = true;
       logger.debug('Debug message', { key: 'value' });
       
@@ -254,7 +280,8 @@ describe('Logger Module', () => {
     });
 
     test('debugEnabled property can be set', () => {
-      const logger = new Logger('text');
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
       assert.strictEqual(logger.debugEnabled, false);
       
       logger.debugEnabled = true;
@@ -264,17 +291,21 @@ describe('Logger Module', () => {
 
   describe('Singleton Logger', () => {
     test('getLogger returns singleton instance', () => {
-      const logger1 = getLogger('text');
+      c8ctl.outputMode = 'text';
+      const logger1 = getLogger();
       const logger2 = getLogger();
       
       assert.strictEqual(logger1, logger2);
     });
 
     test('getLogger updates mode if provided', () => {
-      const logger = getLogger('text');
+      c8ctl.outputMode = 'text';
+      const logger = getLogger();
       assert.strictEqual(logger.mode, 'text');
       
+      // getLogger with mode parameter should update c8ctl.outputMode
       getLogger('json');
+      assert.strictEqual(c8ctl.outputMode, 'json');
       assert.strictEqual(logger.mode, 'json');
     });
   });

@@ -3,14 +3,14 @@
  * Handles output in multiple modes (text, json) based on session state
  */
 
+import { c8ctl } from './runtime.ts';
+
 export type OutputMode = 'text' | 'json';
 
 export class Logger {
-  private _mode: OutputMode;
   private _debugEnabled: boolean = false;
 
-  constructor(mode: OutputMode = 'text') {
-    this._mode = mode;
+  constructor() {
     // Enable debug mode if DEBUG or C8CTL_DEBUG env var is set
     this._debugEnabled = process.env.DEBUG === '1' || 
                          process.env.DEBUG === 'true' || 
@@ -19,11 +19,13 @@ export class Logger {
   }
 
   get mode(): OutputMode {
-    return this._mode;
+    // Always get the mode from c8ctl runtime to ensure it reflects current session state
+    return c8ctl.outputMode;
   }
 
   set mode(mode: OutputMode) {
-    this._mode = mode;
+    // Update the c8ctl runtime when mode is set directly on logger
+    c8ctl.outputMode = mode;
   }
 
   get debugEnabled(): boolean {
@@ -35,14 +37,14 @@ export class Logger {
   }
 
   info(message: string): void {
-    if (this._mode === 'text') {
+    if (this.mode === 'text') {
       console.log(message);
     }
   }
 
   debug(message: string, ...args: any[]): void {
     if (this._debugEnabled) {
-      if (this._mode === 'text') {
+      if (this.mode === 'text') {
         const timestamp = new Date().toISOString();
         console.error(`[DEBUG ${timestamp}] ${message}`, ...args);
       } else {
@@ -57,7 +59,7 @@ export class Logger {
   }
 
   success(message: string, key?: string | number): void {
-    if (this._mode === 'text') {
+    if (this.mode === 'text') {
       if (key !== undefined) {
         console.log(`✓ ${message} [Key: ${key}]`);
       } else {
@@ -73,7 +75,7 @@ export class Logger {
   }
 
   error(message: string, error?: Error): void {
-    if (this._mode === 'text') {
+    if (this.mode === 'text') {
       console.error(`✗ ${message}`);
       if (error) {
         console.error(`  ${error.message}`);
@@ -91,7 +93,7 @@ export class Logger {
   }
 
   table(data: any[]): void {
-    if (this._mode === 'text') {
+    if (this.mode === 'text') {
       if (data.length === 0) {
         console.log('No data to display');
         return;
@@ -125,7 +127,7 @@ export class Logger {
   }
 
   json(data: any): void {
-    if (this._mode === 'text') {
+    if (this.mode === 'text') {
       console.log(JSON.stringify(data, null, 2));
     } else {
       console.log(JSON.stringify(data));
@@ -138,9 +140,12 @@ let loggerInstance: Logger | null = null;
 
 export function getLogger(mode?: OutputMode): Logger {
   if (!loggerInstance) {
-    loggerInstance = new Logger(mode);
-  } else if (mode !== undefined) {
-    loggerInstance.mode = mode;
+    loggerInstance = new Logger();
+  }
+  // Note: mode parameter is deprecated - logger now always reflects c8ctl.outputMode
+  // If mode is provided, update c8ctl.outputMode for backwards compatibility
+  if (mode !== undefined) {
+    c8ctl.outputMode = mode;
   }
   return loggerInstance;
 }
