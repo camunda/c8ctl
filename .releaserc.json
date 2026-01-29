@@ -1,0 +1,33 @@
+{
+  "branches": [
+    "release",
+    {
+      "name": "main",
+      "prerelease": "alpha",
+      "channel": "alpha"
+    }
+  ],
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "npm run build"
+      }
+    ],
+    [
+      "@semantic-release/npm",
+      {
+        "npmPublish": true
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "successComment": "This has been released in ${nextRelease.version}.",
+        "failComment": false
+      }
+    ]
+  ]
+}
