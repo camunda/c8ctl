@@ -178,12 +178,12 @@ async function main() {
       process.exit(1);
     }
     addProfile(args[0], {
-      baseUrl: values.baseUrl,
-      clientId: values.clientId,
-      clientSecret: values.clientSecret,
-      audience: values.audience,
-      oAuthUrl: values.oAuthUrl,
-      defaultTenantId: values.defaultTenantId,
+      baseUrl: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
+      clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
+      clientSecret: typeof values.clientSecret === 'string' ? values.clientSecret : undefined,
+      audience: typeof values.audience === 'string' ? values.audience : undefined,
+      oAuthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
+      defaultTenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
     });
     return;
   }
@@ -235,7 +235,7 @@ async function main() {
   if (verb === 'list' && (normalizedResource === 'process-instance' || normalizedResource === 'process-instances')) {
     await listProcessInstances({
       profile: values.profile as string | undefined,
-      bpmnProcessId: values.bpmnProcessId as string | undefined,
+      processDefinitionId: values.bpmnProcessId as string | undefined,
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
     });
@@ -256,8 +256,8 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'process-instance') {
     await createProcessInstance({
       profile: values.profile as string | undefined,
-      bpmnProcessId: values.bpmnProcessId as string | undefined,
-      version: values.version_num ? parseInt(values.version_num) : undefined,
+      processDefinitionId: values.bpmnProcessId as string | undefined,
+      version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
       variables: values.variables as string | undefined,
     });
     return;
@@ -335,8 +335,8 @@ async function main() {
     }
     await activateJobs(args[0], {
       profile: values.profile as string | undefined,
-      maxJobsToActivate: values.maxJobsToActivate ? parseInt(values.maxJobsToActivate) : undefined,
-      timeout: values.timeout ? parseInt(values.timeout) : undefined,
+      maxJobsToActivate: (values.maxJobsToActivate && typeof values.maxJobsToActivate === 'string') ? parseInt(values.maxJobsToActivate) : undefined,
+      timeout: (values.timeout && typeof values.timeout === 'string') ? parseInt(values.timeout) : undefined,
       worker: values.worker as string | undefined,
     });
     return;
@@ -361,7 +361,7 @@ async function main() {
     }
     await failJob(args[0], {
       profile: values.profile as string | undefined,
-      retries: values.retries ? parseInt(values.retries) : undefined,
+      retries: (values.retries && typeof values.retries === 'string') ? parseInt(values.retries) : undefined,
       errorMessage: values.errorMessage as string | undefined,
     });
     return;
@@ -377,7 +377,7 @@ async function main() {
       profile: values.profile as string | undefined,
       correlationKey: values.correlationKey as string | undefined,
       variables: values.variables as string | undefined,
-      timeToLive: values.timeToLive ? parseInt(values.timeToLive) : undefined,
+      timeToLive: (values.timeToLive && typeof values.timeToLive === 'string') ? parseInt(values.timeToLive) : undefined,
     });
     return;
   }
@@ -391,7 +391,7 @@ async function main() {
       profile: values.profile as string | undefined,
       correlationKey: values.correlationKey as string | undefined,
       variables: values.variables as string | undefined,
-      timeToLive: values.timeToLive ? parseInt(values.timeToLive) : undefined,
+      timeToLive: (values.timeToLive && typeof values.timeToLive === 'string') ? parseInt(values.timeToLive) : undefined,
     });
     return;
   }

@@ -64,7 +64,7 @@ export async function resolveIncident(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.resolveIncident(key);
+    await client.resolveIncident({ incidentKey: key as any });
     logger.success(`Incident ${key} resolved`);
   } catch (error) {
     logger.error(`Failed to resolve incident ${key}`, error as Error);

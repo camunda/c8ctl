@@ -67,7 +67,7 @@ export async function getProcessInstance(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getProcessInstanceByKey(key);
+    const result = await client.getProcessInstance({ processInstanceKey: key as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     logger.error(`Failed to get process instance ${key}`, error as Error);
@@ -130,7 +130,7 @@ export async function cancelProcessInstance(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.cancelProcessInstance({ processInstanceKey: key });
+    await client.cancelProcessInstance({ processInstanceKey: key as any });
     logger.success(`Process instance ${key} cancelled`);
   } catch (error) {
     logger.error(`Failed to cancel process instance ${key}`, error as Error);
