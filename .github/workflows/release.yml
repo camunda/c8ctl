@@ -31,6 +31,19 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
+      - name: Smoke GitHub OIDC token exchange for npm publish 
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG=$(npm -s config get registry||:); REG=${REG%/}; : "${REG:=https://registry.npmjs.org}"
+          HOST=${REG#*://}; HOST=${HOST%%/*}
+          ID=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:${HOST}" | jq -er .value)
+          PKG=$(jq -r '.name|@uri' package.json)
+          RESP=$(curl -fsS -H "Authorization: Bearer $ID" "$REG/-/npm/v1/oidc/token/exchange/package/$PKG" -d "")
+          TOKEN=$(echo "$RESP" | jq -er '.token')
+          echo "::add-mask::$TOKEN"
+          [ -n "$TOKEN" ]
+
       - name: Install dependencies
         run: npm ci
 
