@@ -1,6 +1,6 @@
 {
-  "name": "c8ctl",
-  "version": "2.0.0",
+  "name": "@camunda8/cli",
+  "version": "2.0.0-alpha.2",
   "description": "Camunda 8 CLI - minimal-dependency CLI for Camunda 8 operations",
   "type": "module",
   "engines": {
@@ -35,13 +35,27 @@
     "workflow",
     "orchestration"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camunda/c8ctl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/camunda/c8ctl/issues"
+  },
+  "homepage": "https://github.com/camunda/c8ctl#readme",
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/github": "^11.0.6",
+    "@semantic-release/npm": "^12.0.2",
+    "@semantic-release/release-notes-generator": "^14.0.3",
     "@types/node": "^22.10.0",
+    "semantic-release": "^24.2.0",
     "typescript": "^5.9.3"
   }
 }

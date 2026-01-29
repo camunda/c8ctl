@@ -1,11 +1,13 @@
-name: Test
+name: Release
 
 on:
   push:
-    branches-ignore: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [ main, release ]
   workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -18,7 +20,7 @@ jobs:
       matrix:
         node: [22, 24]
         camunda: ['8.8', '8.9']
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -54,11 +56,11 @@ jobs:
             echo "Attempt $i: Topology not ready yet, waiting..."
             sleep 5
           done
-          
+
           # Then wait an additional 30 seconds for broker to fully initialize
           echo "Waiting additional time for broker to initialize..."
           sleep 30
-          
+
           # Verify we can actually deploy
           echo "Testing deployment capability..."
           for i in {1..30}; do
@@ -69,7 +71,7 @@ jobs:
             echo "Attempt $i: Broker not fully ready, waiting..."
             sleep 2
           done
-          
+
           echo "Camunda may not be fully ready, but continuing with tests..."
 
       - name: Run integration tests
@@ -90,3 +92,35 @@ jobs:
           DATABASE=elasticsearch docker compose --profile elasticsearch logs
         env:
           DATABASE: elasticsearch
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+        run: npx semantic-release
