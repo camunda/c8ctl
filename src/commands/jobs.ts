@@ -33,7 +33,7 @@ export async function listJobs(options: {
       filter.filter.type = options.type;
     }
 
-    const result = await client.searchJobs(filter);
+    const result = await client.searchJobs(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((job: any) => ({

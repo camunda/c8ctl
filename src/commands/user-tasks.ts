@@ -33,7 +33,7 @@ export async function listUserTasks(options: {
       filter.filter.assignee = options.assignee;
     }
 
-    const result = await client.searchUserTasks(filter);
+    const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((task: any) => ({

@@ -33,7 +33,7 @@ export async function listIncidents(options: {
       filter.filter.processInstanceKey = options.processInstanceKey;
     }
 
-    const result = await client.searchIncidents(filter);
+    const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((incident: any) => ({
