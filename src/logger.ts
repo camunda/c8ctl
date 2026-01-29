@@ -39,6 +39,8 @@ export class Logger {
   info(message: string): void {
     if (this.mode === 'text') {
       console.log(message);
+    } else {
+      console.log(JSON.stringify({ status: 'info', message }));
     }
   }
 
