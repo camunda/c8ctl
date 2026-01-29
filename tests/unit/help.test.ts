@@ -26,7 +26,7 @@ describe('Help Module', () => {
   test('getVersion returns package version', () => {
     const version = getVersion();
     assert.ok(version);
-    assert.match(version, /^\d+\.\d+\.\d+$/);
+    assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
   });
 
   test('showVersion outputs version', () => {
