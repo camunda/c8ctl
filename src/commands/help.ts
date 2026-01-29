@@ -58,6 +58,7 @@ Commands:
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
+  completion bash|zsh|fish   Generate shell completion script
   help                       Show this help
 
 Flags:
@@ -83,6 +84,7 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl completion bash              Generate bash completion script
 `.trim());
 }
 
@@ -108,6 +110,7 @@ export function showVerbResources(verb: string): void {
     unload: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
+    completion: 'bash, zsh, fish',
   };
 
   const available = resources[verb];
