@@ -125,7 +125,7 @@ async function main() {
   }
 
   // Handle help command
-  if (verb === 'help' || verb === '--help' || verb === '-h') {
+  if (verb === 'help' || verb === 'menu' || verb === '--help' || verb === '-h') {
     showHelp();
     return;
   }
