@@ -195,45 +195,89 @@ export function removeProfile(name: string): boolean {
 }
 
 /**
- * Load session state from c8ctl runtime object
+ * Load session state from disk and populate c8ctl runtime object
+ * Loads all session properties (activeProfile, activeTenant, outputMode)
  */
 export function loadSessionState(): SessionState {
-  return {
-    activeProfile: c8ctl.activeProfile,
-    activeTenant: c8ctl.activeTenant,
-    outputMode: c8ctl.outputMode,
-  };
+  const path = getSessionStatePath();
+  if (!existsSync(path)) {
+    // Return default state if no session file exists
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
+  }
+  
+  try {
+    const data = readFileSync(path, 'utf-8');
+    const state = JSON.parse(data) as SessionState;
+    
+    // Populate c8ctl runtime with loaded state (convert null to undefined)
+    c8ctl.activeProfile = state.activeProfile === null ? undefined : state.activeProfile;
+    c8ctl.activeTenant = state.activeTenant === null ? undefined : state.activeTenant;
+    c8ctl.outputMode = state.outputMode || 'text';
+    
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
+  } catch (error) {
+    // Return current state if file is corrupted
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
+  }
 }
 
 /**
- * Save session state to c8ctl runtime object
- * This function updates the c8ctl runtime object properties with the provided session state
+ * Save session state from c8ctl runtime object to disk
+ * Always persists all session properties (activeProfile, activeTenant, outputMode)
  */
-export function saveSessionState(state: SessionState): void {
-  c8ctl.activeProfile = state.activeProfile;
-  c8ctl.activeTenant = state.activeTenant;
-  c8ctl.outputMode = state.outputMode;
+export function saveSessionState(state?: SessionState): void {
+  const stateToSave: SessionState = {
+    activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
+    activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
+    outputMode: state?.outputMode ?? c8ctl.outputMode,
+  };
+  
+  // Update c8ctl runtime if state is provided
+  if (state) {
+    c8ctl.activeProfile = state.activeProfile;
+    c8ctl.activeTenant = state.activeTenant;
+    c8ctl.outputMode = state.outputMode;
+  }
+  
+  const path = getSessionStatePath();
+  // Use custom replacer to preserve undefined as null in JSON
+  writeFileSync(path, JSON.stringify(stateToSave, (key, value) => value === undefined ? null : value, 2), 'utf-8');
 }
 
 /**
- * Set active profile in session
+ * Set active profile in session and persist to disk
  */
 export function setActiveProfile(name: string): void {
   c8ctl.activeProfile = name;
+  saveSessionState();
 }
 
 /**
- * Set active tenant in session
+ * Set active tenant in session and persist to disk
  */
 export function setActiveTenant(tenantId: string): void {
   c8ctl.activeTenant = tenantId;
+  saveSessionState();
 }
 
 /**
- * Set output mode in session
+ * Set output mode in session and persist to disk
  */
 export function setOutputMode(mode: OutputMode): void {
   c8ctl.outputMode = mode;
+  saveSessionState();
 }
 
 /**

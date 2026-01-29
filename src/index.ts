@@ -7,6 +7,7 @@
 import { parseArgs } from 'node:util';
 import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
+import { loadSessionState } from './config.ts';
 import { showHelp, showVersion, showVerbResources } from './commands/help.ts';
 import { useProfile, useTenant, setOutputFormat } from './commands/session.ts';
 import { listProfiles, addProfile, removeProfile } from './commands/profiles.ts';
@@ -98,6 +99,9 @@ function parseCliArgs() {
  * Main CLI handler
  */
 async function main() {
+  // Load session state from disk at startup
+  loadSessionState();
+  
   const { values, positionals } = parseCliArgs();
 
   // Initialize logger with current output mode from c8ctl runtime
