@@ -324,7 +324,7 @@ _c8ctl() {
       esac
       ;;
     *)
-      _arguments \$flags
+      _arguments \${flags[@]}
       ;;
   esac
 }
