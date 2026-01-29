@@ -23,7 +23,14 @@ import { publishMessage, correlateMessage } from './commands/messages.ts';
 import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
+import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
+import { 
+  loadInstalledPlugins, 
+  executePluginCommand, 
+  isPluginCommand,
+  clearLoadedPlugins 
+} from './plugin-loader.ts';
 
 /**
  * Normalize resource aliases
@@ -52,6 +59,7 @@ function parseCliArgs() {
       options: {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
+        all: { type: 'boolean' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
@@ -73,6 +81,7 @@ function parseCliArgs() {
         oAuthUrl: { type: 'string' },
         defaultTenantId: { type: 'string' },
         version_num: { type: 'string' },
+        from: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -95,6 +104,9 @@ async function main() {
   const session = loadSessionState();
   const logger = getLogger(session.outputMode);
 
+  // Load installed plugins
+  await loadInstalledPlugins();
+
   // Handle global flags
   if (values.version) {
     showVersion();
@@ -115,7 +127,7 @@ async function main() {
   }
 
   // Handle help command
-  if (verb === 'help' || verb === '--help' || verb === '-h') {
+  if (verb === 'help' || verb === 'menu' || verb === '--help' || verb === '-h') {
     showHelp();
     return;
   }
@@ -166,12 +178,12 @@ async function main() {
       process.exit(1);
     }
     addProfile(args[0], {
-      baseUrl: values.baseUrl,
-      clientId: values.clientId,
-      clientSecret: values.clientSecret,
-      audience: values.audience,
-      oAuthUrl: values.oAuthUrl,
-      defaultTenantId: values.defaultTenantId,
+      baseUrl: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
+      clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
+      clientSecret: typeof values.clientSecret === 'string' ? values.clientSecret : undefined,
+      audience: typeof values.audience === 'string' ? values.audience : undefined,
+      oAuthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
+      defaultTenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
     });
     return;
   }
@@ -192,11 +204,21 @@ async function main() {
   }
 
   if (verb === 'load' && normalizedResource === 'plugin') {
-    if (!args[0]) {
-      logger.error('Package name required. Usage: c8 load plugin <package-name>');
+    const fromUrl = values.from as string | undefined;
+    const packageName = args[0];
+    
+    // Ensure exclusive usage
+    if (packageName && fromUrl) {
+      logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
       process.exit(1);
     }
-    loadPlugin(args[0]);
+    
+    if (!packageName && !fromUrl) {
+      logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
+      process.exit(1);
+    }
+    
+    await loadPlugin(packageName, fromUrl);
     return;
   }
 
@@ -205,7 +227,7 @@ async function main() {
       logger.error('Package name required. Usage: c8 unload plugin <package-name>');
       process.exit(1);
     }
-    unloadPlugin(args[0]);
+    await unloadPlugin(args[0]);
     return;
   }
 
@@ -213,8 +235,9 @@ async function main() {
   if (verb === 'list' && (normalizedResource === 'process-instance' || normalizedResource === 'process-instances')) {
     await listProcessInstances({
       profile: values.profile as string | undefined,
-      bpmnProcessId: values.bpmnProcessId as string | undefined,
+      processDefinitionId: values.bpmnProcessId as string | undefined,
       state: values.state as string | undefined,
+      all: values.all as boolean | undefined,
     });
     return;
   }
@@ -233,8 +256,8 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'process-instance') {
     await createProcessInstance({
       profile: values.profile as string | undefined,
-      bpmnProcessId: values.bpmnProcessId as string | undefined,
-      version: values.version_num ? parseInt(values.version_num) : undefined,
+      processDefinitionId: values.bpmnProcessId as string | undefined,
+      version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
       variables: values.variables as string | undefined,
     });
     return;
@@ -257,6 +280,7 @@ async function main() {
       profile: values.profile as string | undefined,
       state: values.state as string | undefined,
       assignee: values.assignee as string | undefined,
+      all: values.all as boolean | undefined,
     });
     return;
   }
@@ -311,8 +335,8 @@ async function main() {
     }
     await activateJobs(args[0], {
       profile: values.profile as string | undefined,
-      maxJobsToActivate: values.maxJobsToActivate ? parseInt(values.maxJobsToActivate) : undefined,
-      timeout: values.timeout ? parseInt(values.timeout) : undefined,
+      maxJobsToActivate: (values.maxJobsToActivate && typeof values.maxJobsToActivate === 'string') ? parseInt(values.maxJobsToActivate) : undefined,
+      timeout: (values.timeout && typeof values.timeout === 'string') ? parseInt(values.timeout) : undefined,
       worker: values.worker as string | undefined,
     });
     return;
@@ -337,7 +361,7 @@ async function main() {
     }
     await failJob(args[0], {
       profile: values.profile as string | undefined,
-      retries: values.retries ? parseInt(values.retries) : undefined,
+      retries: (values.retries && typeof values.retries === 'string') ? parseInt(values.retries) : undefined,
       errorMessage: values.errorMessage as string | undefined,
     });
     return;
@@ -353,7 +377,7 @@ async function main() {
       profile: values.profile as string | undefined,
       correlationKey: values.correlationKey as string | undefined,
       variables: values.variables as string | undefined,
-      timeToLive: values.timeToLive ? parseInt(values.timeToLive) : undefined,
+      timeToLive: (values.timeToLive && typeof values.timeToLive === 'string') ? parseInt(values.timeToLive) : undefined,
     });
     return;
   }
@@ -367,7 +391,7 @@ async function main() {
       profile: values.profile as string | undefined,
       correlationKey: values.correlationKey as string | undefined,
       variables: values.variables as string | undefined,
-      timeToLive: values.timeToLive ? parseInt(values.timeToLive) : undefined,
+      timeToLive: (values.timeToLive && typeof values.timeToLive === 'string') ? parseInt(values.timeToLive) : undefined,
     });
     return;
   }
@@ -399,6 +423,20 @@ async function main() {
       profile: values.profile as string | undefined,
       variables: values.variables as string | undefined,
     });
+    return;
+  }
+
+  // Handle watch command
+  if (verb === 'watch' || verb === 'w') {
+    const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
+    await watchFiles(paths, {
+      profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  // Try to execute plugin command (before verb-only check)
+  if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
     return;
   }
 

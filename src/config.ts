@@ -59,6 +59,11 @@ interface ModelerProfilesFile {
  * Get platform-specific user data directory
  */
 export function getUserDataDir(): string {
+  // Allow override for testing
+  if (process.env.C8CTL_DATA_DIR) {
+    return process.env.C8CTL_DATA_DIR;
+  }
+  
   const plat = platform();
   const home = homedir();
 

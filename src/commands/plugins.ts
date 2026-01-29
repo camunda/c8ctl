@@ -4,24 +4,44 @@
 
 import { getLogger } from '../logger.ts';
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { clearLoadedPlugins } from '../plugin-loader.ts';
 
 /**
  * Load a plugin (npm install wrapper)
+ * Supports either package name or --from flag with URL
  */
-export function loadPlugin(packageName: string): void {
+export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): Promise<void> {
   const logger = getLogger();
   
-  if (!packageName) {
-    logger.error('Package name required. Usage: c8 load plugin <package-name>');
+  // Validate exclusive usage
+  if (packageNameOrFrom && fromUrl) {
+    logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
+    process.exit(1);
+  }
+  
+  if (!packageNameOrFrom && !fromUrl) {
+    logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
     process.exit(1);
   }
   
   try {
-    logger.info(`Loading plugin: ${packageName}...`);
-    execSync(`npm install ${packageName}`, { stdio: 'inherit' });
-    logger.success('Plugin loaded successfully', packageName);
+    if (fromUrl) {
+      // Install from URL (file://, https://, git://, etc.)
+      logger.info(`Loading plugin from: ${fromUrl}...`);
+      execSync(`npm install ${fromUrl}`, { stdio: 'inherit' });
+      logger.success('Plugin loaded successfully from URL', fromUrl);
+    } else {
+      // Install from npm registry by package name
+      logger.info(`Loading plugin: ${packageNameOrFrom}...`);
+      execSync(`npm install ${packageNameOrFrom}`, { stdio: 'inherit' });
+      logger.success('Plugin loaded successfully', packageNameOrFrom);
+    }
+    
+    // Note: Plugin will be available on next CLI invocation
+    // We don't reload in the same process to avoid module cache issues
+    logger.info('Plugin will be available on next command execution');
   } catch (error) {
     logger.error('Failed to load plugin', error as Error);
     process.exit(1);
@@ -31,7 +51,7 @@ export function loadPlugin(packageName: string): void {
 /**
  * Unload a plugin (npm uninstall wrapper)
  */
-export function unloadPlugin(packageName: string): void {
+export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
   
   if (!packageName) {
@@ -42,7 +62,13 @@ export function unloadPlugin(packageName: string): void {
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
     execSync(`npm uninstall ${packageName}`, { stdio: 'inherit' });
+    
+    // Clear the loaded plugins cache so the plugin is no longer available
+    // This affects the current process - plugin will be gone immediately
+    clearLoadedPlugins();
+    
     logger.success('Plugin unloaded successfully', packageName);
+    logger.info('Plugin commands are no longer available');
   } catch (error) {
     logger.error('Failed to unload plugin', error as Error);
     process.exit(1);
@@ -70,16 +96,13 @@ export function listPlugins(): void {
     for (const [name, version] of Object.entries(allDeps)) {
       try {
         // Try to resolve the package
-        const packagePath = join(process.cwd(), 'node_modules', name, 'package.json');
-        const pkgJson = JSON.parse(readFileSync(packagePath, 'utf-8'));
+        const packageDir = join(process.cwd(), 'node_modules', name);
         
-        // Check if package exports c8ctl-plugin.js or c8ctl-plugin.ts
-        const hasPlugin = pkgJson.main === 'c8ctl-plugin.js' || 
-                         pkgJson.main === 'c8ctl-plugin.ts' ||
-                         pkgJson.exports?.['./c8ctl-plugin.js'] ||
-                         pkgJson.exports?.['./c8ctl-plugin.ts'];
+        // Check if package has c8ctl-plugin.js or c8ctl-plugin.ts file in root
+        const hasPluginFile = existsSync(join(packageDir, 'c8ctl-plugin.js')) ||
+                             existsSync(join(packageDir, 'c8ctl-plugin.ts'));
         
-        if (hasPlugin) {
+        if (hasPluginFile) {
           plugins.push({
             Name: name,
             Version: version as string,

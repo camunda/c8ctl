@@ -3,8 +3,7 @@
  * This demonstrates the expected structure for a c8ctl plugin in JavaScript
  */
 
-// Note: In a real plugin, you would import c8ctl runtime
-// For this test fixture, we'll access it via dynamic import if needed
+import { c8ctl } from 'c8ctl/runtime';
 
 export const commands = {
   /**
@@ -13,6 +12,7 @@ export const commands = {
   'deploy-all': async (args) => {
     console.log('Deploying all resources with JavaScript plugin...');
     console.log(`Target: ${args[0] || 'current directory'}`);
+    console.log(`c8ctl version: ${c8ctl.env.version}`);
     
     // Sample logic
     const files = ['process1.bpmn', 'process2.bpmn', 'decision.dmn'];
@@ -26,6 +26,7 @@ export const commands = {
   status: async () => {
     console.log('Checking cluster status...');
     console.log('All services operational');
+    console.log(`Platform: ${c8ctl.env.platform}`);
   },
 
   /**
@@ -36,11 +37,4 @@ export const commands = {
     const format = args.includes('--json') ? 'json' : 'text';
     console.log(`Output format: ${format}`);
   },
-};
-
-export const metadata = {
-  name: 'sample-js-plugin',
-  version: '2.0.0',
-  description: 'A sample JavaScript plugin for c8ctl',
-  commands: ['deploy-all', 'status', 'report'],
 };

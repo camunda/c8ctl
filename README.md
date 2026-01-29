@@ -45,22 +45,20 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 
 - Node.js >= 22.18.0 (for native TypeScript support)
 
-### Install Dependencies
+### Global Installation (Recommended)
+
+```bash
+npm install @camunda8/cli -g
+```
+
+After installation, the CLI is available as `c8ctl` (or its alias `c8`).
+
+**Note**: The `c8` alias provides typing ergonomics for common keyboard layouts - the `c` key (left index finger) followed by `8` (right middle finger) makes for a comfortable typing experience on both QWERTY and QWERTZ keyboards.
+
+### Local Development
 
 ```bash
 npm install
-```
-
-### Make CLI Executable
-
-The CLI runs directly with Node.js 22.18+ which has native TypeScript support:
-
-```bash
-# Run directly with Node.js
-node src/index.ts <command>
-
-# Or add an alias to your shell (recommended)
-alias c8='node src/index.ts'
 ```
 
 ## Usage
@@ -69,28 +67,71 @@ alias c8='node src/index.ts'
 
 ```bash
 # Show help
-c8 help
+c8ctl help
 
 # Show version
-c8 --version
+c8ctl --version
 
-# List process instances
-c8 list pi
+# List process instances (using alias 'pi')
+c8ctl list pi
+# Or using full command name
+c8ctl list process-instances
 
 # Get process instance by key
-c8 get pi 123456
+c8ctl get pi 123456
+c8ctl get process-instance 123456
 
 # Create process instance
-c8 create pi --bpmnProcessId=myProcess
+c8ctl create pi --bpmnProcessId=myProcess
+c8ctl create process-instance --bpmnProcessId=myProcess
 
 # Deploy BPMN file
-c8 deploy ./my-process.bpmn
+c8ctl deploy ./my-process.bpmn
 
 # Deploy current directory
-c8 deploy
+c8ctl deploy
 
 # Deploy and start process (run)
-c8 run ./my-process.bpmn
+c8ctl run ./my-process.bpmn
+```
+
+### Credential Resolution
+
+Credentials are resolved in the following order:
+
+1. `--profile` flag (one-off override)
+2. Active profile from session state
+3. Environment variables (`CAMUNDA_*`)
+4. Localhost fallback (`http://localhost:8080`)
+
+**Note**: Credential configuration via environment variables follows the same conventions as the `@camunda8/orchestration-cluster-api` module.
+
+```bash
+# Using environment variables
+export CAMUNDA_BASE_URL=https://camunda.example.com
+export CAMUNDA_CLIENT_ID=your-client-id
+export CAMUNDA_CLIENT_SECRET=your-client-secret
+c8ctl list process-instances
+
+# Using profile override
+c8ctl list process-instances --profile prod
+```
+
+### Tenant Resolution
+
+Tenants are resolved in the following order:
+
+1. Active tenant from session state
+2. Default tenant from active profile
+3. `CAMUNDA_DEFAULT_TENANT_ID` environment variable
+4. `<default>` tenant
+
+```bash
+# Set active tenant for the session
+c8ctl use tenant my-tenant-id
+
+# Now all commands use this tenant
+c8ctl list process-instances
 ```
 
 ### Profile Management
@@ -148,34 +189,55 @@ c8 list pi --profile=modeler:Cloud Cluster
 ### Session Management
 
 ```bash
-# Set active tenant
-c8 use tenant my-tenant-id
-
 # Switch to JSON output
-c8 output json
+c8ctl output json
 
 # Switch back to text output
-c8 output text
+c8ctl output text
 ```
+
+### Debug Mode
+
+Enable debug logging to see detailed information about plugin loading and other internal operations:
+
+```bash
+# Enable debug mode with environment variable
+DEBUG=1 c8 <command>
+
+# Or use C8CTL_DEBUG
+C8CTL_DEBUG=true c8 <command>
+
+# Example: See plugin loading details
+DEBUG=1 c8 list plugins
+```
+
+Debug output is written to stderr with timestamps and won't interfere with normal command output.
 
 ### Plugin Management
 
 c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.
 
 ```bash
-# Load a plugin (wraps npm install)
-c8 load plugin <package-name>
+# Load a plugin from npm registry
+c8ctl load plugin <package-name>
+
+# Load a plugin from a URL (including file URLs)
+c8ctl load plugin --from <url>
+c8ctl load plugin --from file:///path/to/plugin
+c8ctl load plugin --from https://github.com/user/repo
+c8ctl load plugin --from git://github.com/user/repo.git
 
 # Unload a plugin (wraps npm uninstall)
-c8 unload plugin <package-name>
+c8ctl unload plugin <package-name>
 
 # List installed plugins
-c8 list plugins
+c8ctl list plugins
 ```
 
 **Plugin Requirements:**
-- Plugin packages must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file
-- The plugin file should export custom commands
+- Plugin packages must be regular Node.js modules
+- They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
+- The plugin file must export a `commands` object
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
 
@@ -199,7 +261,7 @@ export const commands = {
 ### Command Structure
 
 ```
-c8 <verb> <resource> [arguments] [flags]
+c8ctl <verb> <resource> [arguments] [flags]
 ```
 
 **Verbs**: list, get, create, cancel, complete, fail, activate, resolve, publish, correlate, deploy, run, add, remove, use, output
@@ -222,11 +284,10 @@ npm run test:unit
 
 ### Run Integration Tests
 
-Integration tests are skipped by default as they require a running Camunda 8 instance at `http://localhost:8080`. To run them:
+Integration tests require a running Camunda 8 instance at `http://localhost:8080`.
 
 1. Start a local Camunda 8 instance (e.g., using c8run)
-2. Update the test files to remove `.skip` from the tests
-3. Run: `npm run test:integration`
+2. Run: `npm run test:integration`
 
 ## Development
 
@@ -263,11 +324,13 @@ c8ctl/
 ### Running the CLI
 
 ```bash
-# With Node.js 22.18+ (native TypeScript)
-node src/index.ts <command>
-
+# If installed globally
+c8ctl <command>
 # Or using the alias
 c8 <command>
+
+# For local development with Node.js 22.18+ (native TypeScript)
+node src/index.ts <command>
 ```
 
 ### Adding New Commands

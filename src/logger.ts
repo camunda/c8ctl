@@ -6,28 +6,58 @@
 export type OutputMode = 'text' | 'json';
 
 export class Logger {
-  private mode: OutputMode;
+  private _mode: OutputMode;
+  private _debugEnabled: boolean = false;
 
   constructor(mode: OutputMode = 'text') {
-    this.mode = mode;
+    this._mode = mode;
+    // Enable debug mode if DEBUG or C8CTL_DEBUG env var is set
+    this._debugEnabled = process.env.DEBUG === '1' || 
+                         process.env.DEBUG === 'true' || 
+                         process.env.C8CTL_DEBUG === '1' ||
+                         process.env.C8CTL_DEBUG === 'true';
   }
 
-  setMode(mode: OutputMode): void {
-    this.mode = mode;
+  get mode(): OutputMode {
+    return this._mode;
   }
 
-  getMode(): OutputMode {
-    return this.mode;
+  set mode(mode: OutputMode) {
+    this._mode = mode;
+  }
+
+  get debugEnabled(): boolean {
+    return this._debugEnabled;
+  }
+
+  set debugEnabled(enabled: boolean) {
+    this._debugEnabled = enabled;
   }
 
   info(message: string): void {
-    if (this.mode === 'text') {
+    if (this._mode === 'text') {
       console.log(message);
     }
   }
 
+  debug(message: string, ...args: any[]): void {
+    if (this._debugEnabled) {
+      if (this._mode === 'text') {
+        const timestamp = new Date().toISOString();
+        console.error(`[DEBUG ${timestamp}] ${message}`, ...args);
+      } else {
+        console.error(JSON.stringify({ 
+          level: 'debug', 
+          message, 
+          timestamp: new Date().toISOString(),
+          args 
+        }));
+      }
+    }
+  }
+
   success(message: string, key?: string | number): void {
-    if (this.mode === 'text') {
+    if (this._mode === 'text') {
       if (key !== undefined) {
         console.log(`✓ ${message} [Key: ${key}]`);
       } else {
@@ -43,7 +73,7 @@ export class Logger {
   }
 
   error(message: string, error?: Error): void {
-    if (this.mode === 'text') {
+    if (this._mode === 'text') {
       console.error(`✗ ${message}`);
       if (error) {
         console.error(`  ${error.message}`);
@@ -61,7 +91,7 @@ export class Logger {
   }
 
   table(data: any[]): void {
-    if (this.mode === 'text') {
+    if (this._mode === 'text') {
       if (data.length === 0) {
         console.log('No data to display');
         return;
@@ -95,7 +125,7 @@ export class Logger {
   }
 
   json(data: any): void {
-    if (this.mode === 'text') {
+    if (this._mode === 'text') {
       console.log(JSON.stringify(data, null, 2));
     } else {
       console.log(JSON.stringify(data));
@@ -110,7 +140,7 @@ export function getLogger(mode?: OutputMode): Logger {
   if (!loggerInstance) {
     loggerInstance = new Logger(mode);
   } else if (mode !== undefined) {
-    loggerInstance.setMode(mode);
+    loggerInstance.mode = mode;
   }
   return loggerInstance;
 }

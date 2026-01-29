@@ -16,7 +16,7 @@ describe('Profile Management Integration Tests', () => {
     testDir = join(tmpdir(), `c8ctl-profile-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     originalEnv = { ...process.env };
-    process.env.XDG_DATA_HOME = testDir;
+    process.env.C8CTL_DATA_DIR = testDir;
   });
 
   afterEach(() => {

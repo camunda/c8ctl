@@ -1,20 +1,31 @@
 {
   "name": "c8ctl",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Camunda 8 CLI - minimal-dependency CLI for Camunda 8 operations",
   "type": "module",
   "engines": {
     "node": ">=22.18.0"
   },
   "bin": {
-    "c8ctl": "./src/index.ts",
-    "c8": "./src/index.ts"
+    "c8ctl": "./dist/index.js",
+    "c8": "./dist/index.js"
   },
+  "exports": {
+    "./runtime": "./dist/runtime.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "node --test tests/unit/*.test.ts",
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
     "test:integration": "node --test tests/integration/*.test.ts",
-    "cli": "node src/index.ts"
+    "cli": "node src/index.ts",
+    "dev": "node src/index.ts"
   },
   "keywords": [
     "camunda",
@@ -30,6 +41,7 @@
     "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
+    "typescript": "^5.9.3",
     "@types/node": "^22.10.0"
   }
 }

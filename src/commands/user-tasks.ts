@@ -13,6 +13,7 @@ export async function listUserTasks(options: {
   profile?: string;
   state?: string;
   assignee?: string;
+  all?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -27,13 +28,16 @@ export async function listUserTasks(options: {
 
     if (options.state) {
       filter.filter.state = options.state;
+    } else if (!options.all) {
+      // By default, exclude COMPLETED tasks unless --all is specified
+      filter.filter.state = 'CREATED';
     }
 
     if (options.assignee) {
       filter.filter.assignee = options.assignee;
     }
 
-    const result = await client.searchUserTasks(filter);
+    const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((task: any) => ({

@@ -33,7 +33,7 @@ export async function listIncidents(options: {
       filter.filter.processInstanceKey = options.processInstanceKey;
     }
 
-    const result = await client.searchIncidents(filter);
+    const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((incident: any) => ({
@@ -64,7 +64,7 @@ export async function resolveIncident(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.resolveIncident(key);
+    await client.resolveIncident({ incidentKey: key as any });
     logger.success(`Incident ${key} resolved`);
   } catch (error) {
     logger.error(`Failed to resolve incident ${key}`, error as Error);

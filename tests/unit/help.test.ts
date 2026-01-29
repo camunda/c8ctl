@@ -73,7 +73,7 @@ describe('Help Module', () => {
     showVerbResources('list');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 list'));
+    assert.ok(output.includes('c8ctl list'));
     assert.ok(output.includes('process-instances'));
     assert.ok(output.includes('user-tasks'));
     assert.ok(output.includes('incidents'));
@@ -86,7 +86,7 @@ describe('Help Module', () => {
     showVerbResources('get');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 get'));
+    assert.ok(output.includes('c8ctl get'));
     assert.ok(output.includes('process-instance'));
     assert.ok(output.includes('topology'));
   });
@@ -95,7 +95,7 @@ describe('Help Module', () => {
     showVerbResources('create');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 create'));
+    assert.ok(output.includes('c8ctl create'));
     assert.ok(output.includes('process-instance'));
   });
 
@@ -103,7 +103,7 @@ describe('Help Module', () => {
     showVerbResources('complete');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 complete'));
+    assert.ok(output.includes('c8ctl complete'));
     assert.ok(output.includes('user-task'));
     assert.ok(output.includes('job'));
   });
@@ -112,7 +112,7 @@ describe('Help Module', () => {
     showVerbResources('use');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 use'));
+    assert.ok(output.includes('c8ctl use'));
     assert.ok(output.includes('profile'));
     assert.ok(output.includes('tenant'));
   });
@@ -121,7 +121,7 @@ describe('Help Module', () => {
     showVerbResources('output');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 output'));
+    assert.ok(output.includes('c8ctl output'));
     assert.ok(output.includes('json'));
     assert.ok(output.includes('text'));
   });
@@ -131,14 +131,14 @@ describe('Help Module', () => {
     
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('Unknown command'));
-    assert.ok(output.includes('c8 help'));
+    assert.ok(output.includes('c8ctl help'));
   });
 
   test('showVerbResources shows resources for load', () => {
     showVerbResources('load');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 load'));
+    assert.ok(output.includes('c8ctl load'));
     assert.ok(output.includes('plugin'));
   });
 
@@ -146,7 +146,7 @@ describe('Help Module', () => {
     showVerbResources('unload');
     
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8 unload'));
+    assert.ok(output.includes('c8ctl unload'));
     assert.ok(output.includes('plugin'));
   });
 });

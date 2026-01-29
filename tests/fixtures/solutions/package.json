@@ -1,0 +1,16 @@
+{
+  "name": "c8ctl-plugin-solutions",
+  "version": "1.0.0",
+  "description": "Sample c8ctl plugin for solution management",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": [
+    "c8ctl",
+    "plugin",
+    "camunda",
+    "solutions",
+    "building-blocks"
+  ],
+  "author": "",
+  "license": "MIT"
+}

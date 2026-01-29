@@ -35,7 +35,7 @@ export function showHelp(): void {
   console.log(`
 c8ctl - Camunda 8 CLI v${version}
 
-Usage: c8 <command> [resource] [options]
+Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, ut, inc, jobs, profiles)
@@ -50,9 +50,11 @@ Commands:
   correlate msg <name>       Correlate message
   deploy    [path...]        Deploy BPMN/DMN/forms
   run       <path>           Deploy and start process
+  watch     [path...]        Watch files for changes and auto-deploy
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
-  load      plugin <name>    Load a c8ctl plugin (npm install wrapper)
+  load      plugin <name>    Load a c8ctl plugin from npm registry
+  load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
@@ -60,6 +62,7 @@ Commands:
 
 Flags:
   --profile <name>  Use specific profile for this command
+  --from <url>      Load plugin from URL (use with 'load plugin')
   --version, -v     Show version
   --help, -h        Show help
 
@@ -70,13 +73,16 @@ Resource Aliases:
   msg  = message
 
 Examples:
-  c8 list pi                      List process instances
-  c8 get pi 123456                Get process instance by key
-  c8 create pi --bpmnProcessId=myProcess
-  c8 deploy ./my-process.bpmn     Deploy a BPMN file
-  c8 run ./my-process.bpmn        Deploy and start process
-  c8 use profile prod             Set active profile
-  c8 output json                  Switch to JSON output
+  c8ctl list pi                      List process instances
+  c8ctl get pi 123456                Get process instance by key
+  c8ctl create pi --bpmnProcessId=myProcess
+  c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
+  c8ctl run ./my-process.bpmn        Deploy and start process
+  c8ctl watch ./src                  Watch directory for changes
+  c8ctl use profile prod             Set active profile
+  c8ctl output json                  Switch to JSON output
+  c8ctl load plugin my-plugin        Load plugin from npm registry
+  c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
 `.trim());
 }
 
@@ -106,10 +112,10 @@ export function showVerbResources(verb: string): void {
 
   const available = resources[verb];
   if (available) {
-    console.log(`\nUsage: c8 ${verb} <resource>\n`);
+    console.log(`\nUsage: c8ctl ${verb} <resource>\n`);
     console.log(`Available resources:\n  ${available}`);
   } else {
     console.log(`\nUnknown command: ${verb}`);
-    console.log('Run "c8 help" for usage information.');
+    console.log('Run "c8ctl help" for usage information.');
   }
 }

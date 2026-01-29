@@ -50,20 +50,9 @@ describe('Plugin Structure', () => {
       const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
-      // Verify plugin imports runtime
-      assert.ok(pluginContent.includes("import { c8ctl }"), 'Plugin imports c8ctl runtime');
+      // Verify plugin imports c8ctl
+      assert.ok(pluginContent.includes("import { c8ctl } from 'c8ctl/runtime'"), 'Plugin imports c8ctl runtime');
       assert.ok(pluginContent.includes('c8ctl.env'), 'Plugin uses c8ctl.env');
-    });
-
-    test('should have metadata export', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
-      const pluginContent = readFileSync(pluginPath, 'utf-8');
-      
-      // Verify plugin exports metadata
-      assert.ok(pluginContent.includes('export const metadata'), 'Plugin exports metadata');
-      assert.ok(pluginContent.includes('name:'), 'Metadata has name');
-      assert.ok(pluginContent.includes('version:'), 'Metadata has version');
-      assert.ok(pluginContent.includes('description:'), 'Metadata has description');
     });
 
     test('should be valid TypeScript syntax', async () => {
@@ -88,17 +77,6 @@ describe('Plugin Structure', () => {
       assert.ok(pluginContent.includes("'deploy-all':"), 'Plugin has deploy-all command');
       assert.ok(pluginContent.includes('status:'), 'Plugin has status command');
       assert.ok(pluginContent.includes('report:'), 'Plugin has report command');
-    });
-
-    test('should have metadata export', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
-      const pluginContent = readFileSync(pluginPath, 'utf-8');
-      
-      // Verify plugin exports metadata
-      assert.ok(pluginContent.includes('export const metadata'), 'Plugin exports metadata');
-      assert.ok(pluginContent.includes('name:'), 'Metadata has name');
-      assert.ok(pluginContent.includes('version:'), 'Metadata has version');
-      assert.ok(pluginContent.includes('commands:'), 'Metadata lists commands');
     });
 
     test('should use ES6 module syntax', async () => {
@@ -130,7 +108,6 @@ describe('Plugin Structure', () => {
         assert.ok(plugin.commands, 'Plugin has commands export');
         assert.ok(typeof plugin.commands.analyze === 'function', 'analyze is a function');
         assert.ok(typeof plugin.commands.validate === 'function', 'validate is a function');
-        assert.ok(plugin.metadata, 'Plugin has metadata export');
       } catch (error) {
         // If import fails, just verify the file exists
         const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
@@ -149,7 +126,6 @@ describe('Plugin Structure', () => {
         assert.ok(typeof plugin.commands['deploy-all'] === 'function', 'deploy-all is a function');
         assert.ok(typeof plugin.commands.status === 'function', 'status is a function');
         assert.ok(typeof plugin.commands.report === 'function', 'report is a function');
-        assert.ok(plugin.metadata, 'Plugin has metadata export');
       } catch (error) {
         // If import fails, just verify the file exists
         const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');

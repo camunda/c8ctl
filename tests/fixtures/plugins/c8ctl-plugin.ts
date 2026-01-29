@@ -3,7 +3,7 @@
  * This demonstrates the expected structure for a c8ctl plugin
  */
 
-import { c8ctl } from '../../../src/runtime.ts';
+import { c8ctl } from 'c8ctl/runtime';
 
 export const commands = {
   /**
@@ -28,10 +28,4 @@ export const commands = {
     }
     console.log(`Validating files: ${args.join(', ')}`);
   },
-};
-
-export const metadata = {
-  name: 'sample-ts-plugin',
-  version: '1.0.0',
-  description: 'A sample TypeScript plugin for c8ctl',
 };

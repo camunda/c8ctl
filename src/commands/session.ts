@@ -52,7 +52,7 @@ export function setOutputFormat(mode: string): void {
   setOutputMode(mode as OutputMode);
   
   // Update logger immediately
-  logger.setMode(mode as OutputMode);
+  logger.mode = mode as OutputMode;
   
   logger.success(`Output mode set to: ${mode}`);
 }
