@@ -7,6 +7,7 @@ import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import type { OutputMode } from './logger.ts';
+import { c8ctl } from './runtime.ts';
 
 export interface Profile {
   name: string;
@@ -194,54 +195,45 @@ export function removeProfile(name: string): boolean {
 }
 
 /**
- * Load session state
+ * Load session state from c8ctl runtime object
  */
 export function loadSessionState(): SessionState {
-  const path = getSessionStatePath();
-  if (!existsSync(path)) {
-    return { outputMode: 'text' };
-  }
-  try {
-    const data = readFileSync(path, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    return { outputMode: 'text' };
-  }
+  return {
+    activeProfile: c8ctl.activeProfile,
+    activeTenant: c8ctl.activeTenant,
+    outputMode: c8ctl.outputMode,
+  };
 }
 
 /**
- * Save session state to disk
+ * Save session state to c8ctl runtime object
+ * Note: Session state is no longer persisted to disk
  */
 export function saveSessionState(state: SessionState): void {
-  const path = getSessionStatePath();
-  writeFileSync(path, JSON.stringify(state, null, 2), 'utf-8');
+  c8ctl.activeProfile = state.activeProfile;
+  c8ctl.activeTenant = state.activeTenant;
+  c8ctl.outputMode = state.outputMode;
 }
 
 /**
  * Set active profile in session
  */
 export function setActiveProfile(name: string): void {
-  const state = loadSessionState();
-  state.activeProfile = name;
-  saveSessionState(state);
+  c8ctl.activeProfile = name;
 }
 
 /**
  * Set active tenant in session
  */
 export function setActiveTenant(tenantId: string): void {
-  const state = loadSessionState();
-  state.activeTenant = tenantId;
-  saveSessionState(state);
+  c8ctl.activeTenant = tenantId;
 }
 
 /**
  * Set output mode in session
  */
 export function setOutputMode(mode: OutputMode): void {
-  const state = loadSessionState();
-  state.outputMode = mode;
-  saveSessionState(state);
+  c8ctl.outputMode = mode;
 }
 
 /**
@@ -266,9 +258,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   }
 
   // 2. Try session profile
-  const session = loadSessionState();
-  if (session.activeProfile) {
-    const profile = getProfile(session.activeProfile);
+  if (c8ctl.activeProfile) {
+    const profile = getProfile(c8ctl.activeProfile);
     if (profile) {
       return {
         baseUrl: profile.baseUrl,
@@ -319,13 +310,12 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
  */
 export function resolveTenantId(profileFlag?: string): string {
   // 1. Try session tenant
-  const session = loadSessionState();
-  if (session.activeTenant) {
-    return session.activeTenant;
+  if (c8ctl.activeTenant) {
+    return c8ctl.activeTenant;
   }
 
   // 2. Try profile default tenant (from flag or session)
-  const profileName = profileFlag || session.activeProfile;
+  const profileName = profileFlag || c8ctl.activeProfile;
   if (profileName) {
     const profile = getProfile(profileName);
     if (profile?.defaultTenantId) {
