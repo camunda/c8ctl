@@ -38,10 +38,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^8.8.3",
-    "typescript": "^5.9.3"
+    "@camunda8/orchestration-cluster-api": "^8.8.3"
   },
   "devDependencies": {
+    "typescript": "^5.9.3",
     "@types/node": "^22.10.0"
   }
 }
