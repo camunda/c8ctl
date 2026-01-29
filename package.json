@@ -19,7 +19,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "npx tsc",
+    "build": "tsc",
     "prepare": "npm run build",
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
@@ -38,10 +38,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^8.8.3"
+    "@camunda8/orchestration-cluster-api": "^8.8.3",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "typescript": "^5.9.3"
+    "@types/node": "^22.10.0"
   }
 }
