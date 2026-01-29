@@ -135,5 +135,6 @@ jobs:
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
+          # Disabled while repo is private. See: https://github.com/camunda/c8ctl/issues/12
+          NPM_CONFIG_PROVENANCE: 'false' 
         run: NODE_AUTH_TOKEN="" npx semantic-release
