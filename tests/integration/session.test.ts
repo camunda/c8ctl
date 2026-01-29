@@ -12,11 +12,17 @@ describe('Session Management Integration Tests', () => {
   let testDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     testDir = join(tmpdir(), `c8ctl-session-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
     originalEnv = { ...process.env };
     process.env.XDG_DATA_HOME = testDir;
+    
+    // Reset c8ctl runtime state before each test
+    const { c8ctl } = await import('../../src/runtime.ts');
+    c8ctl.activeProfile = undefined;
+    c8ctl.activeTenant = undefined;
+    c8ctl.outputMode = 'text';
   });
 
   afterEach(() => {
@@ -26,8 +32,9 @@ describe('Session Management Integration Tests', () => {
     process.env = originalEnv;
   });
 
-  test('use profile persists active profile', async () => {
+  test('use profile sets active profile in c8ctl runtime', async () => {
     const { addProfile, setActiveProfile, loadSessionState } = await import('../../src/config.ts');
+    const { c8ctl } = await import('../../src/runtime.ts');
     
     // Add a profile first
     addProfile({
@@ -38,30 +45,43 @@ describe('Session Management Integration Tests', () => {
     // Set as active
     setActiveProfile('test-profile');
 
-    // Verify it persisted
+    // Verify it's set in c8ctl runtime
+    assert.strictEqual(c8ctl.activeProfile, 'test-profile');
+    
+    // Verify loadSessionState returns the same value
     const state = loadSessionState();
     assert.strictEqual(state.activeProfile, 'test-profile');
   });
 
-  test('use tenant persists active tenant', async () => {
+  test('use tenant sets active tenant in c8ctl runtime', async () => {
     const { setActiveTenant, loadSessionState } = await import('../../src/config.ts');
+    const { c8ctl } = await import('../../src/runtime.ts');
     
     setActiveTenant('my-tenant');
 
+    // Verify it's set in c8ctl runtime
+    assert.strictEqual(c8ctl.activeTenant, 'my-tenant');
+    
+    // Verify loadSessionState returns the same value
     const state = loadSessionState();
     assert.strictEqual(state.activeTenant, 'my-tenant');
   });
 
-  test('output mode persists', async () => {
+  test('output mode sets mode in c8ctl runtime', async () => {
     const { setOutputMode, loadSessionState } = await import('../../src/config.ts');
+    const { c8ctl } = await import('../../src/runtime.ts');
     
     setOutputMode('json');
 
+    // Verify it's set in c8ctl runtime
+    assert.strictEqual(c8ctl.outputMode, 'json');
+    
+    // Verify loadSessionState returns the same value
     const state = loadSessionState();
     assert.strictEqual(state.outputMode, 'json');
   });
 
-  test('session state persists across multiple operations', async () => {
+  test('session state is managed in c8ctl runtime object', async () => {
     const { 
       addProfile, 
       setActiveProfile, 
@@ -69,6 +89,7 @@ describe('Session Management Integration Tests', () => {
       setOutputMode, 
       loadSessionState 
     } = await import('../../src/config.ts');
+    const { c8ctl } = await import('../../src/runtime.ts');
     
     // Add profile
     addProfile({
@@ -81,7 +102,12 @@ describe('Session Management Integration Tests', () => {
     setActiveTenant('tenant-123');
     setOutputMode('json');
 
-    // Verify all persisted
+    // Verify all are set in c8ctl runtime
+    assert.strictEqual(c8ctl.activeProfile, 'prod');
+    assert.strictEqual(c8ctl.activeTenant, 'tenant-123');
+    assert.strictEqual(c8ctl.outputMode, 'json');
+    
+    // Verify loadSessionState returns the same values
     const state = loadSessionState();
     assert.strictEqual(state.activeProfile, 'prod');
     assert.strictEqual(state.activeTenant, 'tenant-123');
