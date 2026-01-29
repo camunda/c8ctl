@@ -146,13 +146,13 @@ describe('Completion Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('# c8ctl bash completion'));
     
-    consoleLogSpy = [];
+    consoleLogSpy.length = 0;
     showCompletion('Zsh');
     
     const output2 = consoleLogSpy.join('\n');
     assert.ok(output2.includes('#compdef c8ctl c8'));
     
-    consoleLogSpy = [];
+    consoleLogSpy.length = 0;
     showCompletion('FiSh');
     
     const output3 = consoleLogSpy.join('\n');
