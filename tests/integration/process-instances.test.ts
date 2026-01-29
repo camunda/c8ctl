@@ -10,9 +10,10 @@ import { deploy } from '../../src/commands/deployments.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { ProcessDefinitionId, ProcessInstanceKey } from '@camunda8/orchestration-cluster-api';
 
 // Wait time for Elasticsearch to index data before search queries
-const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
+const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 8000;
 
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
@@ -31,7 +32,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     
     // Create process instance
     const createResult = await client.createProcessInstance({
-      processDefinitionId: 'simple-process',
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process')
     });
     
     // Verify instance key is returned
@@ -48,7 +49,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // First deploy and create an instance
     await deploy(['tests/fixtures/simple.bpmn'], {});
     await client.createProcessInstance({
-      processDefinitionId: 'simple-process',
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
     });
     
     // Search for process instances - filter by process definition ID
@@ -70,7 +71,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Deploy and create an instance
     await deploy(['tests/fixtures/simple.bpmn'], {});
     const createResult = await client.createProcessInstance({
-      processDefinitionId: 'simple-process',
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
     });
     
     const instanceKey = createResult.processInstanceKey.toString();
@@ -78,7 +79,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Try to cancel - note: simple-process may complete instantly,
     // so we handle both success and "already completed" scenarios
     try {
-      await client.cancelProcessInstance({ processInstanceKey: instanceKey });
+      await client.cancelProcessInstance({ processInstanceKey: ProcessInstanceKey.assumeExists(instanceKey) });
       assert.ok(true, 'Process instance cancellation succeeded');
     } catch (error: any) {
       // If the process already completed, that's also acceptable
