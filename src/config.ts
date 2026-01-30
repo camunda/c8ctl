@@ -7,6 +7,7 @@ import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import type { OutputMode } from './logger.ts';
+import { c8ctl } from './runtime.ts';
 
 export interface Profile {
   name: string;
@@ -194,54 +195,89 @@ export function removeProfile(name: string): boolean {
 }
 
 /**
- * Load session state
+ * Load session state from disk and populate c8ctl runtime object
+ * Loads all session properties (activeProfile, activeTenant, outputMode)
  */
 export function loadSessionState(): SessionState {
   const path = getSessionStatePath();
   if (!existsSync(path)) {
-    return { outputMode: 'text' };
+    // Return default state if no session file exists
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
   }
+  
   try {
     const data = readFileSync(path, 'utf-8');
-    return JSON.parse(data);
+    const state = JSON.parse(data) as SessionState;
+    
+    // Populate c8ctl runtime with loaded state (convert null to undefined)
+    c8ctl.activeProfile = state.activeProfile === null ? undefined : state.activeProfile;
+    c8ctl.activeTenant = state.activeTenant === null ? undefined : state.activeTenant;
+    c8ctl.outputMode = state.outputMode || 'text';
+    
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
   } catch (error) {
-    return { outputMode: 'text' };
+    // Return current state if file is corrupted
+    return {
+      activeProfile: c8ctl.activeProfile,
+      activeTenant: c8ctl.activeTenant,
+      outputMode: c8ctl.outputMode,
+    };
   }
 }
 
 /**
- * Save session state to disk
+ * Save session state from c8ctl runtime object to disk
+ * Always persists all session properties (activeProfile, activeTenant, outputMode)
  */
-export function saveSessionState(state: SessionState): void {
+export function saveSessionState(state?: SessionState): void {
+  const stateToSave: SessionState = {
+    activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
+    activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
+    outputMode: state?.outputMode ?? c8ctl.outputMode,
+  };
+  
+  // Update c8ctl runtime if state is provided
+  if (state) {
+    c8ctl.activeProfile = state.activeProfile;
+    c8ctl.activeTenant = state.activeTenant;
+    c8ctl.outputMode = state.outputMode;
+  }
+  
   const path = getSessionStatePath();
-  writeFileSync(path, JSON.stringify(state, null, 2), 'utf-8');
+  // Use custom replacer to preserve undefined as null in JSON
+  writeFileSync(path, JSON.stringify(stateToSave, (key, value) => value === undefined ? null : value, 2), 'utf-8');
 }
 
 /**
- * Set active profile in session
+ * Set active profile in session and persist to disk
  */
 export function setActiveProfile(name: string): void {
-  const state = loadSessionState();
-  state.activeProfile = name;
-  saveSessionState(state);
+  c8ctl.activeProfile = name;
+  saveSessionState();
 }
 
 /**
- * Set active tenant in session
+ * Set active tenant in session and persist to disk
  */
 export function setActiveTenant(tenantId: string): void {
-  const state = loadSessionState();
-  state.activeTenant = tenantId;
-  saveSessionState(state);
+  c8ctl.activeTenant = tenantId;
+  saveSessionState();
 }
 
 /**
- * Set output mode in session
+ * Set output mode in session and persist to disk
  */
 export function setOutputMode(mode: OutputMode): void {
-  const state = loadSessionState();
-  state.outputMode = mode;
-  saveSessionState(state);
+  c8ctl.outputMode = mode;
+  saveSessionState();
 }
 
 /**
@@ -266,9 +302,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   }
 
   // 2. Try session profile
-  const session = loadSessionState();
-  if (session.activeProfile) {
-    const profile = getProfile(session.activeProfile);
+  if (c8ctl.activeProfile) {
+    const profile = getProfile(c8ctl.activeProfile);
     if (profile) {
       return {
         baseUrl: profile.baseUrl,
@@ -319,13 +354,12 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
  */
 export function resolveTenantId(profileFlag?: string): string {
   // 1. Try session tenant
-  const session = loadSessionState();
-  if (session.activeTenant) {
-    return session.activeTenant;
+  if (c8ctl.activeTenant) {
+    return c8ctl.activeTenant;
   }
 
   // 2. Try profile default tenant (from flag or session)
-  const profileName = profileFlag || session.activeProfile;
+  const profileName = profileFlag || c8ctl.activeProfile;
   if (profileName) {
     const profile = getProfile(profileName);
     if (profile?.defaultTenantId) {

@@ -37,4 +37,49 @@ describe('c8ctl Runtime', () => {
   test('env should contain rootDir', () => {
     assert.ok(c8ctl.env.rootDir, 'rootDir exists');
   });
+
+  test('should have activeProfile property with undefined default', () => {
+    // Note: This property may have been set by previous tests in the same process
+    // We just verify it's the correct type
+    const profile = c8ctl.activeProfile;
+    assert.ok(profile === undefined || typeof profile === 'string', 'activeProfile is undefined or string');
+  });
+
+  test('should be able to set and get activeProfile', () => {
+    const testProfile = 'test-profile';
+    c8ctl.activeProfile = testProfile;
+    assert.strictEqual(c8ctl.activeProfile, testProfile, 'activeProfile can be set and retrieved');
+    
+    // Clean up
+    c8ctl.activeProfile = undefined;
+  });
+
+  test('should have activeTenant property with undefined default', () => {
+    // Note: This property may have been set by previous tests in the same process
+    // We just verify it's the correct type
+    const tenant = c8ctl.activeTenant;
+    assert.ok(tenant === undefined || typeof tenant === 'string', 'activeTenant is undefined or string');
+  });
+
+  test('should be able to set and get activeTenant', () => {
+    const testTenant = 'test-tenant';
+    c8ctl.activeTenant = testTenant;
+    assert.strictEqual(c8ctl.activeTenant, testTenant, 'activeTenant can be set and retrieved');
+    
+    // Clean up
+    c8ctl.activeTenant = undefined;
+  });
+
+  test('should have outputMode property', () => {
+    // Verify outputMode is always set to either 'text' or 'json'
+    assert.ok(c8ctl.outputMode === 'text' || c8ctl.outputMode === 'json', 'outputMode is text or json');
+  });
+
+  test('should be able to set and get outputMode', () => {
+    c8ctl.outputMode = 'json';
+    assert.strictEqual(c8ctl.outputMode, 'json', 'outputMode can be set to json');
+    
+    c8ctl.outputMode = 'text';
+    assert.strictEqual(c8ctl.outputMode, 'text', 'outputMode can be set back to text');
+  });
 });
