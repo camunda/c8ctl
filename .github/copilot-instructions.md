@@ -18,6 +18,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - pay attention on cross-platform compatibility (Linux, MacOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
 - prefer functional programming over OOP where reasonable
 - prefer concise expressions over verbose control structures
+- when outputting errors, provide clear, concise and actionable hints to the user
 
 - use modern TypeScript syntax and features
 - use modern Getter and Setter syntax for class properties. Examples:
