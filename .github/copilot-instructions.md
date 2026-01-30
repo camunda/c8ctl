@@ -14,6 +14,11 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - use Node.js 24 LTS only
 - this is a native Node.js project running TS files
 - there is no build step for development. Only compile for test purposes or release.
+
+- prefer functional programming over OOP where reasonable
+- prefer concise expressions over verbose control structures
+
+- use modern TypeScript syntax and features
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript
