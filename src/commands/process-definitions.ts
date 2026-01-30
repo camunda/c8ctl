@@ -11,8 +11,6 @@ import { resolveTenantId } from '../config.ts';
  */
 export async function listProcessDefinitions(options: {
   profile?: string;
-  state?: string;
-  all?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -24,10 +22,6 @@ export async function listProcessDefinitions(options: {
         tenantId,
       },
     };
-
-    if (options.state) {
-      filter.filter.state = options.state;
-    }
 
     const result = await client.searchProcessDefinitions(filter, { consistency: { waitUpToMs: 0 } });
     

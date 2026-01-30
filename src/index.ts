@@ -287,8 +287,6 @@ async function main() {
   if (verb === 'list' && (normalizedResource === 'process-definition' || normalizedResource === 'process-definitions')) {
     await listProcessDefinitions({
       profile: values.profile as string | undefined,
-      state: values.state as string | undefined,
-      all: values.all as boolean | undefined,
     });
     return;
   }
