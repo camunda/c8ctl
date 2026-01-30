@@ -7,6 +7,7 @@ import assert from 'node:assert';
 import { 
   clearLoadedPlugins, 
   getPluginCommandNames,
+  getPluginCommandsInfo,
   isPluginCommand
 } from '../../src/plugin-loader.ts';
 
@@ -33,5 +34,13 @@ describe('Plugin Loader', () => {
     const names = getPluginCommandNames();
     assert.ok(Array.isArray(names), 'Should return an array');
     assert.strictEqual(names.length, 0, 'Should be empty when no plugins loaded');
+  });
+
+  test('getPluginCommandsInfo returns empty array when no plugins loaded', async () => {
+    clearLoadedPlugins();
+    
+    const info = getPluginCommandsInfo();
+    assert.ok(Array.isArray(info), 'Should return an array');
+    assert.strictEqual(info.length, 0, 'Should be empty when no plugins loaded');
   });
 });

@@ -70,7 +70,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
         name: testPluginName,
         version: '1.0.0',
         type: 'module',
-        description: 'Test plugin for c8ctl integration tests'
+        description: 'Test plugin for c8ctl integration tests',
+        keywords: ['c8ctl', 'plugin']
       }, null, 2)
     );
     
