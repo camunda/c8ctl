@@ -55,12 +55,6 @@ After installation, the CLI is available as `c8ctl` (or its alias `c8`).
 
 **Note**: The `c8` alias provides typing ergonomics for common keyboard layouts - the `c` key (left index finger) followed by `8` (right middle finger) makes for a comfortable typing experience on both QWERTY and QWERTZ keyboards.
 
-### Local Development
-
-```bash
-npm install
-```
-
 ## Usage
 
 ### Basic Commands
@@ -301,17 +295,7 @@ c8ctl/
 │   ├── config.ts             # Configuration management
 │   ├── client.ts             # SDK client factory
 │   └── commands/             # Command handlers
-│       ├── help.ts
-│       ├── session.ts
-│       ├── profiles.ts
-│       ├── process-instances.ts
-│       ├── user-tasks.ts
-│       ├── incidents.ts
-│       ├── jobs.ts
-│       ├── messages.ts
-│       ├── topology.ts
-│       ├── deployments.ts
-│       └── run.ts
+│       └── ...
 ├── tests/
 │   ├── unit/                 # Unit tests
 │   ├── integration/          # Integration tests
