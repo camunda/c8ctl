@@ -193,7 +193,8 @@ export async function deploy(paths: string[], options: {
                         ext === 'dmn' ? 'application/xml' :
                         ext === 'form' ? 'application/json' :
                         'application/octet-stream';
-        return new File([r.content], r.name, { type: mimeType });
+        // Convert Buffer to Uint8Array for File constructor
+        return new File([new Uint8Array(r.content)], r.name, { type: mimeType });
       }),
     });
     

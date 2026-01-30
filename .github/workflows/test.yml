@@ -1,8 +1,7 @@
 name: Test
 
 on:
-  push:
-    branches-ignore: [ main, release ]
+
   pull_request:
     branches: [ main ]
   workflow_dispatch:

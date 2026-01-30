@@ -9,8 +9,16 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
+### Development
+
+- use Node.js 22 LTS only by respecting .nvmrc
 - this is a native Node.js project running TS files
-- there is no build step, files are run directly with Node.js >= 22.18.0
+- there is no build step for development. Only compile for test purposes or release.
+
+- prefer functional programming over OOP where reasonable
+- prefer concise expressions over verbose control structures
+
+- use modern TypeScript syntax and features
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript
