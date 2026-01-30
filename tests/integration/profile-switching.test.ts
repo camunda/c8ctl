@@ -8,6 +8,7 @@ import assert from 'node:assert';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pollUntil } from '../utils/polling.ts';
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
@@ -80,8 +81,22 @@ describe('Profile Switching Integration Tests', () => {
       processDefinitionId: 'Process_0t60ay7',
     });
     
-    // Wait for Elasticsearch indexing
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Poll for Elasticsearch indexing
+    const instanceFound = await pollUntil(
+      async () => {
+        try {
+          const result = await client.searchProcessInstances({
+            filter: { processDefinitionId: 'Process_0t60ay7' },
+          }, { consistency: { waitUpToMs: 5000 } });
+          return result.items && result.items.length > 0;
+        } catch (error) {
+          return false;
+        }
+      },
+      10000,  // max 10 seconds
+      200     // poll every 200ms
+    );
+    assert.ok(instanceFound, 'Process instance should be indexed');
     
     // Step 3: Switch to profile "two"
     useProfile('two');
