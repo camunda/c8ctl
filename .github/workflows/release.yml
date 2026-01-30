@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js ${{ matrix.node }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
           cache: 'npm'
@@ -105,16 +105,29 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Node.js 22.18.0
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22.18.0
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Smoke GitHub OIDC token exchange for npm publish 
+        shell: bash
+        run: |
+          set -euo pipefail
+          REG=$(npm -s config get registry||:); REG=${REG%/}; : "${REG:=https://registry.npmjs.org}"
+          HOST=${REG#*://}; HOST=${HOST%%/*}
+          ID=$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:${HOST}" | jq -er .value)
+          PKG=$(jq -r '.name|@uri' package.json)
+          RESP=$(curl -fsS -H "Authorization: Bearer $ID" "$REG/-/npm/v1/oidc/token/exchange/package/$PKG" -d "")
+          TOKEN=$(echo "$RESP" | jq -er '.token')
+          echo "::add-mask::$TOKEN"
+          [ -n "$TOKEN" ]
 
       - name: Install dependencies
         run: npm ci
@@ -122,5 +135,6 @@ jobs:
       - name: Run semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
-        run: npx semantic-release
+          # Disabled while repo is private. See: https://github.com/camunda/c8ctl/issues/12
+          NPM_CONFIG_PROVENANCE: 'false' 
+        run: NODE_AUTH_TOKEN="" npx semantic-release
