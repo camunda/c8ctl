@@ -15,6 +15,9 @@ export const metadata = {
     validate: {
       description: 'Validate BPMN files',
     },
+    config: {
+      description: 'Manage configuration (get, set, list)',
+    },
   },
 };
 
@@ -40,5 +43,60 @@ export const commands = {
       process.exit(1);
     }
     console.log(`Validating files: ${args.join(', ')}`);
+  },
+
+  /**
+   * Config command - demonstrates handling subcommands
+   */
+  config: async (args: string[]) => {
+    const [subcommand, ...rest] = args;
+    
+    if (!subcommand) {
+      console.error('Error: Subcommand required');
+      console.log('Usage:');
+      console.log('  c8 config get <key>        Get configuration value');
+      console.log('  c8 config set <key> <val>  Set configuration value');
+      console.log('  c8 config list             List all configuration');
+      process.exit(1);
+    }
+    
+    if (subcommand === 'get') {
+      const key = rest[0];
+      if (!key) {
+        console.error('Error: Configuration key is required');
+        console.log('Usage: c8 config get <key>');
+        process.exit(1);
+      }
+      console.log(`Getting config for: ${key}`);
+      console.log(`Value: sample-value-${key}`);
+      return;
+    }
+    
+    if (subcommand === 'set') {
+      const [key, value] = rest;
+      if (!key || !value) {
+        console.error('Error: Both key and value are required');
+        console.log('Usage: c8 config set <key> <value>');
+        process.exit(1);
+      }
+      console.log(`Setting config: ${key} = ${value}`);
+      console.log('✓ Configuration updated');
+      return;
+    }
+    
+    if (subcommand === 'list') {
+      console.log('Configuration:');
+      console.log('  timeout: 30s');
+      console.log('  retries: 3');
+      console.log('  format: json');
+      return;
+    }
+    
+    console.error(`Error: Unknown subcommand '${subcommand}'`);
+    console.log('Usage:');
+    console.log('  c8 config get <key>        Get configuration value');
+    console.log('  c8 config set <key> <val>  Set configuration value');
+    console.log('  c8 config list             List all configuration');
+    process.exit(1);
   },
 };

@@ -7,50 +7,96 @@ import { c8ctl } from 'c8ctl/runtime';
 
 export const metadata = {
   name: 'sample-js-plugin',
-  description: 'Sample JavaScript c8ctl plugin',
+  description: 'Sample c8ctl plugin demonstrating custom commands',
   commands: {
-    'deploy-all': {
-      description: 'Deploy all resources in directory',
+    analyze: {
+      description: 'Analyze processes and workflows',
     },
-    status: {
-      description: 'Check cluster status',
+    validate: {
+      description: 'Validate BPMN files',
     },
-    report: {
-      description: 'Generate custom reports',
+    config: {
+      description: 'Manage configuration (get, set, list)',
     },
   },
 };
 
 export const commands = {
   /**
-   * Deploy-all command - sample custom command
+   * Analyze command - sample custom command
    */
-  'deploy-all': async (args) => {
-    console.log('Deploying all resources with JavaScript plugin...');
-    console.log(`Target: ${args[0] || 'current directory'}`);
+  'analyze': async (args) => {
+    console.log('Analyzing with JavaScript plugin...');
+    console.log(`Arguments: ${args.join(', ')}`);
+    console.log(`Running on: ${c8ctl.env.platform} ${c8ctl.env.arch}`);
+    console.log(`Node version: ${c8ctl.env.nodeVersion}`);
     console.log(`c8ctl version: ${c8ctl.env.version}`);
+  },
+
+  /**
+   * Validate command - another sample command
+   */
+  validate: async (args) => {
+    console.log('Validating...');
+    if (args.length === 0) {
+      console.error('No files provided for validation');
+      process.exit(1);
+    }
+    console.log(`Validating files: ${args.join(', ')}`);
+  },
+
+  /**
+   * Config command - demonstrates handling subcommands
+   */
+  config: async (args) => {
+    const [subcommand, ...rest] = args;
     
-    // Sample logic
-    const files = ['process1.bpmn', 'process2.bpmn', 'decision.dmn'];
-    console.log(`Found ${files.length} files to deploy`);
-    files.forEach(file => console.log(`  - ${file}`));
-  },
-
-  /**
-   * Status command - another sample command
-   */
-  status: async () => {
-    console.log('Checking cluster status...');
-    console.log('All services operational');
-    console.log(`Platform: ${c8ctl.env.platform}`);
-  },
-
-  /**
-   * Custom report command
-   */
-  report: async (args) => {
-    console.log('Generating report...');
-    const format = args.includes('--json') ? 'json' : 'text';
-    console.log(`Output format: ${format}`);
+    if (!subcommand) {
+      console.error('Error: Subcommand required');
+      console.log('Usage:');
+      console.log('  c8 config get <key>        Get configuration value');
+      console.log('  c8 config set <key> <val>  Set configuration value');
+      console.log('  c8 config list             List all configuration');
+      process.exit(1);
+    }
+    
+    if (subcommand === 'get') {
+      const key = rest[0];
+      if (!key) {
+        console.error('Error: Configuration key is required');
+        console.log('Usage: c8 config get <key>');
+        process.exit(1);
+      }
+      console.log(`Getting config for: ${key}`);
+      console.log(`Value: sample-value-${key}`);
+      return;
+    }
+    
+    if (subcommand === 'set') {
+      const [key, value] = rest;
+      if (!key || !value) {
+        console.error('Error: Both key and value are required');
+        console.log('Usage: c8 config set <key> <value>');
+        process.exit(1);
+      }
+      console.log(`Setting config: ${key} = ${value}`);
+      console.log('✓ Configuration updated');
+      return;
+    }
+    
+    if (subcommand === 'list') {
+      console.log('Configuration:');
+      console.log('  timeout: 30s');
+      console.log('  retries: 3');
+      console.log('  format: json');
+      return;
+    }
+    
+    console.error(`Error: Unknown subcommand '${subcommand}'`);
+    console.log('Usage:');
+    console.log('  c8 config get <key>        Get configuration value');
+    console.log('  c8 config set <key> <val>  Set configuration value');
+    console.log('  c8 config list             List all configuration');
+    process.exit(1);
   },
 };
