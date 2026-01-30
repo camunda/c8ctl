@@ -74,6 +74,8 @@ For a package to be recognized as a c8ctl plugin:
 5. Must declare c8ctl as a peer dependency in package.json
 6. Import c8ctl runtime: `import { c8ctl } from 'c8ctl/runtime'`
 
+> **Note on TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't currently support type stripping in `node_modules`. If your plugin is written in TypeScript, you must transpile it to JavaScript before publishing. Your `c8ctl-plugin.ts` source can be TypeScript, but ensure your build process produces a `c8ctl-plugin.js` file.
+
 ## Metadata Structure
 
 The optional `metadata` export allows plugins to provide information for the help system:

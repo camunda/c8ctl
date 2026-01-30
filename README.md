@@ -238,6 +238,7 @@ c8ctl help
 - Optionally export a `metadata` object to provide help text
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
+- **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
 
 **Example Plugin Structure:**
 ```typescript

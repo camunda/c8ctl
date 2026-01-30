@@ -1,0 +1,22 @@
+{
+  "name": "@c8ctl/sample-ts-plugin",
+  "version": "1.0.0",
+  "description": "Sample TypeScript c8ctl plugin demonstrating custom commands",
+  "type": "module",
+  "main": "index.ts",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "keywords": [
+    "c8ctl",
+    "plugin",
+    "camunda",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "typescript": "^5.9.3"
+  }
+}

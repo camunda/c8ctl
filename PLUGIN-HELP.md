@@ -150,6 +150,7 @@ interface PluginMetadata {
 2. **Keep descriptions concise**: Aim for one line (< 60 characters)
 3. **Use imperative verbs**: Start with action words (Analyze, Deploy, Check, etc.)
 4. **Match command names**: Ensure metadata command names match exported functions
+5. **TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't support type stripping in `node_modules`. Transpile TypeScript to JavaScript before publishing your plugin.
 
 ## Testing
 

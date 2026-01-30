@@ -1,0 +1,17 @@
+{
+  "name": "@c8ctl/sample-js-plugin",
+  "version": "1.0.0",
+  "description": "Sample JavaScript c8ctl plugin demonstrating custom commands",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "keywords": [
+    "c8ctl",
+    "plugin",
+    "camunda"
+  ],
+  "author": "",
+  "license": "MIT"
+}
