@@ -153,6 +153,20 @@ jupyter notebook examples/e2e-operations.ipynb
 
 The notebook operations are also tested in GitHub Actions. See `.github/workflows/e2e-notebook.yml` for the automated test configuration.
 
+You can also run the test script locally to validate all operations:
+
+```bash
+# Make sure Camunda is running first
+cd assets/c8/8.8
+docker compose --profile elasticsearch up -d
+cd ../..
+
+# Run the test script
+./examples/test-notebook-operations.sh
+```
+
+This script validates all the operations demonstrated in the notebook.
+
 ## Alternative: Bash Script Examples
 
 If you prefer command-line examples without Jupyter, see:
