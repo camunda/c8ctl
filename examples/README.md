@@ -10,7 +10,8 @@ This directory contains comprehensive examples and tutorials for using c8ctl.
 
 ### Prerequisites
 
-1. **Node.js v22 LTS** - Required for c8ctl and the notebook kernel
+1. **Node.js v22 LTS** - Required for native TypeScript execution
+   - Alternatively, use Node.js v20+ with compiled JavaScript (run `npm run build` first)
 2. **Camunda 8 Cluster** - Running at `localhost:8080`
 3. **Jupyter with Node.js Kernel** - Install tslab or IJavascript
 
@@ -109,9 +110,15 @@ docker compose --profile elasticsearch logs -f
 
 #### Node.js Version Issues
 
-Ensure you're using Node.js v22 or later:
+The notebook automatically detects your Node.js version:
+- **Node.js v22+**: Uses native TypeScript execution
+- **Node.js v20+**: Requires compiled JavaScript (run `npm run build` first)
+
 ```bash
-node --version  # Should show v22.x.x or higher
+node --version  # Should show v22.x.x or higher for best experience
+
+# If using Node.js <22, compile first:
+npm run build
 
 # Use nvm to switch versions if needed
 nvm use 22
