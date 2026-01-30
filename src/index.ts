@@ -25,7 +25,7 @@ import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
-import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
+import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/plugins.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand, 
@@ -231,6 +231,11 @@ async function main() {
       process.exit(1);
     }
     await unloadPlugin(args[0]);
+    return;
+  }
+
+  if (verb === 'sync' && normalizedResource === 'plugin') {
+    await syncPlugins();
     return;
   }
 
