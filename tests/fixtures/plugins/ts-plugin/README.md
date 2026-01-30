@@ -8,9 +8,19 @@ Sample c8ctl plugin demonstrating custom commands in TypeScript.
 npm install
 ```
 
+## Build
+
+Compile TypeScript to JavaScript:
+
+```bash
+npm run build
+```
+
+This will transpile the TypeScript source to the `dist/` folder.
+
 ## Usage
 
-This plugin can be loaded by c8ctl from the plugins directory. The TypeScript files are executed directly by Node.js without a build step.
+This plugin can be loaded by c8ctl from the plugins directory after building.
 
 ## Commands
 
