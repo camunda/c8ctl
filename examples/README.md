@@ -161,8 +161,12 @@ cd assets/c8/8.8
 docker compose --profile elasticsearch up -d
 cd ../..
 
-# Run the test script
+# Run the test script (make it executable first if needed)
+chmod +x examples/test-notebook-operations.sh
 ./examples/test-notebook-operations.sh
+
+# Or run directly with bash
+bash examples/test-notebook-operations.sh
 ```
 
 This script validates all the operations demonstrated in the notebook.

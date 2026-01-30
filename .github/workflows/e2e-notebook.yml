@@ -33,7 +33,7 @@ jobs:
       - name: Start Camunda 8.8 with Docker Compose
         run: |
           cd assets/c8/8.8
-          DATABASE=elasticsearch docker compose --profile elasticsearch up -d
+          docker compose --profile elasticsearch up -d
         env:
           DATABASE: elasticsearch
 
@@ -205,7 +205,7 @@ jobs:
         if: always()
         run: |
           cd assets/c8/8.8
-          DATABASE=elasticsearch docker compose --profile elasticsearch down -v
+          docker compose --profile elasticsearch down -v
         env:
           DATABASE: elasticsearch
 
@@ -213,6 +213,6 @@ jobs:
         if: failure()
         run: |
           cd assets/c8/8.8
-          DATABASE=elasticsearch docker compose --profile elasticsearch logs
+          docker compose --profile elasticsearch logs
         env:
           DATABASE: elasticsearch
