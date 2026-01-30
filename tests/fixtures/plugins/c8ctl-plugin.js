@@ -5,6 +5,22 @@
 
 import { c8ctl } from 'c8ctl/runtime';
 
+export const metadata = {
+  name: 'sample-js-plugin',
+  description: 'Sample JavaScript c8ctl plugin',
+  commands: {
+    'deploy-all': {
+      description: 'Deploy all resources in directory',
+    },
+    status: {
+      description: 'Check cluster status',
+    },
+    report: {
+      description: 'Generate custom reports',
+    },
+  },
+};
+
 export const commands = {
   /**
    * Deploy-all command - sample custom command

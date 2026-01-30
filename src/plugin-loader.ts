@@ -10,9 +10,20 @@ interface PluginCommands {
   [commandName: string]: (args: string[]) => Promise<void>;
 }
 
+interface PluginMetadata {
+  name?: string;
+  description?: string;
+  commands?: {
+    [commandName: string]: {
+      description?: string;
+    };
+  };
+}
+
 interface LoadedPlugin {
   name: string;
   commands: PluginCommands;
+  metadata?: PluginMetadata;
 }
 
 const loadedPlugins = new Map<string, LoadedPlugin>();
@@ -55,6 +66,7 @@ export async function loadInstalledPlugins(): Promise<void> {
             loadedPlugins.set(packageName, {
               name: packageName,
               commands: plugin.commands,
+              metadata: plugin.metadata || {},
             });
             const commandNames = Object.keys(plugin.commands);
             logger.debug(`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`, commandNames);
@@ -113,6 +125,31 @@ export function isPluginCommand(commandName: string): boolean {
  */
 export function getPluginCommandNames(): string[] {
   return Object.keys(getPluginCommands());
+}
+
+/**
+ * Get plugin information for help display
+ */
+export interface PluginCommandInfo {
+  commandName: string;
+  pluginName: string;
+  description?: string;
+}
+
+export function getPluginCommandsInfo(): PluginCommandInfo[] {
+  const infos: PluginCommandInfo[] = [];
+  
+  for (const plugin of loadedPlugins.values()) {
+    for (const commandName of Object.keys(plugin.commands)) {
+      infos.push({
+        commandName,
+        pluginName: plugin.name,
+        description: plugin.metadata?.commands?.[commandName]?.description,
+      });
+    }
+  }
+  
+  return infos;
 }
 
 /**

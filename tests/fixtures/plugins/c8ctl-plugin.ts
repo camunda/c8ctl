@@ -5,6 +5,19 @@
 
 import { c8ctl } from 'c8ctl/runtime';
 
+export const metadata = {
+  name: 'sample-plugin',
+  description: 'Sample c8ctl plugin demonstrating custom commands',
+  commands: {
+    analyze: {
+      description: 'Analyze processes and workflows',
+    },
+    validate: {
+      description: 'Validate BPMN files',
+    },
+  },
+};
+
 export const commands = {
   /**
    * Analyze command - sample custom command
