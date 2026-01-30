@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Sample JavaScript c8ctl plugin demonstrating custom commands",
   "type": "module",
-  "main": "index.js",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -12,6 +11,9 @@
     "plugin",
     "camunda"
   ],
+  "peerDependencies": {
+    "@camunda8/cli": "*"
+  },
   "author": "",
   "license": "MIT"
 }

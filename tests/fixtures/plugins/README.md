@@ -14,7 +14,8 @@ TypeScript implementation demonstrating:
 
 **Usage in plugins:**
 ```typescript
-import { c8ctl } from 'c8ctl/runtime';
+// c8ctl runtime is available as a global variable
+const c8ctl = (globalThis as any).c8ctl;
 
 export const metadata = {
   name: 'my-plugin',
@@ -43,7 +44,8 @@ JavaScript implementation demonstrating:
 
 **Usage in plugins:**
 ```javascript
-import { c8ctl } from 'c8ctl/runtime';
+// c8ctl runtime is available as a global variable
+const c8ctl = globalThis.c8ctl;
 
 export const metadata = {
   name: 'my-plugin',
@@ -68,11 +70,12 @@ export const commands = {
 For a package to be recognized as a c8ctl plugin:
 
 1. Must be a regular Node.js module with proper package.json
-2. Must have either `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in root directory
-3. Must export a `commands` object with async functions
-4. Optionally export a `metadata` object for help text display
-5. Must declare c8ctl as a peer dependency in package.json
-6. Import c8ctl runtime: `import { c8ctl } from 'c8ctl/runtime'`
+2. Must have `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in root directory
+3. Include `c8ctl` or `c8ctl-plugin` in package.json keywords
+4. Must export a `commands` object with async functions
+5. Optionally export a `metadata` object for help text display
+6. Access c8ctl runtime via `globalThis.c8ctl` (automatically injected by c8ctl)
+7. Declare `@camunda8/cli` with wildcard `*` as peer dependency
 
 > **Note on TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't currently support type stripping in `node_modules`. If your plugin is written in TypeScript, you must transpile it to JavaScript before publishing. Your `c8ctl-plugin.ts` source can be TypeScript, but ensure your build process produces a `c8ctl-plugin.js` file.
 

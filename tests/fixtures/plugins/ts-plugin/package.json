@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Sample TypeScript c8ctl plugin demonstrating custom commands",
   "type": "module",
-  "main": "dist/index.js",
   "files": [
     "dist",
     "README.md"
@@ -22,6 +21,9 @@
     "camunda",
     "typescript"
   ],
+  "peerDependencies": {
+    "@camunda8/cli": "*"
+  },
   "author": "",
   "license": "MIT",
   "devDependencies": {

@@ -1,12 +1,13 @@
 /**
- * Sample c8ctl plugin (TypeScript)
- * This demonstrates the expected structure for a c8ctl plugin
+ * Sample c8ctl plugin (JavaScript)
+ * This demonstrates the expected structure for a c8ctl plugin in JavaScript
  */
 
-import { c8ctl } from 'c8ctl/runtime';
+// c8ctl runtime is available as a global variable
+const c8ctl = globalThis.c8ctl;
 
 export const metadata = {
-  name: 'sample-ts-plugin',
+  name: 'sample-js-plugin',
   description: 'Sample c8ctl plugin demonstrating custom commands',
   commands: {
     analyze: {
@@ -25,8 +26,8 @@ export const commands = {
   /**
    * Analyze command - sample custom command
    */
-  analyze: async (args: string[]) => {
-    console.log('Analyzing with TypeScript plugin...');
+  'analyze': async (args) => {
+    console.log('Analyzing with JavaScript plugin...');
     console.log(`Arguments: ${args.join(', ')}`);
     console.log(`Running on: ${c8ctl.env.platform} ${c8ctl.env.arch}`);
     console.log(`Node version: ${c8ctl.env.nodeVersion}`);
@@ -36,7 +37,7 @@ export const commands = {
   /**
    * Validate command - another sample command
    */
-  validate: async (args: string[]) => {
+  validate: async (args) => {
     console.log('Validating...');
     if (args.length === 0) {
       console.error('No files provided for validation');
@@ -48,7 +49,7 @@ export const commands = {
   /**
    * Config command - demonstrates handling subcommands
    */
-  config: async (args: string[]) => {
+  config: async (args) => {
     const [subcommand, ...rest] = args;
     
     if (!subcommand) {

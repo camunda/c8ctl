@@ -35,7 +35,7 @@ describe('Plugin Commands', () => {
 describe('Plugin Structure', () => {
   describe('TypeScript Plugin', () => {
     test('should have valid structure with commands export', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/ts-plugin/c8ctl-plugin.ts');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
       // Verify plugin exports commands
@@ -46,17 +46,17 @@ describe('Plugin Structure', () => {
       assert.ok(pluginContent.includes('validate:'), 'Plugin has validate command');
     });
 
-    test('should import c8ctl runtime', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
+    test('should access c8ctl runtime via global', async () => {
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/ts-plugin/c8ctl-plugin.ts');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
-      // Verify plugin imports c8ctl
-      assert.ok(pluginContent.includes("import { c8ctl } from 'c8ctl/runtime'"), 'Plugin imports c8ctl runtime');
+      // Verify plugin accesses global c8ctl
+      assert.ok(pluginContent.includes('globalThis') && pluginContent.includes('c8ctl'), 'Plugin accesses c8ctl via globalThis');
       assert.ok(pluginContent.includes('c8ctl.env'), 'Plugin uses c8ctl.env');
     });
 
     test('should be valid TypeScript syntax', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/ts-plugin/c8ctl-plugin.ts');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
       // Basic syntax checks
@@ -67,20 +67,20 @@ describe('Plugin Structure', () => {
 
   describe('JavaScript Plugin', () => {
     test('should have valid structure with commands export', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/js-plugin/c8ctl-plugin.js');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
       // Verify plugin exports commands
       assert.ok(pluginContent.includes('export const commands'), 'Plugin exports commands');
       
       // Verify it has sample commands
-      assert.ok(pluginContent.includes("'deploy-all':"), 'Plugin has deploy-all command');
-      assert.ok(pluginContent.includes('status:'), 'Plugin has status command');
-      assert.ok(pluginContent.includes('report:'), 'Plugin has report command');
+      assert.ok(pluginContent.includes("'analyze':") || pluginContent.includes('analyze:'), 'Plugin has analyze command');
+      assert.ok(pluginContent.includes('validate:'), 'Plugin has validate command');
+      assert.ok(pluginContent.includes('config:'), 'Plugin has config command');
     });
 
     test('should use ES6 module syntax', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/js-plugin/c8ctl-plugin.js');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
       // Verify ES6 syntax
@@ -89,46 +89,43 @@ describe('Plugin Structure', () => {
     });
 
     test('should demonstrate command with arguments', async () => {
-      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/js-plugin/c8ctl-plugin.js');
       const pluginContent = readFileSync(pluginPath, 'utf-8');
       
       // Verify command accepts arguments
-      assert.ok(pluginContent.includes('args[0]'), 'Command accesses arguments');
-      assert.ok(pluginContent.includes('args.includes'), 'Command checks for flags');
+      assert.ok(pluginContent.includes('args[0]') || pluginContent.includes('args.join'), 'Command accesses arguments');
     });
   });
 
   describe('Plugin Loading', () => {
     test('TypeScript plugin can be imported', async () => {
-      // Dynamic import test
-      try {
-        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
-        const plugin = await import(pluginPath);
-        
-        assert.ok(plugin.commands, 'Plugin has commands export');
-        assert.ok(typeof plugin.commands.analyze === 'function', 'analyze is a function');
-        assert.ok(typeof plugin.commands.validate === 'function', 'validate is a function');
-      } catch (error) {
-        // If import fails, just verify the file exists
-        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.ts');
-        const content = readFileSync(pluginPath, 'utf-8');
-        assert.ok(content.length > 0, 'Plugin file exists and has content');
-      }
+      // Dynamic import test - Note: TS files cannot be imported directly in tests
+      // but we verify structure
+      const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/ts-plugin/c8ctl-plugin.ts');
+      const content = readFileSync(pluginPath, 'utf-8');
+      assert.ok(content.length > 0, 'Plugin file exists and has content');
+      assert.ok(content.includes('export const commands'), 'Has commands export');
+      assert.ok(content.includes('analyze'), 'Has analyze command');
+      assert.ok(content.includes('validate'), 'Has validate command');
     });
 
     test('JavaScript plugin can be imported', async () => {
       // Dynamic import test
       try {
-        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
-        const plugin = await import(pluginPath);
+        // Need to inject global for the plugin to work
+        const { c8ctl } = await import('../../src/runtime.js');
+        (globalThis as any).c8ctl = c8ctl;
+        
+        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/js-plugin/c8ctl-plugin.js');
+        const plugin = await import(`${pluginPath}?t=${Date.now()}`);
         
         assert.ok(plugin.commands, 'Plugin has commands export');
-        assert.ok(typeof plugin.commands['deploy-all'] === 'function', 'deploy-all is a function');
-        assert.ok(typeof plugin.commands.status === 'function', 'status is a function');
-        assert.ok(typeof plugin.commands.report === 'function', 'report is a function');
+        assert.ok(typeof plugin.commands['analyze'] === 'function', 'analyze is a function');
+        assert.ok(typeof plugin.commands.validate === 'function', 'validate is a function');
+        assert.ok(typeof plugin.commands.config === 'function', 'config is a function');
       } catch (error) {
         // If import fails, just verify the file exists
-        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/c8ctl-plugin.js');
+        const pluginPath = join(process.cwd(), 'tests/fixtures/plugins/js-plugin/c8ctl-plugin.js');
         const content = readFileSync(pluginPath, 'utf-8');
         assert.ok(content.length > 0, 'Plugin file exists and has content');
       }

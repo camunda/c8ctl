@@ -2,9 +2,10 @@
  * Plugin loader for dynamic command loading
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLogger } from './logger.ts';
+import { c8ctl } from './runtime.ts';
 
 interface PluginCommands {
   [commandName: string]: (args: string[]) => Promise<void>;
@@ -35,45 +36,100 @@ export async function loadInstalledPlugins(): Promise<void> {
   const logger = getLogger();
   const nodeModulesPath = join(process.cwd(), 'node_modules');
   
+  // Make c8ctl runtime available globally for plugins
+  // @ts-ignore
+  globalThis.c8ctl = c8ctl;
+  
   if (!existsSync(nodeModulesPath)) {
     logger.debug('node_modules directory not found');
     return;
   }
   
   try {
-    const packages = readdirSync(nodeModulesPath);
-    logger.debug(`Scanning ${packages.length} packages in node_modules`);
+    const entries = readdirSync(nodeModulesPath);
+    logger.debug(`Scanning ${entries.length} entries in node_modules`);
     
-    for (const packageName of packages) {
-      if (packageName.startsWith('.') || packageName.startsWith('@')) {
+    const packagesToScan: string[] = [];
+    
+    // Collect regular packages and scoped packages
+    for (const entry of entries) {
+      if (entry.startsWith('.')) {
         continue;
       }
       
-      const packagePath = join(nodeModulesPath, packageName);
-      const pluginFileJs = join(packagePath, 'c8ctl-plugin.js');
-      const pluginFileTs = join(packagePath, 'c8ctl-plugin.ts');
-      
-      if (existsSync(pluginFileJs) || existsSync(pluginFileTs)) {
-        logger.debug(`Found plugin candidate: ${packageName}`);
+      if (entry.startsWith('@')) {
+        // Scoped package - scan subdirectories
+        const scopePath = join(nodeModulesPath, entry);
         try {
-          const pluginFile = existsSync(pluginFileJs) ? pluginFileJs : pluginFileTs;
-          // Use file:// protocol and add timestamp to bust cache
-          const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
-          logger.debug(`Loading plugin from: ${pluginUrl}`);
-          const plugin = await import(pluginUrl);
-          
-          if (plugin.commands && typeof plugin.commands === 'object') {
-            loadedPlugins.set(packageName, {
-              name: packageName,
-              commands: plugin.commands,
-              metadata: plugin.metadata || {},
-            });
-            const commandNames = Object.keys(plugin.commands);
-            logger.debug(`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`, commandNames);
+          const scopedPackages = readdirSync(scopePath);
+          for (const scopedPkg of scopedPackages) {
+            if (!scopedPkg.startsWith('.')) {
+              packagesToScan.push(join(entry, scopedPkg));
+            }
           }
         } catch (error) {
-          logger.debug(`Failed to load plugin ${packageName}:`, error);
+          logger.debug(`Failed to scan scoped package directory ${entry}:`, error);
         }
+      } else {
+        // Regular package
+        packagesToScan.push(entry);
+      }
+    }
+    
+    logger.debug(`Found ${packagesToScan.length} packages to scan:`, packagesToScan);
+    
+    for (const packageName of packagesToScan) {
+      const packagePath = join(nodeModulesPath, packageName);
+      const packageJsonPath = join(packagePath, 'package.json');
+      
+      if (!existsSync(packageJsonPath)) {
+        logger.debug(`No package.json for ${packageName}`);
+        continue;
+      }
+      
+      try {
+        // Check for c8ctl-plugin entry point files first
+        const pluginFileJs = join(packagePath, 'c8ctl-plugin.js');
+        const pluginFileTs = join(packagePath, 'c8ctl-plugin.ts');
+        
+        if (!existsSync(pluginFileJs) && !existsSync(pluginFileTs)) {
+          logger.debug(`No c8ctl-plugin.js/ts found for ${packageName}`);
+          continue;
+        }
+        
+        // Read package.json to check keywords
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+        
+        // Plugin must have c8ctl or c8ctl-plugin in keywords
+        const isC8ctlPlugin = 
+          packageJson.keywords?.includes('c8ctl') ||
+          packageJson.keywords?.includes('c8ctl-plugin');
+        
+        if (!isC8ctlPlugin) {
+          logger.debug(`Package ${packageName} has c8ctl-plugin file but missing keywords (keywords: ${packageJson.keywords?.join(', ') || 'none'})`);
+          continue;
+        }
+        
+        logger.debug(`Found c8ctl plugin candidate: ${packageName}`);
+        
+        const pluginFile = existsSync(pluginFileJs) ? pluginFileJs : pluginFileTs;
+        
+        // Use file:// protocol and add timestamp to bust cache
+        const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
+        logger.debug(`Loading plugin from: ${pluginUrl}`);
+        const plugin = await import(pluginUrl);
+        
+        if (plugin.commands && typeof plugin.commands === 'object') {
+          loadedPlugins.set(packageName, {
+            name: packageName,
+            commands: plugin.commands,
+            metadata: plugin.metadata || {},
+          });
+          const commandNames = Object.keys(plugin.commands);
+          logger.debug(`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`, commandNames);
+        }
+      } catch (error) {
+        logger.debug(`Failed to load plugin ${packageName}:`, error);
       }
     }
     logger.debug(`Total plugins loaded: ${loadedPlugins.size}`);
