@@ -209,7 +209,7 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.
+c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages. Plugins are tracked in a registry file (`~/.local/share/c8ctl/plugins.json` on Linux, similar locations on other platforms) for persistence across npm operations.
 
 ```bash
 # Load a plugin from npm registry
@@ -224,12 +224,26 @@ c8ctl load plugin --from git://github.com/user/repo.git
 # Unload a plugin (wraps npm uninstall)
 c8ctl unload plugin <package-name>
 
-# List installed plugins
+# List installed plugins (shows sync status)
 c8ctl list plugins
+
+# Synchronize plugins from registry
+# - First tries npm rebuild for installed plugins
+# - Falls back to fresh npm install if rebuild fails
+c8ctl sync plugins
 
 # View help including plugin commands
 c8ctl help
 ```
+
+**Plugin Registry:**
+- Plugins are tracked independently of `package.json` in a registry file
+- The registry serves as the source of truth (local precedence)
+- `c8ctl list plugins` shows sync status:
+  - `✓ Installed` - Plugin is in registry and installed
+  - `⚠ Not installed` - Plugin is in registry but not in node_modules (run `sync`)
+  - `⚠ Not in registry` - Plugin is in package.json but not tracked in registry
+- `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
@@ -371,6 +385,7 @@ Configuration is stored in platform-specific user data directories:
 Files:
 - `profiles.json`: Saved cluster configurations
 - `session.json`: Active profile, tenant, and output mode
+- `plugins.json`: Plugin registry tracking installed plugins
 
 ### Camunda Modeler Configuration
 

@@ -417,8 +417,44 @@ c8 unload plugin my-custom-plugin
 ### List Plugins
 
 ```bash
-# Show all installed c8ctl plugins
+# Show all installed c8ctl plugins with sync status
 c8 list plugins
+
+# Example output:
+# Name              | Status      | Source                    | Installed At
+# ------------------+-------------+---------------------------+----------------------
+# my-custom-plugin  | ✓ Installed | my-custom-plugin          | 1/30/2026, 6:00:00 PM
+# local-dev-plugin  | ⚠ Not installed | file:///path/to/plugin | 1/30/2026, 5:00:00 PM
+
+# If any plugins are out of sync, you'll see a hint to run sync
+```
+
+### Sync Plugins
+
+```bash
+# Synchronize plugins from the registry
+# - Rebuilds installed plugins
+# - Reinstalls missing plugins
+c8 sync plugins
+
+# Example output showing detailed sync progress:
+# Starting plugin synchronization...
+# 
+# Found 2 registered plugin(s):
+#   - my-custom-plugin (my-custom-plugin)
+#   - local-dev-plugin (file:///path/to/plugin)
+# 
+# Syncing my-custom-plugin...
+#   ✓ my-custom-plugin is already installed, attempting rebuild...
+# ✓   ✓ my-custom-plugin rebuilt successfully
+# 
+# Syncing local-dev-plugin...
+#   ⚠ local-dev-plugin not found, installing...
+# ✓   ✓ local-dev-plugin installed successfully
+# 
+# Synchronization complete:
+#   ✓ Synced: 2 plugin(s)
+# ✓ All plugins synced successfully!
 ```
 
 **Plugin Development:**
@@ -437,6 +473,10 @@ export const commands = {
   }
 };
 ```
+
+**Plugin Registry:**
+
+Plugins are tracked in a registry file (`~/.local/share/c8ctl/plugins.json` on Linux) independently of `package.json`. This ensures plugins persist across npm operations and can be synchronized when moving between environments or after npm operations.
 
 ---
 
