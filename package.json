@@ -24,7 +24,8 @@
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
     "test:integration": "node --test tests/integration/*.test.ts",
-    "dev": "node src/index.ts"
+    "dev": "node src/index.ts",
+    "cli": "node src/index.ts"
   },
   "keywords": [
     "camunda",
