@@ -45,7 +45,8 @@ export function loadPluginRegistry(): PluginRegistry {
     registryCache = JSON.parse(content);
     return registryCache!;
   } catch (error) {
-    // If registry is corrupted, start fresh
+    // If registry is corrupted, start fresh and warn user
+    console.warn('⚠ Warning: Plugin registry file was corrupted and has been reset. Your plugins may need to be re-registered.');
     registryCache = { plugins: [] };
     return registryCache;
   }

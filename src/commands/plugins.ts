@@ -51,9 +51,16 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
       logger.info(`Loading plugin from: ${fromUrl}...`);
       execSync(`npm install ${fromUrl}`, { stdio: 'inherit' });
       
-      // Extract package name from node_modules after install
+      // Extract package name from URL using pattern matching
       pluginName = extractPackageNameFromUrl(fromUrl);
       pluginSource = fromUrl;
+      
+      // Validate plugin name
+      if (!pluginName || pluginName.trim() === '') {
+        logger.error('Failed to extract plugin name from URL');
+        logger.info('💡 Actionable hint: Ensure the URL points to a valid npm package with a package.json file');
+        process.exit(1);
+      }
       
       logger.success('Plugin loaded successfully from URL', fromUrl);
     } else {
@@ -84,19 +91,21 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
 /**
  * Extract package name from URL or path
  * This is a best-effort extraction - for complex cases, the user may need to specify manually
+ * Note: This doesn't handle all edge cases like scoped packages in git URLs
  */
 function extractPackageNameFromUrl(url: string): string {
   // For npm packages: git+https://github.com/user/repo.git -> repo
   // For file paths: file:///path/to/plugin -> plugin
   // For git URLs: git://github.com/user/repo.git -> repo
+  // Note: Scoped packages like @scope/package in URLs are not fully supported
   
   const match = url.match(/\/([^\/]+?)(\.git)?$/);
   if (match) {
     return match[1];
   }
   
-  // Fallback: use the whole URL as the name
-  return url;
+  // Fallback: use a cleaned version of the URL as the name
+  return url.replace(/[^a-zA-Z0-9-_@\/]/g, '-');
 }
 
 /**
@@ -114,7 +123,7 @@ export async function unloadPlugin(packageName: string): Promise<void> {
     logger.info(`Unloading plugin: ${packageName}...`);
     execSync(`npm uninstall ${packageName}`, { stdio: 'inherit' });
     
-    // Remove from plugin registry
+    // Only remove from registry after successful uninstall
     removePluginFromRegistry(packageName);
     logger.debug(`Removed ${packageName} from plugin registry`);
     
