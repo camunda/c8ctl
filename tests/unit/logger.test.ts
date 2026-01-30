@@ -131,12 +131,15 @@ describe('Logger Module', () => {
   });
 
   describe('JSON Mode', () => {
-    test('info does not output in JSON mode', () => {
+    test('info outputs JSON in JSON mode', () => {
       c8ctl.outputMode = 'json';
       const logger = new Logger();
       logger.info('Test message');
       
-      assert.strictEqual(consoleLogSpy.length, 0);
+      assert.strictEqual(consoleLogSpy.length, 1);
+      const output = JSON.parse(consoleLogSpy[0]);
+      assert.strictEqual(output.status, 'info');
+      assert.strictEqual(output.message, 'Test message');
     });
 
     test('success outputs JSON in JSON mode', () => {
