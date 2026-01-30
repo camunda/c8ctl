@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getLogger } from '../logger.ts';
+import { getPluginCommandsInfo } from '../plugin-loader.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,6 +33,17 @@ export function showVersion(): void {
  */
 export function showHelp(): void {
   const version = getVersion();
+  const pluginCommandsInfo = getPluginCommandsInfo();
+  
+  let pluginSection = '';
+  if (pluginCommandsInfo.length > 0) {
+    pluginSection = '\n\nPlugin Commands:';
+    for (const cmd of pluginCommandsInfo) {
+      const desc = cmd.description ? `  ${cmd.description}` : '';
+      pluginSection += `\n  ${cmd.commandName.padEnd(20)}${desc}`;
+    }
+  }
+  
   console.log(`
 c8ctl - Camunda 8 CLI v${version}
 
@@ -58,7 +70,7 @@ Commands:
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
-  help                       Show this help
+  help                       Show this help${pluginSection}
 
 Flags:
   --profile <name>  Use specific profile for this command

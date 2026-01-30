@@ -15,6 +15,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - this is a native Node.js project running TS files
 - there is no build step for development. Only compile for test purposes or release.
 
+- pay attention on cross-platform compatibility (Linux, MacOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
 - prefer functional programming over OOP where reasonable
 - prefer concise expressions over verbose control structures
 
