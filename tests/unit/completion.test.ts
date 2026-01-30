@@ -135,9 +135,13 @@ describe('Completion Module', () => {
       assert.strictEqual(exitCode, 1);
     }
     
+    // logger.error outputs to console.error
     const errorOutput = consoleErrorSpy.join('\n');
     assert.ok(errorOutput.includes('Unknown shell: powershell'));
-    assert.ok(errorOutput.includes('Supported shells: bash, zsh, fish'));
+    
+    // logger.info outputs to console.log
+    const logOutput = consoleLogSpy.join('\n');
+    assert.ok(logOutput.includes('Supported shells: bash, zsh, fish'));
   });
 
   test('handles case-insensitive shell names', () => {
