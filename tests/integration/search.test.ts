@@ -53,10 +53,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search process definitions with filters', async () => {
-    const client = createClient();
-    
     // Deploy a process
     await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    const client = createClient();
     
     // Search to get the key
     const result = await client.searchProcessDefinitions({
@@ -81,10 +81,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search process instances by state', async () => {
-    const client = createClient();
-    
     // Deploy and create an instance
     await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    const client = createClient();
     await client.createProcessInstance({
       processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
     });
