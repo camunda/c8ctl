@@ -11,7 +11,13 @@ function generateBashCompletion(): string {
   return `# c8ctl bash completion
 _c8ctl_completions() {
   local cur prev words cword
-  _init_completion || return
+  
+  # Initialize completion variables (standalone, no bash-completion dependency)
+  COMPREPLY=()
+  cur="\${COMP_WORDS[COMP_CWORD]}"
+  prev="\${COMP_WORDS[COMP_CWORD-1]}"
+  words=("\${COMP_WORDS[@]}")
+  cword=\${COMP_CWORD}
 
   # Commands (verbs)
   local verbs="list get create cancel complete fail activate resolve publish correlate deploy run watch add remove rm load unload use output completion help"
