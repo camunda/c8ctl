@@ -21,6 +21,13 @@ import {
   listProcessDefinitions,
   getProcessDefinition,
 } from './commands/process-definitions.ts';
+import {
+  searchProcessDefinitions,
+  searchProcessInstances,
+  searchUserTasks,
+  searchIncidents,
+  searchJobs,
+} from './commands/search.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, resolveIncident } from './commands/incidents.ts';
 import { listJobs, activateJobs, completeJob, failJob } from './commands/jobs.ts';
@@ -71,6 +78,8 @@ function parseCliArgs() {
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
+        processDefinitionKey: { type: 'string' },
+        parentProcessInstanceKey: { type: 'string' },
         variables: { type: 'string' },
         state: { type: 'string' },
         assignee: { type: 'string' },
@@ -90,6 +99,10 @@ function parseCliArgs() {
         defaultTenantId: { type: 'string' },
         version_num: { type: 'string' },
         from: { type: 'string' },
+        name: { type: 'string' },
+        key: { type: 'string' },
+        elementId: { type: 'string' },
+        errorType: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -468,6 +481,72 @@ async function main() {
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
     });
+    return;
+  }
+
+  // Handle search commands
+  if (verb === 'search') {
+    const normalizedSearchResource = normalizeResource(resource);
+    
+    if (normalizedSearchResource === 'process-definition' || normalizedSearchResource === 'process-definitions') {
+      await searchProcessDefinitions({
+        profile: values.profile as string | undefined,
+        processDefinitionId: values.bpmnProcessId as string | undefined,
+        name: values.name as string | undefined,
+        version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
+        key: values.key as string | undefined,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'process-instance' || normalizedSearchResource === 'process-instances') {
+      await searchProcessInstances({
+        profile: values.profile as string | undefined,
+        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionKey: values.processDefinitionKey as string | undefined,
+        state: values.state as string | undefined,
+        key: values.key as string | undefined,
+        parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'user-task' || normalizedSearchResource === 'user-tasks') {
+      await searchUserTasks({
+        profile: values.profile as string | undefined,
+        state: values.state as string | undefined,
+        assignee: values.assignee as string | undefined,
+        processInstanceKey: values.processInstanceKey as string | undefined,
+        processDefinitionKey: values.processDefinitionKey as string | undefined,
+        elementId: values.elementId as string | undefined,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'incident' || normalizedSearchResource === 'incidents') {
+      await searchIncidents({
+        profile: values.profile as string | undefined,
+        state: values.state as string | undefined,
+        processInstanceKey: values.processInstanceKey as string | undefined,
+        processDefinitionKey: values.processDefinitionKey as string | undefined,
+        errorType: values.errorType as string | undefined,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'jobs') {
+      await searchJobs({
+        profile: values.profile as string | undefined,
+        state: values.state as string | undefined,
+        type: values.type as string | undefined,
+        processInstanceKey: values.processInstanceKey as string | undefined,
+        processDefinitionKey: values.processDefinitionKey as string | undefined,
+      });
+      return;
+    }
+
+    // If resource not recognized for search, show available resources
+    showVerbResources('search');
     return;
   }
 

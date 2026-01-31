@@ -51,6 +51,7 @@ Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
+  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs)
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
@@ -80,6 +81,19 @@ Flags:
   --version, -v     Show version
   --help, -h        Show help
 
+Search Flags:
+  --bpmnProcessId <id>              Filter by process definition ID
+  --processDefinitionKey <key>      Filter by process definition key
+  --processInstanceKey <key>        Filter by process instance key
+  --parentProcessInstanceKey <key>  Filter by parent process instance key
+  --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
+  --name <name>                     Filter by name
+  --key <key>                       Filter by key
+  --assignee <user>                 Filter by assignee (user tasks)
+  --elementId <id>                  Filter by element ID (user tasks)
+  --errorType <type>                Filter by error type (incidents)
+  --type <type>                     Filter by type (jobs)
+
 Resource Aliases:
   pi   = process-instance(s)
   pd   = process-definition(s)
@@ -90,6 +104,11 @@ Resource Aliases:
 Examples:
   c8ctl list pi                      List process instances
   c8ctl list pd                      List process definitions
+  c8ctl search pi --state=ACTIVE     Search for active process instances
+  c8ctl search pd --bpmnProcessId=myProcess  Search process definitions by ID
+  c8ctl search ut --assignee=john    Search user tasks assigned to john
+  c8ctl search inc --state=ACTIVE    Search for active incidents
+  c8ctl search jobs --type=myJobType Search jobs by type
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
@@ -111,6 +130,7 @@ Examples:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
+    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs',
     get: 'process-instance (pi), process-definition (pd), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
