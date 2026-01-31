@@ -100,6 +100,49 @@ c8ctl deploy
 c8ctl run ./my-process.bpmn
 ```
 
+### Shell Completion
+
+c8ctl supports shell completion for bash, zsh, and fish. To enable completion:
+
+#### Bash
+
+```bash
+# Generate and source completion script
+c8ctl completion bash > ~/.c8ctl-completion.bash
+echo 'source ~/.c8ctl-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Or for immediate use in the current session:
+
+```bash
+source <(c8ctl completion bash)
+```
+
+#### Zsh
+
+```bash
+# Generate and source completion script
+c8ctl completion zsh > ~/.c8ctl-completion.zsh
+echo 'source ~/.c8ctl-completion.zsh' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Or for immediate use in the current session:
+
+```bash
+source <(c8ctl completion zsh)
+```
+
+#### Fish
+
+```bash
+# Generate and install completion script
+c8ctl completion fish > ~/.config/fish/completions/c8ctl.fish
+```
+
+Fish will automatically load the completion on next shell start.
+
 ### Credential Resolution
 
 Credentials are resolved in the following order:

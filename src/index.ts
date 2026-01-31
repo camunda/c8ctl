@@ -30,6 +30,7 @@ import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
+import { showCompletion } from './commands/completion.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand, 
@@ -138,6 +139,12 @@ async function main() {
   // Handle help command
   if (verb === 'help' || verb === 'menu' || verb === '--help' || verb === '-h') {
     showHelp();
+    return;
+  }
+
+  // Handle completion command
+  if (verb === 'completion') {
+    showCompletion(resource);
     return;
   }
 
