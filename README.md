@@ -269,24 +269,41 @@ c8ctl unload plugin <package-name>
 
 # List installed plugins
 c8ctl list plugins
+
+# View help including plugin commands
+c8ctl help
 ```
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
+- Optionally export a `metadata` object to provide help text
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
+- **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
 
 **Example Plugin Structure:**
 ```typescript
 // c8ctl-plugin.ts
+export const metadata = {
+  name: 'my-plugin',
+  description: 'My custom c8ctl plugin',
+  commands: {
+    analyze: {
+      description: 'Analyze BPMN processes'
+    }
+  }
+};
+
 export const commands = {
   analyze: async (args: string[]) => {
     console.log('Analyzing...', args);
   }
 };
 ```
+
+When plugins are loaded, their commands automatically appear in `c8ctl help` output. See [PLUGIN-HELP.md](PLUGIN-HELP.md) for detailed documentation on plugin help integration.
 
 ### Resource Aliases
 
@@ -358,7 +375,14 @@ c8 <command>
 
 # For local development with Node.js 22.18+ (native TypeScript)
 node src/index.ts <command>
+
+# Testing with npm link (requires build first)
+npm run build
+npm link
+c8ctl <command>
 ```
+
+**Note**: The build step is only required for publishing or using `npm link`. Development uses native TypeScript execution via `node src/index.ts`.
 
 ### Adding New Commands
 
