@@ -140,8 +140,31 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search user tasks with filters', async () => {
-    // Note: This test just validates the command doesn't crash
-    // Actual user task creation requires a process with user tasks
+    const client = createClient();
+    
+    // Deploy a process with a user task
+    await deploy(['tests/fixtures/list-pis'], {});
+    
+    // Get the process definition to find the process ID
+    const pdResult = await client.searchProcessDefinitions({
+      filter: {},
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
+    
+    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find deployed processes');
+    
+    // Find the process with ID Process_0t60ay7 (from min-usertask.bpmn)
+    const userTaskProcess = pdResult.items.find(pd => pd.processDefinitionId === 'Process_0t60ay7');
+    assert.ok(userTaskProcess, 'Should find the user task process');
+    
+    // Create an instance to generate a user task
+    await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0t60ay7'),
+    });
+    
+    // Wait for Elasticsearch consistency
+    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
+    
+    // Search for user tasks
     await assert.doesNotReject(
       async () => {
         await searchUserTasks({
@@ -153,8 +176,29 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search incidents with filters', async () => {
-    // Note: This test just validates the command doesn't crash
-    // Actual incident creation requires a process that generates incidents
+    const client = createClient();
+    
+    // Deploy a process that will create an incident (service task without job type configuration)
+    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
+    
+    // Get the process definition
+    const pdResult = await client.searchProcessDefinitions({
+      filter: {
+        processDefinitionId: 'Process_0yyrstd',
+      },
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
+    
+    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find the deployed process');
+    
+    // Create an instance to generate an incident
+    await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0yyrstd'),
+    });
+    
+    // Wait for Elasticsearch consistency
+    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
+    
+    // Search for incidents
     await assert.doesNotReject(
       async () => {
         await searchIncidents({
@@ -166,11 +210,33 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search jobs with filters', async () => {
-    // Note: This test just validates the command doesn't crash
-    // Actual job creation requires a process with service tasks
+    const client = createClient();
+    
+    // Deploy a process with a service task (job)
+    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+    
+    // Get the process definition
+    const pdResult = await client.searchProcessDefinitions({
+      filter: {
+        processDefinitionId: 'Process_18glkb3',
+      },
+    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
+    
+    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find the deployed process');
+    
+    // Create an instance to generate jobs
+    await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('Process_18glkb3'),
+    });
+    
+    // Wait for Elasticsearch consistency
+    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
+    
+    // Search for jobs with type 'n00b' (from the service task)
     await assert.doesNotReject(
       async () => {
         await searchJobs({
+          type: 'n00b',
           state: 'ACTIVATABLE',
         });
       },
