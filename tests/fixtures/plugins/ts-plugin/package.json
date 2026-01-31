@@ -1,0 +1,33 @@
+{
+  "name": "@c8ctl/sample-ts-plugin",
+  "version": "1.0.0",
+  "description": "Sample TypeScript c8ctl plugin demonstrating custom commands",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "c8ctl",
+    "plugin",
+    "camunda",
+    "typescript"
+  ],
+  "peerDependencies": {
+    "@camunda8/cli": "*"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "typescript": "^5.9.3"
+  }
+}

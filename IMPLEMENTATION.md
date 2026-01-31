@@ -14,6 +14,7 @@ All requirements from the plan have been successfully implemented and tested.
    - Single runtime dependency: `@camunda8/orchestration-cluster-api@^8.8.3`
    - Test scripts using native Node.js test runner
    - CLI bin entries: `c8ctl` and `c8` aliases
+   - `prepublishOnly` hook ensures build runs before publishing (not on install)
 
 2. **Logger Component** (`src/logger.ts`)
    - Text and JSON output modes

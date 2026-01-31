@@ -55,12 +55,6 @@ After installation, the CLI is available as `c8ctl` (or its alias `c8`).
 
 **Note**: The `c8` alias provides typing ergonomics for common keyboard layouts - the `c` key (left index finger) followed by `8` (right middle finger) makes for a comfortable typing experience on both QWERTY and QWERTZ keyboards.
 
-### Local Development
-
-```bash
-npm install
-```
-
 ## Usage
 
 ### Basic Commands
@@ -77,9 +71,20 @@ c8ctl list pi
 # Or using full command name
 c8ctl list process-instances
 
+# List process definitions (using alias 'pd')
+c8ctl list pd
+c8ctl list process-definitions
+
 # Get process instance by key
 c8ctl get pi 123456
 c8ctl get process-instance 123456
+
+# Get process definition by key
+c8ctl get pd 123456
+c8ctl get process-definition 123456
+
+# Get process definition XML
+c8ctl get pd 123456 --xml
 
 # Create process instance
 c8ctl create pi --bpmnProcessId=myProcess
@@ -94,6 +99,49 @@ c8ctl deploy
 # Deploy and start process (run)
 c8ctl run ./my-process.bpmn
 ```
+
+### Shell Completion
+
+c8ctl supports shell completion for bash, zsh, and fish. To enable completion:
+
+#### Bash
+
+```bash
+# Generate and source completion script
+c8ctl completion bash > ~/.c8ctl-completion.bash
+echo 'source ~/.c8ctl-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Or for immediate use in the current session:
+
+```bash
+source <(c8ctl completion bash)
+```
+
+#### Zsh
+
+```bash
+# Generate and source completion script
+c8ctl completion zsh > ~/.c8ctl-completion.zsh
+echo 'source ~/.c8ctl-completion.zsh' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Or for immediate use in the current session:
+
+```bash
+source <(c8ctl completion zsh)
+```
+
+#### Fish
+
+```bash
+# Generate and install completion script
+c8ctl completion fish > ~/.config/fish/completions/c8ctl.fish
+```
+
+Fish will automatically load the completion on next shell start.
 
 ### Credential Resolution
 
@@ -232,18 +280,33 @@ c8ctl unload plugin <package-name>
 
 # List installed plugins
 c8ctl list plugins
+
+# View help including plugin commands
+c8ctl help
 ```
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
+- Optionally export a `metadata` object to provide help text
 - Plugins are installed in `node_modules` like regular npm packages
 - The runtime object `c8ctl` provides environment information to plugins
+- **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
 
 **Example Plugin Structure:**
 ```typescript
 // c8ctl-plugin.ts
+export const metadata = {
+  name: 'my-plugin',
+  description: 'My custom c8ctl plugin',
+  commands: {
+    analyze: {
+      description: 'Analyze BPMN processes'
+    }
+  }
+};
+
 export const commands = {
   analyze: async (args: string[]) => {
     console.log('Analyzing...', args);
@@ -251,9 +314,12 @@ export const commands = {
 };
 ```
 
+When plugins are loaded, their commands automatically appear in `c8ctl help` output. See [PLUGIN-HELP.md](PLUGIN-HELP.md) for detailed documentation on plugin help integration.
+
 ### Resource Aliases
 
 - `pi` = process-instance(s)
+- `pd` = process-definition(s)
 - `ut` = user-task(s)
 - `inc` = incident(s)
 - `msg` = message
@@ -266,7 +332,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 
 **Verbs**: list, get, create, cancel, complete, fail, activate, resolve, publish, correlate, deploy, run, add, remove, use, output
 
-**Resources**: process-instance, user-task, incident, job, message, topology, profile, tenant
+**Resources**: process-instance, process-definition, user-task, incident, job, message, topology, profile, tenant
 
 ## Testing
 
@@ -301,17 +367,7 @@ c8ctl/
 │   ├── config.ts             # Configuration management
 │   ├── client.ts             # SDK client factory
 │   └── commands/             # Command handlers
-│       ├── help.ts
-│       ├── session.ts
-│       ├── profiles.ts
-│       ├── process-instances.ts
-│       ├── user-tasks.ts
-│       ├── incidents.ts
-│       ├── jobs.ts
-│       ├── messages.ts
-│       ├── topology.ts
-│       ├── deployments.ts
-│       └── run.ts
+│       └── ...
 ├── tests/
 │   ├── unit/                 # Unit tests
 │   ├── integration/          # Integration tests
@@ -331,7 +387,14 @@ c8 <command>
 
 # For local development with Node.js 22.18+ (native TypeScript)
 node src/index.ts <command>
+
+# Testing with npm link (requires build first)
+npm run build
+npm link
+c8ctl <command>
 ```
+
+**Note**: The build step is only required for publishing or using `npm link`. Development uses native TypeScript execution via `node src/index.ts`.
 
 ### Adding New Commands
 

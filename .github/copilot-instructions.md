@@ -9,8 +9,23 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
+### Work Environment
+
+- when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
+- prefer cross-platform solutions where reasonable
+
+### Development
+
+- use Node.js 22 LTS only by respecting .nvmrc
 - this is a native Node.js project running TS files
-- there is no build step, files are run directly with Node.js >= 22.18.0
+- there is no build step for development. Only compile for test purposes or release.
+
+- pay attention on cross-platform compatibility (Linux, MacOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
+- prefer functional programming over OOP where reasonable
+- prefer concise expressions over verbose control structures
+- when outputting errors, provide clear, concise and actionable hints to the user
+
+- use modern TypeScript syntax and features
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript

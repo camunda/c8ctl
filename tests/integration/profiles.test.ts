@@ -26,7 +26,7 @@ describe('Profile Management Integration Tests', () => {
     process.env = originalEnv;
   });
 
-  test('add profile persists to disk', async () => {
+  test('add profile', async () => {
     const { addProfile, loadProfiles } = await import('../../src/config.ts');
     
     addProfile({
@@ -44,7 +44,7 @@ describe('Profile Management Integration Tests', () => {
     assert.strictEqual(profiles[0].defaultTenantId, 'test-tenant');
   });
 
-  test('remove profile removes from disk', async () => {
+  test('remove profile', async () => {
     const { addProfile, removeProfile, loadProfiles } = await import('../../src/config.ts');
     
     addProfile({

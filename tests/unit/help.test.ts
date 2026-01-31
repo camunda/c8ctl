@@ -149,4 +149,22 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl unload'));
     assert.ok(output.includes('plugin'));
   });
+
+  test('showVerbResources shows resources for completion', () => {
+    showVerbResources('completion');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl completion'));
+    assert.ok(output.includes('bash'));
+    assert.ok(output.includes('zsh'));
+    assert.ok(output.includes('fish'));
+  });
+
+  test('showHelp includes completion command', () => {
+    showHelp();
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('completion'));
+    assert.ok(output.includes('bash|zsh|fish'));
+  });
 });

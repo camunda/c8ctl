@@ -6,6 +6,7 @@
 
 import { parseArgs } from 'node:util';
 import { getLogger } from './logger.ts';
+import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
 import { showHelp, showVersion, showVerbResources } from './commands/help.ts';
 import { useProfile, useTenant, setOutputFormat } from './commands/session.ts';
@@ -16,6 +17,10 @@ import {
   createProcessInstance,
   cancelProcessInstance,
 } from './commands/process-instances.ts';
+import {
+  listProcessDefinitions,
+  getProcessDefinition,
+} from './commands/process-definitions.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, resolveIncident } from './commands/incidents.ts';
 import { listJobs, activateJobs, completeJob, failJob } from './commands/jobs.ts';
@@ -25,6 +30,7 @@ import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
+import { showCompletion } from './commands/completion.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand, 
@@ -38,6 +44,7 @@ import {
 function normalizeResource(resource: string): string {
   const aliases: Record<string, string> = {
     pi: 'process-instance',
+    pd: 'process-definition',
     ut: 'user-task',
     inc: 'incident',
     msg: 'message',
@@ -60,6 +67,7 @@ function parseCliArgs() {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
         all: { type: 'boolean' },
+        xml: { type: 'boolean' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
@@ -98,11 +106,13 @@ function parseCliArgs() {
  * Main CLI handler
  */
 async function main() {
+  // Load session state from disk at startup
+  loadSessionState();
+  
   const { values, positionals } = parseCliArgs();
 
-  // Load session state and initialize logger
-  const session = loadSessionState();
-  const logger = getLogger(session.outputMode);
+  // Initialize logger with current output mode from c8ctl runtime
+  const logger = getLogger(c8ctl.outputMode);
 
   // Load installed plugins
   await loadInstalledPlugins();
@@ -129,6 +139,12 @@ async function main() {
   // Handle help command
   if (verb === 'help' || verb === 'menu' || verb === '--help' || verb === '-h') {
     showHelp();
+    return;
+  }
+
+  // Handle completion command
+  if (verb === 'completion') {
+    showCompletion(resource);
     return;
   }
 
@@ -270,6 +286,26 @@ async function main() {
     }
     await cancelProcessInstance(args[0], {
       profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  // Handle process definition commands
+  if (verb === 'list' && (normalizedResource === 'process-definition' || normalizedResource === 'process-definitions')) {
+    await listProcessDefinitions({
+      profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  if (verb === 'get' && normalizedResource === 'process-definition') {
+    if (!args[0]) {
+      logger.error('Process definition key required. Usage: c8 get pd <key>');
+      process.exit(1);
+    }
+    await getProcessDefinition(args[0], {
+      profile: values.profile as string | undefined,
+      xml: values.xml as boolean | undefined,
     });
     return;
   }
