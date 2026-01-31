@@ -17,6 +17,10 @@ import {
   createProcessInstance,
   cancelProcessInstance,
 } from './commands/process-instances.ts';
+import {
+  listProcessDefinitions,
+  getProcessDefinition,
+} from './commands/process-definitions.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, resolveIncident } from './commands/incidents.ts';
 import { listJobs, activateJobs, completeJob, failJob } from './commands/jobs.ts';
@@ -39,6 +43,7 @@ import {
 function normalizeResource(resource: string): string {
   const aliases: Record<string, string> = {
     pi: 'process-instance',
+    pd: 'process-definition',
     ut: 'user-task',
     inc: 'incident',
     msg: 'message',
@@ -61,6 +66,7 @@ function parseCliArgs() {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
         all: { type: 'boolean' },
+        xml: { type: 'boolean' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
@@ -273,6 +279,26 @@ async function main() {
     }
     await cancelProcessInstance(args[0], {
       profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  // Handle process definition commands
+  if (verb === 'list' && (normalizedResource === 'process-definition' || normalizedResource === 'process-definitions')) {
+    await listProcessDefinitions({
+      profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  if (verb === 'get' && normalizedResource === 'process-definition') {
+    if (!args[0]) {
+      logger.error('Process definition key required. Usage: c8 get pd <key>');
+      process.exit(1);
+    }
+    await getProcessDefinition(args[0], {
+      profile: values.profile as string | undefined,
+      xml: values.xml as boolean | undefined,
     });
     return;
   }
