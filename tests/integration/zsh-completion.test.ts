@@ -7,6 +7,12 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 
+// Check if zsh is available
+function isZshAvailable(): boolean {
+  const result = spawnSync('which', ['zsh'], { encoding: 'utf-8' });
+  return result.status === 0;
+}
+
 describe('Zsh Completion Integration Tests', () => {
   test('zsh completion script is generated without errors', () => {
     const result = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
@@ -19,7 +25,7 @@ describe('Zsh Completion Integration Tests', () => {
     assert.ok(result.stdout.includes('_c8ctl'), 'Should contain completion function');
   });
 
-  test('zsh completion script loads without errors in zsh', () => {
+  test('zsh completion script loads without errors in zsh', { skip: !isZshAvailable() ? 'zsh not available' : false }, () => {
     // Generate completion script
     const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
       encoding: 'utf-8',
@@ -67,7 +73,7 @@ echo "SUCCESS"
     assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
   });
 
-  test('zsh completion completes verbs starting with "l"', () => {
+  test('zsh completion completes verbs starting with "l"', { skip: !isZshAvailable() ? 'zsh not available' : false }, () => {
     const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
       encoding: 'utf-8',
       cwd: process.cwd(),

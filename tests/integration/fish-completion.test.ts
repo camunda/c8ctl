@@ -7,6 +7,12 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 
+// Check if fish is available
+function isFishAvailable(): boolean {
+  const result = spawnSync('which', ['fish'], { encoding: 'utf-8' });
+  return result.status === 0;
+}
+
 describe('Fish Completion Integration Tests', () => {
   test('fish completion script is generated without errors', () => {
     const result = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
@@ -20,7 +26,7 @@ describe('Fish Completion Integration Tests', () => {
     assert.ok(result.stdout.includes('complete -c c8'), 'Should contain complete commands for c8');
   });
 
-  test('fish completion script loads without errors in fish', () => {
+  test('fish completion script loads without errors in fish', { skip: !isFishAvailable() ? 'fish not available' : false }, () => {
     // Generate completion script
     const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
       encoding: 'utf-8',
