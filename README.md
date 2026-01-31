@@ -5,14 +5,19 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 ## Features
 
 - **Minimal Dependencies**: Only one runtime dependency (`@camunda8/orchestration-cluster-api`)
-- **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
-- **Session State**: Maintain active profile, tenant, and output preferences
-- **Building Block Deployment**: Automatic prioritization of `_bb-` folders during deployment
+- **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment
+- **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys 
 - **Flexible Output**: Switch between human-readable text and JSON output modes
+
+## Beware the 🤖
+
+*Full transparency*:  
+this cli is also a pilot-coding experiment.  
+Guided by humans, the codebase is (mostly) built by your friendly neighborhood LLM, fully dogfooding the Human-in-the-Loop pattern.
 
 ## Architecture
 
@@ -96,13 +101,17 @@ c8ctl deploy ./my-process.bpmn
 # Deploy current directory
 c8ctl deploy
 
+# Watch mode (using alias 'w')
+c8ctl w
+c8ctl watch
+
 # Deploy and start process (run)
 c8ctl run ./my-process.bpmn
 ```
 
 ### Shell Completion
 
-c8ctl supports shell completion for bash, zsh, and fish. To enable completion:
+c8ctl supports shell completion for `bash`, `zsh`, and `fish`. To enable completion:
 
 #### Bash
 
@@ -357,6 +366,9 @@ Integration tests require a running Camunda 8 instance at `http://localhost:8080
 
 ## Development
 
+- **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
+
+
 ### Project Structure
 
 ```
@@ -443,7 +455,7 @@ Modeler profiles are:
 
 ## License
 
-MIT
+Apache 2.0 - see LICENSE.md 
 
 ## Contributing
 
