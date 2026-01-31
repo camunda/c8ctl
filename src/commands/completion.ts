@@ -335,7 +335,7 @@ _c8ctl() {
   esac
 }
 
-_c8ctl "\$@"
+# compdef is handled by the #compdef directive at the top
 `;
 }
 
