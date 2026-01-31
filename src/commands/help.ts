@@ -50,8 +50,8 @@ c8ctl - Camunda 8 CLI v${version}
 Usage: c8ctl <command> [resource] [options]
 
 Commands:
-  list      <resource>       List resources (pi, ut, inc, jobs, profiles)
-  get       <resource> <key> Get resource by key (pi, topology)
+  list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
+  get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
   complete  <resource> <key> Complete resource (ut, job)
@@ -76,18 +76,23 @@ Commands:
 Flags:
   --profile <name>  Use specific profile for this command
   --from <url>      Load plugin from URL (use with 'load plugin')
+  --xml             Get process definition as XML (use with 'get pd')
   --version, -v     Show version
   --help, -h        Show help
 
 Resource Aliases:
   pi   = process-instance(s)
+  pd   = process-definition(s)
   ut   = user-task(s)
   inc  = incident(s)
   msg  = message
 
 Examples:
   c8ctl list pi                      List process instances
+  c8ctl list pd                      List process definitions
   c8ctl get pi 123456                Get process instance by key
+  c8ctl get pd 123456                Get process definition by key
+  c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl create pi --bpmnProcessId=myProcess
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
@@ -105,8 +110,8 @@ Examples:
  */
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
-    list: 'process-instances (pi), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    get: 'process-instance (pi), topology',
+    list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
+    get: 'process-instance (pi), process-definition (pd), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',

@@ -71,9 +71,20 @@ c8ctl list pi
 # Or using full command name
 c8ctl list process-instances
 
+# List process definitions (using alias 'pd')
+c8ctl list pd
+c8ctl list process-definitions
+
 # Get process instance by key
 c8ctl get pi 123456
 c8ctl get process-instance 123456
+
+# Get process definition by key
+c8ctl get pd 123456
+c8ctl get process-definition 123456
+
+# Get process definition XML
+c8ctl get pd 123456 --xml
 
 # Create process instance
 c8ctl create pi --bpmnProcessId=myProcess
@@ -279,6 +290,7 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 ### Resource Aliases
 
 - `pi` = process-instance(s)
+- `pd` = process-definition(s)
 - `ut` = user-task(s)
 - `inc` = incident(s)
 - `msg` = message
@@ -291,7 +303,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 
 **Verbs**: list, get, create, cancel, complete, fail, activate, resolve, publish, correlate, deploy, run, add, remove, use, output
 
-**Resources**: process-instance, user-task, incident, job, message, topology, profile, tenant
+**Resources**: process-instance, process-definition, user-task, incident, job, message, topology, profile, tenant
 
 ## Testing
 
