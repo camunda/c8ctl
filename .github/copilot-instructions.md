@@ -9,6 +9,11 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
+- always make sure that cli commands, resources and options are reflected in 
+  - the `help`tests
+  - README.md, EXAMPLES.md and other documentation
+  - shell completion
+
 ### Work Environment
 
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
