@@ -216,7 +216,11 @@ async function chat(args) {
                 console.log(`    ${tool.description}`);
               }
               if (tool.inputSchema) {
-                console.log(`    Schema: ${JSON.stringify(tool.inputSchema, null, 2).split('\n').join('\n    ')}`);
+                console.log('    Schema:');
+                const schemaStr = JSON.stringify(tool.inputSchema, null, 2);
+                schemaStr.split('\n').forEach(line => {
+                  console.log(`      ${line}`);
+                });
               }
             });
             console.log();
