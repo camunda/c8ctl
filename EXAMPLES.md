@@ -476,7 +476,7 @@ export const commands = {
 
 **Plugin Registry:**
 
-Plugins are tracked in a registry file (`~/.local/share/c8ctl/plugins.json` on Linux) independently of `package.json`. This ensures plugins persist across npm operations and can be synchronized when moving between environments or after npm operations.
+Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux) independently of `package.json`. This ensures plugins persist across npm operations and can be synchronized when moving between environments or after npm operations.
 
 ---
 
