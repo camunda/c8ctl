@@ -432,7 +432,7 @@ function convertSettingsConnection(conn: SettingsConnection): ModelerProfile {
   }
 
   // Map basic auth credentials
-  if (conn.authType === 'basic' || conn.authType === 'none') {
+  if (conn.authType === 'basic') {
     profile.username = conn.basicAuthUsername;
     profile.password = conn.basicAuthPassword;
   }
