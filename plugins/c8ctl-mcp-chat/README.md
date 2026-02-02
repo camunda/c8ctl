@@ -1,13 +1,15 @@
 # c8ctl MCP Chat Plugin
 
-MCP (Model Context Protocol) chat support for Camunda 8.9+ clusters with AI-powered natural language interface. This plugin uses Claude (Anthropic) to provide intelligent interaction with your cluster's MCP gateway.
+MCP (Model Context Protocol) chat support for Camunda 8.9+ clusters with AI-powered natural language interface. This plugin supports both **Anthropic Claude** and **OpenAI GPT** models for intelligent interaction with your cluster's MCP gateway.
 
 ## Requirements
 
 - Camunda 8.9 or later with MCP gateway enabled
 - Node.js >= 22.18.0
 - c8ctl >= 2.0.0
-- **Anthropic API key** (get one from [console.anthropic.com](https://console.anthropic.com/))
+- **API key** for one of:
+  - Anthropic Claude: Get from [console.anthropic.com](https://console.anthropic.com/)
+  - OpenAI: Get from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
 ## Installation
 
@@ -32,18 +34,33 @@ c8 load plugin --from file:./plugins/c8ctl-mcp-chat
 
 ## Configuration
 
-### Set Your Anthropic API Key
+### Choose Your LLM Provider
 
-Before using the chat feature, set your Anthropic API key:
+The plugin automatically detects which provider to use based on which API key is set:
+
+#### Option 1: Anthropic Claude (Claude 3.5 Sonnet)
 
 ```bash
 export ANTHROPIC_API_KEY=your_api_key_here
 ```
 
-To make it permanent, add it to your shell profile (~/.bashrc, ~/.zshrc, etc.):
+#### Option 2: OpenAI (GPT-4o)
 
 ```bash
+export OPENAI_API_KEY=your_api_key_here
+```
+
+**Note**: If both keys are set, OpenAI takes precedence.
+
+To make it permanent, add to your shell profile (~/.bashrc, ~/.zshrc, etc.):
+
+```bash
+# For Anthropic Claude
 echo 'export ANTHROPIC_API_KEY=your_api_key_here' >> ~/.bashrc
+
+# OR for OpenAI
+echo 'export OPENAI_API_KEY=your_api_key_here' >> ~/.bashrc
+
 source ~/.bashrc
 ```
 
@@ -60,8 +77,12 @@ c8 chat
 This will:
 1. Connect to the cluster's MCP gateway
 2. Verify the cluster is version 8.9 or later
-3. Initialize Claude AI assistant
+3. Detect and initialize your LLM provider (Claude or GPT-4o)
 4. Open an interactive natural language chat session
+
+The plugin will display which model it's using:
+- `Using: Anthropic Claude 3.5 Sonnet` or
+- `Using: OpenAI GPT-4o`
 
 ### With Profile
 
@@ -120,7 +141,7 @@ The plugin automatically constructs the MCP endpoint from your cluster configura
 The plugin uses c8ctl's configuration system and respects:
 - The `--profile` flag for one-time profile override
 - Active profile from session state
-- Environment variables (`CAMUNDA_BASE_URL`, `ANTHROPIC_API_KEY`, etc.)
+- Environment variables (`CAMUNDA_BASE_URL`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
 - Localhost fallback (`http://localhost:8080/v2`)
 
 ## How It Works
@@ -128,11 +149,11 @@ The plugin uses c8ctl's configuration system and respects:
 The plugin implements the full LLM-MCP integration loop:
 
 1. User asks a question in natural language
-2. Query is sent to Claude AI along with available MCP tool descriptions
-3. Claude analyzes the query and decides which tools to invoke
+2. Query is sent to your chosen LLM (Claude or GPT-4o) along with available MCP tool descriptions
+3. The LLM analyzes the query and decides which tools to invoke
 4. The plugin executes the selected tools through the MCP gateway
-5. Tool results are sent back to Claude
-6. Claude formulates a natural language response
+5. Tool results are sent back to the LLM
+6. The LLM formulates a natural language response
 7. The response is displayed to the user
 
 This creates a seamless natural language interface to your Camunda cluster.
@@ -141,8 +162,9 @@ The plugin:
 1. Resolves the cluster configuration using c8ctl's configuration system
 2. Connects to the cluster's REST API to verify version (8.9+)
 3. Establishes an MCP connection via SSE (Server-Sent Events) transport
-4. Initializes Claude AI client with your API key
-5. Enters the interactive chat loop with LLM-powered tool orchestration
+4. Detects which LLM provider to use (based on API keys)
+5. Initializes the appropriate LLM client (Claude or OpenAI)
+6. Enters the interactive chat loop with LLM-powered tool orchestration
 
 ## Development
 
@@ -204,8 +226,10 @@ To test against a local Camunda 8.9+ cluster:
 # Make sure you have a cluster running with MCP enabled
 # Default: http://localhost:8080
 
-# Set your API key
+# Set your API key (choose one)
 export ANTHROPIC_API_KEY=your_key_here
+# OR
+export OPENAI_API_KEY=your_key_here
 
 # Start chat session
 c8 chat
@@ -219,17 +243,25 @@ CAMUNDA_BASE_URL=http://localhost:8080/v2 c8 chat
 ### Dependencies
 
 - `@anthropic-ai/sdk` - Official Anthropic Claude SDK for LLM interaction
+- `openai` - Official OpenAI SDK for GPT models
 - `@modelcontextprotocol/sdk` - Official MCP TypeScript SDK
 - `zod` - Schema validation (peer dependency of MCP SDK)
 
 ### LLM Integration
 
-Uses Claude 3.5 Sonnet for intelligent tool orchestration:
+Supports multiple LLM providers for intelligent tool orchestration:
+
+#### Anthropic Claude (Claude 3.5 Sonnet)
 - Accepts natural language queries from users
 - Analyzes intent and selects appropriate MCP tools
 - Executes tool calls through the MCP gateway
 - Synthesizes results into natural language responses
 - Maintains conversation context across the session
+
+#### OpenAI (GPT-4o)
+- Same capabilities as Claude
+- Alternative provider option
+- Automatically selected if `OPENAI_API_KEY` is set
 
 ### Transport
 
@@ -245,14 +277,21 @@ Uses SSE (Server-Sent Events) transport for real-time bidirectional communicatio
 
 ## Troubleshooting
 
-### "ANTHROPIC_API_KEY environment variable is required"
+### "No LLM API key found"
 
-Set your API key:
+Set an API key for one of the supported providers:
+
+For Anthropic Claude:
 ```bash
 export ANTHROPIC_API_KEY=your_key_here
 ```
+Get your key from: https://console.anthropic.com/
 
-Get an API key from: https://console.anthropic.com/
+For OpenAI:
+```bash
+export OPENAI_API_KEY=your_key_here
+```
+Get your key from: https://platform.openai.com/api-keys
 
 ### "MCP gateway not available"
 
@@ -277,10 +316,10 @@ The plugin attempts to verify the cluster version via `/v2/topology`. If this fa
 
 ### LLM Rate Limits
 
-If you encounter rate limit errors from Claude:
-- Wait a moment and try again
-- Consider upgrading your Anthropic API plan
-- The plugin uses Claude 3.5 Sonnet with a 4096 token limit per response
+If you encounter rate limit errors:
+- **Claude**: Wait a moment and try again, or upgrade your Anthropic API plan
+- **OpenAI**: Check your usage limits at https://platform.openai.com/usage
+- Consider switching to the alternative provider if one is hitting limits
 
 ## License
 

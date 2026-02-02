@@ -23,6 +23,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.1",
     "@modelcontextprotocol/sdk": "^1.25.3",
+    "openai": "^4.85.3",
     "zod": "^3.24.1"
   },
   "peerDependencies": {

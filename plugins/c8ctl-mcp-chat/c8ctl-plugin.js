@@ -5,7 +5,7 @@
  * @version 1.0.0
  * @since 2026-02-02
  * 
- * This implementation integrates with an LLM (Claude) to provide natural language
+ * This implementation integrates with LLMs (Claude or OpenAI) to provide natural language
  * interaction with the cluster's MCP gateway. The LLM acts as an orchestrator,
  * deciding which MCP tools to invoke based on user queries.
  * 
@@ -19,12 +19,13 @@
  * 
  * Current capabilities:
  * - Connect to cluster MCP gateway
- * - LLM-powered natural language interface
+ * - LLM-powered natural language interface (Claude or OpenAI)
  * - Automatic tool invocation based on user intent
  * - Profile-based configuration
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { createInterface } from 'node:readline';
@@ -135,6 +136,21 @@ async function checkClusterVersion(baseUrl) {
 }
 
 /**
+ * Detect which LLM provider to use based on environment variables
+ * Priority order: OPENAI_API_KEY → ANTHROPIC_API_KEY
+ * @returns {'openai'|'anthropic'|null} The provider to use, or null if no key is set
+ */
+function detectProvider() {
+  if (process.env.OPENAI_API_KEY) {
+    return 'openai';
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    return 'anthropic';
+  }
+  return null;
+}
+
+/**
  * Convert MCP tools to Claude-compatible tool format
  */
 function convertToolsForClaude(mcpTools) {
@@ -153,9 +169,30 @@ function convertToolsForClaude(mcpTools) {
 }
 
 /**
- * Process a chat message with LLM and MCP tool execution
+ * Convert MCP tools to OpenAI-compatible tool format
  */
-async function processWithLLM(userMessage, mcpClient, anthropicClient, conversationHistory) {
+function convertToolsForOpenAI(mcpTools) {
+  if (!mcpTools || !mcpTools.tools) {
+    return [];
+  }
+  
+  return mcpTools.tools.map(tool => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description || `Tool: ${tool.name}`,
+      parameters: tool.inputSchema || {
+        type: 'object',
+        properties: {},
+      },
+    },
+  }));
+}
+
+/**
+ * Process a chat message with Claude and MCP tool execution
+ */
+async function processWithClaude(userMessage, mcpClient, anthropicClient, conversationHistory) {
   try {
     // Get available tools from MCP server
     const mcpTools = await mcpClient.listTools();
@@ -241,7 +278,94 @@ async function processWithLLM(userMessage, mcpClient, anthropicClient, conversat
     return textContent || 'No response from assistant.';
     
   } catch (error) {
-    throw new Error(`LLM processing error: ${error.message}`);
+    throw new Error(`Claude processing error: ${error.message}`);
+  }
+}
+
+/**
+ * Process a chat message with OpenAI and MCP tool execution
+ */
+async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversationHistory) {
+  try {
+    // Get available tools from MCP server
+    const mcpTools = await mcpClient.listTools();
+    const openaiTools = convertToolsForOpenAI(mcpTools);
+    
+    // Add user message to history
+    conversationHistory.push({
+      role: 'user',
+      content: userMessage,
+    });
+    
+    // Call OpenAI with tools
+    let response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o',
+      messages: conversationHistory,
+      tools: openaiTools,
+    });
+    
+    let message = response.choices[0].message;
+    
+    // Process tool use loop
+    while (message.tool_calls && message.tool_calls.length > 0) {
+      // Add assistant response to history
+      conversationHistory.push(message);
+      
+      // Execute tool calls
+      for (const toolCall of message.tool_calls) {
+        console.log(`\n🔧 Calling tool: ${toolCall.function.name}...`);
+        
+        try {
+          const args = JSON.parse(toolCall.function.arguments);
+          const result = await mcpClient.callTool({
+            name: toolCall.function.name,
+            arguments: args,
+          });
+          
+          conversationHistory.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result.content),
+          });
+        } catch (error) {
+          conversationHistory.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: `Error: ${error.message}`,
+          });
+        }
+      }
+      
+      // Get next response from OpenAI
+      response = await openaiClient.chat.completions.create({
+        model: 'gpt-4o',
+        messages: conversationHistory,
+        tools: openaiTools,
+      });
+      
+      message = response.choices[0].message;
+    }
+    
+    // Add final assistant response to history
+    conversationHistory.push(message);
+    
+    return message.content || 'No response from assistant.';
+    
+  } catch (error) {
+    throw new Error(`OpenAI processing error: ${error.message}`);
+  }
+}
+
+/**
+ * Process a chat message with LLM and MCP tool execution (unified interface)
+ */
+async function processWithLLM(userMessage, mcpClient, llmClient, conversationHistory, provider) {
+  if (provider === 'anthropic') {
+    return await processWithClaude(userMessage, mcpClient, llmClient, conversationHistory);
+  } else if (provider === 'openai') {
+    return await processWithOpenAI(userMessage, mcpClient, llmClient, conversationHistory);
+  } else {
+    throw new Error(`Unknown provider: ${provider}`);
   }
 }
 
@@ -289,17 +413,28 @@ async function chat(args) {
     
     console.log('✓ Connected to MCP gateway\n');
     
-    // Check for Anthropic API key
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      console.error('Error: ANTHROPIC_API_KEY environment variable is required.');
-      console.error('Get your API key from: https://console.anthropic.com/');
-      console.error('\nSet it with: export ANTHROPIC_API_KEY=your_key_here\n');
+    // Detect and initialize LLM provider
+    const provider = detectProvider();
+    if (!provider) {
+      console.error('Error: No LLM API key found.');
+      console.error('\nSupported providers:');
+      console.error('  - Anthropic Claude: Set ANTHROPIC_API_KEY');
+      console.error('    Get your key from: https://console.anthropic.com/');
+      console.error('  - OpenAI: Set OPENAI_API_KEY');
+      console.error('    Get your key from: https://platform.openai.com/api-keys');
+      console.error('\nExample: export ANTHROPIC_API_KEY=your_key_here\n');
       process.exit(1);
     }
     
-    // Create Anthropic client
-    const anthropic = new Anthropic({ apiKey });
+    // Create LLM client based on provider
+    let llmClient;
+    if (provider === 'anthropic') {
+      llmClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      console.log('Using: Anthropic Claude 3.5 Sonnet\n');
+    } else if (provider === 'openai') {
+      llmClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      console.log('Using: OpenAI GPT-4o\n');
+    }
     
     // Conversation history for context
     const conversationHistory = [];
@@ -401,7 +536,7 @@ async function chat(args) {
       
       try {
         // Process message with LLM
-        const response = await processWithLLM(input, client, anthropic, conversationHistory);
+        const response = await processWithLLM(input, client, llmClient, conversationHistory, provider);
         console.log(`\n${response}\n`);
         
       } catch (error) {

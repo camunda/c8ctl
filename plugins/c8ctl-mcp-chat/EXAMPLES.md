@@ -5,18 +5,20 @@ This document provides examples of using the AI-powered MCP chat plugin with Cam
 ## Prerequisites
 
 Before starting, make sure you have:
-1. Set your Anthropic API key: `export ANTHROPIC_API_KEY=your_key_here`
+1. Set your LLM API key (choose one):
+   - Anthropic Claude: `export ANTHROPIC_API_KEY=your_key_here`
+   - OpenAI: `export OPENAI_API_KEY=your_key_here`
 2. A Camunda 8.9+ cluster with MCP gateway enabled
 3. The plugin installed: `npm install file:./plugins/c8ctl-mcp-chat`
 
 ## Basic Examples
 
-### Example 1: Natural Language Queries
+### Example 1: Natural Language Queries with Claude
 
 Ask questions in plain English and let Claude orchestrate the MCP tools:
 
 ```bash
-# Set API key
+# Set API key for Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Start chat session
@@ -27,6 +29,7 @@ c8 chat
 # Connecting to: http://localhost:8080/mcp
 # Connected to Camunda 8.9.0
 # ✓ Connected to MCP gateway
+# Using: Anthropic Claude 3.5 Sonnet
 #
 # Available tools:
 #   - list-process-instances: List process instances
@@ -68,7 +71,42 @@ c8 chat
 # Would you like me to help resolve these incidents?
 ```
 
-### Example 2: Cloud Cluster with Profile
+### Example 2: Using OpenAI GPT-4o
+
+Use OpenAI instead of Claude:
+
+```bash
+# Set API key for OpenAI
+export OPENAI_API_KEY=sk-...
+
+# Start chat session
+c8 chat
+
+# Expected output:
+# Starting MCP chat session...
+# Connecting to: http://localhost:8080/mcp
+# Connected to Camunda 8.9.0
+# ✓ Connected to MCP gateway
+# Using: OpenAI GPT-4o
+#
+# Available tools:
+#   - list-process-instances: List process instances
+#   - deploy-resource: Deploy BPMN/DMN resources
+#   - create-instance: Create process instances
+#
+# MCP chat session started. Ask questions about your cluster!
+#
+# chat> List all running processes
+#
+# 🔧 Calling tool: list-process-instances...
+#
+# Here are the currently running processes:
+# 1. Order Fulfillment (Instance ID: 2251799813685249)
+# 2. Customer Onboarding (Instance ID: 2251799813685250)
+# ...
+```
+
+### Example 3: Cloud Cluster with Profile
 
 Connect to a Camunda Cloud cluster using a saved profile:
 
@@ -80,7 +118,7 @@ c8 add profile my-cloud \
   --clientSecret=yyy \
   --audience=zeebe.camunda.io
 
-# Set API key and start chat
+# Set API key and start chat (either provider works)
 export ANTHROPIC_API_KEY=sk-ant-...
 c8 chat --profile=my-cloud
 
@@ -90,10 +128,11 @@ c8 chat --profile=my-cloud
 # Connecting to: https://my-cluster.camunda.io/mcp
 # Connected to Camunda 8.9.1
 # ✓ Connected to MCP gateway
+# Using: Anthropic Claude 3.5 Sonnet
 # ...
 ```
 
-### Example 3: Using Modeler Profile
+### Example 4: Using Modeler Profile
 
 Use a profile imported from Camunda Modeler:
 
