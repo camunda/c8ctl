@@ -9,6 +9,11 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
+### Work Environment
+
+- when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
+- prefer cross-platform solutions where reasonable
+
 ### Development
 
 - use Node.js 22 LTS only by respecting .nvmrc
