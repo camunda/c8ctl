@@ -1,0 +1,32 @@
+{
+  "name": "c8ctl-mcp-chat",
+  "version": "1.0.0",
+  "description": "MCP chat support plugin for c8ctl - chat with your Camunda 8.9+ cluster",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": [
+    "c8ctl",
+    "c8ctl-plugin",
+    "camunda",
+    "camunda8",
+    "mcp",
+    "chat"
+  ],
+  "author": "Camunda",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.24.1"
+  },
+  "peerDependencies": {
+    "@camunda8/cli": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@camunda8/cli": {
+      "optional": true
+    }
+  }
+}
