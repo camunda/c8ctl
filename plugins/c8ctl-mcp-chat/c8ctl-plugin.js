@@ -468,13 +468,33 @@ async function chat(args) {
     let llmClient;
     let modelName;
     if (provider === 'anthropic') {
-      llmClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const anthropicOptions = {
+        apiKey: process.env.ANTHROPIC_API_KEY,
+      };
+      
+      // Allow custom base URL if specified
+      if (process.env.ANTHROPIC_BASE_URL) {
+        anthropicOptions.baseURL = process.env.ANTHROPIC_BASE_URL;
+      }
+      
+      llmClient = new Anthropic(anthropicOptions);
       modelName = getClaudeModel();
-      console.log(`Using: Anthropic Claude (${modelName})\n`);
+      const baseUrlInfo = process.env.ANTHROPIC_BASE_URL ? ` (${process.env.ANTHROPIC_BASE_URL})` : '';
+      console.log(`Using: Anthropic Claude (${modelName})${baseUrlInfo}\n`);
     } else if (provider === 'openai') {
-      llmClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const openaiOptions = {
+        apiKey: process.env.OPENAI_API_KEY,
+      };
+      
+      // Allow custom base URL if specified
+      if (process.env.OPENAI_BASE_URL) {
+        openaiOptions.baseURL = process.env.OPENAI_BASE_URL;
+      }
+      
+      llmClient = new OpenAI(openaiOptions);
       modelName = getOpenAIModel();
-      console.log(`Using: OpenAI (${modelName})\n`);
+      const baseUrlInfo = process.env.OPENAI_BASE_URL ? ` (${process.env.OPENAI_BASE_URL})` : '';
+      console.log(`Using: OpenAI (${modelName})${baseUrlInfo}\n`);
     }
     
     // Conversation history for context

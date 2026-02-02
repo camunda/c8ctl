@@ -50,6 +50,11 @@ Optionally specify a model (default: `claude-3-5-sonnet-20241022`):
 export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 ```
 
+Optionally specify a custom base URL (for proxies or compatible APIs):
+```bash
+export ANTHROPIC_BASE_URL=https://your-custom-endpoint.com
+```
+
 #### Option 2: OpenAI
 
 Set your API key:
@@ -62,6 +67,11 @@ Optionally specify a model (default: `gpt-4o`):
 export OPENAI_MODEL=gpt-4o
 ```
 
+Optionally specify a custom base URL (for proxies, Azure, or compatible APIs):
+```bash
+export OPENAI_BASE_URL=https://your-custom-endpoint.com/v1
+```
+
 **Note**: Only set ONE API key. If both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are set, the plugin will exit with an error.
 
 To make it permanent, add to your shell profile (~/.bashrc, ~/.zshrc, etc.):
@@ -71,11 +81,15 @@ To make it permanent, add to your shell profile (~/.bashrc, ~/.zshrc, etc.):
 echo 'export ANTHROPIC_API_KEY=your_api_key_here' >> ~/.bashrc
 # Optional: specify model
 echo 'export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022' >> ~/.bashrc
+# Optional: specify custom base URL
+echo 'export ANTHROPIC_BASE_URL=https://your-custom-endpoint.com' >> ~/.bashrc
 
 # OR for OpenAI
 echo 'export OPENAI_API_KEY=your_api_key_here' >> ~/.bashrc
 # Optional: specify model
 echo 'export OPENAI_MODEL=gpt-4o' >> ~/.bashrc
+# Optional: specify custom base URL
+echo 'export OPENAI_BASE_URL=https://your-custom-endpoint.com/v1' >> ~/.bashrc
 
 source ~/.bashrc
 ```
@@ -99,6 +113,27 @@ This will:
 The plugin will display which provider and model it's using, for example:
 - `Using: Anthropic Claude (claude-3-5-sonnet-20241022)` or
 - `Using: OpenAI (gpt-4o)`
+- If using a custom base URL, it will also show: `Using: OpenAI (gpt-4o) (https://custom-endpoint.com/v1)`
+
+### Using Custom Base URLs
+
+Custom base URLs are useful for:
+- **Proxies and Gateways**: Route requests through a proxy or API gateway
+- **Azure OpenAI**: Use Azure's OpenAI service
+- **Self-hosted Models**: Connect to OpenAI-compatible self-hosted models
+- **Development/Testing**: Point to mock or staging endpoints
+
+Examples:
+```bash
+# Azure OpenAI
+export OPENAI_API_KEY=your_azure_key
+export OPENAI_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+export OPENAI_MODEL=gpt-4
+
+# Custom proxy for Anthropic
+export ANTHROPIC_API_KEY=your_key
+export ANTHROPIC_BASE_URL=https://your-proxy.com
+```
 
 ### With Profile
 

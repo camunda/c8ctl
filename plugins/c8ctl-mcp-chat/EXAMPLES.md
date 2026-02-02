@@ -139,12 +139,46 @@ c8 chat --profile=my-cloud
 # ...
 ```
 
-### Example 4: Using Modeler Profile
+### Example 5: Using Custom Base URL (Azure OpenAI)
 
-Use a profile imported from Camunda Modeler:
+Connect using Azure OpenAI Service:
 
 ```bash
-c8 chat --profile=modeler:Production-Cluster
+# Configure Azure OpenAI
+export OPENAI_API_KEY=your_azure_api_key
+export OPENAI_BASE_URL=https://your-resource.openai.azure.com/openai/deployments/your-deployment
+export OPENAI_MODEL=gpt-4
+
+# Start chat session
+c8 chat
+
+# Expected output:
+# Starting MCP chat session...
+# Connecting to: http://localhost:8080/mcp
+# Connected to Camunda 8.9.0
+# ✓ Connected to MCP gateway
+# Using: OpenAI (gpt-4) (https://your-resource.openai.azure.com/openai/deployments/your-deployment)
+#
+# chat> ...
+```
+
+### Example 6: Using Custom Base URL (Proxy or Gateway)
+
+Use a proxy or API gateway:
+
+```bash
+# Configure with proxy
+export ANTHROPIC_API_KEY=your_key
+export ANTHROPIC_BASE_URL=https://your-proxy.company.com
+export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+
+# Start chat session
+c8 chat
+
+# Expected output:
+# Starting MCP chat session...
+# Using: Anthropic Claude (claude-3-5-sonnet-20241022) (https://your-proxy.company.com)
+# ...
 ```
 
 ## Interactive Commands
