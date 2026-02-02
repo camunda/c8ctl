@@ -1,20 +1,30 @@
 /**
  * Unit tests for config module
+ * Tests the Modeler-compatible Connection format
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { c8ctl } from '../../src/runtime.ts';
 import {
   getUserDataDir,
-  loadProfiles,
-  saveProfiles,
-  getProfile,
-  addProfile,
-  removeProfile,
+  getModelerDataDir,
+  loadConnections,
+  saveConnections,
+  getConnection,
+  saveConnection,
+  removeConnection,
+  createConnection,
+  createDefaultLocalConnection,
+  connectionToClusterConfig,
+  connectionToProfile,
+  getConnectionLabel,
+  getAuthTypeLabel,
+  getTargetTypeLabel,
+  validateConnection,
   loadSessionState,
   saveSessionState,
   setActiveProfile,
@@ -22,6 +32,9 @@ import {
   setOutputMode,
   resolveClusterConfig,
   resolveTenantId,
+  TARGET_TYPES,
+  AUTH_TYPES,
+  type Connection,
 } from '../../src/config.ts';
 
 describe('Config Module', () => {
@@ -31,18 +44,24 @@ describe('Config Module', () => {
     assert.ok(dir.includes('c8ctl'));
   });
 
-  describe('Profile Management', () => {
+  test('getModelerDataDir returns platform-specific path', () => {
+    const dir = getModelerDataDir();
+    assert.ok(dir);
+    assert.ok(dir.includes('camunda-modeler'));
+  });
+
+  describe('Connection Management', () => {
     let testDir: string;
     let originalEnv: NodeJS.ProcessEnv;
 
     beforeEach(() => {
-      // Create temporary test directory
-      testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
+      // Create temporary test directory for modeler config
+      testDir = join(tmpdir(), `c8ctl-modeler-test-${Date.now()}`);
       mkdirSync(testDir, { recursive: true });
       
-      // Override data directory for tests
+      // Override modeler data directory for tests
       originalEnv = { ...process.env };
-      process.env.C8CTL_DATA_DIR = testDir;
+      process.env.C8CTL_MODELER_DIR = testDir;
     });
 
     afterEach(() => {
@@ -53,74 +72,437 @@ describe('Config Module', () => {
       process.env = originalEnv;
     });
 
-    test('loadProfiles returns empty array when no profiles exist', () => {
-      const profiles = loadProfiles();
-      assert.deepStrictEqual(profiles, []);
+    test('loadConnections returns empty array when no config exists', () => {
+      const connections = loadConnections();
+      assert.deepStrictEqual(connections, []);
     });
 
-    test('saveProfiles and loadProfiles work correctly', () => {
-      const profiles = [
-        { name: 'test', baseUrl: 'http://localhost:8080' },
-        { name: 'prod', baseUrl: 'https://prod.example.com', clientId: 'client123' },
+    test('saveConnections and loadConnections work correctly', () => {
+      const connections: Connection[] = [
+        {
+          id: 'conn-1',
+          name: 'test',
+          targetType: TARGET_TYPES.SELF_HOSTED,
+          contactPoint: 'http://localhost:8080/v2',
+          authType: AUTH_TYPES.NONE,
+        },
+        {
+          id: 'conn-2',
+          name: 'cloud',
+          targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+          camundaCloudClusterUrl: 'https://abc.bru-2.zeebe.camunda.io',
+          camundaCloudClientId: 'client123',
+          camundaCloudClientSecret: 'secret123',
+        },
       ];
       
-      saveProfiles(profiles);
-      const loaded = loadProfiles();
+      saveConnections(connections);
+      const loaded = loadConnections();
       
-      assert.deepStrictEqual(loaded, profiles);
+      assert.strictEqual(loaded.length, 2);
+      assert.strictEqual(loaded[0].id, 'conn-1');
+      assert.strictEqual(loaded[1].id, 'conn-2');
     });
 
-    test('getProfile returns correct profile', () => {
-      const profiles = [
-        { name: 'test', baseUrl: 'http://localhost:8080' },
-        { name: 'prod', baseUrl: 'https://prod.example.com' },
+    test('saveConnections preserves other config settings', () => {
+      // Write initial config with other settings
+      const configPath = join(testDir, 'config.json');
+      writeFileSync(configPath, JSON.stringify({
+        'someOtherPlugin.setting': true,
+        'anotherSetting': 'value',
+      }), 'utf-8');
+
+      const connections: Connection[] = [
+        {
+          id: 'conn-1',
+          name: 'test',
+          targetType: TARGET_TYPES.SELF_HOSTED,
+          contactPoint: 'http://localhost:8080/v2',
+        },
       ];
       
-      saveProfiles(profiles);
-      const profile = getProfile('prod');
+      saveConnections(connections);
       
-      assert.ok(profile);
-      assert.strictEqual(profile.name, 'prod');
-      assert.strictEqual(profile.baseUrl, 'https://prod.example.com');
+      // Verify other settings are preserved
+      const data = readFileSync(configPath, 'utf-8');
+      const config = JSON.parse(data);
+      assert.strictEqual(config['someOtherPlugin.setting'], true);
+      assert.strictEqual(config['anotherSetting'], 'value');
     });
 
-    test('getProfile returns undefined for non-existent profile', () => {
-      const profile = getProfile('nonexistent');
-      assert.strictEqual(profile, undefined);
+    test('getConnection returns correct connection by ID', () => {
+      const connections: Connection[] = [
+        {
+          id: 'conn-1',
+          name: 'test',
+          targetType: TARGET_TYPES.SELF_HOSTED,
+          contactPoint: 'http://localhost:8080/v2',
+        },
+        {
+          id: 'conn-2',
+          name: 'prod',
+          targetType: TARGET_TYPES.SELF_HOSTED,
+          contactPoint: 'https://prod.example.com/v2',
+        },
+      ];
+      
+      saveConnections(connections);
+      const conn = getConnection('conn-2');
+      
+      assert.ok(conn);
+      assert.strictEqual(conn.id, 'conn-2');
+      assert.strictEqual(conn.name, 'prod');
     });
 
-    test('addProfile adds new profile', () => {
-      addProfile({ name: 'new', baseUrl: 'http://new.com' });
+    test('getConnection returns correct connection by name', () => {
+      const connections: Connection[] = [
+        {
+          id: 'conn-1',
+          name: 'test',
+          targetType: TARGET_TYPES.SELF_HOSTED,
+          contactPoint: 'http://localhost:8080/v2',
+        },
+      ];
       
-      const profiles = loadProfiles();
-      assert.strictEqual(profiles.length, 1);
-      assert.strictEqual(profiles[0].name, 'new');
+      saveConnections(connections);
+      const conn = getConnection('test');
+      
+      assert.ok(conn);
+      assert.strictEqual(conn.id, 'conn-1');
     });
 
-    test('addProfile updates existing profile', () => {
-      addProfile({ name: 'test', baseUrl: 'http://old.com' });
-      addProfile({ name: 'test', baseUrl: 'http://new.com' });
-      
-      const profiles = loadProfiles();
-      assert.strictEqual(profiles.length, 1);
-      assert.strictEqual(profiles[0].baseUrl, 'http://new.com');
+    test('getConnection returns undefined for non-existent connection', () => {
+      const conn = getConnection('nonexistent');
+      assert.strictEqual(conn, undefined);
     });
 
-    test('removeProfile removes existing profile', () => {
-      addProfile({ name: 'test1', baseUrl: 'http://test1.com' });
-      addProfile({ name: 'test2', baseUrl: 'http://test2.com' });
+    test('saveConnection adds new connection', () => {
+      const conn: Connection = {
+        id: 'new-conn',
+        name: 'new',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://new.com/v2',
+      };
       
-      const removed = removeProfile('test1');
+      saveConnection(conn);
+      
+      const connections = loadConnections();
+      assert.strictEqual(connections.length, 1);
+      assert.strictEqual(connections[0].id, 'new-conn');
+    });
+
+    test('saveConnection updates existing connection', () => {
+      const conn: Connection = {
+        id: 'test-conn',
+        name: 'test',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://old.com/v2',
+      };
+      
+      saveConnection(conn);
+      
+      conn.contactPoint = 'http://new.com/v2';
+      saveConnection(conn);
+      
+      const connections = loadConnections();
+      assert.strictEqual(connections.length, 1);
+      assert.strictEqual(connections[0].contactPoint, 'http://new.com/v2');
+    });
+
+    test('removeConnection removes existing connection by ID', () => {
+      const connections: Connection[] = [
+        { id: 'conn-1', name: 'test1', targetType: TARGET_TYPES.SELF_HOSTED, contactPoint: 'http://test1.com/v2' },
+        { id: 'conn-2', name: 'test2', targetType: TARGET_TYPES.SELF_HOSTED, contactPoint: 'http://test2.com/v2' },
+      ];
+      
+      saveConnections(connections);
+      const removed = removeConnection('conn-1');
       
       assert.strictEqual(removed, true);
-      const profiles = loadProfiles();
-      assert.strictEqual(profiles.length, 1);
-      assert.strictEqual(profiles[0].name, 'test2');
+      const remaining = loadConnections();
+      assert.strictEqual(remaining.length, 1);
+      assert.strictEqual(remaining[0].id, 'conn-2');
     });
 
-    test('removeProfile returns false for non-existent profile', () => {
-      const removed = removeProfile('nonexistent');
+    test('removeConnection removes existing connection by name', () => {
+      const connections: Connection[] = [
+        { id: 'conn-1', name: 'test1', targetType: TARGET_TYPES.SELF_HOSTED, contactPoint: 'http://test1.com/v2' },
+        { id: 'conn-2', name: 'test2', targetType: TARGET_TYPES.SELF_HOSTED, contactPoint: 'http://test2.com/v2' },
+      ];
+      
+      saveConnections(connections);
+      const removed = removeConnection('test1');
+      
+      assert.strictEqual(removed, true);
+      const remaining = loadConnections();
+      assert.strictEqual(remaining.length, 1);
+    });
+
+    test('removeConnection returns false for non-existent connection', () => {
+      const removed = removeConnection('nonexistent');
       assert.strictEqual(removed, false);
+    });
+
+    test('createConnection generates new connection with UUID', () => {
+      const conn = createConnection('My Connection');
+      
+      assert.ok(conn.id);
+      assert.ok(conn.id.length > 30); // UUID format
+      assert.strictEqual(conn.name, 'My Connection');
+      assert.strictEqual(conn.targetType, TARGET_TYPES.SELF_HOSTED);
+      assert.strictEqual(conn.contactPoint, 'http://localhost:8080/v2');
+    });
+
+    test('createDefaultLocalConnection creates c8run connection', () => {
+      const conn = createDefaultLocalConnection();
+      
+      assert.ok(conn.id);
+      assert.strictEqual(conn.name, 'c8run (local)');
+      assert.strictEqual(conn.targetType, TARGET_TYPES.SELF_HOSTED);
+      assert.strictEqual(conn.contactPoint, 'http://localhost:8080/v2');
+      assert.strictEqual(conn.authType, AUTH_TYPES.NONE);
+    });
+  });
+
+  describe('Connection Conversion', () => {
+    test('connectionToClusterConfig converts self-hosted with no auth', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'local',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080/v2',
+        authType: AUTH_TYPES.NONE,
+      };
+      
+      const config = connectionToClusterConfig(conn);
+      
+      assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(config.clientId, undefined);
+      assert.strictEqual(config.username, undefined);
+    });
+
+    test('connectionToClusterConfig converts self-hosted with basic auth', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'local',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080/v2',
+        authType: AUTH_TYPES.BASIC,
+        basicAuthUsername: 'demo',
+        basicAuthPassword: 'demo',
+      };
+      
+      const config = connectionToClusterConfig(conn);
+      
+      assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(config.username, 'demo');
+      assert.strictEqual(config.password, 'demo');
+    });
+
+    test('connectionToClusterConfig converts self-hosted with OAuth', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'sm',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'https://sm.example.com/v2',
+        authType: AUTH_TYPES.OAUTH,
+        clientId: 'sm-client',
+        clientSecret: 'sm-secret',
+        oauthURL: 'https://auth.example.com/token',
+        audience: 'sm-audience',
+      };
+      
+      const config = connectionToClusterConfig(conn);
+      
+      assert.strictEqual(config.baseUrl, 'https://sm.example.com/v2');
+      assert.strictEqual(config.clientId, 'sm-client');
+      assert.strictEqual(config.clientSecret, 'sm-secret');
+      assert.strictEqual(config.oAuthUrl, 'https://auth.example.com/token');
+      assert.strictEqual(config.audience, 'sm-audience');
+    });
+
+    test('connectionToClusterConfig converts Camunda Cloud connection', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'cloud',
+        targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+        camundaCloudClusterUrl: 'https://abc.bru-2.zeebe.camunda.io',
+        camundaCloudClientId: 'cloud-client',
+        camundaCloudClientSecret: 'cloud-secret',
+      };
+      
+      const config = connectionToClusterConfig(conn);
+      
+      // Cloud connections use the cluster URL directly
+      assert.strictEqual(config.baseUrl, 'https://abc.bru-2.zeebe.camunda.io');
+      assert.strictEqual(config.clientId, 'cloud-client');
+      assert.strictEqual(config.clientSecret, 'cloud-secret');
+      assert.strictEqual(config.oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
+      // Cloud uses URL as audience
+      assert.strictEqual(config.audience, 'https://abc.bru-2.zeebe.camunda.io');
+    });
+
+    test('connectionToProfile converts connection to legacy profile format', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'test',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080/v2',
+        authType: AUTH_TYPES.BASIC,
+        basicAuthUsername: 'demo',
+        basicAuthPassword: 'demo',
+        tenantId: 'test-tenant',
+      };
+      
+      const profile = connectionToProfile(conn);
+      
+      assert.strictEqual(profile.name, 'test');
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(profile.username, 'demo');
+      assert.strictEqual(profile.password, 'demo');
+      assert.strictEqual(profile.defaultTenantId, 'test-tenant');
+    });
+  });
+
+  describe('Connection Labels', () => {
+    test('getConnectionLabel returns name if present', () => {
+      const conn: Connection = {
+        id: 'conn-1',
+        name: 'My Connection',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+      };
+      
+      assert.strictEqual(getConnectionLabel(conn), 'My Connection');
+    });
+
+    test('getConnectionLabel returns id if no name', () => {
+      const conn: Connection = {
+        id: 'conn-uuid-123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+      };
+      
+      // Without name or URL, returns 'Unnamed connection'
+      assert.strictEqual(getConnectionLabel(conn), 'Unnamed connection');
+    });
+
+    test('getConnectionLabel returns URL-based label if no name but has URL', () => {
+      const conn: Connection = {
+        id: 'conn-uuid-123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080/v2',
+      };
+      
+      assert.strictEqual(getConnectionLabel(conn), 'Unnamed (http://localhost:8080/v2)');
+    });
+
+    test('getAuthTypeLabel returns correct labels', () => {
+      assert.strictEqual(getAuthTypeLabel({
+        id: '1', targetType: TARGET_TYPES.SELF_HOSTED, authType: AUTH_TYPES.NONE
+      }), 'None');
+      
+      assert.strictEqual(getAuthTypeLabel({
+        id: '1', targetType: TARGET_TYPES.SELF_HOSTED, authType: AUTH_TYPES.BASIC
+      }), 'Basic');
+      
+      assert.strictEqual(getAuthTypeLabel({
+        id: '1', targetType: TARGET_TYPES.SELF_HOSTED, authType: AUTH_TYPES.OAUTH
+      }), 'OAuth');
+      
+      assert.strictEqual(getAuthTypeLabel({
+        id: '1', targetType: TARGET_TYPES.CAMUNDA_CLOUD
+      }), 'OAuth (Cloud)');
+    });
+
+    test('getTargetTypeLabel returns correct labels', () => {
+      assert.strictEqual(getTargetTypeLabel({
+        id: '1', targetType: TARGET_TYPES.SELF_HOSTED
+      }), 'Self-Hosted');
+      
+      assert.strictEqual(getTargetTypeLabel({
+        id: '1', targetType: TARGET_TYPES.CAMUNDA_CLOUD
+      }), 'Camunda Cloud');
+    });
+  });
+
+  describe('Connection Validation', () => {
+    test('validateConnection rejects missing id', () => {
+      const errors = validateConnection({ targetType: TARGET_TYPES.SELF_HOSTED });
+      assert.ok(errors.includes('Connection must have an ID'));
+    });
+
+    test('validateConnection rejects missing targetType', () => {
+      const errors = validateConnection({ id: '123' });
+      assert.ok(errors.includes('Target type is required (camundaCloud or selfHosted)'));
+    });
+
+    test('validateConnection validates Camunda Cloud connection', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+      });
+      
+      assert.ok(errors.includes('Cluster URL is required for Camunda Cloud'));
+      assert.ok(errors.includes('Client ID is required for Camunda Cloud'));
+      assert.ok(errors.includes('Client Secret is required for Camunda Cloud'));
+    });
+
+    test('validateConnection accepts valid Camunda Cloud connection', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+        camundaCloudClusterUrl: 'https://abc.bru-2.zeebe.camunda.io',
+        camundaCloudClientId: 'client',
+        camundaCloudClientSecret: 'secret',
+      });
+      
+      assert.strictEqual(errors.length, 0);
+    });
+
+    test('validateConnection validates self-hosted with basic auth', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080',
+        authType: AUTH_TYPES.BASIC,
+      });
+      
+      assert.ok(errors.includes('Username is required for Basic authentication'));
+      assert.ok(errors.includes('Password is required for Basic authentication'));
+    });
+
+    test('validateConnection validates self-hosted with OAuth', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080',
+        authType: AUTH_TYPES.OAUTH,
+      });
+      
+      assert.ok(errors.includes('Client ID is required for OAuth authentication'));
+      assert.ok(errors.includes('Client Secret is required for OAuth authentication'));
+      assert.ok(errors.includes('OAuth URL is required for OAuth authentication'));
+      assert.ok(errors.includes('Audience is required for OAuth authentication'));
+    });
+
+    test('validateConnection accepts valid self-hosted with no auth', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://localhost:8080',
+        authType: AUTH_TYPES.NONE,
+      });
+      
+      assert.strictEqual(errors.length, 0);
+    });
+
+    test('validateConnection rejects invalid URL format', () => {
+      const errors = validateConnection({
+        id: '123',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'localhost:8080', // missing http://
+      });
+      
+      assert.ok(errors.includes('Cluster URL must start with http://, https://, grpc://, or grpcs://'));
     });
   });
 
@@ -185,16 +567,20 @@ describe('Config Module', () => {
 
   describe('Configuration Resolution', () => {
     let testDir: string;
+    let modelerDir: string;
     let originalEnv: NodeJS.ProcessEnv;
 
     beforeEach(() => {
-      // Create temporary test directory
+      // Create temporary test directories
       testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
+      modelerDir = join(tmpdir(), `c8ctl-modeler-test-${Date.now()}`);
       mkdirSync(testDir, { recursive: true });
+      mkdirSync(modelerDir, { recursive: true });
       
-      // Override data directory and clear Camunda env vars
+      // Override data directories
       originalEnv = { ...process.env };
       process.env.C8CTL_DATA_DIR = testDir;
+      process.env.C8CTL_MODELER_DIR = modelerDir;
       
       // Reset c8ctl runtime state before each test
       c8ctl.activeProfile = undefined;
@@ -217,32 +603,46 @@ describe('Config Module', () => {
       if (existsSync(testDir)) {
         rmSync(testDir, { recursive: true, force: true });
       }
+      if (existsSync(modelerDir)) {
+        rmSync(modelerDir, { recursive: true, force: true });
+      }
       process.env = originalEnv;
     });
 
-    test('resolveClusterConfig uses profile flag if provided', () => {
-      addProfile({
+    test('resolveClusterConfig uses connection by name', () => {
+      const conn: Connection = {
+        id: 'flag-conn',
         name: 'flagprofile',
-        baseUrl: 'http://flag.com',
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://flag.com/v2',
+        authType: AUTH_TYPES.OAUTH,
         clientId: 'flag-client',
-      });
+        clientSecret: 'flag-secret',
+        oauthURL: 'http://flag.com/oauth',
+        audience: 'flag-audience',
+      };
+      saveConnection(conn);
       
       const config = resolveClusterConfig('flagprofile');
       
-      assert.strictEqual(config.baseUrl, 'http://flag.com');
+      assert.strictEqual(config.baseUrl, 'http://flag.com/v2');
       assert.strictEqual(config.clientId, 'flag-client');
     });
 
     test('resolveClusterConfig uses session profile if no flag', () => {
-      addProfile({
+      const conn: Connection = {
+        id: 'session-conn',
         name: 'sessionprofile',
-        baseUrl: 'http://session.com',
-      });
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://session.com/v2',
+        authType: AUTH_TYPES.NONE,
+      };
+      saveConnection(conn);
       setActiveProfile('sessionprofile');
       
       const config = resolveClusterConfig();
       
-      assert.strictEqual(config.baseUrl, 'http://session.com');
+      assert.strictEqual(config.baseUrl, 'http://session.com/v2');
     });
 
     test('resolveClusterConfig uses env vars if no profile', () => {
@@ -270,12 +670,15 @@ describe('Config Module', () => {
       assert.strictEqual(tenantId, 'session-tenant');
     });
 
-    test('resolveTenantId uses profile default tenant', () => {
-      addProfile({
+    test('resolveTenantId uses connection tenant', () => {
+      const conn: Connection = {
+        id: 'tenant-conn',
         name: 'tenant-profile',
-        baseUrl: 'http://test.com',
-        defaultTenantId: 'profile-tenant',
-      });
+        targetType: TARGET_TYPES.SELF_HOSTED,
+        contactPoint: 'http://test.com/v2',
+        tenantId: 'profile-tenant',
+      };
+      saveConnection(conn);
       setActiveProfile('tenant-profile');
       
       const tenantId = resolveTenantId();
@@ -292,288 +695,6 @@ describe('Config Module', () => {
     test('resolveTenantId falls back to <default>', () => {
       const tenantId = resolveTenantId();
       assert.strictEqual(tenantId, '<default>');
-    });
-  });
-
-  describe('Modeler Profile Integration', () => {
-    let testDir: string;
-    let modelerDir: string;
-    let originalEnv: NodeJS.ProcessEnv;
-
-    beforeEach(() => {
-      // Create temporary test directories
-      testDir = join(tmpdir(), `c8ctl-test-${Date.now()}`);
-      modelerDir = join(tmpdir(), `modeler-test-${Date.now()}`);
-      mkdirSync(testDir, { recursive: true });
-      mkdirSync(modelerDir, { recursive: true });
-      
-      // Mock directories using platform-agnostic XDG_CONFIG_HOME
-      // This works because getModelerDataDir() respects XDG_CONFIG_HOME on Linux
-      originalEnv = { ...process.env };
-      process.env.XDG_DATA_HOME = testDir;
-      process.env.XDG_CONFIG_HOME = modelerDir;
-      
-      // On macOS, we need to override HOME to use our test directory
-      // because getModelerDataDir() uses ~/Library/Application Support/camunda-modeler
-      if (process.platform === 'darwin') {
-        process.env.HOME = testDir;
-      }
-    });
-
-    afterEach(() => {
-      if (existsSync(testDir)) {
-        rmSync(testDir, { recursive: true, force: true });
-      }
-      if (existsSync(modelerDir)) {
-        rmSync(modelerDir, { recursive: true, force: true });
-      }
-      process.env = originalEnv;
-    });
-
-    // Test that loadModelerProfiles returns empty array when no profiles.json exists
-    // Note: This test may find profiles from actual Camunda Modeler installation
-    // We verify the function works by checking a directory we control
-    test('loadModelerProfiles returns empty array if no file', async () => {
-      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      
-      // Clean up any existing profiles.json in the modeler directory
-      const profilesPath = join(modelerDataDir, 'profiles.json');
-      if (existsSync(profilesPath)) {
-        const backup = profilesPath + '.backup';
-        // Temporarily move the file
-        try {
-          if (existsSync(backup)) {
-            rmSync(backup);
-          }
-          const { renameSync } = await import('node:fs');
-          renameSync(profilesPath, backup);
-          
-          // Now test with no file
-          const profiles = loadModelerProfiles();
-          assert.strictEqual(profiles.length, 0);
-          
-          // Restore the file
-          renameSync(backup, profilesPath);
-        } catch (error) {
-          // If we can't move the file, just verify the function doesn't crash
-          const profiles = loadModelerProfiles();
-          assert.ok(Array.isArray(profiles));
-        }
-      } else {
-        // No file exists, should return empty array
-        const profiles = loadModelerProfiles();
-        assert.strictEqual(profiles.length, 0);
-      }
-    });
-
-    test('loadModelerProfiles reads profiles.json from modeler directory', async () => {
-      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      mkdirSync(modelerDataDir, { recursive: true });
-      
-      const modelerProfiles = {
-        profiles: [
-          {
-            name: 'Local Dev',
-            clusterId: 'local-cluster',
-            clusterUrl: 'http://localhost:8080',
-            audience: '',
-            clientId: '',
-            clientSecret: ''
-          }
-        ]
-      };
-      
-      writeFileSync(
-        join(modelerDataDir, 'profiles.json'),
-        JSON.stringify(modelerProfiles, null, 2),
-        'utf-8'
-      );
-      
-      const profiles = loadModelerProfiles();
-      assert.strictEqual(profiles.length, 1);
-      assert.strictEqual(profiles[0].name, 'Local Dev');
-      assert.strictEqual(profiles[0].clusterId, 'local-cluster');
-    });
-
-    test('getModelerProfile finds profile by name', async () => {
-      const { loadModelerProfiles, getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      mkdirSync(modelerDataDir, { recursive: true });
-      
-      const modelerProfiles = {
-        profiles: [
-          { name: 'Cloud Cluster', clusterId: 'abc123', clusterUrl: 'https://abc123.zeebe.camunda.io' }
-        ]
-      };
-      
-      writeFileSync(
-        join(modelerDataDir, 'profiles.json'),
-        JSON.stringify(modelerProfiles, null, 2),
-        'utf-8'
-      );
-      
-      const profile = getModelerProfile('Cloud Cluster');
-      assert.ok(profile);
-      assert.strictEqual(profile.name, 'Cloud Cluster');
-    });
-
-    test('getModelerProfile finds profile by clusterId', async () => {
-      const { getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      mkdirSync(modelerDataDir, { recursive: true });
-      
-      const modelerProfiles = {
-        profiles: [
-          { name: 'Cloud Cluster', clusterId: 'abc123', clusterUrl: 'https://abc123.zeebe.camunda.io' }
-        ]
-      };
-      
-      writeFileSync(
-        join(modelerDataDir, 'profiles.json'),
-        JSON.stringify(modelerProfiles, null, 2),
-        'utf-8'
-      );
-      
-      const profile = getModelerProfile('abc123');
-      assert.ok(profile);
-      assert.strictEqual(profile.clusterId, 'abc123');
-    });
-
-    test('getModelerProfile handles modeler: prefix', async () => {
-      const { getModelerProfile, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      mkdirSync(modelerDataDir, { recursive: true });
-      
-      const modelerProfiles = {
-        profiles: [
-          { name: 'Test Profile', clusterId: 'test123', clusterUrl: 'http://localhost:8080' }
-        ]
-      };
-      
-      writeFileSync(
-        join(modelerDataDir, 'profiles.json'),
-        JSON.stringify(modelerProfiles, null, 2),
-        'utf-8'
-      );
-      
-      const profile = getModelerProfile('modeler:Test Profile');
-      assert.ok(profile);
-      assert.strictEqual(profile.name, 'Test Profile');
-    });
-
-    test('constructApiUrl appends /v2 for localhost URLs', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterUrl: 'http://localhost:8080' });
-      assert.strictEqual(url, 'http://localhost:8080/v2');
-    });
-
-    test('constructApiUrl supports any port number', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterUrl: 'http://localhost:9090' });
-      assert.strictEqual(url, 'http://localhost:9090/v2');
-    });
-
-    test('constructApiUrl does not modify URLs with /v2', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterUrl: 'http://localhost:8080/v2' });
-      assert.strictEqual(url, 'http://localhost:8080/v2');
-    });
-
-    test('constructApiUrl handles cloud URLs without /v2', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterUrl: 'https://abc123.region.zeebe.camunda.io' });
-      assert.strictEqual(url, 'https://abc123.region.zeebe.camunda.io');
-    });
-
-    test('constructApiUrl uses self-managed URLs as-is if no /v2', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      // Self-managed clusters should include /v2 in their URL if needed
-      const url = constructApiUrl({ clusterUrl: 'https://my-camunda-cluster.example.com' });
-      assert.strictEqual(url, 'https://my-camunda-cluster.example.com');
-    });
-
-    test('constructApiUrl handles 127.0.0.1 like localhost', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterUrl: 'http://127.0.0.1:8080' });
-      assert.strictEqual(url, 'http://127.0.0.1:8080/v2');
-    });
-
-    test('constructApiUrl constructs cloud URL from clusterId', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({ clusterId: 'abc123-def456' });
-      assert.strictEqual(url, 'https://abc123-def456.zeebe.camunda.io');
-    });
-
-    test('constructApiUrl falls back to localhost', async () => {
-      const { constructApiUrl } = await import('../../src/config.ts');
-      const url = constructApiUrl({});
-      assert.strictEqual(url, 'http://localhost:8080/v2');
-    });
-
-    test('convertModelerProfile creates c8ctl profile with modeler: prefix', async () => {
-      const { convertModelerProfile } = await import('../../src/config.ts');
-      const modelerProfile = {
-        name: 'Test',
-        clusterUrl: 'http://localhost:8080',
-        clientId: 'test-client',
-        clientSecret: 'test-secret'
-      };
-      
-      const c8ctlProfile = convertModelerProfile(modelerProfile);
-      assert.strictEqual(c8ctlProfile.name, 'modeler:Test');
-      assert.strictEqual(c8ctlProfile.baseUrl, 'http://localhost:8080/v2');
-      assert.strictEqual(c8ctlProfile.clientId, 'test-client');
-    });
-
-    test('convertModelerProfile sets OAuth URL for cloud profiles', async () => {
-      const { convertModelerProfile } = await import('../../src/config.ts');
-      const modelerProfile = {
-        name: 'Cloud',
-        clusterUrl: 'https://abc123.zeebe.camunda.io',
-        audience: 'zeebe.camunda.io',
-        clientId: 'cloud-client',
-        clientSecret: 'cloud-secret'
-      };
-      
-      const c8ctlProfile = convertModelerProfile(modelerProfile);
-      assert.strictEqual(c8ctlProfile.oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
-      assert.strictEqual(c8ctlProfile.audience, 'zeebe.camunda.io');
-    });
-
-    test('convertModelerProfile uses clusterId as name fallback', async () => {
-      const { convertModelerProfile } = await import('../../src/config.ts');
-      const modelerProfile = {
-        clusterId: 'fallback-id',
-        clusterUrl: 'http://localhost:8080'
-      };
-      
-      const c8ctlProfile = convertModelerProfile(modelerProfile);
-      assert.strictEqual(c8ctlProfile.name, 'modeler:fallback-id');
-    });
-
-    test('getProfile resolves modeler profiles with modeler: prefix', async () => {
-      const { getProfile, getModelerDataDir } = await import('../../src/config.ts');
-      const modelerDataDir = getModelerDataDir();
-      mkdirSync(modelerDataDir, { recursive: true });
-      
-      const modelerProfiles = {
-        profiles: [
-          { name: 'Modeler Test', clusterUrl: 'http://localhost:8080' }
-        ]
-      };
-      
-      writeFileSync(
-        join(modelerDataDir, 'profiles.json'),
-        JSON.stringify(modelerProfiles, null, 2),
-        'utf-8'
-      );
-      
-      const profile = getProfile('modeler:Modeler Test');
-      assert.ok(profile);
-      assert.strictEqual(profile.name, 'modeler:Modeler Test');
-      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
     });
   });
 });
