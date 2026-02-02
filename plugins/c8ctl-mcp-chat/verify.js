@@ -95,5 +95,7 @@ console.log('\n✅ Plugin structure verification passed!\n');
 console.log('The plugin is correctly structured and ready to be loaded into c8ctl.');
 console.log('\nTo install:');
 console.log('  npm install file:./plugins/c8ctl-mcp-chat');
+console.log('\nTo test:');
+console.log('  cd plugins/c8ctl-mcp-chat && npm test');
 console.log('\nTo use:');
 console.log('  c8 chat');

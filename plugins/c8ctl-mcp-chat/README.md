@@ -150,10 +150,27 @@ The plugin:
 
 ```
 plugins/c8ctl-mcp-chat/
-├── package.json          # Plugin metadata and dependencies
-├── c8ctl-plugin.js       # Plugin implementation with LLM integration
-└── README.md             # This file
+├── package.json            # Plugin metadata and dependencies
+├── c8ctl-plugin.js         # Plugin implementation with LLM integration
+├── version-check.test.js   # Unit tests for version checking logic
+├── verify.js               # Plugin structure validation
+└── README.md               # This file
 ```
+
+### Running Tests
+
+The plugin includes unit tests for the version checking logic:
+
+```bash
+cd plugins/c8ctl-mcp-chat
+npm test
+```
+
+The tests verify:
+- Correct acceptance of versions 8.9.0 and later
+- Correct rejection of versions before 8.9
+- Regression test for the parseFloat bug (versions 8.10, 8.11, etc.)
+- Edge cases like single-digit versions and versions with extra segments
 
 ### Local Testing
 
