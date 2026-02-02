@@ -1,4 +1,3 @@
-/**
  * Help and version commands
  */
 
@@ -102,8 +101,8 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
-  c8ctl completion bash              Generate bash completion script
   c8ctl sync plugin                  Synchronize plugins
+  c8ctl completion bash              Generate bash completion script
 `.trim());
 }
 
