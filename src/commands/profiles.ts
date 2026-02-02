@@ -11,11 +11,9 @@ import {
   getProfileOrModeler,
   addProfile as addProfileConfig,
   removeProfile as removeProfileConfig,
+  MODELER_PREFIX,
   type Profile,
 } from '../config.ts';
-
-// Modeler profile prefix constant
-const MODELER_PREFIX = 'modeler:';
 
 /**
  * List all profiles (c8ctl + Modeler)

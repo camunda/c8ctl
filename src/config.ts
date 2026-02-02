@@ -340,7 +340,7 @@ export function removeProfile(name: string): boolean {
 // Modeler Connection Management - READ-ONLY from settings.json
 // ============================================================================
 
-const MODELER_PREFIX = 'modeler:';
+export const MODELER_PREFIX = 'modeler:';
 
 interface ModelerSettingsFile {
   c8connections?: Connection[];
