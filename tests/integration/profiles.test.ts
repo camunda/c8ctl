@@ -1,5 +1,6 @@
 /**
- * Integration tests for profile management
+ * Integration tests for profile/connection management
+ * Tests the Connection-based API for managing Modeler-compatible connections
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -10,18 +11,25 @@ import { tmpdir } from 'node:os';
 
 describe('Profile Management Integration Tests', () => {
   let testDir: string;
+  let modelerDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `c8ctl-profile-test-${Date.now()}`);
+    modelerDir = join(tmpdir(), `c8ctl-modeler-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
+    mkdirSync(modelerDir, { recursive: true });
     originalEnv = { ...process.env };
     process.env.C8CTL_DATA_DIR = testDir;
+    process.env.C8CTL_MODELER_DIR = modelerDir;
   });
 
   afterEach(() => {
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
+    }
+    if (existsSync(modelerDir)) {
+      rmSync(modelerDir, { recursive: true, force: true });
     }
     process.env = originalEnv;
   });
@@ -33,6 +41,7 @@ describe('Profile Management Integration Tests', () => {
       name: 'test-profile',
       baseUrl: 'http://test.com',
       clientId: 'test-client',
+      clientSecret: 'test-secret',  // Need both clientId and clientSecret for OAuth
       defaultTenantId: 'test-tenant',
     });
 

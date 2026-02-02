@@ -194,12 +194,12 @@ async function main() {
       process.exit(1);
     }
     addProfile(args[0], {
-      baseUrl: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
+      url: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
       clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
       clientSecret: typeof values.clientSecret === 'string' ? values.clientSecret : undefined,
       audience: typeof values.audience === 'string' ? values.audience : undefined,
-      oAuthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
-      defaultTenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
+      oauthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
+      tenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
     });
     return;
   }
