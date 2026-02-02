@@ -1,214 +1,162 @@
 /**
- * Connection management commands (Modeler-compatible)
- * Connections are stored in Camunda Modeler's config.json format
+ * Profile management commands
+ * c8ctl profiles are stored in DATA_DIR/c8ctl/profiles.json
+ * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
-import { randomUUID } from 'node:crypto';
 import { getLogger } from '../logger.ts';
 import {
-  loadConnections,
-  saveConnection,
-  removeConnection,
-  getConnection,
-  getConnectionLabel,
-  getAuthTypeLabel,
-  getTargetTypeLabel,
-  validateConnection,
-  TARGET_TYPES,
-  AUTH_TYPES,
-  type Connection,
-  type TargetType,
-  type AuthType,
+  getAllProfiles,
+  getProfile,
+  getProfileOrModeler,
+  addProfile as addProfileConfig,
+  removeProfile as removeProfileConfig,
+  MODELER_PREFIX,
+  type Profile,
 } from '../config.ts';
 
 /**
- * List all connections
+ * List all profiles (c8ctl + Modeler)
  */
 export function listProfiles(): void {
   const logger = getLogger();
-  const connections = loadConnections();
+  const profiles = getAllProfiles();
 
-  if (connections.length === 0) {
-    logger.info('No connections configured');
+  if (profiles.length === 0) {
+    logger.info('No profiles configured');
     logger.info('');
-    logger.info('Add a connection with: c8ctl profiles add <name> --url <cluster-url>');
-    logger.info('Or configure connections in Camunda Modeler and they will appear here.');
+    logger.info('Add a profile with: c8ctl profiles add <name> --url <cluster-url>');
+    logger.info('Or configure connections in Camunda Modeler and they will appear with "modeler:" prefix.');
     return;
   }
 
-  interface ConnectionTableRow {
+  interface ProfileTableRow {
     Name: string;
-    Type: string;
     URL: string;
-    Auth: string;
     Tenant: string;
+    Source: string;
   }
 
-  const tableData: ConnectionTableRow[] = connections.map(conn => {
-    const url = conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD
-      ? conn.camundaCloudClusterUrl
-      : conn.contactPoint;
-
+  const tableData: ProfileTableRow[] = profiles.map(profile => {
+    const isModeler = profile.name.startsWith(MODELER_PREFIX);
+    
     return {
-      Name: getConnectionLabel(conn),
-      Type: getTargetTypeLabel(conn),
-      URL: url || '(not set)',
-      Auth: getAuthTypeLabel(conn),
-      Tenant: conn.tenantId || '<default>',
+      Name: profile.name,
+      URL: profile.baseUrl || '(not set)',
+      Tenant: profile.defaultTenantId || '<default>',
+      Source: isModeler ? 'Modeler' : 'c8ctl',
     };
   });
 
   logger.table(tableData);
+  
+  // Show hint about read-only Modeler profiles
+  const hasModelerProfiles = profiles.some(p => p.name.startsWith(MODELER_PREFIX));
+  if (hasModelerProfiles) {
+    logger.info('');
+    logger.info(`Note: Modeler profiles (prefixed with "${MODELER_PREFIX}") are read-only. Manage them in Camunda Modeler.`);
+  }
 }
 
 /**
- * Show connection details
+ * Show profile details
  */
-export function showProfile(identifier: string): void {
+export function showProfile(name: string): void {
   const logger = getLogger();
-  const conn = getConnection(identifier);
+  const profile = getProfileOrModeler(name);
 
-  if (!conn) {
-    logger.error(`Connection '${identifier}' not found`);
+  if (!profile) {
+    logger.error(`Profile '${name}' not found`);
     process.exit(1);
   }
 
-  logger.info(`Connection: ${getConnectionLabel(conn)}`);
-  logger.info(`  ID: ${conn.id}`);
-  logger.info(`  Type: ${getTargetTypeLabel(conn)}`);
-
-  if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
-    logger.info(`  Cluster URL: ${conn.camundaCloudClusterUrl || '(not set)'}`);
-    logger.info(`  Client ID: ${conn.camundaCloudClientId || '(not set)'}`);
-    logger.info(`  Client Secret: ${conn.camundaCloudClientSecret ? '********' : '(not set)'}`);
-  } else {
-    logger.info(`  Contact Point: ${conn.contactPoint || '(not set)'}`);
-    logger.info(`  Auth Type: ${getAuthTypeLabel(conn)}`);
-
-    if (conn.authType === AUTH_TYPES.BASIC) {
-      logger.info(`  Username: ${conn.basicAuthUsername || '(not set)'}`);
-      logger.info(`  Password: ${conn.basicAuthPassword ? '********' : '(not set)'}`);
-    } else if (conn.authType === AUTH_TYPES.OAUTH) {
-      logger.info(`  Client ID: ${conn.clientId || '(not set)'}`);
-      logger.info(`  Client Secret: ${conn.clientSecret ? '********' : '(not set)'}`);
-      logger.info(`  OAuth URL: ${conn.oauthURL || '(not set)'}`);
-      logger.info(`  Audience: ${conn.audience || '(not set)'}`);
-      if (conn.scope) {
-        logger.info(`  Scope: ${conn.scope}`);
-      }
-    }
-
-    if (conn.tenantId) {
-      logger.info(`  Tenant ID: ${conn.tenantId}`);
-    }
-    if (conn.operateUrl) {
-      logger.info(`  Operate URL: ${conn.operateUrl}`);
-    }
+  const isModeler = profile.name.startsWith(MODELER_PREFIX);
+  
+  logger.info(`Profile: ${profile.name}`);
+  logger.info(`  Source: ${isModeler ? 'Camunda Modeler (read-only)' : 'c8ctl'}`);
+  logger.info(`  Base URL: ${profile.baseUrl}`);
+  
+  if (profile.username) {
+    logger.info(`  Username: ${profile.username}`);
+    logger.info(`  Password: ${profile.password ? '********' : '(not set)'}`);
+  }
+  
+  if (profile.clientId) {
+    logger.info(`  Client ID: ${profile.clientId}`);
+    logger.info(`  Client Secret: ${profile.clientSecret ? '********' : '(not set)'}`);
+  }
+  
+  if (profile.audience) {
+    logger.info(`  Audience: ${profile.audience}`);
+  }
+  
+  if (profile.oAuthUrl) {
+    logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
+  }
+  
+  if (profile.defaultTenantId) {
+    logger.info(`  Default Tenant: ${profile.defaultTenantId}`);
   }
 }
 
-export interface AddConnectionOptions {
-  // Common options
+export interface AddProfileOptions {
   url?: string;
-  type?: string;
-  tenantId?: string;
-  operateUrl?: string;
-
-  // Cloud options
   clientId?: string;
   clientSecret?: string;
-
-  // Self-hosted auth options
-  authType?: string;
+  audience?: string;
+  oauthUrl?: string;
   username?: string;
   password?: string;
-  oauthUrl?: string;
-  audience?: string;
-  scope?: string;
+  tenantId?: string;
 }
 
 /**
- * Add a connection
+ * Add a c8ctl profile
  */
-export function addProfile(name: string, options: AddConnectionOptions): void {
+export function addProfile(name: string, options: AddProfileOptions): void {
   const logger = getLogger();
 
-  // Determine target type
-  let targetType: TargetType = TARGET_TYPES.SELF_HOSTED;
-  if (options.type === 'cloud' || options.type === 'camundaCloud') {
-    targetType = TARGET_TYPES.CAMUNDA_CLOUD;
-  } else if (options.url?.includes('zeebe.camunda.io')) {
-    targetType = TARGET_TYPES.CAMUNDA_CLOUD;
-  }
-
-  const connection: Connection = {
-    id: randomUUID(),
-    name,
-    targetType,
-  };
-
-  if (targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
-    if (!options.url) {
-      logger.error('Cluster URL is required. Use --url flag');
-      process.exit(1);
-    }
-    connection.camundaCloudClusterUrl = options.url;
-    connection.camundaCloudClientId = options.clientId;
-    connection.camundaCloudClientSecret = options.clientSecret;
-  } else {
-    connection.contactPoint = options.url || 'http://localhost:8080/v2';
-    connection.tenantId = options.tenantId;
-    connection.operateUrl = options.operateUrl;
-
-    // Determine auth type
-    let authType: AuthType = AUTH_TYPES.NONE;
-    if (options.authType === 'basic' || (options.username && options.password)) {
-      authType = AUTH_TYPES.BASIC;
-    } else if (options.authType === 'oauth' || (options.clientId && options.clientSecret && !options.url?.includes('zeebe.camunda.io'))) {
-      authType = AUTH_TYPES.OAUTH;
-    } else if (options.authType) {
-      authType = options.authType as AuthType;
-    }
-
-    connection.authType = authType;
-
-    if (authType === AUTH_TYPES.BASIC) {
-      connection.basicAuthUsername = options.username;
-      connection.basicAuthPassword = options.password;
-    } else if (authType === AUTH_TYPES.OAUTH) {
-      connection.clientId = options.clientId;
-      connection.clientSecret = options.clientSecret;
-      connection.oauthURL = options.oauthUrl;
-      connection.audience = options.audience;
-      connection.scope = options.scope;
-    }
-  }
-
-  // Validate connection
-  const errors = validateConnection(connection);
-  if (errors.length > 0) {
-    logger.error('Invalid connection configuration:');
-    for (const error of errors) {
-      logger.error(`  - ${error}`);
-    }
+  // Prevent adding profiles with "modeler:" prefix
+  if (name.startsWith(MODELER_PREFIX)) {
+    logger.error(`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`);
+    logger.info('Please choose a different name or manage this profile in Camunda Modeler');
     process.exit(1);
   }
 
-  saveConnection(connection);
-  logger.success(`Connection '${name}' added (ID: ${connection.id})`);
+  const profile: Profile = {
+    name,
+    baseUrl: options.url || 'http://localhost:8080/v2',
+    clientId: options.clientId,
+    clientSecret: options.clientSecret,
+    audience: options.audience,
+    oAuthUrl: options.oauthUrl,
+    username: options.username,
+    password: options.password,
+    defaultTenantId: options.tenantId,
+  };
+
+  addProfileConfig(profile);
+  logger.success(`Profile '${name}' added`);
 }
 
 /**
- * Remove a connection
+ * Remove a c8ctl profile
  */
 export function removeProfile(name: string): void {
   const logger = getLogger();
 
-  const removed = removeConnection(name);
+  // Prevent removing Modeler profiles
+  if (name.startsWith(MODELER_PREFIX)) {
+    logger.error('Cannot remove Modeler profiles via c8ctl');
+    logger.info('Manage Modeler connections directly in Camunda Modeler');
+    process.exit(1);
+  }
+
+  const removed = removeProfileConfig(name);
   if (removed) {
-    logger.success(`Connection '${name}' removed`);
+    logger.success(`Profile '${name}' removed`);
   } else {
-    logger.error(`Connection '${name}' not found`);
+    logger.error(`Profile '${name}' not found`);
     process.exit(1);
   }
 }
