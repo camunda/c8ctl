@@ -1,6 +1,23 @@
 /**
  * c8ctl MCP Chat Plugin
  * Provides interactive chat with Camunda 8.9+ clusters via MCP gateway
+ * 
+ * NOTE: This is an initial implementation that establishes the MCP connection
+ * and provides the chat interface. Tool invocation and natural language
+ * processing will be enhanced as the MCP gateway specification evolves
+ * and more tools become available in Camunda 8.9+.
+ * 
+ * Current capabilities:
+ * - Connect to cluster MCP gateway
+ * - List available MCP tools
+ * - Interactive chat interface
+ * - Profile-based configuration
+ * 
+ * Future enhancements:
+ * - Automatic tool invocation based on user intent
+ * - Natural language understanding
+ * - Rich response formatting
+ * - Conversation history
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
