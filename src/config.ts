@@ -1,6 +1,6 @@
 /**
  * Configuration and session state management for c8ctl
- * 
+ *
  * c8ctl stores its own profiles in DATA_DIR/c8ctl/profiles.json
  * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
@@ -340,6 +340,8 @@ export function removeProfile(name: string): boolean {
 // Modeler Connection Management - READ-ONLY from settings.json
 // ============================================================================
 
+const MODELER_PREFIX = 'modeler:';
+
 interface ModelerSettingsFile {
   c8connections?: Connection[];
   [key: string]: unknown;
@@ -365,7 +367,7 @@ export function loadModelerConnections(): Connection[] {
       return [];
     }
 
-    // Filter out invalid connections (must have id and name)
+    // Filter out invalid connections (must have id)
     return connections.filter(c => c && c.id);
   } catch {
     return [];
@@ -383,7 +385,7 @@ export function getAllProfiles(): Profile[] {
   // Convert Modeler connections to Profile format with "modeler:" prefix
   const modelerProfiles = modelerConnections.map(connectionToProfile).map(p => ({
     ...p,
-    name: `modeler:${p.name}`,
+    name: `${MODELER_PREFIX}${p.name}`,
   }));
   
   return [...c8ctlProfiles, ...modelerProfiles];
@@ -401,7 +403,7 @@ export function getProfileOrModeler(name: string): Profile | undefined {
   }
   
   // Try Modeler connections (with or without prefix)
-  const modelerName = name.startsWith('modeler:') ? name.slice(8) : name;
+  const modelerName = name.startsWith(MODELER_PREFIX) ? name.slice(MODELER_PREFIX.length) : name;
   const modelerConnections = loadModelerConnections();
   const modelerConnection = modelerConnections.find(
     c => c.name === modelerName || c.id === modelerName
@@ -411,7 +413,7 @@ export function getProfileOrModeler(name: string): Profile | undefined {
     const profile = connectionToProfile(modelerConnection);
     return {
       ...profile,
-      name: `modeler:${profile.name}`,
+      name: `${MODELER_PREFIX}${profile.name}`,
     };
   }
   

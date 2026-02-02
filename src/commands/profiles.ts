@@ -14,6 +14,9 @@ import {
   type Profile,
 } from '../config.ts';
 
+// Modeler profile prefix constant
+const MODELER_PREFIX = 'modeler:';
+
 /**
  * List all profiles (c8ctl + Modeler)
  */
@@ -37,7 +40,7 @@ export function listProfiles(): void {
   }
 
   const tableData: ProfileTableRow[] = profiles.map(profile => {
-    const isModeler = profile.name.startsWith('modeler:');
+    const isModeler = profile.name.startsWith(MODELER_PREFIX);
     
     return {
       Name: profile.name,
@@ -50,10 +53,10 @@ export function listProfiles(): void {
   logger.table(tableData);
   
   // Show hint about read-only Modeler profiles
-  const hasModelerProfiles = profiles.some(p => p.name.startsWith('modeler:'));
+  const hasModelerProfiles = profiles.some(p => p.name.startsWith(MODELER_PREFIX));
   if (hasModelerProfiles) {
     logger.info('');
-    logger.info('Note: Modeler profiles (prefixed with "modeler:") are read-only. Manage them in Camunda Modeler.');
+    logger.info(`Note: Modeler profiles (prefixed with "${MODELER_PREFIX}") are read-only. Manage them in Camunda Modeler.`);
   }
 }
 
@@ -69,7 +72,7 @@ export function showProfile(name: string): void {
     process.exit(1);
   }
 
-  const isModeler = profile.name.startsWith('modeler:');
+  const isModeler = profile.name.startsWith(MODELER_PREFIX);
   
   logger.info(`Profile: ${profile.name}`);
   logger.info(`  Source: ${isModeler ? 'Camunda Modeler (read-only)' : 'c8ctl'}`);
@@ -116,8 +119,8 @@ export function addProfile(name: string, options: AddProfileOptions): void {
   const logger = getLogger();
 
   // Prevent adding profiles with "modeler:" prefix
-  if (name.startsWith('modeler:')) {
-    logger.error('Profile names cannot start with "modeler:" - this prefix is reserved for Camunda Modeler connections');
+  if (name.startsWith(MODELER_PREFIX)) {
+    logger.error(`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`);
     logger.info('Please choose a different name or manage this profile in Camunda Modeler');
     process.exit(1);
   }
@@ -145,7 +148,7 @@ export function removeProfile(name: string): void {
   const logger = getLogger();
 
   // Prevent removing Modeler profiles
-  if (name.startsWith('modeler:')) {
+  if (name.startsWith(MODELER_PREFIX)) {
     logger.error('Cannot remove Modeler profiles via c8ctl');
     logger.info('Manage Modeler connections directly in Camunda Modeler');
     process.exit(1);
