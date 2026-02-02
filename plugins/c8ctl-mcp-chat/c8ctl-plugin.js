@@ -159,58 +159,143 @@ function detectProvider() {
 }
 
 /**
- * Get the model name for Claude from environment or use default
- * @returns {string} The Claude model name
+ * Get the model name for a provider from environment or use default
+ * @param {'anthropic'|'openai'} provider - The LLM provider
+ * @returns {string} The model name
  */
-function getClaudeModel() {
-  return process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+function getModelForProvider(provider) {
+  if (provider === 'anthropic') {
+    return process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+  } else if (provider === 'openai') {
+    return process.env.OPENAI_MODEL || 'gpt-4o';
+  }
+  throw new Error(`Unknown provider: ${provider}`);
 }
 
 /**
- * Get the model name for OpenAI from environment or use default
- * @returns {string} The OpenAI model name
+ * Build client options for a provider
+ * @param {'anthropic'|'openai'} provider - The LLM provider
+ * @returns {Object} Client configuration options
  */
-function getOpenAIModel() {
-  return process.env.OPENAI_MODEL || 'gpt-4o';
+function buildClientOptions(provider) {
+  const options = {};
+  
+  if (provider === 'anthropic') {
+    options.apiKey = process.env.ANTHROPIC_API_KEY;
+    if (process.env.ANTHROPIC_BASE_URL) {
+      options.baseURL = process.env.ANTHROPIC_BASE_URL;
+    }
+  } else if (provider === 'openai') {
+    options.apiKey = process.env.OPENAI_API_KEY;
+    if (process.env.OPENAI_BASE_URL) {
+      options.baseURL = process.env.OPENAI_BASE_URL;
+    }
+  } else {
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+  
+  return options;
 }
 
 /**
- * Convert MCP tools to Claude-compatible tool format
+ * Get display name for provider
+ * @param {'anthropic'|'openai'} provider - The LLM provider
+ * @returns {string} Display name
  */
-function convertToolsForClaude(mcpTools) {
+function getProviderDisplayName(provider) {
+  return provider === 'anthropic' ? 'Anthropic Claude' : 'OpenAI';
+}
+
+/**
+ * Format startup message showing provider, model, and optional base URL
+ * @param {'anthropic'|'openai'} provider - The LLM provider
+ * @param {string} model - The model name
+ * @param {string|undefined} baseUrl - Optional custom base URL
+ * @returns {string} Formatted message
+ */
+function formatStartupMessage(provider, model, baseUrl) {
+  const providerName = getProviderDisplayName(provider);
+  const baseUrlInfo = baseUrl ? ` (${baseUrl})` : '';
+  return `Using: ${providerName} (${model})${baseUrlInfo}\n`;
+}
+
+/**
+ * Convert MCP tools to provider-specific format
+ * @param {Object} mcpTools - Tools from MCP server
+ * @param {'anthropic'|'openai'} provider - LLM provider
+ * @returns {Array} Formatted tools for the specified provider
+ */
+function convertToolsForProvider(mcpTools, provider) {
   if (!mcpTools || !mcpTools.tools) {
     return [];
   }
   
-  return mcpTools.tools.map(tool => ({
-    name: tool.name,
-    description: tool.description || `Tool: ${tool.name}`,
-    input_schema: tool.inputSchema || {
-      type: 'object',
-      properties: {},
-    },
-  }));
-}
-
-/**
- * Convert MCP tools to OpenAI-compatible tool format
- */
-function convertToolsForOpenAI(mcpTools) {
-  if (!mcpTools || !mcpTools.tools) {
-    return [];
-  }
-  
-  return mcpTools.tools.map(tool => ({
-    type: 'function',
-    function: {
+  return mcpTools.tools.map(tool => {
+    const baseInfo = {
       name: tool.name,
       description: tool.description || `Tool: ${tool.name}`,
-      parameters: tool.inputSchema || {
-        type: 'object',
-        properties: {},
-      },
-    },
-  }));
+    };
+    
+    if (provider === 'anthropic') {
+      return {
+        ...baseInfo,
+        input_schema: tool.inputSchema || {
+          type: 'object',
+          properties: {},
+        },
+      };
+    } else if (provider === 'openai') {
+      return {
+        type: 'function',
+        function: {
+          ...baseInfo,
+          parameters: tool.inputSchema || {
+            type: 'object',
+            properties: {},
+          },
+        },
+      };
+    }
+    
+    throw new Error(`Unknown provider: ${provider}`);
+  });
+}
+
+/**
+ * Execute MCP tool calls and return results
+ * @param {Array} toolCalls - Tool calls to execute
+ * @param {Object} mcpClient - MCP client instance
+ * @param {Function} extractorFn - Function to extract tool info from call
+ * @returns {Promise<Array>} Tool results
+ */
+async function executeMCPToolCalls(toolCalls, mcpClient, extractorFn) {
+  const results = [];
+  
+  for (const toolCall of toolCalls) {
+    const { name, args, id } = extractorFn(toolCall);
+    console.log(`\n🔧 Calling tool: ${name}...`);
+    
+    try {
+      const result = await mcpClient.callTool({
+        name,
+        arguments: args,
+      });
+      
+      results.push({
+        id,
+        content: JSON.stringify(result.content),
+        error: null,
+      });
+    } catch (error) {
+      results.push({
+        id,
+        content: `Error: ${error.message}`,
+        error: error.message,
+      });
+    }
+  }
+  
+  return results;
 }
 
 /**
@@ -220,9 +305,9 @@ async function processWithClaude(userMessage, mcpClient, anthropicClient, conver
   try {
     // Get available tools from MCP server
     const mcpTools = await mcpClient.listTools();
-    const claudeTools = convertToolsForClaude(mcpTools);
+    const claudeTools = convertToolsForProvider(mcpTools, 'anthropic');
     
-    const model = getClaudeModel();
+    const model = getModelForProvider('anthropic');
     
     // Add user message to history
     conversationHistory.push({
@@ -246,38 +331,30 @@ async function processWithClaude(userMessage, mcpClient, anthropicClient, conver
         content: response.content,
       });
       
+      const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
+      
       // Execute tool calls
-      const toolResults = [];
-      for (const contentBlock of response.content) {
-        if (contentBlock.type === 'tool_use') {
-          console.log(`\n🔧 Calling tool: ${contentBlock.name}...`);
-          
-          try {
-            const result = await mcpClient.callTool({
-              name: contentBlock.name,
-              arguments: contentBlock.input,
-            });
-            
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: contentBlock.id,
-              content: JSON.stringify(result.content),
-            });
-          } catch (error) {
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: contentBlock.id,
-              content: `Error: ${error.message}`,
-              is_error: true,
-            });
-          }
-        }
-      }
+      const toolResults = await executeMCPToolCalls(
+        toolUseBlocks,
+        mcpClient,
+        (block) => ({
+          name: block.name,
+          args: block.input,
+          id: block.id,
+        })
+      );
+      
+      const formattedResults = toolResults.map(result => ({
+        type: 'tool_result',
+        tool_use_id: result.id,
+        content: result.content,
+        is_error: !!result.error,
+      }));
       
       // Add tool results to history
       conversationHistory.push({
         role: 'user',
-        content: toolResults,
+        content: formattedResults,
       });
       
       // Get next response from Claude
@@ -315,9 +392,9 @@ async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversat
   try {
     // Get available tools from MCP server
     const mcpTools = await mcpClient.listTools();
-    const openaiTools = convertToolsForOpenAI(mcpTools);
+    const openaiTools = convertToolsForProvider(mcpTools, 'openai');
     
-    const model = getOpenAIModel();
+    const model = getModelForProvider('openai');
     
     // Add user message to history
     conversationHistory.push({
@@ -340,29 +417,23 @@ async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversat
       conversationHistory.push(message);
       
       // Execute tool calls
-      for (const toolCall of message.tool_calls) {
-        console.log(`\n🔧 Calling tool: ${toolCall.function.name}...`);
-        
-        try {
-          const args = JSON.parse(toolCall.function.arguments);
-          const result = await mcpClient.callTool({
-            name: toolCall.function.name,
-            arguments: args,
-          });
-          
-          conversationHistory.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result.content),
-          });
-        } catch (error) {
-          conversationHistory.push({
-            role: 'tool',
-            tool_call_id: toolCall.id,
-            content: `Error: ${error.message}`,
-          });
-        }
-      }
+      const toolResults = await executeMCPToolCalls(
+        message.tool_calls,
+        mcpClient,
+        (toolCall) => ({
+          name: toolCall.function.name,
+          args: JSON.parse(toolCall.function.arguments),
+          id: toolCall.id,
+        })
+      );
+      
+      toolResults.forEach(result => {
+        conversationHistory.push({
+          role: 'tool',
+          tool_call_id: result.id,
+          content: result.content,
+        });
+      });
       
       // Get next response from OpenAI
       response = await openaiClient.chat.completions.create({
@@ -466,36 +537,19 @@ async function chat(args) {
     
     // Create LLM client based on provider
     let llmClient;
-    let modelName;
+    const clientOptions = buildClientOptions(provider);
+    const modelName = getModelForProvider(provider);
+    const baseUrl = provider === 'anthropic' 
+      ? process.env.ANTHROPIC_BASE_URL 
+      : process.env.OPENAI_BASE_URL;
+    
     if (provider === 'anthropic') {
-      const anthropicOptions = {
-        apiKey: process.env.ANTHROPIC_API_KEY,
-      };
-      
-      // Allow custom base URL if specified
-      if (process.env.ANTHROPIC_BASE_URL) {
-        anthropicOptions.baseURL = process.env.ANTHROPIC_BASE_URL;
-      }
-      
-      llmClient = new Anthropic(anthropicOptions);
-      modelName = getClaudeModel();
-      const baseUrlInfo = process.env.ANTHROPIC_BASE_URL ? ` (${process.env.ANTHROPIC_BASE_URL})` : '';
-      console.log(`Using: Anthropic Claude (${modelName})${baseUrlInfo}\n`);
+      llmClient = new Anthropic(clientOptions);
     } else if (provider === 'openai') {
-      const openaiOptions = {
-        apiKey: process.env.OPENAI_API_KEY,
-      };
-      
-      // Allow custom base URL if specified
-      if (process.env.OPENAI_BASE_URL) {
-        openaiOptions.baseURL = process.env.OPENAI_BASE_URL;
-      }
-      
-      llmClient = new OpenAI(openaiOptions);
-      modelName = getOpenAIModel();
-      const baseUrlInfo = process.env.OPENAI_BASE_URL ? ` (${process.env.OPENAI_BASE_URL})` : '';
-      console.log(`Using: OpenAI (${modelName})${baseUrlInfo}\n`);
+      llmClient = new OpenAI(clientOptions);
     }
+    
+    console.log(formatStartupMessage(provider, modelName, baseUrl));
     
     // Conversation history for context
     const conversationHistory = [];
