@@ -1,3 +1,4 @@
+/**
  * Help and version commands
  */
 
