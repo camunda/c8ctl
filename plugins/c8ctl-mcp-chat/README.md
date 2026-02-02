@@ -36,30 +36,46 @@ c8 load plugin --from file:./plugins/c8ctl-mcp-chat
 
 ### Choose Your LLM Provider
 
-The plugin automatically detects which provider to use based on which API key is set:
+**Important**: You must set exactly ONE API key. The plugin will fail if both are set.
 
-#### Option 1: Anthropic Claude (Claude 3.5 Sonnet)
+#### Option 1: Anthropic Claude
 
+Set your API key:
 ```bash
 export ANTHROPIC_API_KEY=your_api_key_here
 ```
 
-#### Option 2: OpenAI (GPT-4o)
+Optionally specify a model (default: `claude-3-5-sonnet-20241022`):
+```bash
+export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+```
 
+#### Option 2: OpenAI
+
+Set your API key:
 ```bash
 export OPENAI_API_KEY=your_api_key_here
 ```
 
-**Note**: If both keys are set, OpenAI takes precedence.
+Optionally specify a model (default: `gpt-4o`):
+```bash
+export OPENAI_MODEL=gpt-4o
+```
+
+**Note**: Only set ONE API key. If both `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are set, the plugin will exit with an error.
 
 To make it permanent, add to your shell profile (~/.bashrc, ~/.zshrc, etc.):
 
 ```bash
 # For Anthropic Claude
 echo 'export ANTHROPIC_API_KEY=your_api_key_here' >> ~/.bashrc
+# Optional: specify model
+echo 'export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022' >> ~/.bashrc
 
 # OR for OpenAI
 echo 'export OPENAI_API_KEY=your_api_key_here' >> ~/.bashrc
+# Optional: specify model
+echo 'export OPENAI_MODEL=gpt-4o' >> ~/.bashrc
 
 source ~/.bashrc
 ```
@@ -77,12 +93,12 @@ c8 chat
 This will:
 1. Connect to the cluster's MCP gateway
 2. Verify the cluster is version 8.9 or later
-3. Detect and initialize your LLM provider (Claude or GPT-4o)
+3. Detect and initialize your LLM provider
 4. Open an interactive natural language chat session
 
-The plugin will display which model it's using:
-- `Using: Anthropic Claude 3.5 Sonnet` or
-- `Using: OpenAI GPT-4o`
+The plugin will display which provider and model it's using, for example:
+- `Using: Anthropic Claude (claude-3-5-sonnet-20241022)` or
+- `Using: OpenAI (gpt-4o)`
 
 ### With Profile
 
@@ -276,6 +292,18 @@ Uses SSE (Server-Sent Events) transport for real-time bidirectional communicatio
 - Follows c8ctl plugin conventions for metadata and command exports
 
 ## Troubleshooting
+
+### "Both OPENAI_API_KEY and ANTHROPIC_API_KEY are set"
+
+You can only use one LLM provider at a time. Unset one of the API keys:
+
+```bash
+# To use Anthropic only
+unset OPENAI_API_KEY
+
+# To use OpenAI only
+unset ANTHROPIC_API_KEY
+```
 
 ### "No LLM API key found"
 

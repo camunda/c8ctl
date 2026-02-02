@@ -137,17 +137,41 @@ async function checkClusterVersion(baseUrl) {
 
 /**
  * Detect which LLM provider to use based on environment variables
- * Priority order: OPENAI_API_KEY → ANTHROPIC_API_KEY
+ * Fails if both providers are configured
  * @returns {'openai'|'anthropic'|null} The provider to use, or null if no key is set
+ * @throws {Error} If both OPENAI_API_KEY and ANTHROPIC_API_KEY are set
  */
 function detectProvider() {
-  if (process.env.OPENAI_API_KEY) {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+  
+  if (hasOpenAI && hasAnthropic) {
+    throw new Error('Both OPENAI_API_KEY and ANTHROPIC_API_KEY are set. Please use only one LLM provider.');
+  }
+  
+  if (hasOpenAI) {
     return 'openai';
   }
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (hasAnthropic) {
     return 'anthropic';
   }
   return null;
+}
+
+/**
+ * Get the model name for Claude from environment or use default
+ * @returns {string} The Claude model name
+ */
+function getClaudeModel() {
+  return process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+}
+
+/**
+ * Get the model name for OpenAI from environment or use default
+ * @returns {string} The OpenAI model name
+ */
+function getOpenAIModel() {
+  return process.env.OPENAI_MODEL || 'gpt-4o';
 }
 
 /**
@@ -198,6 +222,8 @@ async function processWithClaude(userMessage, mcpClient, anthropicClient, conver
     const mcpTools = await mcpClient.listTools();
     const claudeTools = convertToolsForClaude(mcpTools);
     
+    const model = getClaudeModel();
+    
     // Add user message to history
     conversationHistory.push({
       role: 'user',
@@ -206,7 +232,7 @@ async function processWithClaude(userMessage, mcpClient, anthropicClient, conver
     
     // Call Claude with tools
     let response = await anthropicClient.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: model,
       max_tokens: 4096,
       tools: claudeTools,
       messages: conversationHistory,
@@ -256,7 +282,7 @@ async function processWithClaude(userMessage, mcpClient, anthropicClient, conver
       
       // Get next response from Claude
       response = await anthropicClient.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
+        model: model,
         max_tokens: 4096,
         tools: claudeTools,
         messages: conversationHistory,
@@ -291,6 +317,8 @@ async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversat
     const mcpTools = await mcpClient.listTools();
     const openaiTools = convertToolsForOpenAI(mcpTools);
     
+    const model = getOpenAIModel();
+    
     // Add user message to history
     conversationHistory.push({
       role: 'user',
@@ -299,7 +327,7 @@ async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversat
     
     // Call OpenAI with tools
     let response = await openaiClient.chat.completions.create({
-      model: 'gpt-4o',
+      model: model,
       messages: conversationHistory,
       tools: openaiTools,
     });
@@ -338,7 +366,7 @@ async function processWithOpenAI(userMessage, mcpClient, openaiClient, conversat
       
       // Get next response from OpenAI
       response = await openaiClient.chat.completions.create({
-        model: 'gpt-4o',
+        model: model,
         messages: conversationHistory,
         tools: openaiTools,
       });
@@ -414,7 +442,17 @@ async function chat(args) {
     console.log('✓ Connected to MCP gateway\n');
     
     // Detect and initialize LLM provider
-    const provider = detectProvider();
+    let provider;
+    try {
+      provider = detectProvider();
+    } catch (error) {
+      console.error(`Error: ${error.message}`);
+      console.error('\nPlease set only one API key:');
+      console.error('  - For Anthropic Claude: export ANTHROPIC_API_KEY=your_key');
+      console.error('  - For OpenAI: export OPENAI_API_KEY=your_key\n');
+      process.exit(1);
+    }
+    
     if (!provider) {
       console.error('Error: No LLM API key found.');
       console.error('\nSupported providers:');
@@ -428,12 +466,15 @@ async function chat(args) {
     
     // Create LLM client based on provider
     let llmClient;
+    let modelName;
     if (provider === 'anthropic') {
       llmClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-      console.log('Using: Anthropic Claude 3.5 Sonnet\n');
+      modelName = getClaudeModel();
+      console.log(`Using: Anthropic Claude (${modelName})\n`);
     } else if (provider === 'openai') {
       llmClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      console.log('Using: OpenAI GPT-4o\n');
+      modelName = getOpenAIModel();
+      console.log(`Using: OpenAI (${modelName})\n`);
     }
     
     // Conversation history for context

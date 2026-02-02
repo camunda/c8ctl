@@ -5,9 +5,10 @@ This document provides examples of using the AI-powered MCP chat plugin with Cam
 ## Prerequisites
 
 Before starting, make sure you have:
-1. Set your LLM API key (choose one):
+1. Set **exactly one** LLM API key:
    - Anthropic Claude: `export ANTHROPIC_API_KEY=your_key_here`
    - OpenAI: `export OPENAI_API_KEY=your_key_here`
+   - **Note**: Setting both will cause an error
 2. A Camunda 8.9+ cluster with MCP gateway enabled
 3. The plugin installed: `npm install file:./plugins/c8ctl-mcp-chat`
 
@@ -21,6 +22,9 @@ Ask questions in plain English and let Claude orchestrate the MCP tools:
 # Set API key for Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 
+# Optional: Specify a model
+export ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+
 # Start chat session
 c8 chat
 
@@ -29,7 +33,7 @@ c8 chat
 # Connecting to: http://localhost:8080/mcp
 # Connected to Camunda 8.9.0
 # ✓ Connected to MCP gateway
-# Using: Anthropic Claude 3.5 Sonnet
+# Using: Anthropic Claude (claude-3-5-sonnet-20241022)
 #
 # Available tools:
 #   - list-process-instances: List process instances
@@ -79,6 +83,9 @@ Use OpenAI instead of Claude:
 # Set API key for OpenAI
 export OPENAI_API_KEY=sk-...
 
+# Optional: Specify a model
+export OPENAI_MODEL=gpt-4o
+
 # Start chat session
 c8 chat
 
@@ -87,7 +94,7 @@ c8 chat
 # Connecting to: http://localhost:8080/mcp
 # Connected to Camunda 8.9.0
 # ✓ Connected to MCP gateway
-# Using: OpenAI GPT-4o
+# Using: OpenAI (gpt-4o)
 #
 # Available tools:
 #   - list-process-instances: List process instances
@@ -128,7 +135,7 @@ c8 chat --profile=my-cloud
 # Connecting to: https://my-cluster.camunda.io/mcp
 # Connected to Camunda 8.9.1
 # ✓ Connected to MCP gateway
-# Using: Anthropic Claude 3.5 Sonnet
+# Using: Anthropic Claude (claude-3-5-sonnet-20241022)
 # ...
 ```
 
