@@ -1,16 +1,23 @@
 # c8ctl MCP Chat Plugin - Examples
 
-This document provides examples of using the MCP chat plugin with Camunda 8.9+ clusters.
+This document provides examples of using the AI-powered MCP chat plugin with Camunda 8.9+ clusters.
+
+## Prerequisites
+
+Before starting, make sure you have:
+1. Set your Anthropic API key: `export ANTHROPIC_API_KEY=your_key_here`
+2. A Camunda 8.9+ cluster with MCP gateway enabled
+3. The plugin installed: `npm install file:./plugins/c8ctl-mcp-chat`
 
 ## Basic Examples
 
-### Example 1: Local Cluster Chat
+### Example 1: Natural Language Queries
 
-Connect to a local Camunda cluster running on the default port:
+Ask questions in plain English and let Claude orchestrate the MCP tools:
 
 ```bash
-# Start local cluster (example using docker-compose)
-# Make sure the cluster has MCP gateway enabled
+# Set API key
+export ANTHROPIC_API_KEY=sk-ant-...
 
 # Start chat session
 c8 chat
@@ -22,13 +29,43 @@ c8 chat
 # ✓ Connected to MCP gateway
 #
 # Available tools:
-#   - deploy: Deploy BPMN processes
+#   - list-process-instances: List process instances
+#   - deploy-resource: Deploy BPMN/DMN resources
 #   - create-instance: Create process instances
-#   - query-instances: Query process instances
 #
-# MCP chat session started. Type your message or "exit" to quit.
+# MCP chat session started. Ask questions about your cluster!
 #
-# chat>
+# Examples:
+#   - "What process instances are currently running?"
+#   - "Deploy the order-process.bpmn file"
+#   - "Show me all incidents in the cluster"
+#
+# chat> What's running right now?
+# 
+# 🔧 Calling tool: list-process-instances...
+#
+# There are currently 3 active process instances:
+# 1. Order Processing (ID: 2251799813685249) - Running since 2 hours ago
+# 2. Payment Workflow (ID: 2251799813685250) - Running since 1 hour ago
+# 3. Shipping Process (ID: 2251799813685251) - Running since 30 minutes ago
+#
+# All instances appear to be progressing normally.
+#
+# chat> Are there any problems?
+#
+# 🔧 Calling tool: list-incidents...
+#
+# Yes, I found 2 incidents that need attention:
+#
+# 1. Process instance 2251799813685249 has an error in the "ProcessPayment" task
+#    - Error: Payment gateway timeout
+#    - Created: 15 minutes ago
+#
+# 2. Process instance 2251799813685251 has failed at "ValidateShipping"
+#    - Error: Invalid shipping address format
+#    - Created: 5 minutes ago
+#
+# Would you like me to help resolve these incidents?
 ```
 
 ### Example 2: Cloud Cluster with Profile
@@ -43,7 +80,8 @@ c8 add profile my-cloud \
   --clientSecret=yyy \
   --audience=zeebe.camunda.io
 
-# Start chat session with profile
+# Set API key and start chat
+export ANTHROPIC_API_KEY=sk-ant-...
 c8 chat --profile=my-cloud
 
 # Expected output:

@@ -5,24 +5,26 @@
  * @version 1.0.0
  * @since 2026-02-02
  * 
- * NOTE: This is an initial implementation (Phase 1) that establishes the MCP connection
- * and provides the chat interface. Automatic tool invocation and natural language
- * processing will be enhanced in future releases as the MCP gateway specification
- * evolves and more tools become available in Camunda 8.9+.
+ * This implementation integrates with an LLM (Claude) to provide natural language
+ * interaction with the cluster's MCP gateway. The LLM acts as an orchestrator,
+ * deciding which MCP tools to invoke based on user queries.
  * 
- * Current capabilities (Phase 1):
+ * Chat Flow:
+ * 1. Get available tools from MCP server
+ * 2. User query → LLM (with tool descriptions)
+ * 3. LLM decides which tools to call
+ * 4. Execute tool calls via MCP
+ * 5. Results → LLM
+ * 6. LLM response → User
+ * 
+ * Current capabilities:
  * - Connect to cluster MCP gateway
- * - List available MCP tools
- * - Interactive chat interface
- * - Profile-based configuration
- * 
- * Planned enhancements (Phase 2+):
+ * - LLM-powered natural language interface
  * - Automatic tool invocation based on user intent
- * - Natural language understanding
- * - Rich response formatting
- * - Conversation history
+ * - Profile-based configuration
  */
 
+import Anthropic from '@anthropic-ai/sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { createInterface } from 'node:readline';
@@ -131,6 +133,117 @@ async function checkClusterVersion(baseUrl) {
 }
 
 /**
+ * Convert MCP tools to Claude-compatible tool format
+ */
+function convertToolsForClaude(mcpTools) {
+  if (!mcpTools || !mcpTools.tools) {
+    return [];
+  }
+  
+  return mcpTools.tools.map(tool => ({
+    name: tool.name,
+    description: tool.description || `Tool: ${tool.name}`,
+    input_schema: tool.inputSchema || {
+      type: 'object',
+      properties: {},
+    },
+  }));
+}
+
+/**
+ * Process a chat message with LLM and MCP tool execution
+ */
+async function processWithLLM(userMessage, mcpClient, anthropicClient, conversationHistory) {
+  try {
+    // Get available tools from MCP server
+    const mcpTools = await mcpClient.listTools();
+    const claudeTools = convertToolsForClaude(mcpTools);
+    
+    // Add user message to history
+    conversationHistory.push({
+      role: 'user',
+      content: userMessage,
+    });
+    
+    // Call Claude with tools
+    let response = await anthropicClient.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 4096,
+      tools: claudeTools,
+      messages: conversationHistory,
+    });
+    
+    // Process tool use loop
+    while (response.stop_reason === 'tool_use') {
+      // Add assistant response to history
+      conversationHistory.push({
+        role: 'assistant',
+        content: response.content,
+      });
+      
+      // Execute tool calls
+      const toolResults = [];
+      for (const contentBlock of response.content) {
+        if (contentBlock.type === 'tool_use') {
+          console.log(`\n🔧 Calling tool: ${contentBlock.name}...`);
+          
+          try {
+            const result = await mcpClient.callTool({
+              name: contentBlock.name,
+              arguments: contentBlock.input,
+            });
+            
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: contentBlock.id,
+              content: JSON.stringify(result.content),
+            });
+          } catch (error) {
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: contentBlock.id,
+              content: `Error: ${error.message}`,
+              is_error: true,
+            });
+          }
+        }
+      }
+      
+      // Add tool results to history
+      conversationHistory.push({
+        role: 'user',
+        content: toolResults,
+      });
+      
+      // Get next response from Claude
+      response = await anthropicClient.messages.create({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 4096,
+        tools: claudeTools,
+        messages: conversationHistory,
+      });
+    }
+    
+    // Add final assistant response to history
+    conversationHistory.push({
+      role: 'assistant',
+      content: response.content,
+    });
+    
+    // Extract text response
+    const textContent = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('\n');
+    
+    return textContent || 'No response from assistant.';
+    
+  } catch (error) {
+    throw new Error(`LLM processing error: ${error.message}`);
+  }
+}
+
+/**
  * Main chat command implementation
  */
 async function chat(args) {
@@ -174,6 +287,21 @@ async function chat(args) {
     
     console.log('✓ Connected to MCP gateway\n');
     
+    // Check for Anthropic API key
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      console.error('Error: ANTHROPIC_API_KEY environment variable is required.');
+      console.error('Get your API key from: https://console.anthropic.com/');
+      console.error('\nSet it with: export ANTHROPIC_API_KEY=your_key_here\n');
+      process.exit(1);
+    }
+    
+    // Create Anthropic client
+    const anthropic = new Anthropic({ apiKey });
+    
+    // Conversation history for context
+    const conversationHistory = [];
+    
     // List available tools
     try {
       const tools = await client.listTools();
@@ -183,6 +311,8 @@ async function chat(args) {
           console.log(`  - ${tool.name}: ${tool.description || 'No description'}`);
         });
         console.log();
+      } else {
+        console.log('Note: No MCP tools available from this cluster.\n');
       }
     } catch (error) {
       console.warn('Could not list tools:', error.message);
@@ -195,7 +325,11 @@ async function chat(args) {
       prompt: 'chat> ',
     });
     
-    console.log('MCP chat session started. Type your message or "exit" to quit.\n');
+    console.log('MCP chat session started. Ask questions about your cluster!\n');
+    console.log('Examples:');
+    console.log('  - "What process instances are currently running?"');
+    console.log('  - "Deploy the order-process.bpmn file"');
+    console.log('  - "Show me all incidents in the cluster"\n');
     rl.prompt();
     
     rl.on('line', async (line) => {
@@ -215,12 +349,21 @@ async function chat(args) {
       
       // Handle special commands
       if (input.toLowerCase() === 'help') {
-        console.log('\nAvailable commands:');
+        console.log('\nYou can ask natural language questions about your cluster.');
+        console.log('The AI assistant will use the available MCP tools to help you.\n');
+        console.log('Special commands:');
         console.log('  help     - Show this help message');
         console.log('  tools    - List available MCP tools');
+        console.log('  clear    - Clear conversation history');
         console.log('  exit     - Exit the chat session');
-        console.log('  quit     - Exit the chat session');
-        console.log('\nOtherwise, type your message to interact with the cluster.\n');
+        console.log('  quit     - Exit the chat session\n');
+        rl.prompt();
+        return;
+      }
+      
+      if (input.toLowerCase() === 'clear') {
+        conversationHistory.length = 0;
+        console.log('\n✓ Conversation history cleared.\n');
         rl.prompt();
         return;
       }
@@ -255,22 +398,12 @@ async function chat(args) {
       }
       
       try {
-        console.log(`\nProcessing: ${input}\n`);
-        
-        // For now, we'll implement basic message handling
-        // In a full implementation, you'd want to:
-        // 1. Parse the user's intent
-        // 2. Call appropriate MCP tools
-        // 3. Format and display responses
-        
-        // Example: Try to call a tool if the input looks like a tool invocation
-        // This is a placeholder for actual MCP interaction
-        
-        console.log('Note: Automatic tool invocation based on natural language is planned for a future release.\n');
-        console.log('Use the "tools" command to see available MCP tools and their schemas.\n');
+        // Process message with LLM
+        const response = await processWithLLM(input, client, anthropic, conversationHistory);
+        console.log(`\n${response}\n`);
         
       } catch (error) {
-        console.error(`Error: ${error.message}\n`);
+        console.error(`\nError: ${error.message}\n`);
       }
       
       rl.prompt();

@@ -82,7 +82,7 @@ try {
 
 // Check 4: Dependencies are installed
 console.log('\n✓ Checking dependencies...');
-const requiredDeps = ['@modelcontextprotocol/sdk', 'zod'];
+const requiredDeps = ['@anthropic-ai/sdk', '@modelcontextprotocol/sdk', 'zod'];
 for (const dep of requiredDeps) {
   if (!packageJson.dependencies || !packageJson.dependencies[dep]) {
     console.warn(`⚠️  Dependency not listed in package.json: ${dep}`);
