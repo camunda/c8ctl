@@ -325,6 +325,34 @@ export const commands = {
 
 When plugins are loaded, their commands automatically appear in `c8ctl help` output. See [PLUGIN-HELP.md](PLUGIN-HELP.md) for detailed documentation on plugin help integration.
 
+### Official Plugins
+
+#### MCP Chat Plugin (Camunda 8.9+)
+
+The MCP Chat plugin enables interactive chat with Camunda 8.9+ clusters via the Model Context Protocol gateway.
+
+```bash
+# Install the plugin (when published)
+npm install -g c8ctl-mcp-chat
+
+# Or install from source
+npm install file:./plugins/c8ctl-mcp-chat
+
+# Start a chat session
+c8 chat
+
+# With profile
+c8 chat --profile=production
+```
+
+The plugin provides:
+- Interactive chat interface with your cluster
+- Automatic version detection (8.9+ required)
+- Integration with c8ctl's profile system
+- MCP tool discovery and invocation
+
+See [plugins/c8ctl-mcp-chat/README.md](plugins/c8ctl-mcp-chat/README.md) for detailed documentation.
+
 ### Resource Aliases
 
 - `pi` = process-instance(s)

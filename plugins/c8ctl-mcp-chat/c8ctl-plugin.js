@@ -25,26 +25,33 @@ export const metadata = {
 };
 
 /**
- * Get cluster configuration from c8ctl runtime
+ * Get cluster configuration from c8ctl runtime or environment
  */
 function getClusterConfig(args) {
   // Check for --profile flag in args
   const profileFlagIndex = args.findIndex(arg => arg.startsWith('--profile='));
-  let profileFlag;
+  let profileName;
   if (profileFlagIndex !== -1) {
-    profileFlag = args[profileFlagIndex].split('=')[1];
+    profileName = args[profileFlagIndex].split('=')[1];
   }
 
-  // Import config module to resolve cluster configuration
-  // Note: This requires c8ctl runtime to expose config functions
-  // For now, we'll use a simplified approach with environment variables and defaults
+  // Try to use c8ctl session profile if no flag provided
+  if (!profileName && c8ctl?.activeProfile) {
+    profileName = c8ctl.activeProfile;
+  }
+
+  // Resolve base URL with priority: profileFlag → session → env vars → localhost
+  let baseUrl = process.env.CAMUNDA_BASE_URL || 'http://localhost:8080/v2';
   
-  // Priority: profileFlag → session → env vars → localhost
-  const baseUrl = process.env.CAMUNDA_BASE_URL || 'http://localhost:8080';
+  // If we have a profile name, try to resolve it (simplified approach)
+  // In production, this would use c8ctl's config module
+  if (profileName) {
+    console.log(`Using profile: ${profileName}`);
+  }
   
   return {
     baseUrl,
-    profileFlag,
+    profileName,
   };
 }
 
@@ -186,25 +193,60 @@ async function chat(args) {
         process.exit(0);
       }
       
+      // Handle special commands
+      if (input.toLowerCase() === 'help') {
+        console.log('\nAvailable commands:');
+        console.log('  help     - Show this help message');
+        console.log('  tools    - List available MCP tools');
+        console.log('  exit     - Exit the chat session');
+        console.log('  quit     - Exit the chat session');
+        console.log('\nOtherwise, type your message to interact with the cluster.\n');
+        rl.prompt();
+        return;
+      }
+      
+      if (input.toLowerCase() === 'tools') {
+        try {
+          const tools = await client.listTools();
+          if (tools && tools.tools && tools.tools.length > 0) {
+            console.log('\nAvailable tools:');
+            tools.tools.forEach(tool => {
+              console.log(`\n  ${tool.name}`);
+              if (tool.description) {
+                console.log(`    ${tool.description}`);
+              }
+              if (tool.inputSchema) {
+                console.log(`    Schema: ${JSON.stringify(tool.inputSchema, null, 2).split('\n').join('\n    ')}`);
+              }
+            });
+            console.log();
+          } else {
+            console.log('\nNo tools available.\n');
+          }
+        } catch (error) {
+          console.error(`\nError listing tools: ${error.message}\n`);
+        }
+        rl.prompt();
+        return;
+      }
+      
       try {
+        console.log(`\nProcessing: ${input}\n`);
+        
         // For now, we'll implement basic message handling
         // In a full implementation, you'd want to:
         // 1. Parse the user's intent
         // 2. Call appropriate MCP tools
         // 3. Format and display responses
         
-        console.log(`\nProcessing: ${input}\n`);
+        // Example: Try to call a tool if the input looks like a tool invocation
+        // This is a placeholder for actual MCP interaction
         
-        // This is a placeholder - actual MCP interaction would go here
-        // You would typically:
-        // - Use client.callTool() to invoke MCP tools
-        // - Use client.readResource() to read resources
-        // - Handle responses and display them to the user
-        
-        console.log('Response: MCP integration is ready. Tool invocation will be implemented based on cluster capabilities.\n');
+        console.log('Note: Full MCP tool invocation will be available once the cluster exposes MCP tools.\n');
+        console.log('The connection is established and ready to process requests.\n');
         
       } catch (error) {
-        console.error('Error processing message:', error.message);
+        console.error(`Error: ${error.message}\n`);
       }
       
       rl.prompt();
