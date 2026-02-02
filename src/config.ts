@@ -343,7 +343,7 @@ export function removeProfile(name: string): boolean {
 export const MODELER_PREFIX = 'modeler:';
 
 interface ModelerSettingsFile {
-  c8connections?: Connection[];
+  'connectionManagerPlugin.c8connections'?: Connection[];
   [key: string]: unknown;
 }
 
@@ -361,7 +361,7 @@ export function loadModelerConnections(): Connection[] {
   try {
     const data = readFileSync(settingsPath, 'utf-8');
     const settings: ModelerSettingsFile = JSON.parse(data);
-    const connections = settings.c8connections;
+    const connections = settings['connectionManagerPlugin.c8connections'];
 
     if (!connections || !Array.isArray(connections)) {
       return [];
