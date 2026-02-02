@@ -2,18 +2,21 @@
  * c8ctl MCP Chat Plugin
  * Provides interactive chat with Camunda 8.9+ clusters via MCP gateway
  * 
- * NOTE: This is an initial implementation that establishes the MCP connection
- * and provides the chat interface. Tool invocation and natural language
- * processing will be enhanced as the MCP gateway specification evolves
- * and more tools become available in Camunda 8.9+.
+ * @version 1.0.0
+ * @since 2026-02-02
  * 
- * Current capabilities:
+ * NOTE: This is an initial implementation (Phase 1) that establishes the MCP connection
+ * and provides the chat interface. Automatic tool invocation and natural language
+ * processing will be enhanced in future releases as the MCP gateway specification
+ * evolves and more tools become available in Camunda 8.9+.
+ * 
+ * Current capabilities (Phase 1):
  * - Connect to cluster MCP gateway
  * - List available MCP tools
  * - Interactive chat interface
  * - Profile-based configuration
  * 
- * Future enhancements:
+ * Planned enhancements (Phase 2+):
  * - Automatic tool invocation based on user intent
  * - Natural language understanding
  * - Rich response formatting
@@ -263,8 +266,8 @@ async function chat(args) {
         // Example: Try to call a tool if the input looks like a tool invocation
         // This is a placeholder for actual MCP interaction
         
-        console.log('Note: Full MCP tool invocation will be available once the cluster exposes MCP tools.\n');
-        console.log('The connection is established and ready to process requests.\n');
+        console.log('Note: Automatic tool invocation based on natural language is planned for a future release.\n');
+        console.log('Use the "tools" command to see available MCP tools and their schemas.\n');
         
       } catch (error) {
         console.error(`Error: ${error.message}\n`);
