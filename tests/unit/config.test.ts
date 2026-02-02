@@ -575,5 +575,226 @@ describe('Config Module', () => {
       assert.strictEqual(profile.name, 'modeler:Modeler Test');
       assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
     });
+
+    test('loadModelerProfiles reads from settings.json if profiles.json does not exist', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const settingsData = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            id: '1g72b5h',
+            name: 'Local DEV',
+            contactPoint: 'http://localhost:8080/v2',
+            operateUrl: 'http://localhost:8080/operate',
+            targetType: 'selfHosted',
+            authType: 'basic',
+            basicAuthUsername: 'demo',
+            basicAuthPassword: 'demo',
+            clientId: '',
+            clientSecret: '',
+            audience: '',
+            oAuthUrl: '',
+            rememberCredentials: true
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'settings.json'),
+        JSON.stringify(settingsData, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].name, 'Local DEV');
+      assert.strictEqual(profiles[0].clusterId, '1g72b5h');
+      assert.strictEqual(profiles[0].clusterUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(profiles[0].username, 'demo');
+      assert.strictEqual(profiles[0].password, 'demo');
+      assert.strictEqual(profiles[0].authType, 'basic');
+    });
+
+    test('loadModelerProfiles prefers profiles.json over settings.json', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      // Create both files
+      const profilesData = {
+        profiles: [
+          {
+            name: 'From profiles.json',
+            clusterUrl: 'http://localhost:9090'
+          }
+        ]
+      };
+      
+      const settingsData = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            name: 'From settings.json',
+            contactPoint: 'http://localhost:8080/v2'
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'profiles.json'),
+        JSON.stringify(profilesData, null, 2),
+        'utf-8'
+      );
+      
+      writeFileSync(
+        join(modelerDataDir, 'settings.json'),
+        JSON.stringify(settingsData, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].name, 'From profiles.json');
+      assert.strictEqual(profiles[0].clusterUrl, 'http://localhost:9090');
+    });
+
+    test('loadModelerProfiles handles settings.json with OAuth configuration', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const settingsData = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            id: 'cloud-123',
+            name: 'Cloud Cluster',
+            camundaCloudClusterUrl: 'https://abc123.zeebe.camunda.io',
+            targetType: 'camundaCloud',
+            authType: 'oauth',
+            clientId: 'my-client-id',
+            clientSecret: 'my-secret',
+            audience: 'zeebe.camunda.io',
+            oAuthUrl: 'https://login.cloud.camunda.io/oauth/token'
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'settings.json'),
+        JSON.stringify(settingsData, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].name, 'Cloud Cluster');
+      assert.strictEqual(profiles[0].clusterUrl, 'https://abc123.zeebe.camunda.io');
+      assert.strictEqual(profiles[0].clientId, 'my-client-id');
+      assert.strictEqual(profiles[0].clientSecret, 'my-secret');
+      assert.strictEqual(profiles[0].audience, 'zeebe.camunda.io');
+      assert.strictEqual(profiles[0].oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
+    });
+
+    test('loadModelerProfiles handles settings.json with authType none', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const settingsData = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            id: 'luwSeir',
+            name: 'c8run (Local)',
+            contactPoint: 'http://localhost:8080/v2',
+            operateUrl: 'http://localhost:8080/operate',
+            targetType: 'selfHosted',
+            authType: 'none'
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'settings.json'),
+        JSON.stringify(settingsData, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 1);
+      assert.strictEqual(profiles[0].name, 'c8run (Local)');
+      assert.strictEqual(profiles[0].authType, 'none');
+      assert.strictEqual(profiles[0].clusterUrl, 'http://localhost:8080/v2');
+    });
+
+    test('loadModelerProfiles handles settings.json with multiple connections', async () => {
+      const { loadModelerProfiles, getModelerDataDir } = await import('../../src/config.ts');
+      const modelerDataDir = getModelerDataDir();
+      mkdirSync(modelerDataDir, { recursive: true });
+      
+      const settingsData = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            id: 'conn1',
+            name: 'Connection 1',
+            contactPoint: 'http://localhost:8080/v2',
+            authType: 'basic',
+            basicAuthUsername: 'user1',
+            basicAuthPassword: 'pass1'
+          },
+          {
+            id: 'conn2',
+            name: 'Connection 2',
+            contactPoint: 'http://localhost:9090/v2',
+            authType: 'none'
+          }
+        ]
+      };
+      
+      writeFileSync(
+        join(modelerDataDir, 'settings.json'),
+        JSON.stringify(settingsData, null, 2),
+        'utf-8'
+      );
+      
+      const profiles = loadModelerProfiles();
+      assert.strictEqual(profiles.length, 2);
+      assert.strictEqual(profiles[0].name, 'Connection 1');
+      assert.strictEqual(profiles[0].username, 'user1');
+      assert.strictEqual(profiles[1].name, 'Connection 2');
+      assert.strictEqual(profiles[1].authType, 'none');
+    });
+
+    test('convertModelerProfile handles profiles with username and password', async () => {
+      const { convertModelerProfile } = await import('../../src/config.ts');
+      const modelerProfile = {
+        name: 'Test',
+        clusterUrl: 'http://localhost:8080/v2',
+        authType: 'basic',
+        username: 'testuser',
+        password: 'testpass'
+      };
+      
+      const c8ctlProfile = convertModelerProfile(modelerProfile);
+      assert.strictEqual(c8ctlProfile.name, 'modeler:Test');
+      assert.strictEqual(c8ctlProfile.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(c8ctlProfile.username, 'testuser');
+      assert.strictEqual(c8ctlProfile.password, 'testpass');
+    });
+
+    test('convertModelerProfile handles profiles with custom oAuthUrl', async () => {
+      const { convertModelerProfile } = await import('../../src/config.ts');
+      const modelerProfile = {
+        name: 'Custom OAuth',
+        clusterUrl: 'https://my-cluster.example.com',
+        clientId: 'client-123',
+        clientSecret: 'secret-456',
+        oAuthUrl: 'https://auth.example.com/oauth/token'
+      };
+      
+      const c8ctlProfile = convertModelerProfile(modelerProfile);
+      assert.strictEqual(c8ctlProfile.name, 'modeler:Custom OAuth');
+      assert.strictEqual(c8ctlProfile.oAuthUrl, 'https://auth.example.com/oauth/token');
+    });
   });
 });

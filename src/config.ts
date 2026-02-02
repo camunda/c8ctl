@@ -47,6 +47,10 @@ export interface ModelerProfile {
   audience?: string;
   clientId?: string;
   clientSecret?: string;
+  username?: string;
+  password?: string;
+  authType?: string;
+  oAuthUrl?: string;
 }
 
 /**
@@ -54,6 +58,33 @@ export interface ModelerProfile {
  */
 interface ModelerProfilesFile {
   profiles?: ModelerProfile[];
+}
+
+/**
+ * Camunda Modeler settings.json connection structure
+ */
+interface SettingsConnection {
+  id?: string;
+  name?: string;
+  contactPoint?: string;
+  operateUrl?: string;
+  targetType?: string;
+  authType?: string;
+  basicAuthUsername?: string;
+  basicAuthPassword?: string;
+  clientId?: string;
+  clientSecret?: string;
+  audience?: string;
+  oAuthUrl?: string;
+  camundaCloudClusterUrl?: string;
+  rememberCredentials?: boolean;
+}
+
+/**
+ * Camunda Modeler settings.json structure
+ */
+interface ModelerSettingsFile {
+  'connectionManagerPlugin.c8connections'?: SettingsConnection[];
 }
 
 /**
@@ -378,8 +409,48 @@ export function resolveTenantId(profileFlag?: string): string {
 }
 
 /**
- * Load Camunda Modeler profiles from profiles.json
+ * Convert a settings.json connection to a ModelerProfile
+ */
+function convertSettingsConnection(conn: SettingsConnection): ModelerProfile {
+  const profile: ModelerProfile = {
+    name: conn.name,
+    clusterId: conn.id,
+    audience: conn.audience,
+    clientId: conn.clientId,
+    clientSecret: conn.clientSecret,
+    authType: conn.authType,
+  };
+
+  // Map contactPoint to clusterUrl
+  if (conn.contactPoint) {
+    profile.clusterUrl = conn.contactPoint;
+  }
+
+  // Use camundaCloudClusterUrl if available (for cloud connections)
+  if (conn.camundaCloudClusterUrl) {
+    profile.clusterUrl = conn.camundaCloudClusterUrl;
+  }
+
+  // Map basic auth credentials
+  if (conn.authType === 'basic' || conn.authType === 'none') {
+    profile.username = conn.basicAuthUsername;
+    profile.password = conn.basicAuthPassword;
+  }
+
+  // Map OAuth URL
+  if (conn.oAuthUrl) {
+    profile.oAuthUrl = conn.oAuthUrl;
+  }
+
+  return profile;
+}
+
+/**
+ * Load Camunda Modeler profiles from profiles.json or settings.json
  * Always reads fresh from disk (no caching)
+ * 
+ * If profiles.json doesn't exist, falls back to reading from settings.json
+ * which contains connection info in connectionManagerPlugin.c8connections
  * 
  * TODO: Consider introducing caching mechanism for better performance.
  * Current implementation reads from disk on every call. For commands that
@@ -391,14 +462,26 @@ export function loadModelerProfiles(): ModelerProfile[] {
     const modelerDir = getModelerDataDir();
     const profilesPath = join(modelerDir, 'profiles.json');
     
-    if (!existsSync(profilesPath)) {
-      return [];
+    // First try profiles.json
+    if (existsSync(profilesPath)) {
+      const data = readFileSync(profilesPath, 'utf-8');
+      const parsed: ModelerProfilesFile = JSON.parse(data);
+      return parsed.profiles || [];
     }
     
-    const data = readFileSync(profilesPath, 'utf-8');
-    const parsed: ModelerProfilesFile = JSON.parse(data);
+    // Fall back to settings.json if profiles.json doesn't exist
+    const settingsPath = join(modelerDir, 'settings.json');
+    if (existsSync(settingsPath)) {
+      const data = readFileSync(settingsPath, 'utf-8');
+      const parsed: ModelerSettingsFile = JSON.parse(data);
+      const connections = parsed['connectionManagerPlugin.c8connections'];
+      
+      if (connections && Array.isArray(connections)) {
+        return connections.map(convertSettingsConnection);
+      }
+    }
     
-    return parsed.profiles || [];
+    return [];
   } catch (error) {
     // Silently return empty array if file can't be read or parsed
     return [];
@@ -475,9 +558,11 @@ export function convertModelerProfile(modelerProfile: ModelerProfile): Profile {
     clientId: modelerProfile.clientId,
     clientSecret: modelerProfile.clientSecret,
     audience: modelerProfile.audience,
+    username: modelerProfile.username,
+    password: modelerProfile.password,
     // Cloud clusters typically use the standard OAuth URL
-    oAuthUrl: modelerProfile.audience ? 
+    oAuthUrl: modelerProfile.oAuthUrl || (modelerProfile.audience ? 
       'https://login.cloud.camunda.io/oauth/token' : 
-      undefined,
+      undefined),
   };
 }
