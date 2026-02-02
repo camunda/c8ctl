@@ -112,10 +112,12 @@ async function checkClusterVersion(baseUrl) {
     // Check if version is available in topology response
     if (topology.version) {
       const version = topology.version;
-      const majorMinor = version.split('.').slice(0, 2).join('.');
-      const versionNum = parseFloat(majorMinor);
+      const versionParts = version.split('.').map(part => parseInt(part, 10));
+      const major = versionParts[0] || 0;
+      const minor = versionParts[1] || 0;
       
-      if (versionNum < 8.9) {
+      // Check if version is 8.9 or later
+      if (major < 8 || (major === 8 && minor < 9)) {
         console.error(`Error: MCP chat requires Camunda 8.9 or later. Current version: ${version}`);
         return false;
       }
