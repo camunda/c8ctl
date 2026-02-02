@@ -213,7 +213,7 @@ export function getUserDataDir(): string {
     case 'darwin':
       return join(home, 'Library', 'Application Support', 'c8ctl');
     default:
-      return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'c8ctl');
+      return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'c8ctl');
   }
 }
 
