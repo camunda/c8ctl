@@ -1,7 +1,8 @@
 /**
  * Configuration and session state management for c8ctl
- * Uses Camunda Modeler's connection format for compatibility
- * Connections are stored in Modeler's config.json at connectionManagerPlugin.c8connections
+ *
+ * c8ctl stores its own profiles in DATA_DIR/c8ctl/profiles.json
+ * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
 import { homedir, platform } from 'node:os';
@@ -77,8 +78,8 @@ export interface Connection {
 }
 
 /**
- * Legacy Profile interface for backward compatibility during migration
- * @deprecated Use Connection interface instead
+ * c8ctl Profile interface - stored in DATA_DIR/c8ctl/profiles.json
+ * This is c8ctl's native profile format
  */
 export interface Profile {
   name: string;
@@ -212,12 +213,13 @@ export function getUserDataDir(): string {
     case 'darwin':
       return join(home, 'Library', 'Application Support', 'c8ctl');
     default:
-      return join(process.env.XDG_DATA_HOME || join(home, '.local', 'share'), 'c8ctl');
+      return join(process.env.XDG_CONFIG_HOME || join(home, '.config'), 'c8ctl');
   }
 }
 
 /**
  * Get platform-specific Camunda Modeler data directory
+ * Modeler stores connections in settings.json
  */
 export function getModelerDataDir(): string {
   // Allow override for testing
@@ -250,34 +252,116 @@ function getSessionStatePath(): string {
   return join(ensureUserDataDir(), 'session.json');
 }
 
-function getModelerConfigPath(): string {
-  return join(getModelerDataDir(), 'config.json');
+function getProfilesPath(): string {
+  return join(ensureUserDataDir(), 'profiles.json');
+}
+
+function getModelerSettingsPath(): string {
+  return join(getModelerDataDir(), 'settings.json');
 }
 
 // ============================================================================
-// Connection Management - Modeler-compatible
+// c8ctl Profile Management - stored in DATA_DIR/c8ctl/profiles.json
 // ============================================================================
 
-const CONNECTIONS_KEY = 'connectionManagerPlugin.c8connections';
-
-interface ModelerConfigFile {
-  [key: string]: unknown;
+interface ProfilesFile {
+  profiles: Profile[];
 }
 
 /**
- * Load all connections from Modeler's config.json
+ * Load c8ctl profiles from profiles.json
  */
-export function loadConnections(): Connection[] {
-  const configPath = getModelerConfigPath();
+export function loadProfiles(): Profile[] {
+  const profilesPath = getProfilesPath();
 
-  if (!existsSync(configPath)) {
+  if (!existsSync(profilesPath)) {
     return [];
   }
 
   try {
-    const data = readFileSync(configPath, 'utf-8');
-    const config: ModelerConfigFile = JSON.parse(data);
-    const connections = config[CONNECTIONS_KEY] as Connection[] | undefined;
+    const data = readFileSync(profilesPath, 'utf-8');
+    const profilesFile: ProfilesFile = JSON.parse(data);
+    return profilesFile.profiles || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save c8ctl profiles to profiles.json
+ */
+export function saveProfiles(profiles: Profile[]): void {
+  const profilesPath = getProfilesPath();
+  const profilesFile: ProfilesFile = { profiles };
+  writeFileSync(profilesPath, JSON.stringify(profilesFile, null, 2), 'utf-8');
+}
+
+/**
+ * Get a c8ctl profile by name
+ */
+export function getProfile(name: string): Profile | undefined {
+  const profiles = loadProfiles();
+  return profiles.find(p => p.name === name);
+}
+
+/**
+ * Add a c8ctl profile
+ */
+export function addProfile(profile: Profile): void {
+  const profiles = loadProfiles();
+  
+  // Check if profile already exists
+  const existingIndex = profiles.findIndex(p => p.name === profile.name);
+  if (existingIndex >= 0) {
+    profiles[existingIndex] = profile;
+  } else {
+    profiles.push(profile);
+  }
+  
+  saveProfiles(profiles);
+}
+
+/**
+ * Remove a c8ctl profile by name
+ */
+export function removeProfile(name: string): boolean {
+  const profiles = loadProfiles();
+  const filtered = profiles.filter(p => p.name !== name);
+  
+  if (filtered.length === profiles.length) {
+    return false;
+  }
+  
+  saveProfiles(filtered);
+  return true;
+}
+
+// ============================================================================
+// Modeler Connection Management - READ-ONLY from settings.json
+// ============================================================================
+
+export const MODELER_PREFIX = 'modeler:';
+
+interface ModelerSettingsFile {
+  c8connections?: Connection[];
+  [key: string]: unknown;
+}
+
+/**
+ * Load connections from Modeler's settings.json (read-only)
+ * These are NOT modified by c8ctl
+ */
+export function loadModelerConnections(): Connection[] {
+  const settingsPath = getModelerSettingsPath();
+
+  if (!existsSync(settingsPath)) {
+    return [];
+  }
+
+  try {
+    const data = readFileSync(settingsPath, 'utf-8');
+    const settings: ModelerSettingsFile = JSON.parse(data);
+    const connections = settings.c8connections;
 
     if (!connections || !Array.isArray(connections)) {
       return [];
@@ -291,102 +375,49 @@ export function loadConnections(): Connection[] {
 }
 
 /**
- * Save connections to Modeler's config.json
- * Preserves other settings in the config file
+ * Get all profiles including c8ctl profiles and Modeler connections
+ * Modeler connections are prefixed with "modeler:"
  */
-export function saveConnections(connections: Connection[]): void {
-  const configPath = getModelerConfigPath();
-  const modelerDir = getModelerDataDir();
+export function getAllProfiles(): Profile[] {
+  const c8ctlProfiles = loadProfiles();
+  const modelerConnections = loadModelerConnections();
+  
+  // Convert Modeler connections to Profile format with "modeler:" prefix
+  const modelerProfiles = modelerConnections.map(connectionToProfile).map(p => ({
+    ...p,
+    name: `${MODELER_PREFIX}${p.name}`,
+  }));
+  
+  return [...c8ctlProfiles, ...modelerProfiles];
+}
 
-  // Ensure modeler directory exists
-  if (!existsSync(modelerDir)) {
-    mkdirSync(modelerDir, { recursive: true });
+/**
+ * Get a profile by name, checking both c8ctl and Modeler sources
+ * For Modeler profiles, accepts name with or without "modeler:" prefix
+ */
+export function getProfileOrModeler(name: string): Profile | undefined {
+  // Try c8ctl profiles first
+  const c8ctlProfile = getProfile(name);
+  if (c8ctlProfile) {
+    return c8ctlProfile;
   }
-
-  let config: ModelerConfigFile = {};
-
-  // Load existing config to preserve other settings
-  if (existsSync(configPath)) {
-    try {
-      const data = readFileSync(configPath, 'utf-8');
-      config = JSON.parse(data);
-    } catch {
-      // Start fresh if parsing fails
-      config = {};
-    }
+  
+  // Try Modeler connections (with or without prefix)
+  const modelerName = name.startsWith(MODELER_PREFIX) ? name.slice(MODELER_PREFIX.length) : name;
+  const modelerConnections = loadModelerConnections();
+  const modelerConnection = modelerConnections.find(
+    c => c.name === modelerName || c.id === modelerName
+  );
+  
+  if (modelerConnection) {
+    const profile = connectionToProfile(modelerConnection);
+    return {
+      ...profile,
+      name: `${MODELER_PREFIX}${profile.name}`,
+    };
   }
-
-  config[CONNECTIONS_KEY] = connections;
-  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-}
-
-/**
- * Get a connection by ID or name
- */
-export function getConnection(identifier: string): Connection | undefined {
-  const connections = loadConnections();
-  return connections.find(c => c.id === identifier || c.name === identifier);
-}
-
-/**
- * Add or update a connection
- */
-export function saveConnection(connection: Connection): void {
-  const connections = loadConnections();
-  const existingIndex = connections.findIndex(c => c.id === connection.id);
-
-  if (existingIndex >= 0) {
-    connections[existingIndex] = connection;
-  } else {
-    connections.push(connection);
-  }
-
-  saveConnections(connections);
-}
-
-/**
- * Remove a connection by ID or name
- */
-export function removeConnection(identifier: string): boolean {
-  const connections = loadConnections();
-  const filtered = connections.filter(c => c.id !== identifier && c.name !== identifier);
-
-  if (filtered.length === connections.length) {
-    return false;
-  }
-
-  saveConnections(filtered);
-  return true;
-}
-
-/**
- * Generate a new connection with default values
- */
-export function createConnection(name?: string): Connection {
-  const connections = loadConnections();
-  const connectionName = name || `New connection ${connections.length + 1}`;
-
-  return {
-    id: randomUUID(),
-    name: connectionName,
-    targetType: TARGET_TYPES.SELF_HOSTED,
-    contactPoint: 'http://localhost:8080/v2',
-    authType: AUTH_TYPES.NONE,
-  };
-}
-
-/**
- * Create a default local connection (c8run style)
- */
-export function createDefaultLocalConnection(): Connection {
-  return {
-    id: randomUUID(),
-    name: 'c8run (local)',
-    targetType: TARGET_TYPES.SELF_HOSTED,
-    contactPoint: 'http://localhost:8080/v2',
-    operateUrl: 'http://localhost:8080/operate',
-    authType: AUTH_TYPES.NONE,
-  };
+  
+  return undefined;
 }
 
 // ============================================================================
@@ -426,8 +457,8 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
 }
 
 /**
- * Convert Connection to legacy Profile format
- * @deprecated Use Connection interface directly
+ * Convert Connection to Profile format
+ * Used to convert read-only Modeler connections to c8ctl Profile format
  */
 export function connectionToProfile(conn: Connection): Profile {
   const config = connectionToClusterConfig(conn);
@@ -442,6 +473,21 @@ export function connectionToProfile(conn: Connection): Profile {
     username: config.username,
     password: config.password,
     defaultTenantId: conn.tenantId,
+  };
+}
+
+/**
+ * Convert Profile to ClusterConfig for API client use
+ */
+export function profileToClusterConfig(profile: Profile): ClusterConfig {
+  return {
+    baseUrl: profile.baseUrl,
+    clientId: profile.clientId,
+    clientSecret: profile.clientSecret,
+    audience: profile.audience,
+    oAuthUrl: profile.oAuthUrl,
+    username: profile.username,
+    password: profile.password,
   };
 }
 
@@ -586,19 +632,19 @@ export function setOutputMode(mode: OutputMode): void {
  * Priority: profileFlag → session profile → env vars → localhost fallback
  */
 export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
-  // 1. Try profile flag (connection ID or name)
+  // 1. Try profile flag (profile name, including modeler: prefix)
   if (profileFlag) {
-    const connection = getConnection(profileFlag);
-    if (connection) {
-      return connectionToClusterConfig(connection);
+    const profile = getProfileOrModeler(profileFlag);
+    if (profile) {
+      return profileToClusterConfig(profile);
     }
   }
 
   // 2. Try session profile
   if (c8ctl.activeProfile) {
-    const connection = getConnection(c8ctl.activeProfile);
-    if (connection) {
-      return connectionToClusterConfig(connection);
+    const profile = getProfileOrModeler(c8ctl.activeProfile);
+    if (profile) {
+      return profileToClusterConfig(profile);
     }
   }
 
@@ -632,8 +678,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
 }
 
 /**
- * Resolve tenant ID from session, connection, env vars, or default
- * Priority: session tenant → connection tenant → env var → '<default>'
+ * Resolve tenant ID from session, profile, env vars, or default
+ * Priority: session tenant → profile tenant → env var → '<default>'
  */
 export function resolveTenantId(profileFlag?: string): string {
   // 1. Try session tenant
@@ -641,12 +687,12 @@ export function resolveTenantId(profileFlag?: string): string {
     return c8ctl.activeTenant;
   }
 
-  // 2. Try connection default tenant (from flag or session)
-  const connectionName = profileFlag || c8ctl.activeProfile;
-  if (connectionName) {
-    const connection = getConnection(connectionName);
-    if (connection?.tenantId) {
-      return connection.tenantId;
+  // 2. Try profile default tenant (from flag or session)
+  const profileName = profileFlag || c8ctl.activeProfile;
+  if (profileName) {
+    const profile = getProfileOrModeler(profileName);
+    if (profile?.defaultTenantId) {
+      return profile.defaultTenantId;
     }
   }
 
@@ -658,79 +704,4 @@ export function resolveTenantId(profileFlag?: string): string {
 
   // 4. Default tenant
   return '<default>';
-}
-
-// ============================================================================
-// Legacy API - Deprecated, for backward compatibility during migration
-// ============================================================================
-
-/**
- * @deprecated Use loadConnections() instead
- */
-export function loadProfiles(): Profile[] {
-  return loadConnections().map(connectionToProfile);
-}
-
-/**
- * @deprecated Use getConnection() instead
- */
-export function getProfile(name: string): Profile | undefined {
-  const connection = getConnection(name);
-  return connection ? connectionToProfile(connection) : undefined;
-}
-
-/**
- * @deprecated Use saveConnection() instead
- */
-export function addProfile(profile: Profile): void {
-  // Convert profile to connection
-  const isCloud = profile.baseUrl.includes('zeebe.camunda.io');
-
-  const connection: Connection = {
-    id: randomUUID(),
-    name: profile.name,
-    targetType: isCloud ? TARGET_TYPES.CAMUNDA_CLOUD : TARGET_TYPES.SELF_HOSTED,
-    tenantId: profile.defaultTenantId,
-  };
-
-  if (isCloud) {
-    connection.camundaCloudClusterUrl = profile.baseUrl;
-    connection.camundaCloudClientId = profile.clientId;
-    connection.camundaCloudClientSecret = profile.clientSecret;
-  } else {
-    connection.contactPoint = profile.baseUrl;
-
-    if (profile.username && profile.password) {
-      connection.authType = AUTH_TYPES.BASIC;
-      connection.basicAuthUsername = profile.username;
-      connection.basicAuthPassword = profile.password;
-    } else if (profile.clientId && profile.clientSecret) {
-      connection.authType = AUTH_TYPES.OAUTH;
-      connection.clientId = profile.clientId;
-      connection.clientSecret = profile.clientSecret;
-      connection.oauthURL = profile.oAuthUrl;
-      connection.audience = profile.audience;
-    } else {
-      connection.authType = AUTH_TYPES.NONE;
-    }
-  }
-
-  saveConnection(connection);
-}
-
-/**
- * @deprecated Use removeConnection() instead
- */
-export function removeProfile(name: string): boolean {
-  return removeConnection(name);
-}
-
-/**
- * @deprecated Use saveConnections() instead
- */
-export function saveProfiles(profiles: Profile[]): void {
-  // This is lossy - only use for migration
-  for (const profile of profiles) {
-    addProfile(profile);
-  }
 }
