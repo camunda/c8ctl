@@ -1,105 +1,158 @@
 /**
  * Profile management commands
+ * c8ctl profiles are stored in DATA_DIR/c8ctl/profiles.json
+ * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
 import { getLogger } from '../logger.ts';
 import {
-  loadProfiles,
-  addProfile as addProfileToConfig,
-  removeProfile as removeProfileFromConfig,
-  loadModelerProfiles,
-  convertModelerProfile,
+  getAllProfiles,
+  getProfile,
+  getProfileOrModeler,
+  addProfile as addProfileConfig,
+  removeProfile as removeProfileConfig,
+  MODELER_PREFIX,
   type Profile,
 } from '../config.ts';
 
 /**
- * List all profiles
+ * List all profiles (c8ctl + Modeler)
  */
 export function listProfiles(): void {
   const logger = getLogger();
-  const c8ctlProfiles = loadProfiles();
-  const modelerProfiles = loadModelerProfiles();
-  
-  const totalProfiles = c8ctlProfiles.length + modelerProfiles.length;
-  
-  if (totalProfiles === 0) {
+  const profiles = getAllProfiles();
+
+  if (profiles.length === 0) {
     logger.info('No profiles configured');
+    logger.info('');
+    logger.info('Add a profile with: c8ctl profiles add <name> --url <cluster-url>');
+    logger.info('Or configure connections in Camunda Modeler and they will appear with "modeler:" prefix.');
     return;
   }
 
   interface ProfileTableRow {
     Name: string;
-    'Base URL': string;
-    'Client ID': string;
-    'Default Tenant': string;
-  }
-  
-  const tableData: ProfileTableRow[] = [];
-  
-  // Add c8ctl profiles
-  for (const p of c8ctlProfiles) {
-    tableData.push({
-      Name: p.name,
-      'Base URL': p.baseUrl,
-      'Client ID': p.clientId || '(none)',
-      'Default Tenant': p.defaultTenantId || '<default>',
-    });
-  }
-  
-  // Add modeler profiles with 'modeler:' prefix
-  for (const mp of modelerProfiles) {
-    const converted = convertModelerProfile(mp);
-    tableData.push({
-      Name: converted.name,
-      'Base URL': converted.baseUrl,
-      'Client ID': converted.clientId || '(none)',
-      'Default Tenant': converted.defaultTenantId || '<default>',
-    });
+    URL: string;
+    Tenant: string;
+    Source: string;
   }
 
+  const tableData: ProfileTableRow[] = profiles.map(profile => {
+    const isModeler = profile.name.startsWith(MODELER_PREFIX);
+    
+    return {
+      Name: profile.name,
+      URL: profile.baseUrl || '(not set)',
+      Tenant: profile.defaultTenantId || '<default>',
+      Source: isModeler ? 'Modeler' : 'c8ctl',
+    };
+  });
+
   logger.table(tableData);
+  
+  // Show hint about read-only Modeler profiles
+  const hasModelerProfiles = profiles.some(p => p.name.startsWith(MODELER_PREFIX));
+  if (hasModelerProfiles) {
+    logger.info('');
+    logger.info(`Note: Modeler profiles (prefixed with "${MODELER_PREFIX}") are read-only. Manage them in Camunda Modeler.`);
+  }
 }
 
 /**
- * Add a profile
+ * Show profile details
  */
-export function addProfile(name: string, options: {
-  baseUrl?: string;
+export function showProfile(name: string): void {
+  const logger = getLogger();
+  const profile = getProfileOrModeler(name);
+
+  if (!profile) {
+    logger.error(`Profile '${name}' not found`);
+    process.exit(1);
+  }
+
+  const isModeler = profile.name.startsWith(MODELER_PREFIX);
+  
+  logger.info(`Profile: ${profile.name}`);
+  logger.info(`  Source: ${isModeler ? 'Camunda Modeler (read-only)' : 'c8ctl'}`);
+  logger.info(`  Base URL: ${profile.baseUrl}`);
+  
+  if (profile.username) {
+    logger.info(`  Username: ${profile.username}`);
+    logger.info(`  Password: ${profile.password ? '********' : '(not set)'}`);
+  }
+  
+  if (profile.clientId) {
+    logger.info(`  Client ID: ${profile.clientId}`);
+    logger.info(`  Client Secret: ${profile.clientSecret ? '********' : '(not set)'}`);
+  }
+  
+  if (profile.audience) {
+    logger.info(`  Audience: ${profile.audience}`);
+  }
+  
+  if (profile.oAuthUrl) {
+    logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
+  }
+  
+  if (profile.defaultTenantId) {
+    logger.info(`  Default Tenant: ${profile.defaultTenantId}`);
+  }
+}
+
+export interface AddProfileOptions {
+  url?: string;
   clientId?: string;
   clientSecret?: string;
   audience?: string;
-  oAuthUrl?: string;
-  defaultTenantId?: string;
-}): void {
+  oauthUrl?: string;
+  username?: string;
+  password?: string;
+  tenantId?: string;
+}
+
+/**
+ * Add a c8ctl profile
+ */
+export function addProfile(name: string, options: AddProfileOptions): void {
   const logger = getLogger();
 
-  // Validate required fields
-  if (!options.baseUrl) {
-    logger.error('Base URL is required. Use --baseUrl flag');
+  // Prevent adding profiles with "modeler:" prefix
+  if (name.startsWith(MODELER_PREFIX)) {
+    logger.error(`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`);
+    logger.info('Please choose a different name or manage this profile in Camunda Modeler');
     process.exit(1);
   }
 
   const profile: Profile = {
     name,
-    baseUrl: options.baseUrl,
+    baseUrl: options.url || 'http://localhost:8080/v2',
     clientId: options.clientId,
     clientSecret: options.clientSecret,
     audience: options.audience,
-    oAuthUrl: options.oAuthUrl,
-    defaultTenantId: options.defaultTenantId,
+    oAuthUrl: options.oauthUrl,
+    username: options.username,
+    password: options.password,
+    defaultTenantId: options.tenantId,
   };
 
-  addProfileToConfig(profile);
+  addProfileConfig(profile);
   logger.success(`Profile '${name}' added`);
 }
 
 /**
- * Remove a profile
+ * Remove a c8ctl profile
  */
 export function removeProfile(name: string): void {
   const logger = getLogger();
-  
-  const removed = removeProfileFromConfig(name);
+
+  // Prevent removing Modeler profiles
+  if (name.startsWith(MODELER_PREFIX)) {
+    logger.error('Cannot remove Modeler profiles via c8ctl');
+    logger.info('Manage Modeler connections directly in Camunda Modeler');
+    process.exit(1);
+  }
+
+  const removed = removeProfileConfig(name);
   if (removed) {
     logger.success(`Profile '${name}' removed`);
   } else {

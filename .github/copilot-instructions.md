@@ -9,11 +9,22 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
+- always make sure that cli commands, resources and options are reflected in 
+  - the `help`tests
+  - README.md, EXAMPLES.md and other documentation
+  - shell completion
+
+### Work Environment
+
+- when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
+- prefer cross-platform solutions where reasonable
+
 ### Development
 
 - use Node.js 22 LTS only by respecting .nvmrc
 - this is a native Node.js project running TS files
 - there is no build step for development. Only compile for test purposes or release.
+- on changes, make sure all tests pass and a build via `npm run build` works without errors
 
 - pay attention on cross-platform compatibility (Linux, MacOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
 - prefer functional programming over OOP where reasonable

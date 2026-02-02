@@ -30,6 +30,7 @@ import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/plugins.ts';
+import { showCompletion } from './commands/completion.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand, 
@@ -141,6 +142,12 @@ async function main() {
     return;
   }
 
+  // Handle completion command
+  if (verb === 'completion') {
+    showCompletion(resource);
+    return;
+  }
+
   // Normalize resource
   const normalizedResource = resource ? normalizeResource(resource) : '';
 
@@ -187,12 +194,12 @@ async function main() {
       process.exit(1);
     }
     addProfile(args[0], {
-      baseUrl: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
+      url: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
       clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
       clientSecret: typeof values.clientSecret === 'string' ? values.clientSecret : undefined,
       audience: typeof values.audience === 'string' ? values.audience : undefined,
-      oAuthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
-      defaultTenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
+      oauthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
+      tenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
     });
     return;
   }

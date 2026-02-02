@@ -10,13 +10,17 @@ import { tmpdir } from 'node:os';
 
 describe('Session Management Integration Tests', () => {
   let testDir: string;
+  let modelerDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `c8ctl-session-test-${Date.now()}`);
+    modelerDir = join(tmpdir(), `c8ctl-modeler-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
+    mkdirSync(modelerDir, { recursive: true });
     originalEnv = { ...process.env };
-    process.env.XDG_DATA_HOME = testDir;
+    process.env.C8CTL_DATA_DIR = testDir;
+    process.env.C8CTL_MODELER_DIR = modelerDir;
     
     // Reset c8ctl runtime state before each test
     const { c8ctl } = await import('../../src/runtime.ts');
@@ -28,6 +32,9 @@ describe('Session Management Integration Tests', () => {
   afterEach(() => {
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
+    }
+    if (existsSync(modelerDir)) {
+      rmSync(modelerDir, { recursive: true, force: true });
     }
     process.env = originalEnv;
   });
@@ -121,11 +128,14 @@ describe('Session Management Integration Tests', () => {
       resolveClusterConfig 
     } = await import('../../src/config.ts');
     
-    // Add profile with specific config
+    // Add profile with specific config (need both clientId and clientSecret for OAuth)
     addProfile({
       name: 'my-profile',
       baseUrl: 'https://custom.example.com',
       clientId: 'custom-client',
+      clientSecret: 'custom-secret',
+      oAuthUrl: 'https://auth.example.com/token',
+      audience: 'custom-audience',
     });
 
     // Set as active

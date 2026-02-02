@@ -71,6 +71,7 @@ Commands:
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
+  completion bash|zsh|fish   Generate shell completion script
   help                       Show this help${pluginSection}
 
 Flags:
@@ -101,6 +102,7 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl completion bash              Generate bash completion script
   c8ctl sync plugin                  Synchronize plugins
 `.trim());
 }
@@ -128,6 +130,7 @@ export function showVerbResources(verb: string): void {
     sync: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
+    completion: 'bash, zsh, fish',
   };
 
   const available = resources[verb];
