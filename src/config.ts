@@ -251,7 +251,7 @@ function getSessionStatePath(): string {
 }
 
 function getModelerConfigPath(): string {
-  return join(getModelerDataDir(), 'config.json');
+  return join(getModelerDataDir(), 'settings.json');
 }
 
 // ============================================================================
