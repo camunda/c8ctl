@@ -43,7 +43,7 @@ All requirements from the plan have been successfully implemented and tested.
    - **Jobs** (`jobs.ts`): list, activate, complete, fail
    - **Messages** (`messages.ts`): publish, correlate
    - **Topology** (`topology.ts`): get cluster topology
-   - **Deployments** (`deployments.ts`): deploy with `_bb-` folder prioritization and duplicate ID validation
+   - **Deployments** (`deployments.ts`): deploy with `_bb-` folder prioritization, duplicate ID validation, enhanced logging with file paths and building block indicators (🧱), and `.process-application` batch deployment detection
    - **Run** (`run.ts`): deploy + create process instance
    - **Profiles** (`profiles.ts`): list, add, remove
    - **Session** (`session.ts`): use profile/tenant, output format

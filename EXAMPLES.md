@@ -224,9 +224,40 @@ c8 deploy
 # Deploys all BPMN/DMN/Form files in specified directory and subdirectories
 c8 deploy ./my-project
 
-# Building block folders (containing _bb- in name) are prioritized
+# Building block folders (containing _bb- in name) are prioritized and marked with 🧱
 # Order: _bb-* folders first, then other files
+# Example output:
+#   Deploying 3 resource(s)...
+#   🧱 _bb-shared/common-process.bpmn
+#     processes/order-process.bpmn
+#     forms/order-form.form
 ```
+
+### Process Application Batch Deployment
+
+If a directory contains a `.process-application` file, all resources in that directory and its subdirectories will be deployed together as a batch. The deployment log will indicate this:
+
+```bash
+# Directory structure:
+# my-app/
+#   .process-application
+#   process.bpmn
+#   decision.dmn
+
+c8 deploy ./my-app
+
+# Output:
+# Deploying 2 resource(s) (batch deployment from process application)...
+#   process.bpmn
+#   decision.dmn
+```
+
+### Deployment Output Details
+
+The deployment command now shows:
+- **File names with relative paths** - Easy to identify which files are being deployed
+- **Building block indicators** - Resources from folders with `_bb-` in the name are marked with 🧱 emoji
+- **Process application detection** - Directories with `.process-application` file show batch deployment note
 
 ### Important: Duplicate Process IDs
 
