@@ -253,6 +253,48 @@ c8 run ./order-process.bpmn
 c8 run ./order-process.bpmn --variables='{"orderId":"12345","amount":100}'
 ```
 
+### Watch Mode
+
+Watch mode monitors files for changes and automatically deploys them. Optionally, it can also create process instances after each deployment using the `--run` flag.
+
+```bash
+# Basic watch - auto-deploys on changes
+c8 watch
+c8 w  # alias
+
+# Watch specific directory
+c8 watch ./processes
+
+# Watch and create process instance after each change
+c8 watch --run path/to/process.bpmn
+
+# Watch with variables passed to process instances
+c8 watch --run path/to/process.bpmn --variables='{"orderId":"12345","amount":100}'
+
+# Watch and run multiple BPMNs
+c8 watch --run file1.bpmn --run file2.bpmn
+
+# Watch and run with wildcards
+# Single * = current folder only
+c8 watch --run ./processes/*
+
+# Double ** = recursive (includes subfolders)
+c8 watch --run ./processes/**
+
+# Watch and run with multiple patterns and variables
+c8 watch --run ./main.bpmn --variables='{"env":"dev"}' --run ./helpers/**
+
+# Combine watched paths with --run patterns
+c8 watch ./src --run ./processes/*.bpmn
+```
+
+**How --run works:**
+- The `--run` flag specifies BPMN files to create process instances for after any detected change
+- Unlike the `run` command, `--run` does NOT deploy the referenced BPMNs - it only creates process instances
+- The referenced BPMNs should already be deployed or will be deployed if they're in the watched paths
+- Variables are applied to all process instances created from the specified patterns
+- The CLI logs which BPMNs were found and the process instance keys created
+
 ---
 
 ## Topology
