@@ -39,6 +39,7 @@ interface ResourceFile {
   content: Buffer;
   isBuildingBlock: boolean;
   isProcessApplication: boolean;
+  groupPath?: string; // Path to the root of the group (BB or PA folder)
   relativePath?: string;
 }
 
@@ -58,11 +59,44 @@ function hasProcessApplicationFile(dirPath: string): boolean {
 }
 
 /**
+ * Find the root building block or process application folder by traversing up the path
+ * Returns the path to the group root, or null if not in a group
+ */
+function findGroupRoot(filePath: string, basePath: string): { type: 'bb' | 'pa' | null, root: string | null } {
+  let currentDir = dirname(filePath);
+  
+  // Traverse up the directory tree until we reach basePath
+  while (currentDir.startsWith(basePath)) {
+    // Check if this directory is a building block
+    if (isBuildingBlockFolder(currentDir)) {
+      return { type: 'bb', root: currentDir };
+    }
+    
+    // Check if this directory has a .process-application file
+    if (hasProcessApplicationFile(currentDir)) {
+      return { type: 'pa', root: currentDir };
+    }
+    
+    // Move up one level
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) break; // Reached root
+    currentDir = parentDir;
+  }
+  
+  return { type: null, root: null };
+}
+
+/**
  * Recursively collect resource files from a directory
  */
-function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): ResourceFile[] {
+function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string): ResourceFile[] {
   if (!existsSync(dirPath)) {
     return collected;
+  }
+
+  // Set basePath to dirPath on first call
+  if (!basePath) {
+    basePath = dirPath;
   }
 
   const stat = statSync(dirPath);
@@ -70,13 +104,14 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
   if (stat.isFile()) {
     const ext = extname(dirPath);
     if (RESOURCE_EXTENSIONS.includes(ext)) {
-      const parentDir = dirname(dirPath);
+      const groupInfo = findGroupRoot(dirPath, basePath);
       collected.push({
         path: dirPath,
         name: basename(dirPath),
         content: readFileSync(dirPath),
-        isBuildingBlock: isBuildingBlockFolder(parentDir),
-        isProcessApplication: hasProcessApplicationFile(parentDir),
+        isBuildingBlock: groupInfo.type === 'bb',
+        isProcessApplication: groupInfo.type === 'pa',
+        groupPath: groupInfo.root || undefined,
       });
     }
     return collected;
@@ -109,24 +144,26 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
     files.forEach(file => {
       const ext = extname(file);
       if (RESOURCE_EXTENSIONS.includes(ext)) {
+        const groupInfo = findGroupRoot(file, basePath);
         collected.push({
           path: file,
           name: basename(file),
           content: readFileSync(file),
-          isBuildingBlock: isBuildingBlockFolder(dirPath),
-          isProcessApplication: hasProcessApplicationFile(dirPath),
+          isBuildingBlock: groupInfo.type === 'bb',
+          isProcessApplication: groupInfo.type === 'pa',
+          groupPath: groupInfo.root || undefined,
         });
       }
     });
 
     // Process building block folders first (prioritized)
     bbFolders.forEach(bbFolder => {
-      collectResourceFiles(bbFolder, collected);
+      collectResourceFiles(bbFolder, collected, basePath);
     });
 
     // Then process regular folders
     regularFolders.forEach(regularFolder => {
-      collectResourceFiles(regularFolder, collected);
+      collectResourceFiles(regularFolder, collected, basePath);
     });
   }
 
@@ -186,19 +223,35 @@ export async function deploy(paths: string[], options: {
       r.relativePath = relative(basePath, r.path) || r.name;
     });
 
-    // Sort: building blocks first, then process applications, then regular resources
+    // Sort: group resources by their group, with building blocks first, then process applications, then standalone
     resources.sort((a, b) => {
       // Building blocks have highest priority
       if (a.isBuildingBlock && !b.isBuildingBlock) return -1;
       if (!a.isBuildingBlock && b.isBuildingBlock) return 1;
       
-      // Within same building block status, process applications come next
-      if (a.isBuildingBlock === b.isBuildingBlock) {
-        if (a.isProcessApplication && !b.isProcessApplication) return -1;
-        if (!a.isProcessApplication && b.isProcessApplication) return 1;
+      // Within building blocks, group by groupPath
+      if (a.isBuildingBlock && b.isBuildingBlock) {
+        if (a.groupPath && b.groupPath) {
+          const groupCompare = a.groupPath.localeCompare(b.groupPath);
+          if (groupCompare !== 0) return groupCompare;
+        }
+        return a.path.localeCompare(b.path);
       }
       
-      // Finally sort by path
+      // Process applications come next
+      if (a.isProcessApplication && !b.isProcessApplication) return -1;
+      if (!a.isProcessApplication && b.isProcessApplication) return 1;
+      
+      // Within process applications, group by groupPath
+      if (a.isProcessApplication && b.isProcessApplication) {
+        if (a.groupPath && b.groupPath) {
+          const groupCompare = a.groupPath.localeCompare(b.groupPath);
+          if (groupCompare !== 0) return groupCompare;
+        }
+        return a.path.localeCompare(b.path);
+      }
+      
+      // Finally, standalone resources sorted by path
       return a.path.localeCompare(b.path);
     });
 

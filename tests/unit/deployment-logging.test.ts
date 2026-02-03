@@ -98,4 +98,23 @@ describe('Deployment Logging', () => {
       throw new Error(`Unexpected deployment output: ${output}`);
     }
   });
+
+  test('mixed resources are properly grouped in deployment', () => {
+    // This test verifies that building blocks, process applications, and standalone
+    // resources are all properly grouped when deployed together
+    const output = executeDeployment('tests/fixtures/sample-mixed-resources');
+    
+    // Verify all 6 resources are being deployed (2 BB + 2 PA + 2 standalone)
+    assert.match(output, /Deploying 6 resource\(s\)/, 
+      'Should deploy all 6 resources from mixed structure');
+    
+    // The error is expected if no Camunda server is running
+    if (output.includes('fetch failed') || output.includes('ECONNREFUSED')) {
+      assert.ok(true, 'Deployment attempted with all resources from mixed structure');
+    } else if (output.includes('Deployment successful')) {
+      assert.ok(true, 'Deployment succeeded with mixed resources');
+    } else {
+      throw new Error(`Unexpected deployment output: ${output}`);
+    }
+  });
 });

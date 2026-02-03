@@ -240,39 +240,56 @@ c8 deploy ./my-project
 
 ### Process Application Deployment
 
-If a directory contains a `.process-application` file, resources in that directory are marked with the 📦 emoji in the deployment results table. Process applications can be deployed alongside building blocks and standalone resources:
+If a directory contains a `.process-application` file, **all resources in that directory and its subdirectories** are marked with the 📦 emoji in the deployment results table. Resources are grouped together based on their location:
 
 ```bash
 # Directory structure:
 # my-project/
 #   _bb-shared/
 #     common.bpmn
+#     nested/
+#       util.bpmn        # Also part of _bb-shared group
 #   my-app/
 #     .process-application
 #     process.bpmn
-#     form.form
+#     subfolder/
+#       form.form        # Also part of my-app group
 #   standalone.bpmn
 
 c8 deploy ./my-project
 
-# Output shows resources grouped by type:
-# Deploying 4 resource(s)...
+# Output shows resources grouped by their folder hierarchy:
+# Deploying 5 resource(s)...
 # ✓ Deployment successful [Key: 123456789]
 #
-# File                       | Type    | ID            | Version | Key
-# ---------------------------|---------|---------------|---------|-------------------
-# 🧱 _bb-shared/common.bpmn  | Process | common        | 1       | 2251799813685249
-# 📦 my-app/process.bpmn     | Process | my-proc       | 1       | 2251799813685250
-# 📦 my-app/form.form        | Form    | form-id       | 1       | 2251799813685251
-# standalone.bpmn            | Process | standalone    | 1       | 2251799813685252
+# File                            | Type    | ID            | Version | Key
+# --------------------------------|---------|---------------|---------|-------------------
+# 🧱 _bb-shared/common.bpmn       | Process | common        | 1       | 2251799813685249
+# 🧱 _bb-shared/nested/util.bpmn  | Process | util          | 1       | 2251799813685250
+# 📦 my-app/process.bpmn          | Process | my-proc       | 1       | 2251799813685251
+# 📦 my-app/subfolder/form.form   | Form    | form-id       | 1       | 2251799813685252
+# standalone.bpmn                 | Process | standalone    | 1       | 2251799813685253
 ```
+
+### Resource Grouping Rules
+
+Resources are automatically grouped based on their folder hierarchy:
+
+1. **Building Block Groups** - All resources in a folder with `_bb-` in the name (and its subdirectories) belong to the same group and are marked with 🧱
+2. **Process Application Groups** - All resources in a folder containing `.process-application` file (and its subdirectories) belong to the same group and are marked with 📦
+3. **Standalone Resources** - Resources not in a building block or process application folder are treated as standalone
+
+In the deployment output:
+- Building block groups are listed first, grouped together
+- Process application groups are listed next, grouped together
+- Standalone resources are listed last
 
 ### Deployment Output Details
 
 The deployment results table shows:
 - **File column** - Shows the file name with relative path
-  - 🧱 emoji indicates building block resources (from `_bb-*` folders)
-  - 📦 emoji indicates process application resources (from folders with `.process-application` file)
+  - 🧱 emoji indicates building block resources (from `_bb-*` folders, including nested files)
+  - 📦 emoji indicates process application resources (from folders with `.process-application` file, including nested files)
 - **Type column** - Resource type (Process, Decision, or Form)
 - **ID column** - The process/decision/form ID
 - **Version column** - Version number assigned by Camunda
