@@ -62,11 +62,17 @@ function hasProcessApplicationFile(dirPath: string): boolean {
  * Find the root building block or process application folder by traversing up the path
  * Returns the path to the group root, or null if not in a group
  */
-function findGroupRoot(filePath: string, basePath: string): { type: 'bb' | 'pa' | null, root: string | null } {
+function findGroupRoot(filePath: string, basePath: string): { type: 'bb', root: string } | { type: 'pa', root: string } | { type: null, root: null } {
   let currentDir = dirname(filePath);
   
-  // Traverse up the directory tree until we reach basePath
-  while (currentDir.startsWith(basePath)) {
+  // Traverse up the directory tree until we reach or go outside basePath
+  while (true) {
+    // Check if we've gone outside the basePath
+    const rel = relative(basePath, currentDir);
+    if (rel.startsWith('..') || rel === '') {
+      break;
+    }
+    
     // Check if this directory is a building block
     if (isBuildingBlockFolder(currentDir)) {
       return { type: 'bb', root: currentDir };
@@ -79,7 +85,7 @@ function findGroupRoot(filePath: string, basePath: string): { type: 'bb' | 'pa' 
     
     // Move up one level
     const parentDir = dirname(currentDir);
-    if (parentDir === currentDir) break; // Reached root
+    if (parentDir === currentDir) break; // Reached filesystem root
     currentDir = parentDir;
   }
   
