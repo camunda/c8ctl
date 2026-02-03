@@ -70,4 +70,40 @@ describe('Deployment Logging', () => {
         'Should not display process application note when file is absent');
     }
   });
+
+  test('batched deployment with process application deploys all resources together', () => {
+    // This test verifies that when a .process-application file is present,
+    // all resources in that directory are deployed in a single batch
+    try {
+      execSync('npm run cli -- deploy tests/fixtures/list-pis', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 5000,
+        env: process.env
+      });
+      // If deployment succeeds, test passes (requires Camunda server)
+      assert.ok(true, 'Deployment succeeded with all resources in batch');
+    } catch (error: any) {
+      const output = error.stdout + error.stderr;
+      
+      // Verify batch deployment note is shown
+      assert.match(output, /batch deployment from process application/, 
+        'Should indicate batch deployment from process application');
+      
+      // Verify multiple resources are being deployed (2 in list-pis: BPMN + Form)
+      assert.match(output, /Deploying 2 resource\(s\)/, 
+        'Should deploy all 2 resources (BPMN and Form) in the directory');
+      
+      // The error is expected if no Camunda server is running
+      // We're validating the behavior up to the API call
+      if (output.includes('fetch failed') || output.includes('ECONNREFUSED')) {
+        // Expected: connection error means we got to the deployment attempt
+        assert.ok(true, 'Deployment attempted with all resources as expected');
+      } else {
+        // Unexpected error
+        throw error;
+      }
+    }
+  });
 });
