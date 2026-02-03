@@ -6,9 +6,10 @@ import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, extname, basename } from 'node:path';
+import { join, dirname, extname, basename, relative } from 'node:path';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
+const PROCESS_APPLICATION_FILE = '.process-application';
 
 /**
  * Extract process/decision IDs from BPMN/DMN files to detect duplicates
@@ -37,6 +38,7 @@ interface ResourceFile {
   name: string;
   content: Buffer;
   isBuildingBlock: boolean;
+  relativePath?: string;
 }
 
 /**
@@ -44,6 +46,14 @@ interface ResourceFile {
  */
 function isBuildingBlockFolder(path: string): boolean {
   return basename(path).includes('_bb-');
+}
+
+/**
+ * Check if a directory contains a .process-application file
+ */
+function hasProcessApplicationFile(dirPath: string): boolean {
+  const paFilePath = join(dirPath, PROCESS_APPLICATION_FILE);
+  return existsSync(paFilePath);
 }
 
 /**
@@ -148,6 +158,9 @@ export async function deploy(paths: string[], options: {
 
   try {
     const resources: ResourceFile[] = [];
+    
+    // Store the base paths for relative path calculation
+    const basePaths = paths.length === 0 ? [process.cwd()] : paths;
 
     if (paths.length === 0) {
       logger.error('No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)');
@@ -163,6 +176,19 @@ export async function deploy(paths: string[], options: {
       logger.error('No BPMN/DMN/Form files found in the specified paths');
       process.exit(1);
     }
+
+    // Calculate relative paths for display
+    const basePath = basePaths.length === 1 ? basePaths[0] : process.cwd();
+    resources.forEach(r => {
+      r.relativePath = relative(basePath, r.path) || r.name;
+    });
+
+    // Check for .process-application files in any of the base paths
+    const hasProcessApplication = basePaths.some(path => {
+      const stat = statSync(path);
+      const checkDir = stat.isDirectory() ? path : dirname(path);
+      return hasProcessApplicationFile(checkDir);
+    });
 
     // Sort: building blocks first, then by path
     resources.sort((a, b) => {
@@ -181,7 +207,14 @@ export async function deploy(paths: string[], options: {
       process.exit(1);
     }
 
-    logger.info(`Deploying ${resources.length} resource(s)...`);
+    logger.info(`Deploying ${resources.length} resource(s)${hasProcessApplication ? ' (batch deployment from process application)' : ''}...`);
+    
+    // Log each file being deployed with building block indicator
+    resources.forEach(r => {
+      const indicator = r.isBuildingBlock ? '🧱 ' : '  ';
+      logger.info(`${indicator}${r.relativePath}`);
+    });
+    console.log(''); // Empty line for better readability
 
     // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
