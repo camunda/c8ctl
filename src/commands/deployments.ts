@@ -263,7 +263,7 @@ export async function deploy(paths: string[], options: {
     });
     
     result.decisions.forEach(dec => {
-      const resource = dec.decisionDefinitionId ? definitionIdToResource.get(dec.decisionDefinitionId) : undefined;
+      const resource = definitionIdToResource.get(dec.decisionDefinitionId || '');
       const fileDisplay = resource 
         ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
         : '-';
@@ -278,7 +278,7 @@ export async function deploy(paths: string[], options: {
     });
     
     result.forms.forEach(form => {
-      const resource = form.formId ? formNameToResource.get(form.formId) : undefined;
+      const resource = formNameToResource.get(form.formId || '');
       const fileDisplay = resource 
         ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
         : '-';
