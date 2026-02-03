@@ -9,6 +9,9 @@ import { join } from 'node:path';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
+// Timeout for deployment commands (longer for CI environments)
+const DEPLOYMENT_TIMEOUT = 10000;
+
 describe('Deployment Logging', () => {
   let testDir: string;
   let originalEnv: NodeJS.ProcessEnv;
@@ -37,73 +40,62 @@ describe('Deployment Logging', () => {
     process.env = originalEnv;
   });
 
-  test('shows process application batch deployment note', () => {
+  /**
+   * Helper function to execute deployment command and capture output
+   */
+  function executeDeployment(path: string): string {
     try {
-      execSync('npm run cli -- deploy tests/fixtures/list-pis', {
+      execSync(`npm run cli -- deploy ${path}`, {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
-        timeout: 5000,
+        timeout: DEPLOYMENT_TIMEOUT,
         env: process.env
       });
+      return '';
     } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      // Should mention batch deployment from process application
-      assert.match(output, /batch deployment from process application/, 
-        'Should display process application batch deployment note');
+      return error.stdout + error.stderr;
     }
+  }
+
+  test('shows process application batch deployment note', () => {
+    const output = executeDeployment('tests/fixtures/list-pis');
+    // Should mention batch deployment from process application
+    assert.match(output, /batch deployment from process application/, 
+      'Should display process application batch deployment note');
   });
 
   test('does not show batch deployment note when no .process-application file', () => {
-    try {
-      execSync('npm run cli -- deploy tests/fixtures/_bb-building-block', {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: process.env
-      });
-    } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      // Should NOT mention batch deployment from process application
-      assert.doesNotMatch(output, /batch deployment from process application/, 
-        'Should not display process application note when file is absent');
-    }
+    const output = executeDeployment('tests/fixtures/_bb-building-block');
+    // Should NOT mention batch deployment from process application
+    assert.doesNotMatch(output, /batch deployment from process application/, 
+      'Should not display process application note when file is absent');
   });
 
   test('batched deployment with process application deploys all resources together', () => {
     // This test verifies that when a .process-application file is present,
     // all resources in that directory are deployed in a single batch
-    try {
-      execSync('npm run cli -- deploy tests/fixtures/list-pis', {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: process.env
-      });
-      // If deployment succeeds, test passes (requires Camunda server)
+    const output = executeDeployment('tests/fixtures/list-pis');
+    
+    // Verify batch deployment note is shown
+    assert.match(output, /batch deployment from process application/, 
+      'Should indicate batch deployment from process application');
+    
+    // Verify multiple resources are being deployed (2 in list-pis: BPMN + Form)
+    assert.match(output, /Deploying 2 resource\(s\)/, 
+      'Should deploy all 2 resources (BPMN and Form) in the directory');
+    
+    // The error is expected if no Camunda server is running
+    // We're validating the behavior up to the API call
+    if (output.includes('fetch failed') || output.includes('ECONNREFUSED')) {
+      // Expected: connection error means we got to the deployment attempt
+      assert.ok(true, 'Deployment attempted with all resources as expected');
+    } else if (output.includes('Deployment successful')) {
+      // If Camunda server is running, deployment succeeded
       assert.ok(true, 'Deployment succeeded with all resources in batch');
-    } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      
-      // Verify batch deployment note is shown
-      assert.match(output, /batch deployment from process application/, 
-        'Should indicate batch deployment from process application');
-      
-      // Verify multiple resources are being deployed (2 in list-pis: BPMN + Form)
-      assert.match(output, /Deploying 2 resource\(s\)/, 
-        'Should deploy all 2 resources (BPMN and Form) in the directory');
-      
-      // The error is expected if no Camunda server is running
-      // We're validating the behavior up to the API call
-      if (output.includes('fetch failed') || output.includes('ECONNREFUSED')) {
-        // Expected: connection error means we got to the deployment attempt
-        assert.ok(true, 'Deployment attempted with all resources as expected');
-      } else {
-        // Unexpected error
-        throw error;
-      }
+    } else {
+      // Unexpected error
+      throw new Error(`Unexpected deployment output: ${output}`);
     }
   });
 });
