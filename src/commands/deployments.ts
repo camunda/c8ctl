@@ -208,13 +208,24 @@ export async function deploy(paths: string[], options: {
     }
 
     logger.info(`Deploying ${resources.length} resource(s)${hasProcessApplication ? ' (batch deployment from process application)' : ''}...`);
+
+    // Create a mapping from definition ID to resource file for later reference
+    const definitionIdToResource = new Map<string, ResourceFile>();
+    const formNameToResource = new Map<string, ResourceFile>();
     
-    // Log each file being deployed with building block indicator
     resources.forEach(r => {
-      const indicator = r.isBuildingBlock ? '🧱 ' : '  ';
-      logger.info(`${indicator}${r.relativePath}`);
+      const ext = extname(r.path);
+      if (ext === '.bpmn' || ext === '.dmn') {
+        const defId = extractDefinitionId(r.content, ext);
+        if (defId) {
+          definitionIdToResource.set(defId, r);
+        }
+      } else if (ext === '.form') {
+        // Forms are matched by filename (without extension)
+        const formId = basename(r.name, '.form');
+        formNameToResource.set(formId, r);
+      }
     });
-    logger.info(''); // Empty line for better readability
 
     // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
@@ -233,11 +244,17 @@ export async function deploy(paths: string[], options: {
     
     logger.success('Deployment successful', result.deploymentKey.toString());
     
-    // Display deployed resources
-    const tableData: Array<{Type: string, ID: string, Version: string | number, Key: string}> = [];
+    // Display deployed resources with file information
+    const tableData: Array<{File: string, Type: string, ID: string, Version: string | number, Key: string}> = [];
     
     result.processes.forEach(proc => {
+      const resource = definitionIdToResource.get(proc.processDefinitionId);
+      const fileDisplay = resource 
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        : '-';
+      
       tableData.push({
+        File: fileDisplay,
         Type: 'Process',
         ID: proc.processDefinitionId,
         Version: proc.processDefinitionVersion,
@@ -246,7 +263,13 @@ export async function deploy(paths: string[], options: {
     });
     
     result.decisions.forEach(dec => {
+      const resource = dec.decisionDefinitionId ? definitionIdToResource.get(dec.decisionDefinitionId) : undefined;
+      const fileDisplay = resource 
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        : '-';
+      
       tableData.push({
+        File: fileDisplay,
         Type: 'Decision',
         ID: dec.decisionDefinitionId || '-',
         Version: dec.version ?? '-',
@@ -255,7 +278,13 @@ export async function deploy(paths: string[], options: {
     });
     
     result.forms.forEach(form => {
+      const resource = form.formId ? formNameToResource.get(form.formId) : undefined;
+      const fileDisplay = resource 
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        : '-';
+      
       tableData.push({
+        File: fileDisplay,
         Type: 'Form',
         ID: form.formId || '-',
         Version: form.version ?? '-',

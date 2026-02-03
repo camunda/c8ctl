@@ -224,13 +224,17 @@ c8 deploy
 # Deploys all BPMN/DMN/Form files in specified directory and subdirectories
 c8 deploy ./my-project
 
-# Building block folders (containing _bb- in name) are prioritized and marked with 🧱
+# Building block folders (containing _bb- in name) are prioritized
 # Order: _bb-* folders first, then other files
 # Example output:
 #   Deploying 3 resource(s)...
-#   🧱 _bb-shared/common-process.bpmn
-#     processes/order-process.bpmn
-#     forms/order-form.form
+#   ✓ Deployment successful [Key: 123456789]
+#   
+#   File                              | Type    | ID              | Version | Key
+#   ----------------------------------|---------|-----------------|---------|-------------------
+#   🧱 _bb-shared/common-process.bpmn | Process | common-process  | 1       | 2251799813685249
+#   processes/order-process.bpmn      | Process | order-process   | 1       | 2251799813685250
+#   forms/order-form.form             | Form    | order-form      | 1       | 2251799813685251
 ```
 
 ### Process Application Batch Deployment
@@ -248,16 +252,22 @@ c8 deploy ./my-app
 
 # Output:
 # Deploying 2 resource(s) (batch deployment from process application)...
-#   process.bpmn
-#   decision.dmn
+# ✓ Deployment successful [Key: 123456789]
+#
+# File           | Type     | ID       | Version | Key
+# ---------------|----------|----------|---------|-------------------
+# process.bpmn   | Process  | my-proc  | 1       | 2251799813685249
+# decision.dmn   | Decision | my-dec   | 1       | 2251799813685250
 ```
 
 ### Deployment Output Details
 
-The deployment command now shows:
-- **File names with relative paths** - Easy to identify which files are being deployed
-- **Building block indicators** - Resources from folders with `_bb-` in the name are marked with 🧱 emoji
-- **Process application detection** - Directories with `.process-application` file show batch deployment note
+The deployment results table shows:
+- **File column** - Shows the file name with relative path, building block resources marked with 🧱 emoji
+- **Type column** - Resource type (Process, Decision, or Form)
+- **ID column** - The process/decision/form ID
+- **Version column** - Version number assigned by Camunda
+- **Key column** - Unique key assigned by Camunda
 
 ### Important: Duplicate Process IDs
 

@@ -6,7 +6,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
-import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 describe('Deployment Logging', () => {
@@ -37,24 +37,6 @@ describe('Deployment Logging', () => {
     process.env = originalEnv;
   });
 
-  test('shows building block indicator in deployment output', () => {
-    try {
-      execSync('npm run cli -- deploy tests/fixtures/_bb-building-block', {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: process.env
-      });
-    } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      // Should show the building block emoji indicator
-      assert.match(output, /🧱/, 'Should display building block indicator');
-      // Should show the file name
-      assert.match(output, /bb-process\.bpmn/, 'Should display file name');
-    }
-  });
-
   test('shows process application batch deployment note', () => {
     try {
       execSync('npm run cli -- deploy tests/fixtures/list-pis', {
@@ -72,9 +54,9 @@ describe('Deployment Logging', () => {
     }
   });
 
-  test('shows relative file paths in deployment output', () => {
+  test('does not show batch deployment note when no .process-application file', () => {
     try {
-      execSync('npm run cli -- deploy tests/fixtures/list-pis', {
+      execSync('npm run cli -- deploy tests/fixtures/_bb-building-block', {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
@@ -83,65 +65,9 @@ describe('Deployment Logging', () => {
       });
     } catch (error: any) {
       const output = error.stdout + error.stderr;
-      // Should show file names with relative paths
-      assert.match(output, /min-usertask\.bpmn/, 'Should display BPMN file name');
-      assert.match(output, /some-form\.form/, 'Should display Form file name');
-    }
-  });
-
-  test('prioritizes building blocks in output', () => {
-    // Create a test directory with both building blocks and regular files
-    const testDeployDir = join(testDir, 'test-deploy');
-    mkdirSync(testDeployDir, { recursive: true });
-    
-    const bbDir = join(testDeployDir, '_bb-test');
-    const regDir = join(testDeployDir, 'regular');
-    mkdirSync(bbDir, { recursive: true });
-    mkdirSync(regDir, { recursive: true });
-    
-    // Create test BPMN files
-    writeFileSync(join(bbDir, 'bb-proc.bpmn'), 
-      '<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"><bpmn:process id="bb-proc" /></bpmn:definitions>');
-    writeFileSync(join(regDir, 'reg-proc.bpmn'), 
-      '<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"><bpmn:process id="reg-proc" /></bpmn:definitions>');
-    
-    try {
-      execSync(`npm run cli -- deploy ${testDeployDir}`, {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: process.env
-      });
-    } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      
-      // Building block file should appear before regular file
-      const bbIndex = output.indexOf('bb-proc.bpmn');
-      const regIndex = output.indexOf('reg-proc.bpmn');
-      
-      assert.ok(bbIndex > -1, 'Should show building block file');
-      assert.ok(regIndex > -1, 'Should show regular file');
-      assert.ok(bbIndex < regIndex, 'Building block should appear before regular file');
-      
-      // Building block should have emoji
-      assert.match(output, /🧱.*bb-proc\.bpmn/, 'Building block should have emoji indicator');
-    }
-  });
-
-  test('regular files have proper indentation', () => {
-    try {
-      execSync('npm run cli -- deploy tests/fixtures/simple.bpmn', {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: process.env
-      });
-    } catch (error: any) {
-      const output = error.stdout + error.stderr;
-      // Regular files should be indented (not have building block emoji)
-      assert.match(output, /\s{2}simple\.bpmn/, 'Regular file should be indented with 2 spaces');
+      // Should NOT mention batch deployment from process application
+      assert.doesNotMatch(output, /batch deployment from process application/, 
+        'Should not display process application note when file is absent');
     }
   });
 });
