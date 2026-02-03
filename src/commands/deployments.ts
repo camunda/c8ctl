@@ -214,7 +214,7 @@ export async function deploy(paths: string[], options: {
       const indicator = r.isBuildingBlock ? '🧱 ' : '  ';
       logger.info(`${indicator}${r.relativePath}`);
     });
-    console.log(''); // Empty line for better readability
+    logger.info(''); // Empty line for better readability
 
     // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
