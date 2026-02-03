@@ -4,17 +4,84 @@
 
 import { watch } from 'node:fs';
 import { resolve, extname, basename } from 'node:path';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, readFileSync } from 'node:fs';
 import { getLogger } from '../logger.ts';
 import { deploy } from './deployments.ts';
+import { createClient } from '../client.ts';
+import { resolveTenantId } from '../config.ts';
+import { resolveBpmnFiles } from '../utils/glob-resolver.ts';
+import { extractProcessId } from './run.ts';
 
 const WATCHED_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
+
+export interface RunSpec {
+  patterns: string[];
+  variables?: Record<string, any>;
+}
+
+/**
+ * Create process instances for specified BPMN files
+ */
+async function createProcessInstances(runSpecs: RunSpec[], profile?: string): Promise<void> {
+  const logger = getLogger();
+  const client = createClient(profile);
+  const tenantId = resolveTenantId(profile);
+  
+  for (const spec of runSpecs) {
+    // Resolve patterns to actual BPMN files
+    const bpmnFiles = resolveBpmnFiles(spec.patterns);
+    
+    if (bpmnFiles.length === 0) {
+      logger.info(`⚠️  No BPMN files found for patterns: ${spec.patterns.join(', ')}`);
+      continue;
+    }
+    
+    // Log files if multiple were found
+    if (bpmnFiles.length > 1) {
+      logger.info(`📋 Found ${bpmnFiles.length} BPMN file(s):`);
+      bpmnFiles.forEach(f => logger.info(`   - ${basename(f.path)}`));
+    }
+    
+    // Create process instances for each BPMN file
+    for (const bpmnFile of bpmnFiles) {
+      try {
+        // Read BPMN content to extract process ID
+        const content = readFileSync(bpmnFile.path, 'utf-8');
+        const processId = extractProcessId(content);
+        
+        if (!processId) {
+          logger.error(`Could not extract process ID from ${basename(bpmnFile.path)}`);
+          continue;
+        }
+        
+        // Create process instance request
+        const request: any = {
+          processDefinitionId: processId,
+          tenantId,
+        };
+        
+        if (spec.variables) {
+          request.variables = spec.variables;
+        }
+        
+        const result = await client.createProcessInstance(request);
+        logger.success(
+          `Process instance created for ${basename(bpmnFile.path)}`,
+          result.processInstanceKey
+        );
+      } catch (error) {
+        logger.error(`Failed to create process instance for ${basename(bpmnFile.path)}`, error as Error);
+      }
+    }
+  }
+}
 
 /**
  * Watch for file changes and auto-deploy
  */
 export async function watchFiles(paths: string[], options: {
   profile?: string;
+  runSpecs?: RunSpec[];
 }): Promise<void> {
   const logger = getLogger();
   
@@ -35,6 +102,11 @@ export async function watchFiles(paths: string[], options: {
 
   logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(', ')}`);
   logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(', ')}`);
+  
+  if (options.runSpecs && options.runSpecs.length > 0) {
+    logger.info(`🚀 Will create process instances after changes detected`);
+  }
+  
   logger.info('Press Ctrl+C to stop watching\n');
 
   // Keep track of recently deployed files to avoid duplicate deploys
@@ -74,6 +146,14 @@ export async function watchFiles(paths: string[], options: {
 
       try {
         await deploy([fullPath], { profile: options.profile });
+        
+        // If --run flags are specified, create process instances after deployment
+        if (options.runSpecs && options.runSpecs.length > 0) {
+          logger.info('🚀 Creating process instances...');
+          // Add small delay to ensure deployment is fully processed
+          await new Promise(resolve => setTimeout(resolve, 500));
+          await createProcessInstances(options.runSpecs, options.profile);
+        }
       } catch (error) {
         logger.error(`Failed to deploy ${basename(filename)}`, error as Error);
       }
