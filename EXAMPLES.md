@@ -224,46 +224,55 @@ c8 deploy
 # Deploys all BPMN/DMN/Form files in specified directory and subdirectories
 c8 deploy ./my-project
 
-# Building block folders (containing _bb- in name) are prioritized
-# Order: _bb-* folders first, then other files
+# Building block folders (containing _bb- in name) are prioritized and marked with 🧱
+# Process applications (folders with .process-application file) are marked with 📦
 # Example output:
-#   Deploying 3 resource(s)...
+#   Deploying 4 resource(s)...
 #   ✓ Deployment successful [Key: 123456789]
 #   
 #   File                              | Type    | ID              | Version | Key
 #   ----------------------------------|---------|-----------------|---------|-------------------
 #   🧱 _bb-shared/common-process.bpmn | Process | common-process  | 1       | 2251799813685249
-#   processes/order-process.bpmn      | Process | order-process   | 1       | 2251799813685250
-#   forms/order-form.form             | Form    | order-form      | 1       | 2251799813685251
+#   📦 my-app/process.bpmn            | Process | my-proc         | 1       | 2251799813685250
+#   📦 my-app/decision.dmn            | Decision| my-dec          | 1       | 2251799813685251
+#   processes/order-process.bpmn      | Process | order-process   | 1       | 2251799813685252
 ```
 
-### Process Application Batch Deployment
+### Process Application Deployment
 
-If a directory contains a `.process-application` file, all resources in that directory and its subdirectories will be deployed together as a batch. The deployment log will indicate this:
+If a directory contains a `.process-application` file, resources in that directory are marked with the 📦 emoji in the deployment results table. Process applications can be deployed alongside building blocks and standalone resources:
 
 ```bash
 # Directory structure:
-# my-app/
-#   .process-application
-#   process.bpmn
-#   decision.dmn
+# my-project/
+#   _bb-shared/
+#     common.bpmn
+#   my-app/
+#     .process-application
+#     process.bpmn
+#     form.form
+#   standalone.bpmn
 
-c8 deploy ./my-app
+c8 deploy ./my-project
 
-# Output:
-# Deploying 2 resource(s) (batch deployment from process application)...
+# Output shows resources grouped by type:
+# Deploying 4 resource(s)...
 # ✓ Deployment successful [Key: 123456789]
 #
-# File           | Type     | ID       | Version | Key
-# ---------------|----------|----------|---------|-------------------
-# process.bpmn   | Process  | my-proc  | 1       | 2251799813685249
-# decision.dmn   | Decision | my-dec   | 1       | 2251799813685250
+# File                       | Type    | ID            | Version | Key
+# ---------------------------|---------|---------------|---------|-------------------
+# 🧱 _bb-shared/common.bpmn  | Process | common        | 1       | 2251799813685249
+# 📦 my-app/process.bpmn     | Process | my-proc       | 1       | 2251799813685250
+# 📦 my-app/form.form        | Form    | form-id       | 1       | 2251799813685251
+# standalone.bpmn            | Process | standalone    | 1       | 2251799813685252
 ```
 
 ### Deployment Output Details
 
 The deployment results table shows:
-- **File column** - Shows the file name with relative path, building block resources marked with 🧱 emoji
+- **File column** - Shows the file name with relative path
+  - 🧱 emoji indicates building block resources (from `_bb-*` folders)
+  - 📦 emoji indicates process application resources (from folders with `.process-application` file)
 - **Type column** - Resource type (Process, Decision, or Form)
 - **ID column** - The process/decision/form ID
 - **Version column** - Version number assigned by Camunda

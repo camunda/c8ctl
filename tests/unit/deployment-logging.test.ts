@@ -58,28 +58,28 @@ describe('Deployment Logging', () => {
     }
   }
 
-  test('shows process application batch deployment note', () => {
+  test('process application resources are deployed together', () => {
     const output = executeDeployment('tests/fixtures/list-pis');
-    // Should mention batch deployment from process application
-    assert.match(output, /batch deployment from process application/, 
-      'Should display process application batch deployment note');
+    // Should NOT mention batch deployment from process application anymore
+    assert.doesNotMatch(output, /batch deployment from process application/, 
+      'Should not display process application batch deployment note');
+    
+    // Should deploy all 2 resources (BPMN + Form) in the directory
+    assert.match(output, /Deploying 2 resource\(s\)/, 
+      'Should deploy all 2 resources (BPMN and Form) in the directory');
   });
 
-  test('does not show batch deployment note when no .process-application file', () => {
+  test('deployment without process application works normally', () => {
     const output = executeDeployment('tests/fixtures/_bb-building-block');
     // Should NOT mention batch deployment from process application
     assert.doesNotMatch(output, /batch deployment from process application/, 
       'Should not display process application note when file is absent');
   });
 
-  test('batched deployment with process application deploys all resources together', () => {
+  test('all resources from process application directory are deployed', () => {
     // This test verifies that when a .process-application file is present,
-    // all resources in that directory are deployed in a single batch
+    // all resources in that directory are deployed together
     const output = executeDeployment('tests/fixtures/list-pis');
-    
-    // Verify batch deployment note is shown
-    assert.match(output, /batch deployment from process application/, 
-      'Should indicate batch deployment from process application');
     
     // Verify multiple resources are being deployed (2 in list-pis: BPMN + Form)
     assert.match(output, /Deploying 2 resource\(s\)/, 
@@ -92,7 +92,7 @@ describe('Deployment Logging', () => {
       assert.ok(true, 'Deployment attempted with all resources as expected');
     } else if (output.includes('Deployment successful')) {
       // If Camunda server is running, deployment succeeded
-      assert.ok(true, 'Deployment succeeded with all resources in batch');
+      assert.ok(true, 'Deployment succeeded with all resources');
     } else {
       // Unexpected error
       throw new Error(`Unexpected deployment output: ${output}`);

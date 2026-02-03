@@ -38,6 +38,7 @@ interface ResourceFile {
   name: string;
   content: Buffer;
   isBuildingBlock: boolean;
+  isProcessApplication: boolean;
   relativePath?: string;
 }
 
@@ -75,6 +76,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
         name: basename(dirPath),
         content: readFileSync(dirPath),
         isBuildingBlock: isBuildingBlockFolder(parentDir),
+        isProcessApplication: hasProcessApplicationFile(parentDir),
       });
     }
     return collected;
@@ -112,6 +114,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
           name: basename(file),
           content: readFileSync(file),
           isBuildingBlock: isBuildingBlockFolder(dirPath),
+          isProcessApplication: hasProcessApplicationFile(dirPath),
         });
       }
     });
@@ -183,17 +186,19 @@ export async function deploy(paths: string[], options: {
       r.relativePath = relative(basePath, r.path) || r.name;
     });
 
-    // Check for .process-application files in any of the base paths
-    const hasProcessApplication = basePaths.some(path => {
-      const stat = statSync(path);
-      const checkDir = stat.isDirectory() ? path : dirname(path);
-      return hasProcessApplicationFile(checkDir);
-    });
-
-    // Sort: building blocks first, then by path
+    // Sort: building blocks first, then process applications, then regular resources
     resources.sort((a, b) => {
+      // Building blocks have highest priority
       if (a.isBuildingBlock && !b.isBuildingBlock) return -1;
       if (!a.isBuildingBlock && b.isBuildingBlock) return 1;
+      
+      // Within same building block status, process applications come next
+      if (a.isBuildingBlock === b.isBuildingBlock) {
+        if (a.isProcessApplication && !b.isProcessApplication) return -1;
+        if (!a.isProcessApplication && b.isProcessApplication) return 1;
+      }
+      
+      // Finally sort by path
       return a.path.localeCompare(b.path);
     });
 
@@ -207,7 +212,7 @@ export async function deploy(paths: string[], options: {
       process.exit(1);
     }
 
-    logger.info(`Deploying ${resources.length} resource(s)${hasProcessApplication ? ' (batch deployment from process application)' : ''}...`);
+    logger.info(`Deploying ${resources.length} resource(s)...`);
 
     // Create a mapping from definition ID to resource file for later reference
     const definitionIdToResource = new Map<string, ResourceFile>();
@@ -250,7 +255,7 @@ export async function deploy(paths: string[], options: {
     result.processes.forEach(proc => {
       const resource = definitionIdToResource.get(proc.processDefinitionId);
       const fileDisplay = resource 
-        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
         : '-';
       
       tableData.push({
@@ -265,7 +270,7 @@ export async function deploy(paths: string[], options: {
     result.decisions.forEach(dec => {
       const resource = definitionIdToResource.get(dec.decisionDefinitionId || '');
       const fileDisplay = resource 
-        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
         : '-';
       
       tableData.push({
@@ -280,7 +285,7 @@ export async function deploy(paths: string[], options: {
     result.forms.forEach(form => {
       const resource = formNameToResource.get(form.formId || '');
       const fileDisplay = resource 
-        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.relativePath || resource.name}`
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
         : '-';
       
       tableData.push({
