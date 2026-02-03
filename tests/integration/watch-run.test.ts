@@ -15,6 +15,13 @@ import { homedir, tmpdir } from 'node:os';
 // Wait time for Elasticsearch to index data before search queries
 const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
 
+// Test timing constants
+const WATCH_STARTUP_WAIT_MS = 2000;
+const FILE_CHANGE_WAIT_MS = 3000;
+const FILE_CHANGE_WAIT_LONG_MS = 4000;
+const CLEANUP_WAIT_MS = 100;
+const SIGINT_WAIT_MS = 500;
+
 // Helper to wait for a condition
 async function waitFor(conditionFn: () => Promise<boolean>, timeoutMs: number = 10000): Promise<boolean> {
   const startTime = Date.now();
@@ -22,7 +29,7 @@ async function waitFor(conditionFn: () => Promise<boolean>, timeoutMs: number = 
     if (await conditionFn()) {
       return true;
     }
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   }
   return false;
 }
@@ -52,7 +59,7 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
     }
     if (watchProcess) {
       // Wait a bit for cleanup
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, CLEANUP_WAIT_MS));
       watchProcess = null;
     }
 
@@ -76,7 +83,6 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
     }];
 
     // Start watch in background (will auto-deploy and run)
-    let watchStarted = false;
     watchProcess = (async () => {
       try {
         await watchFiles([testDir], { runSpecs });
@@ -86,15 +92,14 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
     })();
     
     // Give watch time to start
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    watchStarted = true;
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // Modify the BPMN file to trigger watch
     const content = readFileSync(testBpmn, 'utf-8');
     writeFileSync(testBpmn, content + '\n<!-- modified -->');
 
     // Wait for deployment and process instance creation
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, FILE_CHANGE_WAIT_MS));
 
     // Verify process instance was created
     const client = createClient();
@@ -109,7 +114,7 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
 
     // Stop watch manually
     process.emit('SIGINT' as any);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   });
 
   test('watch --run with variables passes them to process instance', async () => {
@@ -134,20 +139,20 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       }
     })();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // Trigger change
     const content = readFileSync(testBpmn, 'utf-8');
     writeFileSync(testBpmn, content + '\n<!-- with vars -->');
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, FILE_CHANGE_WAIT_MS));
 
     // The test passes if no error is thrown
     // Verifying variables would require querying the process instance details
     assert.ok(true, 'Watch with variables completed');
 
     process.emit('SIGINT' as any);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   });
 
   test('watch --run with wildcard resolves multiple BPMNs', async () => {
@@ -176,13 +181,13 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       }
     })();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // Trigger change
     const content = readFileSync(triggerFile, 'utf-8');
     writeFileSync(triggerFile, content + '\n<!-- trigger -->');
 
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    await new Promise(resolve => setTimeout(resolve, FILE_CHANGE_WAIT_LONG_MS));
 
     // Verify process instances were created for different processes
     const client = createClient();
@@ -201,7 +206,7 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       'Should create instance for min-user-task-process');
 
     process.emit('SIGINT' as any);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   });
 
   test('watch --run with recursive wildcard (**) finds nested BPMNs', async () => {
@@ -231,13 +236,13 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       }
     })();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // Trigger change
     const content = readFileSync(triggerFile, 'utf-8');
     writeFileSync(triggerFile, content + '\n<!-- recursive test -->');
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, FILE_CHANGE_WAIT_MS));
 
     // Verify process instance was created (both files should be picked up)
     const client = createClient();
@@ -249,7 +254,7 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       'Should create process instances from recursive search');
 
     process.emit('SIGINT' as any);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   });
 
   test('watch --run handles non-existent patterns gracefully', async () => {
@@ -272,18 +277,18 @@ describe('Watch --run Integration Tests (requires Camunda 8 at localhost:8080)',
       }
     })();
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // Trigger change
     const content = readFileSync(testBpmn, 'utf-8');
     writeFileSync(testBpmn, content + '\n<!-- should not crash -->');
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, WATCH_STARTUP_WAIT_MS));
 
     // If we got here without crash, test passes
     assert.ok(true, 'Watch handled non-existent pattern gracefully');
 
     process.emit('SIGINT' as any);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, SIGINT_WAIT_MS));
   });
 });

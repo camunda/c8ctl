@@ -55,16 +55,13 @@ async function createProcessInstances(runSpecs: RunSpec[], profile?: string): Pr
         }
         
         // Create process instance request
-        const request: any = {
-          processDefinitionId: processId,
+        const request = {
+          processDefinitionId: processId as any,
           tenantId,
+          variables: spec.variables,
         };
         
-        if (spec.variables) {
-          request.variables = spec.variables;
-        }
-        
-        const result = await client.createProcessInstance(request);
+        const result = await client.createProcessInstance(request as any);
         logger.success(
           `Process instance created for ${basename(bpmnFile.path)}`,
           result.processInstanceKey
