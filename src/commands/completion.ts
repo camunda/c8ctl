@@ -43,7 +43,7 @@ _c8ctl_completions() {
   local completion_resources="bash zsh fish"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num --awaitCompletion --fetchVariables"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num --awaitCompletion --fetchVariables"
 
   case \${cword} in
     1)
@@ -174,6 +174,7 @@ _c8ctl() {
     '--from[Load plugin from URL]:url:'
     '--all[Show all results]'
     '--bpmnProcessId[Process definition ID]:id:'
+    '--id[Process definition ID (alias for --bpmnProcessId)]:id:'
     '--processInstanceKey[Process instance key]:key:'
     '--variables[JSON variables]:json:'
     '--state[Filter by state]:state:'
@@ -376,6 +377,8 @@ complete -c c8ctl -l all -d 'Show all results'
 complete -c c8 -l all -d 'Show all results'
 complete -c c8ctl -l bpmnProcessId -d 'Process definition ID' -r
 complete -c c8 -l bpmnProcessId -d 'Process definition ID' -r
+complete -c c8ctl -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
+complete -c c8 -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
 complete -c c8ctl -l processInstanceKey -d 'Process instance key' -r
 complete -c c8 -l processInstanceKey -d 'Process instance key' -r
 complete -c c8ctl -l variables -d 'JSON variables' -r

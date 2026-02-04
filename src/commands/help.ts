@@ -79,6 +79,7 @@ Flags:
   --profile <name>      Use specific profile for this command
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
+  --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Comma-separated variable names (requires --awaitCompletion)
   --version, -v         Show version
@@ -97,8 +98,8 @@ Examples:
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
-  c8ctl create pi --bpmnProcessId=myProcess
-  c8ctl create pi --bpmnProcessId=myProcess --awaitCompletion
+  c8ctl create pi --id=myProcess
+  c8ctl create pi --id=myProcess --awaitCompletion
   c8ctl await pi 123456              Wait for process instance to complete
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process

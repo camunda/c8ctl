@@ -71,6 +71,7 @@ function parseCliArgs() {
         xml: { type: 'boolean' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
+        id: { type: 'string' },
         processInstanceKey: { type: 'string' },
         variables: { type: 'string' },
         state: { type: 'string' },
@@ -103,6 +104,13 @@ function parseCliArgs() {
     console.error(`Error parsing arguments: ${error.message}`);
     process.exit(1);
   }
+}
+
+/**
+ * Resolve process definition ID from either --bpmnProcessId or --id flag
+ */
+function resolveProcessDefinitionId(values: any): string | undefined {
+  return (values.id || values.bpmnProcessId) as string | undefined;
 }
 
 /**
@@ -259,7 +267,7 @@ async function main() {
   if (verb === 'list' && (normalizedResource === 'process-instance' || normalizedResource === 'process-instances')) {
     await listProcessInstances({
       profile: values.profile as string | undefined,
-      processDefinitionId: values.bpmnProcessId as string | undefined,
+      processDefinitionId: resolveProcessDefinitionId(values),
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
     });
@@ -280,7 +288,7 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'process-instance') {
     await createProcessInstance({
       profile: values.profile as string | undefined,
-      processDefinitionId: values.bpmnProcessId as string | undefined,
+      processDefinitionId: resolveProcessDefinitionId(values),
       version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
