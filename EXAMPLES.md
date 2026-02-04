@@ -54,6 +54,23 @@ c8 create pi --bpmnProcessId=order-process --version_num=2
 
 # Create with variables
 c8 create pi --bpmnProcessId=order-process --variables='{"orderId":"12345","amount":100}'
+
+# Create and wait for completion
+c8 create pi --bpmnProcessId=order-process --awaitCompletion
+
+# Create, wait for completion, and fetch specific variables
+c8 create pi --bpmnProcessId=order-process --awaitCompletion --fetchVariables=result,status
+```
+
+### Await Process Instance Completion
+
+```bash
+# Wait for a process instance to complete
+c8 await pi 2251799813685249
+c8 await process-instance 2251799813685249
+
+# Wait and fetch specific variables (once supported)
+c8 await pi 2251799813685249 --fetchVariables=result,status
 ```
 
 ### Cancel Process Instance

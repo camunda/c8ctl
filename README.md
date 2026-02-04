@@ -97,6 +97,13 @@ c8ctl get pd 123456 --xml
 c8ctl create pi --bpmnProcessId=myProcess
 c8ctl create process-instance --bpmnProcessId=myProcess
 
+# Create process instance and wait for completion
+c8ctl create pi --bpmnProcessId=myProcess --awaitCompletion
+
+# Await process instance completion
+c8ctl await pi 123456
+c8ctl await process-instance 123456
+
 # Deploy BPMN file
 c8ctl deploy ./my-process.bpmn
 
