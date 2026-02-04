@@ -378,25 +378,69 @@ export async function deploy(paths: string[], options: {
  * Format and display deployment errors with actionable guidance
  */
 function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>): never {
-  const err = error as Record<string, unknown>;
-  
-  // Extract RFC 9457 Problem Detail fields
-  const title = err?.title as string || err?.message as string || 'Unknown error';
-  const detail = err?.detail as string;
-  const status = err?.status as number;
-  
+  const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
+
+  // Try to interpret common transport/network issues first for actionable guidance
+  const deriveNetworkErrorTitle = (err: unknown): string | undefined => {
+    const anyErr = err as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+    const code = typeof anyErr?.code === 'string'
+      ? anyErr.code
+      : (typeof (anyErr?.cause as Record<string, unknown> | undefined)?.code === 'string'
+          ? ((anyErr.cause as Record<string, unknown>).code as string)
+          : undefined);
+
+    if (!code && typeof anyErr?.name === 'string') {
+      // Handle fetch/abort style errors
+      if (anyErr.name === 'AbortError') {
+        return 'Request to Camunda cluster timed out or was aborted. Please check your network connection and try again.';
+      }
+    }
+
+    switch (code) {
+      case 'ECONNREFUSED':
+        return 'Cannot connect to Camunda cluster (connection refused). Verify the endpoint URL and that the cluster is reachable.';
+      case 'ENOTFOUND':
+        return 'Cannot resolve Camunda cluster host. Check the cluster URL and your DNS/network configuration.';
+      case 'EHOSTUNREACH':
+        return 'Camunda cluster host is unreachable. Check VPN/proxy settings and your network connectivity.';
+      case 'ECONNRESET':
+        return 'Connection to Camunda cluster was reset. Retry the operation and check for intermittent network issues.';
+      case 'ETIMEDOUT':
+        return 'Request to Camunda cluster timed out. Check your network connection and consider retrying.';
+      default:
+        return undefined;
+    }
+  };
+
+  // Extract RFC 9457 Problem Detail fields and other useful signals
+  const problemTitle = typeof raw.title === 'string' ? (raw.title as string) : undefined;
+  const networkTitle = deriveNetworkErrorTitle(error);
+  const errorInstanceTitle =
+    error instanceof Error && typeof error.message === 'string' && error.message
+      ? error.message
+      : undefined;
+  const messageFieldTitle = typeof raw.message === 'string' ? (raw.message as string) : undefined;
+  const title =
+    problemTitle ??
+    networkTitle ??
+    errorInstanceTitle ??
+    messageFieldTitle ??
+    'Unknown error (unexpected error format; re-run with increased logging or check network configuration).';
+
+  const detail = typeof raw.detail === 'string' ? (raw.detail as string) : undefined;
+  const status = typeof raw.status === 'number' ? (raw.status as number) : undefined;
+
   // Display the main error
   logger.error('Deployment failed', new Error(title));
-  
+
   // Display the detailed error message if available
   if (detail) {
     console.error('\n' + formatDeploymentErrorDetail(detail));
   }
-  
+
   // Provide actionable hints based on error type
   console.error('');
   printDeploymentHints(title, detail, status, resources);
-  
   process.exit(1);
 }
 
@@ -412,7 +456,7 @@ function formatDeploymentErrorDetail(detail: string): string {
   let inFileError = false;
   
   for (const line of lines) {
-    if (line.startsWith("'") && line.includes('.bpmn') || line.includes('.dmn') || line.includes('.form')) {
+    if (line.startsWith("'") && (line.includes('.bpmn') || line.includes('.dmn') || line.includes('.form'))) {
       // This is a file-specific error
       inFileError = true;
       result.push(`  📄 ${line}`);
