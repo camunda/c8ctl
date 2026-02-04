@@ -19,6 +19,14 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
 - prefer cross-platform solutions where reasonable
 
+### Terminal Commands
+
+- avoid heredocs (`<< EOF`) in terminal commands as they don't work reliably in zsh on macOS when executed via tools
+- instead of heredocs, use one of these alternatives:
+  - use the file editing tools (`create_file`, `replace_string_in_file`) to modify file content directly
+  - use `echo` or `printf` for appending single lines: `echo "content" >> file.txt`
+  - use `printf` for multi-line content: `printf 'line1\nline2\n' >> file.txt`
+
 ### Development
 
 - use Node.js 22 LTS only by respecting .nvmrc
