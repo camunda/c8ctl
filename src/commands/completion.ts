@@ -41,7 +41,7 @@ _c8ctl_completions() {
   local use_resources="profile tenant"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local help_resources="list get create complete cancel fail activate resolve publish correlate deploy run watch add remove load unload sync use output completion"
+  local help_resources="list get create complete"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num"
@@ -348,23 +348,6 @@ _c8ctl() {
             'get:Show get command help'
             'create:Show create command help'
             'complete:Show complete command help'
-            'cancel:Show cancel command help'
-            'fail:Show fail command help'
-            'activate:Show activate command help'
-            'resolve:Show resolve command help'
-            'publish:Show publish command help'
-            'correlate:Show correlate command help'
-            'deploy:Show deploy command help'
-            'run:Show run command help'
-            'watch:Show watch command help'
-            'add:Show add command help'
-            'remove:Show remove command help'
-            'load:Show load command help'
-            'unload:Show unload command help'
-            'sync:Show sync command help'
-            'use:Show use command help'
-            'output:Show output command help'
-            'completion:Show completion command help'
           )
           _describe 'resource' resources
           ;;
