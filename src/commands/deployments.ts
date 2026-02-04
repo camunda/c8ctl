@@ -6,9 +6,10 @@ import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, extname, basename } from 'node:path';
+import { join, dirname, extname, basename, relative } from 'node:path';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
+const PROCESS_APPLICATION_FILE = '.process-application';
 
 /**
  * Extract process/decision IDs from BPMN/DMN files to detect duplicates
@@ -37,6 +38,9 @@ interface ResourceFile {
   name: string;
   content: Buffer;
   isBuildingBlock: boolean;
+  isProcessApplication: boolean;
+  groupPath?: string; // Path to the root of the group (BB or PA folder)
+  relativePath?: string;
 }
 
 /**
@@ -47,11 +51,58 @@ function isBuildingBlockFolder(path: string): boolean {
 }
 
 /**
+ * Check if a directory contains a .process-application file
+ */
+function hasProcessApplicationFile(dirPath: string): boolean {
+  const paFilePath = join(dirPath, PROCESS_APPLICATION_FILE);
+  return existsSync(paFilePath);
+}
+
+/**
+ * Find the root building block or process application folder by traversing up the path
+ * Returns the path to the group root, or null if not in a group
+ */
+function findGroupRoot(filePath: string, basePath: string): { type: 'bb', root: string } | { type: 'pa', root: string } | { type: null, root: null } {
+  let currentDir = dirname(filePath);
+  
+  // Traverse up the directory tree until we reach or go outside basePath
+  while (true) {
+    // Check if we've gone outside the basePath
+    const rel = relative(basePath, currentDir);
+    if (rel.startsWith('..') || rel === '') {
+      break;
+    }
+    
+    // Check if this directory is a building block
+    if (isBuildingBlockFolder(currentDir)) {
+      return { type: 'bb', root: currentDir };
+    }
+    
+    // Check if this directory has a .process-application file
+    if (hasProcessApplicationFile(currentDir)) {
+      return { type: 'pa', root: currentDir };
+    }
+    
+    // Move up one level
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) break; // Reached filesystem root
+    currentDir = parentDir;
+  }
+  
+  return { type: null, root: null };
+}
+
+/**
  * Recursively collect resource files from a directory
  */
-function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): ResourceFile[] {
+function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string): ResourceFile[] {
   if (!existsSync(dirPath)) {
     return collected;
+  }
+
+  // Set basePath to dirPath on first call
+  if (!basePath) {
+    basePath = dirPath;
   }
 
   const stat = statSync(dirPath);
@@ -59,12 +110,14 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
   if (stat.isFile()) {
     const ext = extname(dirPath);
     if (RESOURCE_EXTENSIONS.includes(ext)) {
-      const parentDir = dirname(dirPath);
+      const groupInfo = findGroupRoot(dirPath, basePath);
       collected.push({
         path: dirPath,
         name: basename(dirPath),
         content: readFileSync(dirPath),
-        isBuildingBlock: isBuildingBlockFolder(parentDir),
+        isBuildingBlock: groupInfo.type === 'bb',
+        isProcessApplication: groupInfo.type === 'pa',
+        groupPath: groupInfo.root || undefined,
       });
     }
     return collected;
@@ -97,23 +150,26 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = []): 
     files.forEach(file => {
       const ext = extname(file);
       if (RESOURCE_EXTENSIONS.includes(ext)) {
+        const groupInfo = findGroupRoot(file, basePath);
         collected.push({
           path: file,
           name: basename(file),
           content: readFileSync(file),
-          isBuildingBlock: isBuildingBlockFolder(dirPath),
+          isBuildingBlock: groupInfo.type === 'bb',
+          isProcessApplication: groupInfo.type === 'pa',
+          groupPath: groupInfo.root || undefined,
         });
       }
     });
 
     // Process building block folders first (prioritized)
     bbFolders.forEach(bbFolder => {
-      collectResourceFiles(bbFolder, collected);
+      collectResourceFiles(bbFolder, collected, basePath);
     });
 
     // Then process regular folders
     regularFolders.forEach(regularFolder => {
-      collectResourceFiles(regularFolder, collected);
+      collectResourceFiles(regularFolder, collected, basePath);
     });
   }
 
@@ -148,6 +204,9 @@ export async function deploy(paths: string[], options: {
 
   try {
     const resources: ResourceFile[] = [];
+    
+    // Store the base paths for relative path calculation
+    const basePaths = paths.length === 0 ? [process.cwd()] : paths;
 
     if (paths.length === 0) {
       logger.error('No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)');
@@ -164,10 +223,41 @@ export async function deploy(paths: string[], options: {
       process.exit(1);
     }
 
-    // Sort: building blocks first, then by path
+    // Calculate relative paths for display
+    const basePath = basePaths.length === 1 ? basePaths[0] : process.cwd();
+    resources.forEach(r => {
+      r.relativePath = relative(basePath, r.path) || r.name;
+    });
+
+    // Sort: group resources by their group, with building blocks first, then process applications, then standalone
     resources.sort((a, b) => {
+      // Building blocks have highest priority
       if (a.isBuildingBlock && !b.isBuildingBlock) return -1;
       if (!a.isBuildingBlock && b.isBuildingBlock) return 1;
+      
+      // Within building blocks, group by groupPath
+      if (a.isBuildingBlock && b.isBuildingBlock) {
+        if (a.groupPath && b.groupPath) {
+          const groupCompare = a.groupPath.localeCompare(b.groupPath);
+          if (groupCompare !== 0) return groupCompare;
+        }
+        return a.path.localeCompare(b.path);
+      }
+      
+      // Process applications come next
+      if (a.isProcessApplication && !b.isProcessApplication) return -1;
+      if (!a.isProcessApplication && b.isProcessApplication) return 1;
+      
+      // Within process applications, group by groupPath
+      if (a.isProcessApplication && b.isProcessApplication) {
+        if (a.groupPath && b.groupPath) {
+          const groupCompare = a.groupPath.localeCompare(b.groupPath);
+          if (groupCompare !== 0) return groupCompare;
+        }
+        return a.path.localeCompare(b.path);
+      }
+      
+      // Finally, standalone resources sorted by path
       return a.path.localeCompare(b.path);
     });
 
@@ -182,6 +272,24 @@ export async function deploy(paths: string[], options: {
     }
 
     logger.info(`Deploying ${resources.length} resource(s)...`);
+
+    // Create a mapping from definition ID to resource file for later reference
+    const definitionIdToResource = new Map<string, ResourceFile>();
+    const formNameToResource = new Map<string, ResourceFile>();
+    
+    resources.forEach(r => {
+      const ext = extname(r.path);
+      if (ext === '.bpmn' || ext === '.dmn') {
+        const defId = extractDefinitionId(r.content, ext);
+        if (defId) {
+          definitionIdToResource.set(defId, r);
+        }
+      } else if (ext === '.form') {
+        // Forms are matched by filename (without extension)
+        const formId = basename(r.name, '.form');
+        formNameToResource.set(formId, r);
+      }
+    });
 
     // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
@@ -200,38 +308,67 @@ export async function deploy(paths: string[], options: {
     
     logger.success('Deployment successful', result.deploymentKey.toString());
     
-    // Display deployed resources
-    const tableData: Array<{Type: string, ID: string, Version: string | number, Key: string}> = [];
+    // Group resources by their directory (building block or process application)
+    type ResourceRow = {File: string, Type: string, ID: string, Version: string | number, Key: string, sortKey: string};
     
-    result.processes.forEach(proc => {
-      tableData.push({
-        Type: 'Process',
-        ID: proc.processDefinitionId,
-        Version: proc.processDefinitionVersion,
-        Key: proc.processDefinitionKey.toString(),
-      });
+    // Normalize all deployed resources into a common structure
+    const allResources = [
+      ...result.processes.map(proc => ({
+        type: 'Process' as const,
+        id: proc.processDefinitionId,
+        version: proc.processDefinitionVersion,
+        key: proc.processDefinitionKey.toString(),
+        resource: definitionIdToResource.get(proc.processDefinitionId),
+      })),
+      ...result.decisions.map(dec => ({
+        type: 'Decision' as const,
+        id: dec.decisionDefinitionId || '-',
+        version: dec.version ?? '-',
+        key: dec.decisionDefinitionKey?.toString() || '-',
+        resource: definitionIdToResource.get(dec.decisionDefinitionId || ''),
+      })),
+      ...result.forms.map(form => ({
+        type: 'Form' as const,
+        id: form.formId || '-',
+        version: form.version ?? '-',
+        key: form.formKey?.toString() || '-',
+        resource: formNameToResource.get(form.formId || ''),
+      })),
+    ];
+    
+    const tableData: ResourceRow[] = allResources.map(({type, id, version, key, resource}) => {
+      const fileDisplay = resource 
+        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
+        : '-';
+      
+      // Extract directory path for grouping (e.g., "bla/_bb-building-block" or "pa")
+      const sortKey = resource?.relativePath 
+        ? resource.relativePath.substring(0, resource.relativePath.lastIndexOf('/') + 1) || resource.relativePath
+        : 'zzz'; // Resources without paths go last
+      
+      return {
+        File: fileDisplay,
+        Type: type,
+        ID: id,
+        Version: version,
+        Key: key,
+        sortKey,
+      };
     });
     
-    result.decisions.forEach(dec => {
-      tableData.push({
-        Type: 'Decision',
-        ID: dec.decisionDefinitionId || '-',
-        Version: dec.version ?? '-',
-        Key: dec.decisionDefinitionKey?.toString() || '-',
-      });
+    // Sort by directory path (grouping), then by file name
+    tableData.sort((a, b) => {
+      if (a.sortKey !== b.sortKey) {
+        return a.sortKey.localeCompare(b.sortKey);
+      }
+      return a.File.localeCompare(b.File);
     });
     
-    result.forms.forEach(form => {
-      tableData.push({
-        Type: 'Form',
-        ID: form.formId || '-',
-        Version: form.version ?? '-',
-        Key: form.formKey?.toString() || '-',
-      });
-    });
+    // Remove sortKey before displaying
+    const displayData = tableData.map(({File, Type, ID, Version, Key}) => ({File, Type, ID, Version, Key}));
     
-    if (tableData.length > 0) {
-      logger.table(tableData);
+    if (displayData.length > 0) {
+      logger.table(displayData);
     }
   } catch (error) {
     // Log detailed error information

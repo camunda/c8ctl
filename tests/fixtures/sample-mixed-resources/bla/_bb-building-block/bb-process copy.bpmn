@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  id="Definitions_bb"
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="building-block-process1" name="Building Block Process" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_BB" name="Start">
+      <bpmn:outgoing>Flow_BB</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:endEvent id="EndEvent_BB" name="End">
+      <bpmn:incoming>Flow_BB</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_BB" sourceRef="StartEvent_BB" targetRef="EndEvent_BB" />
+  </bpmn:process>
+</bpmn:definitions>
