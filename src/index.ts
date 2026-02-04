@@ -28,7 +28,7 @@ import { publishMessage, correlateMessage } from './commands/messages.ts';
 import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
-import { watchFiles } from './commands/watch.ts';
+import { watchFiles, type RunSpec } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins } from './commands/plugins.ts';
 import { showCompletion } from './commands/completion.ts';
 import { 
@@ -72,6 +72,7 @@ function parseCliArgs() {
         bpmnProcessId: { type: 'string' },
         processInstanceKey: { type: 'string' },
         variables: { type: 'string' },
+        run: { type: 'string', multiple: true },
         state: { type: 'string' },
         assignee: { type: 'string' },
         type: { type: 'string' },
@@ -465,8 +466,34 @@ async function main() {
   // Handle watch command
   if (verb === 'watch' || verb === 'w') {
     const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
+    
+    // Parse --run flags
+    const runSpecs: Array<{ patterns: string[]; variables?: Record<string, any> }> = [];
+    const runFlags = values.run as string[] | undefined;
+    
+    if (runFlags && runFlags.length > 0) {
+      // Parse variables if provided
+      let currentVariables: Record<string, any> | undefined;
+      if (values.variables) {
+        try {
+          currentVariables = JSON.parse(values.variables as string);
+        } catch (error) {
+          logger.error('Invalid JSON for --variables', error as Error);
+          process.exit(1);
+        }
+      }
+      
+      // Group patterns and associate with variables
+      // For simplicity, we apply the same variables to all patterns
+      runSpecs.push({
+        patterns: runFlags,
+        variables: currentVariables,
+      });
+    }
+    
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
+      runSpecs: runSpecs.length > 0 ? runSpecs : undefined,
     });
     return;
   }

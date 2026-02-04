@@ -110,6 +110,9 @@ c8ctl deploy ./processes ./forms ./building-blocks
 c8ctl w
 c8ctl watch
 
+# Watch and auto-create process instances after changes
+c8ctl watch --run ./process.bpmn
+
 # Deploy and start process (run)
 c8ctl run ./my-process.bpmn
 ```

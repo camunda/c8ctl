@@ -42,7 +42,7 @@ _c8ctl_completions() {
   local completion_resources="bash zsh fish"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num"
+  local flags="--help --version --profile --from --all --bpmnProcessId --processInstanceKey --variables --run --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num"
 
   case \${cword} in
     1)
@@ -171,6 +171,7 @@ _c8ctl() {
     '--bpmnProcessId[Process definition ID]:id:'
     '--processInstanceKey[Process instance key]:key:'
     '--variables[JSON variables]:json:'
+    '--run[BPMN pattern to create instances after changes]:pattern:_files -g "*.bpmn"'
     '--state[Filter by state]:state:'
     '--assignee[Filter by assignee]:assignee:'
     '--type[Job type]:type:'
@@ -366,6 +367,8 @@ complete -c c8ctl -l processInstanceKey -d 'Process instance key' -r
 complete -c c8 -l processInstanceKey -d 'Process instance key' -r
 complete -c c8ctl -l variables -d 'JSON variables' -r
 complete -c c8 -l variables -d 'JSON variables' -r
+complete -c c8ctl -l run -d 'BPMN pattern to create instances after changes' -r
+complete -c c8 -l run -d 'BPMN pattern to create instances after changes' -r
 complete -c c8ctl -l state -d 'Filter by state' -r
 complete -c c8 -l state -d 'Filter by state' -r
 complete -c c8ctl -l assignee -d 'Filter by assignee' -r

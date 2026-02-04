@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 /**
  * Extract process ID from BPMN file
  */
-function extractProcessId(bpmnContent: string): string | null {
+export function extractProcessId(bpmnContent: string): string | null {
   const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
   return match ? match[1] : null;
 }
