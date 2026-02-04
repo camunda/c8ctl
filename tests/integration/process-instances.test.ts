@@ -113,7 +113,6 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
       
       if (instance.state === 'COMPLETED') {
         completed = true;
-        assert.ok(true, 'Process instance completed');
         break;
       }
       

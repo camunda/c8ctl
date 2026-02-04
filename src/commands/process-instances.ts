@@ -208,9 +208,10 @@ export async function awaitProcessInstance(key: string, options: {
           logger.json(result);
           process.exit(1);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         // If instance not found, it might have been deleted
-        if (error.message?.includes('404') || error.message?.includes('not found')) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage?.includes('404') || errorMessage?.includes('not found')) {
           logger.error(`Process instance ${key} not found`);
           process.exit(1);
         }
