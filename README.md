@@ -9,7 +9,9 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
-- **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment
+- **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
+- **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
+- **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys 
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
@@ -100,6 +102,9 @@ c8ctl deploy ./my-process.bpmn
 
 # Deploy current directory
 c8ctl deploy
+
+# Deploy from multiple paths
+c8ctl deploy ./processes ./forms ./building-blocks
 
 # Watch mode (using alias 'w')
 c8ctl w
