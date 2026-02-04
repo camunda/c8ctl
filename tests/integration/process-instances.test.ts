@@ -88,4 +88,39 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
       assert.ok(error instanceof Error, 'Should receive an error for already completed process');
     }
   });
+
+  test('await process instance waits for completion', async () => {
+    const client = createClient();
+    
+    // Deploy and create an instance
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    const createResult = await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+    });
+    
+    const instanceKey = createResult.processInstanceKey.toString();
+    
+    // Wait for completion using getProcessInstance in a loop
+    // Since simple-process completes instantly, it should already be completed
+    const maxAttempts = 10;
+    let completed = false;
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      const instance = await client.getProcessInstance(
+        { processInstanceKey: ProcessInstanceKey.assumeExists(instanceKey) },
+        { consistency: { waitUpToMs: 1000 } }
+      );
+      
+      if (instance.state === 'COMPLETED') {
+        completed = true;
+        assert.ok(true, 'Process instance completed');
+        break;
+      }
+      
+      // Wait a bit before retrying
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    assert.ok(completed, 'Process instance should complete');
+  });
 });
