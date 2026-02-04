@@ -103,6 +103,9 @@ c8ctl deploy ./my-process.bpmn
 # Deploy current directory
 c8ctl deploy
 
+# Deploy from multiple paths
+c8ctl deploy ./processes ./forms ./building-blocks
+
 # Watch mode (using alias 'w')
 c8ctl w
 c8ctl watch
