@@ -100,8 +100,9 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     
     const instanceKey = createResult.processInstanceKey.toString();
     
-    // Wait for completion using getProcessInstance in a loop
-    // Since simple-process completes instantly, it should already be completed
+    // Test the polling behavior that awaitProcessInstance implements
+    // Note: We test the API behavior directly since awaitProcessInstance
+    // uses logger and process.exit which are not suitable for unit testing
     const maxAttempts = 10;
     let completed = false;
     

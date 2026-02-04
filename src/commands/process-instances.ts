@@ -173,12 +173,11 @@ export async function awaitProcessInstance(key: string, options: {
   const pollInterval = options.pollInterval ?? 500;
   
   const startTime = Date.now();
-  const maxAttempts = Math.ceil(timeout / pollInterval);
   
   logger.info(`Waiting for process instance ${key} to complete...`);
   
   try {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    while (true) {
       const elapsedTime = Date.now() - startTime;
       
       if (elapsedTime >= timeout) {
@@ -221,9 +220,6 @@ export async function awaitProcessInstance(key: string, options: {
       // Wait before next poll
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
-    
-    logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
-    process.exit(1);
   } catch (error) {
     logger.error(`Failed to await process instance ${key}`, error as Error);
     process.exit(1);
