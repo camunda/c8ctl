@@ -54,6 +54,7 @@ Commands:
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
+  await     <resource> <key> Await resource completion (pi)
   complete  <resource> <key> Complete resource (ut, job)
   fail      job <key>        Fail a job
   activate  jobs <type>      Activate jobs by type
@@ -75,11 +76,13 @@ Commands:
   help                       Show this help${pluginSection}
 
 Flags:
-  --profile <name>  Use specific profile for this command
-  --from <url>      Load plugin from URL (use with 'load plugin')
-  --xml             Get process definition as XML (use with 'get pd')
-  --version, -v     Show version
-  --help, -h        Show help
+  --profile <name>      Use specific profile for this command
+  --from <url>          Load plugin from URL (use with 'load plugin')
+  --xml                 Get process definition as XML (use with 'get pd')
+  --awaitCompletion     Wait for process instance to complete (use with 'create pi')
+  --fetchVariables <v>  Comma-separated variable names (requires --awaitCompletion)
+  --version, -v         Show version
+  --help, -h            Show help
 
 Resource Aliases:
   pi   = process-instance(s)
@@ -95,6 +98,8 @@ Examples:
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl create pi --bpmnProcessId=myProcess
+  c8ctl create pi --bpmnProcessId=myProcess --awaitCompletion
+  c8ctl await pi 123456              Wait for process instance to complete
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
@@ -117,6 +122,7 @@ export function showVerbResources(verb: string): void {
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
+    await: 'process-instance (pi)',
     resolve: 'incident (inc)',
     activate: 'jobs',
     fail: 'job',

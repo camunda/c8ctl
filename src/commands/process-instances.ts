@@ -83,6 +83,8 @@ export async function createProcessInstance(options: {
   processDefinitionId?: string;
   version?: number;
   variables?: string;
+  awaitCompletion?: boolean;
+  fetchVariables?: string;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -90,6 +92,12 @@ export async function createProcessInstance(options: {
 
   if (!options.processDefinitionId) {
     logger.error('processDefinitionId is required. Use --processDefinitionId flag');
+    process.exit(1);
+  }
+
+  // Validate: fetchVariables requires awaitCompletion
+  if (options.fetchVariables && !options.awaitCompletion) {
+    logger.error('--fetchVariables can only be used with --awaitCompletion');
     process.exit(1);
   }
 
@@ -114,6 +122,14 @@ export async function createProcessInstance(options: {
 
     const result = await client.createProcessInstance(request);
     logger.success('Process instance created', result.processInstanceKey);
+    
+    // If awaitCompletion is enabled, wait for the process to complete
+    if (options.awaitCompletion) {
+      await awaitProcessInstance(result.processInstanceKey.toString(), {
+        profile: options.profile,
+        fetchVariables: options.fetchVariables,
+      });
+    }
   } catch (error) {
     logger.error('Failed to create process instance', error as Error);
     process.exit(1);
@@ -134,6 +150,81 @@ export async function cancelProcessInstance(key: string, options: {
     logger.success(`Process instance ${key} cancelled`);
   } catch (error) {
     logger.error(`Failed to cancel process instance ${key}`, error as Error);
+    process.exit(1);
+  }
+}
+
+/**
+ * Await process instance completion
+ * Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED, or has an incident)
+ */
+export async function awaitProcessInstance(key: string, options: {
+  profile?: string;
+  fetchVariables?: string;
+  timeout?: number;
+  pollInterval?: number;
+}): Promise<void> {
+  const logger = getLogger();
+  const client = createClient(options.profile);
+  
+  // Default timeout: 5 minutes
+  const timeout = options.timeout ?? 300000;
+  // Default poll interval: 500ms
+  const pollInterval = options.pollInterval ?? 500;
+  
+  const startTime = Date.now();
+  const maxAttempts = Math.ceil(timeout / pollInterval);
+  
+  logger.info(`Waiting for process instance ${key} to complete...`);
+  
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const elapsedTime = Date.now() - startTime;
+      
+      if (elapsedTime >= timeout) {
+        logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
+        process.exit(1);
+      }
+      
+      try {
+        const result = await client.getProcessInstance(
+          { processInstanceKey: key as any },
+          { consistency: { waitUpToMs: 0 } }
+        );
+        
+        // Check if process instance is in a terminal state
+        const state = result.state;
+        if (state === 'COMPLETED' || state === 'CANCELED') {
+          logger.success(`Process instance ${key} ${state.toLowerCase()}`);
+          
+          // Always return full result with variables when awaiting
+          logger.json(result);
+          return;
+        }
+        
+        // Check if there's an incident (error state)
+        if (result.hasIncident) {
+          logger.error(`Process instance ${key} has an incident`);
+          logger.json(result);
+          process.exit(1);
+        }
+      } catch (error: any) {
+        // If instance not found, it might have been deleted
+        if (error.message?.includes('404') || error.message?.includes('not found')) {
+          logger.error(`Process instance ${key} not found`);
+          process.exit(1);
+        }
+        // Continue polling on other errors
+      }
+      
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    
+    logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
+    process.exit(1);
+  } catch (error) {
+    logger.error(`Failed to await process instance ${key}`, error as Error);
     process.exit(1);
   }
 }

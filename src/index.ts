@@ -16,6 +16,7 @@ import {
   getProcessInstance,
   createProcessInstance,
   cancelProcessInstance,
+  awaitProcessInstance,
 } from './commands/process-instances.ts';
 import {
   listProcessDefinitions,
@@ -90,6 +91,8 @@ function parseCliArgs() {
         defaultTenantId: { type: 'string' },
         version_num: { type: 'string' },
         from: { type: 'string' },
+        awaitCompletion: { type: 'boolean' },
+        fetchVariables: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -280,6 +283,8 @@ async function main() {
       processDefinitionId: values.bpmnProcessId as string | undefined,
       version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
       variables: values.variables as string | undefined,
+      awaitCompletion: values.awaitCompletion as boolean | undefined,
+      fetchVariables: values.fetchVariables as string | undefined,
     });
     return;
   }
@@ -291,6 +296,18 @@ async function main() {
     }
     await cancelProcessInstance(args[0], {
       profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  if (verb === 'await' && normalizedResource === 'process-instance') {
+    if (!args[0]) {
+      logger.error('Process instance key required. Usage: c8 await pi <key>');
+      process.exit(1);
+    }
+    await awaitProcessInstance(args[0], {
+      profile: values.profile as string | undefined,
+      fetchVariables: values.fetchVariables as string | undefined,
     });
     return;
   }
