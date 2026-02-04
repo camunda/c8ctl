@@ -201,10 +201,9 @@ export async function deploy(paths: string[], options: {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const resources: ResourceFile[] = [];
 
   try {
-    const resources: ResourceFile[] = [];
-    
     // Store the base paths for relative path calculation
     const basePaths = paths.length === 0 ? [process.cwd()] : paths;
 
@@ -371,22 +370,111 @@ export async function deploy(paths: string[], options: {
       logger.table(displayData);
     }
   } catch (error) {
-    // Log detailed error information
-    if (error && typeof error === 'object') {
-      const err = error as any;
-      logger.error('Failed to deploy resources', error as Error);
-      if (err.response) {
-        console.error('API Response:', err.response);
-      }
-      if (err.message) {
-        console.error('Error message:', err.message);
-      }
-      if (err.cause) {
-        console.error('Error cause:', err.cause);
-      }
-    } else {
-      logger.error('Failed to deploy resources', error as Error);
-    }
-    process.exit(1);
+    handleDeploymentError(error, resources, logger);
   }
+}
+
+/**
+ * Format and display deployment errors with actionable guidance
+ */
+function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>): never {
+  const err = error as Record<string, unknown>;
+  
+  // Extract RFC 9457 Problem Detail fields
+  const title = err?.title as string || err?.message as string || 'Unknown error';
+  const detail = err?.detail as string;
+  const status = err?.status as number;
+  
+  // Display the main error
+  logger.error('Deployment failed', new Error(title));
+  
+  // Display the detailed error message if available
+  if (detail) {
+    console.error('\n' + formatDeploymentErrorDetail(detail));
+  }
+  
+  // Provide actionable hints based on error type
+  console.error('');
+  printDeploymentHints(title, detail, status, resources);
+  
+  process.exit(1);
+}
+
+/**
+ * Format the error detail for better readability
+ */
+function formatDeploymentErrorDetail(detail: string): string {
+  // The detail often contains embedded newlines, format them nicely
+  const lines = detail.split('\n').map(line => line.trim()).filter(Boolean);
+  
+  // Find the main message and the file-specific errors
+  const result: string[] = [];
+  let inFileError = false;
+  
+  for (const line of lines) {
+    if (line.startsWith("'") && line.includes('.bpmn') || line.includes('.dmn') || line.includes('.form')) {
+      // This is a file-specific error
+      inFileError = true;
+      result.push(`  📄 ${line}`);
+    } else if (line.startsWith('- Element:')) {
+      result.push(`     ${line}`);
+    } else if (line.startsWith('- ERROR:') || line.startsWith('- WARNING:')) {
+      const icon = line.startsWith('- ERROR:') ? '❌' : '⚠️';
+      result.push(`     ${icon} ${line.substring(2)}`);
+    } else if (inFileError && line.startsWith('-')) {
+      result.push(`     ${line}`);
+    } else {
+      result.push(`  ${line}`);
+    }
+  }
+  
+  return result.join('\n');
+}
+
+/**
+ * Print actionable hints based on the error type
+ */
+function printDeploymentHints(title: string, detail: string | undefined, status: number | undefined, resources: ResourceFile[]): void {
+  const hints: string[] = [];
+  
+  if (title === 'INVALID_ARGUMENT') {
+    if (detail?.includes('Must reference a message')) {
+      hints.push('💡 A message start event or intermediate catch event is missing a message reference.');
+      hints.push('   Open the BPMN file in Camunda Modeler and configure the message name.');
+    }
+    if (detail?.includes('duplicate')) {
+      hints.push('💡 Resource IDs must be unique within a deployment.');
+      hints.push('   Check for duplicate process/decision IDs in your files.');
+    }
+    if (detail?.includes('parsing') || detail?.includes('syntax')) {
+      hints.push('💡 The resource file contains syntax errors.');
+      hints.push('   Validate the file in Camunda Modeler or check the XML/JSON structure.');
+    }
+  } else if (title === 'RESOURCE_EXHAUSTED') {
+    hints.push('💡 The server is under heavy load (backpressure).');
+    hints.push('   Wait a moment and retry the deployment.');
+  } else if (title === 'NOT_FOUND' || status === 404) {
+    hints.push('💡 The Camunda server could not be reached or the endpoint was not found.');
+    hints.push('   Check your connection settings with: c8 list profiles');
+  } else if (title === 'UNAUTHENTICATED' || title === 'PERMISSION_DENIED' || status === 401 || status === 403) {
+    hints.push('💡 Authentication or authorization failed.');
+    hints.push('   Check your credentials and permissions for the current profile.');
+  } else {
+    hints.push('💡 Review the error message above for specific issues.');
+    hints.push('   You may need to fix the resource files before deploying.');
+  }
+  
+  // Show which files were being deployed
+  if (resources.length > 0) {
+    hints.push('');
+    hints.push(`📁 Resources attempted (${resources.length}):`);
+    resources.slice(0, 5).forEach(r => {
+      hints.push(`   - ${r.relativePath || r.name}`);
+    });
+    if (resources.length > 5) {
+      hints.push(`   ... and ${resources.length - 5} more`);
+    }
+  }
+  
+  hints.forEach(h => console.error(h));
 }
