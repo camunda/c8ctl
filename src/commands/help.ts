@@ -68,6 +68,7 @@ Commands:
   load      plugin <name>    Load a c8ctl plugin from npm registry
   load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
+  sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
@@ -101,6 +102,7 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
 `.trim());
 }
@@ -125,6 +127,7 @@ export function showVerbResources(verb: string): void {
     rm: 'profile',
     load: 'plugin',
     unload: 'plugin',
+    sync: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',

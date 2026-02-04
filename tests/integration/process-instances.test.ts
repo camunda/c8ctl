@@ -9,7 +9,7 @@ import { createClient } from '../../src/client.ts';
 import { deploy } from '../../src/commands/deployments.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getUserDataDir } from '../../src/config.ts';
 import { ProcessDefinitionId, ProcessInstanceKey } from '@camunda8/orchestration-cluster-api';
 
 // Wait time for Elasticsearch to index data before search queries
@@ -18,7 +18,7 @@ const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 8000;
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    const sessionPath = join(getUserDataDir(), 'session.json');
     if (existsSync(sessionPath)) {
       unlinkSync(sessionPath);
     }

@@ -114,15 +114,12 @@ export interface ClusterConfig {
 // ============================================================================
 
 const VALIDATION_PATTERNS = {
-  URL: /^(http|grpc)s?:\/\//,
-  CAMUNDA_CLOUD_GRPC_URL: /^((https|grpcs):\/\/|)[a-z\d-]+\.[a-z]+-\d+\.zeebe\.camunda\.io(:443|)\/?$/,
+  URL: /^https?:\/\//,
   CAMUNDA_CLOUD_REST_URL: /^https:\/\/[a-z]+-\d+\.zeebe\.camunda\.io(:443|)\/[a-z\d-]+\/?$/,
 };
 
-// Combined pattern for cloud URLs
-const CAMUNDA_CLOUD_URL_PATTERN = new RegExp(
-  `${VALIDATION_PATTERNS.CAMUNDA_CLOUD_GRPC_URL.source}|${VALIDATION_PATTERNS.CAMUNDA_CLOUD_REST_URL.source}`
-);
+// Cloud URLs must be REST URLs (HTTP-based)
+const CAMUNDA_CLOUD_URL_PATTERN = VALIDATION_PATTERNS.CAMUNDA_CLOUD_REST_URL;
 
 /**
  * Validate a connection configuration
@@ -161,7 +158,7 @@ export function validateConnection(conn: Partial<Connection>): string[] {
     if (!conn.contactPoint) {
       errors.push('Cluster URL (contactPoint) is required for Self-Hosted');
     } else if (!VALIDATION_PATTERNS.URL.test(conn.contactPoint)) {
-      errors.push('Cluster URL must start with http://, https://, grpc://, or grpcs://');
+      errors.push('Cluster URL must start with http:// or https://');
     }
 
     if (conn.authType === AUTH_TYPES.BASIC) {
