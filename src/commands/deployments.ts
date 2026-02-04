@@ -308,56 +308,67 @@ export async function deploy(paths: string[], options: {
     
     logger.success('Deployment successful', result.deploymentKey.toString());
     
-    // Display deployed resources with file information
-    const tableData: Array<{File: string, Type: string, ID: string, Version: string | number, Key: string}> = [];
+    // Group resources by their directory (building block or process application)
+    type ResourceRow = {File: string, Type: string, ID: string, Version: string | number, Key: string, sortKey: string};
     
-    result.processes.forEach(proc => {
-      const resource = definitionIdToResource.get(proc.processDefinitionId);
+    // Normalize all deployed resources into a common structure
+    const allResources = [
+      ...result.processes.map(proc => ({
+        type: 'Process' as const,
+        id: proc.processDefinitionId,
+        version: proc.processDefinitionVersion,
+        key: proc.processDefinitionKey.toString(),
+        resource: definitionIdToResource.get(proc.processDefinitionId),
+      })),
+      ...result.decisions.map(dec => ({
+        type: 'Decision' as const,
+        id: dec.decisionDefinitionId || '-',
+        version: dec.version ?? '-',
+        key: dec.decisionDefinitionKey?.toString() || '-',
+        resource: definitionIdToResource.get(dec.decisionDefinitionId || ''),
+      })),
+      ...result.forms.map(form => ({
+        type: 'Form' as const,
+        id: form.formId || '-',
+        version: form.version ?? '-',
+        key: form.formKey?.toString() || '-',
+        resource: formNameToResource.get(form.formId || ''),
+      })),
+    ];
+    
+    const tableData: ResourceRow[] = allResources.map(({type, id, version, key, resource}) => {
       const fileDisplay = resource 
         ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
         : '-';
       
-      tableData.push({
-        File: fileDisplay,
-        Type: 'Process',
-        ID: proc.processDefinitionId,
-        Version: proc.processDefinitionVersion,
-        Key: proc.processDefinitionKey.toString(),
-      });
-    });
-    
-    result.decisions.forEach(dec => {
-      const resource = definitionIdToResource.get(dec.decisionDefinitionId || '');
-      const fileDisplay = resource 
-        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
-        : '-';
+      // Extract directory path for grouping (e.g., "bla/_bb-building-block" or "pa")
+      const sortKey = resource?.relativePath 
+        ? resource.relativePath.substring(0, resource.relativePath.lastIndexOf('/') + 1) || resource.relativePath
+        : 'zzz'; // Resources without paths go last
       
-      tableData.push({
+      return {
         File: fileDisplay,
-        Type: 'Decision',
-        ID: dec.decisionDefinitionId || '-',
-        Version: dec.version ?? '-',
-        Key: dec.decisionDefinitionKey?.toString() || '-',
-      });
+        Type: type,
+        ID: id,
+        Version: version,
+        Key: key,
+        sortKey,
+      };
     });
     
-    result.forms.forEach(form => {
-      const resource = formNameToResource.get(form.formId || '');
-      const fileDisplay = resource 
-        ? `${resource.isBuildingBlock ? '🧱 ' : ''}${resource.isProcessApplication ? '📦 ' : ''}${resource.relativePath || resource.name}`
-        : '-';
-      
-      tableData.push({
-        File: fileDisplay,
-        Type: 'Form',
-        ID: form.formId || '-',
-        Version: form.version ?? '-',
-        Key: form.formKey?.toString() || '-',
-      });
+    // Sort by directory path (grouping), then by file name
+    tableData.sort((a, b) => {
+      if (a.sortKey !== b.sortKey) {
+        return a.sortKey.localeCompare(b.sortKey);
+      }
+      return a.File.localeCompare(b.File);
     });
     
-    if (tableData.length > 0) {
-      logger.table(tableData);
+    // Remove sortKey before displaying
+    const displayData = tableData.map(({File, Type, ID, Version, Key}) => ({File, Type, ID, Version, Key}));
+    
+    if (displayData.length > 0) {
+      logger.table(displayData);
     }
   } catch (error) {
     // Log detailed error information
