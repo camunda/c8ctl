@@ -72,7 +72,7 @@ Commands:
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
-  help      [command]        Show this help or detailed help for a command${pluginSection}
+  help      [command]        Show help (detailed help for list, get, create, complete)${pluginSection}
 
 Flags:
   --profile <name>  Use specific profile for this command
