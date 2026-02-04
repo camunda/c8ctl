@@ -45,14 +45,14 @@ describe('Deployment Logging', () => {
    */
   function executeDeployment(path: string): string {
     try {
-      execSync(`npm run cli -- deploy ${path}`, {
+      const output = execSync(`npm run cli -- deploy ${path}`, {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
         timeout: DEPLOYMENT_TIMEOUT,
         env: process.env
       });
-      return '';
+      return output;
     } catch (error: any) {
       return error.stdout + error.stderr;
     }
