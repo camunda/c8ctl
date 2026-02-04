@@ -142,3 +142,158 @@ export function showVerbResources(verb: string): void {
     console.log('Run "c8ctl help" for usage information.');
   }
 }
+
+/**
+ * Show detailed help for list command with all resources and their flags
+ */
+export function showListHelp(): void {
+  console.log(`
+c8ctl list - List resources
+
+Usage: c8ctl list <resource> [flags]
+
+Resources and their available flags:
+
+  process-instances (pi)
+    --bpmnProcessId <id>     Filter by process definition ID
+    --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
+    --all                    List all instances (pagination)
+    --profile <name>         Use specific profile
+
+  process-definitions (pd)
+    --profile <name>         Use specific profile
+
+  user-tasks (ut)
+    --state <state>          Filter by state (CREATED, COMPLETED, etc.)
+    --assignee <name>        Filter by assignee
+    --all                    List all tasks (pagination)
+    --profile <name>         Use specific profile
+
+  incidents (inc)
+    --state <state>          Filter by state (ACTIVE, RESOLVED, etc.)
+    --processInstanceKey <key>  Filter by process instance
+    --profile <name>         Use specific profile
+
+  jobs
+    --state <state>          Filter by state (ACTIVATABLE, ACTIVATED, etc.)
+    --type <type>            Filter by job type
+    --profile <name>         Use specific profile
+
+  profiles
+    Lists both c8ctl and Camunda Modeler profiles
+    (Modeler profiles are shown with 'modeler:' prefix)
+
+  plugins
+    Shows installed plugins with sync status
+
+Examples:
+  c8ctl list pi --state=ACTIVE
+  c8ctl list ut --assignee=john.doe
+  c8ctl list inc --processInstanceKey=123456
+  c8ctl list jobs --type=email-service
+  c8ctl list profiles
+  c8ctl list plugins
+`.trim());
+}
+
+/**
+ * Show detailed help for get command
+ */
+export function showGetHelp(): void {
+  console.log(`
+c8ctl get - Get resource by key
+
+Usage: c8ctl get <resource> <key> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi) <key>
+    --profile <name>         Use specific profile
+
+  process-definition (pd) <key>
+    --xml                    Return process definition as XML
+    --profile <name>         Use specific profile
+
+  topology
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl get pi 2251799813685249
+  c8ctl get pd 2251799813685250
+  c8ctl get pd 2251799813685250 --xml
+  c8ctl get topology
+`.trim());
+}
+
+/**
+ * Show detailed help for create command
+ */
+export function showCreateHelp(): void {
+  console.log(`
+c8ctl create - Create a resource
+
+Usage: c8ctl create <resource> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi)
+    --bpmnProcessId <id>     Process definition ID (required)
+    --version_num <num>      Process definition version
+    --variables <json>       Process variables as JSON string
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl create pi --bpmnProcessId=order-process
+  c8ctl create pi --bpmnProcessId=order-process --version_num=2
+  c8ctl create pi --bpmnProcessId=order-process --variables='{"orderId":"12345"}'
+`.trim());
+}
+
+/**
+ * Show detailed help for complete command
+ */
+export function showCompleteHelp(): void {
+  console.log(`
+c8ctl complete - Complete a resource
+
+Usage: c8ctl complete <resource> <key> [flags]
+
+Resources and their available flags:
+
+  user-task (ut) <key>
+    --variables <json>       Completion variables as JSON string
+    --profile <name>         Use specific profile
+
+  job <key>
+    --variables <json>       Completion variables as JSON string
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl complete ut 2251799813685250
+  c8ctl complete ut 2251799813685250 --variables='{"approved":true}'
+  c8ctl complete job 2251799813685252 --variables='{"result":"success"}'
+`.trim());
+}
+
+/**
+ * Show detailed help for specific commands
+ */
+export function showCommandHelp(command: string): void {
+  switch (command) {
+    case 'list':
+      showListHelp();
+      break;
+    case 'get':
+      showGetHelp();
+      break;
+    case 'create':
+      showCreateHelp();
+      break;
+    case 'complete':
+      showCompleteHelp();
+      break;
+    default:
+      console.log(`\nNo detailed help available for: ${command}`);
+      console.log('Run "c8ctl help" for general usage information.');
+  }
+}
