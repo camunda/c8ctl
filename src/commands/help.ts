@@ -72,7 +72,7 @@ Commands:
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
-  help                       Show this help${pluginSection}
+  help      [command]        Show this help or detailed help for a command${pluginSection}
 
 Flags:
   --profile <name>  Use specific profile for this command
@@ -104,6 +104,12 @@ Examples:
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
   c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
+
+For detailed help on specific commands with all available flags:
+  c8ctl help list                    Show all list resources and their flags
+  c8ctl help get                     Show all get resources and their flags
+  c8ctl help create                  Show all create resources and their flags
+  c8ctl help complete                Show all complete resources and their flags
 `.trim());
 }
 

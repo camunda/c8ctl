@@ -64,55 +64,43 @@ After installation, the CLI is available as `c8ctl` (or its alias `c8`).
 
 ## Usage
 
-### Basic Commands
+### Getting Help
 
 ```bash
-# Show help
+# Show general help
 c8ctl help
+
+# Show detailed help for specific commands with all flags
+c8ctl help list      # Shows all list resources and their flags
+c8ctl help get       # Shows all get resources and their flags
+c8ctl help create    # Shows all create resources and their flags
+c8ctl help complete  # Shows all complete resources and their flags
 
 # Show version
 c8ctl --version
-
-# List process instances (using alias 'pi')
-c8ctl list pi
-# Or using full command name
-c8ctl list process-instances
-
-# List process definitions (using alias 'pd')
-c8ctl list pd
-c8ctl list process-definitions
-
-# Get process instance by key
-c8ctl get pi 123456
-c8ctl get process-instance 123456
-
-# Get process definition by key
-c8ctl get pd 123456
-c8ctl get process-definition 123456
-
-# Get process definition XML
-c8ctl get pd 123456 --xml
-
-# Create process instance
-c8ctl create pi --bpmnProcessId=myProcess
-c8ctl create process-instance --bpmnProcessId=myProcess
-
-# Deploy BPMN file
-c8ctl deploy ./my-process.bpmn
-
-# Deploy current directory
-c8ctl deploy
-
-# Deploy from multiple paths
-c8ctl deploy ./processes ./forms ./building-blocks
-
-# Watch mode (using alias 'w')
-c8ctl w
-c8ctl watch
-
-# Deploy and start process (run)
-c8ctl run ./my-process.bpmn
 ```
+
+### Basic Commands
+
+```bash
+# List and get resources (use aliases pi, pd, ut, inc for convenience)
+c8ctl list pi                          # List process instances
+c8ctl list pd                          # List process definitions
+c8ctl get pi 123456                    # Get process instance by key
+c8ctl get pd 123456 --xml              # Get process definition as XML
+
+# Create and manage process instances
+c8ctl create pi --bpmnProcessId=myProcess
+c8ctl cancel pi 123456
+
+# Deploy and run
+c8ctl deploy ./my-process.bpmn         # Deploy a single file
+c8ctl deploy                           # Deploy current directory
+c8ctl run ./my-process.bpmn            # Deploy and start process
+c8ctl watch                            # Watch for changes and auto-deploy
+```
+
+For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).
 
 ### Shell Completion
 
@@ -358,9 +346,32 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 c8ctl <verb> <resource> [arguments] [flags]
 ```
 
-**Verbs**: list, get, create, cancel, complete, fail, activate, resolve, publish, correlate, deploy, run, add, remove, use, output
+**Verbs**: 
+- `list` - List resources
+- `get` - Get resource by key
+- `create` - Create resource
+- `cancel` - Cancel resource
+- `complete` - Complete resource
+- `fail` - Fail a job
+- `activate` - Activate jobs
+- `resolve` - Resolve incident
+- `publish` - Publish message
+- `correlate` - Correlate message
+- `deploy` - Deploy BPMN/DMN/forms
+- `run` - Deploy and start process
+- `watch` (alias: `w`) - Watch for changes and auto-deploy
+- `add` - Add a profile
+- `remove` (alias: `rm`) - Remove a profile
+- `load` - Load a plugin
+- `unload` - Unload a plugin
+- `sync` - Synchronize plugins
+- `use` - Set active profile or tenant
+- `output` - Set output format
+- `completion` - Generate shell completion script
 
-**Resources**: process-instance, process-definition, user-task, incident, job, message, topology, profile, tenant
+**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, message (msg), topology, profile, tenant, plugin
+
+**Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 
 ## Testing
 
