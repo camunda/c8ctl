@@ -8,12 +8,12 @@ import assert from 'node:assert';
 import { createClient } from '../../src/client.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getUserDataDir } from '../../src/config.ts';
 
 describe('Topology Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    const sessionPath = join(getUserDataDir(), 'session.json');
     if (existsSync(sessionPath)) {
       unlinkSync(sessionPath);
     }

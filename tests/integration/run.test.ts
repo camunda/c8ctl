@@ -9,7 +9,7 @@ import { run } from '../../src/commands/run.ts';
 import { createClient } from '../../src/client.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getUserDataDir } from '../../src/config.ts';
 
 // Wait time for Elasticsearch to index data before search queries
 const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
@@ -17,7 +17,7 @@ const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 5000;
 describe('Run Command Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    const sessionPath = join(getUserDataDir(), 'session.json');
     if (existsSync(sessionPath)) {
       unlinkSync(sessionPath);
     }
