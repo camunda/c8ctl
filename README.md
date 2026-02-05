@@ -89,8 +89,18 @@ c8ctl list pd                          # List process definitions
 c8ctl get pi 123456                    # Get process instance by key
 c8ctl get pd 123456 --xml              # Get process definition as XML
 
-# Create and manage process instances
-c8ctl create pi --bpmnProcessId=myProcess
+# Create process instance
+c8ctl create pi --id=myProcess
+c8ctl create process-instance --id=myProcess
+
+# Create process instance and wait for completion
+c8ctl create pi --id=myProcess --awaitCompletion
+
+# Await process instance completion (alias for create with --awaitCompletion)
+c8ctl await pi --id=myProcess
+c8ctl await process-instance --id=myProcess
+
+# Cancel process instance
 c8ctl cancel pi 123456
 
 # Deploy and run

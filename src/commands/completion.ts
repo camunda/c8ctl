@@ -20,13 +20,14 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list get create cancel complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
+  local verbs="list get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
   local get_resources="process-instance pi process-definition pd topology"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
+  local await_resources="process-instance pi"
   local complete_resources="user-task ut job"
   local fail_resources="job"
   local activate_resources="jobs"
@@ -44,7 +45,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables"
 
   case \${cword} in
     1)
@@ -66,6 +67,9 @@ _c8ctl_completions() {
           ;;
         cancel)
           COMPREPLY=( \$(compgen -W "\${cancel_resources}" -- "\${cur}") )
+          ;;
+        await)
+          COMPREPLY=( \$(compgen -W "\${await_resources}" -- "\${cur}") )
           ;;
         complete)
           COMPREPLY=( \$(compgen -W "\${complete_resources}" -- "\${cur}") )
@@ -148,6 +152,7 @@ _c8ctl() {
     'get:Get resource by key'
     'create:Create resource'
     'cancel:Cancel resource'
+    'await:Await resource completion'
     'complete:Complete resource'
     'fail:Fail a job'
     'activate:Activate jobs by type'
@@ -178,6 +183,7 @@ _c8ctl() {
     '--from[Load plugin from URL]:url:'
     '--all[Show all results]'
     '--bpmnProcessId[Process definition ID]:id:'
+    '--id[Process definition ID (alias for --bpmnProcessId)]:id:'
     '--processInstanceKey[Process instance key]:key:'
     '--variables[JSON variables]:json:'
     '--state[Filter by state]:state:'
@@ -196,7 +202,9 @@ _c8ctl() {
     '--audience[OAuth audience]:audience:'
     '--oAuthUrl[OAuth token endpoint]:url:'
     '--defaultTenantId[Default tenant ID]:id:'
-    '--version_num[Process definition version]:version:'
+    '--version[Process definition version]:version:'
+    '--awaitCompletion[Wait for process instance to complete]'
+    '--fetchVariables[Comma-separated variable names]:variables:'
   )
 
   case \$CURRENT in
@@ -245,6 +253,13 @@ _c8ctl() {
           resources=(
             'process-instance:Cancel process instance'
             'pi:Cancel process instance'
+          )
+          _describe 'resource' resources
+          ;;
+        await)
+          resources=(
+            'process-instance:Await process instance completion'
+            'pi:Await process instance completion'
           )
           _describe 'resource' resources
           ;;
@@ -389,6 +404,8 @@ complete -c c8ctl -l all -d 'Show all results'
 complete -c c8 -l all -d 'Show all results'
 complete -c c8ctl -l bpmnProcessId -d 'Process definition ID' -r
 complete -c c8 -l bpmnProcessId -d 'Process definition ID' -r
+complete -c c8ctl -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
+complete -c c8 -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
 complete -c c8ctl -l processInstanceKey -d 'Process instance key' -r
 complete -c c8 -l processInstanceKey -d 'Process instance key' -r
 complete -c c8ctl -l variables -d 'JSON variables' -r
@@ -425,8 +442,12 @@ complete -c c8ctl -l oAuthUrl -d 'OAuth token endpoint' -r
 complete -c c8 -l oAuthUrl -d 'OAuth token endpoint' -r
 complete -c c8ctl -l defaultTenantId -d 'Default tenant ID' -r
 complete -c c8 -l defaultTenantId -d 'Default tenant ID' -r
-complete -c c8ctl -l version_num -d 'Process definition version' -r
-complete -c c8 -l version_num -d 'Process definition version' -r
+complete -c c8ctl -l version -d 'Process definition version' -r
+complete -c c8 -l version -d 'Process definition version' -r
+complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
+complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
+complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
+complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
@@ -437,6 +458,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
 complete -c c8 -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
 complete -c c8 -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'await' -d 'Await resource completion'
+complete -c c8 -n '__fish_use_subcommand' -a 'await' -d 'Await resource completion'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'complete' -d 'Complete resource'
 complete -c c8 -n '__fish_use_subcommand' -a 'complete' -d 'Complete resource'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'fail' -d 'Fail a job'
@@ -529,6 +552,12 @@ complete -c c8ctl -n '__fish_seen_subcommand_from cancel' -a 'process-instance' 
 complete -c c8 -n '__fish_seen_subcommand_from cancel' -a 'process-instance' -d 'Cancel process instance'
 complete -c c8ctl -n '__fish_seen_subcommand_from cancel' -a 'pi' -d 'Cancel process instance'
 complete -c c8 -n '__fish_seen_subcommand_from cancel' -a 'pi' -d 'Cancel process instance'
+
+# Resources for 'await' command
+complete -c c8ctl -n '__fish_seen_subcommand_from await' -a 'process-instance' -d 'Await process instance completion'
+complete -c c8 -n '__fish_seen_subcommand_from await' -a 'process-instance' -d 'Await process instance completion'
+complete -c c8ctl -n '__fish_seen_subcommand_from await' -a 'pi' -d 'Await process instance completion'
+complete -c c8 -n '__fish_seen_subcommand_from await' -a 'pi' -d 'Await process instance completion'
 
 # Resources for 'complete' command
 complete -c c8ctl -n '__fish_seen_subcommand_from complete' -a 'user-task' -d 'Complete user task'

@@ -52,6 +52,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('list'));
     assert.ok(output.includes('get'));
     assert.ok(output.includes('create'));
+    assert.ok(output.includes('await'));
     assert.ok(output.includes('deploy'));
     assert.ok(output.includes('run'));
     assert.ok(output.includes('load'));
@@ -65,6 +66,8 @@ describe('Help Module', () => {
     
     // Check for flags
     assert.ok(output.includes('--profile'));
+    assert.ok(output.includes('--awaitCompletion'));
+    assert.ok(output.includes('--fetchVariables'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
   });
@@ -106,6 +109,14 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl complete'));
     assert.ok(output.includes('user-task'));
     assert.ok(output.includes('job'));
+  });
+
+  test('showVerbResources shows resources for await', () => {
+    showVerbResources('await');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl await'));
+    assert.ok(output.includes('process-instance'));
   });
 
   test('showVerbResources shows resources for use', () => {
@@ -202,7 +213,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl create'));
     assert.ok(output.includes('process-instance (pi)'));
     assert.ok(output.includes('--bpmnProcessId'));
-    assert.ok(output.includes('--version_num'));
+    assert.ok(output.includes('--version'));
     assert.ok(output.includes('--variables'));
   });
 

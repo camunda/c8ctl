@@ -54,6 +54,7 @@ Commands:
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
+  await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
   complete  <resource> <key> Complete resource (ut, job)
   fail      job <key>        Fail a job
   activate  jobs <type>      Activate jobs by type
@@ -72,14 +73,17 @@ Commands:
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
-  help      [command]        Show help (detailed help for list, get, create, complete)${pluginSection}
+  help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
 
 Flags:
-  --profile <name>  Use specific profile for this command
-  --from <url>      Load plugin from URL (use with 'load plugin')
-  --xml             Get process definition as XML (use with 'get pd')
-  --version, -v     Show version
-  --help, -h        Show help
+  --profile <name>      Use specific profile for this command
+  --from <url>          Load plugin from URL (use with 'load plugin')
+  --xml                 Get process definition as XML (use with 'get pd')
+  --id <process-id>     Process definition ID (alias for --bpmnProcessId)
+  --awaitCompletion     Wait for process instance to complete (use with 'create pi')
+  --fetchVariables <v>  Reserved for future use (all variables returned by default)
+  --version, -v         Show version
+  --help, -h            Show help
 
 Resource Aliases:
   pi   = process-instance(s)
@@ -94,7 +98,9 @@ Examples:
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
-  c8ctl create pi --bpmnProcessId=myProcess
+  c8ctl create pi --id=myProcess
+  c8ctl create pi --id=myProcess --awaitCompletion
+  c8ctl await pi --id=myProcess      Create and wait for completion
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
@@ -110,6 +116,7 @@ For detailed help on specific commands with all available flags:
   c8ctl help get                     Show all get resources and their flags
   c8ctl help create                  Show all create resources and their flags
   c8ctl help complete                Show all complete resources and their flags
+  c8ctl help await                   Show await command with all flags
 `.trim());
 }
 
@@ -123,6 +130,7 @@ export function showVerbResources(verb: string): void {
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
+    await: 'process-instance (pi)',
     resolve: 'incident (inc)',
     activate: 'jobs',
     fail: 'job',
@@ -161,7 +169,7 @@ Usage: c8ctl list <resource> [flags]
 Resources and their available flags:
 
   process-instances (pi)
-    --bpmnProcessId <id>     Filter by process definition ID
+    --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
     --profile <name>         Use specific profile
@@ -243,15 +251,18 @@ Usage: c8ctl create <resource> [flags]
 Resources and their available flags:
 
   process-instance (pi)
-    --bpmnProcessId <id>     Process definition ID (required)
-    --version_num <num>      Process definition version
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
+    --version <num>          Process definition version
     --variables <json>       Process variables as JSON string
+    --awaitCompletion        Wait for process instance to complete
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
     --profile <name>         Use specific profile
 
 Examples:
-  c8ctl create pi --bpmnProcessId=order-process
-  c8ctl create pi --bpmnProcessId=order-process --version_num=2
-  c8ctl create pi --bpmnProcessId=order-process --variables='{"orderId":"12345"}'
+  c8ctl create pi --id=order-process
+  c8ctl create pi --id=order-process --version=2
+  c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
+  c8ctl create pi --id=order-process --awaitCompletion
 `.trim());
 }
 
@@ -282,6 +293,40 @@ Examples:
 }
 
 /**
+ * Show detailed help for await command
+ */
+export function showAwaitHelp(): void {
+  console.log(`
+c8ctl await - Create and await process instance completion
+
+Usage: c8ctl await <resource> [flags]
+
+Note: 'await pi' is an alias for 'create pi --awaitCompletion'
+
+Resources and their available flags:
+
+  process-instance (pi)
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
+    --version <num>          Process definition version
+    --variables <json>       Process variables as JSON string
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --profile <name>         Use specific profile
+
+Description:
+  Creates a process instance and waits for it to reach a terminal state (COMPLETED, CANCELED).
+  Returns the full process instance with all variables when complete.
+  Uses the Camunda 8 API's built-in awaitCompletion parameter for reliable server-side waiting.
+
+Examples:
+  c8ctl await pi --id=order-process
+  c8ctl await pi --id=order-process --variables='{"orderId":"12345"}'
+  
+  # Equivalent to:
+  c8ctl create pi --id=order-process --awaitCompletion
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -297,6 +342,9 @@ export function showCommandHelp(command: string): void {
       break;
     case 'complete':
       showCompleteHelp();
+      break;
+    case 'await':
+      showAwaitHelp();
       break;
     default:
       console.log(`\nNo detailed help available for: ${command}`);

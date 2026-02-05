@@ -30,7 +30,7 @@ c8 list process-instances
 
 ```bash
 # Filter by BPMN process ID
-c8 list pi --bpmnProcessId=order-process
+c8 list pi --id=order-process
 
 # Filter by state
 c8 list pi --state=ACTIVE
@@ -47,13 +47,38 @@ c8 get process-instance 2251799813685249
 
 ```bash
 # Create with process ID
-c8 create pi --bpmnProcessId=order-process
+c8 create pi --id=order-process
 
 # Create with specific version
-c8 create pi --bpmnProcessId=order-process --version_num=2
+c8 create pi --id=order-process --version=2
 
 # Create with variables
-c8 create pi --bpmnProcessId=order-process --variables='{"orderId":"12345","amount":100}'
+c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
+
+# Create and wait for completion
+c8 create pi --id=order-process --awaitCompletion
+
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
+```
+
+### Await Process Instance Completion
+
+The `await` command is an alias for `create` with `--awaitCompletion`. It uses the Camunda 8 API's built-in server-side waiting to create a process instance and wait for completion.
+
+```bash
+# Create and wait for completion (shorthand)
+c8 await pi --id=order-process
+c8 await process-instance --id=order-process
+
+# With variables
+c8 await pi --id=order-process --variables='{"orderId":"12345"}'
+
+# Equivalent to:
+c8 create pi --id=order-process --awaitCompletion
+
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
 ```
 
 ### Cancel Process Instance
@@ -437,7 +462,7 @@ c8 use tenant my-tenant-123
 
 # All commands now include tenant filter/parameter
 c8 list pi
-c8 create pi --bpmnProcessId=order-process
+c8 create pi --id=order-process
 ```
 
 ### Set Output Mode
@@ -561,7 +586,7 @@ c8 use tenant production
 c8 deploy ./processes/
 
 # 3. Create and monitor instance
-c8 create pi --bpmnProcessId=order-process --variables='{"orderId":"12345"}'
+c8 create pi --id=order-process --variables='{"orderId":"12345"}'
 # ✓ Process instance created [Key: 2251799813685249]
 
 c8 get pi 2251799813685249
@@ -586,7 +611,7 @@ c8 output json  # For automated testing
 c8 run ./test-process.bpmn --variables='{"testData":"value"}'
 
 # 3. Verify
-c8 list pi --bpmnProcessId=test-process
+c8 list pi --id=test-process
 ```
 
 ### Multi-Tenant Management
