@@ -89,7 +89,6 @@ c8ctl list pd                          # List process definitions
 c8ctl get pi 123456                    # Get process instance by key
 c8ctl get pd 123456 --xml              # Get process definition as XML
 
-<<<<<<< copilot/implement-await-completion-flags
 # Create process instance
 c8ctl create pi --id=myProcess
 c8ctl create process-instance --id=myProcess
@@ -101,19 +100,8 @@ c8ctl create pi --id=myProcess --awaitCompletion
 c8ctl await pi 123456
 c8ctl await process-instance 123456
 
-# Deploy BPMN file
-c8ctl deploy ./my-process.bpmn
-
-# Deploy current directory
-c8ctl deploy
-
-# Deploy from multiple paths
-c8ctl deploy ./processes ./forms ./building-blocks
-=======
-# Create and manage process instances
-c8ctl create pi --bpmnProcessId=myProcess
+# Cancel process instance
 c8ctl cancel pi 123456
->>>>>>> main
 
 # Deploy and run
 c8ctl deploy ./my-process.bpmn         # Deploy a single file

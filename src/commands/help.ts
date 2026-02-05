@@ -73,7 +73,7 @@ Commands:
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
-  help      [command]        Show help (detailed help for list, get, create, complete)${pluginSection}
+  help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
 
 Flags:
   --profile <name>      Use specific profile for this command
@@ -116,6 +116,7 @@ For detailed help on specific commands with all available flags:
   c8ctl help get                     Show all get resources and their flags
   c8ctl help create                  Show all create resources and their flags
   c8ctl help complete                Show all complete resources and their flags
+  c8ctl help await                   Show await command with all flags
 `.trim());
 }
 
@@ -168,7 +169,7 @@ Usage: c8ctl list <resource> [flags]
 Resources and their available flags:
 
   process-instances (pi)
-    --bpmnProcessId <id>     Filter by process definition ID
+    --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
     --profile <name>         Use specific profile
@@ -250,15 +251,18 @@ Usage: c8ctl create <resource> [flags]
 Resources and their available flags:
 
   process-instance (pi)
-    --bpmnProcessId <id>     Process definition ID (required)
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
     --version_num <num>      Process definition version
     --variables <json>       Process variables as JSON string
+    --awaitCompletion        Wait for process instance to complete
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
     --profile <name>         Use specific profile
 
 Examples:
-  c8ctl create pi --bpmnProcessId=order-process
-  c8ctl create pi --bpmnProcessId=order-process --version_num=2
-  c8ctl create pi --bpmnProcessId=order-process --variables='{"orderId":"12345"}'
+  c8ctl create pi --id=order-process
+  c8ctl create pi --id=order-process --version_num=2
+  c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
+  c8ctl create pi --id=order-process --awaitCompletion
 `.trim());
 }
 
@@ -289,6 +293,32 @@ Examples:
 }
 
 /**
+ * Show detailed help for await command
+ */
+export function showAwaitHelp(): void {
+  console.log(`
+c8ctl await - Await resource completion
+
+Usage: c8ctl await <resource> <key> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi) <key>
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --profile <name>         Use specific profile
+
+Description:
+  Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED).
+  Returns the full process instance with all variables when complete.
+  Default timeout: 5 minutes, poll interval: 500ms
+
+Examples:
+  c8ctl await pi 2251799813685249
+  c8ctl await process-instance 2251799813685249
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -304,6 +334,9 @@ export function showCommandHelp(command: string): void {
       break;
     case 'complete':
       showCompleteHelp();
+      break;
+    case 'await':
+      showAwaitHelp();
       break;
     default:
       console.log(`\nNo detailed help available for: ${command}`);
