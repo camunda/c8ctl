@@ -20,11 +20,11 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload use output completion help"
+  local verbs="list get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
-  local get_resources="process-instance pi topology"
+  local get_resources="process-instance pi process-definition pd topology"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
   local await_resources="process-instance pi"
@@ -38,9 +38,11 @@ _c8ctl_completions() {
   local remove_resources="profile"
   local load_resources="plugin"
   local unload_resources="plugin"
+  local sync_resources="plugin plugins"
   local use_resources="profile tenant"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
+  local help_resources="list get create complete"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num --awaitCompletion --fetchVariables"
@@ -99,6 +101,9 @@ _c8ctl_completions() {
         unload)
           COMPREPLY=( \$(compgen -W "\${unload_resources}" -- "\${cur}") )
           ;;
+        sync)
+          COMPREPLY=( \$(compgen -W "\${sync_resources}" -- "\${cur}") )
+          ;;
         use)
           COMPREPLY=( \$(compgen -W "\${use_resources}" -- "\${cur}") )
           ;;
@@ -107,6 +112,9 @@ _c8ctl_completions() {
           ;;
         completion)
           COMPREPLY=( \$(compgen -W "\${completion_resources}" -- "\${cur}") )
+          ;;
+        help)
+          COMPREPLY=( \$(compgen -W "\${help_resources}" -- "\${cur}") )
           ;;
         deploy|run|watch)
           # Complete with files
@@ -159,10 +167,11 @@ _c8ctl() {
     'rm:Remove a profile'
     'load:Load a c8ctl plugin'
     'unload:Unload a c8ctl plugin'
+    'sync:Synchronize plugins from registry'
     'use:Set active profile or tenant'
     'output:Set output format'
     'completion:Generate shell completion script'
-    'help:Show help'
+    'help:Show help or detailed help for a command'
   )
 
   flags=(
@@ -227,6 +236,8 @@ _c8ctl() {
           resources=(
             'process-instance:Get process instance'
             'pi:Get process instance'
+            'process-definition:Get process definition'
+            'pd:Get process definition'
             'topology:Get cluster topology'
           )
           _describe 'resource' resources
@@ -317,6 +328,13 @@ _c8ctl() {
           )
           _describe 'resource' resources
           ;;
+        sync)
+          resources=(
+            'plugin:Synchronize plugin'
+            'plugins:Synchronize plugins'
+          )
+          _describe 'resource' resources
+          ;;
         use)
           resources=(
             'profile:Set active profile'
@@ -336,6 +354,15 @@ _c8ctl() {
             'bash:Generate bash completion'
             'zsh:Generate zsh completion'
             'fish:Generate fish completion'
+          )
+          _describe 'resource' resources
+          ;;
+        help)
+          resources=(
+            'list:Show list command help'
+            'get:Show get command help'
+            'create:Show create command help'
+            'complete:Show complete command help'
           )
           _describe 'resource' resources
           ;;
@@ -461,12 +488,14 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'load' -d 'Load a c8ctl plugin'
 complete -c c8 -n '__fish_use_subcommand' -a 'load' -d 'Load a c8ctl plugin'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plugin'
 complete -c c8 -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plugin'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
+complete -c c8 -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
 complete -c c8 -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help'
-complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
+complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 
@@ -505,6 +534,10 @@ complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'pi' -d 'Get process instance'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'pi' -d 'Get process instance'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-definition' -d 'Get process definition'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'process-definition' -d 'Get process definition'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
 
@@ -578,6 +611,12 @@ complete -c c8 -n '__fish_seen_subcommand_from load' -a 'plugin' -d 'Load plugin
 complete -c c8ctl -n '__fish_seen_subcommand_from unload' -a 'plugin' -d 'Unload plugin'
 complete -c c8 -n '__fish_seen_subcommand_from unload' -a 'plugin' -d 'Unload plugin'
 
+# Resources for 'sync' command
+complete -c c8ctl -n '__fish_seen_subcommand_from sync' -a 'plugin' -d 'Synchronize plugin'
+complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugin' -d 'Synchronize plugin'
+complete -c c8ctl -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
+complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
+
 # Resources for 'use' command
 complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
 complete -c c8 -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
@@ -597,6 +636,16 @@ complete -c c8ctl -n '__fish_seen_subcommand_from completion' -a 'zsh' -d 'Gener
 complete -c c8 -n '__fish_seen_subcommand_from completion' -a 'zsh' -d 'Generate zsh completion'
 complete -c c8ctl -n '__fish_seen_subcommand_from completion' -a 'fish' -d 'Generate fish completion'
 complete -c c8 -n '__fish_seen_subcommand_from completion' -a 'fish' -d 'Generate fish completion'
+
+# Resources for 'help' command
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'list' -d 'Show list command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'list' -d 'Show list command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'get' -d 'Show get command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'get' -d 'Show get command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show create command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show create command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
 `;
 }
 

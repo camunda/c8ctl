@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
-import { showHelp, showVersion, showVerbResources } from './commands/help.ts';
+import { showHelp, showVersion, showVerbResources, showCommandHelp } from './commands/help.ts';
 import { useProfile, useTenant, setOutputFormat } from './commands/session.ts';
 import { listProfiles, addProfile, removeProfile } from './commands/profiles.ts';
 import {
@@ -149,7 +149,12 @@ async function main() {
 
   // Handle help command
   if (verb === 'help' || verb === 'menu' || verb === '--help' || verb === '-h') {
-    showHelp();
+    // Check if user wants help for a specific command
+    if (resource) {
+      showCommandHelp(resource);
+    } else {
+      showHelp();
+    }
     return;
   }
 
