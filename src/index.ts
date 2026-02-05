@@ -33,9 +33,7 @@ import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/p
 import { showCompletion } from './commands/completion.ts';
 import { 
   loadInstalledPlugins, 
-  executePluginCommand, 
-  isPluginCommand,
-  clearLoadedPlugins 
+  executePluginCommand
 } from './plugin-loader.ts';
 
 /**

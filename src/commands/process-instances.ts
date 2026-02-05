@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List process instances
@@ -85,7 +86,11 @@ export async function createProcessInstance(options: {
   variables?: string;
   awaitCompletion?: boolean;
   fetchVariables?: string;
-}): Promise<void> {
+}): Promise<{
+  processInstanceKey: string | number;
+  variables?: Record<string, unknown>;
+  [key: string]: unknown;
+} | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -109,8 +114,8 @@ export async function createProcessInstance(options: {
   }
 
   try {
-    // Build the request body matching ProcessInstanceCreationInstructionById type
-    const body: {
+    // Build the request matching ProcessInstanceCreationInstructionById type
+    const request: {
       processDefinitionId: string;
       tenantId: string;
       processDefinitionVersion?: number;
@@ -122,12 +127,12 @@ export async function createProcessInstance(options: {
     };
 
     if (options.version !== undefined) {
-      body.processDefinitionVersion = options.version;
+      request.processDefinitionVersion = options.version;
     }
 
     if (options.variables) {
       try {
-        body.variables = JSON.parse(options.variables);
+        request.variables = JSON.parse(options.variables);
       } catch (error) {
         logger.error('Invalid JSON for variables', error as Error);
         process.exit(1);
@@ -136,11 +141,11 @@ export async function createProcessInstance(options: {
 
     // Use the API's built-in awaitCompletion parameter
     if (options.awaitCompletion) {
-      body.awaitCompletion = true;
+      request.awaitCompletion = true;
       logger.info('Waiting for process instance to complete...');
     }
 
-    const result = await client.createProcessInstance({ body } as any);
+    const result = await client.createProcessInstance(request as unknown as ProcessInstanceCreationInstructionById);
     
     if (options.awaitCompletion) {
       // When awaitCompletion is true, the API returns the completed process instance with variables
@@ -150,6 +155,12 @@ export async function createProcessInstance(options: {
       // When awaitCompletion is false, just show the process instance key
       logger.success('Process instance created', result.processInstanceKey);
     }
+    
+    return result as {
+      processInstanceKey: string | number;
+      variables?: Record<string, unknown>;
+      [key: string]: unknown;
+    };
   } catch (error) {
     logger.error('Failed to create process instance', error as Error);
     process.exit(1);

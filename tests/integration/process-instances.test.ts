@@ -89,25 +89,51 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     }
   });
 
-  test('create with awaitCompletion waits for completion', async () => {
-    const client = createClient();
-    
-    // Deploy a simple process
+  test('create with awaitCompletion returns completed result with variables', async () => {
+    // Deploy a simple process first
     await deploy(['tests/fixtures/simple.bpmn'], {});
     
-    // Test createProcessInstance with awaitCompletion flag
+    // Import the createProcessInstance function
     const { createProcessInstance } = await import('../../src/commands/process-instances.ts');
     
-    // This should create and wait for the process to complete
-    // The function will exit(0) on success or exit(1) on failure
-    // Since we can't test process.exit easily, we test the underlying API call
-    const result = await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+    // Test with awaitCompletion flag
+    const result = await createProcessInstance({
+      processDefinitionId: 'simple-process',
       awaitCompletion: true,
     });
     
-    // When awaitCompletion is true, the result includes the completed state and variables
+    // Verify the result contains the expected properties
+    assert.ok(result, 'Result should be returned');
     assert.ok(result.processInstanceKey, 'Should have process instance key');
-    assert.ok(result.variables, 'Should have variables in the result');
+    assert.ok('variables' in result, 'Result should have variables property when awaitCompletion is true');
+  });
+
+  test('create with awaitCompletion CLI output includes completed and variables', async () => {
+    // Deploy a simple process first
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    // Run the CLI command as a subprocess to test the full integration
+    const { execSync } = await import('node:child_process');
+    
+    // Execute the CLI command and capture output (using proper command syntax: create pi)
+    const output = execSync(
+      'npx tsx src/index.ts create pi --id simple-process --awaitCompletion',
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+    
+    // Verify the output indicates successful completion
+    assert.ok(output.includes('completed'), 'Output should indicate process completed');
+    // Verify that variables are present in the output (JSON response should contain "variables")
+    assert.ok(output.includes('variables'), 'Output should contain variables when awaitCompletion is true');
+
+    // Also test the 'await pi' command which is an alias for 'create pi --awaitCompletion'
+    const outputWithAlias = execSync(
+      'npx tsx src/index.ts await pi --id simple-process',
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+    
+    // Verify the alias works the same way
+    assert.ok(outputWithAlias.includes('completed'), 'Output with await alias should indicate process completed');
+    assert.ok(outputWithAlias.includes('variables'), 'Output with await alias should contain variables');
   });
 });
