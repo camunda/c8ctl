@@ -69,6 +69,7 @@ function parseCliArgs() {
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         id: { type: 'string' },
+        processDefinitionId: { type: 'string' },
         processInstanceKey: { type: 'string' },
         variables: { type: 'string' },
         state: { type: 'string' },
@@ -89,7 +90,7 @@ function parseCliArgs() {
         defaultTenantId: { type: 'string' },
         from: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
-        fetchVariables: { type: 'string' },
+        fetchVariables: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -103,10 +104,10 @@ function parseCliArgs() {
 }
 
 /**
- * Resolve process definition ID from either --bpmnProcessId or --id flag
+ * Resolve process definition ID from --id, --processDefinitionId, or --bpmnProcessId flag
  */
 function resolveProcessDefinitionId(values: any): string | undefined {
-  return (values.id || values.bpmnProcessId) as string | undefined;
+  return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
 }
 
 /**
@@ -293,7 +294,7 @@ async function main() {
       version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
-      fetchVariables: values.fetchVariables as string | undefined,
+      fetchVariables: values.fetchVariables as boolean | undefined,
     });
     return;
   }
@@ -319,7 +320,7 @@ async function main() {
       version: values.version as number | undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
-      fetchVariables: values.fetchVariables as string | undefined,
+      fetchVariables: values.fetchVariables as boolean | undefined,
     });
     return;
   }

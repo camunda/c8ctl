@@ -87,7 +87,7 @@ export async function createProcessInstance(options: {
   version?: number;
   variables?: string;
   awaitCompletion?: boolean;
-  fetchVariables?: string;
+  fetchVariables?: boolean;
 }): Promise<{
   processInstanceKey: string | number;
   variables?: Record<string, unknown>;
@@ -98,7 +98,7 @@ export async function createProcessInstance(options: {
   const tenantId = resolveTenantId(options.profile);
 
   if (!options.processDefinitionId) {
-    logger.error('processDefinitionId is required. Use --processDefinitionId flag');
+    logger.error('processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag');
     process.exit(1);
   }
 
