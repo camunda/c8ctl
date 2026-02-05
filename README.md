@@ -96,9 +96,9 @@ c8ctl create process-instance --id=myProcess
 # Create process instance and wait for completion
 c8ctl create pi --id=myProcess --awaitCompletion
 
-# Await process instance completion
-c8ctl await pi 123456
-c8ctl await process-instance 123456
+# Await process instance completion (alias for create with --awaitCompletion)
+c8ctl await pi --id=myProcess
+c8ctl await process-instance --id=myProcess
 
 # Cancel process instance
 c8ctl cancel pi 123456

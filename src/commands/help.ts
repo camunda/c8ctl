@@ -54,7 +54,7 @@ Commands:
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
-  await     <resource> <key> Await resource completion (pi)
+  await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
   complete  <resource> <key> Complete resource (ut, job)
   fail      job <key>        Fail a job
   activate  jobs <type>      Activate jobs by type
@@ -100,7 +100,7 @@ Examples:
   c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl create pi --id=myProcess
   c8ctl create pi --id=myProcess --awaitCompletion
-  c8ctl await pi 123456              Wait for process instance to complete
+  c8ctl await pi --id=myProcess      Create and wait for completion
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
@@ -297,24 +297,32 @@ Examples:
  */
 export function showAwaitHelp(): void {
   console.log(`
-c8ctl await - Await resource completion
+c8ctl await - Create and await process instance completion
 
-Usage: c8ctl await <resource> <key> [flags]
+Usage: c8ctl await <resource> [flags]
+
+Note: 'await pi' is an alias for 'create pi --awaitCompletion'
 
 Resources and their available flags:
 
-  process-instance (pi) <key>
+  process-instance (pi)
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
+    --version_num <num>      Process definition version
+    --variables <json>       Process variables as JSON string
     --fetchVariables <vars>  Reserved for future use (all variables returned by default)
     --profile <name>         Use specific profile
 
 Description:
-  Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED).
+  Creates a process instance and waits for it to reach a terminal state (COMPLETED, CANCELED).
   Returns the full process instance with all variables when complete.
   Default timeout: 5 minutes, poll interval: 500ms
 
 Examples:
-  c8ctl await pi 2251799813685249
-  c8ctl await process-instance 2251799813685249
+  c8ctl await pi --id=order-process
+  c8ctl await pi --id=order-process --variables='{"orderId":"12345"}'
+  
+  # Equivalent to:
+  c8ctl create pi --id=order-process --awaitCompletion
 `.trim());
 }
 

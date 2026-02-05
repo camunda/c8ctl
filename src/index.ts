@@ -313,13 +313,16 @@ async function main() {
     return;
   }
 
+  // Handle await command - alias for create with awaitCompletion
   if (verb === 'await' && normalizedResource === 'process-instance') {
-    if (!args[0]) {
-      logger.error('Process instance key required. Usage: c8 await pi <key>');
-      process.exit(1);
-    }
-    await awaitProcessInstance(args[0], {
+    // await pi is an alias for create pi with --awaitCompletion
+    // It supports the same flags as create (id, variables, version_num, etc.)
+    await createProcessInstance({
       profile: values.profile as string | undefined,
+      processDefinitionId: resolveProcessDefinitionId(values),
+      version: values.version_num as number | undefined,
+      variables: values.variables as string | undefined,
+      awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as string | undefined,
     });
     return;

@@ -64,10 +64,18 @@ c8 create pi --id=order-process --awaitCompletion
 
 ### Await Process Instance Completion
 
+The `await` command is an alias for `create` with `--awaitCompletion`. It creates a process instance and waits for completion.
+
 ```bash
-# Wait for a process instance to complete
-c8 await pi 2251799813685249
-c8 await process-instance 2251799813685249
+# Create and wait for completion (shorthand)
+c8 await pi --id=order-process
+c8 await process-instance --id=order-process
+
+# With variables
+c8 await pi --id=order-process --variables='{"orderId":"12345"}'
+
+# Equivalent to:
+c8 create pi --id=order-process --awaitCompletion
 
 # Note: --fetchVariables is reserved for future API support
 # All variables are currently returned by default
