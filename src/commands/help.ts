@@ -252,7 +252,7 @@ Resources and their available flags:
 
   process-instance (pi)
     --id <id>                Process definition ID (required, alias: --bpmnProcessId)
-    --version_num <num>      Process definition version
+    --version <num>          Process definition version
     --variables <json>       Process variables as JSON string
     --awaitCompletion        Wait for process instance to complete
     --fetchVariables <vars>  Reserved for future use (all variables returned by default)
@@ -260,7 +260,7 @@ Resources and their available flags:
 
 Examples:
   c8ctl create pi --id=order-process
-  c8ctl create pi --id=order-process --version_num=2
+  c8ctl create pi --id=order-process --version=2
   c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
   c8ctl create pi --id=order-process --awaitCompletion
 `.trim());
@@ -307,7 +307,7 @@ Resources and their available flags:
 
   process-instance (pi)
     --id <id>                Process definition ID (required, alias: --bpmnProcessId)
-    --version_num <num>      Process definition version
+    --version <num>          Process definition version
     --variables <json>       Process variables as JSON string
     --fetchVariables <vars>  Reserved for future use (all variables returned by default)
     --profile <name>         Use specific profile

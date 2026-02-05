@@ -213,7 +213,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl create'));
     assert.ok(output.includes('process-instance (pi)'));
     assert.ok(output.includes('--bpmnProcessId'));
-    assert.ok(output.includes('--version_num'));
+    assert.ok(output.includes('--version'));
     assert.ok(output.includes('--variables'));
   });
 

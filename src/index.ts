@@ -90,7 +90,7 @@ function parseCliArgs() {
         audience: { type: 'string' },
         oAuthUrl: { type: 'string' },
         defaultTenantId: { type: 'string' },
-        version_num: { type: 'string' },
+        version: { type: 'string' },
         from: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'string' },
@@ -128,8 +128,11 @@ async function main() {
   // Load installed plugins
   await loadInstalledPlugins();
 
-  // Handle global flags
-  if (values.version) {
+  // Extract command and resource
+  const [verb, resource, ...args] = positionals;
+
+  // Handle global --version flag (only when no verb/command is provided)
+  if (values.version && !verb) {
     showVersion();
     return;
   }
@@ -138,9 +141,6 @@ async function main() {
     showHelp();
     return;
   }
-
-  // Extract command and resource
-  const [verb, resource, ...args] = positionals;
 
   if (!verb) {
     showHelp();
@@ -294,7 +294,7 @@ async function main() {
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
+      version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
       fetchVariables: values.fetchVariables as string | undefined,
@@ -316,11 +316,11 @@ async function main() {
   // Handle await command - alias for create with awaitCompletion
   if (verb === 'await' && normalizedResource === 'process-instance') {
     // await pi is an alias for create pi with --awaitCompletion
-    // It supports the same flags as create (id, variables, version_num, etc.)
+    // It supports the same flags as create (id, variables, version, etc.)
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: values.version_num as number | undefined,
+      version: values.version as number | undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as string | undefined,

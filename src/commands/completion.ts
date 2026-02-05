@@ -45,7 +45,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --version_num --awaitCompletion --fetchVariables"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables"
 
   case \${cword} in
     1)
@@ -202,7 +202,7 @@ _c8ctl() {
     '--audience[OAuth audience]:audience:'
     '--oAuthUrl[OAuth token endpoint]:url:'
     '--defaultTenantId[Default tenant ID]:id:'
-    '--version_num[Process definition version]:version:'
+    '--version[Process definition version]:version:'
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
   )
@@ -442,8 +442,8 @@ complete -c c8ctl -l oAuthUrl -d 'OAuth token endpoint' -r
 complete -c c8 -l oAuthUrl -d 'OAuth token endpoint' -r
 complete -c c8ctl -l defaultTenantId -d 'Default tenant ID' -r
 complete -c c8 -l defaultTenantId -d 'Default tenant ID' -r
-complete -c c8ctl -l version_num -d 'Process definition version' -r
-complete -c c8 -l version_num -d 'Process definition version' -r
+complete -c c8ctl -l version -d 'Process definition version' -r
+complete -c c8 -l version -d 'Process definition version' -r
 complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r

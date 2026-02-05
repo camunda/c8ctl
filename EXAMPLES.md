@@ -50,7 +50,7 @@ c8 get process-instance 2251799813685249
 c8 create pi --id=order-process
 
 # Create with specific version
-c8 create pi --id=order-process --version_num=2
+c8 create pi --id=order-process --version=2
 
 # Create with variables
 c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
