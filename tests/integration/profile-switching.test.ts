@@ -179,7 +179,8 @@ describe('Profile Switching Integration Tests', () => {
         assert.ok(
           errorOutput.includes('Failed to list process instances') ||
           errorOutput.includes('ECONNREFUSED') ||
-          errorOutput.includes('connect'),
+          errorOutput.includes('connect') ||
+          errorOutput.includes('fetch failed'),
           `Error should mention connection failure. Got: ${errorOutput}`
         );
       } else {
@@ -187,7 +188,8 @@ describe('Profile Switching Integration Tests', () => {
         assert.ok(
           error.message.includes('ECONNREFUSED') ||
           error.message.includes('connect') ||
-          error.message.includes('Failed'),
+          error.message.includes('Failed') ||
+          error.message.includes('fetch failed'),
           `Error should mention connection failure. Got: ${error.message}`
         );
       }

@@ -55,6 +55,7 @@ Commands:
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
+  await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
   complete  <resource> <key> Complete resource (ut, job)
   fail      job <key>        Fail a job
   activate  jobs <type>      Activate jobs by type
@@ -69,17 +70,21 @@ Commands:
   load      plugin <name>    Load a c8ctl plugin from npm registry
   load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
+  sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
-  help                       Show this help${pluginSection}
+  help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
 
 Flags:
-  --profile <name>  Use specific profile for this command
-  --from <url>      Load plugin from URL (use with 'load plugin')
-  --xml             Get process definition as XML (use with 'get pd')
-  --version, -v     Show version
-  --help, -h        Show help
+  --profile <name>      Use specific profile for this command
+  --from <url>          Load plugin from URL (use with 'load plugin')
+  --xml                 Get process definition as XML (use with 'get pd')
+  --id <process-id>     Process definition ID (alias for --bpmnProcessId)
+  --awaitCompletion     Wait for process instance to complete (use with 'create pi')
+  --fetchVariables <v>  Reserved for future use (all variables returned by default)
+  --version, -v         Show version
+  --help, -h            Show help
 
 Search Flags:
   --bpmnProcessId <id>              Filter by process definition ID
@@ -112,7 +117,9 @@ Examples:
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
-  c8ctl create pi --bpmnProcessId=myProcess
+  c8ctl create pi --id=myProcess
+  c8ctl create pi --id=myProcess --awaitCompletion
+  c8ctl await pi --id=myProcess      Create and wait for completion
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
@@ -120,7 +127,15 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
+
+For detailed help on specific commands with all available flags:
+  c8ctl help list                    Show all list resources and their flags
+  c8ctl help get                     Show all get resources and their flags
+  c8ctl help create                  Show all create resources and their flags
+  c8ctl help complete                Show all complete resources and their flags
+  c8ctl help await                   Show await command with all flags
 `.trim());
 }
 
@@ -135,6 +150,7 @@ export function showVerbResources(verb: string): void {
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
+    await: 'process-instance (pi)',
     resolve: 'incident (inc)',
     activate: 'jobs',
     fail: 'job',
@@ -145,6 +161,7 @@ export function showVerbResources(verb: string): void {
     rm: 'profile',
     load: 'plugin',
     unload: 'plugin',
+    sync: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
@@ -157,5 +174,200 @@ export function showVerbResources(verb: string): void {
   } else {
     console.log(`\nUnknown command: ${verb}`);
     console.log('Run "c8ctl help" for usage information.');
+  }
+}
+
+/**
+ * Show detailed help for list command with all resources and their flags
+ */
+export function showListHelp(): void {
+  console.log(`
+c8ctl list - List resources
+
+Usage: c8ctl list <resource> [flags]
+
+Resources and their available flags:
+
+  process-instances (pi)
+    --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
+    --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
+    --all                    List all instances (pagination)
+    --profile <name>         Use specific profile
+
+  process-definitions (pd)
+    --profile <name>         Use specific profile
+
+  user-tasks (ut)
+    --state <state>          Filter by state (CREATED, COMPLETED, etc.)
+    --assignee <name>        Filter by assignee
+    --all                    List all tasks (pagination)
+    --profile <name>         Use specific profile
+
+  incidents (inc)
+    --state <state>          Filter by state (ACTIVE, RESOLVED, etc.)
+    --processInstanceKey <key>  Filter by process instance
+    --profile <name>         Use specific profile
+
+  jobs
+    --state <state>          Filter by state (ACTIVATABLE, ACTIVATED, etc.)
+    --type <type>            Filter by job type
+    --profile <name>         Use specific profile
+
+  profiles
+    Lists both c8ctl and Camunda Modeler profiles
+    (Modeler profiles are shown with 'modeler:' prefix)
+
+  plugins
+    Shows installed plugins with sync status
+
+Examples:
+  c8ctl list pi --state=ACTIVE
+  c8ctl list ut --assignee=john.doe
+  c8ctl list inc --processInstanceKey=123456
+  c8ctl list jobs --type=email-service
+  c8ctl list profiles
+  c8ctl list plugins
+`.trim());
+}
+
+/**
+ * Show detailed help for get command
+ */
+export function showGetHelp(): void {
+  console.log(`
+c8ctl get - Get resource by key
+
+Usage: c8ctl get <resource> <key> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi) <key>
+    --profile <name>         Use specific profile
+
+  process-definition (pd) <key>
+    --xml                    Return process definition as XML
+    --profile <name>         Use specific profile
+
+  topology
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl get pi 2251799813685249
+  c8ctl get pd 2251799813685250
+  c8ctl get pd 2251799813685250 --xml
+  c8ctl get topology
+`.trim());
+}
+
+/**
+ * Show detailed help for create command
+ */
+export function showCreateHelp(): void {
+  console.log(`
+c8ctl create - Create a resource
+
+Usage: c8ctl create <resource> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi)
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
+    --version <num>          Process definition version
+    --variables <json>       Process variables as JSON string
+    --awaitCompletion        Wait for process instance to complete
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl create pi --id=order-process
+  c8ctl create pi --id=order-process --version=2
+  c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
+  c8ctl create pi --id=order-process --awaitCompletion
+`.trim());
+}
+
+/**
+ * Show detailed help for complete command
+ */
+export function showCompleteHelp(): void {
+  console.log(`
+c8ctl complete - Complete a resource
+
+Usage: c8ctl complete <resource> <key> [flags]
+
+Resources and their available flags:
+
+  user-task (ut) <key>
+    --variables <json>       Completion variables as JSON string
+    --profile <name>         Use specific profile
+
+  job <key>
+    --variables <json>       Completion variables as JSON string
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl complete ut 2251799813685250
+  c8ctl complete ut 2251799813685250 --variables='{"approved":true}'
+  c8ctl complete job 2251799813685252 --variables='{"result":"success"}'
+`.trim());
+}
+
+/**
+ * Show detailed help for await command
+ */
+export function showAwaitHelp(): void {
+  console.log(`
+c8ctl await - Create and await process instance completion
+
+Usage: c8ctl await <resource> [flags]
+
+Note: 'await pi' is an alias for 'create pi --awaitCompletion'
+
+Resources and their available flags:
+
+  process-instance (pi)
+    --id <id>                Process definition ID (required, alias: --bpmnProcessId)
+    --version <num>          Process definition version
+    --variables <json>       Process variables as JSON string
+    --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --profile <name>         Use specific profile
+
+Description:
+  Creates a process instance and waits for it to reach a terminal state (COMPLETED, CANCELED).
+  Returns the full process instance with all variables when complete.
+  Uses the Camunda 8 API's built-in awaitCompletion parameter for reliable server-side waiting.
+
+Examples:
+  c8ctl await pi --id=order-process
+  c8ctl await pi --id=order-process --variables='{"orderId":"12345"}'
+  
+  # Equivalent to:
+  c8ctl create pi --id=order-process --awaitCompletion
+`.trim());
+}
+
+/**
+ * Show detailed help for specific commands
+ */
+export function showCommandHelp(command: string): void {
+  switch (command) {
+    case 'list':
+      showListHelp();
+      break;
+    case 'get':
+      showGetHelp();
+      break;
+    case 'create':
+      showCreateHelp();
+      break;
+    case 'complete':
+      showCompleteHelp();
+      break;
+    case 'await':
+      showAwaitHelp();
+      break;
+    default:
+      console.log(`\nNo detailed help available for: ${command}`);
+      console.log('Run "c8ctl help" for general usage information.');
   }
 }

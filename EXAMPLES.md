@@ -30,7 +30,7 @@ c8 list process-instances
 
 ```bash
 # Filter by BPMN process ID
-c8 list pi --bpmnProcessId=order-process
+c8 list pi --id=order-process
 
 # Filter by state
 c8 list pi --state=ACTIVE
@@ -47,13 +47,38 @@ c8 get process-instance 2251799813685249
 
 ```bash
 # Create with process ID
-c8 create pi --bpmnProcessId=order-process
+c8 create pi --id=order-process
 
 # Create with specific version
-c8 create pi --bpmnProcessId=order-process --version_num=2
+c8 create pi --id=order-process --version=2
 
 # Create with variables
-c8 create pi --bpmnProcessId=order-process --variables='{"orderId":"12345","amount":100}'
+c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
+
+# Create and wait for completion
+c8 create pi --id=order-process --awaitCompletion
+
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
+```
+
+### Await Process Instance Completion
+
+The `await` command is an alias for `create` with `--awaitCompletion`. It uses the Camunda 8 API's built-in server-side waiting to create a process instance and wait for completion.
+
+```bash
+# Create and wait for completion (shorthand)
+c8 await pi --id=order-process
+c8 await process-instance --id=order-process
+
+# With variables
+c8 await pi --id=order-process --variables='{"orderId":"12345"}'
+
+# Equivalent to:
+c8 create pi --id=order-process --awaitCompletion
+
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
 ```
 
 ### Cancel Process Instance
@@ -224,9 +249,76 @@ c8 deploy
 # Deploys all BPMN/DMN/Form files in specified directory and subdirectories
 c8 deploy ./my-project
 
-# Building block folders (containing _bb- in name) are prioritized
-# Order: _bb-* folders first, then other files
+# Building block folders (containing _bb- in name) are prioritized and marked with 🧱
+# Process applications (folders with .process-application file) are marked with 📦
+# Example output:
+#   Deploying 4 resource(s)...
+#   ✓ Deployment successful [Key: 123456789]
+#   
+#   File                              | Type    | ID              | Version | Key
+#   ----------------------------------|---------|-----------------|---------|-------------------
+#   🧱 _bb-shared/common-process.bpmn | Process | common-process  | 1       | 2251799813685249
+#   📦 my-app/process.bpmn            | Process | my-proc         | 1       | 2251799813685250
+#   📦 my-app/decision.dmn            | Decision| my-dec          | 1       | 2251799813685251
+#   processes/order-process.bpmn      | Process | order-process   | 1       | 2251799813685252
 ```
+
+### Process Application Deployment
+
+If a directory contains a `.process-application` file, **all resources in that directory and its subdirectories** are marked with the 📦 emoji in the deployment results table. Resources are grouped together based on their location:
+
+```bash
+# Directory structure:
+# my-project/
+#   _bb-shared/
+#     common.bpmn
+#     nested/
+#       util.bpmn        # Also part of _bb-shared group
+#   my-app/
+#     .process-application
+#     process.bpmn
+#     subfolder/
+#       form.form        # Also part of my-app group
+#   standalone.bpmn
+
+c8 deploy ./my-project
+
+# Output shows resources grouped by their folder hierarchy:
+# Deploying 5 resource(s)...
+# ✓ Deployment successful [Key: 123456789]
+#
+# File                            | Type    | ID            | Version | Key
+# --------------------------------|---------|---------------|---------|-------------------
+# 🧱 _bb-shared/common.bpmn       | Process | common        | 1       | 2251799813685249
+# 🧱 _bb-shared/nested/util.bpmn  | Process | util          | 1       | 2251799813685250
+# 📦 my-app/process.bpmn          | Process | my-proc       | 1       | 2251799813685251
+# 📦 my-app/subfolder/form.form   | Form    | form-id       | 1       | 2251799813685252
+# standalone.bpmn                 | Process | standalone    | 1       | 2251799813685253
+```
+
+### Resource Grouping Rules
+
+Resources are automatically grouped based on their folder hierarchy:
+
+1. **Building Block Groups** - All resources in a folder with `_bb-` in the name (and its subdirectories) belong to the same group and are marked with 🧱
+2. **Process Application Groups** - All resources in a folder containing `.process-application` file (and its subdirectories) belong to the same group and are marked with 📦
+3. **Standalone Resources** - Resources not in a building block or process application folder are treated as standalone
+
+In the deployment output:
+- Building block groups are listed first, grouped together
+- Process application groups are listed next, grouped together
+- Standalone resources are listed last
+
+### Deployment Output Details
+
+The deployment results table shows:
+- **File column** - Shows the file name with relative path
+  - 🧱 emoji indicates building block resources (from `_bb-*` folders, including nested files)
+  - 📦 emoji indicates process application resources (from folders with `.process-application` file, including nested files)
+- **Type column** - Resource type (Process, Decision, or Form)
+- **ID column** - The process/decision/form ID
+- **Version column** - Version number assigned by Camunda
+- **Key column** - Unique key assigned by Camunda
 
 ### Important: Duplicate Process IDs
 
@@ -370,7 +462,7 @@ c8 use tenant my-tenant-123
 
 # All commands now include tenant filter/parameter
 c8 list pi
-c8 create pi --bpmnProcessId=order-process
+c8 create pi --id=order-process
 ```
 
 ### Set Output Mode
@@ -417,8 +509,44 @@ c8 unload plugin my-custom-plugin
 ### List Plugins
 
 ```bash
-# Show all installed c8ctl plugins
+# Show all installed c8ctl plugins with sync status
 c8 list plugins
+
+# Example output:
+# Name              | Status      | Source                    | Installed At
+# ------------------+-------------+---------------------------+----------------------
+# my-custom-plugin  | ✓ Installed | my-custom-plugin          | 1/30/2026, 6:00:00 PM
+# local-dev-plugin  | ⚠ Not installed | file:///path/to/plugin | 1/30/2026, 5:00:00 PM
+
+# If any plugins are out of sync, you'll see a hint to run sync
+```
+
+### Sync Plugins
+
+```bash
+# Synchronize plugins from the registry
+# - Rebuilds installed plugins
+# - Reinstalls missing plugins
+c8 sync plugins
+
+# Example output showing detailed sync progress:
+# Starting plugin synchronization...
+# 
+# Found 2 registered plugin(s):
+#   - my-custom-plugin (my-custom-plugin)
+#   - local-dev-plugin (file:///path/to/plugin)
+# 
+# Syncing my-custom-plugin...
+#   ✓ my-custom-plugin is already installed, attempting rebuild...
+# ✓   ✓ my-custom-plugin rebuilt successfully
+# 
+# Syncing local-dev-plugin...
+#   ⚠ local-dev-plugin not found, installing...
+# ✓   ✓ local-dev-plugin installed successfully
+# 
+# Synchronization complete:
+#   ✓ Synced: 2 plugin(s)
+# ✓ All plugins synced successfully!
 ```
 
 **Plugin Development:**
@@ -438,6 +566,10 @@ export const commands = {
 };
 ```
 
+**Plugin Registry:**
+
+Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux) independently of `package.json`. This ensures plugins persist across npm operations and can be synchronized when moving between environments or after npm operations.
+
 ---
 
 ## Combined Examples
@@ -454,7 +586,7 @@ c8 use tenant production
 c8 deploy ./processes/
 
 # 3. Create and monitor instance
-c8 create pi --bpmnProcessId=order-process --variables='{"orderId":"12345"}'
+c8 create pi --id=order-process --variables='{"orderId":"12345"}'
 # ✓ Process instance created [Key: 2251799813685249]
 
 c8 get pi 2251799813685249
@@ -479,7 +611,7 @@ c8 output json  # For automated testing
 c8 run ./test-process.bpmn --variables='{"testData":"value"}'
 
 # 3. Verify
-c8 list pi --bpmnProcessId=test-process
+c8 list pi --id=test-process
 ```
 
 ### Multi-Tenant Management

@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List process instances
@@ -14,7 +15,7 @@ export async function listProcessInstances(options: {
   processDefinitionId?: string;
   state?: string;
   all?: boolean;
-}): Promise<void> {
+}): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -51,6 +52,8 @@ export async function listProcessInstances(options: {
     } else {
       logger.info('No process instances found');
     }
+    
+    return result as { items: Array<Record<string, unknown>>; total?: number };
   } catch (error) {
     logger.error('Failed to list process instances', error as Error);
     process.exit(1);
@@ -83,18 +86,44 @@ export async function createProcessInstance(options: {
   processDefinitionId?: string;
   version?: number;
   variables?: string;
-}): Promise<void> {
+  awaitCompletion?: boolean;
+  fetchVariables?: boolean;
+}): Promise<{
+  processInstanceKey: string | number;
+  variables?: Record<string, unknown>;
+  [key: string]: unknown;
+} | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
 
   if (!options.processDefinitionId) {
-    logger.error('processDefinitionId is required. Use --processDefinitionId flag');
+    logger.error('processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag');
     process.exit(1);
   }
 
+  // Validate: fetchVariables requires awaitCompletion
+  if (options.fetchVariables && !options.awaitCompletion) {
+    logger.error('--fetchVariables can only be used with --awaitCompletion');
+    process.exit(1);
+  }
+
+  // Note: fetchVariables parameter is reserved for future API enhancement
+  // The orchestration-cluster-api currently does not support filtering variables
+  // The API returns all variables by default when awaitCompletion is true
+  if (options.fetchVariables) {
+    logger.info('Note: --fetchVariables is not yet supported by the API. All variables will be returned.');
+  }
+
   try {
-    const request: any = {
+    // Build the request matching ProcessInstanceCreationInstructionById type
+    const request: {
+      processDefinitionId: string;
+      tenantId: string;
+      processDefinitionVersion?: number;
+      variables?: Record<string, unknown>;
+      awaitCompletion?: boolean;
+    } = {
       processDefinitionId: options.processDefinitionId,
       tenantId,
     };
@@ -112,8 +141,28 @@ export async function createProcessInstance(options: {
       }
     }
 
-    const result = await client.createProcessInstance(request);
-    logger.success('Process instance created', result.processInstanceKey);
+    // Use the API's built-in awaitCompletion parameter
+    if (options.awaitCompletion) {
+      request.awaitCompletion = true;
+      logger.info('Waiting for process instance to complete...');
+    }
+
+    const result = await client.createProcessInstance(request as unknown as ProcessInstanceCreationInstructionById);
+    
+    if (options.awaitCompletion) {
+      // When awaitCompletion is true, the API returns the completed process instance with variables
+      logger.success('Process instance completed', result.processInstanceKey);
+      logger.json(result);
+    } else {
+      // When awaitCompletion is false, just show the process instance key
+      logger.success('Process instance created', result.processInstanceKey);
+    }
+    
+    return result as {
+      processInstanceKey: string | number;
+      variables?: Record<string, unknown>;
+      [key: string]: unknown;
+    };
   } catch (error) {
     logger.error('Failed to create process instance', error as Error);
     process.exit(1);

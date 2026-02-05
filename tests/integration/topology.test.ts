@@ -8,12 +8,12 @@ import assert from 'node:assert';
 import { createClient } from '../../src/client.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { getUserDataDir } from '../../src/config.ts';
 
 describe('Topology Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    const sessionPath = join(getUserDataDir(), 'session.json');
     if (existsSync(sessionPath)) {
       unlinkSync(sessionPath);
     }
@@ -31,22 +31,35 @@ describe('Topology Integration Tests (requires Camunda 8 at localhost:8080)', ()
 
   test('topology command handles connection errors gracefully', async () => {
     // Test with an invalid profile/URL that won't connect
-    // We need to temporarily set up a client pointing to a non-existent server
-    const { createCamundaClient } = await import('@camunda8/orchestration-cluster-api');
-    const badClient = createCamundaClient({ baseURL: 'http://localhost:9999' });
+    // Use the CLI's createClient wrapper with a bad config (via env override)
+    const originalEnv = process.env.CAMUNDA_REST_ADDRESS;
+    process.env.CAMUNDA_REST_ADDRESS = 'http://localhost:9999';
     
-    // Should throw an error when trying to connect to non-existent server
-    let errorThrown = false;
     try {
-      await badClient.getTopology();
-    } catch (error: any) {
-      errorThrown = true;
-      // Verify it's a connection-related error
-      assert.ok(error instanceof Error, 'Should be an Error instance');
+      // Re-import to pick up new env
+      const { createClient } = await import('../../src/client.ts');
+      const badClient = createClient();
+      
+      // Should throw an error when trying to connect to non-existent server
+      let errorThrown = false;
+      try {
+        await badClient.getTopology();
+      } catch (error: any) {
+        errorThrown = true;
+        // Verify it's a connection-related error
+        assert.ok(error instanceof Error, 'Should be an Error instance');
+      }
+      
+      // Note: Some SDK versions may not throw for connection errors but return empty data
+      // Accept either behavior as valid
+      assert.ok(true, 'Connection error handling test completed');
+    } finally {
+      // Restore original env
+      if (originalEnv !== undefined) {
+        process.env.CAMUNDA_REST_ADDRESS = originalEnv;
+      } else {
+        delete process.env.CAMUNDA_REST_ADDRESS;
+      }
     }
-    
-    // Note: Some SDK versions may not throw for connection errors but return empty data
-    // Accept either behavior as valid
-    assert.ok(true, 'Connection error handling test completed');
   });
 });

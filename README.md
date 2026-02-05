@@ -9,7 +9,9 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
-- **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment
+- **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
+- **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
+- **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys 
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
@@ -62,52 +64,53 @@ After installation, the CLI is available as `c8ctl` (or its alias `c8`).
 
 ## Usage
 
-### Basic Commands
+### Getting Help
 
 ```bash
-# Show help
+# Show general help
 c8ctl help
+
+# Show detailed help for specific commands with all flags
+c8ctl help list      # Shows all list resources and their flags
+c8ctl help get       # Shows all get resources and their flags
+c8ctl help create    # Shows all create resources and their flags
+c8ctl help complete  # Shows all complete resources and their flags
 
 # Show version
 c8ctl --version
+```
 
-# List process instances (using alias 'pi')
-c8ctl list pi
-# Or using full command name
-c8ctl list process-instances
+### Basic Commands
 
-# List process definitions (using alias 'pd')
-c8ctl list pd
-c8ctl list process-definitions
-
-# Get process instance by key
-c8ctl get pi 123456
-c8ctl get process-instance 123456
-
-# Get process definition by key
-c8ctl get pd 123456
-c8ctl get process-definition 123456
-
-# Get process definition XML
-c8ctl get pd 123456 --xml
+```bash
+# List and get resources (use aliases pi, pd, ut, inc for convenience)
+c8ctl list pi                          # List process instances
+c8ctl list pd                          # List process definitions
+c8ctl get pi 123456                    # Get process instance by key
+c8ctl get pd 123456 --xml              # Get process definition as XML
 
 # Create process instance
-c8ctl create pi --bpmnProcessId=myProcess
-c8ctl create process-instance --bpmnProcessId=myProcess
+c8ctl create pi --id=myProcess
+c8ctl create process-instance --id=myProcess
 
-# Deploy BPMN file
-c8ctl deploy ./my-process.bpmn
+# Create process instance and wait for completion
+c8ctl create pi --id=myProcess --awaitCompletion
 
-# Deploy current directory
-c8ctl deploy
+# Await process instance completion (alias for create with --awaitCompletion)
+c8ctl await pi --id=myProcess
+c8ctl await process-instance --id=myProcess
 
-# Watch mode (using alias 'w')
-c8ctl w
-c8ctl watch
+# Cancel process instance
+c8ctl cancel pi 123456
 
-# Deploy and start process (run)
-c8ctl run ./my-process.bpmn
+# Deploy and run
+c8ctl deploy ./my-process.bpmn         # Deploy a single file
+c8ctl deploy                           # Deploy current directory
+c8ctl run ./my-process.bpmn            # Deploy and start process
+c8ctl watch                            # Watch for changes and auto-deploy
 ```
+
+For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).
 
 ### Shell Completion
 
@@ -272,7 +275,7 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages.
+c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages. Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms) for persistence across npm operations.
 
 ```bash
 # Load a plugin from npm registry
@@ -287,12 +290,26 @@ c8ctl load plugin --from git://github.com/user/repo.git
 # Unload a plugin (wraps npm uninstall)
 c8ctl unload plugin <package-name>
 
-# List installed plugins
+# List installed plugins (shows sync status)
 c8ctl list plugins
+
+# Synchronize plugins from registry
+# - First tries npm rebuild for installed plugins
+# - Falls back to fresh npm install if rebuild fails
+c8ctl sync plugins
 
 # View help including plugin commands
 c8ctl help
 ```
+
+**Plugin Registry:**
+- Plugins are tracked independently of `package.json` in a registry file
+- The registry serves as the source of truth (local precedence)
+- `c8ctl list plugins` shows sync status:
+  - `✓ Installed` - Plugin is in registry and installed
+  - `⚠ Not installed` - Plugin is in registry but not in node_modules (run `sync`)
+  - `⚠ Not in registry` - Plugin is in package.json but not tracked in registry
+- `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
@@ -339,9 +356,32 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 c8ctl <verb> <resource> [arguments] [flags]
 ```
 
-**Verbs**: list, get, create, cancel, complete, fail, activate, resolve, publish, correlate, deploy, run, add, remove, use, output
+**Verbs**: 
+- `list` - List resources
+- `get` - Get resource by key
+- `create` - Create resource
+- `cancel` - Cancel resource
+- `complete` - Complete resource
+- `fail` - Fail a job
+- `activate` - Activate jobs
+- `resolve` - Resolve incident
+- `publish` - Publish message
+- `correlate` - Correlate message
+- `deploy` - Deploy BPMN/DMN/forms
+- `run` - Deploy and start process
+- `watch` (alias: `w`) - Watch for changes and auto-deploy
+- `add` - Add a profile
+- `remove` (alias: `rm`) - Remove a profile
+- `load` - Load a plugin
+- `unload` - Unload a plugin
+- `sync` - Synchronize plugins
+- `use` - Set active profile or tenant
+- `output` - Set output format
+- `completion` - Generate shell completion script
 
-**Resources**: process-instance, process-definition, user-task, incident, job, message, topology, profile, tenant
+**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, message (msg), topology, profile, tenant, plugin
+
+**Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 
 ## Testing
 
@@ -431,13 +471,14 @@ c8ctl <command>
 
 Configuration is stored in platform-specific user data directories:
 
-- **Linux**: `~/.local/share/c8ctl/`
+- **Linux**: `~/.config/c8ctl/`
 - **macOS**: `~/Library/Application Support/c8ctl/`
 - **Windows**: `%APPDATA%\c8ctl\`
 
 Files:
 - `profiles.json`: Saved cluster configurations
 - `session.json`: Active profile, tenant, and output mode
+- `plugins.json`: Plugin registry tracking installed plugins
 
 ### Camunda Modeler Configuration
 

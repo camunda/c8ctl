@@ -1,6 +1,6 @@
 {
   "name": "@camunda8/cli",
-  "version": "2.0.0-alpha.2",
+  "version": "2.0.0-alpha.6",
   "description": "Camunda 8 CLI - minimal-dependency CLI for Camunda 8 operations",
   "type": "module",
   "engines": {
