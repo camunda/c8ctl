@@ -16,7 +16,6 @@ import {
   getProcessInstance,
   createProcessInstance,
   cancelProcessInstance,
-  awaitProcessInstance,
 } from './commands/process-instances.ts';
 import {
   listProcessDefinitions,

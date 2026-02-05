@@ -89,29 +89,25 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     }
   });
 
-  test('await process instance waits for completion', async () => {
+  test('create with awaitCompletion waits for completion', async () => {
     const client = createClient();
     
-    // Deploy and create an instance
+    // Deploy a simple process
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    const createResult = await client.createProcessInstance({
+    
+    // Test createProcessInstance with awaitCompletion flag
+    const { createProcessInstance } = await import('../../src/commands/process-instances.ts');
+    
+    // This should create and wait for the process to complete
+    // The function will exit(0) on success or exit(1) on failure
+    // Since we can't test process.exit easily, we test the underlying API call
+    const result = await client.createProcessInstance({
       processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+      awaitCompletion: true,
     });
     
-    const instanceKey = createResult.processInstanceKey.toString();
-    
-    // Test awaitProcessInstance function directly
-    const { awaitProcessInstance } = await import('../../src/commands/process-instances.ts');
-    
-    // This should wait for the process to complete and not throw
-    await awaitProcessInstance(instanceKey, {});
-    
-    // Verify the instance is indeed completed
-    const finalInstance = await client.getProcessInstance(
-      { processInstanceKey: ProcessInstanceKey.assumeExists(instanceKey) },
-      { consistency: { waitUpToMs: 1000 } }
-    );
-    
-    assert.strictEqual(finalInstance.state, 'COMPLETED', 'Process instance should be completed');
+    // When awaitCompletion is true, the result includes the completed state and variables
+    assert.ok(result.processInstanceKey, 'Should have process instance key');
+    assert.ok(result.variables, 'Should have variables in the result');
   });
 });

@@ -64,7 +64,7 @@ c8 create pi --id=order-process --awaitCompletion
 
 ### Await Process Instance Completion
 
-The `await` command is an alias for `create` with `--awaitCompletion`. It creates a process instance and waits for completion.
+The `await` command is an alias for `create` with `--awaitCompletion`. It uses the Camunda 8 API's built-in server-side waiting to create a process instance and wait for completion.
 
 ```bash
 # Create and wait for completion (shorthand)

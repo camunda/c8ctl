@@ -315,7 +315,7 @@ Resources and their available flags:
 Description:
   Creates a process instance and waits for it to reach a terminal state (COMPLETED, CANCELED).
   Returns the full process instance with all variables when complete.
-  Default timeout: 5 minutes, poll interval: 500ms
+  Uses the Camunda 8 API's built-in awaitCompletion parameter for reliable server-side waiting.
 
 Examples:
   c8ctl await pi --id=order-process
