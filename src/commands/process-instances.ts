@@ -101,34 +101,54 @@ export async function createProcessInstance(options: {
     process.exit(1);
   }
 
+  // Note: fetchVariables parameter is reserved for future API enhancement
+  // The orchestration-cluster-api currently does not support filtering variables
+  // The API returns all variables by default when awaitCompletion is true
+  if (options.fetchVariables) {
+    logger.info('Note: --fetchVariables is not yet supported by the API. All variables will be returned.');
+  }
+
   try {
-    const request: any = {
+    // Build the request body matching ProcessInstanceCreationInstructionById type
+    const body: {
+      processDefinitionId: string;
+      tenantId: string;
+      processDefinitionVersion?: number;
+      variables?: Record<string, unknown>;
+      awaitCompletion?: boolean;
+    } = {
       processDefinitionId: options.processDefinitionId,
       tenantId,
     };
 
     if (options.version !== undefined) {
-      request.processDefinitionVersion = options.version;
+      body.processDefinitionVersion = options.version;
     }
 
     if (options.variables) {
       try {
-        request.variables = JSON.parse(options.variables);
+        body.variables = JSON.parse(options.variables);
       } catch (error) {
         logger.error('Invalid JSON for variables', error as Error);
         process.exit(1);
       }
     }
 
-    const result = await client.createProcessInstance(request);
-    logger.success('Process instance created', result.processInstanceKey);
-    
-    // If awaitCompletion is enabled, wait for the process to complete
+    // Use the API's built-in awaitCompletion parameter
     if (options.awaitCompletion) {
-      await awaitProcessInstance(result.processInstanceKey.toString(), {
-        profile: options.profile,
-        fetchVariables: options.fetchVariables,
-      });
+      body.awaitCompletion = true;
+      logger.info('Waiting for process instance to complete...');
+    }
+
+    const result = await client.createProcessInstance({ body } as any);
+    
+    if (options.awaitCompletion) {
+      // When awaitCompletion is true, the API returns the completed process instance with variables
+      logger.success('Process instance completed', result.processInstanceKey);
+      logger.json(result);
+    } else {
+      // When awaitCompletion is false, just show the process instance key
+      logger.success('Process instance created', result.processInstanceKey);
     }
   } catch (error) {
     logger.error('Failed to create process instance', error as Error);
@@ -151,78 +171,5 @@ export async function cancelProcessInstance(key: string, options: {
   } catch (error) {
     logger.error(`Failed to cancel process instance ${key}`, error as Error);
     process.exit(1);
-  }
-}
-
-/**
- * Await process instance completion
- * Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED, or has an incident)
- */
-export async function awaitProcessInstance(key: string, options: {
-  profile?: string;
-  fetchVariables?: string;  // Reserved for future use - API currently returns all variables
-  timeout?: number;
-  pollInterval?: number;
-}): Promise<void> {
-  const logger = getLogger();
-  const client = createClient(options.profile);
-  
-  // Default timeout: 5 minutes
-  const timeout = options.timeout ?? 300000;
-  // Default poll interval: 500ms
-  const pollInterval = options.pollInterval ?? 500;
-  
-  // Note: fetchVariables parameter is reserved for future API enhancement
-  // The orchestration-cluster-api currently does not support filtering variables
-  // The API returns all variables by default when fetching a process instance
-  if (options.fetchVariables) {
-    logger.warn('--fetchVariables is not yet supported by the API. All variables will be returned.');
-  }
-  
-  logger.info(`Waiting for process instance ${key} to complete...`);
-  
-  const startTime = Date.now();
-  
-  while (true) {
-    const elapsedTime = Date.now() - startTime;
-    
-    // Check timeout
-    if (elapsedTime >= timeout) {
-      logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
-      process.exit(1);
-    }
-    
-    try {
-      const result = await client.getProcessInstance(
-        { processInstanceKey: key as any },
-        { consistency: { waitUpToMs: 0 } }
-      );
-      
-      // Check if process instance is in a terminal state
-      const state = result.state;
-      if (state === 'COMPLETED' || state === 'CANCELED') {
-        logger.success(`Process instance ${key} ${state.toLowerCase()}`);
-        logger.json(result);
-        return;
-      }
-      
-      // Check if there's an incident (error state)
-      if (result.hasIncident) {
-        logger.error(`Process instance ${key} has an incident`);
-        logger.json(result);
-        process.exit(1);
-      }
-    } catch (error: unknown) {
-      // If instance not found, it might have been deleted
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage?.includes('404') || errorMessage?.includes('not found')) {
-        logger.error(`Process instance ${key} not found`);
-        process.exit(1);
-      }
-      // Continue polling on other errors
-    }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 }

@@ -16,7 +16,6 @@ import {
   getProcessInstance,
   createProcessInstance,
   cancelProcessInstance,
-  awaitProcessInstance,
 } from './commands/process-instances.ts';
 import {
   listProcessDefinitions,
@@ -66,7 +65,7 @@ function parseCliArgs() {
       args: process.argv.slice(2),
       options: {
         help: { type: 'boolean', short: 'h' },
-        version: { type: 'boolean', short: 'v' },
+        version: { type: 'string', short: 'v' },
         all: { type: 'boolean' },
         xml: { type: 'boolean' },
         profile: { type: 'string' },
@@ -90,7 +89,6 @@ function parseCliArgs() {
         audience: { type: 'string' },
         oAuthUrl: { type: 'string' },
         defaultTenantId: { type: 'string' },
-        version: { type: 'string' },
         from: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'string' },
