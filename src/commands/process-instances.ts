@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { pollUntil } from '../utils/polling.ts';
 
 /**
  * List process instances
@@ -155,48 +156,6 @@ export async function cancelProcessInstance(key: string, options: {
 }
 
 /**
- * Poll until condition is met with timeout
- * @param checkCondition - Function that returns true when condition is met, or throws error to fail
- * @param maxDuration - Maximum time to poll in milliseconds
- * @param interval - Polling interval in milliseconds
- * @returns Promise that resolves when condition is met, rejects on timeout
- */
-async function pollUntilCondition(
-  checkCondition: () => Promise<boolean>,
-  maxDuration: number,
-  interval: number
-): Promise<void> {
-  const startTime = Date.now();
-  const maxAttempts = Math.ceil(maxDuration / interval);
-  
-  const attemptPoll = async (attemptNumber: number): Promise<void> => {
-    const elapsedTime = Date.now() - startTime;
-    
-    // Check timeout
-    if (attemptNumber >= maxAttempts || elapsedTime >= maxDuration) {
-      throw new Error(`Timeout after ${elapsedTime}ms`);
-    }
-    
-    try {
-      // Check if condition is met
-      const conditionMet = await checkCondition();
-      if (conditionMet) {
-        return; // Success!
-      }
-    } catch (error) {
-      // If checkCondition throws, propagate the error
-      throw error;
-    }
-    
-    // Wait before next attempt
-    await new Promise(resolve => setTimeout(resolve, interval));
-    return attemptPoll(attemptNumber + 1);
-  };
-  
-  return attemptPoll(0);
-}
-
-/**
  * Await process instance completion
  * Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED, or has an incident)
  */
@@ -224,53 +183,52 @@ export async function awaitProcessInstance(key: string, options: {
   logger.info(`Waiting for process instance ${key} to complete...`);
   
   let finalResult: any = null;
+  let hasIncident = false;
   
-  try {
-    await pollUntilCondition(async () => {
-      try {
-        const result = await client.getProcessInstance(
-          { processInstanceKey: key as any },
-          { consistency: { waitUpToMs: 0 } }
-        );
-        
-        // Check if process instance is in a terminal state
-        const state = result.state;
-        if (state === 'COMPLETED' || state === 'CANCELED') {
-          finalResult = result;
-          return true; // Condition met!
-        }
-        
-        // Check if there's an incident (error state)
-        if (result.hasIncident) {
-          logger.error(`Process instance ${key} has an incident`);
-          logger.json(result);
-          process.exit(1);
-        }
-        
-        return false; // Not yet complete, continue polling
-      } catch (error: unknown) {
-        // If instance not found, it might have been deleted
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage?.includes('404') || errorMessage?.includes('not found')) {
-          throw new Error(`Process instance ${key} not found`);
-        }
-        // Continue polling on other errors
-        return false;
+  const completed = await pollUntil(async () => {
+    try {
+      const result = await client.getProcessInstance(
+        { processInstanceKey: key as any },
+        { consistency: { waitUpToMs: 0 } }
+      );
+      
+      // Check if process instance is in a terminal state
+      const state = result.state;
+      if (state === 'COMPLETED' || state === 'CANCELED') {
+        finalResult = result;
+        return true; // Condition met!
       }
-    }, timeout, pollInterval);
-    
-    // Success - process completed
-    if (finalResult) {
-      logger.success(`Process instance ${key} ${finalResult.state.toLowerCase()}`);
-      logger.json(finalResult);
+      
+      // Check if there's an incident (error state)
+      if (result.hasIncident) {
+        finalResult = result;
+        hasIncident = true;
+        return true; // Stop polling, but we'll handle as error
+      }
+      
+      return false; // Not yet complete, continue polling
+    } catch (error: unknown) {
+      // If instance not found, it might have been deleted
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage?.includes('404') || errorMessage?.includes('not found')) {
+        logger.error(`Process instance ${key} not found`);
+        process.exit(1);
+      }
+      // Continue polling on other errors
+      return false;
     }
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes('Timeout')) {
-      logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
-    } else {
-      logger.error(`Failed to await process instance ${key}: ${errorMessage}`);
-    }
+  }, timeout, pollInterval);
+  
+  // Handle results
+  if (hasIncident && finalResult) {
+    logger.error(`Process instance ${key} has an incident`);
+    logger.json(finalResult);
+    process.exit(1);
+  } else if (completed && finalResult) {
+    logger.success(`Process instance ${key} ${finalResult.state.toLowerCase()}`);
+    logger.json(finalResult);
+  } else {
+    logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
     process.exit(1);
   }
 }

@@ -102,7 +102,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     
     // Test the polling behavior that awaitProcessInstance implements
     // Use pollUntil utility for consistent polling behavior
-    const { pollUntil } = await import('../utils/polling.ts');
+    const { pollUntil } = await import('../../src/utils/polling.ts');
     
     const completed = await pollUntil(async () => {
       const instance = await client.getProcessInstance(

@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pollUntil } from '../utils/polling.ts';
+import { pollUntil } from '../../src/utils/polling.ts';
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
