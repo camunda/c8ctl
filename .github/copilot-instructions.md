@@ -13,6 +13,8 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
   - the `help`tests
   - README.md, EXAMPLES.md and other documentation
   - shell completion
+  
+- as a final Quality Gate before running tests, make sure to run `npm run build` to catch any compilation errors that might be missed by the test suite. This is especially important for catching type errors and ensuring that the codebase remains robust and maintainable.
 
 ### Work Environment
 
