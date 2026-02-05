@@ -15,7 +15,7 @@ export async function listProcessInstances(options: {
   processDefinitionId?: string;
   state?: string;
   all?: boolean;
-}): Promise<void> {
+}): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -52,6 +52,8 @@ export async function listProcessInstances(options: {
     } else {
       logger.info('No process instances found');
     }
+    
+    return result as { items: Array<Record<string, unknown>>; total?: number };
   } catch (error) {
     logger.error('Failed to list process instances', error as Error);
     process.exit(1);
