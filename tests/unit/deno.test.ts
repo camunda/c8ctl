@@ -160,6 +160,7 @@ describe('Deno Request Patching', () => {
     test('preserves other RequestInit properties when stripping client', () => {
       const init = {
         method: 'POST',
+        // Note: 'test-token' is a placeholder for unit testing only
         headers: { 'Authorization': 'Bearer test-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'value' }),
         client: 'should-be-stripped'
