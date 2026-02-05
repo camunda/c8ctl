@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { getVersion, showVersion, showHelp, showVerbResources } from '../../src/commands/help.ts';
+import { getVersion, showVersion, showHelp, showVerbResources, showCommandHelp } from '../../src/commands/help.ts';
 
 describe('Help Module', () => {
   let consoleLogSpy: any[];
@@ -166,5 +166,61 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('completion'));
     assert.ok(output.includes('bash|zsh|fish'));
+  });
+
+  test('showCommandHelp shows list help with resources and flags', () => {
+    showCommandHelp('list');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl list'));
+    assert.ok(output.includes('process-instances (pi)'));
+    assert.ok(output.includes('--bpmnProcessId'));
+    assert.ok(output.includes('--state'));
+    assert.ok(output.includes('--assignee'));
+    assert.ok(output.includes('user-tasks (ut)'));
+    assert.ok(output.includes('incidents (inc)'));
+    assert.ok(output.includes('jobs'));
+    assert.ok(output.includes('profiles'));
+    assert.ok(output.includes('plugins'));
+  });
+
+  test('showCommandHelp shows get help with resources and flags', () => {
+    showCommandHelp('get');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl get'));
+    assert.ok(output.includes('process-instance (pi)'));
+    assert.ok(output.includes('process-definition (pd)'));
+    assert.ok(output.includes('--xml'));
+    assert.ok(output.includes('topology'));
+  });
+
+  test('showCommandHelp shows create help with resources and flags', () => {
+    showCommandHelp('create');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl create'));
+    assert.ok(output.includes('process-instance (pi)'));
+    assert.ok(output.includes('--bpmnProcessId'));
+    assert.ok(output.includes('--version_num'));
+    assert.ok(output.includes('--variables'));
+  });
+
+  test('showCommandHelp shows complete help with resources and flags', () => {
+    showCommandHelp('complete');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl complete'));
+    assert.ok(output.includes('user-task (ut)'));
+    assert.ok(output.includes('job'));
+    assert.ok(output.includes('--variables'));
+  });
+
+  test('showCommandHelp handles unknown command', () => {
+    showCommandHelp('unknown');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('No detailed help available'));
+    assert.ok(output.includes('unknown'));
   });
 });
