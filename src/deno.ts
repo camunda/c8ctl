@@ -24,23 +24,23 @@ import { runCli } from './cli.ts';
 // We strip non-HttpClient `client` values to keep the SDK compatible.
 const OriginalRequest = (globalThis as any).Request as any;
 if (typeof OriginalRequest === 'function') {
-	class PatchedRequest extends OriginalRequest {
-		constructor(input: any, init?: any) {
-			if (init && typeof init === 'object' && 'client' in (init as any)) {
-				const candidate = (init as any).client;
-				const isLikelyDenoHttpClient = !!candidate && typeof candidate === 'object' && typeof candidate.close === 'function';
-				if (!isLikelyDenoHttpClient) {
-					const nextInit = { ...(init as any) };
-					delete nextInit.client;
-					super(input, nextInit);
-					return;
-				}
-			}
-			super(input, init);
-		}
-	}
+    class PatchedRequest extends OriginalRequest {
+        constructor(input: any, init?: any) {
+            if (init && typeof init === 'object' && 'client' in (init as any)) {
+                const candidate = (init as any).client;
+                const isLikelyDenoHttpClient = !!candidate && typeof candidate === 'object' && typeof candidate.close === 'function';
+                if (!isLikelyDenoHttpClient) {
+                    const nextInit = { ...(init as any) };
+                    delete nextInit.client;
+                    super(input, nextInit);
+                    return;
+                }
+            }
+            super(input, init);
+        }
+    }
 
-	(globalThis as any).Request = PatchedRequest;
+    (globalThis as any).Request = PatchedRequest;
 }
 
 const deno = (globalThis as any).Deno as { args?: string[] } | undefined;
