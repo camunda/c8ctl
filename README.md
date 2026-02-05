@@ -87,6 +87,7 @@ c8ctl --version
 c8ctl list pi                          # List process instances
 c8ctl list pd                          # List process definitions
 c8ctl get pi 123456                    # Get process instance by key
+c8ctl get pi 123456 --variables        # Get process instance with variables
 c8ctl get pd 123456 --xml              # Get process definition as XML
 
 # Create process instance

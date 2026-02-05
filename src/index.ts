@@ -281,8 +281,11 @@ async function main() {
       logger.error('Process instance key required. Usage: c8 get pi <key>');
       process.exit(1);
     }
+    // Check if --variables flag is present (for get command, it's a boolean flag)
+    const includeVariables = process.argv.includes('--variables');
     await getProcessInstance(args[0], {
       profile: values.profile as string | undefined,
+      variables: includeVariables,
     });
     return;
   }
