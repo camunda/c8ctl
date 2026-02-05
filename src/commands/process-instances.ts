@@ -81,6 +81,7 @@ export async function getProcessInstance(key: string, options: {
             filter: {
               processInstanceKey: key as any,
             },
+            truncateValues: false,  // Get full variable values
           },
           { consistency: { waitUpToMs: 0 } }
         );
