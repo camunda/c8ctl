@@ -19,7 +19,7 @@ describe('Deno Request Patching', () => {
         constructor(input: any, init?: any) {
           if (init && typeof init === 'object' && 'client' in (init as any)) {
             const candidate = (init as any).client;
-            const isLikelyDenoHttpClient = !!candidate && typeof candidate === 'object' && typeof candidate.close === 'function';
+            const isLikelyDenoHttpClient = candidate && typeof candidate === 'object' && typeof candidate.close === 'function';
             if (!isLikelyDenoHttpClient) {
               const nextInit = { ...(init as any) };
               delete nextInit.client;
@@ -160,7 +160,7 @@ describe('Deno Request Patching', () => {
     test('preserves other RequestInit properties when stripping client', () => {
       const init = {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer token', 'Content-Type': 'application/json' },
+        headers: { 'Authorization': 'Bearer test-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'value' }),
         client: 'should-be-stripped'
       };
@@ -169,7 +169,7 @@ describe('Deno Request Patching', () => {
       
       assert.ok(request instanceof Request);
       assert.strictEqual(request.method, 'POST');
-      assert.ok(request.headers.get('Authorization')?.includes('Bearer token'));
+      assert.ok(request.headers.get('Authorization')?.includes('Bearer test-token'));
       assert.ok(request.headers.get('Content-Type')?.includes('application/json'));
     });
 
