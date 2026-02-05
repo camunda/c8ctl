@@ -58,8 +58,8 @@ c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
 # Create and wait for completion
 c8 create pi --id=order-process --awaitCompletion
 
-# Create, wait for completion, and fetch specific variables
-c8 create pi --id=order-process --awaitCompletion --fetchVariables=result,status
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
 ```
 
 ### Await Process Instance Completion
@@ -69,8 +69,8 @@ c8 create pi --id=order-process --awaitCompletion --fetchVariables=result,status
 c8 await pi 2251799813685249
 c8 await process-instance 2251799813685249
 
-# Wait and fetch specific variables (once supported)
-c8 await pi 2251799813685249 --fetchVariables=result,status
+# Note: --fetchVariables is reserved for future API support
+# All variables are currently returned by default
 ```
 
 ### Cancel Process Instance

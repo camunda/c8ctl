@@ -101,26 +101,18 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     const instanceKey = createResult.processInstanceKey.toString();
     
     // Test the polling behavior that awaitProcessInstance implements
-    // Note: We test the API behavior directly since awaitProcessInstance
-    // uses logger and process.exit which are not suitable for unit testing
-    const maxAttempts = 10;
-    let completed = false;
+    // Use pollUntil utility for consistent polling behavior
+    const { pollUntil } = await import('../utils/polling.ts');
     
-    for (let i = 0; i < maxAttempts; i++) {
+    const completed = await pollUntil(async () => {
       const instance = await client.getProcessInstance(
         { processInstanceKey: ProcessInstanceKey.assumeExists(instanceKey) },
         { consistency: { waitUpToMs: 1000 } }
       );
       
-      if (instance.state === 'COMPLETED') {
-        completed = true;
-        break;
-      }
-      
-      // Wait a bit before retrying
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+      return instance.state === 'COMPLETED';
+    }, 10000, 100);  // 10 second timeout, 100ms interval
     
-    assert.ok(completed, 'Process instance should complete');
+    assert.ok(completed, 'Process instance should complete within timeout');
   });
 });

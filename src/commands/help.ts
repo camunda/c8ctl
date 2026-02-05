@@ -81,7 +81,7 @@ Flags:
   --xml                 Get process definition as XML (use with 'get pd')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
-  --fetchVariables <v>  Comma-separated variable names (requires --awaitCompletion)
+  --fetchVariables <v>  Reserved for future use (all variables returned by default)
   --version, -v         Show version
   --help, -h            Show help
 

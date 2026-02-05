@@ -155,12 +155,54 @@ export async function cancelProcessInstance(key: string, options: {
 }
 
 /**
+ * Poll until condition is met with timeout
+ * @param checkCondition - Function that returns true when condition is met, or throws error to fail
+ * @param maxDuration - Maximum time to poll in milliseconds
+ * @param interval - Polling interval in milliseconds
+ * @returns Promise that resolves when condition is met, rejects on timeout
+ */
+async function pollUntilCondition(
+  checkCondition: () => Promise<boolean>,
+  maxDuration: number,
+  interval: number
+): Promise<void> {
+  const startTime = Date.now();
+  const maxAttempts = Math.ceil(maxDuration / interval);
+  
+  const attemptPoll = async (attemptNumber: number): Promise<void> => {
+    const elapsedTime = Date.now() - startTime;
+    
+    // Check timeout
+    if (attemptNumber >= maxAttempts || elapsedTime >= maxDuration) {
+      throw new Error(`Timeout after ${elapsedTime}ms`);
+    }
+    
+    try {
+      // Check if condition is met
+      const conditionMet = await checkCondition();
+      if (conditionMet) {
+        return; // Success!
+      }
+    } catch (error) {
+      // If checkCondition throws, propagate the error
+      throw error;
+    }
+    
+    // Wait before next attempt
+    await new Promise(resolve => setTimeout(resolve, interval));
+    return attemptPoll(attemptNumber + 1);
+  };
+  
+  return attemptPoll(0);
+}
+
+/**
  * Await process instance completion
  * Polls the process instance until it reaches a terminal state (COMPLETED, CANCELED, or has an incident)
  */
 export async function awaitProcessInstance(key: string, options: {
   profile?: string;
-  fetchVariables?: string;
+  fetchVariables?: string;  // Reserved for future use - API currently returns all variables
   timeout?: number;
   pollInterval?: number;
 }): Promise<void> {
@@ -172,19 +214,19 @@ export async function awaitProcessInstance(key: string, options: {
   // Default poll interval: 500ms
   const pollInterval = options.pollInterval ?? 500;
   
-  const startTime = Date.now();
+  // Note: fetchVariables parameter is reserved for future API enhancement
+  // The orchestration-cluster-api currently does not support filtering variables
+  // The API returns all variables by default when fetching a process instance
+  if (options.fetchVariables) {
+    logger.warn('--fetchVariables is not yet supported by the API. All variables will be returned.');
+  }
   
   logger.info(`Waiting for process instance ${key} to complete...`);
   
+  let finalResult: any = null;
+  
   try {
-    while (true) {
-      const elapsedTime = Date.now() - startTime;
-      
-      if (elapsedTime >= timeout) {
-        logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
-        process.exit(1);
-      }
-      
+    await pollUntilCondition(async () => {
       try {
         const result = await client.getProcessInstance(
           { processInstanceKey: key as any },
@@ -194,11 +236,8 @@ export async function awaitProcessInstance(key: string, options: {
         // Check if process instance is in a terminal state
         const state = result.state;
         if (state === 'COMPLETED' || state === 'CANCELED') {
-          logger.success(`Process instance ${key} ${state.toLowerCase()}`);
-          
-          // Always return full result with variables when awaiting
-          logger.json(result);
-          return;
+          finalResult = result;
+          return true; // Condition met!
         }
         
         // Check if there's an incident (error state)
@@ -207,21 +246,31 @@ export async function awaitProcessInstance(key: string, options: {
           logger.json(result);
           process.exit(1);
         }
+        
+        return false; // Not yet complete, continue polling
       } catch (error: unknown) {
         // If instance not found, it might have been deleted
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage?.includes('404') || errorMessage?.includes('not found')) {
-          logger.error(`Process instance ${key} not found`);
-          process.exit(1);
+          throw new Error(`Process instance ${key} not found`);
         }
         // Continue polling on other errors
+        return false;
       }
-      
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }, timeout, pollInterval);
+    
+    // Success - process completed
+    if (finalResult) {
+      logger.success(`Process instance ${key} ${finalResult.state.toLowerCase()}`);
+      logger.json(finalResult);
     }
-  } catch (error) {
-    logger.error(`Failed to await process instance ${key}`, error as Error);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('Timeout')) {
+      logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
+    } else {
+      logger.error(`Failed to await process instance ${key}: ${errorMessage}`);
+    }
     process.exit(1);
   }
 }
