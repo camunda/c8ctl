@@ -5,7 +5,6 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
-import { pollUntil } from '../utils/polling.ts';
 
 /**
  * List process instances
@@ -182,10 +181,17 @@ export async function awaitProcessInstance(key: string, options: {
   
   logger.info(`Waiting for process instance ${key} to complete...`);
   
-  let finalResult: any = null;
-  let hasIncident = false;
+  const startTime = Date.now();
   
-  const completed = await pollUntil(async () => {
+  while (true) {
+    const elapsedTime = Date.now() - startTime;
+    
+    // Check timeout
+    if (elapsedTime >= timeout) {
+      logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
+      process.exit(1);
+    }
+    
     try {
       const result = await client.getProcessInstance(
         { processInstanceKey: key as any },
@@ -195,18 +201,17 @@ export async function awaitProcessInstance(key: string, options: {
       // Check if process instance is in a terminal state
       const state = result.state;
       if (state === 'COMPLETED' || state === 'CANCELED') {
-        finalResult = result;
-        return true; // Condition met!
+        logger.success(`Process instance ${key} ${state.toLowerCase()}`);
+        logger.json(result);
+        return;
       }
       
       // Check if there's an incident (error state)
       if (result.hasIncident) {
-        finalResult = result;
-        hasIncident = true;
-        return true; // Stop polling, but we'll handle as error
+        logger.error(`Process instance ${key} has an incident`);
+        logger.json(result);
+        process.exit(1);
       }
-      
-      return false; // Not yet complete, continue polling
     } catch (error: unknown) {
       // If instance not found, it might have been deleted
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -215,20 +220,9 @@ export async function awaitProcessInstance(key: string, options: {
         process.exit(1);
       }
       // Continue polling on other errors
-      return false;
     }
-  }, timeout, pollInterval);
-  
-  // Handle results
-  if (hasIncident && finalResult) {
-    logger.error(`Process instance ${key} has an incident`);
-    logger.json(finalResult);
-    process.exit(1);
-  } else if (completed && finalResult) {
-    logger.success(`Process instance ${key} ${finalResult.state.toLowerCase()}`);
-    logger.json(finalResult);
-  } else {
-    logger.error(`Timeout waiting for process instance ${key} to complete after ${timeout}ms`);
-    process.exit(1);
+    
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 }
