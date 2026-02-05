@@ -66,6 +66,7 @@ describe('Help Module', () => {
     
     // Check for flags
     assert.ok(output.includes('--profile'));
+    assert.ok(output.includes('--variables'));
     assert.ok(output.includes('--awaitCompletion'));
     assert.ok(output.includes('--fetchVariables'));
     assert.ok(output.includes('--version'));
@@ -201,6 +202,7 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl get'));
     assert.ok(output.includes('process-instance (pi)'));
+    assert.ok(output.includes('--variables'));
     assert.ok(output.includes('process-definition (pd)'));
     assert.ok(output.includes('--xml'));
     assert.ok(output.includes('topology'));

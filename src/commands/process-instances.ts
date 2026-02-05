@@ -65,13 +65,39 @@ export async function listProcessInstances(options: {
  */
 export async function getProcessInstance(key: string, options: {
   profile?: string;
+  variables?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
 
   try {
     const result = await client.getProcessInstance({ processInstanceKey: key as any }, { consistency: { waitUpToMs: 0 } });
-    logger.json(result);
+    
+    // Fetch variables if requested
+    if (options.variables) {
+      try {
+        const variablesResult = await client.searchVariables(
+          {
+            filter: {
+              processInstanceKey: key as any,
+            },
+          },
+          { consistency: { waitUpToMs: 0 } }
+        );
+        
+        // Add variables to the result
+        const resultWithVariables = {
+          ...result,
+          variables: variablesResult.items || [],
+        };
+        logger.json(resultWithVariables);
+      } catch (varError) {
+        logger.error(`Failed to fetch variables for process instance ${key}`, varError as Error);
+        process.exit(1);
+      }
+    } else {
+      logger.json(result);
+    }
   } catch (error) {
     logger.error(`Failed to get process instance ${key}`, error as Error);
     process.exit(1);

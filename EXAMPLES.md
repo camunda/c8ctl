@@ -41,6 +41,9 @@ c8 list pi --state=ACTIVE
 ```bash
 c8 get pi 2251799813685249
 c8 get process-instance 2251799813685249
+
+# Get process instance with variables
+c8 get pi 2251799813685249 --variables
 ```
 
 ### Create Process Instance

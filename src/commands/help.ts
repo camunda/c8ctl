@@ -79,6 +79,7 @@ Flags:
   --profile <name>      Use specific profile for this command
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
+  --variables           Get process instance with variables (use with 'get pi')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
@@ -96,6 +97,7 @@ Examples:
   c8ctl list pi                      List process instances
   c8ctl list pd                      List process definitions
   c8ctl get pi 123456                Get process instance by key
+  c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl create pi --id=myProcess
@@ -222,6 +224,7 @@ Usage: c8ctl get <resource> <key> [flags]
 Resources and their available flags:
 
   process-instance (pi) <key>
+    --variables              Include variables for the process instance
     --profile <name>         Use specific profile
 
   process-definition (pd) <key>
@@ -233,6 +236,7 @@ Resources and their available flags:
 
 Examples:
   c8ctl get pi 2251799813685249
+  c8ctl get pi 2251799813685249 --variables
   c8ctl get pd 2251799813685250
   c8ctl get pd 2251799813685250 --xml
   c8ctl get topology
