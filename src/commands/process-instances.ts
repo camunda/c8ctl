@@ -69,9 +69,10 @@ export async function getProcessInstance(key: string, options: {
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
+  const consistencyOptions = { consistency: { waitUpToMs: 0 } };
 
   try {
-    const result = await client.getProcessInstance({ processInstanceKey: key as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getProcessInstance({ processInstanceKey: key as any }, consistencyOptions);
     
     // Fetch variables if requested
     if (options.variables) {
@@ -83,7 +84,7 @@ export async function getProcessInstance(key: string, options: {
             },
             truncateValues: false,  // Get full variable values
           },
-          { consistency: { waitUpToMs: 0 } }
+          consistencyOptions
         );
         
         // Add variables to the result
@@ -93,7 +94,7 @@ export async function getProcessInstance(key: string, options: {
         };
         logger.json(resultWithVariables);
       } catch (varError) {
-        logger.error(`Failed to fetch variables for process instance ${key}`, varError as Error);
+        logger.error(`Failed to fetch variables for process instance ${key}. The process instance was found, but variables could not be retrieved.`, varError as Error);
         process.exit(1);
       }
     } else {
