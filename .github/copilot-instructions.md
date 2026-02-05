@@ -1,7 +1,7 @@
 # Camunda 8 CLI Project
 
 This project provides a cli for Camunda 8. It is based on the Camunda 8 Orchestration
-Cluster API in assets/rest-api.yaml and the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api. It makes the REST API available with corresponding commands from the command line.
+Cluster API npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api. It makes the REST API available with corresponding commands from the command line.
 
 ## Commit Message Guidelines
 
@@ -20,6 +20,8 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
 - prefer cross-platform solutions where reasonable
+
+- always consult the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api for API details and usage examples. It is the main source of truth for how to interact with the Camunda 8 Orchestration Cluster API. As a backup, a copy of the REST API documentation is available in OpenAPI format in the `assets/c8/rest-api` folder.
 
 ### Terminal Commands
 
