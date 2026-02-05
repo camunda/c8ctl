@@ -13,6 +13,7 @@ import {
   searchUserTasks,
   searchIncidents,
   searchJobs,
+  searchVariables,
 } from '../../src/commands/search.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -241,6 +242,66 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
         });
       },
       'Search jobs should not throw an error'
+    );
+  });
+
+  test('search variables with filters', async () => {
+    const client = createClient();
+    
+    // Deploy a process and create an instance with variables
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    // Create an instance with variables
+    await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+      variables: {
+        testVar: 'testValue',
+        count: 42,
+        flag: true,
+      },
+    });
+    
+    // Wait for Elasticsearch consistency
+    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
+    
+    // Search for variables by name
+    await assert.doesNotReject(
+      async () => {
+        await searchVariables({
+          name: 'testVar',
+        });
+      },
+      'Search variables should not throw an error'
+    );
+  });
+
+  test('search variables with fullValue option', async () => {
+    const client = createClient();
+    
+    // Deploy a process and create an instance with a long variable value
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    
+    const longValue = 'a'.repeat(1000); // Create a long value that might be truncated
+    
+    await client.createProcessInstance({
+      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+      variables: {
+        longVar: longValue,
+      },
+    });
+    
+    // Wait for Elasticsearch consistency
+    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
+    
+    // Search for variables with full values
+    await assert.doesNotReject(
+      async () => {
+        await searchVariables({
+          name: 'longVar',
+          fullValue: true,
+        });
+      },
+      'Search variables with fullValue should not throw an error'
     );
   });
 });

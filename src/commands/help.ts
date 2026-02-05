@@ -51,7 +51,7 @@ Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
-  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs)
+  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables)
   get       <resource> <key> Get resource by key (pi, pd, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
@@ -92,12 +92,15 @@ Search Flags:
   --processInstanceKey <key>        Filter by process instance key
   --parentProcessInstanceKey <key>  Filter by parent process instance key
   --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
-  --name <name>                     Filter by name
+  --name <name>                     Filter by name (variables, process definitions)
   --key <key>                       Filter by key
   --assignee <user>                 Filter by assignee (user tasks)
   --elementId <id>                  Filter by element ID (user tasks)
   --errorType <type>                Filter by error type (incidents)
   --type <type>                     Filter by type (jobs)
+  --value <value>                   Filter by variable value
+  --scopeKey <key>                  Filter by scope key (variables)
+  --fullValue                       Return full variable values (default: truncated)
 
 Resource Aliases:
   pi   = process-instance(s)
@@ -114,6 +117,9 @@ Examples:
   c8ctl search ut --assignee=john    Search user tasks assigned to john
   c8ctl search inc --state=ACTIVE    Search for active incidents
   c8ctl search jobs --type=myJobType Search jobs by type
+  c8ctl search variables --name=myVar  Search for variables by name
+  c8ctl search variables --value=foo Search for variables by value
+  c8ctl search variables --processInstanceKey=123 --fullValue  Search variables with full values
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
@@ -145,7 +151,7 @@ For detailed help on specific commands with all available flags:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs',
+    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables',
     get: 'process-instance (pi), process-definition (pd), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',

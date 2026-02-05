@@ -27,6 +27,7 @@ import {
   searchUserTasks,
   searchIncidents,
   searchJobs,
+  searchVariables,
 } from './commands/search.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, resolveIncident } from './commands/incidents.ts';
@@ -104,6 +105,9 @@ function parseCliArgs() {
         errorType: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'boolean' },
+        value: { type: 'string' },
+        scopeKey: { type: 'string' },
+        fullValue: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -576,6 +580,18 @@ async function main() {
         type: values.type as string | undefined,
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'variable' || normalizedSearchResource === 'variables') {
+      await searchVariables({
+        profile: values.profile as string | undefined,
+        name: values.name as string | undefined,
+        value: values.value as string | undefined,
+        processInstanceKey: values.processInstanceKey as string | undefined,
+        scopeKey: values.scopeKey as string | undefined,
+        fullValue: values.fullValue as boolean | undefined,
       });
       return;
     }

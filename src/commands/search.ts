@@ -308,3 +308,80 @@ export async function searchJobs(options: {
     process.exit(1);
   }
 }
+
+/**
+ * Search variables
+ */
+export async function searchVariables(options: {
+  profile?: string;
+  name?: string;
+  value?: string;
+  processInstanceKey?: string;
+  scopeKey?: string;
+  fullValue?: boolean;
+}): Promise<void> {
+  const logger = getLogger();
+  const client = createClient(options.profile);
+  const tenantId = resolveTenantId(options.profile);
+
+  try {
+    const filter: any = {
+      filter: {
+        tenantId,
+      },
+    };
+
+    if (options.name) {
+      filter.filter.name = options.name;
+    }
+
+    if (options.value) {
+      filter.filter.value = options.value;
+    }
+
+    if (options.processInstanceKey) {
+      filter.filter.processInstanceKey = options.processInstanceKey;
+    }
+
+    if (options.scopeKey) {
+      filter.filter.scopeKey = options.scopeKey;
+    }
+
+    // By default, truncate values unless --fullValue is specified
+    const truncateValues = !options.fullValue;
+
+    const result = await client.searchVariables(
+      { ...filter, truncateValues }, 
+      { consistency: { waitUpToMs: 0 } }
+    );
+    
+    if (result.items && result.items.length > 0) {
+      const tableData = result.items.map((variable: any) => {
+        const row: any = {
+          Name: variable.name,
+          Value: variable.value || '',
+          'Process Instance': variable.processInstanceKey,
+          'Scope Key': variable.scopeKey,
+          'Tenant ID': variable.tenantId,
+        };
+        
+        if (variable.isTruncated) {
+          row['Truncated'] = '✓';
+        }
+        
+        return row;
+      });
+      logger.table(tableData);
+      logger.info(`Found ${result.items.length} variable(s)`);
+      
+      if (!options.fullValue && result.items.some((v: any) => v.isTruncated)) {
+        logger.info('Some values are truncated. Use --fullValue to see full values.');
+      }
+    } else {
+      logger.info('No variables found matching the criteria');
+    }
+  } catch (error) {
+    logger.error('Failed to search variables', error as Error);
+    process.exit(1);
+  }
+}
