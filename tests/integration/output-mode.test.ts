@@ -9,6 +9,7 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { ProcessDefinitionId } from '@camunda8/orchestration-cluster-api';
 
 describe('Output Mode Integration Tests', () => {
   let testDir: string;
@@ -47,7 +48,7 @@ describe('Output Mode Integration Tests', () => {
     // Create a process instance to ensure we have data
     const client = createClient();
     const instance = await client.createProcessInstance({
-      processDefinitionId: 'Process_0t60ay7',
+      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0t60ay7'),
     });
     
     // Poll for process instance with API-level consistency

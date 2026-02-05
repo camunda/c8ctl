@@ -52,6 +52,24 @@ Guided by humans, the codebase is (mostly) built by your friendly neighborhood L
 
 - Node.js >= 22.18.0 (for native TypeScript support)
 
+### Prebuilt Binaries (Deno)
+
+c8ctl can also be distributed as a single-file native binary compiled via Deno.
+
+- Download the appropriate binary from GitHub Releases.
+- No Node.js runtime is required for core CLI usage.
+- **Plugins are optional, but plugin management requires `npm`** (the binary runs `npm install/uninstall/rebuild` under the hood).
+
+From source, you can compile binaries with:
+
+```bash
+deno task compile:all
+```
+
+This produces artifacts in `dist-deno/`.
+
+Note on binary size: Deno binaries include the Deno runtime, and may also embed the current workspace `node_modules/` depending on how dependencies are resolved during compilation. For the smallest self-contained binaries, compile in a clean environment (no dev dependencies installed) or with production-only dependencies present.
+
 ### Global Installation (Recommended)
 
 ```bash
@@ -315,6 +333,7 @@ c8ctl help
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
+- Plugin install/uninstall/sync require `npm` to be available on `PATH` (this also applies when using the Deno-compiled binary)
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
 - Optionally export a `metadata` object to provide help text

@@ -9,6 +9,7 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { ProcessDefinitionId } from '@camunda8/orchestration-cluster-api';
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
@@ -78,7 +79,7 @@ describe('Profile Switching Integration Tests', () => {
     // Create a process instance to ensure we have data
     const client = createClient();
     await client.createProcessInstance({
-      processDefinitionId: 'Process_0t60ay7',
+      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0t60ay7'),
     });
     
     // Poll for Elasticsearch indexing
@@ -86,7 +87,7 @@ describe('Profile Switching Integration Tests', () => {
       async () => {
         try {
           const result = await client.searchProcessInstances({
-            filter: { processDefinitionId: 'Process_0t60ay7' },
+            filter: { processDefinitionId: ProcessDefinitionId.assumeExists('Process_0t60ay7') },
           }, { consistency: { waitUpToMs: 5000 } });
           return result.items && result.items.length > 0;
         } catch (error) {

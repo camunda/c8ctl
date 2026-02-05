@@ -42,7 +42,7 @@ export async function run(path: string, options: {
     const fileName = path.split('/').pop() || 'process.bpmn';
     const deployResult = await client.createDeployment({
       tenantId,
-      resources: [new File([Buffer.from(content)], fileName, { type: 'application/xml' })],
+      resources: [new File([new TextEncoder().encode(content)], fileName, { type: 'application/xml' })],
     });
     logger.success('Deployment successful', deployResult.deploymentKey.toString());
 

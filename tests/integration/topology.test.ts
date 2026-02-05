@@ -33,7 +33,7 @@ describe('Topology Integration Tests (requires Camunda 8 at localhost:8080)', ()
     // Test with an invalid profile/URL that won't connect
     // We need to temporarily set up a client pointing to a non-existent server
     const { createCamundaClient } = await import('@camunda8/orchestration-cluster-api');
-    const badClient = createCamundaClient({ baseURL: 'http://localhost:9999' });
+    const badClient = createCamundaClient({ config:{  CAMUNDA_REST_ADDRESS: 'http://localhost:9999' } });
     
     // Should throw an error when trying to connect to non-existent server
     let errorThrown = false;
