@@ -94,11 +94,11 @@ c8ctl get process-definition 123456
 c8ctl get pd 123456 --xml
 
 # Create process instance
-c8ctl create pi --bpmnProcessId=myProcess
-c8ctl create process-instance --bpmnProcessId=myProcess
+c8ctl create pi --id=myProcess
+c8ctl create process-instance --id=myProcess
 
 # Create process instance and wait for completion
-c8ctl create pi --bpmnProcessId=myProcess --awaitCompletion
+c8ctl create pi --id=myProcess --awaitCompletion
 
 # Await process instance completion
 c8ctl await pi 123456
