@@ -105,22 +105,29 @@ export async function createProcessInstance(options: {
   // The orchestration-cluster-api currently does not support filtering variables
   // The API returns all variables by default when awaitCompletion is true
   if (options.fetchVariables) {
-    logger.warn('--fetchVariables is not yet supported by the API. All variables will be returned.');
+    logger.info('Note: --fetchVariables is not yet supported by the API. All variables will be returned.');
   }
 
   try {
-    const request: any = {
+    // Build the request body matching ProcessInstanceCreationInstructionById type
+    const body: {
+      processDefinitionId: string;
+      tenantId: string;
+      processDefinitionVersion?: number;
+      variables?: Record<string, unknown>;
+      awaitCompletion?: boolean;
+    } = {
       processDefinitionId: options.processDefinitionId,
       tenantId,
     };
 
     if (options.version !== undefined) {
-      request.processDefinitionVersion = options.version;
+      body.processDefinitionVersion = options.version;
     }
 
     if (options.variables) {
       try {
-        request.variables = JSON.parse(options.variables);
+        body.variables = JSON.parse(options.variables);
       } catch (error) {
         logger.error('Invalid JSON for variables', error as Error);
         process.exit(1);
@@ -129,11 +136,11 @@ export async function createProcessInstance(options: {
 
     // Use the API's built-in awaitCompletion parameter
     if (options.awaitCompletion) {
-      request.awaitCompletion = true;
+      body.awaitCompletion = true;
       logger.info('Waiting for process instance to complete...');
     }
 
-    const result = await client.createProcessInstance(request);
+    const result = await client.createProcessInstance({ body } as any);
     
     if (options.awaitCompletion) {
       // When awaitCompletion is true, the API returns the completed process instance with variables
