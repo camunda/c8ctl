@@ -381,7 +381,7 @@ async function main() {
     return;
   }
 
-  if (verb === 'get' && (normalizedResource === 'incident' || normalizedResource === 'incidents')) {
+  if (verb === 'get' && normalizedResource === 'incident') {
     if (!args[0]) {
       logger.error('Incident key required. Usage: c8 get inc <key>');
       process.exit(1);

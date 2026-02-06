@@ -128,7 +128,7 @@ For detailed help on specific commands with all available flags:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    get: 'process-instance (pi), process-definition (pd), incident/incidents (inc), topology',
+    get: 'process-instance (pi), process-definition (pd), incident (inc), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
@@ -231,7 +231,7 @@ Resources and their available flags:
     --xml                    Return process definition as XML
     --profile <name>         Use specific profile
 
-  incident (inc, incidents) <key>
+  incident (inc) <key>
     --profile <name>         Use specific profile
 
   topology

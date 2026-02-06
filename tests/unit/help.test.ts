@@ -206,7 +206,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('--variables'));
     assert.ok(output.includes('process-definition (pd)'));
     assert.ok(output.includes('--xml'));
-    assert.ok(output.includes('incident (inc, incidents)'));
+    assert.ok(output.includes('incident (inc)'));
     assert.ok(output.includes('topology'));
   });
 
