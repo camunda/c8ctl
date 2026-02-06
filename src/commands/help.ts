@@ -80,8 +80,8 @@ Flags:
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
   --variables           Get process instance with variables (use with 'get pi')
-  --userTask            Get form for a user task (use with 'get form')
-  --processDefinition   Get start form for a process definition (use with 'get form')
+  --userTask, --ut      Get form for a user task (use with 'get form')
+  --processDefinition, --pd  Get start form for a process definition (use with 'get form')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
@@ -102,8 +102,8 @@ Examples:
   c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
-  c8ctl get form 123456 --userTask   Get form for user task
-  c8ctl get form 123456 --processDefinition  Get start form for process
+  c8ctl get form 123456 --ut         Get form for user task (alias: --userTask)
+  c8ctl get form 123456 --pd         Get start form for process (alias: --processDefinition)
   c8ctl create pi --id=myProcess
   c8ctl create pi --id=myProcess --awaitCompletion
   c8ctl await pi --id=myProcess      Create and wait for completion
@@ -239,8 +239,8 @@ Resources and their available flags:
     --profile <name>         Use specific profile
 
   form <key>
-    --userTask               Get form for a user task (mutually exclusive with --processDefinition)
-    --processDefinition      Get start form for a process definition (mutually exclusive with --userTask)
+    --userTask, --ut         Get form for a user task (mutually exclusive with --processDefinition)
+    --processDefinition, --pd  Get start form for a process definition (mutually exclusive with --userTask)
     --profile <name>         Use specific profile
 
 Examples:
@@ -249,8 +249,8 @@ Examples:
   c8ctl get pd 2251799813685250
   c8ctl get pd 2251799813685250 --xml
   c8ctl get topology
-  c8ctl get form 2251799813685251 --userTask
-  c8ctl get form 2251799813685252 --processDefinition
+  c8ctl get form 2251799813685251 --ut
+  c8ctl get form 2251799813685252 --pd
 `.trim());
 }
 

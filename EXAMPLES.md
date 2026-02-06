@@ -358,21 +358,27 @@ Forms in Camunda 8 are linked to user tasks and process definitions. You can ret
 ### Get Form for User Task
 
 ```bash
-# Get the form associated with a user task
+# Get the form associated with a user task (short form with --ut alias)
+c8 get form 2251799813685251 --ut
+
+# Long form
 c8 get form 2251799813685251 --userTask
 
 # Using profile
-c8 get form 2251799813685251 --userTask --profile prod
+c8 get form 2251799813685251 --ut --profile prod
 ```
 
 ### Get Start Form for Process Definition
 
 ```bash
-# Get the start form for a process definition
+# Get the start form for a process definition (short form with --pd alias)
+c8 get form 2251799813685252 --pd
+
+# Long form
 c8 get form 2251799813685252 --processDefinition
 
 # Using profile
-c8 get form 2251799813685252 --processDefinition --profile prod
+c8 get form 2251799813685252 --pd --profile prod
 ```
 
 **Note**: These commands return the form schema/content if the resource has an associated form. If no form is associated, the command will indicate "found but has no associated form".

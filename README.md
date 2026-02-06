@@ -105,8 +105,8 @@ c8ctl await process-instance --id=myProcess
 c8ctl cancel pi 123456
 
 # Get forms
-c8ctl get form 123456 --userTask            # Get form for user task
-c8ctl get form 123456 --processDefinition   # Get start form for process
+c8ctl get form 123456 --ut                   # Get form for user task (alias: --userTask)
+c8ctl get form 123456 --pd                   # Get start form for process (alias: --processDefinition)
 
 # Deploy and run
 c8ctl deploy ./my-process.bpmn         # Deploy a single file

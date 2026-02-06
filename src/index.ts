@@ -484,20 +484,21 @@ async function main() {
   // Handle form commands
   if (verb === 'get' && normalizedResource === 'form') {
     if (!args[0]) {
-      logger.error('Key required. Usage: c8 get form <key> --userTask OR c8 get form <key> --processDefinition');
+      logger.error('Key required. Usage: c8 get form <key> --userTask|--ut OR c8 get form <key> --processDefinition|--pd');
       process.exit(1);
     }
     
-    const isUserTask = process.argv.includes('--userTask');
-    const isProcessDefinition = process.argv.includes('--processDefinition');
+    // Check for flags and their aliases
+    const isUserTask = process.argv.includes('--userTask') || process.argv.includes('--ut');
+    const isProcessDefinition = process.argv.includes('--processDefinition') || process.argv.includes('--pd');
     
     if (!isUserTask && !isProcessDefinition) {
-      logger.error('Must specify either --userTask or --processDefinition flag. Usage: c8 get form <key> --userTask OR c8 get form <key> --processDefinition');
+      logger.error('Must specify either --userTask|--ut or --processDefinition|--pd flag. Usage: c8 get form <key> --userTask|--ut OR c8 get form <key> --processDefinition|--pd');
       process.exit(1);
     }
     
     if (isUserTask && isProcessDefinition) {
-      logger.error('Cannot specify both --userTask and --processDefinition. Use one or the other.');
+      logger.error('Cannot specify both --userTask|--ut and --processDefinition|--pd. Use one or the other.');
       process.exit(1);
     }
     

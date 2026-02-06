@@ -45,7 +45,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --userTask --processDefinition"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --userTask --ut --processDefinition --pd"
 
   case \${cword} in
     1)
@@ -206,7 +206,9 @@ _c8ctl() {
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
     '--userTask[Get form for a user task]'
+    '--ut[Get form for a user task (alias for --userTask)]'
     '--processDefinition[Get start form for a process definition]'
+    '--pd[Get start form for a process definition (alias for --processDefinition)]'
   )
 
   case \$CURRENT in
@@ -453,8 +455,12 @@ complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8ctl -l userTask -d 'Get form for a user task'
 complete -c c8 -l userTask -d 'Get form for a user task'
+complete -c c8ctl -l ut -d 'Get form for a user task (alias for --userTask)'
+complete -c c8 -l ut -d 'Get form for a user task (alias for --userTask)'
 complete -c c8ctl -l processDefinition -d 'Get start form for a process definition'
 complete -c c8 -l processDefinition -d 'Get start form for a process definition'
+complete -c c8ctl -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
+complete -c c8 -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
