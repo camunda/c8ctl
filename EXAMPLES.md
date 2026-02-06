@@ -355,7 +355,18 @@ c8 run ./order-process.bpmn --variables='{"orderId":"12345","amount":100}'
 
 Forms in Camunda 8 are linked to user tasks and process definitions. You can retrieve the form associated with a specific resource.
 
-### Get Form for User Task
+### Get Form (Search Both Types)
+
+```bash
+# Search both user task and process definition (no flag required)
+c8 get form 2251799813685251
+
+# The output will indicate whether the form was found as a user task, process definition, both, or neither
+# Using profile
+c8 get form 2251799813685251 --profile prod
+```
+
+### Get Form for User Task Only
 
 ```bash
 # Get the form associated with a user task (short form with --ut alias)
@@ -368,7 +379,7 @@ c8 get form 2251799813685251 --userTask
 c8 get form 2251799813685251 --ut --profile prod
 ```
 
-### Get Start Form for Process Definition
+### Get Start Form for Process Definition Only
 
 ```bash
 # Get the start form for a process definition (short form with --pd alias)
@@ -381,7 +392,7 @@ c8 get form 2251799813685252 --processDefinition
 c8 get form 2251799813685252 --pd --profile prod
 ```
 
-**Note**: These commands return the form schema/content if the resource has an associated form. If no form is associated, the command will indicate "found but has no associated form".
+**Note**: When no flag is specified, the command searches both user tasks and process definitions and reports where the form was found. With a flag, it only searches the specified type.
 
 ---
 
