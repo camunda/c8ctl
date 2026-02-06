@@ -31,6 +31,7 @@ import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/plugins.ts';
 import { showCompletion } from './commands/completion.ts';
+import { getUserTaskForm, getStartForm } from './commands/forms.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand
@@ -91,6 +92,8 @@ function parseCliArgs() {
         from: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'boolean' },
+        userTask: { type: 'boolean' },
+        processDefinition: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -475,6 +478,38 @@ async function main() {
     await getTopology({
       profile: values.profile as string | undefined,
     });
+    return;
+  }
+
+  // Handle form commands
+  if (verb === 'get' && normalizedResource === 'form') {
+    if (!args[0]) {
+      logger.error('Key required. Usage: c8 get form <key> --userTask OR c8 get form <key> --processDefinition');
+      process.exit(1);
+    }
+    
+    const isUserTask = process.argv.includes('--userTask');
+    const isProcessDefinition = process.argv.includes('--processDefinition');
+    
+    if (!isUserTask && !isProcessDefinition) {
+      logger.error('Must specify either --userTask or --processDefinition flag. Usage: c8 get form <key> --userTask OR c8 get form <key> --processDefinition');
+      process.exit(1);
+    }
+    
+    if (isUserTask && isProcessDefinition) {
+      logger.error('Cannot specify both --userTask and --processDefinition. Use one or the other.');
+      process.exit(1);
+    }
+    
+    if (isUserTask) {
+      await getUserTaskForm(args[0], {
+        profile: values.profile as string | undefined,
+      });
+    } else {
+      await getStartForm(args[0], {
+        profile: values.profile as string | undefined,
+      });
+    }
     return;
   }
 

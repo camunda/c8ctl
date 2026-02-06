@@ -93,6 +93,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl get'));
     assert.ok(output.includes('process-instance'));
     assert.ok(output.includes('topology'));
+    assert.ok(output.includes('form'));
   });
 
   test('showVerbResources shows resources for create', () => {
@@ -206,6 +207,9 @@ describe('Help Module', () => {
     assert.ok(output.includes('process-definition (pd)'));
     assert.ok(output.includes('--xml'));
     assert.ok(output.includes('topology'));
+    assert.ok(output.includes('form'));
+    assert.ok(output.includes('--userTask'));
+    assert.ok(output.includes('--processDefinition'));
   });
 
   test('showCommandHelp shows create help with resources and flags', () => {

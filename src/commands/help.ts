@@ -51,7 +51,7 @@ Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
-  get       <resource> <key> Get resource by key (pi, pd, topology)
+  get       <resource> <key> Get resource by key (pi, pd, topology, form)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
   await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
@@ -80,6 +80,8 @@ Flags:
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
   --variables           Get process instance with variables (use with 'get pi')
+  --userTask            Get form for a user task (use with 'get form')
+  --processDefinition   Get start form for a process definition (use with 'get form')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
@@ -100,6 +102,8 @@ Examples:
   c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
+  c8ctl get form 123456 --userTask   Get form for user task
+  c8ctl get form 123456 --processDefinition  Get start form for process
   c8ctl create pi --id=myProcess
   c8ctl create pi --id=myProcess --awaitCompletion
   c8ctl await pi --id=myProcess      Create and wait for completion
@@ -128,7 +132,7 @@ For detailed help on specific commands with all available flags:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    get: 'process-instance (pi), process-definition (pd), topology',
+    get: 'process-instance (pi), process-definition (pd), topology, form',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
@@ -234,12 +238,19 @@ Resources and their available flags:
   topology
     --profile <name>         Use specific profile
 
+  form <key>
+    --userTask               Get form for a user task (mutually exclusive with --processDefinition)
+    --processDefinition      Get start form for a process definition (mutually exclusive with --userTask)
+    --profile <name>         Use specific profile
+
 Examples:
   c8ctl get pi 2251799813685249
   c8ctl get pi 2251799813685249 --variables
   c8ctl get pd 2251799813685250
   c8ctl get pd 2251799813685250 --xml
   c8ctl get topology
+  c8ctl get form 2251799813685251 --userTask
+  c8ctl get form 2251799813685252 --processDefinition
 `.trim());
 }
 
