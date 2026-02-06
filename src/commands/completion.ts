@@ -20,10 +20,11 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
+  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable"
   local get_resources="process-instance pi process-definition pd topology"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
@@ -45,7 +46,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue"
 
   case \${cword} in
     1)
@@ -58,6 +59,9 @@ _c8ctl_completions() {
       case "\${verb}" in
         list)
           COMPREPLY=( \$(compgen -W "\${list_resources}" -- "\${cur}") )
+          ;;
+        search)
+          COMPREPLY=( \$(compgen -W "\${search_resources}" -- "\${cur}") )
           ;;
         get)
           COMPREPLY=( \$(compgen -W "\${get_resources}" -- "\${cur}") )
@@ -149,6 +153,7 @@ _c8ctl() {
 
   verbs=(
     'list:List resources'
+    'search:Search resources with filters'
     'get:Get resource by key'
     'create:Create resource'
     'cancel:Cancel resource'
@@ -185,6 +190,8 @@ _c8ctl() {
     '--bpmnProcessId[Process definition ID]:id:'
     '--id[Process definition ID (alias for --bpmnProcessId)]:id:'
     '--processInstanceKey[Process instance key]:key:'
+    '--processDefinitionKey[Process definition key]:key:'
+    '--parentProcessInstanceKey[Parent process instance key]:key:'
     '--variables[JSON variables]:json:'
     '--state[Filter by state]:state:'
     '--assignee[Filter by assignee]:assignee:'
@@ -205,6 +212,13 @@ _c8ctl() {
     '--version[Process definition version]:version:'
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
+    '--name[Variable or resource name]:name:'
+    '--key[Resource key]:key:'
+    '--elementId[Element ID]:id:'
+    '--errorType[Error type]:type:'
+    '--value[Variable value]:value:'
+    '--scopeKey[Scope key]:key:'
+    '--fullValue[Return full variable values]'
   )
 
   case \$CURRENT in
@@ -229,6 +243,26 @@ _c8ctl() {
             'profile:List profiles'
             'plugins:List plugins'
             'plugin:List plugins'
+          )
+          _describe 'resource' resources
+          ;;
+        search)
+          resources=(
+            'process-instances:Search process instances'
+            'process-instance:Search process instances'
+            'pi:Search process instances'
+            'process-definitions:Search process definitions'
+            'process-definition:Search process definitions'
+            'pd:Search process definitions'
+            'user-tasks:Search user tasks'
+            'user-task:Search user tasks'
+            'ut:Search user tasks'
+            'incidents:Search incidents'
+            'incident:Search incidents'
+            'inc:Search incidents'
+            'jobs:Search jobs'
+            'variables:Search variables'
+            'variable:Search variables'
           )
           _describe 'resource' resources
           ;;
@@ -408,6 +442,10 @@ complete -c c8ctl -l id -d 'Process definition ID (alias for --bpmnProcessId)' -
 complete -c c8 -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
 complete -c c8ctl -l processInstanceKey -d 'Process instance key' -r
 complete -c c8 -l processInstanceKey -d 'Process instance key' -r
+complete -c c8ctl -l processDefinitionKey -d 'Process definition key' -r
+complete -c c8 -l processDefinitionKey -d 'Process definition key' -r
+complete -c c8ctl -l parentProcessInstanceKey -d 'Parent process instance key' -r
+complete -c c8 -l parentProcessInstanceKey -d 'Parent process instance key' -r
 complete -c c8ctl -l variables -d 'JSON variables' -r
 complete -c c8 -l variables -d 'JSON variables' -r
 complete -c c8ctl -l state -d 'Filter by state' -r
@@ -448,10 +486,26 @@ complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
+complete -c c8ctl -l name -d 'Variable or resource name' -r
+complete -c c8 -l name -d 'Variable or resource name' -r
+complete -c c8ctl -l key -d 'Resource key' -r
+complete -c c8 -l key -d 'Resource key' -r
+complete -c c8ctl -l elementId -d 'Element ID' -r
+complete -c c8 -l elementId -d 'Element ID' -r
+complete -c c8ctl -l errorType -d 'Error type' -r
+complete -c c8 -l errorType -d 'Error type' -r
+complete -c c8ctl -l value -d 'Variable value' -r
+complete -c c8 -l value -d 'Variable value' -r
+complete -c c8ctl -l scopeKey -d 'Scope key' -r
+complete -c c8 -l scopeKey -d 'Scope key' -r
+complete -c c8ctl -l fullValue -d 'Return full variable values'
+complete -c c8 -l fullValue -d 'Return full variable values'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
 complete -c c8 -n '__fish_use_subcommand' -a 'list' -d 'List resources'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'search' -d 'Search resources with filters'
+complete -c c8 -n '__fish_use_subcommand' -a 'search' -d 'Search resources with filters'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
 complete -c c8 -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
@@ -528,6 +582,38 @@ complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List pl
 complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List plugins'
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
 complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
+
+# Resources for 'search' command
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-instances' -d 'Search process instances'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-instances' -d 'Search process instances'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-instance' -d 'Search process instances'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-instance' -d 'Search process instances'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'pi' -d 'Search process instances'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'pi' -d 'Search process instances'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-definitions' -d 'Search process definitions'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-definitions' -d 'Search process definitions'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-definition' -d 'Search process definitions'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-definition' -d 'Search process definitions'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'pd' -d 'Search process definitions'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'pd' -d 'Search process definitions'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user-tasks' -d 'Search user tasks'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user-tasks' -d 'Search user tasks'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user-task' -d 'Search user tasks'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user-task' -d 'Search user tasks'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'ut' -d 'Search user tasks'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'ut' -d 'Search user tasks'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'incidents' -d 'Search incidents'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'incidents' -d 'Search incidents'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'incident' -d 'Search incidents'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'incident' -d 'Search incidents'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'inc' -d 'Search incidents'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'inc' -d 'Search incidents'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'jobs' -d 'Search jobs'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'jobs' -d 'Search jobs'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Search variables'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Search variables'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
 
 # Resources for 'get' command
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
