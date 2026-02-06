@@ -24,7 +24,7 @@ _c8ctl_completions() {
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
-  local get_resources="process-instance pi process-definition pd incident inc topology"
+  local get_resources="process-instance pi process-definition pd incidents incident inc topology"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
   local await_resources="process-instance pi"
@@ -238,6 +238,7 @@ _c8ctl() {
             'pi:Get process instance'
             'process-definition:Get process definition'
             'pd:Get process definition'
+            'incidents:Get incident'
             'incident:Get incident'
             'inc:Get incident'
             'topology:Get cluster topology'
@@ -540,6 +541,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-definition' -
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'process-definition' -d 'Get process definition'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'incidents' -d 'Get incident'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'incidents' -d 'Get incident'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'incident' -d 'Get incident'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'incident' -d 'Get incident'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'inc' -d 'Get incident'
