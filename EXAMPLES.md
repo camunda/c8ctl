@@ -10,6 +10,7 @@ Comprehensive examples for all c8ctl operations.
 - [Jobs](#jobs)
 - [Messages](#messages)
 - [Deployments](#deployments)
+- [Forms](#forms)
 - [Topology](#topology)
 - [Profile Management](#profile-management)
 - [Session Management](#session-management)
@@ -347,6 +348,34 @@ c8 run ./order-process.bpmn
 # With variables
 c8 run ./order-process.bpmn --variables='{"orderId":"12345","amount":100}'
 ```
+
+---
+
+## Forms
+
+Forms in Camunda 8 are linked to user tasks and process definitions. You can retrieve the form associated with a specific resource.
+
+### Get Form for User Task
+
+```bash
+# Get the form associated with a user task
+c8 get form 2251799813685251 --userTask
+
+# Using profile
+c8 get form 2251799813685251 --userTask --profile prod
+```
+
+### Get Start Form for Process Definition
+
+```bash
+# Get the start form for a process definition
+c8 get form 2251799813685252 --processDefinition
+
+# Using profile
+c8 get form 2251799813685252 --processDefinition --profile prod
+```
+
+**Note**: These commands return the form schema/content if the resource has an associated form. If no form is associated, the command will indicate "found but has no associated form".
 
 ---
 
