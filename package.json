@@ -47,7 +47,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^8.8.4"
+    "@camunda8/orchestration-cluster-api": "^8.8.4",
+    "@modelcontextprotocol/sdk": "^1.26.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",

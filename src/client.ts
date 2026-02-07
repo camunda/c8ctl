@@ -8,7 +8,7 @@ import { resolveClusterConfig } from './config.ts';
 /**
  * Create a Camunda 8 cluster client with resolved configuration
  */
-export function createClient(profileFlag?: string): CamundaClient {
+export function createClient(profileFlag?: string, additionalConfig: Partial<CamundaOptions> = {}): CamundaClient {
   const config = resolveClusterConfig(profileFlag);
   
   // Build config object for the SDK
@@ -39,5 +39,5 @@ export function createClient(profileFlag?: string): CamundaClient {
     sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
   }
 
-  return createCamundaClient({ config: sdkConfig });
+  return createCamundaClient({ config: { ...sdkConfig, ...additionalConfig} });
 }

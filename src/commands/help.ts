@@ -64,6 +64,7 @@ Commands:
   deploy    [path...]        Deploy BPMN/DMN/forms
   run       <path>           Deploy and start process
   watch     [path...]        Watch files for changes and auto-deploy
+  mcp-proxy                  Start a STDIO to remote HTTP MCP proxy server
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
   load      plugin <name>    Load a c8ctl plugin from npm registry

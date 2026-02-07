@@ -36,6 +36,7 @@ import {
   loadInstalledPlugins, 
   executePluginCommand
 } from './plugin-loader.ts';
+import { mcpProxy } from './commands/mcp-proxy.ts';
 
 /**
  * Normalize resource aliases
@@ -553,6 +554,14 @@ async function main() {
   if (verb === 'watch' || verb === 'w') {
     const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
     await watchFiles(paths, {
+      profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  // Handle mcp-proxy command
+  if (verb === 'mcp-proxy') {
+    await mcpProxy({
       profile: values.profile as string | undefined,
     });
     return;
