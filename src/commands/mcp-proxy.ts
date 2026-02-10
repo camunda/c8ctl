@@ -6,36 +6,10 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { type CamundaClient } from '@camunda8/orchestration-cluster-api';
 import { type Logger } from '@camunda8/orchestration-cluster-api/logger';
 import { createClient } from '../client.ts';
 import { getVersion } from './help.ts';
-
-/**
- * Configure global HTTP proxy if environment variables are set.
- *
- * undici is Node.js's HTTP client that powers the built-in fetch() API.
- * ProxyAgent allows all fetch requests (including from orchestration-cluster-api)
- * to route through corporate HTTP proxies by setting a global dispatcher.
- */
-function configureHttpProxy(logger: Logger): void {
-  const httpsProxy = process.env.https_proxy || process.env.HTTPS_PROXY;
-  const httpProxy = process.env.http_proxy || process.env.HTTP_PROXY;
-  const proxy = httpsProxy || httpProxy;
-
-  if (proxy) {
-    try {
-      const agent = new ProxyAgent(proxy);
-      setGlobalDispatcher(agent);
-      logger.info(`Configured HTTP proxy: ${proxy}`);
-    } catch (error) {
-      logger.warn(
-        `Failed to configure proxy: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-}
 
 /**
  * Creates a custom fetch function that injects Camunda authentication headers
@@ -262,7 +236,7 @@ class McpProxy {
       this.logger.info('MCP proxy started successfully');
     } catch (error) {
       this.logger.error(
-        `Failed to start proxy: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to start MCP proxy: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
@@ -281,7 +255,7 @@ class McpProxy {
       // Close client (internally closes clientTransport)
       await this.client.close();
 
-      this.logger.info('MCP proxy stopped');
+      this.logger.debug('MCP proxy stopped');
     } catch (error) {
       this.logger.error(
         `Error during shutdown: ${error instanceof Error ? error.message : String(error)}`,
@@ -341,9 +315,6 @@ async function runProxy(camundaClient: CamundaClient, mcpServerPath: string) {
   const logger = camundaClient.logger('mcp-proxy');
 
   try {
-    // Configure HTTP proxy for Node.js fetch if environment variables are set
-    configureHttpProxy(logger);
-
     // Create and start proxy
     proxy = new McpProxy(camundaClient, logger, mcpServerPath);
     await proxy.start();
