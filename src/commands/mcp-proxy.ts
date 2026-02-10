@@ -8,8 +8,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { ProxyAgent, setGlobalDispatcher } from 'undici';
 import { type CamundaClient } from '@camunda8/orchestration-cluster-api';
-import { Logger } from '@camunda8/orchestration-cluster-api/logger';
+import { type Logger } from '@camunda8/orchestration-cluster-api/logger';
 import { createClient } from '../client.ts';
+import { getVersion } from './help.ts';
 
 /**
  * Configure global HTTP proxy if environment variables are set.
@@ -46,6 +47,7 @@ function configureHttpProxy(logger: Logger): void {
  */
 function createCamundaFetch(
   camundaClient: CamundaClient,
+  logger: Logger,
   timeout: number = 60000,
 ): typeof fetch {
   return async (
@@ -79,6 +81,10 @@ function createCamundaFetch(
       if (response.status === 401) {
         clearTimeout(timeoutId);
 
+        logger.warn(
+          'Received 401 (Unauthorized) response, attempting token refresh and retrying',
+        );
+
         // Force token refresh
         await camundaClient.forceAuthRefresh();
         const freshHeaders = await camundaClient.getAuthHeaders();
@@ -107,37 +113,45 @@ function createCamundaFetch(
       if (error instanceof Error && error.name === 'AbortError') {
         throw new Error(`Request timeout after ${timeout}ms`);
       }
+
+      const cause = (error as any)?.cause;
+      if (cause?.code === 'ECONNREFUSED') {
+        const url = typeof input === 'string' ? input : input.toString();
+        throw new Error(
+          `Connection refused: Unable to connect to ${url}. Please verify the server is running and accessible.`,
+        );
+      }
+
       throw error;
     }
   };
 }
 
 /**
- * Normalize remote MCP URL to ensure it points to the MCP endpoint
+ * Normalize remote MCP URL to ensure it points to the MCP endpoint (assuming it ends with /mcp).
  * - If URL has no path or just "/", append "/mcp"
  * - If URL ends with "/v2", replace with "/mcp"
  * - If URL already ends with "/mcp", keep it as is
  */
-function normalizeRemoteMcpUrl(url: string): string {
+function normalizeRemoteMcpUrl(url: string, mcpServerPath: string): string {
   try {
     const urlObj = new URL(url);
 
-    // If path is empty or just "/", append "/mcp"
+    // If path is empty or just "/", append MCP server path
     if (urlObj.pathname === '' || urlObj.pathname === '/') {
-      urlObj.pathname = '/mcp';
+      urlObj.pathname = mcpServerPath;
       return urlObj.toString();
     }
 
-    // If path ends with "/v2", replace with "/mcp"
+    // If path ends with "/v2", replace with MCP server path
     if (urlObj.pathname.endsWith('/v2')) {
-      urlObj.pathname = urlObj.pathname.slice(0, -3) + '/mcp';
+      urlObj.pathname = urlObj.pathname.slice(0, -3) + mcpServerPath;
       return urlObj.toString();
     }
 
-    // Already ends with /mcp or has custom path - keep as is
+    // Already ends with MCP server path or has custom path - keep as is
     return url;
   } catch (e) {
-    // If URL parsing fails, return as is (will be caught by Zod validation)
     return url;
   }
 }
@@ -164,12 +178,17 @@ class McpProxy {
   private server: Server;
   private serverTransport: StdioServerTransport | null = null;
 
-  constructor(camundaClient: CamundaClient, logger: Logger) {
+  constructor(
+    camundaClient: CamundaClient,
+    logger: Logger,
+    mcpServerPath: string,
+  ) {
     this.camundaClient = camundaClient;
     this.logger = logger;
 
     this.mcpRemoteUrl = normalizeRemoteMcpUrl(
       this.camundaClient.getConfig().restAddress,
+      mcpServerPath,
     );
 
     this.logger.info(
@@ -180,13 +199,15 @@ class McpProxy {
     this.clientTransport = new StreamableHTTPClientTransport(
       new URL(this.mcpRemoteUrl),
       {
-        fetch: createCamundaFetch(this.camundaClient),
+        fetch: createCamundaFetch(this.camundaClient, this.logger),
       },
     );
 
+    const version = getVersion();
+
     // Create MCP client to call remote server
     this.client = new Client(
-      { name: 'camunda-mcp-proxy', version: '1.0.0' },
+      { name: 'c8ctl-mcp-proxy', version },
       { capabilities: {} },
     );
 
@@ -194,7 +215,7 @@ class McpProxy {
     this.server = new Server(
       {
         name: 'c8ctl-mcp-proxy',
-        version: '1.0.0',
+        version,
       },
       {
         capabilities: {
@@ -215,17 +236,17 @@ class McpProxy {
       // Verify authentication works by getting auth headers
       const authStrategy = this.camundaClient.getConfig().auth.strategy;
       if (authStrategy !== 'NONE') {
-        this.logger.info(`Verifying ${authStrategy} authentication...`);
+        this.logger.debug(`Resolving ${authStrategy} authentication...`);
         await this.camundaClient.getAuthHeaders();
-        this.logger.info(
-          `${authStrategy} authentication verified successfully`,
+        this.logger.debug(
+          `${authStrategy} authentication resolved successfully`,
         );
       } else {
         this.logger.info('No authentication configured (auth.strategy=NONE)');
       }
 
       // Connect client to remote server
-      this.logger.info(`Connecting to remote MCP server`);
+      this.logger.debug(`Connecting to remote MCP server`);
       await this.client.connect(this.clientTransport);
       this.logger.info('Connected to remote MCP server');
 
@@ -275,10 +296,10 @@ class McpProxy {
   private setupHandlers(): void {
     // Forward tools/list to remote server
     this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-      this.logger.debug('Forwarding tools/list request');
+      this.logger.trace('Forwarding tools/list request');
       try {
         const result = await this.client.listTools(request.params);
-        this.logger.debug('Received tools/list response');
+        this.logger.trace('Received tools/list response');
         return result;
       } catch (error) {
         this.logger.error('Failed to forward tools/list', {
@@ -290,10 +311,10 @@ class McpProxy {
 
     // Forward tools/call to remote server
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      this.logger.debug(`Forwarding tools/call: ${request.params?.name}`);
+      this.logger.trace(`Forwarding tools/call: ${request.params?.name}`);
       try {
         const result = await this.client.callTool(request.params);
-        this.logger.debug(
+        this.logger.trace(
           `Received tools/call response: ${request.params?.name}`,
         );
         return result;
@@ -314,7 +335,7 @@ class McpProxy {
   }
 }
 
-async function runProxy(camundaClient: CamundaClient) {
+async function runProxy(camundaClient: CamundaClient, mcpServerPath: string) {
   let proxy: McpProxy | null = null;
 
   const logger = camundaClient.logger('mcp-proxy');
@@ -324,7 +345,7 @@ async function runProxy(camundaClient: CamundaClient) {
     configureHttpProxy(logger);
 
     // Create and start proxy
-    proxy = new McpProxy(camundaClient, logger);
+    proxy = new McpProxy(camundaClient, logger, mcpServerPath);
     await proxy.start();
 
     // Handle graceful shutdown
@@ -342,9 +363,7 @@ async function runProxy(camundaClient: CamundaClient) {
     // Keep process alive
     await new Promise(() => {});
   } catch (error) {
-    logger.error(
-      `Fatal error: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    logger.error(`Failed to run MCP proxy. Shutting down...`);
     if (proxy) {
       await proxy.stop();
     }
@@ -355,7 +374,10 @@ async function runProxy(camundaClient: CamundaClient) {
 /**
  * Run STDIO to remote HTTP MCP proxy with Camunda authentication
  */
-export async function mcpProxy(options: { profile?: string }): Promise<void> {
+export async function mcpProxy(
+  mcpServerPath: string,
+  options: { profile?: string },
+): Promise<void> {
   const camundaClient = createClient(options.profile, {
     log: {
       transport: (evt) => {
@@ -364,5 +386,5 @@ export async function mcpProxy(options: { profile?: string }): Promise<void> {
     },
   });
 
-  await runProxy(camundaClient);
+  await runProxy(camundaClient, mcpServerPath);
 }

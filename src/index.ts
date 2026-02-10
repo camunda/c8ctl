@@ -561,7 +561,12 @@ async function main() {
 
   // Handle mcp-proxy command
   if (verb === 'mcp-proxy') {
-    await mcpProxy({
+    let mcpServerPath: string = '/mcp';
+    if (positionals.length > 1) {
+      mcpServerPath = positionals[1];
+    }
+
+    await mcpProxy(mcpServerPath, {
       profile: values.profile as string | undefined,
     });
     return;

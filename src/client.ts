@@ -8,9 +8,12 @@ import { resolveClusterConfig } from './config.ts';
 /**
  * Create a Camunda 8 cluster client with resolved configuration
  */
-export function createClient(profileFlag?: string, additionalConfig: Partial<CamundaOptions> = {}): CamundaClient {
+export function createClient(
+  profileFlag?: string,
+  additionalSdkConfig: Partial<CamundaOptions> = {},
+): CamundaClient {
   const config = resolveClusterConfig(profileFlag);
-  
+
   // Build config object for the SDK
   const sdkConfig: Partial<CamundaOptions["config"]> = {
     CAMUNDA_REST_ADDRESS: config.baseUrl,
@@ -39,5 +42,5 @@ export function createClient(profileFlag?: string, additionalConfig: Partial<Cam
     sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
   }
 
-  return createCamundaClient({ config: { ...sdkConfig, ...additionalConfig} });
+  return createCamundaClient({ config: { ...sdkConfig, ...additionalSdkConfig } });
 }
