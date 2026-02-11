@@ -197,4 +197,33 @@ describe('Config Module', () => {
       assert.ok(Array.isArray(connections));
     });
   });
+
+  describe('Environment Variable Configuration', () => {
+    let originalEnv: NodeJS.ProcessEnv;
+
+    beforeEach(() => {
+      originalEnv = { ...process.env };
+      // Clear c8ctl session
+      c8ctl.activeProfile = undefined;
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      c8ctl.activeProfile = undefined;
+    });
+
+    test('resolveClusterConfig reads CAMUNDA_TOKEN_AUDIENCE from environment', () => {
+      process.env.CAMUNDA_BASE_URL = 'https://test.camunda.io';
+      process.env.CAMUNDA_CLIENT_ID = 'test-client-id';
+      process.env.CAMUNDA_CLIENT_SECRET = 'test-secret';
+      process.env.CAMUNDA_TOKEN_AUDIENCE = 'test-audience';
+
+      const config = resolveClusterConfig();
+
+      assert.strictEqual(config.baseUrl, 'https://test.camunda.io');
+      assert.strictEqual(config.clientId, 'test-client-id');
+      assert.strictEqual(config.clientSecret, 'test-secret');
+      assert.strictEqual(config.audience, 'test-audience');
+    });
+  });
 });
