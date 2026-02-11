@@ -100,20 +100,30 @@ export async function watchFiles(paths: string[], options: {
             const client = createClient(options.profile);
             const tenantId = resolveTenantId(options.profile);
             
-            const createRequest: any = {
-              processDefinitionId: processId,
-              tenantId,
-            };
-            
+            let parsedVariables: Record<string, unknown>;
             try {
-              createRequest.variables = JSON.parse(options.variables);
+              parsedVariables = JSON.parse(options.variables);
             } catch (error) {
               logger.error('Invalid JSON for variables', error as Error);
-              return; // Continue watching even if variables are invalid
+              // Skip instance creation but continue watching
+              parsedVariables = {};
             }
             
-            const createResult = await client.createProcessInstance(createRequest);
-            logger.success('Process instance created', createResult.processInstanceKey);
+            // Only create instance if variables were parsed successfully
+            if (Object.keys(parsedVariables).length > 0 || options.variables === '{}') {
+              const createRequest: any = {
+                processDefinitionId: processId,
+                tenantId,
+                variables: parsedVariables,
+              };
+              
+              try {
+                const createResult = await client.createProcessInstance(createRequest);
+                logger.success('Process instance created', createResult.processInstanceKey);
+              } catch (error) {
+                logger.error('Failed to create process instance', error as Error);
+              }
+            }
           } else {
             logger.info('Could not extract process ID from BPMN file, skipping instance creation');
           }
