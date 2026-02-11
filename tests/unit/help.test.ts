@@ -55,6 +55,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('await'));
     assert.ok(output.includes('deploy'));
     assert.ok(output.includes('run'));
+    assert.ok(output.includes('watch'));
     assert.ok(output.includes('load'));
     assert.ok(output.includes('unload'));
     
