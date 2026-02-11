@@ -5,7 +5,10 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { type CamundaClient } from '@camunda8/orchestration-cluster-api';
 import { createClient } from '../client.ts';
 import { getVersion } from './help.ts';
@@ -202,7 +205,6 @@ class McpProxy {
       `Connecting to remote MCP server at: ${this.mcpRemoteUrl}`,
     );
 
-
     try {
       // Verify authentication works by getting auth headers
       const authStrategy = this.camundaClient.getConfig().auth.strategy;
@@ -235,6 +237,13 @@ class McpProxy {
       this.logger.error(
         `Failed to start MCP proxy: ${error instanceof Error ? error.message : String(error)}`,
       );
+
+      if (error instanceof StreamableHTTPError && error.code === 404) {
+        this.logger.error(
+          'Please verify that the server is running and accessible and that the MCP gateway is enabled.',
+        );
+      }
+
       throw error;
     }
   }
