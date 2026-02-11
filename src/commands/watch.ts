@@ -4,28 +4,17 @@
 
 import { watch } from 'node:fs';
 import { resolve, extname, basename } from 'node:path';
-import { existsSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { getLogger } from '../logger.ts';
 import { deploy } from './deployments.ts';
-import { createClient } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
 
 const WATCHED_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
-
-/**
- * Extract process ID from BPMN file
- */
-function extractProcessId(bpmnContent: string): string | null {
-  const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
-  return match ? match[1] : null;
-}
 
 /**
  * Watch for file changes and auto-deploy
  */
 export async function watchFiles(paths: string[], options: {
   profile?: string;
-  variables?: string;
 }): Promise<void> {
   const logger = getLogger();
   
@@ -46,9 +35,6 @@ export async function watchFiles(paths: string[], options: {
 
   logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(', ')}`);
   logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(', ')}`);
-  if (options.variables) {
-    logger.info(`🔧 Auto-creating process instances with variables on BPMN changes`);
-  }
   logger.info('Press Ctrl+C to stop watching\n');
 
   // Keep track of recently deployed files to avoid duplicate deploys
@@ -88,46 +74,6 @@ export async function watchFiles(paths: string[], options: {
 
       try {
         await deploy([fullPath], { profile: options.profile });
-        
-        // If this is a BPMN file and variables are provided, create a process instance
-        if (ext === '.bpmn' && options.variables) {
-          const content = readFileSync(fullPath, 'utf-8');
-          const processId = extractProcessId(content);
-          
-          if (processId) {
-            logger.info(`Creating process instance for ${processId}...`);
-            
-            const client = createClient(options.profile);
-            const tenantId = resolveTenantId(options.profile);
-            
-            let parsedVariables: Record<string, unknown>;
-            try {
-              parsedVariables = JSON.parse(options.variables);
-            } catch (error) {
-              logger.error('Invalid JSON for variables', error as Error);
-              // Skip instance creation but continue watching
-              parsedVariables = {};
-            }
-            
-            // Only create instance if variables were parsed successfully
-            if (Object.keys(parsedVariables).length > 0 || options.variables === '{}') {
-              const createRequest: any = {
-                processDefinitionId: processId,
-                tenantId,
-                variables: parsedVariables,
-              };
-              
-              try {
-                const createResult = await client.createProcessInstance(createRequest);
-                logger.success('Process instance created', createResult.processInstanceKey);
-              } catch (error) {
-                logger.error('Failed to create process instance', error as Error);
-              }
-            }
-          } else {
-            logger.info('Could not extract process ID from BPMN file, skipping instance creation');
-          }
-        }
       } catch (error) {
         logger.error(`Failed to deploy ${basename(filename)}`, error as Error);
       }

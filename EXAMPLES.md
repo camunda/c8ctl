@@ -348,29 +348,6 @@ c8 run ./order-process.bpmn
 c8 run ./order-process.bpmn --variables='{"orderId":"12345","amount":100}'
 ```
 
-### Watch (Auto-Deploy on Changes)
-
-```bash
-# Watch current directory for changes
-c8 watch
-
-# Watch specific directory
-c8 watch ./src
-
-# Watch and auto-create process instances with variables when BPMN files change
-# This is useful for rapid development/testing - each time a BPMN file is saved,
-# it's deployed AND a process instance is created with the provided variables
-c8 watch ./src --variables='{"testMode":true,"userId":"developer"}'
-
-# Watch multiple paths
-c8 watch ./process-definitions ./forms
-```
-
-**Note**: When `--variables` is provided, the watch command will:
-1. Deploy the changed file (BPMN, DMN, or Form)
-2. If the file is a BPMN file, automatically create a process instance with the specified variables
-3. This enables a fast feedback loop during development
-
 ---
 
 ## Topology

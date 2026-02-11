@@ -110,7 +110,6 @@ c8ctl deploy                           # Deploy current directory
 c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl run ./my-process.bpmn --variables='{"key":"value"}'  # Deploy and start with variables
 c8ctl watch                            # Watch for changes and auto-deploy
-c8ctl watch --variables='{"test":true}'  # Watch and auto-create instances with variables
 ```
 
 For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).

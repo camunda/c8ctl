@@ -80,7 +80,7 @@ Flags:
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
   --variables           Get process instance with variables (use with 'get pi')
-  --variables <json>    Process variables as JSON string (use with 'run', 'watch', 'create pi', 'await pi', 'complete ut/job')
+  --variables <json>    Process variables as JSON string (use with 'run', 'create pi', 'await pi', 'complete ut/job')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
@@ -108,7 +108,6 @@ Examples:
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl run ./my-process.bpmn --variables='{"key":"value"}'
   c8ctl watch ./src                  Watch directory for changes
-  c8ctl watch ./src --variables='{"test":true}'  Watch and auto-create instances
   c8ctl use profile prod             Set active profile
   c8ctl output json                  Switch to JSON output
   c8ctl load plugin my-plugin        Load plugin from npm registry
