@@ -55,6 +55,24 @@ export async function listIncidents(options: {
 }
 
 /**
+ * Get incident by key
+ */
+export async function getIncident(key: string, options: {
+  profile?: string;
+}): Promise<void> {
+  const logger = getLogger();
+  const client = createClient(options.profile);
+
+  try {
+    const result = await client.getIncident({ incidentKey: key as any }, { consistency: { waitUpToMs: 0 } });
+    logger.json(result);
+  } catch (error) {
+    logger.error(`Failed to get incident ${key}`, error as Error);
+    process.exit(1);
+  }
+}
+
+/**
  * Resolve incident
  */
 export async function resolveIncident(key: string, options: {
