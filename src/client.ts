@@ -42,5 +42,5 @@ export function createClient(
     sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
   }
 
-  return createCamundaClient({ config: { ...sdkConfig, ...additionalSdkConfig } });
+  return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });
 }
