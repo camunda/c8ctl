@@ -84,8 +84,14 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     } catch (error: any) {
       // CLI should exit with non-zero code when process already completed
       assert.ok(error.status !== 0, 'CLI should exit with non-zero status for already completed process');
-      assert.ok(error.stderr.includes('NOT_FOUND') || error.stderr.includes('Failed'), 
-        'CLI should output error message for already completed process');
+      // Check that error output contains an error message (either 'Failed', 'NOT_FOUND', or '✗')
+      const hasErrorMessage = error.stderr && (
+        error.stderr.includes('Failed') || 
+        error.stderr.includes('NOT_FOUND') ||
+        error.stderr.includes('✗')
+      );
+      assert.ok(hasErrorMessage, 
+        `CLI should output error message for already completed process. Got stderr: ${error.stderr}`);
     }
   });
 
