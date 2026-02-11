@@ -505,6 +505,7 @@ async function main() {
     const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
+      variables: values.variables as string | undefined,
     });
     return;
   }
