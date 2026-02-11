@@ -25,7 +25,7 @@ _c8ctl_completions() {
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
   local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable"
-  local get_resources="process-instance pi process-definition pd incident inc topology"
+  local get_resources="process-instance pi process-definition pd incident inc topology form"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
   local await_resources="process-instance pi"
@@ -46,7 +46,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd"
 
   case \${cword} in
     1)
@@ -219,6 +219,10 @@ _c8ctl() {
     '--value[Variable value]:value:'
     '--scopeKey[Scope key]:key:'
     '--fullValue[Return full variable values]'
+    '--userTask[Get form for a user task]'
+    '--ut[Get form for a user task (alias for --userTask)]'
+    '--processDefinition[Get start form for a process definition]'
+    '--pd[Get start form for a process definition (alias for --processDefinition)]'
   )
 
   case \$CURRENT in
@@ -275,6 +279,7 @@ _c8ctl() {
             'incident:Get incident'
             'inc:Get incident'
             'topology:Get cluster topology'
+            'form:Get form for user task or process definition'
           )
           _describe 'resource' resources
           ;;
@@ -502,6 +507,14 @@ complete -c c8ctl -l scopeKey -d 'Scope key' -r
 complete -c c8 -l scopeKey -d 'Scope key' -r
 complete -c c8ctl -l fullValue -d 'Return full variable values'
 complete -c c8 -l fullValue -d 'Return full variable values'
+complete -c c8ctl -l userTask -d 'Get form for a user task'
+complete -c c8 -l userTask -d 'Get form for a user task'
+complete -c c8ctl -l ut -d 'Get form for a user task (alias for --userTask)'
+complete -c c8 -l ut -d 'Get form for a user task (alias for --userTask)'
+complete -c c8ctl -l processDefinition -d 'Get start form for a process definition'
+complete -c c8 -l processDefinition -d 'Get start form for a process definition'
+complete -c c8ctl -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
+complete -c c8 -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
@@ -632,6 +645,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'inc' -d 'Get incident
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'inc' -d 'Get incident'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
 
 # Resources for 'create' command
 complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'process-instance' -d 'Create process instance'
