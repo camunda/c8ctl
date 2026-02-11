@@ -22,7 +22,7 @@ import { Logger, type LogWriter } from '../logger.ts';
  * @param timeout - Request timeout in milliseconds (default: 30000)
  * @returns Custom fetch function compatible with MCP SDK transport
  */
-function createCamundaFetch(
+export function createCamundaFetch(
   camundaClient: CamundaClient,
   logger: Logger,
   timeout: number = 60000,
@@ -105,9 +105,9 @@ function createCamundaFetch(
 /**
  * Normalize remote MCP URL to ensure it points to the MCP endpoint (assuming it ends with /mcp/cluster).
  * - If URL has no path or just "/", append "/mcp/cluster"
- * - If URL ends with "/v2", replace with "/mcp/cluster"
+ * - If URL ends with "/v2" or "/v2/", replace with "/mcp/cluster"
  */
-function normalizeRemoteMcpUrl(url: string, mcpServerPath: string): string {
+export function normalizeRemoteMcpUrl(url: string, mcpServerPath: string): string {
   try {
     const urlObj = new URL(url);
 
@@ -117,9 +117,9 @@ function normalizeRemoteMcpUrl(url: string, mcpServerPath: string): string {
       return urlObj.toString();
     }
 
-    // If path ends with "/v2", replace with MCP server path
-    if (urlObj.pathname.endsWith('/v2')) {
-      urlObj.pathname = urlObj.pathname.slice(0, -3) + mcpServerPath;
+    // If path ends with "/v2" (with or without trailing slash), replace with MCP server path
+    if (urlObj.pathname.match(/\/v2\/?$/)) {
+      urlObj.pathname = urlObj.pathname.replace(/\/v2\/?$/, mcpServerPath);
       return urlObj.toString();
     }
 
