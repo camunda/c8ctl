@@ -212,7 +212,7 @@ describe('Config Module', () => {
       c8ctl.activeProfile = undefined;
     });
 
-    test('resolveClusterConfig reads CAMUNDA_TOKEN_AUDIENCE from environment', () => {
+    test('resolveClusterConfig reads OAuth config from environment variables', () => {
       process.env.CAMUNDA_BASE_URL = 'https://test.camunda.io';
       process.env.CAMUNDA_CLIENT_ID = 'test-client-id';
       process.env.CAMUNDA_CLIENT_SECRET = 'test-secret';
