@@ -312,4 +312,171 @@ describe('Logger Module', () => {
       assert.strictEqual(logger.mode, 'json');
     });
   });
+
+  describe('Custom LogWriter', () => {
+    test('Logger uses defaultWriter by default', () => {
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
+
+      // defaultWriter should route log to console.log
+      logger.info('Test message');
+      assert.strictEqual(consoleLogSpy.length, 1);
+      assert.strictEqual(consoleLogSpy[0], 'Test message');
+
+      // defaultWriter should route error to console.error
+      logger.error('Error message');
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      assert.ok(consoleErrorSpy[0].includes('Error message'));
+    });
+
+    test('Logger accepts custom writer', () => {
+      c8ctl.outputMode = 'text';
+      const customLogOutput: any[] = [];
+      const customErrorOutput: any[] = [];
+
+      const customWriter = {
+        log(...data: any[]): void {
+          customLogOutput.push(data.join(' '));
+        },
+        error(...data: any[]): void {
+          customErrorOutput.push(data.join(' '));
+        },
+      };
+
+      const logger = new Logger(customWriter);
+
+      logger.info('Custom info');
+      logger.success('Custom success');
+      logger.error('Custom error');
+
+      // Verify custom writer was used instead of console
+      assert.strictEqual(consoleLogSpy.length, 0);
+      assert.strictEqual(consoleErrorSpy.length, 0);
+
+      // Verify custom writer captured output
+      assert.strictEqual(customLogOutput.length, 2);
+      assert.ok(customLogOutput[0].includes('Custom info'));
+      assert.ok(customLogOutput[1].includes('Custom success'));
+
+      assert.strictEqual(customErrorOutput.length, 1);
+      assert.ok(customErrorOutput[0].includes('Custom error'));
+    });
+
+    test('Custom writer receives all method calls', () => {
+      c8ctl.outputMode = 'text';
+      const logCalls: any[][] = [];
+      const errorCalls: any[][] = [];
+
+      const trackingWriter = {
+        log(...data: any[]): void {
+          logCalls.push(data);
+        },
+        error(...data: any[]): void {
+          errorCalls.push(data);
+        },
+      };
+
+      const logger = new Logger(trackingWriter);
+
+      logger.info('Info message');
+      logger.success('Success message', 123);
+      logger.table([{ id: 1, name: 'Test' }]);
+      logger.json({ key: 'value' });
+      logger.error('Error message', new Error('Failed'));
+      logger.debugEnabled = true;
+      logger.debug('Debug message', 'arg1', 'arg2');
+
+      // Verify log calls: info(1) + success(1) + table(3: header, separator, row) + json(1) = 6
+      assert.strictEqual(logCalls.length, 6, 'Should have 6 log calls');
+
+      // Verify error calls: error with Error object(2) + debug(1) = 3
+      assert.strictEqual(errorCalls.length, 3, 'Should have 3 error calls');
+    });
+
+    test('Custom writer can route everything to stderr', () => {
+      c8ctl.outputMode = 'text';
+
+      // Simulate stderrWriter behavior
+      const stderrWriter = {
+        log(...data: any[]): void {
+          console.error(...data);
+        },
+        error(...data: any[]): void {
+          console.error(...data);
+        },
+      };
+
+      const logger = new Logger(stderrWriter);
+
+      logger.info('Info to stderr');
+      logger.success('Success to stderr');
+      logger.error('Error to stderr');
+
+      // All output should go to console.error
+      assert.strictEqual(consoleLogSpy.length, 0, 'Nothing should go to stdout');
+      assert.ok(consoleErrorSpy.length > 0, 'Everything should go to stderr');
+
+      const allErrors = consoleErrorSpy.join('\n');
+      assert.ok(allErrors.includes('Info to stderr'));
+      assert.ok(allErrors.includes('Success to stderr'));
+      assert.ok(allErrors.includes('Error to stderr'));
+    });
+
+    test('Custom writer works with JSON mode', () => {
+      c8ctl.outputMode = 'json';
+      const logOutput: any[] = [];
+      const errorOutput: any[] = [];
+
+      const customWriter = {
+        log(...data: any[]): void {
+          logOutput.push(data[0]);
+        },
+        error(...data: any[]): void {
+          errorOutput.push(data[0]);
+        },
+      };
+
+      const logger = new Logger(customWriter);
+
+      logger.info('JSON info');
+      logger.success('JSON success', 456);
+      logger.error('JSON error');
+
+      // Verify JSON output was captured
+      assert.strictEqual(logOutput.length, 2);
+      const infoObj = JSON.parse(logOutput[0]);
+      assert.strictEqual(infoObj.status, 'info');
+      assert.strictEqual(infoObj.message, 'JSON info');
+
+      const successObj = JSON.parse(logOutput[1]);
+      assert.strictEqual(successObj.status, 'success');
+      assert.strictEqual(successObj.key, 456);
+
+      assert.strictEqual(errorOutput.length, 1);
+      const errorObj = JSON.parse(errorOutput[0]);
+      assert.strictEqual(errorObj.status, 'error');
+      assert.strictEqual(errorObj.message, 'JSON error');
+    });
+
+    test('Custom writer handles debug with multiple arguments', () => {
+      c8ctl.outputMode = 'text';
+      const errorCalls: any[][] = [];
+
+      const trackingWriter = {
+        log(...data: any[]): void {},
+        error(...data: any[]): void {
+          errorCalls.push(data);
+        },
+      };
+
+      const logger = new Logger(trackingWriter);
+      logger.debugEnabled = true;
+
+      logger.debug('Debug with args', { obj: 'value' }, [1, 2, 3], 'string');
+
+      assert.strictEqual(errorCalls.length, 1);
+      assert.ok(errorCalls[0].length > 1, 'Should have multiple arguments');
+      assert.ok(errorCalls[0][0].includes('Debug with args'));
+    });
+  });
 });
