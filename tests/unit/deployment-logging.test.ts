@@ -26,7 +26,7 @@ describe('Deployment Logging', () => {
     delete process.env.CAMUNDA_BASE_URL;
     delete process.env.CAMUNDA_CLIENT_ID;
     delete process.env.CAMUNDA_CLIENT_SECRET;
-    delete process.env.CAMUNDA_AUDIENCE;
+    delete process.env.CAMUNDA_TOKEN_AUDIENCE;
     delete process.env.CAMUNDA_OAUTH_URL;
     delete process.env.CAMUNDA_USERNAME;
     delete process.env.CAMUNDA_PASSWORD;

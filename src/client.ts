@@ -2,7 +2,7 @@
  * SDK client factory using resolved configuration
  */
 
-import { createCamundaClient, type CamundaClient } from '@camunda8/orchestration-cluster-api';
+import { createCamundaClient, type CamundaClient, type CamundaOptions } from '@camunda8/orchestration-cluster-api';
 import { resolveClusterConfig } from './config.ts';
 
 /**
@@ -12,7 +12,7 @@ export function createClient(profileFlag?: string): CamundaClient {
   const config = resolveClusterConfig(profileFlag);
   
   // Build config object for the SDK
-  const sdkConfig: any = {
+  const sdkConfig: Partial<CamundaOptions["config"]> = {
     CAMUNDA_REST_ADDRESS: config.baseUrl,
   };
 
@@ -22,7 +22,7 @@ export function createClient(profileFlag?: string): CamundaClient {
     sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
     sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
     if (config.audience) {
-      sdkConfig.CAMUNDA_OAUTH_AUDIENCE = config.audience;
+      sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
     }
     if (config.oAuthUrl) {
       sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
