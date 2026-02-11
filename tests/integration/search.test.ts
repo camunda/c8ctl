@@ -238,7 +238,7 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
       async () => {
         await searchJobs({
           type: 'n00b',
-          state: 'ACTIVATABLE',
+          state: 'CREATED',
         });
       },
       'Search jobs should not throw an error'
