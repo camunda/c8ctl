@@ -92,6 +92,7 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl get'));
     assert.ok(output.includes('process-instance'));
+    assert.ok(output.includes('incident'));
     assert.ok(output.includes('topology'));
     assert.ok(output.includes('form'));
   });
@@ -206,6 +207,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('--variables'));
     assert.ok(output.includes('process-definition (pd)'));
     assert.ok(output.includes('--xml'));
+    assert.ok(output.includes('incident (inc)'));
     assert.ok(output.includes('topology'));
     assert.ok(output.includes('form'));
     assert.ok(output.includes('--userTask'));

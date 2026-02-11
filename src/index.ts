@@ -22,7 +22,7 @@ import {
   getProcessDefinition,
 } from './commands/process-definitions.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
-import { listIncidents, resolveIncident } from './commands/incidents.ts';
+import { listIncidents, getIncident, resolveIncident } from './commands/incidents.ts';
 import { listJobs, activateJobs, completeJob, failJob } from './commands/jobs.ts';
 import { publishMessage, correlateMessage } from './commands/messages.ts';
 import { getTopology } from './commands/topology.ts';
@@ -380,6 +380,17 @@ async function main() {
       profile: values.profile as string | undefined,
       state: values.state as string | undefined,
       processInstanceKey: values.processInstanceKey as string | undefined,
+    });
+    return;
+  }
+
+  if (verb === 'get' && normalizedResource === 'incident') {
+    if (!args[0]) {
+      logger.error('Incident key required. Usage: c8 get inc <key>');
+      process.exit(1);
+    }
+    await getIncident(args[0], {
+      profile: values.profile as string | undefined,
     });
     return;
   }

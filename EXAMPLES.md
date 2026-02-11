@@ -143,6 +143,13 @@ c8 list inc --state=ACTIVE
 c8 list inc --processInstanceKey=2251799813685249
 ```
 
+### Get Incident by Key
+
+```bash
+c8 get inc 2251799813685251
+c8 get incident 2251799813685251
+```
+
 ### Resolve Incident
 
 ```bash
