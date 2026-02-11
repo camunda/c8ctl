@@ -467,7 +467,7 @@ c8ctl <command>
 - `CAMUNDA_BASE_URL`: Cluster base URL
 - `CAMUNDA_CLIENT_ID`: OAuth client ID
 - `CAMUNDA_CLIENT_SECRET`: OAuth client secret
-- `CAMUNDA_AUDIENCE`: OAuth audience
+- `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 
