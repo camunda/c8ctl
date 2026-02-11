@@ -19,7 +19,7 @@ import { Logger, type LogWriter } from '../logger.ts';
  * and handles token refresh on 401 errors.
  *
  * @param camundaClient - The Camunda client instance for auth
- * @param timeout - Request timeout in milliseconds (default: 30000)
+ * @param timeout - Request timeout in milliseconds (default: 60000)
  * @returns Custom fetch function compatible with MCP SDK transport
  */
 export function createCamundaFetch(
@@ -61,22 +61,31 @@ export function createCamundaFetch(
           'Received 401 (Unauthorized) response, attempting token refresh and retrying',
         );
 
-        // Force token refresh
+        // Force token refresh and rebuild headers
         await camundaClient.forceAuthRefresh();
         const freshHeaders = await camundaClient.getAuthHeaders();
-
-        // Rebuild headers with fresh auth
         const retryHeaders = new Headers(init?.headers);
         Object.entries(freshHeaders).forEach(([key, value]) => {
           retryHeaders.set(key, value);
         });
 
-        // Retry the request once with fresh token
-        return await fetch(input, {
-          ...init,
-          headers: retryHeaders,
-          signal: init?.signal,
-        });
+        // Retry with fresh token and timeout
+        const retryTimeoutController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryTimeoutController.abort(), timeout);
+
+        try {
+          const retrySignal = init?.signal
+            ? AbortSignal.any([init.signal, retryTimeoutController.signal])
+            : retryTimeoutController.signal;
+
+          return await fetch(input, {
+            ...init,
+            headers: retryHeaders,
+            signal: retrySignal,
+          });
+        } finally {
+          clearTimeout(retryTimeoutId);
+        }
       }
 
       clearTimeout(timeoutId);
