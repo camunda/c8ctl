@@ -198,7 +198,7 @@ describe('Config Module', () => {
     });
   });
 
-  describe('Environment Variable Configuration', () => {
+  describe('Credentials', () => {
     let originalEnv: NodeJS.ProcessEnv;
 
     beforeEach(() => {
@@ -212,11 +212,12 @@ describe('Config Module', () => {
       c8ctl.activeProfile = undefined;
     });
 
-    test('resolveClusterConfig reads OAuth config from environment variables', () => {
+    test('resolveClusterConfig reads all OAuth config from environment variables', () => {
       process.env.CAMUNDA_BASE_URL = 'https://test.camunda.io';
       process.env.CAMUNDA_CLIENT_ID = 'test-client-id';
       process.env.CAMUNDA_CLIENT_SECRET = 'test-secret';
       process.env.CAMUNDA_TOKEN_AUDIENCE = 'test-audience';
+      process.env.CAMUNDA_OAUTH_URL = 'https://oauth.example.com/token';
 
       const config = resolveClusterConfig();
 
@@ -224,6 +225,36 @@ describe('Config Module', () => {
       assert.strictEqual(config.clientId, 'test-client-id');
       assert.strictEqual(config.clientSecret, 'test-secret');
       assert.strictEqual(config.audience, 'test-audience');
+      assert.strictEqual(config.oAuthUrl, 'https://oauth.example.com/token');
+    });
+
+    test('resolveClusterConfig reads basic auth config from environment variables', () => {
+      process.env.CAMUNDA_BASE_URL = 'https://test.camunda.io';
+      process.env.CAMUNDA_USERNAME = 'test-user';
+      process.env.CAMUNDA_PASSWORD = 'test-password';
+
+      const config = resolveClusterConfig();
+
+      assert.strictEqual(config.baseUrl, 'https://test.camunda.io');
+      assert.strictEqual(config.username, 'test-user');
+      assert.strictEqual(config.password, 'test-password');
+    });
+
+    test('resolveClusterConfig falls back to localhost with demo credentials', () => {
+      // Clear all env vars
+      delete process.env.CAMUNDA_BASE_URL;
+      delete process.env.CAMUNDA_CLIENT_ID;
+      delete process.env.CAMUNDA_CLIENT_SECRET;
+      delete process.env.CAMUNDA_TOKEN_AUDIENCE;
+      delete process.env.CAMUNDA_OAUTH_URL;
+      delete process.env.CAMUNDA_USERNAME;
+      delete process.env.CAMUNDA_PASSWORD;
+
+      const config = resolveClusterConfig();
+
+      assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(config.username, 'demo');
+      assert.strictEqual(config.password, 'demo');
     });
   });
 });
