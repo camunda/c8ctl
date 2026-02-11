@@ -164,6 +164,18 @@ async function main() {
   // Normalize resource
   const normalizedResource = resource ? normalizeResource(resource) : '';
 
+  // Check for --help flag with verb + resource (e.g., "create pi --help")
+  if (values.help) {
+    // Show command-specific help if available
+    if (verb === 'list' || verb === 'get' || verb === 'create' || verb === 'complete' || verb === 'await') {
+      showCommandHelp(verb);
+    } else {
+      // Show general help for other commands
+      showHelp();
+    }
+    return;
+  }
+
   // Handle session commands
   if (verb === 'use') {
     if (normalizedResource === 'profile') {
