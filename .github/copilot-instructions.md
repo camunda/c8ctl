@@ -14,6 +14,12 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
   - README.md, EXAMPLES.md and other documentation
   - shell completion
   
+- for every implementation, make sure to add or update tests that cover the new functionality. This includes unit tests for individual functions and integration tests for end-to-end scenarios. Tests should be comprehensive and cover edge cases to ensure the robustness of the codebase.
+
+- in any test, only use the implemented cli commands to interact with the system. Avoid using internal functions or direct API calls in tests, as this can lead to brittle tests that are tightly coupled to the implementation. By using the cli commands, you ensure that your tests are more resilient to changes in the underlying code and better reflect real-world usage.
+
+- don't use Promises in tests to wait for the overall system status to settle. Instead, use the polling helper from tests/utils/polling.ts to wait for specific conditions to be met.
+  
 - as a final Quality Gate before running tests, make sure to run `npm run build` to catch any compilation errors that might be missed by the test suite. This is especially important for catching type errors and ensuring that the codebase remains robust and maintainable.
 
 ### Work Environment

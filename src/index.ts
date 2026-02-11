@@ -31,6 +31,7 @@ import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
 import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/plugins.ts';
 import { showCompletion } from './commands/completion.ts';
+import { getUserTaskForm, getStartForm, getForm } from './commands/forms.ts';
 import { 
   loadInstalledPlugins, 
   executePluginCommand
@@ -91,6 +92,8 @@ function parseCliArgs() {
         from: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'boolean' },
+        userTask: { type: 'boolean' },
+        processDefinition: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -486,6 +489,41 @@ async function main() {
     await getTopology({
       profile: values.profile as string | undefined,
     });
+    return;
+  }
+
+  // Handle form commands
+  if (verb === 'get' && normalizedResource === 'form') {
+    if (!args[0]) {
+      logger.error('Key required. Usage: c8 get form <key> [--userTask|--ut] [--processDefinition|--pd]');
+      process.exit(1);
+    }
+    
+    // Check for flags and their aliases
+    const isUserTask = process.argv.includes('--userTask') || process.argv.includes('--ut');
+    const isProcessDefinition = process.argv.includes('--processDefinition') || process.argv.includes('--pd');
+    
+    // If both flags specified, error
+    if (isUserTask && isProcessDefinition) {
+      logger.error('Cannot specify both --userTask|--ut and --processDefinition|--pd. Use one or the other, or omit both to search both types.');
+      process.exit(1);
+    }
+    
+    // If specific flag provided, use that API
+    if (isUserTask) {
+      await getUserTaskForm(args[0], {
+        profile: values.profile as string | undefined,
+      });
+    } else if (isProcessDefinition) {
+      await getStartForm(args[0], {
+        profile: values.profile as string | undefined,
+      });
+    } else {
+      // No flag provided - try both
+      await getForm(args[0], {
+        profile: values.profile as string | undefined,
+      });
+    }
     return;
   }
 
