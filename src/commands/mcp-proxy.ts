@@ -47,9 +47,8 @@ function createCamundaFetch(
         ? AbortSignal.any([init.signal, timeoutController.signal])
         : timeoutController.signal;
 
-      // Make the request with merged headers (exclude init.headers to avoid overwriting)
-      const { headers: _, ...restInit } = init || {};
-      const response = await fetch(input, { ...restInit, headers, signal });
+      // Make the request with merged headers
+      const response = await fetch(input, { ...init, headers, signal });
 
       // Handle 401 with token refresh and retry
       if (response.status === 401) {
@@ -69,10 +68,9 @@ function createCamundaFetch(
           retryHeaders.set(key, value);
         });
 
-        // Retry the request once with fresh token (exclude init.headers to avoid overwriting)
-        const { headers: _, ...restInit } = init || {};
+        // Retry the request once with fresh token
         return await fetch(input, {
-          ...restInit,
+          ...init,
           headers: retryHeaders,
           signal: init?.signal,
         });
@@ -102,10 +100,9 @@ function createCamundaFetch(
 }
 
 /**
- * Normalize remote MCP URL to ensure it points to the MCP endpoint (assuming it ends with /mcp).
- * - If URL has no path or just "/", append "/mcp"
- * - If URL ends with "/v2", replace with "/mcp"
- * - If URL already ends with "/mcp", keep it as is
+ * Normalize remote MCP URL to ensure it points to the MCP endpoint (assuming it ends with /mcp/cluster).
+ * - If URL has no path or just "/", append "/mcp/cluster"
+ * - If URL ends with "/v2", replace with "/mcp/cluster"
  */
 function normalizeRemoteMcpUrl(url: string, mcpServerPath: string): string {
   try {
