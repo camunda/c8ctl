@@ -41,6 +41,9 @@ c8 list pi --state=ACTIVE
 ```bash
 c8 get pi 2251799813685249
 c8 get process-instance 2251799813685249
+
+# Get process instance with variables
+c8 get pi 2251799813685249 --variables
 ```
 
 ### Create Process Instance
@@ -137,6 +140,13 @@ c8 list inc --state=ACTIVE
 
 # Filter by process instance
 c8 list inc --processInstanceKey=2251799813685249
+```
+
+### Get Incident by Key
+
+```bash
+c8 get inc 2251799813685251
+c8 get incident 2251799813685251
 ```
 
 ### Resolve Incident

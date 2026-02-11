@@ -52,7 +52,7 @@ Usage: c8ctl <command> [resource] [options]
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
   search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables)
-  get       <resource> <key> Get resource by key (pi, pd, topology)
+  get       <resource> <key> Get resource by key (pi, pd, inc, topology)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
   await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
@@ -80,6 +80,7 @@ Flags:
   --profile <name>      Use specific profile for this command
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
+  --variables           Get process instance with variables (use with 'get pi')
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
@@ -121,6 +122,7 @@ Examples:
   c8ctl search variables --value=foo Search for variables by value
   c8ctl search variables --processInstanceKey=123 --fullValue  Search variables with full values
   c8ctl get pi 123456                Get process instance by key
+  c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl create pi --id=myProcess
@@ -152,7 +154,7 @@ export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
     search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables',
-    get: 'process-instance (pi), process-definition (pd), topology',
+    get: 'process-instance (pi), process-definition (pd), incident (inc), topology',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
@@ -248,10 +250,14 @@ Usage: c8ctl get <resource> <key> [flags]
 Resources and their available flags:
 
   process-instance (pi) <key>
+    --variables              Include variables for the process instance
     --profile <name>         Use specific profile
 
   process-definition (pd) <key>
     --xml                    Return process definition as XML
+    --profile <name>         Use specific profile
+
+  incident (inc) <key>
     --profile <name>         Use specific profile
 
   topology
@@ -259,8 +265,10 @@ Resources and their available flags:
 
 Examples:
   c8ctl get pi 2251799813685249
+  c8ctl get pi 2251799813685249 --variables
   c8ctl get pd 2251799813685250
   c8ctl get pd 2251799813685250 --xml
+  c8ctl get inc 2251799813685251
   c8ctl get topology
 `.trim());
 }
