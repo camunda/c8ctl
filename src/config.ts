@@ -649,7 +649,7 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   const baseUrl = process.env.CAMUNDA_BASE_URL;
   const clientId = process.env.CAMUNDA_CLIENT_ID;
   const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
-  const audience = process.env.CAMUNDA_AUDIENCE;
+  const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
   const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
   const username = process.env.CAMUNDA_USERNAME;
   const password = process.env.CAMUNDA_PASSWORD;
