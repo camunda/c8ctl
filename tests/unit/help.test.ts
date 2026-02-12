@@ -243,6 +243,158 @@ describe('Help Module', () => {
     assert.ok(output.includes('--variables'));
   });
 
+  test('showCommandHelp shows search help with resources and flags', () => {
+    showCommandHelp('search');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl search'));
+    assert.ok(output.includes('process-instances (pi)'));
+    assert.ok(output.includes('process-definitions (pd)'));
+    assert.ok(output.includes('user-tasks (ut)'));
+    assert.ok(output.includes('incidents (inc)'));
+    assert.ok(output.includes('jobs'));
+    assert.ok(output.includes('variables'));
+    assert.ok(output.includes('--bpmnProcessId'));
+    assert.ok(output.includes('--iid'));
+    assert.ok(output.includes('--iname'));
+    assert.ok(output.includes('Wildcard Search'));
+    assert.ok(output.includes('Case-Insensitive Search'));
+  });
+
+  test('showCommandHelp shows deploy help', () => {
+    showCommandHelp('deploy');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl deploy'));
+    assert.ok(output.includes('BPMN'));
+    assert.ok(output.includes('DMN'));
+    assert.ok(output.includes('form'));
+    assert.ok(output.includes('Building Blocks'));
+  });
+
+  test('showCommandHelp shows run help', () => {
+    showCommandHelp('run');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl run'));
+    assert.ok(output.includes('Deploy and start'));
+    assert.ok(output.includes('--variables'));
+  });
+
+  test('showCommandHelp shows watch help', () => {
+    showCommandHelp('watch');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl watch'));
+    assert.ok(output.includes('Watch files'));
+    assert.ok(output.includes('Alias: w'));
+    assert.ok(output.includes('--variables'));
+  });
+
+  test('showCommandHelp shows cancel help', () => {
+    showCommandHelp('cancel');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl cancel'));
+    assert.ok(output.includes('process-instance (pi)'));
+  });
+
+  test('showCommandHelp shows resolve help', () => {
+    showCommandHelp('resolve');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl resolve'));
+    assert.ok(output.includes('incident'));
+    assert.ok(output.includes('Alias: inc'));
+  });
+
+  test('showCommandHelp shows fail help', () => {
+    showCommandHelp('fail');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl fail'));
+    assert.ok(output.includes('job'));
+    assert.ok(output.includes('--retries'));
+    assert.ok(output.includes('--errorMessage'));
+  });
+
+  test('showCommandHelp shows activate help', () => {
+    showCommandHelp('activate');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl activate'));
+    assert.ok(output.includes('jobs'));
+    assert.ok(output.includes('--maxJobsToActivate'));
+    assert.ok(output.includes('--timeout'));
+    assert.ok(output.includes('--worker'));
+  });
+
+  test('showCommandHelp shows publish help', () => {
+    showCommandHelp('publish');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl publish'));
+    assert.ok(output.includes('message'));
+    assert.ok(output.includes('Alias: msg'));
+    assert.ok(output.includes('--correlationKey'));
+    assert.ok(output.includes('--timeToLive'));
+  });
+
+  test('showCommandHelp shows correlate help', () => {
+    showCommandHelp('correlate');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl correlate'));
+    assert.ok(output.includes('message'));
+    assert.ok(output.includes('--correlationKey'));
+  });
+
+  test('showCommandHelp handles watch alias w', () => {
+    showCommandHelp('w');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl watch'));
+    assert.ok(output.includes('Alias: w'));
+  });
+
+  test('showHelp includes all help commands', () => {
+    showHelp();
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl help search'));
+    assert.ok(output.includes('c8ctl help deploy'));
+    assert.ok(output.includes('c8ctl help run'));
+    assert.ok(output.includes('c8ctl help watch'));
+    assert.ok(output.includes('c8ctl help cancel'));
+    assert.ok(output.includes('c8ctl help resolve'));
+    assert.ok(output.includes('c8ctl help fail'));
+    assert.ok(output.includes('c8ctl help activate'));
+    assert.ok(output.includes('c8ctl help publish'));
+    assert.ok(output.includes('c8ctl help correlate'));
+  });
+
+  test('showVerbResources shows resources for help', () => {
+    showVerbResources('help');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl help'));
+    assert.ok(output.includes('list'));
+    assert.ok(output.includes('get'));
+    assert.ok(output.includes('create'));
+    assert.ok(output.includes('complete'));
+    assert.ok(output.includes('await'));
+    assert.ok(output.includes('search'));
+    assert.ok(output.includes('deploy'));
+    assert.ok(output.includes('run'));
+    assert.ok(output.includes('watch'));
+    assert.ok(output.includes('cancel'));
+    assert.ok(output.includes('resolve'));
+    assert.ok(output.includes('fail'));
+    assert.ok(output.includes('activate'));
+    assert.ok(output.includes('publish'));
+    assert.ok(output.includes('correlate'));
+  });
+
   test('showCommandHelp handles unknown command', () => {
     showCommandHelp('unknown');
     
