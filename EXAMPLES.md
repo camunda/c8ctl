@@ -8,6 +8,7 @@ Comprehensive examples for all c8ctl operations.
 - [User Tasks](#user-tasks)
 - [Incidents](#incidents)
 - [Jobs](#jobs)
+- [Search](#search)
 - [Messages](#messages)
 - [Deployments](#deployments)
 - [Forms](#forms)
@@ -204,6 +205,164 @@ c8 fail job 2251799813685252
 
 # Fail job with custom message and retries
 c8 fail job 2251799813685252 --retries=3 --errorMessage="Email service unavailable"
+```
+
+---
+
+## Search
+
+The `search` command provides powerful filtering across all major resource types. Unlike `list`, which shows resources with basic filters, `search` supports fine-grained query options. All search commands respect the active tenant and profile.
+
+### Search Process Definitions
+
+```bash
+# Search by BPMN process ID
+c8 search pd --id=order-process
+c8 search process-definitions --bpmnProcessId=order-process
+
+# Search by name
+c8 search pd --name=Order
+
+# Search by key
+c8 search pd --key=2251799813685249
+
+# Combine filters
+c8 search pd --id=order-process --name=Order
+
+# Using a specific profile
+c8 search pd --id=order-process --profile=prod
+```
+
+### Search Process Instances
+
+```bash
+# Search by state
+c8 search pi --state=ACTIVE
+c8 search pi --state=COMPLETED
+
+# Search by process definition ID
+c8 search pi --id=order-process
+c8 search pi --bpmnProcessId=order-process
+
+# Search by process definition key
+c8 search pi --processDefinitionKey=2251799813685249
+
+# Search by process instance key
+c8 search pi --key=2251799813685260
+
+# Search by parent process instance (for call activities)
+c8 search pi --parentProcessInstanceKey=2251799813685250
+
+# Combine filters
+c8 search pi --id=order-process --state=ACTIVE
+```
+
+### Search User Tasks
+
+```bash
+# Search by state
+c8 search ut --state=CREATED
+c8 search ut --state=COMPLETED
+
+# Search by assignee
+c8 search ut --assignee=john.doe
+
+# Search by process instance
+c8 search ut --processInstanceKey=2251799813685249
+
+# Search by process definition key
+c8 search ut --processDefinitionKey=2251799813685249
+
+# Search by element ID (BPMN element)
+c8 search ut --elementId=UserTask_Approve
+
+# Combine filters
+c8 search ut --state=CREATED --assignee=john.doe
+```
+
+### Search Incidents
+
+```bash
+# Search by state
+c8 search inc --state=ACTIVE
+c8 search incidents --state=ACTIVE
+
+# Search by process instance
+c8 search inc --processInstanceKey=2251799813685249
+
+# Search by process definition key
+c8 search inc --processDefinitionKey=2251799813685249
+
+# Search by error type
+c8 search inc --errorType=JOB_NO_RETRIES
+
+# Combine filters
+c8 search inc --state=ACTIVE --errorType=JOB_NO_RETRIES
+```
+
+### Search Jobs
+
+```bash
+# Search by type
+c8 search jobs --type=email-service
+
+# Search by state
+c8 search jobs --state=CREATED
+c8 search jobs --state=FAILED
+
+# Search by process instance
+c8 search jobs --processInstanceKey=2251799813685249
+
+# Search by process definition key
+c8 search jobs --processDefinitionKey=2251799813685249
+
+# Combine filters
+c8 search jobs --type=email-service --state=CREATED
+```
+
+### Search Variables
+
+```bash
+# Search by variable name
+c8 search variables --name=orderId
+
+# Search by variable value
+c8 search variables --value=12345
+
+# Search by process instance
+c8 search variables --processInstanceKey=2251799813685249
+
+# Search by scope key
+c8 search variables --scopeKey=2251799813685260
+
+# Show full (non-truncated) variable values
+c8 search variables --name=orderPayload --fullValue
+
+# Combine filters
+c8 search variables --name=orderId --processInstanceKey=2251799813685249
+
+# Combine name and full value
+c8 search variables --name=orderPayload --processInstanceKey=2251799813685249 --fullValue
+```
+
+**Note**: By default, long variable values are truncated in the output. Truncated values are marked with a `✓` in the "Truncated" column. Use `--fullValue` to see the complete values.
+
+### Search Output
+
+Search results are displayed as tables in text mode:
+
+```bash
+# Text mode (default)
+c8 search pi --state=ACTIVE
+# Key              | Process ID     | State  | Version | Tenant ID
+# 2251799813685260 | order-process  | ACTIVE | 3       | <default>
+# 2251799813685270 | order-process  | ACTIVE | 3       | <default>
+# Found 2 process instance(s)
+
+# JSON mode
+c8 output json
+c8 search pi --state=ACTIVE
+# [{"processInstanceKey":"2251799813685260",...}, ...]
 ```
 
 ---
@@ -647,12 +806,16 @@ c8 create pi --id=order-process --variables='{"orderId":"12345"}'
 
 c8 get pi 2251799813685249
 
-# 4. Complete user task
-c8 list ut --state=CREATED
+# 4. Search for related resources
+c8 search pi --id=order-process --state=ACTIVE
+c8 search variables --processInstanceKey=2251799813685249
+
+# 5. Complete user task
+c8 search ut --state=CREATED --processInstanceKey=2251799813685249
 c8 complete ut 2251799813685250 --variables='{"approved":true}'
 
-# 5. Handle incidents if any
-c8 list inc --state=ACTIVE
+# 6. Handle incidents if any
+c8 search inc --state=ACTIVE --processInstanceKey=2251799813685249
 c8 resolve inc 2251799813685251
 ```
 
@@ -693,11 +856,13 @@ c8 list pi
 ## Tips
 
 1. **Use Aliases**: Save typing with resource aliases (pi, ut, inc, msg)
-2. **Profile Override**: Use `--profile` flag for one-off commands without changing session
-3. **JSON Output**: Use `c8 output json` for scripting and automation
-4. **Building Blocks**: Organize reusable processes in `_bb-*` folders for deployment priority
-5. **Session State**: Set profile and tenant once, use everywhere
-6. **Help**: Run `c8 <verb>` without resource to see available resources for that verb
+2. **Search vs List**: Use `search` for fine-grained filtering, `list` for simple overviews
+3. **Profile Override**: Use `--profile` flag for one-off commands without changing session
+4. **JSON Output**: Use `c8 output json` for scripting and automation
+5. **Building Blocks**: Organize reusable processes in `_bb-*` folders for deployment priority
+6. **Session State**: Set profile and tenant once, use everywhere
+7. **Full Values**: Use `--fullValue` with `search variables` to see non-truncated values
+8. **Help**: Run `c8 <verb>` without resource to see available resources for that verb
 
 ---
 
