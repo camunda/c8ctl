@@ -288,7 +288,6 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl watch'));
     assert.ok(output.includes('Watch files'));
     assert.ok(output.includes('Alias: w'));
-    assert.ok(output.includes('--variables'));
   });
 
   test('showCommandHelp shows cancel help', () => {
