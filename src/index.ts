@@ -111,6 +111,12 @@ function parseCliArgs() {
         fullValue: { type: 'boolean' },
         userTask: { type: 'boolean' },
         processDefinition: { type: 'boolean' },
+        iname: { type: 'string' },
+        iid: { type: 'string' },
+        iassignee: { type: 'string' },
+        ierrorMessage: { type: 'string' },
+        itype: { type: 'string' },
+        ivalue: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -586,6 +592,8 @@ async function main() {
         name: values.name as string | undefined,
         version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
         key: values.key as string | undefined,
+        iProcessDefinitionId: values.iid as string | undefined,
+        iName: values.iname as string | undefined,
       });
       return;
     }
@@ -598,6 +606,7 @@ async function main() {
         state: values.state as string | undefined,
         key: values.key as string | undefined,
         parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,
+        iProcessDefinitionId: values.iid as string | undefined,
       });
       return;
     }
@@ -610,6 +619,7 @@ async function main() {
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
         elementId: values.elementId as string | undefined,
+        iAssignee: values.iassignee as string | undefined,
       });
       return;
     }
@@ -620,7 +630,11 @@ async function main() {
         state: values.state as string | undefined,
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
+        processDefinitionId: values.bpmnProcessId as string | undefined,
         errorType: values.errorType as string | undefined,
+        errorMessage: values.errorMessage as string | undefined,
+        iErrorMessage: values.ierrorMessage as string | undefined,
+        iProcessDefinitionId: values.iid as string | undefined,
       });
       return;
     }
@@ -632,6 +646,7 @@ async function main() {
         type: values.type as string | undefined,
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
+        iType: values.itype as string | undefined,
       });
       return;
     }
@@ -644,6 +659,8 @@ async function main() {
         processInstanceKey: values.processInstanceKey as string | undefined,
         scopeKey: values.scopeKey as string | undefined,
         fullValue: values.fullValue as boolean | undefined,
+        iName: values.iname as string | undefined,
+        iValue: values.ivalue as string | undefined,
       });
       return;
     }

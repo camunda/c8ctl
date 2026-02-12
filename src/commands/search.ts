@@ -9,6 +9,54 @@ import { resolveTenantId } from '../config.ts';
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
 /**
+ * Detect wildcard characters (* or ?) in a string value and return
+ * a $like filter object for the API. Returns the plain string for exact match.
+ *
+ * Supported wildcards (per Camunda REST API LikeFilter):
+ *   * — matches zero, one, or multiple characters
+ *   ? — matches exactly one character
+ *   Escape with backslash: \* or \?
+ */
+export const hasUnescapedWildcard = (value: string): boolean =>
+  /(?<!\\)[*?]/.test(value);
+
+export const toStringFilter = (value: string): string | { $like: string } =>
+  hasUnescapedWildcard(value) ? { $like: value } : value;
+
+/**
+ * Convert a wildcard pattern (* and ?) to a case-insensitive RegExp.
+ * Handles escaped wildcards (\* and \?).
+ */
+export const wildcardToRegex = (pattern: string): RegExp => {
+  let regex = '';
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] === '\\' && i + 1 < pattern.length && (pattern[i + 1] === '*' || pattern[i + 1] === '?')) {
+      regex += pattern[i + 1] === '*' ? '\\*' : '\\?';
+      i++;
+    } else if (pattern[i] === '*') {
+      regex += '.*';
+    } else if (pattern[i] === '?') {
+      regex += '.';
+    } else {
+      regex += pattern[i].replace(/[[\]{}()+.,\\^$|#]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${regex}$`, 'i');
+};
+
+/**
+ * Test if a value matches a wildcard pattern case-insensitively.
+ * Without wildcards, performs exact case-insensitive match.
+ */
+export const matchesCaseInsensitive = (value: string | undefined | null, pattern: string): boolean => {
+  if (value == null) return false;
+  return wildcardToRegex(pattern).test(value);
+};
+
+/** Max page size for case-insensitive search (client-side filtering needs broader result set) */
+const CI_PAGE_SIZE = 1000;
+
+/**
  * Search process definitions
  */
 export async function searchProcessDefinitions(options: {
@@ -17,10 +65,13 @@ export async function searchProcessDefinitions(options: {
   name?: string;
   version?: number;
   key?: string;
+  iProcessDefinitionId?: string;
+  iName?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!(options.iProcessDefinitionId || options.iName);
 
   try {
     const filter: any = {
@@ -29,12 +80,14 @@ export async function searchProcessDefinitions(options: {
       },
     };
 
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
+
     if (options.processDefinitionId) {
-      filter.filter.processDefinitionId = options.processDefinitionId;
+      filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
     }
 
     if (options.name) {
-      filter.filter.name = options.name;
+      filter.filter.name = toStringFilter(options.name);
     }
 
     if (options.version !== undefined) {
@@ -46,6 +99,15 @@ export async function searchProcessDefinitions(options: {
     }
 
     const result = await client.searchProcessDefinitions(filter, { consistency: { waitUpToMs: 0 } });
+
+    // Client-side case-insensitive post-filtering
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((pd: any) => {
+        if (options.iProcessDefinitionId && !matchesCaseInsensitive(pd.processDefinitionId, options.iProcessDefinitionId)) return false;
+        if (options.iName && !matchesCaseInsensitive(pd.name, options.iName)) return false;
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((pd: any) => ({
@@ -78,10 +140,12 @@ export async function searchProcessInstances(options: {
   state?: string;
   key?: string;
   parentProcessInstanceKey?: string;
+  iProcessDefinitionId?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!options.iProcessDefinitionId;
 
   try {
     const filter: any = {
@@ -90,8 +154,10 @@ export async function searchProcessInstances(options: {
       },
     };
 
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
+
     if (options.processDefinitionId) {
-      filter.filter.processDefinitionId = options.processDefinitionId;
+      filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
     }
 
     if (options.processDefinitionKey) {
@@ -111,6 +177,13 @@ export async function searchProcessInstances(options: {
     }
 
     const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
+
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((pi: any) => {
+        if (options.iProcessDefinitionId && !matchesCaseInsensitive(pi.processDefinitionId, options.iProcessDefinitionId)) return false;
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((pi: any) => ({
@@ -143,10 +216,12 @@ export async function searchUserTasks(options: {
   processInstanceKey?: string;
   processDefinitionKey?: string;
   elementId?: string;
+  iAssignee?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!options.iAssignee;
 
   try {
     const filter: any = {
@@ -155,12 +230,14 @@ export async function searchUserTasks(options: {
       },
     };
 
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
+
     if (options.state) {
       filter.filter.state = options.state;
     }
 
     if (options.assignee) {
-      filter.filter.assignee = options.assignee;
+      filter.filter.assignee = toStringFilter(options.assignee);
     }
 
     if (options.processInstanceKey) {
@@ -176,6 +253,13 @@ export async function searchUserTasks(options: {
     }
 
     const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
+
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((task: any) => {
+        if (options.iAssignee && !matchesCaseInsensitive(task.assignee, options.iAssignee)) return false;
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((task: any) => ({
@@ -207,11 +291,16 @@ export async function searchIncidents(options: {
   state?: string;
   processInstanceKey?: string;
   processDefinitionKey?: string;
+  processDefinitionId?: string;
   errorType?: string;
+  errorMessage?: string;
+  iErrorMessage?: string;
+  iProcessDefinitionId?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!(options.iErrorMessage || options.iProcessDefinitionId);
 
   try {
     const filter: any = {
@@ -219,6 +308,8 @@ export async function searchIncidents(options: {
         tenantId,
       },
     };
+
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
 
     if (options.state) {
       filter.filter.state = options.state;
@@ -236,7 +327,23 @@ export async function searchIncidents(options: {
       filter.filter.errorType = options.errorType;
     }
 
+    if (options.errorMessage) {
+      filter.filter.errorMessage = toStringFilter(options.errorMessage);
+    }
+
+    if (options.processDefinitionId) {
+      filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
+    }
+
     const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
+
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((incident: any) => {
+        if (options.iErrorMessage && !matchesCaseInsensitive(incident.errorMessage, options.iErrorMessage)) return false;
+        if (options.iProcessDefinitionId && !matchesCaseInsensitive(incident.processDefinitionId, options.iProcessDefinitionId)) return false;
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((incident: any) => ({
@@ -269,10 +376,12 @@ export async function searchJobs(options: {
   type?: string;
   processInstanceKey?: string;
   processDefinitionKey?: string;
+  iType?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!options.iType;
 
   try {
     const filter: any = {
@@ -281,12 +390,14 @@ export async function searchJobs(options: {
       },
     };
 
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
+
     if (options.state) {
       filter.filter.state = options.state;
     }
 
     if (options.type) {
-      filter.filter.type = options.type;
+      filter.filter.type = toStringFilter(options.type);
     }
 
     if (options.processInstanceKey) {
@@ -298,6 +409,13 @@ export async function searchJobs(options: {
     }
 
     const result = await client.searchJobs(filter, { consistency: { waitUpToMs: 0 } });
+
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((job: any) => {
+        if (options.iType && !matchesCaseInsensitive(job.type, options.iType)) return false;
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((job: any) => ({
@@ -331,10 +449,13 @@ export async function searchVariables(options: {
   processInstanceKey?: string;
   scopeKey?: string;
   fullValue?: boolean;
+  iName?: string;
+  iValue?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
+  const hasCiFilter = !!(options.iName || options.iValue);
 
   try {
     const filter: any = {
@@ -343,12 +464,14 @@ export async function searchVariables(options: {
       },
     };
 
+    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
+
     if (options.name) {
-      filter.filter.name = options.name;
+      filter.filter.name = toStringFilter(options.name);
     }
 
     if (options.value) {
-      filter.filter.value = options.value;
+      filter.filter.value = toStringFilter(options.value);
     }
 
     if (options.processInstanceKey) {
@@ -366,6 +489,23 @@ export async function searchVariables(options: {
       { ...filter, truncateValues }, 
       { consistency: { waitUpToMs: 0 } }
     );
+
+    if (hasCiFilter && result.items) {
+      result.items = result.items.filter((variable: any) => {
+        if (options.iName && !matchesCaseInsensitive(variable.name, options.iName)) return false;
+        if (options.iValue) {
+          // Variable values come JSON-encoded from the API (e.g., '"PendingReview"').
+          // Unwrap the JSON string for comparison so users can match the actual value.
+          let rawValue = variable.value;
+          try {
+            const parsed = JSON.parse(rawValue);
+            if (typeof parsed === 'string') rawValue = parsed;
+          } catch { /* keep original value */ }
+          if (!matchesCaseInsensitive(rawValue, options.iValue)) return false;
+        }
+        return true;
+      });
+    }
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((variable: any) => {

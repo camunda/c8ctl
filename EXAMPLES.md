@@ -211,7 +211,84 @@ c8 fail job 2251799813685252 --retries=3 --errorMessage="Email service unavailab
 
 ## Search
 
-The `search` command provides powerful filtering across all major resource types. Unlike `list`, which shows resources with basic filters, `search` supports fine-grained query options. All search commands respect the active tenant and profile.
+The `search` command provides powerful filtering across all major resource types. Unlike `list`, which shows resources with basic filters, `search` supports fine-grained query options including wildcard matching and case-insensitive search. All search commands respect the active tenant and profile.
+
+### Wildcard Search
+
+String filters support wildcard matching using the `$like` operator (applied automatically when wildcards are detected):
+
+- `*` — matches zero, one, or multiple characters
+- `?` — matches exactly one character
+- Escape with backslash: `\*` or `\?`
+
+```bash
+# Find process definitions with names containing "order"
+c8 search pd --name='*order*'
+
+# Find process definitions starting with "main"
+c8 search pd --name='main*'
+
+# Find jobs with type matching a pattern
+c8 search jobs --type='*-service'
+
+# Find variables with names matching a pattern
+c8 search variables --name='order*'
+
+# Single character wildcard
+c8 search pd --id='process-v?'
+```
+
+**Wildcard-capable fields per resource:**
+
+| Resource | Fields supporting wildcards |
+|---|---|
+| Process Definitions | `--name`, `--id` (bpmnProcessId) |
+| Process Instances | `--id` (processDefinitionId) |
+| User Tasks | `--assignee` |
+| Incidents | `--errorMessage`, `--id` (processDefinitionId) |
+| Jobs | `--type` |
+| Variables | `--name`, `--value` |
+
+### Case-Insensitive Search
+
+For case-insensitive matching, prefix the flag name with `i` (e.g., `--name` becomes `--iname`). Case-insensitive filtering is performed client-side after fetching results from the server, so it works with wildcards too.
+
+```bash
+# Case-insensitive name search — matches "order", "Order", "ORDER", etc.
+c8 search pd --iname=order
+
+# Case-insensitive wildcard search
+c8 search pd --iname='*ORDER*'
+
+# Case-insensitive assignee search
+c8 search ut --iassignee=John
+
+# Case-insensitive job type search
+c8 search jobs --itype='*Service*'
+
+# Case-insensitive error message search
+c8 search inc --ierrorMessage='*timeout*'
+
+# Case-insensitive variable name and value
+c8 search variables --iname='OrderId'
+c8 search variables --ivalue='*pending*'
+
+# Combine case-insensitive with regular (case-sensitive) filters
+c8 search pd --iname='*order*' --key=2251799813685249
+```
+
+**Case-insensitive flags per resource:**
+
+| Resource | Case-insensitive flags |
+|---|---|
+| Process Definitions | `--iname`, `--iid` |
+| Process Instances | `--iid` |
+| User Tasks | `--iassignee` |
+| Incidents | `--ierrorMessage`, `--iid` |
+| Jobs | `--itype` |
+| Variables | `--iname`, `--ivalue` |
+
+> **Note:** Case-insensitive filtering fetches up to 1000 results from the server and filters client-side. For very large result sets, consider combining with other (case-sensitive) filters to narrow results.
 
 ### Search Process Definitions
 
@@ -295,6 +372,9 @@ c8 search inc --processDefinitionKey=2251799813685249
 
 # Search by error type
 c8 search inc --errorType=JOB_NO_RETRIES
+
+# Search by error message (with wildcard)
+c8 search inc --errorMessage='*timeout*'
 
 # Combine filters
 c8 search inc --state=ACTIVE --errorType=JOB_NO_RETRIES

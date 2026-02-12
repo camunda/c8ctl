@@ -46,7 +46,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
 
   case \${cword} in
     1)
@@ -223,6 +223,12 @@ _c8ctl() {
     '--ut[Get form for a user task (alias for --userTask)]'
     '--processDefinition[Get start form for a process definition]'
     '--pd[Get start form for a process definition (alias for --processDefinition)]'
+    '--iname[Case-insensitive name filter]:pattern:'
+    '--iid[Case-insensitive process definition ID filter]:pattern:'
+    '--iassignee[Case-insensitive assignee filter]:pattern:'
+    '--ierrorMessage[Case-insensitive error message filter]:pattern:'
+    '--itype[Case-insensitive job type filter]:pattern:'
+    '--ivalue[Case-insensitive variable value filter]:pattern:'
   )
 
   case \$CURRENT in
@@ -515,6 +521,18 @@ complete -c c8ctl -l processDefinition -d 'Get start form for a process definiti
 complete -c c8 -l processDefinition -d 'Get start form for a process definition'
 complete -c c8ctl -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
 complete -c c8 -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
+complete -c c8ctl -l iname -d 'Case-insensitive name filter' -r
+complete -c c8 -l iname -d 'Case-insensitive name filter' -r
+complete -c c8ctl -l iid -d 'Case-insensitive process definition ID filter' -r
+complete -c c8 -l iid -d 'Case-insensitive process definition ID filter' -r
+complete -c c8ctl -l iassignee -d 'Case-insensitive assignee filter' -r
+complete -c c8 -l iassignee -d 'Case-insensitive assignee filter' -r
+complete -c c8ctl -l ierrorMessage -d 'Case-insensitive error message filter' -r
+complete -c c8 -l ierrorMessage -d 'Case-insensitive error message filter' -r
+complete -c c8ctl -l itype -d 'Case-insensitive job type filter' -r
+complete -c c8 -l itype -d 'Case-insensitive job type filter' -r
+complete -c c8ctl -l ivalue -d 'Case-insensitive variable value filter' -r
+complete -c c8 -l ivalue -d 'Case-insensitive variable value filter' -r
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'

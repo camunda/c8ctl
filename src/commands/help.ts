@@ -100,10 +100,26 @@ Search Flags:
   --assignee <user>                 Filter by assignee (user tasks)
   --elementId <id>                  Filter by element ID (user tasks)
   --errorType <type>                Filter by error type (incidents)
+  --errorMessage <msg>              Filter by error message (incidents)
   --type <type>                     Filter by type (jobs)
   --value <value>                   Filter by variable value
   --scopeKey <key>                  Filter by scope key (variables)
   --fullValue                       Return full variable values (default: truncated)
+
+  Wildcard Search:
+  String filters support wildcards: * (any chars) and ? (single char).
+  Example: --name='*main*' matches all names containing "main".
+
+  Case-Insensitive Search (--i prefix):
+  --iname <pattern>                 Case-insensitive --name filter
+  --iid <pattern>                   Case-insensitive --bpmnProcessId filter
+  --iassignee <pattern>             Case-insensitive --assignee filter
+  --ierrorMessage <pattern>         Case-insensitive --errorMessage filter
+  --itype <pattern>                 Case-insensitive --type filter
+  --ivalue <pattern>                Case-insensitive --value filter
+  Prefix any string filter with 'i' for case-insensitive matching.
+  Wildcards (* and ?) are supported. Filtering is applied client-side.
+  Example: --iname='*ORDER*' matches "order", "Order", "ORDER", etc.
 
 Resource Aliases:
   pi   = process-instance(s)
@@ -117,12 +133,16 @@ Examples:
   c8ctl list pd                      List process definitions
   c8ctl search pi --state=ACTIVE     Search for active process instances
   c8ctl search pd --bpmnProcessId=myProcess  Search process definitions by ID
+  c8ctl search pd --name='*main*'    Search process definitions with wildcard
   c8ctl search ut --assignee=john    Search user tasks assigned to john
   c8ctl search inc --state=ACTIVE    Search for active incidents
   c8ctl search jobs --type=myJobType Search jobs by type
+  c8ctl search jobs --type='*service*' Search jobs with type containing "service"
   c8ctl search variables --name=myVar  Search for variables by name
   c8ctl search variables --value=foo Search for variables by value
   c8ctl search variables --processInstanceKey=123 --fullValue  Search variables with full values
+  c8ctl search pd --iname='*order*'    Case-insensitive search by name
+  c8ctl search ut --iassignee=John     Case-insensitive search by assignee
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
