@@ -10,7 +10,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 ## Implementation Details
 
 - always make sure that cli commands, resources and options are reflected in 
-  - the `help`tests
+  - the `help` tests
   - README.md, EXAMPLES.md and other documentation
   - shell completion
   
