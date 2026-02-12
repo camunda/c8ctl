@@ -71,6 +71,14 @@ describe('Help Module', () => {
     assert.ok(output.includes('--fetchVariables'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
+    
+    // Check for case-insensitive search flags
+    assert.ok(output.includes('--iname'));
+    assert.ok(output.includes('--iid'));
+    assert.ok(output.includes('--iassignee'));
+    assert.ok(output.includes('--ierrorMessage'));
+    assert.ok(output.includes('--itype'));
+    assert.ok(output.includes('--ivalue'));
   });
 
   test('showVerbResources shows resources for list', () => {

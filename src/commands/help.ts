@@ -51,6 +51,7 @@ Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
+  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables)
   get       <resource> <key> Get resource by key (pi, pd, inc, topology, form)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
@@ -88,6 +89,38 @@ Flags:
   --version, -v         Show version
   --help, -h            Show help
 
+Search Flags:
+  --bpmnProcessId <id>              Filter by process definition ID
+  --processDefinitionKey <key>      Filter by process definition key
+  --processInstanceKey <key>        Filter by process instance key
+  --parentProcessInstanceKey <key>  Filter by parent process instance key
+  --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
+  --name <name>                     Filter by name (variables, process definitions)
+  --key <key>                       Filter by key
+  --assignee <user>                 Filter by assignee (user tasks)
+  --elementId <id>                  Filter by element ID (user tasks)
+  --errorType <type>                Filter by error type (incidents)
+  --errorMessage <msg>              Filter by error message (incidents)
+  --type <type>                     Filter by type (jobs)
+  --value <value>                   Filter by variable value
+  --scopeKey <key>                  Filter by scope key (variables)
+  --fullValue                       Return full variable values (default: truncated)
+
+  Wildcard Search:
+  String filters support wildcards: * (any chars) and ? (single char).
+  Example: --name='*main*' matches all names containing "main".
+
+  Case-Insensitive Search (--i prefix):
+  --iname <pattern>                 Case-insensitive --name filter
+  --iid <pattern>                   Case-insensitive --bpmnProcessId filter
+  --iassignee <pattern>             Case-insensitive --assignee filter
+  --ierrorMessage <pattern>         Case-insensitive --errorMessage filter
+  --itype <pattern>                 Case-insensitive --type filter
+  --ivalue <pattern>                Case-insensitive --value filter
+  Prefix any string filter with 'i' for case-insensitive matching.
+  Wildcards (* and ?) are supported. Filtering is applied client-side.
+  Example: --iname='*ORDER*' matches "order", "Order", "ORDER", etc.
+
 Resource Aliases:
   pi   = process-instance(s)
   pd   = process-definition(s)
@@ -98,6 +131,18 @@ Resource Aliases:
 Examples:
   c8ctl list pi                      List process instances
   c8ctl list pd                      List process definitions
+  c8ctl search pi --state=ACTIVE     Search for active process instances
+  c8ctl search pd --bpmnProcessId=myProcess  Search process definitions by ID
+  c8ctl search pd --name='*main*'    Search process definitions with wildcard
+  c8ctl search ut --assignee=john    Search user tasks assigned to john
+  c8ctl search inc --state=ACTIVE    Search for active incidents
+  c8ctl search jobs --type=myJobType Search jobs by type
+  c8ctl search jobs --type='*service*' Search jobs with type containing "service"
+  c8ctl search variables --name=myVar  Search for variables by name
+  c8ctl search variables --value=foo Search for variables by value
+  c8ctl search variables --processInstanceKey=123 --fullValue  Search variables with full values
+  c8ctl search pd --iname='*order*'    Case-insensitive search by name
+  c8ctl search ut --iassignee=John     Case-insensitive search by assignee
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pi 123456 --variables    Get process instance with variables
   c8ctl get pd 123456                Get process definition by key
@@ -133,6 +178,7 @@ For detailed help on specific commands with all available flags:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
+    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables',
     get: 'process-instance (pi), process-definition (pd), incident (inc), topology, form',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',
