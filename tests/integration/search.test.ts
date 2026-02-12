@@ -1,13 +1,16 @@
 /**
  * Integration tests for search commands
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
+ *
+ * These tests validate the project's wrapper functions in src/commands/search.ts,
+ * not the underlying @camunda8/orchestration-cluster-api npm module directly.
  */
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { createClient } from '../../src/client.ts';
 import { deploy } from '../../src/commands/deployments.ts';
-import { 
+import { createProcessInstance } from '../../src/commands/process-instances.ts';
+import {
   searchProcessDefinitions,
   searchProcessInstances,
   searchUserTasks,
@@ -15,293 +18,223 @@ import {
   searchJobs,
   searchVariables,
 } from '../../src/commands/search.ts';
+import { pollUntil } from '../utils/polling.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { ProcessDefinitionId } from '@camunda8/orchestration-cluster-api';
+import { getUserDataDir } from '../../src/config.ts';
 
-// Wait time for Elasticsearch to index data before search queries
-const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 8000;
+// Polling configuration for Elasticsearch consistency
+const POLL_TIMEOUT_MS = 15000;
+const POLL_INTERVAL_MS = 1000;
 
 describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
     // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(homedir(), 'Library', 'Application Support', 'c8ctl', 'session.json');
+    const sessionPath = join(getUserDataDir(), 'session.json');
     if (existsSync(sessionPath)) {
       unlinkSync(sessionPath);
     }
   });
 
   test('search process definitions by processDefinitionId', async () => {
-    const client = createClient();
-    
     // Deploy a process to ensure at least one exists
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search using the command function
-    // Note: This tests the function works without error; actual output is logged
-    await assert.doesNotReject(
-      async () => {
-        await searchProcessDefinitions({
-          processDefinitionId: 'simple-process',
-        });
-      },
-      'Search process definitions should not throw an error'
-    );
+
+    // Poll until the search command finds the deployed process definition
+    const found = await pollUntil(async () => {
+      const result = await searchProcessDefinitions({
+        processDefinitionId: 'simple-process',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find the deployed process definition');
   });
 
   test('search process definitions with filters', async () => {
     // Deploy a process
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    const client = createClient();
-    
-    // Search to get the key
-    const result = await client.searchProcessDefinitions({
-      filter: {
+
+    // Poll until the process definition is indexed and extract its key
+    let processDefKey: string | undefined;
+    const found = await pollUntil(async () => {
+      const result = await searchProcessDefinitions({
         processDefinitionId: 'simple-process',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(result.items && result.items.length > 0, 'Should find the deployed process');
-    
-    const processDefKey = result.items[0].processDefinitionKey?.toString();
-    
-    // Test search command with key filter
-    await assert.doesNotReject(
-      async () => {
-        await searchProcessDefinitions({
-          key: processDefKey,
-        });
-      },
-      'Search process definitions by key should not throw an error'
-    );
+      });
+      if (result?.items && result.items.length > 0) {
+        const item = result.items[0] as any;
+        processDefKey = (item.processDefinitionKey || item.key)?.toString();
+        return processDefKey !== undefined;
+      }
+      return false;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Should find the deployed process');
+    assert.ok(processDefKey, 'Should have process definition key');
+
+    // Search by key using the command function
+    const result = await searchProcessDefinitions({ key: processDefKey });
+    assert.ok(result?.items && result.items.length > 0, 'Search by key should find the process');
   });
 
   test('search process instances by state', async () => {
-    // Deploy and create an instance
+    // Deploy and create an instance using CLI wrappers
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    const client = createClient();
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for process instances with state filter
-    await assert.doesNotReject(
-      async () => {
-        await searchProcessInstances({
-          processDefinitionId: 'simple-process',
-          state: 'COMPLETED',
-        });
-      },
-      'Search process instances should not throw an error'
-    );
+
+    // Poll until completed process instances appear in search results
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+        state: 'COMPLETED',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find completed process instances');
   });
 
   test('search process instances by processDefinitionKey', async () => {
-    const client = createClient();
-    
     // Deploy a process
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Get the process definition key
-    const pdResult = await client.searchProcessDefinitions({
-      filter: {
+
+    // Poll until process definition is indexed and extract its key
+    let processDefKey: string | undefined;
+    const indexed = await pollUntil(async () => {
+      const result = await searchProcessDefinitions({
         processDefinitionId: 'simple-process',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find the deployed process');
-    const processDefKey = pdResult.items[0].processDefinitionKey?.toString();
-    
-    // Create an instance
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
+      });
+      if (result?.items && result.items.length > 0) {
+        const item = result.items[0] as any;
+        processDefKey = (item.processDefinitionKey || item.key)?.toString();
+        return processDefKey !== undefined;
+      }
+      return false;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(indexed, 'Should find the deployed process');
+    assert.ok(processDefKey, 'Should have process definition key');
+
+    // Create an instance using CLI wrapper
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search by process definition key
-    await assert.doesNotReject(
-      async () => {
-        await searchProcessInstances({
-          processDefinitionKey: processDefKey,
-        });
-      },
-      'Search process instances by key should not throw an error'
-    );
+
+    // Poll until search by processDefinitionKey finds results
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionKey: processDefKey,
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search by processDefinitionKey should find process instances');
   });
 
   test('search user tasks with filters', async () => {
-    const client = createClient();
-    
     // Deploy a process with a user task
     await deploy(['tests/fixtures/list-pis'], {});
-    
-    // Get the process definition to find the process ID
-    const pdResult = await client.searchProcessDefinitions({
-      filter: {},
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find deployed processes');
-    
-    // Find the process with ID Process_0t60ay7 (from min-usertask.bpmn)
-    const userTaskProcess = pdResult.items.find(pd => pd.processDefinitionId === 'Process_0t60ay7');
-    assert.ok(userTaskProcess, 'Should find the user task process');
-    
+
     // Create an instance to generate a user task
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0t60ay7'),
+    await createProcessInstance({
+      processDefinitionId: 'Process_0t60ay7',
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for user tasks
-    await assert.doesNotReject(
-      async () => {
-        await searchUserTasks({
-          state: 'CREATED',
-        });
-      },
-      'Search user tasks should not throw an error'
-    );
+
+    // Poll until the user task appears in search results
+    const found = await pollUntil(async () => {
+      const result = await searchUserTasks({
+        state: 'CREATED',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find created user tasks');
   });
 
   test('search incidents with filters', async () => {
-    const client = createClient();
-    
     // Deploy a process that will create an incident (service task without job type configuration)
     await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
-    
-    // Get the process definition
-    const pdResult = await client.searchProcessDefinitions({
-      filter: {
-        processDefinitionId: 'Process_0yyrstd',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find the deployed process');
-    
+
     // Create an instance to generate an incident
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('Process_0yyrstd'),
+    await createProcessInstance({
+      processDefinitionId: 'Process_0yyrstd',
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for incidents
-    await assert.doesNotReject(
-      async () => {
-        await searchIncidents({
-          state: 'ACTIVE',
-        });
-      },
-      'Search incidents should not throw an error'
-    );
+
+    // Poll until the incident appears in search results
+    const found = await pollUntil(async () => {
+      const result = await searchIncidents({
+        state: 'ACTIVE',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find active incidents');
   });
 
   test('search jobs with filters', async () => {
-    const client = createClient();
-    
     // Deploy a process with a service task (job)
     await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-    
-    // Get the process definition
-    const pdResult = await client.searchProcessDefinitions({
-      filter: {
-        processDefinitionId: 'Process_18glkb3',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(pdResult.items && pdResult.items.length > 0, 'Should find the deployed process');
-    
+
     // Create an instance to generate jobs
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('Process_18glkb3'),
+    await createProcessInstance({
+      processDefinitionId: 'Process_18glkb3',
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for jobs with type 'n00b' (from the service task)
-    await assert.doesNotReject(
-      async () => {
-        await searchJobs({
-          type: 'n00b',
-          state: 'CREATED',
-        });
-      },
-      'Search jobs should not throw an error'
-    );
+
+    // Poll until the job appears in search results
+    const found = await pollUntil(async () => {
+      const result = await searchJobs({
+        type: 'n00b',
+        state: 'CREATED',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find created jobs');
   });
 
   test('search variables with filters', async () => {
-    const client = createClient();
-    
     // Deploy a process and create an instance with variables
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Create an instance with variables
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
-      variables: {
-        testVar: 'testValue',
-        count: 42,
-        flag: true,
-      },
+
+    // Create an instance with variables using the CLI wrapper
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
+      variables: JSON.stringify({ testVar: 'testValue', count: 42, flag: true }),
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for variables by name
-    await assert.doesNotReject(
-      async () => {
-        await searchVariables({
-          name: 'testVar',
-        });
-      },
-      'Search variables should not throw an error'
-    );
+
+    // Poll until the variable appears in search results
+    const found = await pollUntil(async () => {
+      const result = await searchVariables({
+        name: 'testVar',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find variable by name');
   });
 
   test('search variables with fullValue option', async () => {
-    const client = createClient();
-    
     // Deploy a process and create an instance with a long variable value
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    
+
     const longValue = 'a'.repeat(1000); // Create a long value that might be truncated
-    
-    await client.createProcessInstance({
-      processDefinitionId: ProcessDefinitionId.assumeExists('simple-process'),
-      variables: {
-        longVar: longValue,
-      },
+
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
+      variables: JSON.stringify({ longVar: longValue }),
     });
-    
-    // Wait for Elasticsearch consistency
-    await new Promise(resolve => setTimeout(resolve, ELASTICSEARCH_CONSISTENCY_WAIT_MS));
-    
-    // Search for variables with full values
-    await assert.doesNotReject(
-      async () => {
-        await searchVariables({
-          name: 'longVar',
-          fullValue: true,
-        });
-      },
-      'Search variables with fullValue should not throw an error'
-    );
+
+    // Poll until the variable appears in search results with full value
+    const found = await pollUntil(async () => {
+      const result = await searchVariables({
+        name: 'longVar',
+        fullValue: true,
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search with fullValue should find the variable');
   });
 });

@@ -6,6 +6,8 @@ import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
+export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
+
 /**
  * Search process definitions
  */
@@ -15,7 +17,7 @@ export async function searchProcessDefinitions(options: {
   name?: string;
   version?: number;
   key?: string;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -58,6 +60,8 @@ export async function searchProcessDefinitions(options: {
     } else {
       logger.info('No process definitions found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search process definitions', error as Error);
     process.exit(1);
@@ -74,7 +78,7 @@ export async function searchProcessInstances(options: {
   state?: string;
   key?: string;
   parentProcessInstanceKey?: string;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -121,6 +125,8 @@ export async function searchProcessInstances(options: {
     } else {
       logger.info('No process instances found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search process instances', error as Error);
     process.exit(1);
@@ -137,7 +143,7 @@ export async function searchUserTasks(options: {
   processInstanceKey?: string;
   processDefinitionKey?: string;
   elementId?: string;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -185,6 +191,8 @@ export async function searchUserTasks(options: {
     } else {
       logger.info('No user tasks found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search user tasks', error as Error);
     process.exit(1);
@@ -200,7 +208,7 @@ export async function searchIncidents(options: {
   processInstanceKey?: string;
   processDefinitionKey?: string;
   errorType?: string;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -244,6 +252,8 @@ export async function searchIncidents(options: {
     } else {
       logger.info('No incidents found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search incidents', error as Error);
     process.exit(1);
@@ -259,7 +269,7 @@ export async function searchJobs(options: {
   type?: string;
   processInstanceKey?: string;
   processDefinitionKey?: string;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -303,6 +313,8 @@ export async function searchJobs(options: {
     } else {
       logger.info('No jobs found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search jobs', error as Error);
     process.exit(1);
@@ -319,7 +331,7 @@ export async function searchVariables(options: {
   processInstanceKey?: string;
   scopeKey?: string;
   fullValue?: boolean;
-}): Promise<void> {
+}): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -380,6 +392,8 @@ export async function searchVariables(options: {
     } else {
       logger.info('No variables found matching the criteria');
     }
+
+    return result as SearchResult;
   } catch (error) {
     logger.error('Failed to search variables', error as Error);
     process.exit(1);
