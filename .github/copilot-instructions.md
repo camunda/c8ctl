@@ -39,7 +39,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ### Development
 
-- use Node.js 22 LTS only by respecting .nvmrc
+- **only use** Node.js 22 LTS and respect .nvmrc
 - this is a native Node.js project running TS files
 - there is no build step for development. Only compile for test purposes or release.
 - on changes, make sure all tests pass and a build via `npm run build` works without errors
