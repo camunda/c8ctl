@@ -5,8 +5,10 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { createCamundaFetch } from '../../src/commands/mcp-proxy.ts';
-import type { CamundaClient } from '@camunda8/orchestration-cluster-api';
+import type { createClient } from '../../src/client.ts';
 import type { Logger } from '../../src/logger.ts';
+
+type CamundaClient = ReturnType<typeof createClient>;
 
 describe('createCamundaFetch', () => {
   let originalFetch: typeof fetch;

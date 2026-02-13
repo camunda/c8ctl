@@ -6,8 +6,10 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createCamundaFetch } from '../../src/commands/mcp-proxy.ts';
-import type { CamundaClient } from '@camunda8/orchestration-cluster-api';
+import type { createClient } from '../../src/client.ts';
 import type { Logger } from '../../src/logger.ts';
+
+type CamundaClient = ReturnType<typeof createClient>;
 
 describe('MCP Proxy Mock Server Integration Tests', () => {
   let mockServer: Server;
