@@ -1,4 +1,4 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   ListToolsRequestSchema,
@@ -158,7 +158,7 @@ class McpProxy {
   private client: Client;
   private clientTransport: StreamableHTTPClientTransport;
 
-  private server: Server;
+  private mcpServer: McpServer;
   private serverTransport: StdioServerTransport | null = null;
 
   constructor(
@@ -191,7 +191,7 @@ class McpProxy {
     );
 
     // Initialize MCP server for STDIO (stateless mode - tools only)
-    this.server = new Server(
+    this.mcpServer = new McpServer(
       {
         name: 'c8ctl-mcp-proxy',
         version,
@@ -239,7 +239,7 @@ class McpProxy {
       this.serverTransport = new StdioServerTransport();
 
       // Connect server to STDIO transport
-      await this.server.connect(this.serverTransport);
+      await this.mcpServer.connect(this.serverTransport);
 
       this.logger.info('MCP proxy started successfully');
     } catch (error) {
@@ -265,7 +265,7 @@ class McpProxy {
 
     try {
       // Close server (internally closes serverTransport)
-      await this.server.close();
+      await this.mcpServer.close();
 
       // Close client (internally closes clientTransport)
       await this.client.close();
@@ -284,7 +284,7 @@ class McpProxy {
    */
   private setupHandlers(): void {
     // Forward tools/list to remote server
-    this.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    this.mcpServer.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
       this.logger.debug('Forwarding tools/list request');
       try {
         const result = await this.client.listTools(request.params);
@@ -300,7 +300,7 @@ class McpProxy {
     });
 
     // Forward tools/call to remote server
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.mcpServer.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       this.logger.debug(`Forwarding tools/call: ${request.params?.name}`);
       try {
         const result = await this.client.callTool(request.params);
