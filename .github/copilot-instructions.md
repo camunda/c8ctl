@@ -10,7 +10,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 ## Implementation Details
 
 - always make sure that cli commands, resources and options are reflected in 
-  - the `help`tests
+  - the `help` tests
   - README.md, EXAMPLES.md and other documentation
   - shell completion
   
@@ -27,7 +27,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
 - prefer cross-platform solutions where reasonable
 
-- always consult the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api for API details and usage examples. It is the main source of truth for how to interact with the Camunda 8 Orchestration Cluster API. As a backup, a copy of the REST API documentation is available in OpenAPI format in the `assets/c8/rest-api` folder.
+- always consult the GitHub repository camunda/orchestration-cluster-api-js for API details and usage examples. It is the main source of truth for how to interact with the Camunda 8 Orchestration Cluster API. As a backup, a copy of the REST API documentation is available in OpenAPI format in the `assets/c8/rest-api` folder. As a last resort, you should refer to the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api.
 
 ### Terminal Commands
 

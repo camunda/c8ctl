@@ -13,6 +13,7 @@ A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orc
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys 
+- **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
 ## Beware the 🤖
@@ -108,6 +109,19 @@ c8ctl cancel pi 123456
 c8ctl get form 123456                        # Get form (searches both user task and process definition)
 c8ctl get form 123456 --ut                   # Get form for user task only
 c8ctl get form 123456 --pd                   # Get start form for process definition only
+
+# Search resources with filters
+c8ctl search pi --state=ACTIVE         # Search active process instances
+c8ctl search pd --id=myProcess         # Search process definitions by ID
+c8ctl search pd --name='*order*'       # Wildcard search (* = any chars, ? = single char)
+c8ctl search pd --id='process-v?'      # Single-char wildcard (matches process-v1, process-v2, …)
+c8ctl search pd --iname='*ORDER*'      # Case-insensitive search (--i prefix)
+c8ctl search ut --iassignee=John       # Case-insensitive assignee search
+c8ctl search ut --assignee=john        # Search user tasks by assignee
+c8ctl search inc --state=ACTIVE        # Search active incidents
+c8ctl search jobs --type='*service*'   # Search jobs with type containing "service"
+c8ctl search variables --name=myVar    # Search variables by name
+c8ctl search variables --fullValue     # Search with full (non-truncated) values
 
 # Deploy and run
 c8ctl deploy ./my-process.bpmn         # Deploy a single file
@@ -364,6 +378,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 
 **Verbs**: 
 - `list` - List resources
+- `search` - Search resources with filters
 - `get` - Get resource by key
 - `create` - Create resource
 - `cancel` - Cancel resource
@@ -385,7 +400,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `output` - Set output format
 - `completion` - Generate shell completion script
 
-**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, message (msg), topology, profile, tenant, plugin
+**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables, message (msg), topology, profile, tenant, plugin
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 
