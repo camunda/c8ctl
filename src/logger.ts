@@ -7,10 +7,27 @@ import { c8ctl } from './runtime.ts';
 
 export type OutputMode = 'text' | 'json';
 
+export type LogWriter = {
+  log(...data: any[]): void;
+  error(...data: any[]): void;
+};
+
+const defaultLogWriter: LogWriter = {
+  log(...data: any[]): void {
+    console.log(...data);
+  },
+  error(...data: any[]): void {
+    console.error(...data);
+  },
+};
+
 export class Logger {
   private _debugEnabled: boolean = false;
+  private _logWriter: LogWriter;
 
-  constructor() {
+  constructor(logWriter: LogWriter = defaultLogWriter) {
+    this._logWriter = logWriter;
+
     // Enable debug mode if DEBUG or C8CTL_DEBUG env var is set
     this._debugEnabled = process.env.DEBUG === '1' || 
                          process.env.DEBUG === 'true' || 
@@ -36,11 +53,19 @@ export class Logger {
     this._debugEnabled = enabled;
   }
 
+  private _writeLog(...data: any[]): void {
+    this._logWriter.log(...data);
+  }
+
+  private _writeError(...data: any[]): void {
+    this._logWriter.error(...data);
+  }
+
   info(message: string): void {
     if (this.mode === 'text') {
-      console.log(message);
+      this._writeLog(message);
     } else {
-      console.log(JSON.stringify({ status: 'info', message }));
+      this._writeLog(JSON.stringify({ status: 'info', message }));
     }
   }
 
@@ -48,13 +73,13 @@ export class Logger {
     if (this._debugEnabled) {
       if (this.mode === 'text') {
         const timestamp = new Date().toISOString();
-        console.error(`[DEBUG ${timestamp}] ${message}`, ...args);
+        this._writeError(`[DEBUG ${timestamp}] ${message}`, ...args);
       } else {
-        console.error(JSON.stringify({ 
-          level: 'debug', 
-          message, 
+        this._writeError(JSON.stringify({
+          level: 'debug',
+          message,
           timestamp: new Date().toISOString(),
-          args 
+          args
         }));
       }
     }
@@ -63,24 +88,24 @@ export class Logger {
   success(message: string, key?: string | number): void {
     if (this.mode === 'text') {
       if (key !== undefined) {
-        console.log(`✓ ${message} [Key: ${key}]`);
+        this._writeLog(`✓ ${message} [Key: ${key}]`);
       } else {
-        console.log(`✓ ${message}`);
+        this._writeLog(`✓ ${message}`);
       }
     } else {
       if (key !== undefined) {
-        console.log(JSON.stringify({ status: 'success', message, key }));
+        this._writeLog(JSON.stringify({ status: 'success', message, key }));
       } else {
-        console.log(JSON.stringify({ status: 'success', message }));
+        this._writeLog(JSON.stringify({ status: 'success', message }));
       }
     }
   }
 
   error(message: string, error?: Error): void {
     if (this.mode === 'text') {
-      console.error(`✗ ${message}`);
+      this._writeError(`✗ ${message}`);
       if (error) {
-        console.error(`  ${error.message}`);
+        this._writeError(`  ${error.message}`);
       }
     } else {
       const output: any = { status: 'error', message };
@@ -90,14 +115,14 @@ export class Logger {
           output.stack = error.stack;
         }
       }
-      console.error(JSON.stringify(output));
+      this._writeError(JSON.stringify(output));
     }
   }
 
   table(data: any[]): void {
     if (this.mode === 'text') {
       if (data.length === 0) {
-        console.log('No data to display');
+        this._writeLog('No data to display');
         return;
       }
       
@@ -115,24 +140,24 @@ export class Logger {
 
       // Print header
       const header = keys.map(key => key.padEnd(widths[key])).join(' | ');
-      console.log(header);
-      console.log(keys.map(key => '-'.repeat(widths[key])).join('-+-'));
+      this._writeLog(header);
+      this._writeLog(keys.map(key => '-'.repeat(widths[key])).join('-+-'));
 
       // Print rows
       data.forEach(obj => {
         const row = keys.map(key => String(obj[key] ?? '').padEnd(widths[key])).join(' | ');
-        console.log(row);
+        this._writeLog(row);
       });
     } else {
-      console.log(JSON.stringify(data, null, 2));
+      this._writeLog(JSON.stringify(data, null, 2));
     }
   }
 
   json(data: any): void {
     if (this.mode === 'text') {
-      console.log(JSON.stringify(data, null, 2));
+      this._writeLog(JSON.stringify(data, null, 2));
     } else {
-      console.log(JSON.stringify(data));
+      this._writeLog(JSON.stringify(data));
     }
   }
 }

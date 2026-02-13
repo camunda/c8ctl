@@ -74,6 +74,7 @@ Commands:
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
+  mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
   help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
 
 Flags:
@@ -169,6 +170,7 @@ For detailed help on specific commands with all available flags:
   c8ctl help create                  Show all create resources and their flags
   c8ctl help complete                Show all complete resources and their flags
   c8ctl help await                   Show await command with all flags
+  c8ctl help mcp-proxy               Show mcp-proxy setup and usage
   c8ctl help search                  Show all search resources and their flags
   c8ctl help deploy                  Show deploy command with all flags
   c8ctl help run                     Show run command with all flags
@@ -403,6 +405,65 @@ Examples:
   
   # Equivalent to:
   c8ctl create pi --id=order-process --awaitCompletion
+`.trim());
+}
+
+/**
+ * Show detailed help for mcp-proxy command
+ */
+export function showMcpProxyHelp(): void {
+  console.log(`
+c8ctl mcp-proxy - Start MCP proxy server
+
+Usage: c8ctl mcp-proxy [mcp-path] [flags]
+
+Description:
+  Starts a STDIO-based Model Context Protocol (MCP) proxy server that bridges
+  between local MCP clients (like VSCode or other AI assistants) and
+  remote Camunda 8 HTTP MCP servers. The proxy handles authentication by
+  injecting Camunda credentials from your active profile.
+
+Arguments:
+  mcp-path                 Path to the remote MCP endpoint (default: /mcp/cluster)
+
+Flags:
+  --profile <name>         Use specific profile for authentication
+
+How it works:
+  1. Accepts MCP requests via STDIO (standard input/output)
+  2. Forwards requests to the remote Camunda 8 cluster's MCP endpoint
+  3. Injects authentication headers from your c8ctl profile
+  4. Returns responses back through STDIO
+
+Configuration:
+  VSCode  example - add a block like the following to your mcp.json:
+
+  {
+    "servers": {
+      "camunda-cluster": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["c8ctl", "mcp-proxy"]
+      }
+    }
+  }
+
+Examples:
+  # Start proxy with default MCP path and active profile
+  c8ctl mcp-proxy
+
+  # Use specific MCP endpoint path
+  c8ctl mcp-proxy /api/mcp
+
+  # Use specific profile for authentication
+  c8ctl mcp-proxy --profile=production
+
+  # Combine custom path and profile
+  c8ctl mcp-proxy /mcp/v2 --profile=staging
+
+Note:
+  The mcp-proxy command runs in the foreground and communicates via STDIO.
+  It's designed to be launched by MCP clients, not run directly in a terminal.
 `.trim());
 }
 
@@ -758,6 +819,9 @@ export function showCommandHelp(command: string): void {
       break;
     case 'await':
       showAwaitHelp();
+      break;
+    case 'mcp-proxy':
+      showMcpProxyHelp();
       break;
     case 'search':
       showSearchHelp();
