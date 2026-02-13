@@ -171,6 +171,16 @@ For detailed help on specific commands with all available flags:
   c8ctl help complete                Show all complete resources and their flags
   c8ctl help await                   Show await command with all flags
   c8ctl help mcp-proxy               Show mcp-proxy setup and usage
+  c8ctl help search                  Show all search resources and their flags
+  c8ctl help deploy                  Show deploy command with all flags
+  c8ctl help run                     Show run command with all flags
+  c8ctl help watch                   Show watch command with all flags
+  c8ctl help cancel                  Show cancel command with all flags
+  c8ctl help resolve                 Show resolve command with all flags
+  c8ctl help fail                    Show fail command with all flags
+  c8ctl help activate                Show activate command with all flags
+  c8ctl help publish                 Show publish command with all flags
+  c8ctl help correlate               Show correlate command with all flags
 `.trim());
 }
 
@@ -200,6 +210,7 @@ export function showVerbResources(verb: string): void {
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate',
   };
 
   const available = resources[verb];
@@ -457,6 +468,339 @@ Note:
 }
 
 /**
+ * Show detailed help for search command
+ */
+export function showSearchHelp(): void {
+  console.log(`
+c8ctl search - Search resources with filters
+
+Usage: c8ctl search <resource> [flags]
+
+Resources and their available flags:
+
+  process-instances (pi)
+    --bpmnProcessId <id>              Filter by process definition ID
+    --iid <pattern>                   Case-insensitive --bpmnProcessId filter
+    --processDefinitionKey <key>      Filter by process definition key
+    --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
+    --key <key>                       Filter by key
+    --parentProcessInstanceKey <key>  Filter by parent process instance key
+    --profile <name>                  Use specific profile
+
+  process-definitions (pd)
+    --bpmnProcessId <id>              Filter by process definition ID
+    --iid <pattern>                   Case-insensitive --bpmnProcessId filter
+    --name <name>                     Filter by name
+    --iname <pattern>                 Case-insensitive --name filter
+    --key <key>                       Filter by key
+    --profile <name>                  Use specific profile
+
+  user-tasks (ut)
+    --state <state>                   Filter by state (CREATED, COMPLETED, etc.)
+    --assignee <user>                 Filter by assignee
+    --iassignee <pattern>             Case-insensitive --assignee filter
+    --processInstanceKey <key>        Filter by process instance key
+    --processDefinitionKey <key>      Filter by process definition key
+    --elementId <id>                  Filter by element ID
+    --profile <name>                  Use specific profile
+
+  incidents (inc)
+    --state <state>                   Filter by state (ACTIVE, RESOLVED, etc.)
+    --processInstanceKey <key>        Filter by process instance key
+    --processDefinitionKey <key>      Filter by process definition key
+    --bpmnProcessId <id>              Filter by process definition ID
+    --iid <pattern>                   Case-insensitive --bpmnProcessId filter
+    --errorType <type>                Filter by error type
+    --errorMessage <msg>              Filter by error message
+    --ierrorMessage <pattern>         Case-insensitive --errorMessage filter
+    --profile <name>                  Use specific profile
+
+  jobs
+    --state <state>                   Filter by state (ACTIVATABLE, ACTIVATED, etc.)
+    --type <type>                     Filter by job type
+    --itype <pattern>                 Case-insensitive --type filter
+    --processInstanceKey <key>        Filter by process instance key
+    --processDefinitionKey <key>      Filter by process definition key
+    --profile <name>                  Use specific profile
+
+  variables
+    --name <name>                     Filter by variable name
+    --iname <pattern>                 Case-insensitive --name filter
+    --value <value>                   Filter by variable value
+    --ivalue <pattern>                Case-insensitive --value filter
+    --processInstanceKey <key>        Filter by process instance key
+    --scopeKey <key>                  Filter by scope key
+    --fullValue                       Return full variable values (default: truncated)
+    --profile <name>                  Use specific profile
+
+Wildcard Search:
+  String filters support wildcards: * (any chars) and ? (single char).
+  Example: --name='*main*' matches all names containing "main".
+
+Case-Insensitive Search:
+  Prefix any string filter with 'i' for case-insensitive matching.
+  Wildcards (* and ?) are supported. Filtering is applied client-side.
+  Example: --iname='*ORDER*' matches "order", "Order", "ORDER", etc.
+
+Examples:
+  c8ctl search pi --state=ACTIVE
+  c8ctl search pi --bpmnProcessId=order-process
+  c8ctl search pd --name='*main*'
+  c8ctl search pd --iname='*order*'
+  c8ctl search ut --assignee=john.doe
+  c8ctl search ut --iassignee=John
+  c8ctl search inc --state=ACTIVE --processInstanceKey=123456
+  c8ctl search jobs --type=email-service
+  c8ctl search jobs --itype='*SERVICE*'
+  c8ctl search variables --name=orderId
+  c8ctl search variables --value=12345 --fullValue
+`.trim());
+}
+
+/**
+ * Show detailed help for deploy command
+ */
+export function showDeployHelp(): void {
+  console.log(`
+c8ctl deploy - Deploy BPMN, DMN, and form files
+
+Usage: c8ctl deploy [path...] [flags]
+
+Description:
+  Deploy BPMN process definitions, DMN decision tables, and forms to Camunda 8.
+  Automatically discovers all deployable files in the specified paths.
+  If no path is provided, deploys from the current directory.
+
+Flags:
+  --profile <name>         Use specific profile
+
+Supported File Types:
+  - BPMN files (.bpmn)
+  - DMN files (.dmn)
+  - Form files (.form)
+
+Building Blocks:
+  Folders containing '_bb-' in their name are treated as building blocks
+  and are deployed before regular processes.
+
+Examples:
+  c8ctl deploy                          Deploy all files in current directory
+  c8ctl deploy ./src                    Deploy all files in ./src directory
+  c8ctl deploy ./process.bpmn           Deploy a specific BPMN file
+  c8ctl deploy ./src ./forms            Deploy from multiple directories
+  c8ctl deploy --profile=prod          Deploy using specific profile
+`.trim());
+}
+
+/**
+ * Show detailed help for run command
+ */
+export function showRunHelp(): void {
+  console.log(`
+c8ctl run - Deploy and start a process
+
+Usage: c8ctl run <path> [flags]
+
+Description:
+  Deploys a BPMN file and immediately creates a process instance from it.
+  This is a convenience command that combines deploy and create operations.
+
+Flags:
+  --profile <name>         Use specific profile
+  --variables <json>       Process variables as JSON string
+
+Examples:
+  c8ctl run ./my-process.bpmn
+  c8ctl run ./my-process.bpmn --variables='{"orderId":"12345"}'
+  c8ctl run ./my-process.bpmn --profile=prod
+`.trim());
+}
+
+/**
+ * Show detailed help for watch command
+ */
+export function showWatchHelp(): void {
+  console.log(`
+c8ctl watch - Watch files for changes and auto-deploy
+
+Usage: c8ctl watch [path...] [flags]
+
+Alias: w
+
+Description:
+  Watches BPMN, DMN, and form files for changes and automatically deploys them.
+  Useful during development for rapid iteration.
+  If no path is provided, watches the current directory.
+
+Flags:
+  --profile <name>         Use specific profile
+
+Supported File Types:
+  - BPMN files (.bpmn)
+  - DMN files (.dmn)
+  - Form files (.form)
+
+Examples:
+  c8ctl watch                           Watch current directory
+  c8ctl watch ./src                     Watch ./src directory
+  c8ctl watch ./src ./forms             Watch multiple directories
+  c8ctl w ./src                         Use short alias
+  c8ctl watch --profile=dev             Watch using specific profile
+`.trim());
+}
+
+/**
+ * Show detailed help for cancel command
+ */
+export function showCancelHelp(): void {
+  console.log(`
+c8ctl cancel - Cancel a resource
+
+Usage: c8ctl cancel <resource> <key> [flags]
+
+Resources and their available flags:
+
+  process-instance (pi) <key>
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl cancel pi 2251799813685249
+  c8ctl cancel pi 2251799813685249 --profile=prod
+`.trim());
+}
+
+/**
+ * Show detailed help for resolve command
+ */
+export function showResolveHelp(): void {
+  console.log(`
+c8ctl resolve - Resolve an incident
+
+Usage: c8ctl resolve incident <key> [flags]
+
+Alias: inc for incident
+
+Description:
+  Resolves an incident by its key. This marks the incident as resolved
+  and allows the process instance to continue.
+
+Flags:
+  --profile <name>         Use specific profile
+
+Examples:
+  c8ctl resolve inc 2251799813685251
+  c8ctl resolve incident 2251799813685251
+  c8ctl resolve inc 2251799813685251 --profile=prod
+`.trim());
+}
+
+/**
+ * Show detailed help for fail command
+ */
+export function showFailHelp(): void {
+  console.log(`
+c8ctl fail - Fail a job
+
+Usage: c8ctl fail job <key> [flags]
+
+Description:
+  Marks a job as failed with optional error message and retry count.
+
+Flags:
+  --profile <name>         Use specific profile
+  --retries <num>          Number of retries remaining (default: 0)
+  --errorMessage <msg>     Error message describing the failure
+
+Examples:
+  c8ctl fail job 2251799813685252
+  c8ctl fail job 2251799813685252 --retries=3
+  c8ctl fail job 2251799813685252 --errorMessage="Connection timeout"
+  c8ctl fail job 2251799813685252 --retries=2 --errorMessage="Temporary failure"
+`.trim());
+}
+
+/**
+ * Show detailed help for activate command
+ */
+export function showActivateHelp(): void {
+  console.log(`
+c8ctl activate - Activate jobs by type
+
+Usage: c8ctl activate jobs <type> [flags]
+
+Description:
+  Activates jobs of a specific type for processing by a worker.
+
+Flags:
+  --profile <name>         Use specific profile
+  --maxJobsToActivate <num>  Maximum number of jobs to activate (default: 10)
+  --timeout <ms>           Job lock timeout in milliseconds (default: 60000)
+  --worker <name>          Worker name (default: "c8ctl")
+
+Examples:
+  c8ctl activate jobs email-service
+  c8ctl activate jobs payment-processor --maxJobsToActivate=5
+  c8ctl activate jobs data-sync --timeout=120000 --worker=my-worker
+  c8ctl activate jobs batch-job --maxJobsToActivate=100 --profile=prod
+`.trim());
+}
+
+/**
+ * Show detailed help for publish command
+ */
+export function showPublishHelp(): void {
+  console.log(`
+c8ctl publish - Publish a message
+
+Usage: c8ctl publish message <name> [flags]
+
+Alias: msg for message
+
+Description:
+  Publishes a message to Camunda 8 for message correlation.
+
+Flags:
+  --profile <name>         Use specific profile
+  --correlationKey <key>   Correlation key for the message
+  --variables <json>       Message variables as JSON string
+  --timeToLive <ms>        Message time-to-live in milliseconds
+
+Examples:
+  c8ctl publish msg payment-received
+  c8ctl publish message order-confirmed --correlationKey=order-123
+  c8ctl publish msg invoice-paid --variables='{"amount":1000}'
+  c8ctl publish msg notification --correlationKey=user-456 --timeToLive=30000
+`.trim());
+}
+
+/**
+ * Show detailed help for correlate command
+ */
+export function showCorrelateHelp(): void {
+  console.log(`
+c8ctl correlate - Correlate a message
+
+Usage: c8ctl correlate message <name> [flags]
+
+Alias: msg for message
+
+Description:
+  Correlates a message to a specific process instance.
+
+Flags:
+  --profile <name>         Use specific profile
+  --correlationKey <key>   Correlation key for the message (required)
+  --variables <json>       Message variables as JSON string
+  --timeToLive <ms>        Message time-to-live in milliseconds
+
+Examples:
+  c8ctl correlate msg payment-received --correlationKey=order-123
+  c8ctl correlate message order-confirmed --correlationKey=order-456 --variables='{"status":"confirmed"}'
+  c8ctl correlate msg invoice-paid --correlationKey=inv-789 --timeToLive=60000
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -478,6 +822,37 @@ export function showCommandHelp(command: string): void {
       break;
     case 'mcp-proxy':
       showMcpProxyHelp();
+      break;
+    case 'search':
+      showSearchHelp();
+      break;
+    case 'deploy':
+      showDeployHelp();
+      break;
+    case 'run':
+      showRunHelp();
+      break;
+    case 'watch':
+    case 'w':
+      showWatchHelp();
+      break;
+    case 'cancel':
+      showCancelHelp();
+      break;
+    case 'resolve':
+      showResolveHelp();
+      break;
+    case 'fail':
+      showFailHelp();
+      break;
+    case 'activate':
+      showActivateHelp();
+      break;
+    case 'publish':
+      showPublishHelp();
+      break;
+    case 'correlate':
+      showCorrelateHelp();
       break;
     default:
       console.log(`\nNo detailed help available for: ${command}`);

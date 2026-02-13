@@ -72,10 +72,21 @@ After installation, the CLI is available as `c8ctl` (or its alias `c8`).
 c8ctl help
 
 # Show detailed help for specific commands with all flags
-c8ctl help list      # Shows all list resources and their flags
-c8ctl help get       # Shows all get resources and their flags
-c8ctl help create    # Shows all create resources and their flags
-c8ctl help complete  # Shows all complete resources and their flags
+c8ctl help list       # Shows all list resources and their flags
+c8ctl help get        # Shows all get resources and their flags
+c8ctl help create     # Shows all create resources and their flags
+c8ctl help complete   # Shows all complete resources and their flags
+c8ctl help await      # Shows await command with all flags
+c8ctl help search     # Shows all search resources and their flags
+c8ctl help deploy     # Shows deploy command with all flags
+c8ctl help run        # Shows run command with all flags
+c8ctl help watch      # Shows watch command with all flags
+c8ctl help cancel     # Shows cancel command with all flags
+c8ctl help resolve    # Shows resolve command with all flags
+c8ctl help fail       # Shows fail command with all flags
+c8ctl help activate   # Shows activate command with all flags
+c8ctl help publish    # Shows publish command with all flags
+c8ctl help correlate  # Shows correlate command with all flags
 
 # Show version
 c8ctl --version
