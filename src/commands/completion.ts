@@ -43,7 +43,7 @@ _c8ctl_completions() {
   local use_resources="profile tenant"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local help_resources="list get create complete"
+  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
@@ -410,6 +410,17 @@ _c8ctl() {
             'get:Show get command help'
             'create:Show create command help'
             'complete:Show complete command help'
+            'await:Show await command help'
+            'search:Show search command help'
+            'deploy:Show deploy command help'
+            'run:Show run command help'
+            'watch:Show watch command help'
+            'cancel:Show cancel command help'
+            'resolve:Show resolve command help'
+            'fail:Show fail command help'
+            'activate:Show activate command help'
+            'publish:Show publish command help'
+            'correlate:Show correlate command help'
           )
           _describe 'resource' resources
           ;;
@@ -771,6 +782,28 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show cre
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show create command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'await' -d 'Show await command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'await' -d 'Show await command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'search' -d 'Show search command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'search' -d 'Show search command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'deploy' -d 'Show deploy command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'deploy' -d 'Show deploy command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'resolve' -d 'Show resolve command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'resolve' -d 'Show resolve command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'fail' -d 'Show fail command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'fail' -d 'Show fail command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'activate' -d 'Show activate command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'activate' -d 'Show activate command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
 `;
 }
 
