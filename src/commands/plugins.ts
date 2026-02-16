@@ -4,9 +4,10 @@
 
 import { getLogger } from '../logger.ts';
 import { execSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { clearLoadedPlugins } from '../plugin-loader.ts';
+import { ensurePluginsDir } from '../config.ts';
 import {
   addPluginToRegistry,
   removePluginFromRegistry,
@@ -19,6 +20,7 @@ import {
 /**
  * Load a plugin (npm install wrapper)
  * Supports either package name or --from flag with URL
+ * Installs to global plugins directory
  */
 export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): Promise<void> {
   const logger = getLogger();
@@ -34,13 +36,8 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     process.exit(1);
   }
   
-  // Check if we have package.json in current directory
-  const packageJsonPath = join(process.cwd(), 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    logger.error('No package.json found in current directory.');
-    logger.info('💡 Actionable hint: Run "npm init -y" to create a package.json, or navigate to a directory with an existing package.json');
-    process.exit(1);
-  }
+  // Get global plugins directory
+  const pluginsDir = ensurePluginsDir();
   
   try {
     let pluginName: string;
@@ -49,7 +46,7 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     if (fromUrl) {
       // Install from URL (file://, https://, git://, etc.)
       logger.info(`Loading plugin from: ${fromUrl}...`);
-      execSync(`npm install ${fromUrl}`, { stdio: 'inherit' });
+      execSync(`npm install ${fromUrl} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
       
       // Extract package name from URL using pattern matching
       pluginName = extractPackageNameFromUrl(fromUrl);
@@ -66,7 +63,7 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     } else {
       // Install from npm registry by package name
       logger.info(`Loading plugin: ${packageNameOrFrom}...`);
-      execSync(`npm install ${packageNameOrFrom}`, { stdio: 'inherit' });
+      execSync(`npm install ${packageNameOrFrom} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
       
       pluginName = packageNameOrFrom!;
       pluginSource = packageNameOrFrom!;
@@ -110,6 +107,7 @@ function extractPackageNameFromUrl(url: string): string {
 
 /**
  * Unload a plugin (npm uninstall wrapper)
+ * Uninstalls from global plugins directory
  */
 export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
@@ -119,9 +117,12 @@ export async function unloadPlugin(packageName: string): Promise<void> {
     process.exit(1);
   }
   
+  // Get global plugins directory
+  const pluginsDir = ensurePluginsDir();
+  
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
-    execSync(`npm uninstall ${packageName}`, { stdio: 'inherit' });
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
     
     // Only remove from registry after successful uninstall
     removePluginFromRegistry(packageName);
@@ -150,29 +151,47 @@ export function listPlugins(): void {
     // Get plugins from registry (local source of truth)
     const registeredPlugins = getRegisteredPlugins();
     
-    // Check package.json if it exists
-    const packageJsonPath = join(process.cwd(), 'package.json');
-    let packageJsonPlugins: Set<string> = new Set();
+    // Check global plugins directory
+    const pluginsDir = ensurePluginsDir();
+    const nodeModulesPath = join(pluginsDir, 'node_modules');
+    let installedPlugins: Set<string> = new Set();
     
-    if (existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-      const dependencies = packageJson.dependencies || {};
-      const devDependencies = packageJson.devDependencies || {};
-      const allDeps = { ...dependencies, ...devDependencies };
-      
-      // Find c8ctl plugins in package.json
-      for (const [name] of Object.entries(allDeps)) {
-        try {
-          const packageDir = join(process.cwd(), 'node_modules', name);
-          const hasPluginFile = existsSync(join(packageDir, 'c8ctl-plugin.js')) ||
-                               existsSync(join(packageDir, 'c8ctl-plugin.ts'));
+    if (existsSync(nodeModulesPath)) {
+      // Scan for installed plugins in global directory
+      try {
+        const entries = readdirSync(nodeModulesPath);
+        for (const entry of entries) {
+          if (entry.startsWith('.')) continue;
           
-          if (hasPluginFile) {
-            packageJsonPlugins.add(name);
+          if (entry.startsWith('@')) {
+            // Scoped package - scan subdirectories
+            const scopePath = join(nodeModulesPath, entry);
+            try {
+              const scopedPackages = readdirSync(scopePath);
+              for (const scopedPkg of scopedPackages) {
+                if (!scopedPkg.startsWith('.')) {
+                  const packageName = join(entry, scopedPkg);
+                  const hasPluginFile = existsSync(join(nodeModulesPath, packageName, 'c8ctl-plugin.js')) ||
+                                       existsSync(join(nodeModulesPath, packageName, 'c8ctl-plugin.ts'));
+                  if (hasPluginFile) {
+                    installedPlugins.add(packageName);
+                  }
+                }
+              }
+            } catch {
+              // Skip packages that can't be read
+            }
+          } else {
+            // Regular package
+            const hasPluginFile = existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.js')) ||
+                                 existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.ts'));
+            if (hasPluginFile) {
+              installedPlugins.add(entry);
+            }
           }
-        } catch {
-          // Skip packages that can't be read
         }
+      } catch (error) {
+        logger.debug('Error scanning global plugins directory:', error);
       }
     }
     
@@ -181,7 +200,7 @@ export function listPlugins(): void {
     
     // Add registered plugins
     for (const plugin of registeredPlugins) {
-      const isInstalled = packageJsonPlugins.has(plugin.name);
+      const isInstalled = installedPlugins.has(plugin.name);
       const installStatus = isInstalled ? '✓ Installed' : '⚠ Not installed';
       
       plugins.push({
@@ -191,15 +210,15 @@ export function listPlugins(): void {
         'Installed At': new Date(plugin.installedAt).toLocaleString(),
       });
       
-      packageJsonPlugins.delete(plugin.name);
+      installedPlugins.delete(plugin.name);
     }
     
-    // Add any plugins in package.json but not in registry
-    for (const name of packageJsonPlugins) {
+    // Add any plugins installed but not in registry
+    for (const name of installedPlugins) {
       plugins.push({
         Name: name,
         Status: '⚠ Not in registry',
-        Source: 'package.json',
+        Source: 'Unknown',
         'Installed At': 'Unknown',
       });
     }
@@ -220,25 +239,20 @@ export function listPlugins(): void {
     }
   } catch (error) {
     logger.error('Failed to list plugins', error as Error);
-    logger.info('💡 Actionable hint: Ensure you are in a directory with a package.json file');
     process.exit(1);
   }
 }
 
 /**
  * Sync plugins - synchronize registry with actual installations
- * Local (registry) has precedence over package.json
+ * Registry has precedence - plugins are installed to global directory
  */
 export async function syncPlugins(): Promise<void> {
   const logger = getLogger();
   
-  // Check if package.json exists
-  const packageJsonPath = join(process.cwd(), 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    logger.error('No package.json found in current directory.');
-    logger.info('💡 Actionable hint: Run "npm init -y" to create a package.json, or navigate to a directory with an existing package.json');
-    process.exit(1);
-  }
+  // Get global plugins directory
+  const pluginsDir = ensurePluginsDir();
+  const nodeModulesPath = join(pluginsDir, 'node_modules');
   
   logger.info('Starting plugin synchronization...');
   logger.info('');
@@ -266,8 +280,8 @@ export async function syncPlugins(): Promise<void> {
     logger.info(`Syncing ${plugin.name}...`);
     
     try {
-      // Check if plugin is installed
-      const packageDir = join(process.cwd(), 'node_modules', plugin.name);
+      // Check if plugin is installed in global directory
+      const packageDir = join(nodeModulesPath, plugin.name);
       const isInstalled = existsSync(packageDir);
       
       if (isInstalled) {
@@ -275,7 +289,7 @@ export async function syncPlugins(): Promise<void> {
         
         // Try npm rebuild first
         try {
-          execSync(`npm rebuild ${plugin.name}`, { stdio: 'pipe' });
+          execSync(`npm rebuild ${plugin.name} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
           logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
           syncedCount++;
           continue;
@@ -288,7 +302,7 @@ export async function syncPlugins(): Promise<void> {
       
       // Fresh install
       try {
-        execSync(`npm install ${plugin.source}`, { stdio: 'inherit' });
+        execSync(`npm install ${plugin.source} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
         logger.success(`  ✓ ${plugin.name} installed successfully`);
         syncedCount++;
       } catch (installError) {

@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
+import { ensurePluginsDir } from './config.ts';
 
 interface PluginCommands {
   [commandName: string]: (args: string[]) => Promise<void>;
@@ -30,18 +31,21 @@ interface LoadedPlugin {
 const loadedPlugins = new Map<string, LoadedPlugin>();
 
 /**
- * Load all installed plugins from node_modules
+ * Load all installed plugins from global plugins directory
  */
 export async function loadInstalledPlugins(): Promise<void> {
   const logger = getLogger();
-  const nodeModulesPath = join(process.cwd(), 'node_modules');
+  
+  // Ensure plugins directory exists
+  const pluginsDir = ensurePluginsDir();
+  const nodeModulesPath = join(pluginsDir, 'node_modules');
   
   // Make c8ctl runtime available globally for plugins
   // @ts-ignore
   globalThis.c8ctl = c8ctl;
   
   if (!existsSync(nodeModulesPath)) {
-    logger.debug('node_modules directory not found');
+    logger.debug('Global plugins node_modules directory not found');
     return;
   }
   

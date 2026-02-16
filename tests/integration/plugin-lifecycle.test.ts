@@ -7,11 +7,13 @@ import assert from 'node:assert';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { getUserDataDir } from '../../src/config.ts';
 
 describe('Plugin Lifecycle Integration Tests', () => {
   const testPluginDir = join(process.cwd(), 'test-plugin-temp');
   const testPluginName = 'c8ctl-test-plugin';
-  const nodeModulesPluginPath = join(process.cwd(), 'node_modules', testPluginName);
+  const pluginsDir = join(getUserDataDir(), 'plugins');
+  const nodeModulesPluginPath = join(pluginsDir, 'node_modules', testPluginName);
   
   // Setup: Clean up any previous test artifacts
   before(() => {
@@ -20,9 +22,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
     
-    // Uninstall plugin if it exists from previous run
+    // Unload plugin if it exists from previous run
     try {
-      execSync(`npm uninstall ${testPluginName}`, { 
+      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
         cwd: process.cwd(),
         stdio: 'ignore' 
       });
@@ -30,7 +32,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       // Ignore if not installed
     }
     
-    // Remove from node_modules if still there
+    // Remove from global node_modules if still there
     if (existsSync(nodeModulesPluginPath)) {
       rmSync(nodeModulesPluginPath, { recursive: true, force: true });
     }
@@ -43,9 +45,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
     
-    // Uninstall plugin
+    // Unload plugin
     try {
-      execSync(`npm uninstall ${testPluginName}`, { 
+      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
         cwd: process.cwd(),
         stdio: 'ignore' 
       });
@@ -53,7 +55,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       // Ignore if already uninstalled
     }
     
-    // Remove from node_modules
+    // Remove from global node_modules
     if (existsSync(nodeModulesPluginPath)) {
       rmSync(nodeModulesPluginPath, { recursive: true, force: true });
     }
@@ -87,14 +89,14 @@ describe('Plugin Lifecycle Integration Tests', () => {
     );
     
     try {
-      // Load the plugin using npm install with file: protocol
-      execSync(`npm install file:${testPluginDir}`, { 
+      // Load the plugin using c8ctl load command with file: protocol
+      execSync(`node src/index.ts load plugin --from file:${testPluginDir}`, { 
         cwd: process.cwd(),
         stdio: 'pipe'
       });
       
-      // Verify plugin is installed
-      assert.ok(existsSync(nodeModulesPluginPath), 'Plugin should be installed in node_modules');
+      // Verify plugin is installed in global directory
+      assert.ok(existsSync(nodeModulesPluginPath), 'Plugin should be installed in global plugins directory');
       
       // Verify plugin file exists
       const installedPluginFile = join(nodeModulesPluginPath, 'c8ctl-plugin.js');
@@ -118,15 +120,15 @@ describe('Plugin Lifecycle Integration Tests', () => {
       assert.ok(commandOutput.includes('TEST_COMMAND_EXECUTED'), 
         `Plugin command should execute. Output: ${commandOutput}, Stderr: ${commandStderr}`);
       
-      // Unload the plugin
-      execSync(`npm uninstall ${testPluginName}`, {
+      // Unload the plugin using c8ctl unload command
+      execSync(`node src/index.ts unload plugin ${testPluginName}`, {
         cwd: process.cwd(),
         stdio: 'pipe'
       });
       
-      // Verify plugin is uninstalled
+      // Verify plugin is uninstalled from global directory
       assert.ok(!existsSync(nodeModulesPluginPath), 
-        'Plugin should be removed from node_modules');
+        'Plugin should be removed from global plugins directory');
       
       // Verify plugin command no longer works
       let shouldFail = false;
@@ -155,7 +157,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       }
       
       try {
-        execSync(`npm uninstall ${testPluginName}`, { 
+        execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
           cwd: process.cwd(),
           stdio: 'ignore' 
         });
