@@ -86,6 +86,14 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
 }
 
 /**
+ * Check if a package has a c8ctl plugin file
+ */
+function hasPluginFile(packagePath: string): boolean {
+  return existsSync(join(packagePath, 'c8ctl-plugin.js')) ||
+         existsSync(join(packagePath, 'c8ctl-plugin.ts'));
+}
+
+/**
  * Extract package name from URL or installed package
  * Tries to read package.json from installed package, falls back to URL parsing
  */
@@ -103,27 +111,24 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
           const scopePath = join(nodeModulesPath, entry);
           const scopedPackages = readdirSync(scopePath);
           for (const scopedPkg of scopedPackages) {
-            const pkgJsonPath = join(scopePath, scopedPkg, 'package.json');
+            const pkgPath = join(scopePath, scopedPkg);
+            const pkgJsonPath = join(pkgPath, 'package.json');
             if (existsSync(pkgJsonPath)) {
               const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
               // Check if this package has c8ctl-plugin file
-              const scopedPackagePath = join(entry, scopedPkg);
-              const hasPluginFile = existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.js')) ||
-                                   existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.ts'));
-              if (hasPluginFile && pkgJson.keywords?.includes('c8ctl')) {
+              if (hasPluginFile(pkgPath) && pkgJson.keywords?.includes('c8ctl')) {
                 return pkgJson.name;
               }
             }
           }
         } else {
           // Regular package
-          const pkgJsonPath = join(nodeModulesPath, entry, 'package.json');
+          const pkgPath = join(nodeModulesPath, entry);
+          const pkgJsonPath = join(pkgPath, 'package.json');
           if (existsSync(pkgJsonPath)) {
             const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
             // Check if this package has c8ctl-plugin file
-            const hasPluginFile = existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.js')) ||
-                                 existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.ts'));
-            if (hasPluginFile && pkgJson.keywords?.includes('c8ctl')) {
+            if (hasPluginFile(pkgPath) && pkgJson.keywords?.includes('c8ctl')) {
               return pkgJson.name;
             }
           }
@@ -204,11 +209,10 @@ export function listPlugins(): void {
               const scopedPackages = readdirSync(scopePath);
               for (const scopedPkg of scopedPackages) {
                 if (!scopedPkg.startsWith('.')) {
-                  const scopedPackageName = join(entry, scopedPkg);
-                  const hasPluginFile = existsSync(join(nodeModulesPath, scopedPackageName, 'c8ctl-plugin.js')) ||
-                                       existsSync(join(nodeModulesPath, scopedPackageName, 'c8ctl-plugin.ts'));
-                  if (hasPluginFile) {
-                    installedPlugins.add(scopedPackageName);
+                  const packageNameWithScope = `${entry}/${scopedPkg}`;
+                  const packagePath = join(nodeModulesPath, entry, scopedPkg);
+                  if (hasPluginFile(packagePath)) {
+                    installedPlugins.add(packageNameWithScope);
                   }
                 }
               }
@@ -217,9 +221,8 @@ export function listPlugins(): void {
             }
           } else {
             // Regular package
-            const hasPluginFile = existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.js')) ||
-                                 existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.ts'));
-            if (hasPluginFile) {
+            const packagePath = join(nodeModulesPath, entry);
+            if (hasPluginFile(packagePath)) {
               installedPlugins.add(entry);
             }
           }
