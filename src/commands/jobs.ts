@@ -41,6 +41,7 @@ export async function listJobs(options: {
         Type: job.type,
         State: job.state,
         Retries: job.retries,
+        Created: job.creationTime || '-',
         'Process Instance': job.processInstanceKey,
         'Tenant ID': job.tenantId,
       }));

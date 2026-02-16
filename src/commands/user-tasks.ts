@@ -45,6 +45,7 @@ export async function listUserTasks(options: {
         Name: task.name || task.elementId,
         State: task.state,
         Assignee: task.assignee || '(unassigned)',
+        Created: task.creationDate || '-',
         'Process Instance': task.processInstanceKey,
         'Tenant ID': task.tenantId,
       }));

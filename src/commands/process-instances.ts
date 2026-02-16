@@ -46,6 +46,7 @@ export async function listProcessInstances(options: {
         'Process ID': pi.processDefinitionId,
         State: pi.state,
         Version: pi.processDefinitionVersion || pi.version,
+        'Start Date': pi.startDate || '-',
         'Tenant ID': pi.tenantId,
       }));
       logger.table(tableData);

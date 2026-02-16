@@ -41,6 +41,7 @@ export async function listIncidents(options: {
         Type: incident.errorType,
         Message: incident.errorMessage?.substring(0, 50) || '',
         State: incident.state,
+        Created: incident.creationTime || '-',
         'Process Instance': incident.processInstanceKey,
         'Tenant ID': incident.tenantId,
       }));
