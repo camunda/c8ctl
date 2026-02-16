@@ -6,9 +6,18 @@ This document describes how c8ctl plugins can provide help text that gets integr
 
 When users load plugins, their commands automatically appear in the help text. Plugins can optionally provide descriptions for their commands to make the help more informative.
 
+## Global Plugin System
+
+c8ctl uses a global plugin system where plugins are installed to a user-specific directory. This means:
+
+- **No local package.json required**: Plugins work from any directory
+- **Global installation**: Plugins are installed to `~/.config/c8ctl/plugins/node_modules` (on Linux)
+- **Persistent across projects**: Once loaded, plugins are available everywhere
+- **Centralized management**: All plugins are managed through the c8ctl plugin registry
+
 ## How It Works
 
-1. **Automatic Discovery**: When `c8ctl help` is invoked, it scans all loaded plugins
+1. **Automatic Discovery**: When `c8ctl help` is invoked, it scans all loaded plugins from the global plugins directory
 2. **Plugin Section**: If plugins are loaded, a "Plugin Commands" section appears at the bottom of the help text
 3. **Command Listing**: Each plugin command is listed with its optional description
 
@@ -121,6 +130,7 @@ The plugin loader ([src/plugin-loader.ts](src/plugin-loader.ts)) provides:
 - `getPluginCommandNames()`: Returns array of command names
 - `getPluginCommandsInfo()`: Returns detailed info including descriptions
 - Automatic metadata extraction during plugin loading
+- Scans the global plugins directory (`~/.config/c8ctl/plugins/node_modules` on Linux) for installed plugins
 
 ### Help Command
 

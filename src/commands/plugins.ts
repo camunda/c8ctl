@@ -48,8 +48,8 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
       logger.info(`Loading plugin from: ${fromUrl}...`);
       execSync(`npm install ${fromUrl} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
       
-      // Extract package name from URL using pattern matching
-      pluginName = extractPackageNameFromUrl(fromUrl);
+      // Extract package name from installed package
+      pluginName = extractPackageNameFromUrl(fromUrl, pluginsDir);
       pluginSource = fromUrl;
       
       // Validate plugin name
@@ -86,23 +86,69 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
 }
 
 /**
- * Extract package name from URL or path
- * This is a best-effort extraction - for complex cases, the user may need to specify manually
- * Note: This doesn't handle all edge cases like scoped packages in git URLs
+ * Extract package name from URL or installed package
+ * Tries to read package.json from installed package, falls back to URL parsing
  */
-function extractPackageNameFromUrl(url: string): string {
-  // For npm packages: git+https://github.com/user/repo.git -> repo
-  // For file paths: file:///path/to/plugin -> plugin
-  // For git URLs: git://github.com/user/repo.git -> repo
-  // Note: Scoped packages like @scope/package in URLs are not fully supported
-  
+function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
+  // First, try to extract from URL pattern
   const match = url.match(/\/([^\/]+?)(\.git)?$/);
-  if (match) {
-    return match[1];
+  const urlBasedName = match ? match[1] : url.replace(/[^a-zA-Z0-9-_@\/]/g, '-');
+  
+  // Try to read the actual package name from package.json in node_modules
+  try {
+    const possiblePaths = [
+      join(pluginsDir, 'node_modules', urlBasedName, 'package.json'),
+    ];
+    
+    // Also check if it might be a scoped package
+    if (urlBasedName.includes('/')) {
+      possiblePaths.push(join(pluginsDir, 'node_modules', urlBasedName, 'package.json'));
+    }
+    
+    // Scan node_modules to find the package
+    const nodeModulesPath = join(pluginsDir, 'node_modules');
+    if (existsSync(nodeModulesPath)) {
+      const entries = readdirSync(nodeModulesPath);
+      for (const entry of entries) {
+        if (entry.startsWith('.')) continue;
+        
+        if (entry.startsWith('@')) {
+          // Scoped package
+          const scopePath = join(nodeModulesPath, entry);
+          const scopedPackages = readdirSync(scopePath);
+          for (const scopedPkg of scopedPackages) {
+            const pkgJsonPath = join(scopePath, scopedPkg, 'package.json');
+            if (existsSync(pkgJsonPath)) {
+              const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+              // Check if this package has c8ctl-plugin file
+              const hasPluginFile = existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.js')) ||
+                                   existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.ts'));
+              if (hasPluginFile && pkgJson.keywords?.includes('c8ctl')) {
+                return pkgJson.name;
+              }
+            }
+          }
+        } else {
+          // Regular package
+          const pkgJsonPath = join(nodeModulesPath, entry, 'package.json');
+          if (existsSync(pkgJsonPath)) {
+            const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+            // Check if this package has c8ctl-plugin file
+            const hasPluginFile = existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.js')) ||
+                                 existsSync(join(nodeModulesPath, entry, 'c8ctl-plugin.ts'));
+            if (hasPluginFile && pkgJson.keywords?.includes('c8ctl')) {
+              return pkgJson.name;
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    // Fall through to URL-based name
   }
   
-  // Fallback: use a cleaned version of the URL as the name
-  return url.replace(/[^a-zA-Z0-9-_@\/]/g, '-');
+  // Fallback to URL-based name
+  return urlBasedName;
 }
 
 /**

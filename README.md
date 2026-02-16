@@ -306,7 +306,7 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages. Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms) for persistence across npm operations.
+c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms).
 
 ```bash
 # Load a plugin from npm registry
@@ -318,7 +318,7 @@ c8ctl load plugin --from file:///path/to/plugin
 c8ctl load plugin --from https://github.com/user/repo
 c8ctl load plugin --from git://github.com/user/repo.git
 
-# Unload a plugin (wraps npm uninstall)
+# Unload a plugin
 c8ctl unload plugin <package-name>
 
 # List installed plugins (shows sync status)
@@ -333,13 +333,15 @@ c8ctl sync plugins
 c8ctl help
 ```
 
-**Plugin Registry:**
-- Plugins are tracked independently of `package.json` in a registry file
-- The registry serves as the source of truth (local precedence)
+**Global Plugin System:**
+- Plugins are installed to a global directory (`~/.config/c8ctl/plugins/node_modules` on Linux)
+- No local `package.json` is required in your working directory
+- Plugins are available globally from any directory
+- The registry serves as the source of truth for installed plugins
 - `c8ctl list plugins` shows sync status:
   - `✓ Installed` - Plugin is in registry and installed
-  - `⚠ Not installed` - Plugin is in registry but not in node_modules (run `sync`)
-  - `⚠ Not in registry` - Plugin is in package.json but not tracked in registry
+  - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
+  - `⚠ Not in registry` - Plugin is installed but not tracked in registry
 - `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
 
 **Plugin Requirements:**
@@ -347,7 +349,7 @@ c8ctl help
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
 - Optionally export a `metadata` object to provide help text
-- Plugins are installed in `node_modules` like regular npm packages
+- Plugins are installed globally and work from any directory
 - The runtime object `c8ctl` provides environment information to plugins
 - **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
 
