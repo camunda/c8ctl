@@ -90,22 +90,8 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
  * Tries to read package.json from installed package, falls back to URL parsing
  */
 function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
-  // First, try to extract from URL pattern
-  const match = url.match(/\/([^\/]+?)(\.git)?$/);
-  const urlBasedName = match ? match[1] : url.replace(/[^a-zA-Z0-9-_@\/]/g, '-');
-  
-  // Try to read the actual package name from package.json in node_modules
+  // Try to scan node_modules to find the package by reading package.json
   try {
-    const possiblePaths = [
-      join(pluginsDir, 'node_modules', urlBasedName, 'package.json'),
-    ];
-    
-    // Also check if it might be a scoped package
-    if (urlBasedName.includes('/')) {
-      possiblePaths.push(join(pluginsDir, 'node_modules', urlBasedName, 'package.json'));
-    }
-    
-    // Scan node_modules to find the package
     const nodeModulesPath = join(pluginsDir, 'node_modules');
     if (existsSync(nodeModulesPath)) {
       const entries = readdirSync(nodeModulesPath);
@@ -121,6 +107,7 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
             if (existsSync(pkgJsonPath)) {
               const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
               // Check if this package has c8ctl-plugin file
+              const scopedPackagePath = join(entry, scopedPkg);
               const hasPluginFile = existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.js')) ||
                                    existsSync(join(scopePath, scopedPkg, 'c8ctl-plugin.ts'));
               if (hasPluginFile && pkgJson.keywords?.includes('c8ctl')) {
@@ -144,11 +131,12 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
       }
     }
   } catch (error) {
-    // Fall through to URL-based name
+    // Fall through to URL-based name extraction
   }
   
-  // Fallback to URL-based name
-  return urlBasedName;
+  // Fallback: extract from URL pattern
+  const match = url.match(/\/([^\/]+?)(\.git)?$/);
+  return match ? match[1] : url.replace(/[^a-zA-Z0-9-_@\/]/g, '-');
 }
 
 /**
@@ -216,11 +204,11 @@ export function listPlugins(): void {
               const scopedPackages = readdirSync(scopePath);
               for (const scopedPkg of scopedPackages) {
                 if (!scopedPkg.startsWith('.')) {
-                  const packageName = join(entry, scopedPkg);
-                  const hasPluginFile = existsSync(join(nodeModulesPath, packageName, 'c8ctl-plugin.js')) ||
-                                       existsSync(join(nodeModulesPath, packageName, 'c8ctl-plugin.ts'));
+                  const scopedPackageName = join(entry, scopedPkg);
+                  const hasPluginFile = existsSync(join(nodeModulesPath, scopedPackageName, 'c8ctl-plugin.js')) ||
+                                       existsSync(join(nodeModulesPath, scopedPackageName, 'c8ctl-plugin.ts'));
                   if (hasPluginFile) {
-                    installedPlugins.add(packageName);
+                    installedPlugins.add(scopedPackageName);
                   }
                 }
               }
