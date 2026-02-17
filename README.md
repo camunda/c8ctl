@@ -306,7 +306,11 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms).
+c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file:
+
+- **Linux**: `~/.config/c8ctl/plugins.json`
+- **macOS**: `~/Library/Application Support/c8ctl/plugins.json`
+- **Windows**: `%APPDATA%\c8ctl\plugins.json`
 
 ```bash
 # Create a new plugin from template

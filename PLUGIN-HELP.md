@@ -11,7 +11,10 @@ When users load plugins, their commands automatically appear in the help text. P
 c8ctl uses a global plugin system where plugins are installed to a user-specific directory. This means:
 
 - **No local package.json required**: Plugins work from any directory
-- **Global installation**: Plugins are installed to `~/.config/c8ctl/plugins/node_modules` (on Linux)
+- **Global installation**: Plugins are installed to:
+  - Linux: `~/.config/c8ctl/plugins/node_modules`
+  - macOS: `~/Library/Application Support/c8ctl/plugins/node_modules`
+  - Windows (WSL): `~/.config/c8ctl/plugins/node_modules`
 - **Persistent across projects**: Once loaded, plugins are available everywhere
 - **Centralized management**: All plugins are managed through the c8ctl plugin registry
 
@@ -92,6 +95,7 @@ export const commands = {
 ## Help Output Example
 
 Without plugins loaded:
+
 ```
 c8ctl - Camunda 8 CLI v2.0.0
 
@@ -104,6 +108,7 @@ Commands:
 ```
 
 With plugins loaded:
+
 ```
 c8ctl - Camunda 8 CLI v2.0.0
 
@@ -130,7 +135,7 @@ The plugin loader ([src/plugin-loader.ts](src/plugin-loader.ts)) provides:
 - `getPluginCommandNames()`: Returns array of command names
 - `getPluginCommandsInfo()`: Returns detailed info including descriptions
 - Automatic metadata extraction during plugin loading
-- Scans the global plugins directory (`~/.config/c8ctl/plugins/node_modules` on Linux) for installed plugins
+- Scans the [global plugins directory](#global-plugin-system) for installed plugins
 
 ### Help Command
 
@@ -165,6 +170,7 @@ interface PluginMetadata {
 ## Testing
 
 See [tests/unit/plugin-loader.test.ts](tests/unit/plugin-loader.test.ts) for unit tests that verify:
+
 - `getPluginCommandsInfo()` returns correct structure
 - Help text includes plugin commands
 - Metadata is properly parsed
@@ -172,13 +178,15 @@ See [tests/unit/plugin-loader.test.ts](tests/unit/plugin-loader.test.ts) for uni
 ## Example Plugin Development Flow
 
 1. Create plugin with commands:
+
 ```typescript
 export const commands = {
   myCommand: async () => { /* ... */ }
 };
 ```
 
-2. Add metadata for help:
+1. Add metadata for help:
+
 ```typescript
 export const metadata = {
   commands: {
@@ -189,12 +197,14 @@ export const metadata = {
 };
 ```
 
-3. Load plugin:
+1. Load plugin:
+
 ```bash
 c8ctl load plugin my-plugin
 ```
 
-4. Verify help includes your command:
+1. Verify help includes your command:
+
 ```bash
 c8ctl help
 ```
