@@ -309,6 +309,9 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms).
 
 ```bash
+# Create a new plugin from template
+c8ctl init plugin my-plugin
+
 # Load a plugin from npm registry
 c8ctl load plugin <package-name>
 
@@ -317,6 +320,13 @@ c8ctl load plugin --from <url>
 c8ctl load plugin --from file:///path/to/plugin
 c8ctl load plugin --from https://github.com/user/repo
 c8ctl load plugin --from git://github.com/user/repo.git
+
+# Upgrade a plugin to latest or specific version
+c8ctl upgrade plugin <package-name>
+c8ctl upgrade plugin <package-name> 1.2.3
+
+# Downgrade a plugin to a specific version
+c8ctl downgrade plugin <package-name> 1.0.0
 
 # Unload a plugin
 c8ctl unload plugin <package-name>
@@ -338,11 +348,18 @@ c8ctl help
 - No local `package.json` is required in your working directory
 - Plugins are available globally from any directory
 - The registry serves as the source of truth for installed plugins
+- Default plugins are bundled with c8ctl and loaded automatically
 - `c8ctl list plugins` shows sync status:
   - `✓ Installed` - Plugin is in registry and installed
   - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
   - `⚠ Not in registry` - Plugin is installed but not tracked in registry
 - `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
+
+**Plugin Development:**
+- Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
+- Generated scaffold includes all necessary files and build configuration
+- Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
+- See the bundled `hello-world` plugin in `default-plugins/` for a complete example
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
