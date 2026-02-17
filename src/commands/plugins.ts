@@ -583,6 +583,7 @@ export async function initPlugin(pluginName?: string): Promise<void> {
         forceConsistentCasingInFileNames: true,
       },
       include: ['src/**/*'],
+      exclude: ['node_modules'],
     };
     
     writeFileSync(

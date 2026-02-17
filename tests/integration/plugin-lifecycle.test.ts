@@ -170,4 +170,140 @@ describe('Plugin Lifecycle Integration Tests', () => {
       }
     }
   });
+  
+  test('should complete full plugin lifecycle with init, build, load, execute, and help', async () => {
+    const scaffoldPluginName = 'test-scaffold';
+    const scaffoldDir = join(process.cwd(), `c8ctl-${scaffoldPluginName}`);
+    const fullPluginName = `c8ctl-${scaffoldPluginName}`;
+    const scaffoldNodeModulesPath = join(pluginsDir, 'node_modules', fullPluginName);
+    
+    // Clean up from any previous test run
+    if (existsSync(scaffoldDir)) {
+      rmSync(scaffoldDir, { recursive: true, force: true });
+    }
+    
+    try {
+      // Step 1: Bootstrap a new c8ctl plugin with "c8ctl init plugin"
+      const initOutput = execSync(`node src/index.ts init plugin ${scaffoldPluginName}`, {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000
+      });
+      
+      assert.ok(initOutput.includes('Plugin scaffolding created successfully'), 
+        'Init command should succeed');
+      assert.ok(existsSync(scaffoldDir), 'Plugin directory should be created');
+      assert.ok(existsSync(join(scaffoldDir, 'package.json')), 'package.json should exist');
+      assert.ok(existsSync(join(scaffoldDir, 'src', 'c8ctl-plugin.ts')), 'Plugin source should exist');
+      assert.ok(existsSync(join(scaffoldDir, 'tsconfig.json')), 'tsconfig.json should exist');
+      
+      // Step 2: Add a minimal implementation to the generated skeleton
+      // Modify the hello command to output something we can verify
+      const pluginSource = `/**
+ * ${fullPluginName} - A c8ctl plugin
+ */
+
+// Optional metadata for help text
+export const metadata = {
+  name: '${fullPluginName}',
+  description: 'Test scaffold plugin',
+  commands: {
+    'scaffold-test': {
+      description: 'Test command from scaffolded plugin',
+    },
+  },
+};
+
+// Required commands export
+export const commands = {
+  'scaffold-test': async (args: string[]) => {
+    console.log('SCAFFOLD_TEST_EXECUTED');
+    if (args.length > 0) {
+      console.log('Args:', args.join(','));
+    }
+  },
+};
+`;
+      
+      writeFileSync(join(scaffoldDir, 'src', 'c8ctl-plugin.ts'), pluginSource);
+      
+      // Step 3: Build the plugin
+      execSync('npm install', {
+        cwd: scaffoldDir,
+        stdio: 'pipe',
+        timeout: 30000
+      });
+      
+      execSync('npm run build', {
+        cwd: scaffoldDir,
+        stdio: 'pipe',
+        timeout: 10000
+      });
+      
+      // Verify the build output exists
+      const builtPluginFile = join(scaffoldDir, 'c8ctl-plugin.js');
+      assert.ok(existsSync(builtPluginFile), 'Built plugin file should exist');
+      
+      // Step 4: Load the plugin
+      execSync(`node src/index.ts load plugin --from file:${scaffoldDir}`, {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        timeout: 10000
+      });
+      
+      // Verify plugin is installed
+      assert.ok(existsSync(scaffoldNodeModulesPath), 
+        'Scaffolded plugin should be installed in global directory');
+      
+      // Step 5: Make sure the plugin works - command executes
+      let commandOutput = '';
+      try {
+        commandOutput = execSync('node src/index.ts scaffold-test arg1 arg2', {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          timeout: 5000
+        });
+      } catch (error: any) {
+        commandOutput = error.stdout || '';
+      }
+      
+      assert.ok(commandOutput.includes('SCAFFOLD_TEST_EXECUTED'), 
+        `Scaffolded plugin command should execute. Output: ${commandOutput}`);
+      assert.ok(commandOutput.includes('Args: arg1,arg2'), 
+        'Command should receive arguments');
+      
+      // Step 6: Make sure the plugin command is available in "c8ctl help"
+      const helpOutput = execSync('node src/index.ts help', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000
+      });
+      
+      assert.ok(helpOutput.includes('Plugin Commands'), 
+        'Help should include Plugin Commands section');
+      assert.ok(helpOutput.includes('scaffold-test'), 
+        'Help should list the scaffold-test command');
+      assert.ok(helpOutput.includes('Test command from scaffolded plugin'), 
+        'Help should include command description');
+      
+    } finally {
+      // Cleanup
+      if (existsSync(scaffoldDir)) {
+        rmSync(scaffoldDir, { recursive: true, force: true });
+      }
+      
+      try {
+        execSync(`node src/index.ts unload plugin ${fullPluginName}`, {
+          cwd: process.cwd(),
+          stdio: 'ignore'
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+      
+      if (existsSync(scaffoldNodeModulesPath)) {
+        rmSync(scaffoldNodeModulesPath, { recursive: true, force: true });
+      }
+    }
+  });
 });
