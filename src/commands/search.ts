@@ -637,7 +637,7 @@ export async function searchVariables(options: {
     criteria.push(formatCriterion('value', options.iValue, true));
   }
   if (options.fullValue) {
-    criteria.push('(with full values)');
+    criteria.push("'fullValue' = true");
   }
   logSearchCriteria('Variables', criteria);
 
