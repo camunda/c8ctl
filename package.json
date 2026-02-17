@@ -46,6 +46,9 @@
   "homepage": "https://github.com/camunda/c8ctl#readme",
   "author": "",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^8.8.4",
     "@modelcontextprotocol/sdk": "^1.26.0"
