@@ -55,10 +55,10 @@ export const commands = {
     }
     
     console.log('✨ Plugin API Features:');
-    console.log('   • Access to c8ctl runtime via globalThis.c8ctl');
-    console.log('   • Commands receive arguments as string array');
-    console.log('   • Metadata provides help text integration');
-    console.log('   • Full Node.js API available');
+    console.log('   - Access to c8ctl runtime via globalThis.c8ctl');
+    console.log('   - Commands receive arguments as string array');
+    console.log('   - Metadata provides help text integration');
+    console.log('   - Full Node.js API available');
     console.log('');
     console.log('📚 Learn more: https://github.com/camunda/c8ctl/blob/main/PLUGIN-HELP.md');
   },
