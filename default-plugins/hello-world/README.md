@@ -46,6 +46,18 @@ hello-world/
 
 ## Plugin API
 
+### Storage Locations
+
+Plugins are stored in OS-specific directories:
+
+| OS | Plugin Directory | Registry File |
+|----|-----------------|---------------|
+| **Linux** | `~/.config/c8ctl/plugins/node_modules` | `~/.config/c8ctl/plugins.json` |
+| **macOS** | `~/Library/Application Support/c8ctl/plugins/node_modules` | `~/Library/Application Support/c8ctl/plugins.json` |
+| **Windows** | `%APPDATA%\c8ctl\plugins\node_modules` | `%APPDATA%\c8ctl\plugins.json` |
+
+> **Note:** Override with `C8CTL_DATA_DIR` environment variable if needed.
+
 ### Runtime Access
 
 The plugin can access c8ctl runtime via `globalThis.c8ctl`:
@@ -92,6 +104,24 @@ export const metadata = {
   },
 };
 ```
+
+## Important Limitations
+
+### Command Precedence
+
+**Plugin commands cannot override built-in commands.** The c8ctl CLI always checks for built-in commands first. If a plugin exports a command with the same name as a built-in command (e.g., `list`, `get`, `create`), the built-in command will always execute, and the plugin command will be ignored.
+
+For example, if a plugin tries to export a `list` command:
+
+```javascript
+export const commands = {
+  'list': async (args) => {
+    console.log('This will NEVER execute');
+  }
+};
+```
+
+When users run `c8ctl list`, the built-in `list` command will execute instead. Choose unique command names for your plugins to avoid conflicts.
 
 ## Development
 

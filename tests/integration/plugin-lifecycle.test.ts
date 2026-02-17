@@ -306,4 +306,109 @@ export const commands = {
       }
     }
   });
+  
+  test('plugin cannot overwrite built-in commands', async () => {
+    const conflictPluginName = 'test-conflict';
+    const conflictDir = join(process.cwd(), `c8ctl-${conflictPluginName}`);
+    const fullPluginName = `c8ctl-${conflictPluginName}`;
+    const conflictNodeModulesPath = join(pluginsDir, 'node_modules', fullPluginName);
+    
+    // Clean up from any previous test run
+    if (existsSync(conflictDir)) {
+      rmSync(conflictDir, { recursive: true, force: true });
+    }
+    
+    try {
+      // Create a plugin directory manually (not using init to keep it simple)
+      mkdirSync(conflictDir, { recursive: true });
+      
+      // Create package.json
+      writeFileSync(
+        join(conflictDir, 'package.json'),
+        JSON.stringify({
+          name: fullPluginName,
+          version: '1.0.0',
+          type: 'module',
+          description: 'Test plugin that tries to overwrite built-in commands',
+          keywords: ['c8ctl', 'plugin']
+        }, null, 2)
+      );
+      
+      // Create plugin file that tries to overwrite a built-in command (e.g., 'list')
+      writeFileSync(
+        join(conflictDir, 'c8ctl-plugin.js'),
+        `export const metadata = {
+  name: '${fullPluginName}',
+  description: 'Test conflict plugin',
+  commands: {
+    'list': {
+      description: 'PLUGIN VERSION - This should NOT override the built-in list command',
+    },
+  },
+};
+
+export const commands = {
+  'list': async (args) => {
+    console.log('PLUGIN_LIST_COMMAND_EXECUTED');
+  },
+};
+`
+      );
+      
+      // Load the plugin
+      execSync(`node src/index.ts load plugin --from file:${conflictDir}`, {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        timeout: 10000
+      });
+      
+      // Verify plugin is installed
+      assert.ok(existsSync(conflictNodeModulesPath), 
+        'Conflict plugin should be installed in global directory');
+      
+      // Try to execute 'list' command - should execute BUILT-IN, not plugin version
+      let listOutput = '';
+      try {
+        // Execute 'list profiles' which is a valid built-in command
+        listOutput = execSync('node src/index.ts list profiles', {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          timeout: 5000
+        });
+      } catch (error: any) {
+        listOutput = error.stdout || error.stderr || '';
+      }
+      
+      // Built-in command should execute (showing profiles or "No profiles found")
+      // Plugin command should NOT execute (would show 'PLUGIN_LIST_COMMAND_EXECUTED')
+      assert.ok(!listOutput.includes('PLUGIN_LIST_COMMAND_EXECUTED'), 
+        'Built-in list command should execute, not plugin version');
+      
+      // Verify that either profiles are listed OR we get the expected built-in response
+      const isBuiltInResponse = listOutput.includes('No profiles found') || 
+                                 listOutput.includes('Profile') ||
+                                 listOutput.includes('profiles');
+      assert.ok(isBuiltInResponse, 
+        `Built-in list command should work normally. Output: ${listOutput}`);
+      
+    } finally {
+      // Cleanup
+      if (existsSync(conflictDir)) {
+        rmSync(conflictDir, { recursive: true, force: true });
+      }
+      
+      try {
+        execSync(`node src/index.ts unload plugin ${fullPluginName}`, {
+          cwd: process.cwd(),
+          stdio: 'ignore'
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+      
+      if (existsSync(conflictNodeModulesPath)) {
+        rmSync(conflictNodeModulesPath, { recursive: true, force: true });
+      }
+    }
+  });
 });

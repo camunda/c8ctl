@@ -11,12 +11,37 @@ When users load plugins, their commands automatically appear in the help text. P
 c8ctl uses a global plugin system where plugins are installed to a user-specific directory. This means:
 
 - **No local package.json required**: Plugins work from any directory
-- **Global installation**: Plugins are installed to:
-  - Linux: `~/.config/c8ctl/plugins/node_modules`
-  - macOS: `~/Library/Application Support/c8ctl/plugins/node_modules`
-  - Windows (WSL): `~/.config/c8ctl/plugins/node_modules`
+- **Global installation**: Plugins are installed to OS-specific directories:
+  - **Linux**: `~/.config/c8ctl/plugins/node_modules`
+  - **macOS**: `~/Library/Application Support/c8ctl/plugins/node_modules`
+  - **Windows**: `%APPDATA%\c8ctl\plugins\node_modules`
+- **Plugin registry**: Tracked in `plugins.json` in the same parent directory
 - **Persistent across projects**: Once loaded, plugins are available everywhere
 - **Centralized management**: All plugins are managed through the c8ctl plugin registry
+- **Cannot override built-in commands**: Plugin commands are executed only if no built-in command matches
+
+> **Note:** You can override the default data directory by setting the `C8CTL_DATA_DIR` environment variable.
+
+## Plugin Registry
+
+The plugin registry (`plugins.json`) maintains a list of all installed plugins with metadata:
+
+```json
+{
+  "plugins": [
+    {
+      "name": "my-plugin",
+      "source": "my-plugin@1.0.0",
+      "installedAt": "2024-01-15T10:30:00.000Z"
+    }
+  ]
+}
+```
+
+Registry locations by OS:
+- **Linux**: `~/.config/c8ctl/plugins.json`
+- **macOS**: `~/Library/Application Support/c8ctl/plugins.json`
+- **Windows**: `%APPDATA%\c8ctl\plugins.json`
 
 ## How It Works
 
@@ -165,7 +190,38 @@ interface PluginMetadata {
 2. **Keep descriptions concise**: Aim for one line (< 60 characters)
 3. **Use imperative verbs**: Start with action words (Analyze, Deploy, Check, etc.)
 4. **Match command names**: Ensure metadata command names match exported functions
-5. **TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't support type stripping in `node_modules`. Transpile TypeScript to JavaScript before publishing your plugin.
+5. **Use unique command names**: Plugin commands cannot override built-in commands (see [Command Precedence](#command-precedence))
+6. **TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't support type stripping in `node_modules`. Transpile TypeScript to JavaScript before publishing your plugin.
+
+## Command Precedence
+
+**Important:** Plugin commands cannot override built-in c8ctl commands. Built-in commands always take precedence.
+
+When c8ctl processes a command, it follows this order:
+
+1. Check for built-in commands (list, get, create, deploy, etc.)
+2. If no built-in command matches, check plugin commands
+3. Execute the matched command
+
+### Example
+
+If a plugin exports a command named `list`:
+
+```javascript
+export const commands = {
+  'list': async (args) => {
+    console.log('This will NEVER execute');
+  }
+};
+```
+
+When users run `c8ctl list profiles`, the built-in `list` command will execute, not the plugin version.
+
+### Recommendation
+
+Choose descriptive, unique names for your plugin commands that don't conflict with built-in commands. For example:
+- ✅ `analyze-process`, `export-data`, `sync-resources`
+- ❌ `list`, `get`, `create`, `deploy`
 
 ## Testing
 

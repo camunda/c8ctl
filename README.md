@@ -306,11 +306,19 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file:
+c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file.
 
-- **Linux**: `~/.config/c8ctl/plugins.json`
-- **macOS**: `~/Library/Application Support/c8ctl/plugins.json`
-- **Windows**: `%APPDATA%\c8ctl\plugins.json`
+**Plugin Storage Locations:**
+
+The plugin system uses OS-specific directories:
+
+| OS | Plugins Directory | Registry File |
+|----|-------------------|---------------|
+| **Linux** | `~/.config/c8ctl/plugins/node_modules` | `~/.config/c8ctl/plugins.json` |
+| **macOS** | `~/Library/Application Support/c8ctl/plugins/node_modules` | `~/Library/Application Support/c8ctl/plugins.json` |
+| **Windows** | `%APPDATA%\c8ctl\plugins\node_modules` | `%APPDATA%\c8ctl\plugins.json` |
+
+> **Note:** You can override the data directory with the `C8CTL_DATA_DIR` environment variable.
 
 ```bash
 # Create a new plugin from template
@@ -348,11 +356,13 @@ c8ctl help
 ```
 
 **Global Plugin System:**
-- Plugins are installed to a global directory (`~/.config/c8ctl/plugins/node_modules` on Linux)
+- Plugins are installed to a global directory (OS-specific, see table above)
+- Plugin registry file (`plugins.json`) tracks all installed plugins
 - No local `package.json` is required in your working directory
 - Plugins are available globally from any directory
 - The registry serves as the source of truth for installed plugins
 - Default plugins are bundled with c8ctl and loaded automatically
+- **Plugin commands cannot override built-in commands** - built-in commands always take precedence
 - `c8ctl list plugins` shows sync status:
   - `✓ Installed` - Plugin is in registry and installed
   - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
