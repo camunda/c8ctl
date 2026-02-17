@@ -4,7 +4,7 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { getUserDataDir } from '../../src/config.ts';
@@ -90,7 +90,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
     
     try {
       // Load the plugin using c8ctl load command with file: protocol
-      execSync(`node src/index.ts load plugin --from file:${testPluginDir}`, { 
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${testPluginDir}`], {
         cwd: process.cwd(),
         stdio: 'pipe'
       });
