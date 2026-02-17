@@ -5,6 +5,7 @@ A default "hello world" plugin for c8ctl that demonstrates the complete plugin A
 ## Purpose
 
 This plugin serves multiple purposes:
+
 1. **Example**: Shows how to create a fully compliant c8ctl plugin
 2. **Documentation**: Demonstrates all plugin API features
 3. **Testing**: Validates the plugin system is working correctly
@@ -97,6 +98,7 @@ export const metadata = {
 To create a similar plugin:
 
 1. Use the scaffolding command:
+
    ```bash
    c8ctl init plugin my-plugin
    ```
@@ -104,20 +106,23 @@ To create a similar plugin:
 2. Or manually create the structure following this example
 
 3. Test locally:
+
    ```bash
    c8ctl load plugin --from file:///path/to/plugin
    ```
 
 4. Publish to npm:
+
    ```bash
    npm publish
    ```
 
 5. Users can install:
+
    ```bash
    c8ctl load plugin your-plugin-name
    ```
 
 ## License
 
-Same as c8ctl project
+You decide, but our [own Drink-ware](/LICENSE.md) is of course the most fitting :)
