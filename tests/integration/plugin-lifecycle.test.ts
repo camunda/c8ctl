@@ -356,7 +356,13 @@ export const commands = {
       );
       
       // Load the plugin
-      execSync(`node src/index.ts load plugin --from file:${conflictDir}`, {
+      execFileSync('node', [
+        'src/index.ts',
+        'load',
+        'plugin',
+        '--from',
+        `file:${conflictDir}`,
+      ], {
         cwd: process.cwd(),
         stdio: 'pipe',
         timeout: 10000
