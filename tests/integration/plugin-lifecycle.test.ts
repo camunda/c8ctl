@@ -245,7 +245,7 @@ export const commands = {
       assert.ok(existsSync(builtPluginFile), 'Built plugin file should exist');
       
       // Step 4: Load the plugin
-      execSync(`node src/index.ts load plugin --from file:${scaffoldDir}`, {
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${scaffoldDir}`], {
         cwd: process.cwd(),
         stdio: 'pipe',
         timeout: 10000
