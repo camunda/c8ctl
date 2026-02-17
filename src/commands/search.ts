@@ -57,6 +57,52 @@ export const matchesCaseInsensitive = (value: string | undefined | null, pattern
 const CI_PAGE_SIZE = 1000;
 
 /**
+ * Build a human-readable description of a filter criterion.
+ * 
+ * NOTE: This function outputs to console.log (not the logger class) because
+ * these messages provide UX feedback about the search criteria and are not
+ * part of the structured text/JSON output.
+ * 
+ * @param fieldLabel - Human-readable name of the field being searched
+ * @param value - The filter value
+ * @param isCaseInsensitive - Whether this is a case-insensitive search
+ * @returns A formatted string describing the criterion
+ */
+function formatCriterion(fieldLabel: string, value: string | number, isCaseInsensitive: boolean = false): string {
+  if (typeof value === 'number') {
+    return `'${fieldLabel}' = ${value}`;
+  }
+  
+  const hasWildcard = hasUnescapedWildcard(value);
+  const prefix = isCaseInsensitive ? '(case-insensitive) ' : '';
+  
+  if (hasWildcard) {
+    return `${prefix}'${fieldLabel}' matching "${value}"`;
+  } else {
+    return `${prefix}'${fieldLabel}' = "${value}"`;
+  }
+}
+
+/**
+ * Log search criteria to console for better developer experience.
+ * 
+ * NOTE: Uses console.log directly (not the logger class) because these messages
+ * are UX feedback about the search and should not be part of text/JSON output.
+ * 
+ * @param resourceName - Human-readable name of the resource type being searched
+ * @param criteria - Array of criterion strings describing the filters
+ */
+function logSearchCriteria(resourceName: string, criteria: string[]): void {
+  if (criteria.length === 0) {
+    console.log(`Searching ${resourceName}`);
+  } else if (criteria.length === 1) {
+    console.log(`Searching ${resourceName} where ${criteria[0]}`);
+  } else {
+    console.log(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
+  }
+}
+
+/**
  * Search process definitions
  */
 export async function searchProcessDefinitions(options: {
@@ -72,6 +118,28 @@ export async function searchProcessDefinitions(options: {
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!(options.iProcessDefinitionId || options.iName);
+
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.processDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.processDefinitionId));
+  }
+  if (options.name) {
+    criteria.push(formatCriterion('name', options.name));
+  }
+  if (options.version !== undefined) {
+    criteria.push(formatCriterion('version', options.version));
+  }
+  if (options.key) {
+    criteria.push(formatCriterion('key', options.key));
+  }
+  if (options.iProcessDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
+  }
+  if (options.iName) {
+    criteria.push(formatCriterion('name', options.iName, true));
+  }
+  logSearchCriteria('Process Definitions', criteria);
 
   try {
     const filter: any = {
@@ -146,6 +214,28 @@ export async function searchProcessInstances(options: {
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!options.iProcessDefinitionId;
+
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.processDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.processDefinitionId));
+  }
+  if (options.processDefinitionKey) {
+    criteria.push(formatCriterion('Process Definition Key', options.processDefinitionKey));
+  }
+  if (options.state) {
+    criteria.push(formatCriterion('state', options.state));
+  }
+  if (options.key) {
+    criteria.push(formatCriterion('key', options.key));
+  }
+  if (options.parentProcessInstanceKey) {
+    criteria.push(formatCriterion('Parent Process Instance Key', options.parentProcessInstanceKey));
+  }
+  if (options.iProcessDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
+  }
+  logSearchCriteria('Process Instances', criteria);
 
   try {
     const filter: any = {
@@ -222,6 +312,28 @@ export async function searchUserTasks(options: {
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!options.iAssignee;
+
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.state) {
+    criteria.push(formatCriterion('state', options.state));
+  }
+  if (options.assignee) {
+    criteria.push(formatCriterion('assignee', options.assignee));
+  }
+  if (options.processInstanceKey) {
+    criteria.push(formatCriterion('Process Instance Key', options.processInstanceKey));
+  }
+  if (options.processDefinitionKey) {
+    criteria.push(formatCriterion('Process Definition Key', options.processDefinitionKey));
+  }
+  if (options.elementId) {
+    criteria.push(formatCriterion('Element ID', options.elementId));
+  }
+  if (options.iAssignee) {
+    criteria.push(formatCriterion('assignee', options.iAssignee, true));
+  }
+  logSearchCriteria('User Tasks', criteria);
 
   try {
     const filter: any = {
@@ -301,6 +413,34 @@ export async function searchIncidents(options: {
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!(options.iErrorMessage || options.iProcessDefinitionId);
+
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.state) {
+    criteria.push(formatCriterion('state', options.state));
+  }
+  if (options.processInstanceKey) {
+    criteria.push(formatCriterion('Process Instance Key', options.processInstanceKey));
+  }
+  if (options.processDefinitionKey) {
+    criteria.push(formatCriterion('Process Definition Key', options.processDefinitionKey));
+  }
+  if (options.errorType) {
+    criteria.push(formatCriterion('Error Type', options.errorType));
+  }
+  if (options.errorMessage) {
+    criteria.push(formatCriterion('Error Message', options.errorMessage));
+  }
+  if (options.processDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.processDefinitionId));
+  }
+  if (options.iErrorMessage) {
+    criteria.push(formatCriterion('Error Message', options.iErrorMessage, true));
+  }
+  if (options.iProcessDefinitionId) {
+    criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
+  }
+  logSearchCriteria('Incidents', criteria);
 
   try {
     const filter: any = {
@@ -383,6 +523,25 @@ export async function searchJobs(options: {
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!options.iType;
 
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.state) {
+    criteria.push(formatCriterion('state', options.state));
+  }
+  if (options.type) {
+    criteria.push(formatCriterion('type', options.type));
+  }
+  if (options.processInstanceKey) {
+    criteria.push(formatCriterion('Process Instance Key', options.processInstanceKey));
+  }
+  if (options.processDefinitionKey) {
+    criteria.push(formatCriterion('Process Definition Key', options.processDefinitionKey));
+  }
+  if (options.iType) {
+    criteria.push(formatCriterion('type', options.iType, true));
+  }
+  logSearchCriteria('Jobs', criteria);
+
   try {
     const filter: any = {
       filter: {
@@ -456,6 +615,31 @@ export async function searchVariables(options: {
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const hasCiFilter = !!(options.iName || options.iValue);
+
+  // Build search criteria description for user feedback
+  const criteria: string[] = [];
+  if (options.name) {
+    criteria.push(formatCriterion('name', options.name));
+  }
+  if (options.value) {
+    criteria.push(formatCriterion('value', options.value));
+  }
+  if (options.processInstanceKey) {
+    criteria.push(formatCriterion('Process Instance Key', options.processInstanceKey));
+  }
+  if (options.scopeKey) {
+    criteria.push(formatCriterion('Scope Key', options.scopeKey));
+  }
+  if (options.iName) {
+    criteria.push(formatCriterion('name', options.iName, true));
+  }
+  if (options.iValue) {
+    criteria.push(formatCriterion('value', options.iValue, true));
+  }
+  if (options.fullValue) {
+    criteria.push('(with full values)');
+  }
+  logSearchCriteria('Variables', criteria);
 
   try {
     const filter: any = {
