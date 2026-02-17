@@ -68,7 +68,11 @@ const CI_PAGE_SIZE = 1000;
  * @param isCaseInsensitive - Whether this is a case-insensitive search
  * @returns A formatted string describing the criterion
  */
-function formatCriterion(fieldLabel: string, value: string | number, isCaseInsensitive: boolean = false): string {
+function formatCriterion(fieldLabel: string, value: string | number | boolean, isCaseInsensitive: boolean = false): string {
+  if (typeof value === 'boolean') {
+    return `'${fieldLabel}' = ${value}`;
+  }
+  
   if (typeof value === 'number') {
     return `'${fieldLabel}' = ${value}`;
   }
@@ -637,7 +641,7 @@ export async function searchVariables(options: {
     criteria.push(formatCriterion('value', options.iValue, true));
   }
   if (options.fullValue) {
-    criteria.push("'fullValue' = true");
+    criteria.push(formatCriterion('fullValue', true));
   }
   logSearchCriteria('Variables', criteria);
 
