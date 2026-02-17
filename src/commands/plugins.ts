@@ -27,12 +27,12 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
   
   // Validate exclusive usage
   if (packageNameOrFrom && fromUrl) {
-    logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
+    logger.error('Cannot specify both package name and --from flag. Use either "c8ctl load plugin <name>" or "c8ctl load plugin --from <url>"');
     process.exit(1);
   }
   
   if (!packageNameOrFrom && !fromUrl) {
-    logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
+    logger.error('Package name or --from URL required. Usage: c8ctl load plugin <package-name> OR c8ctl load plugin --from <url>');
     process.exit(1);
   }
   
@@ -55,7 +55,7 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
       // Validate plugin name
       if (!pluginName || pluginName.trim() === '') {
         logger.error('Failed to extract plugin name from URL');
-        logger.info('💡 Actionable hint: Ensure the URL points to a valid npm package with a package.json file');
+        logger.info('Ensure the URL points to a valid npm package with a package.json file');
         process.exit(1);
       }
       
@@ -80,7 +80,7 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
     logger.error('Failed to load plugin', error as Error);
-    logger.info('💡 Actionable hint: Check that the plugin name/URL is correct and you have network access if loading from a remote source');
+    logger.info('Check that the plugin name/URL is correct and you have network access if loading from a remote source');
     process.exit(1);
   }
 }
@@ -183,7 +183,7 @@ export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
   
   if (!packageName) {
-    logger.error('Package name required. Usage: c8 unload plugin <package-name>');
+    logger.error('Package name required. Usage: c8ctl unload plugin <package-name>');
     process.exit(1);
   }
   
@@ -206,7 +206,7 @@ export async function unloadPlugin(packageName: string): Promise<void> {
     logger.info('Plugin commands are no longer available');
   } catch (error) {
     logger.error('Failed to unload plugin', error as Error);
-    logger.info('💡 Actionable hint: Verify the plugin name is correct by running "c8 list plugins"');
+    logger.info('Verify the plugin name is correct by running "c8ctl list plugins"');
     process.exit(1);
   }
 }
@@ -317,7 +317,7 @@ export function listPlugins(): void {
     
     if (needsSync) {
       logger.info('');
-      logger.info('💡 Actionable hint: Some plugins are out of sync. Run "c8 sync plugins" to synchronize your plugins');
+      logger.info('Some plugins are out of sync. Run "c8ctl sync plugins" to synchronize your plugins');
     }
   } catch (error) {
     logger.error('Failed to list plugins', error as Error);
@@ -419,7 +419,7 @@ export async function syncPlugins(): Promise<void> {
       logger.error(`  - ${failure.plugin}: ${failure.error}`);
     }
     logger.info('');
-    logger.info('💡 Actionable hint: Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8 unload plugin <name>"');
+    logger.info('Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"');
     process.exit(1);
   }
   
@@ -433,14 +433,14 @@ export async function upgradePlugin(packageName: string, version?: string): Prom
   const logger = getLogger();
   
   if (!packageName) {
-    logger.error('Package name required. Usage: c8 upgrade plugin <package-name> [version]');
+    logger.error('Package name required. Usage: c8ctl upgrade plugin <package-name> [version]');
     process.exit(1);
   }
   
   // Check if plugin is registered
   if (!isPluginRegistered(packageName)) {
     logger.error(`Plugin "${packageName}" is not registered.`);
-    logger.info('💡 Actionable hint: Run "c8 list plugins" to see installed plugins');
+    logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
   
@@ -470,7 +470,7 @@ export async function upgradePlugin(packageName: string, version?: string): Prom
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
     logger.error('Failed to upgrade plugin', error as Error);
-    logger.info('💡 Actionable hint: Check network connectivity and verify the package/version exists');
+    logger.info('Check network connectivity and verify the package/version exists');
     process.exit(1);
   }
 }
@@ -482,14 +482,14 @@ export async function downgradePlugin(packageName: string, version: string): Pro
   const logger = getLogger();
   
   if (!packageName || !version) {
-    logger.error('Package name and version required. Usage: c8 downgrade plugin <package-name> <version>');
+    logger.error('Package name and version required. Usage: c8ctl downgrade plugin <package-name> <version>');
     process.exit(1);
   }
   
   // Check if plugin is registered
   if (!isPluginRegistered(packageName)) {
     logger.error(`Plugin "${packageName}" is not registered.`);
-    logger.info('💡 Actionable hint: Run "c8 list plugins" to see installed plugins');
+    logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
   
@@ -515,7 +515,7 @@ export async function downgradePlugin(packageName: string, version: string): Pro
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
     logger.error('Failed to downgrade plugin', error as Error);
-    logger.info('💡 Actionable hint: Check network connectivity and verify the version exists');
+    logger.info('Check network connectivity and verify the version exists');
     process.exit(1);
   }
 }
@@ -536,7 +536,7 @@ export async function initPlugin(pluginName?: string): Promise<void> {
   // Check if directory already exists
   if (existsSync(pluginDir)) {
     logger.error(`Directory "${dirName}" already exists.`);
-    logger.info('💡 Actionable hint: Choose a different name or remove the existing directory');
+    logger.info('Choose a different name or remove the existing directory');
     process.exit(1);
   }
   

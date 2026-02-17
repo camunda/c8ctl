@@ -212,10 +212,13 @@ export function showVerbResources(verb: string): void {
     load: 'plugin',
     unload: 'plugin',
     sync: 'plugin',
+    upgrade: 'plugin',
+    downgrade: 'plugin',
+    init: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init',
   };
 
   const available = resources[verb];
