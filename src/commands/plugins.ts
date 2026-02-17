@@ -94,6 +94,66 @@ function hasPluginFile(packagePath: string): boolean {
 }
 
 /**
+ * Check if a package is a valid c8ctl plugin
+ */
+function isValidPlugin(pkgPath: string): boolean {
+  const pkgJsonPath = join(pkgPath, 'package.json');
+  if (!existsSync(pkgJsonPath)) return false;
+  
+  try {
+    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+    return hasPluginFile(pkgPath) && pkgJson.keywords?.includes('c8ctl');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get package name from a valid plugin directory
+ */
+function getPackageName(pkgPath: string): string | null {
+  const pkgJsonPath = join(pkgPath, 'package.json');
+  try {
+    const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+    return pkgJson.name;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan directory entries for c8ctl plugins
+ */
+function scanForPlugin(nodeModulesPath: string, entries: string[]): string | null {
+  for (const entry of entries.filter(e => !e.startsWith('.'))) {
+    const pkgPath = entry.startsWith('@')
+      ? null // Scoped packages handled separately
+      : join(nodeModulesPath, entry);
+    
+    if (pkgPath && isValidPlugin(pkgPath)) {
+      return getPackageName(pkgPath);
+    }
+    
+    // Handle scoped packages
+    if (entry.startsWith('@')) {
+      const scopePath = join(nodeModulesPath, entry);
+      try {
+        const scopedPackages = readdirSync(scopePath);
+        for (const scopedPkg of scopedPackages) {
+          const pkgPath = join(scopePath, scopedPkg);
+          if (isValidPlugin(pkgPath)) {
+            return getPackageName(pkgPath);
+          }
+        }
+      } catch {
+        // Skip scoped packages that can't be read
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Extract package name from URL or installed package
  * Tries to read package.json from installed package, falls back to URL parsing
  */
@@ -103,37 +163,8 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
     const nodeModulesPath = join(pluginsDir, 'node_modules');
     if (existsSync(nodeModulesPath)) {
       const entries = readdirSync(nodeModulesPath);
-      for (const entry of entries) {
-        if (entry.startsWith('.')) continue;
-        
-        if (entry.startsWith('@')) {
-          // Scoped package
-          const scopePath = join(nodeModulesPath, entry);
-          const scopedPackages = readdirSync(scopePath);
-          for (const scopedPkg of scopedPackages) {
-            const pkgPath = join(scopePath, scopedPkg);
-            const pkgJsonPath = join(pkgPath, 'package.json');
-            if (existsSync(pkgJsonPath)) {
-              const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-              // Check if this package has c8ctl-plugin file
-              if (hasPluginFile(pkgPath) && pkgJson.keywords?.includes('c8ctl')) {
-                return pkgJson.name;
-              }
-            }
-          }
-        } else {
-          // Regular package
-          const pkgPath = join(nodeModulesPath, entry);
-          const pkgJsonPath = join(pkgPath, 'package.json');
-          if (existsSync(pkgJsonPath)) {
-            const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-            // Check if this package has c8ctl-plugin file
-            if (hasPluginFile(pkgPath) && pkgJson.keywords?.includes('c8ctl')) {
-              return pkgJson.name;
-            }
-          }
-        }
-      }
+      const foundName = scanForPlugin(nodeModulesPath, entries);
+      if (foundName) return foundName;
     }
   } catch (error) {
     // Fall through to URL-based name extraction
@@ -181,6 +212,57 @@ export async function unloadPlugin(packageName: string): Promise<void> {
 }
 
 /**
+ * Scan a directory entry for c8ctl plugins and add to the set
+ */
+function addPluginIfFound(entry: string, nodeModulesPath: string, installedPlugins: Set<string>): void {
+  if (entry.startsWith('.')) return;
+  
+  if (entry.startsWith('@')) {
+    // Scoped package - scan subdirectories
+    const scopePath = join(nodeModulesPath, entry);
+    try {
+      readdirSync(scopePath)
+        .filter(pkg => !pkg.startsWith('.'))
+        .forEach(scopedPkg => {
+          const packageNameWithScope = `${entry}/${scopedPkg}`;
+          const packagePath = join(nodeModulesPath, entry, scopedPkg);
+          if (hasPluginFile(packagePath)) {
+            installedPlugins.add(packageNameWithScope);
+          }
+        });
+    } catch {
+      // Skip packages that can't be read
+    }
+  } else {
+    // Regular package
+    const packagePath = join(nodeModulesPath, entry);
+    if (hasPluginFile(packagePath)) {
+      installedPlugins.add(entry);
+    }
+  }
+}
+
+/**
+ * Scan node_modules for installed plugins
+ */
+function scanInstalledPlugins(nodeModulesPath: string): Set<string> {
+  const installedPlugins = new Set<string>();
+  
+  if (!existsSync(nodeModulesPath)) {
+    return installedPlugins;
+  }
+  
+  try {
+    const entries = readdirSync(nodeModulesPath);
+    entries.forEach(entry => addPluginIfFound(entry, nodeModulesPath, installedPlugins));
+  } catch (error) {
+    getLogger().debug('Error scanning global plugins directory:', error);
+  }
+  
+  return installedPlugins;
+}
+
+/**
  * List installed plugins
  */
 export function listPlugins(): void {
@@ -193,44 +275,7 @@ export function listPlugins(): void {
     // Check global plugins directory
     const pluginsDir = ensurePluginsDir();
     const nodeModulesPath = join(pluginsDir, 'node_modules');
-    let installedPlugins: Set<string> = new Set();
-    
-    if (existsSync(nodeModulesPath)) {
-      // Scan for installed plugins in global directory
-      try {
-        const entries = readdirSync(nodeModulesPath);
-        for (const entry of entries) {
-          if (entry.startsWith('.')) continue;
-          
-          if (entry.startsWith('@')) {
-            // Scoped package - scan subdirectories
-            const scopePath = join(nodeModulesPath, entry);
-            try {
-              const scopedPackages = readdirSync(scopePath);
-              for (const scopedPkg of scopedPackages) {
-                if (!scopedPkg.startsWith('.')) {
-                  const packageNameWithScope = `${entry}/${scopedPkg}`;
-                  const packagePath = join(nodeModulesPath, entry, scopedPkg);
-                  if (hasPluginFile(packagePath)) {
-                    installedPlugins.add(packageNameWithScope);
-                  }
-                }
-              }
-            } catch {
-              // Skip packages that can't be read
-            }
-          } else {
-            // Regular package
-            const packagePath = join(nodeModulesPath, entry);
-            if (hasPluginFile(packagePath)) {
-              installedPlugins.add(entry);
-            }
-          }
-        }
-      } catch (error) {
-        logger.debug('Error scanning global plugins directory:', error);
-      }
-    }
+    const installedPlugins = scanInstalledPlugins(nodeModulesPath);
     
     // Build unified list with status
     const plugins: Array<{Name: string, Status: string, Source: string, 'Installed At': string}> = [];
