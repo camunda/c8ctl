@@ -49,6 +49,27 @@ class C8ctl {
     rootDir: join(__dirname, '..'),
   };
 
+  // Expose env properties directly for plugin compatibility
+  get version(): string {
+    return this.env.version;
+  }
+
+  get nodeVersion(): string {
+    return this.env.nodeVersion;
+  }
+
+  get platform(): string {
+    return this.env.platform;
+  }
+
+  get arch(): string {
+    return this.env.arch;
+  }
+
+  get cwd(): string {
+    return this.env.cwd;
+  }
+
   get activeProfile(): string | undefined {
     return this._activeProfile;
   }

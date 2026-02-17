@@ -31,18 +31,91 @@ interface LoadedPlugin {
 const loadedPlugins = new Map<string, LoadedPlugin>();
 
 /**
+ * Load default plugins bundled with c8ctl
+ */
+async function loadDefaultPlugins(): Promise<void> {
+  const logger = getLogger();
+  const { fileURLToPath } = await import('node:url');
+  const { dirname } = await import('node:path');
+  
+  try {
+    // Get the directory where this file is located
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const defaultPluginsDir = join(__dirname, '..', 'default-plugins');
+    
+    if (!existsSync(defaultPluginsDir)) {
+      logger.debug('No default-plugins directory found');
+      return;
+    }
+    
+    const pluginDirs = readdirSync(defaultPluginsDir);
+    logger.debug(`Found ${pluginDirs.length} default plugin(s)`);
+    
+    for (const pluginDir of pluginDirs) {
+      const pluginPath = join(defaultPluginsDir, pluginDir);
+      const packageJsonPath = join(pluginPath, 'package.json');
+      
+      if (!existsSync(packageJsonPath)) {
+        logger.debug(`No package.json in default plugin: ${pluginDir}`);
+        continue;
+      }
+      
+      try {
+        // Check for c8ctl-plugin file
+        const pluginFileJs = join(pluginPath, 'c8ctl-plugin.js');
+        const pluginFileTs = join(pluginPath, 'c8ctl-plugin.ts');
+        
+        if (!existsSync(pluginFileJs) && !existsSync(pluginFileTs)) {
+          logger.debug(`No c8ctl-plugin.js/ts in default plugin: ${pluginDir}`);
+          continue;
+        }
+        
+        // Read package.json
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+        const pluginName = packageJson.name || `default-${pluginDir}`;
+        
+        const pluginFile = existsSync(pluginFileJs) ? pluginFileJs : pluginFileTs;
+        
+        // Use file:// protocol and add timestamp to bust cache
+        const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
+        logger.debug(`Loading default plugin from: ${pluginUrl}`);
+        const plugin = await import(pluginUrl);
+        
+        if (plugin.commands && typeof plugin.commands === 'object') {
+          loadedPlugins.set(pluginName, {
+            name: pluginName,
+            commands: plugin.commands,
+            metadata: plugin.metadata || {},
+          });
+          const commandNames = Object.keys(plugin.commands);
+          logger.debug(`Successfully loaded default plugin: ${pluginName} with ${commandNames.length} commands:`, commandNames);
+        }
+      } catch (error) {
+        logger.debug(`Failed to load default plugin ${pluginDir}:`, error);
+      }
+    }
+  } catch (error) {
+    logger.debug('Error loading default plugins:', error);
+  }
+}
+
+/**
  * Load all installed plugins from global plugins directory
  */
 export async function loadInstalledPlugins(): Promise<void> {
   const logger = getLogger();
   
-  // Ensure plugins directory exists
-  const pluginsDir = ensurePluginsDir();
-  const nodeModulesPath = join(pluginsDir, 'node_modules');
-  
   // Make c8ctl runtime available globally for plugins
   // @ts-ignore
   globalThis.c8ctl = c8ctl;
+  
+  // Load default plugins first
+  await loadDefaultPlugins();
+  
+  // Then load user-installed plugins
+  const pluginsDir = ensurePluginsDir();
+  const nodeModulesPath = join(pluginsDir, 'node_modules');
   
   if (!existsSync(nodeModulesPath)) {
     logger.debug('Global plugins node_modules directory not found');

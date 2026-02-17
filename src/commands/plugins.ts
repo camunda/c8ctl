@@ -380,3 +380,309 @@ export async function syncPlugins(): Promise<void> {
   
   logger.success('All plugins synced successfully!');
 }
+
+/**
+ * Upgrade a plugin to the latest version or a specific version
+ */
+export async function upgradePlugin(packageName: string, version?: string): Promise<void> {
+  const logger = getLogger();
+  
+  if (!packageName) {
+    logger.error('Package name required. Usage: c8 upgrade plugin <package-name> [version]');
+    process.exit(1);
+  }
+  
+  // Check if plugin is registered
+  if (!isPluginRegistered(packageName)) {
+    logger.error(`Plugin "${packageName}" is not registered.`);
+    logger.info('💡 Actionable hint: Run "c8 list plugins" to see installed plugins');
+    process.exit(1);
+  }
+  
+  const pluginEntry = getPluginEntry(packageName);
+  const pluginsDir = ensurePluginsDir();
+  
+  try {
+    const versionSpec = version ? `@${version}` : '@latest';
+    logger.info(`Upgrading plugin: ${packageName} to ${version || 'latest'}...`);
+    
+    // Uninstall current version
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+    
+    // Install new version
+    const installTarget = version ? `${packageName}${versionSpec}` : pluginEntry!.source;
+    execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
+    
+    // Update registry with new source if version was specified
+    if (version) {
+      addPluginToRegistry(packageName, `${packageName}${versionSpec}`);
+    }
+    
+    // Clear plugin cache
+    clearLoadedPlugins();
+    
+    logger.success('Plugin upgraded successfully', packageName);
+    logger.info('Plugin will be available on next command execution');
+  } catch (error) {
+    logger.error('Failed to upgrade plugin', error as Error);
+    logger.info('💡 Actionable hint: Check network connectivity and verify the package/version exists');
+    process.exit(1);
+  }
+}
+
+/**
+ * Downgrade a plugin to a specific version
+ */
+export async function downgradePlugin(packageName: string, version: string): Promise<void> {
+  const logger = getLogger();
+  
+  if (!packageName || !version) {
+    logger.error('Package name and version required. Usage: c8 downgrade plugin <package-name> <version>');
+    process.exit(1);
+  }
+  
+  // Check if plugin is registered
+  if (!isPluginRegistered(packageName)) {
+    logger.error(`Plugin "${packageName}" is not registered.`);
+    logger.info('💡 Actionable hint: Run "c8 list plugins" to see installed plugins');
+    process.exit(1);
+  }
+  
+  const pluginsDir = ensurePluginsDir();
+  
+  try {
+    logger.info(`Downgrading plugin: ${packageName} to version ${version}...`);
+    
+    // Uninstall current version
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+    
+    // Install specific version
+    const installTarget = `${packageName}@${version}`;
+    execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
+    
+    // Update registry with new source
+    addPluginToRegistry(packageName, installTarget);
+    
+    // Clear plugin cache
+    clearLoadedPlugins();
+    
+    logger.success('Plugin downgraded successfully', packageName);
+    logger.info('Plugin will be available on next command execution');
+  } catch (error) {
+    logger.error('Failed to downgrade plugin', error as Error);
+    logger.info('💡 Actionable hint: Check network connectivity and verify the version exists');
+    process.exit(1);
+  }
+}
+
+/**
+ * Initialize a new plugin project with TypeScript template
+ */
+export async function initPlugin(pluginName?: string): Promise<void> {
+  const logger = getLogger();
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { resolve } = await import('node:path');
+  
+  // Use provided name or default
+  const name = pluginName || 'my-c8ctl-plugin';
+  const dirName = name.startsWith('c8ctl-') ? name : `c8ctl-${name}`;
+  const pluginDir = resolve(process.cwd(), dirName);
+  
+  // Check if directory already exists
+  if (existsSync(pluginDir)) {
+    logger.error(`Directory "${dirName}" already exists.`);
+    logger.info('💡 Actionable hint: Choose a different name or remove the existing directory');
+    process.exit(1);
+  }
+  
+  try {
+    logger.info(`Creating plugin: ${dirName}...`);
+    
+    // Create plugin directory
+    mkdirSync(pluginDir, { recursive: true });
+    
+    // Create package.json
+    const packageJson = {
+      name: dirName,
+      version: '1.0.0',
+      type: 'module',
+      description: `A c8ctl plugin`,
+      keywords: ['c8ctl', 'c8ctl-plugin'],
+      main: 'c8ctl-plugin.js',
+      scripts: {
+        build: 'tsc',
+        watch: 'tsc --watch',
+      },
+      devDependencies: {
+        typescript: '^5.0.0',
+        '@types/node': '^22.0.0',
+      },
+    };
+    
+    writeFileSync(
+      join(pluginDir, 'package.json'),
+      JSON.stringify(packageJson, null, 2)
+    );
+    
+    // Create tsconfig.json
+    const tsConfig = {
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'ES2022',
+        moduleResolution: 'node',
+        outDir: '.',
+        rootDir: './src',
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        forceConsistentCasingInFileNames: true,
+      },
+      include: ['src/**/*'],
+    };
+    
+    writeFileSync(
+      join(pluginDir, 'tsconfig.json'),
+      JSON.stringify(tsConfig, null, 2)
+    );
+    
+    // Create src directory
+    mkdirSync(join(pluginDir, 'src'), { recursive: true });
+    
+    // Create c8ctl-plugin.ts
+    const pluginTemplate = `/**
+ * ${dirName} - A c8ctl plugin
+ */
+
+// The c8ctl runtime is available globally
+declare const c8ctl: {
+  version: string;
+  nodeVersion: string;
+  platform: string;
+  arch: string;
+  cwd: string;
+  outputMode: 'text' | 'json';
+  activeProfile?: string;
+  activeTenant?: string;
+};
+
+// Optional metadata for help text
+export const metadata = {
+  name: '${dirName}',
+  description: 'A c8ctl plugin',
+  commands: {
+    hello: {
+      description: 'Say hello from the plugin',
+    },
+  },
+};
+
+// Required commands export
+export const commands = {
+  hello: async (args: string[]) => {
+    console.log('Hello from ${dirName}!');
+    console.log('c8ctl version:', c8ctl.version);
+    console.log('Node version:', c8ctl.nodeVersion);
+    
+    if (args.length > 0) {
+      console.log('Arguments:', args.join(', '));
+    }
+    
+    // Example: Access c8ctl runtime
+    console.log('Current directory:', c8ctl.cwd);
+    console.log('Output mode:', c8ctl.outputMode);
+    
+    if (c8ctl.activeProfile) {
+      console.log('Active profile:', c8ctl.activeProfile);
+    }
+  },
+};
+`;
+    
+    writeFileSync(
+      join(pluginDir, 'src', 'c8ctl-plugin.ts'),
+      pluginTemplate
+    );
+    
+    // Create README.md
+    const readme = `# ${dirName}
+
+A c8ctl plugin.
+
+## Development
+
+1. Install dependencies:
+\`\`\`bash
+npm install
+\`\`\`
+
+2. Build the plugin:
+\`\`\`bash
+npm run build
+\`\`\`
+
+3. Load the plugin for testing:
+\`\`\`bash
+c8ctl load plugin --from file://\${PWD}
+\`\`\`
+
+4. Test the plugin command:
+\`\`\`bash
+c8ctl hello
+\`\`\`
+
+## Plugin Structure
+
+- \`src/c8ctl-plugin.ts\` - Plugin source code (TypeScript)
+- \`c8ctl-plugin.js\` - Compiled plugin file (JavaScript)
+- \`package.json\` - Package metadata with c8ctl keywords
+
+## Publishing
+
+Before publishing, ensure:
+- The plugin is built (\`npm run build\`)
+- The package.json has correct metadata
+- Keywords include 'c8ctl' or 'c8ctl-plugin'
+
+Then publish to npm:
+\`\`\`bash
+npm publish
+\`\`\`
+
+Users can install your plugin with:
+\`\`\`bash
+c8ctl load plugin ${dirName}
+\`\`\`
+`;
+    
+    writeFileSync(
+      join(pluginDir, 'README.md'),
+      readme
+    );
+    
+    // Create .gitignore
+    const gitignore = `node_modules/
+*.js
+*.js.map
+!c8ctl-plugin.js
+`;
+    
+    writeFileSync(
+      join(pluginDir, '.gitignore'),
+      gitignore
+    );
+    
+    logger.success('Plugin scaffolding created successfully!');
+    logger.info('');
+    logger.info(`Next steps:`);
+    logger.info(`  1. cd ${dirName}`);
+    logger.info(`  2. npm install`);
+    logger.info(`  3. npm run build`);
+    logger.info(`  4. c8ctl load plugin --from file://\${PWD}`);
+    logger.info(`  5. c8ctl hello`);
+    logger.info('');
+    logger.info(`Edit src/c8ctl-plugin.ts to add your plugin logic.`);
+  } catch (error) {
+    logger.error('Failed to create plugin', error as Error);
+    process.exit(1);
+  }
+}
