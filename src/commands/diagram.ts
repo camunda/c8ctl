@@ -104,7 +104,7 @@ export async function getProcessInstanceDiagram(key: string, options: {
       writeFileSync(options.output, pngBuffer);
       logger.success(`Diagram saved to ${options.output}`);
     } else {
-      printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
+      await printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
     }
 
   } catch (error) {
@@ -233,10 +233,58 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
 }
 
 /**
- * Print a PNG image inline in the terminal using the iTerm2 Inline Images Protocol.
- * Supported by: iTerm2, WezTerm, mintty, VS Code, Konsole, kitty (compat mode), and others.
+ * Print a PNG image inline in the terminal using the appropriate protocol.
+ * Supports both iTerm2 Inline Images Protocol and Kitty Graphics Protocol.
+ * 
+ * Protocols:
+ * - Kitty Graphics Protocol: Supported by Ghostty, Kitty, WezTerm, Konsole, and others
+ * - iTerm2 Protocol: Supported by iTerm2, WezTerm, mintty, VS Code, and others
  */
-function printInlineImage(pngBuffer: Buffer, filename: string): void {
+async function printInlineImage(pngBuffer: Buffer, filename: string): Promise<void> {
+  const supportsTerminalGraphics = (await import('supports-terminal-graphics')).default;
+  const support = supportsTerminalGraphics.stdout;
+
+  if (support.kitty) {
+    // Use Kitty Graphics Protocol
+    printKittyImage(pngBuffer);
+  } else if (support.iterm2) {
+    // Use iTerm2 Inline Images Protocol
+    printIterm2Image(pngBuffer, filename);
+  } else {
+    // Fallback to iTerm2 protocol (might work in some terminals)
+    printIterm2Image(pngBuffer, filename);
+  }
+}
+
+/**
+ * Print image using Kitty Graphics Protocol
+ * Format: ESC_Ga=T,f=100;BASE64_DATA ESC\
+ */
+function printKittyImage(pngBuffer: Buffer): void {
+  const base64 = pngBuffer.toString('base64');
+  const chunkSize = 4096;
+  
+  // Split base64 data into chunks to avoid line length limits
+  for (let i = 0; i < base64.length; i += chunkSize) {
+    const chunk = base64.slice(i, i + chunkSize);
+    const isLast = (i + chunkSize) >= base64.length;
+    
+    // m=1 means more data coming, m=0 means last chunk
+    // a=T means transmit and display, f=100 means PNG format
+    const moreFlag = isLast ? 0 : 1;
+    const action = (i === 0) ? 'a=T,f=100' : '';
+    const params = action ? `${action},m=${moreFlag}` : `m=${moreFlag}`;
+    
+    process.stdout.write(`\x1b_G${params};${chunk}\x1b\\`);
+  }
+  process.stdout.write('\n');
+}
+
+/**
+ * Print image using iTerm2 Inline Images Protocol
+ * Format: OSC 1337 ; File=[args] : BASE64_DATA ST
+ */
+function printIterm2Image(pngBuffer: Buffer, filename: string): void {
   const base64 = pngBuffer.toString('base64');
   const args = `name=${Buffer.from(filename).toString('base64')};size=${pngBuffer.length};inline=1`;
 

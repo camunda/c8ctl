@@ -52,7 +52,8 @@
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^8.8.4",
     "@modelcontextprotocol/sdk": "^1.26.0",
-    "puppeteer-core": "^24.37.4"
+    "puppeteer-core": "^24.37.4",
+    "supports-terminal-graphics": "^0.1.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
