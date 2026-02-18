@@ -546,10 +546,10 @@ complete -c c8ctl -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8 -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8ctl -l ivalue -d 'Case-insensitive variable value filter' -r
 complete -c c8 -l ivalue -d 'Case-insensitive variable value filter' -r
-complete -c c8ctl -l diagram -d 'Open process instance diagram in browser'
-complete -c c8 -l diagram -d 'Open process instance diagram in browser'
-complete -c c8ctl -l output -d 'Output file path for diagram HTML' -r
-complete -c c8 -l output -d 'Output file path for diagram HTML' -r
+complete -c c8ctl -l diagram -d 'Render process instance diagram as PNG'
+complete -c c8 -l diagram -d 'Render process instance diagram as PNG'
+complete -c c8ctl -l output -d 'Output file path for diagram PNG' -r
+complete -c c8 -l output -d 'Output file path for diagram PNG' -r
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
