@@ -229,8 +229,8 @@ _c8ctl() {
     '--ierrorMessage[Case-insensitive error message filter]:pattern:'
     '--itype[Case-insensitive job type filter]:pattern:'
     '--ivalue[Case-insensitive variable value filter]:pattern:'
-    '--diagram[Open process instance diagram in browser]'
-    '--output[Output file path for diagram HTML]:path:_files'
+    '--diagram[Render process instance diagram as PNG]'
+    '--output[Output file path for diagram PNG]:path:_files'
   )
 
   case \$CURRENT in
