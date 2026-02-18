@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { c8ctl } from '../runtime.ts';
 
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
@@ -91,18 +92,31 @@ function formatCriterion(fieldLabel: string, value: string | number | boolean, i
  * Log search criteria to console for better developer experience.
  * 
  * NOTE: Uses console.log directly (not the logger class) because these messages
- * are UX feedback about the search and should not be part of text/JSON output.
+ * are UX feedback about the search. In JSON mode, outputs proper JSON for Unix pipe compatibility.
  * 
  * @param resourceName - Human-readable name of the resource type being searched
  * @param criteria - Array of criterion strings describing the filters
  */
 function logSearchCriteria(resourceName: string, criteria: string[]): void {
-  if (criteria.length === 0) {
-    console.log(`Searching ${resourceName}`);
-  } else if (criteria.length === 1) {
-    console.log(`Searching ${resourceName} where ${criteria[0]}`);
+  const mode = c8ctl.outputMode;
+  
+  if (mode === 'json') {
+    // Output JSON for pipe-ability to tools like jq
+    const output = {
+      action: 'search',
+      resource: resourceName,
+      criteria: criteria.length > 0 ? criteria : undefined
+    };
+    console.log(JSON.stringify(output));
   } else {
-    console.log(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
+    // Text mode output for human readability
+    if (criteria.length === 0) {
+      console.log(`Searching ${resourceName}`);
+    } else if (criteria.length === 1) {
+      console.log(`Searching ${resourceName} where ${criteria[0]}`);
+    } else {
+      console.log(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
+    }
   }
 }
 

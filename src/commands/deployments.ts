@@ -5,11 +5,23 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { c8ctl } from '../runtime.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname, extname, basename, relative } from 'node:path';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
 const PROCESS_APPLICATION_FILE = '.process-application';
+
+/**
+ * Helper to output messages that respect JSON mode for Unix pipe compatibility
+ */
+function logMessage(message: string): void {
+  if (c8ctl.outputMode === 'json') {
+    console.error(JSON.stringify({ type: 'message', message }));
+  } else {
+    console.error(message);
+  }
+}
 
 /**
  * Extract process/decision IDs from BPMN/DMN files to detect duplicates
@@ -264,9 +276,9 @@ export async function deploy(paths: string[], options: {
     const duplicates = findDuplicateDefinitionIds(resources);
     if (duplicates.size > 0) {
       logger.error('Cannot deploy: Multiple files with the same process/decision ID in one deployment');
-      duplicates.forEach((paths, id) => console.error(`  Process/Decision ID "${id}" found in: ${paths.join(', ')}`));
-      console.error('\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.');
-      console.error('Please deploy these files separately or ensure each process/decision has a unique ID.');
+      duplicates.forEach((paths, id) => logMessage(`  Process/Decision ID "${id}" found in: ${paths.join(', ')}`));
+      logMessage('\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.');
+      logMessage('Please deploy these files separately or ensure each process/decision has a unique ID.');
       process.exit(1);
     }
 
@@ -435,11 +447,11 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
 
   // Display the detailed error message if available
   if (detail) {
-    console.error('\n' + formatDeploymentErrorDetail(detail));
+    logMessage('\n' + formatDeploymentErrorDetail(detail));
   }
 
   // Provide actionable hints based on error type
-  console.error('');
+  logMessage('');
   printDeploymentHints(title, detail, status, resources);
   process.exit(1);
 }
@@ -520,5 +532,5 @@ function printDeploymentHints(title: string, detail: string | undefined, status:
     }
   }
   
-  hints.forEach(h => console.error(h));
+  hints.forEach(h => logMessage(h));
 }
