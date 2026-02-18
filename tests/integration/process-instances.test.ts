@@ -139,4 +139,109 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     assert.ok(outputWithAlias.includes('completed'), 'Output with await alias should indicate process completed');
     assert.ok(outputWithAlias.includes('variables'), 'Output with await alias should contain variables');
   });
+
+  test('get process instance with --diagram flag saves PNG to file', async () => {
+    // Deploy and create a process instance
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    const result = await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+    
+    assert.ok(result, 'Create result should exist');
+    const instanceKey = result.processInstanceKey.toString();
+    
+    // Run CLI command to generate diagram with --output flag
+    const { execSync } = await import('node:child_process');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const tmpDir = mkdtempSync(join(tmpdir(), 'c8ctl-diagram-test-'));
+    const outputPath = join(tmpDir, 'diagram.png');
+    
+    try {
+      const output = execSync(
+        `node src/index.ts get pi --key ${instanceKey} --diagram --output ${outputPath}`,
+        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
+      );
+      
+      // Verify the file was created
+      assert.ok(existsSync(outputPath), 'Diagram PNG file should be created');
+      
+      // Verify the file has content (PNG files start with specific bytes)
+      const { readFileSync } = await import('node:fs');
+      const fileContent = readFileSync(outputPath);
+      assert.ok(fileContent.length > 0, 'PNG file should have content');
+      // Verify PNG signature (starts with 0x89504E47)
+      assert.strictEqual(fileContent[0], 0x89, 'PNG file should start with PNG signature byte 1');
+      assert.strictEqual(fileContent[1], 0x50, 'PNG file should start with PNG signature byte 2');
+      assert.strictEqual(fileContent[2], 0x4E, 'PNG file should start with PNG signature byte 3');
+      assert.strictEqual(fileContent[3], 0x47, 'PNG file should start with PNG signature byte 4');
+      
+      // Verify success message in output
+      assert.ok(output.includes('Diagram saved'), 'Output should indicate diagram was saved');
+    } finally {
+      // Cleanup: remove temp directory
+      const { rmSync } = await import('node:fs');
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('get process instance with --diagram flag without --output prints inline', async () => {
+    // Deploy and create a process instance
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    const result = await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+    
+    assert.ok(result, 'Create result should exist');
+    const instanceKey = result.processInstanceKey.toString();
+    
+    // Run CLI command to generate diagram without --output flag
+    const { execSync } = await import('node:child_process');
+    
+    try {
+      const output = execSync(
+        `node src/index.ts get pi --key ${instanceKey} --diagram`,
+        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
+      );
+      
+      // Verify iTerm2 inline image protocol is present in output
+      // The protocol uses OSC 1337 escape sequence: \x1b]1337;File=...
+      assert.ok(output.includes('\x1b]1337;File='), 'Output should contain iTerm2 inline image protocol');
+      assert.ok(output.includes('inline=1'), 'Output should indicate inline display mode');
+    } catch (error: any) {
+      // On systems without Chrome/Chromium, this test may fail
+      // Verify it fails with a helpful error message
+      if (error.stderr && error.stderr.includes('No Chrome or Chromium browser found')) {
+        assert.ok(true, 'Test skipped: Chrome/Chromium not installed');
+      } else {
+        throw error;
+      }
+    }
+  });
+
+  test('get process instance with --diagram handles non-existent process instance', async () => {
+    // Run CLI command with a non-existent process instance key
+    const { execSync } = await import('node:child_process');
+    const nonExistentKey = '9999999999999';
+    
+    try {
+      execSync(
+        `node src/index.ts get pi --key ${nonExistentKey} --diagram`,
+        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
+      );
+      assert.fail('Should have thrown an error for non-existent process instance');
+    } catch (error: any) {
+      // CLI should exit with non-zero code
+      assert.ok(error.status !== 0, 'CLI should exit with non-zero status for non-existent process instance');
+      // Check that error output contains an error message
+      const hasErrorMessage = error.stderr && (
+        error.stderr.includes('Failed') || 
+        error.stderr.includes('NOT_FOUND') ||
+        error.stderr.includes('✗') ||
+        error.stderr.includes('Error')
+      );
+      assert.ok(hasErrorMessage, 
+        `CLI should output error message for non-existent process instance. Got stderr: ${error.stderr}`);
+    }
+  });
 });
