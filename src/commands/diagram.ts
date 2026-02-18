@@ -1,9 +1,9 @@
 /**
  * Process instance diagram generation
- * 
- * Generates a self-contained HTML file that renders a BPMN diagram with
- * highlighted elements and sequence flows for a process instance.
- * Uses bpmn-js loaded from CDN for client-side rendering.
+ *
+ * Renders a BPMN diagram with highlighted elements and sequence flows
+ * for a process instance, outputting a PNG file.
+ * Uses puppeteer-core with system-installed Chrome/Chromium and bpmn-js from CDN.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 
 /**
- * Fetch process instance diagram data and generate an HTML file
+ * Fetch process instance diagram data and render to PNG
  */
 export async function getProcessInstanceDiagram(key: string, options: {
   profile?: string;
@@ -79,8 +79,11 @@ export async function getProcessInstanceDiagram(key: string, options: {
         .map((sf: any) => sf.elementId)
     )];
 
-    // 7. Generate HTML
-    const html = generateDiagramHtml({
+    // 7. Render to PNG
+    const outputPath = options.output || join(tmpdir(), `c8-diagram-${key}.png`);
+
+    logger.info('Rendering diagram...');
+    await renderDiagramToPng({
       processInstanceKey: key,
       processDefinitionId,
       processDefinitionKey,
@@ -90,15 +93,10 @@ export async function getProcessInstanceDiagram(key: string, options: {
       activeElements: activeElements as string[],
       incidentElements: incidentElements as string[],
       takenSequenceFlows: takenSequenceFlows as string[],
-    });
+    }, outputPath);
 
-    // 8. Write to file and open
-    const outputPath = options.output || join(tmpdir(), `c8-diagram-${key}.html`);
-    writeFileSync(outputPath, html, 'utf-8');
     logger.success(`Diagram saved to ${outputPath}`);
-
-    // Open in default browser
-    await openInBrowser(outputPath);
+    await openFile(outputPath);
 
   } catch (error) {
     logger.error(`Failed to generate diagram for process instance ${key}`, error as Error);
@@ -106,39 +104,7 @@ export async function getProcessInstanceDiagram(key: string, options: {
   }
 }
 
-/**
- * Open a file in the default browser (cross-platform)
- */
-async function openInBrowser(filePath: string): Promise<void> {
-  const { exec } = await import('node:child_process');
-  const url = `file://${filePath}`;
-
-  const platform = process.platform;
-  let cmd: string;
-
-  if (platform === 'darwin') {
-    cmd = `open "${url}"`;
-  } else if (platform === 'linux') {
-    // WSL detection
-    const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
-    cmd = isWSL ? `wslview "${url}" || xdg-open "${url}"` : `xdg-open "${url}"`;
-  } else {
-    // Should not happen (no native Windows support, only WSL)
-    cmd = `xdg-open "${url}"`;
-  }
-
-  exec(cmd, (error) => {
-    if (error) {
-      const logger = getLogger();
-      logger.info(`Open the diagram in your browser: ${url}`);
-    }
-  });
-}
-
-/**
- * Generate a self-contained HTML file with embedded bpmn-js viewer
- */
-function generateDiagramHtml(data: {
+interface DiagramData {
   processInstanceKey: string;
   processDefinitionId: string;
   processDefinitionKey: string | number;
@@ -148,60 +114,164 @@ function generateDiagramHtml(data: {
   activeElements: string[];
   incidentElements: string[];
   takenSequenceFlows: string[];
-}): string {
+}
+
+/**
+ * Find system-installed Chrome/Chromium executable
+ */
+async function findChromePath(): Promise<string> {
+  const { computeSystemExecutablePath, Browser, ChromeReleaseChannel } =
+    await import('@puppeteer/browsers');
+
+  const candidates: Array<{ browser: typeof Browser[keyof typeof Browser]; channel: typeof ChromeReleaseChannel[keyof typeof ChromeReleaseChannel] }> = [
+    { browser: Browser.CHROME, channel: ChromeReleaseChannel.STABLE },
+    { browser: Browser.CHROME, channel: ChromeReleaseChannel.DEV },
+    { browser: Browser.CHROME, channel: ChromeReleaseChannel.BETA },
+    { browser: Browser.CHROMIUM, channel: ChromeReleaseChannel.STABLE },
+  ];
+
+  for (const { browser, channel } of candidates) {
+    try {
+      return computeSystemExecutablePath({ browser, channel });
+    } catch {
+      // try next
+    }
+  }
+
+  throw new Error(
+    'No Chrome or Chromium browser found.\n' +
+    'Install Google Chrome or Chromium to use --diagram.\n' +
+    'Download: https://www.google.com/chrome/'
+  );
+}
+
+/**
+ * Render BPMN diagram to PNG using headless Chrome
+ */
+async function renderDiagramToPng(data: DiagramData, outputPath: string): Promise<void> {
+  const puppeteer = await import('puppeteer-core');
+  const chromePath = await findChromePath();
+
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    executablePath: chromePath,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
+
+  try {
+    const page = await browser.newPage();
+    const html = generateDiagramHtml(data);
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    // Wait for bpmn-js to finish rendering
+    await page.waitForFunction(
+      'window.__diagramRendered === true',
+      { timeout: 15000 },
+    );
+
+    // Get the bounding box of the rendered diagram for tight cropping
+    const clip = await page.evaluate(`(function() {
+      var svg = document.querySelector('#canvas svg');
+      if (!svg) return null;
+      var bbox = svg.getBBox();
+      var ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      return {
+        x: Math.max(0, bbox.x * ctm.a + ctm.e - 20),
+        y: Math.max(0, bbox.y * ctm.d + ctm.f - 20),
+        width: bbox.width * ctm.a + 40,
+        height: bbox.height * ctm.d + 40,
+      };
+    })()`);
+
+    await page.setViewport({
+      width: (clip as any) ? Math.ceil((clip as any).x + (clip as any).width) : 1920,
+      height: (clip as any) ? Math.ceil((clip as any).y + (clip as any).height) : 1080,
+      deviceScaleFactor: 2,
+    });
+
+    // Re-render after viewport change
+    await page.evaluate('window.__viewer && window.__viewer.get("canvas").zoom("fit-viewport")');
+
+    // Brief wait for re-render
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Recalculate clip after re-render
+    const finalClip = await page.evaluate(`(function() {
+      var svg = document.querySelector('#canvas svg');
+      if (!svg) return null;
+      var bbox = svg.getBBox();
+      var ctm = svg.getScreenCTM();
+      if (!ctm) return null;
+      return {
+        x: Math.max(0, bbox.x * ctm.a + ctm.e - 20),
+        y: Math.max(0, bbox.y * ctm.d + ctm.f - 20),
+        width: bbox.width * ctm.a + 40,
+        height: bbox.height * ctm.d + 40,
+      };
+    })()`);
+
+    const screenshot = await page.screenshot({
+      type: 'png',
+      clip: (finalClip as any) || undefined,
+      omitBackground: false,
+    });
+
+    writeFileSync(outputPath, screenshot);
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Open a file with the system default viewer (cross-platform)
+ */
+async function openFile(filePath: string): Promise<void> {
+  const { exec } = await import('node:child_process');
+
+  const platform = process.platform;
+  let cmd: string;
+
+  if (platform === 'darwin') {
+    cmd = `open "${filePath}"`;
+  } else if (platform === 'linux') {
+    const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
+    cmd = isWSL ? `wslview "${filePath}" || xdg-open "${filePath}"` : `xdg-open "${filePath}"`;
+  } else {
+    cmd = `xdg-open "${filePath}"`;
+  }
+
+  exec(cmd, (error) => {
+    if (error) {
+      const logger = getLogger();
+      logger.info(`Open the diagram: ${filePath}`);
+    }
+  });
+}
+
+/**
+ * Generate HTML for headless rendering (not user-facing, used as intermediate step)
+ */
+function generateDiagramHtml(data: DiagramData): string {
   const diagramData = JSON.stringify({
-    processInstanceKey: data.processInstanceKey,
-    processDefinitionId: data.processDefinitionId,
-    processDefinitionKey: data.processDefinitionKey,
-    state: data.state,
     completedElements: data.completedElements,
     activeElements: data.activeElements,
     incidentElements: data.incidentElements,
     takenSequenceFlows: data.takenSequenceFlows,
   });
 
-  // Escape XML for embedding in script tag
   const escapedXml = JSON.stringify(data.xml);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Process Instance ${data.processInstanceKey} - ${data.processDefinitionId}</title>
   <link rel="stylesheet" href="https://unpkg.com/bpmn-js@18/dist/assets/bpmn-js.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8f9fa; }
-    .header {
-      background: #1a1a2e; color: #fff; padding: 16px 24px;
-      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    }
-    .header h1 { font-size: 18px; font-weight: 600; }
-    .header .meta { font-size: 13px; color: #a0a0b0; }
-    .header .state {
-      display: inline-block; padding: 2px 10px; border-radius: 12px;
-      font-size: 12px; font-weight: 600; text-transform: uppercase;
-    }
-    .state-ACTIVE { background: #0d6efd; color: #fff; }
-    .state-COMPLETED { background: #198754; color: #fff; }
-    .state-CANCELED { background: #6c757d; color: #fff; }
-    .state-INCIDENT { background: #dc3545; color: #fff; }
-    .legend {
-      display: flex; gap: 20px; padding: 10px 24px; background: #fff;
-      border-bottom: 1px solid #dee2e6; font-size: 13px; color: #555; flex-wrap: wrap;
-    }
-    .legend-item { display: flex; align-items: center; gap: 6px; }
-    .legend-color {
-      width: 16px; height: 16px; border-radius: 3px; border: 2px solid;
-    }
-    .legend-completed { border-color: #0072CE; background: rgba(0, 114, 206, 0.1); }
-    .legend-active { border-color: #0d6efd; background: rgba(13, 110, 253, 0.3); animation: pulse 2s infinite; }
-    .legend-incident { border-color: #dc3545; background: rgba(220, 53, 69, 0.15); }
-    .legend-flow { border-color: #0072CE; background: #0072CE; border-radius: 0; height: 3px; width: 20px; }
-    #canvas { width: 100%; height: calc(100vh - 100px); background: #fff; }
+    body { background: #fff; }
+    #canvas { width: 1600px; height: 900px; }
 
-    /* BPMN element markers */
     .highlight:not(.djs-connection) .djs-visual > :nth-child(1) {
       stroke: #0072CE !important;
       fill: rgba(0, 114, 206, 0.1) !important;
@@ -209,34 +279,14 @@ function generateDiagramHtml(data: {
     .active-element:not(.djs-connection) .djs-visual > :nth-child(1) {
       stroke: #0d6efd !important;
       fill: rgba(13, 110, 253, 0.15) !important;
-      animation: pulse-stroke 2s infinite;
     }
     .incident-element:not(.djs-connection) .djs-visual > :nth-child(1) {
       stroke: #dc3545 !important;
       fill: rgba(220, 53, 69, 0.1) !important;
     }
-    @keyframes pulse-stroke {
-      0%, 100% { stroke-width: 2px; }
-      50% { stroke-width: 4px; }
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>${data.processDefinitionId}</h1>
-    <span class="meta">Instance: ${data.processInstanceKey}</span>
-    <span class="state state-${data.state}">${data.state}</span>
-  </div>
-  <div class="legend">
-    <div class="legend-item"><div class="legend-color legend-completed"></div> Completed</div>
-    <div class="legend-item"><div class="legend-color legend-active"></div> Active</div>
-    <div class="legend-item"><div class="legend-color legend-incident"></div> Incident</div>
-    <div class="legend-item"><div class="legend-color legend-flow"></div> Sequence Flow</div>
-  </div>
   <div id="canvas"></div>
 
   <script src="https://unpkg.com/bpmn-js@18/dist/bpmn-viewer.production.min.js"></script>
@@ -246,6 +296,7 @@ function generateDiagramHtml(data: {
 
     async function renderDiagram() {
       const viewer = new BpmnJS({ container: '#canvas' });
+      window.__viewer = viewer;
 
       try {
         await viewer.importXML(xml);
@@ -255,22 +306,18 @@ function generateDiagramHtml(data: {
 
         canvas.zoom('fit-viewport');
 
-        // Highlight completed elements
         diagramData.completedElements.forEach(function(elementId) {
           canvas.addMarker(elementId, 'highlight');
         });
 
-        // Highlight active elements (overrides completed)
         diagramData.activeElements.forEach(function(elementId) {
           canvas.addMarker(elementId, 'active-element');
         });
 
-        // Highlight incident elements (overrides others)
         diagramData.incidentElements.forEach(function(elementId) {
           canvas.addMarker(elementId, 'incident-element');
         });
 
-        // Color taken sequence flows
         diagramData.takenSequenceFlows.forEach(function(flowId) {
           var sequenceFlow = elementRegistry.get(flowId);
           if (sequenceFlow) {
@@ -283,10 +330,11 @@ function generateDiagramHtml(data: {
             }
           }
         });
+
+        window.__diagramRendered = true;
       } catch (err) {
         console.error('Failed to render BPMN diagram:', err);
-        document.getElementById('canvas').innerHTML =
-          '<div style="padding:40px;color:#dc3545;">Failed to render diagram: ' + err.message + '</div>';
+        window.__diagramRendered = true;
       }
     }
 
