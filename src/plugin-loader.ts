@@ -42,9 +42,24 @@ async function loadDefaultPlugins(): Promise<void> {
     // Get the directory where this file is located
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const defaultPluginsDir = join(__dirname, '..', 'default-plugins');
     
-    if (!existsSync(defaultPluginsDir)) {
+    // Check both possible locations:
+    // In development: src/plugin-loader.ts -> ../default-plugins
+    // In production: dist/plugin-loader.js -> dist/default-plugins
+    const possiblePaths = [
+      join(__dirname, 'default-plugins'),  // Production path
+      join(__dirname, '..', 'default-plugins'),  // Development path
+    ];
+    
+    let defaultPluginsDir: string | null = null;
+    for (const path of possiblePaths) {
+      if (existsSync(path)) {
+        defaultPluginsDir = path;
+        break;
+      }
+    }
+    
+    if (!defaultPluginsDir) {
       logger.debug('No default-plugins directory found');
       return;
     }
