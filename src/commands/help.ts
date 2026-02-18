@@ -70,7 +70,10 @@ Commands:
   load      plugin <name>    Load a c8ctl plugin from npm registry
   load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
+  upgrade   plugin <name> [version]  Upgrade a plugin to latest or specific version
+  downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
+  init      plugin [name]    Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
@@ -162,8 +165,10 @@ Examples:
   c8ctl watch ./src                  Watch directory for changes
   c8ctl use profile prod             Set active profile
   c8ctl output json                  Switch to JSON output
+  c8ctl init plugin my-plugin        Create new plugin from template
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
   c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
 
@@ -210,10 +215,13 @@ export function showVerbResources(verb: string): void {
     load: 'plugin',
     unload: 'plugin',
     sync: 'plugin',
+    upgrade: 'plugin',
+    downgrade: 'plugin',
+    init: 'plugin',
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init',
   };
 
   const available = resources[verb];

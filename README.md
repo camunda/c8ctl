@@ -308,9 +308,24 @@ Debug output is written to stderr with timestamps and won't interfere with norma
 
 ### Plugin Management
 
-c8ctl supports a plugin system that allows extending the CLI with custom commands via npm packages. Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux, similar locations on other platforms) for persistence across npm operations.
+c8ctl supports a global plugin system that allows extending the CLI with custom commands via npm packages. Plugins are installed globally to a user-specific directory and tracked in a registry file.
+
+**Plugin Storage Locations:**
+
+The plugin system uses OS-specific directories:
+
+| OS | Plugins Directory | Registry File |
+|----|-------------------|---------------|
+| **Linux** | `~/.config/c8ctl/plugins/node_modules` | `~/.config/c8ctl/plugins.json` |
+| **macOS** | `~/Library/Application Support/c8ctl/plugins/node_modules` | `~/Library/Application Support/c8ctl/plugins.json` |
+| **Windows** | `%APPDATA%\c8ctl\plugins\node_modules` | `%APPDATA%\c8ctl\plugins.json` |
+
+> **Note:** You can override the data directory with the `C8CTL_DATA_DIR` environment variable.
 
 ```bash
+# Create a new plugin from template
+c8ctl init plugin my-plugin
+
 # Load a plugin from npm registry
 c8ctl load plugin <package-name>
 
@@ -320,7 +335,14 @@ c8ctl load plugin --from file:///path/to/plugin
 c8ctl load plugin --from https://github.com/user/repo
 c8ctl load plugin --from git://github.com/user/repo.git
 
-# Unload a plugin (wraps npm uninstall)
+# Upgrade a plugin to latest or specific version
+c8ctl upgrade plugin <package-name>
+c8ctl upgrade plugin <package-name> 1.2.3
+
+# Downgrade a plugin to a specific version
+c8ctl downgrade plugin <package-name> 1.0.0
+
+# Unload a plugin
 c8ctl unload plugin <package-name>
 
 # List installed plugins (shows sync status)
@@ -335,21 +357,32 @@ c8ctl sync plugins
 c8ctl help
 ```
 
-**Plugin Registry:**
-- Plugins are tracked independently of `package.json` in a registry file
-- The registry serves as the source of truth (local precedence)
+**Global Plugin System:**
+- Plugins are installed to a global directory (OS-specific, see table above)
+- Plugin registry file (`plugins.json`) tracks all installed plugins
+- No local `package.json` is required in your working directory
+- Plugins are available globally from any directory
+- The registry serves as the source of truth for installed plugins
+- Default plugins are bundled with c8ctl and loaded automatically
+- **Plugin commands cannot override built-in commands** - built-in commands always take precedence
 - `c8ctl list plugins` shows sync status:
   - `✓ Installed` - Plugin is in registry and installed
-  - `⚠ Not installed` - Plugin is in registry but not in node_modules (run `sync`)
-  - `⚠ Not in registry` - Plugin is in package.json but not tracked in registry
+  - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
+  - `⚠ Not in registry` - Plugin is installed but not tracked in registry
 - `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
+
+**Plugin Development:**
+- Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
+- Generated scaffold includes all necessary files and build configuration
+- Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
+- See the bundled `hello-world` plugin in `default-plugins/` for a complete example
 
 **Plugin Requirements:**
 - Plugin packages must be regular Node.js modules
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
 - Optionally export a `metadata` object to provide help text
-- Plugins are installed in `node_modules` like regular npm packages
+- Plugins are installed globally and work from any directory
 - The runtime object `c8ctl` provides environment information to plugins
 - **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
 
