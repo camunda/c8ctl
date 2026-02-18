@@ -2,8 +2,13 @@
  * Process instance diagram generation
  *
  * Renders a BPMN diagram with highlighted elements and sequence flows
- * for a process instance, outputting a PNG file.
+ * for a process instance, outputting a PNG image.
  * Uses puppeteer-core with system-installed Chrome/Chromium and bpmn-js from CDN.
+ *
+ * Output behavior:
+ *   --output <path>   Save PNG to specified path
+ *   (no --output)     Print inline to terminal if supported (iTerm2, kitty, WezTerm,
+ *                     VS Code, Windows Terminal, etc.), otherwise save to temp file and open
  */
 
 import { writeFileSync } from 'node:fs';
@@ -79,11 +84,9 @@ export async function getProcessInstanceDiagram(key: string, options: {
         .map((sf: any) => sf.elementId)
     )];
 
-    // 7. Render to PNG
-    const outputPath = options.output || join(tmpdir(), `c8-diagram-${key}.png`);
-
+    // 7. Render to PNG buffer
     logger.info('Rendering diagram...');
-    await renderDiagramToPng({
+    const pngBuffer = await renderDiagramToPng({
       processInstanceKey: key,
       processDefinitionId,
       processDefinitionKey,
@@ -93,10 +96,20 @@ export async function getProcessInstanceDiagram(key: string, options: {
       activeElements: activeElements as string[],
       incidentElements: incidentElements as string[],
       takenSequenceFlows: takenSequenceFlows as string[],
-    }, outputPath);
+    });
 
-    logger.success(`Diagram saved to ${outputPath}`);
-    await openFile(outputPath);
+    // 8. Output: explicit path, inline terminal, or fallback to temp file + open
+    if (options.output) {
+      writeFileSync(options.output, pngBuffer);
+      logger.success(`Diagram saved to ${options.output}`);
+    } else if (supportsInlineImages()) {
+      printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
+    } else {
+      const outputPath = join(tmpdir(), `c8-diagram-${key}.png`);
+      writeFileSync(outputPath, pngBuffer);
+      logger.success(`Diagram saved to ${outputPath}`);
+      await openFile(outputPath);
+    }
 
   } catch (error) {
     logger.error(`Failed to generate diagram for process instance ${key}`, error as Error);
@@ -146,9 +159,9 @@ async function findChromePath(): Promise<string> {
 }
 
 /**
- * Render BPMN diagram to PNG using headless Chrome
+ * Render BPMN diagram to PNG buffer using headless Chrome
  */
-async function renderDiagramToPng(data: DiagramData, outputPath: string): Promise<void> {
+async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
   const puppeteer = await import('puppeteer-core');
   const chromePath = await findChromePath();
 
@@ -217,10 +230,51 @@ async function renderDiagramToPng(data: DiagramData, outputPath: string): Promis
       omitBackground: false,
     });
 
-    writeFileSync(outputPath, screenshot);
+    return Buffer.from(screenshot);
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * Detect whether the current terminal supports inline image display.
+ * Checks for iTerm2, kitty, WezTerm, VS Code, mintty, and Konsole.
+ */
+function supportsInlineImages(): boolean {
+  const env = process.env;
+
+  // iTerm2 (TERM_PROGRAM=iTerm.app or LC_TERMINAL=iTerm2)
+  if (env.TERM_PROGRAM === 'iTerm.app' || env.LC_TERMINAL === 'iTerm2') return true;
+
+  // WezTerm (TERM_PROGRAM=WezTerm)
+  if (env.TERM_PROGRAM === 'WezTerm') return true;
+
+  // kitty (TERM=xterm-kitty)
+  if (env.TERM === 'xterm-kitty') return true;
+
+  // VS Code integrated terminal (TERM_PROGRAM=vscode)
+  if (env.TERM_PROGRAM === 'vscode') return true;
+
+  // mintty (TERM_PROGRAM=mintty) — supports iTerm2 protocol
+  if (env.TERM_PROGRAM === 'mintty') return true;
+
+  // Konsole (KONSOLE_VERSION set)
+  if (env.KONSOLE_VERSION) return true;
+
+  return false;
+}
+
+/**
+ * Print a PNG image inline in the terminal using the iTerm2 Inline Images Protocol.
+ * Supported by: iTerm2, WezTerm, mintty, VS Code, Konsole, and others.
+ * kitty also supports this protocol via compatibility mode.
+ */
+function printInlineImage(pngBuffer: Buffer, filename: string): void {
+  const base64 = pngBuffer.toString('base64');
+  const args = `name=${Buffer.from(filename).toString('base64')};size=${pngBuffer.length};inline=1`;
+
+  // iTerm2 Inline Images Protocol: OSC 1337 ; File=[args] : <base64> ST
+  process.stdout.write(`\x1b]1337;File=${args}:${base64}\x07\n`);
 }
 
 /**
