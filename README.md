@@ -1,6 +1,6 @@
 # c8ctl - Camunda 8 CLI
 
-A minimal-dependency CLI for Camunda 8 operations built on top of `@camunda8/orchestration-cluster-api`.
+A minimal-dependency CLI for Camunda 8 operations built on top of [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api).
 
 ## Features
 
