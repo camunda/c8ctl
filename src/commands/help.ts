@@ -293,7 +293,7 @@ Resources and their available flags:
   process-instance (pi) <key>
     --variables              Include variables for the process instance
     --diagram                Render a BPMN diagram as PNG with execution highlights
-    --output <path>          Output file path for diagram PNG (default: temp file)
+    --output <path>          Output file path for diagram PNG (default: inline terminal display)
     --profile <name>         Use specific profile
 
   process-definition (pd) <key>
