@@ -12,10 +12,8 @@
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 
@@ -130,7 +128,7 @@ export async function getProcessInstanceDiagram(key: string, options: {
         process.exit(1);
       }
     } else {
-      printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
+      await printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
     }
 
   } catch (error) {
@@ -259,15 +257,89 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
 }
 
 /**
- * Print a PNG image inline in the terminal using the iTerm2 Inline Images Protocol.
- * Supported by: iTerm2, WezTerm, mintty, VS Code, Konsole, kitty (compat mode), and others.
+ * Print a PNG image inline in the terminal using the appropriate protocol.
+ * Supports Kitty Graphics Protocol, iTerm2 Inline Images Protocol, and Sixel.
+ * 
+ * Protocols:
+ * - Kitty Graphics Protocol: Supported by Ghostty, Kitty, WezTerm, Konsole, and others
+ * - iTerm2 Protocol: Supported by iTerm2, WezTerm, mintty, VS Code, and others
+ * - Sixel: Supported by xterm, mintty, mlterm, and other legacy terminals
  */
-function printInlineImage(pngBuffer: Buffer, filename: string): void {
+async function printInlineImage(pngBuffer: Buffer, filename: string): Promise<void> {
+  const supportsTerminalGraphics = (await import('supports-terminal-graphics')).default;
+  const support = supportsTerminalGraphics.stdout;
+
+  if (support.kitty) {
+    // Use Kitty Graphics Protocol
+    printKittyImage(pngBuffer);
+  } else if (support.iterm2) {
+    // Use iTerm2 Inline Images Protocol
+    printIterm2Image(pngBuffer, filename);
+  } else if (support.sixel) {
+    // Use Sixel protocol
+    await printSixelImage(pngBuffer);
+  } else {
+    // Fallback to iTerm2 protocol (might work in some terminals)
+    printIterm2Image(pngBuffer, filename);
+  }
+}
+
+/**
+ * Print image using Kitty Graphics Protocol
+ * Format: ESC_Ga=T,f=100;BASE64_DATA ESC\
+ */
+function printKittyImage(pngBuffer: Buffer): void {
+  const base64 = pngBuffer.toString('base64');
+  const chunkSize = 4096;
+  
+  // Split base64 data into chunks to avoid line length limits
+  for (let i = 0; i < base64.length; i += chunkSize) {
+    const chunk = base64.slice(i, i + chunkSize);
+    const isLast = (i + chunkSize) >= base64.length;
+    
+    // m=1 means more data coming, m=0 means last chunk
+    // a=T means transmit and display, f=100 means PNG format
+    const moreFlag = isLast ? 0 : 1;
+    const action = (i === 0) ? 'a=T,f=100' : '';
+    const params = action ? `${action},m=${moreFlag}` : `m=${moreFlag}`;
+    
+    process.stdout.write(`\x1b_G${params};${chunk}\x1b\\`);
+  }
+  process.stdout.write('\n');
+}
+
+/**
+ * Print image using iTerm2 Inline Images Protocol
+ * Format: OSC 1337 ; File=[args] : BASE64_DATA ST
+ */
+function printIterm2Image(pngBuffer: Buffer, filename: string): void {
   const base64 = pngBuffer.toString('base64');
   const args = `name=${Buffer.from(filename).toString('base64')};size=${pngBuffer.length};inline=1`;
 
   // iTerm2 Inline Images Protocol: OSC 1337 ; File=[args] : <base64> ST
   process.stdout.write(`\x1b]1337;File=${args}:${base64}\x07\n`);
+}
+
+/**
+ * Print image using Sixel protocol
+ * Sixel is supported by xterm, mintty, mlterm, and other legacy terminals
+ */
+async function printSixelImage(pngBuffer: Buffer): Promise<void> {
+  const { image2sixel } = await import('sixel');
+  const { PNG } = await import('pngjs');
+  
+  // Decode PNG to raw RGBA data
+  const png = PNG.sync.read(pngBuffer);
+  const width = png.width;
+  const height = png.height;
+  const rgba = png.data;  // RGBA Uint8Array
+  
+  // Convert to Sixel format (256 colors, no background selection)
+  const sixelData = image2sixel(rgba, width, height, 256, 0);
+  
+  // Output Sixel data to terminal
+  process.stdout.write(sixelData);
+  process.stdout.write('\n');
 }
 
 /**
