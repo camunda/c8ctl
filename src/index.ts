@@ -311,8 +311,8 @@ async function main() {
       logger.error('Process instance key required. Usage: c8 get pi <key>');
       process.exit(1);
     }
-    // Check if --diagram flag is present
-    const showDiagram = process.argv.includes('--diagram');
+    // Check if --diagram flag is present via parsed arguments
+    const showDiagram = Boolean(values.diagram);
     if (showDiagram) {
       await getProcessInstanceDiagram(args[0], {
         profile: values.profile as string | undefined,
