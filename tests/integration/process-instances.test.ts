@@ -219,6 +219,52 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     }
   });
 
+  test('get process instance with --diagram creates parent directory if needed', async () => {
+    // Deploy and create a process instance
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    const result = await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+    
+    assert.ok(result, 'Create result should exist');
+    const instanceKey = result.processInstanceKey.toString();
+    
+    // Run CLI command to generate diagram with --output flag in non-existent nested directory
+    const { execSync } = await import('node:child_process');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const tmpDir = mkdtempSync(join(tmpdir(), 'c8ctl-diagram-test-'));
+    // Use a nested path that doesn't exist
+    const outputPath = join(tmpDir, 'nested', 'path', 'diagram.png');
+    
+    try {
+      const output = execSync(
+        `node src/index.ts get pi --key ${instanceKey} --diagram --output ${outputPath}`,
+        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
+      );
+      
+      // Verify the file was created
+      assert.ok(existsSync(outputPath), 'Diagram PNG file should be created in nested directory');
+      
+      // Verify the file has content (PNG files start with specific bytes)
+      const { readFileSync } = await import('node:fs');
+      const fileContent = readFileSync(outputPath);
+      assert.ok(fileContent.length > 0, 'PNG file should have content');
+      // Verify PNG signature (starts with 0x89504E47)
+      assert.strictEqual(fileContent[0], 0x89, 'PNG file should start with PNG signature byte 1');
+      assert.strictEqual(fileContent[1], 0x50, 'PNG file should start with PNG signature byte 2');
+      assert.strictEqual(fileContent[2], 0x4E, 'PNG file should start with PNG signature byte 3');
+      assert.strictEqual(fileContent[3], 0x47, 'PNG file should start with PNG signature byte 4');
+      
+      // Verify success message in output
+      assert.ok(output.includes('Diagram saved'), 'Output should indicate diagram was saved');
+    } finally {
+      // Cleanup: remove temp directory
+      const { rmSync } = await import('node:fs');
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test('get process instance with --diagram handles non-existent process instance', async () => {
     // Run CLI command with a non-existent process instance key
     const { execSync } = await import('node:child_process');
