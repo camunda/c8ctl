@@ -320,8 +320,9 @@ async function main() {
       });
       return;
     }
-    // Check if --variables flag is present (for get command, it's a boolean flag)
-    const includeVariables = process.argv.includes('--variables');
+    // Check if --variables flag is present via parsed arguments
+    // When used as a flag without value, it becomes true; with a value it becomes a string
+    const includeVariables = Boolean(values.variables);
     await getProcessInstance(args[0], {
       profile: values.profile as string | undefined,
       variables: includeVariables,
