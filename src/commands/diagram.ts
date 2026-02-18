@@ -58,7 +58,10 @@ export async function getProcessInstanceDiagram(key: string, options: {
     // 3. Extract completed element IDs (exclude PROCESS type)
     const completedElements = [...new Set(
       ((elementInstances as any).items || [])
-        .filter((el: any) => el.type !== 'PROCESS')
+        .filter((el: any) =>
+          el.type !== 'PROCESS' &&
+          (el.state === 'COMPLETED' || el.state === 'TERMINATED')
+        )
         .map((el: any) => el.elementId)
     )];
 
