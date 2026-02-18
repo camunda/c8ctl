@@ -69,6 +69,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('--variables'));
     assert.ok(output.includes('--awaitCompletion'));
     assert.ok(output.includes('--fetchVariables'));
+    assert.ok(output.includes('--requestTimeout'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
     

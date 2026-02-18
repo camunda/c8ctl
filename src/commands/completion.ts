@@ -49,7 +49,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
 
   case \${cword} in
     1)
@@ -227,6 +227,7 @@ _c8ctl() {
     '--version[Process definition version]:version:'
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
+    '--requestTimeout[Timeout in milliseconds for process completion]:milliseconds:'
     '--name[Variable or resource name]:name:'
     '--key[Resource key]:key:'
     '--elementId[Element ID]:id:'
@@ -546,6 +547,8 @@ complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
+complete -c c8ctl -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
+complete -c c8 -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
 complete -c c8ctl -l name -d 'Variable or resource name' -r
 complete -c c8 -l name -d 'Variable or resource name' -r
 complete -c c8ctl -l key -d 'Resource key' -r

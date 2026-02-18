@@ -109,9 +109,15 @@ c8ctl create process-instance --id=myProcess
 # Create process instance and wait for completion
 c8ctl create pi --id=myProcess --awaitCompletion
 
+# Create process instance with custom timeout (30 seconds)
+c8ctl create pi --id=myProcess --awaitCompletion --requestTimeout=30000
+
 # Await process instance completion (alias for create with --awaitCompletion)
 c8ctl await pi --id=myProcess
 c8ctl await process-instance --id=myProcess
+
+# Await with custom timeout
+c8ctl await pi --id=myProcess --requestTimeout=60000
 
 # Cancel process instance
 c8ctl cancel pi 123456

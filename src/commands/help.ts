@@ -90,6 +90,7 @@ Flags:
   --id <process-id>     Process definition ID (alias for --bpmnProcessId)
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
+  --requestTimeout <ms> Timeout in milliseconds for process completion (use with --awaitCompletion)
   --version, -v         Show version
   --help, -h            Show help
 
@@ -346,6 +347,7 @@ Resources and their available flags:
     --variables <json>       Process variables as JSON string
     --awaitCompletion        Wait for process instance to complete
     --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --requestTimeout <ms>    Timeout in milliseconds for process completion (use with --awaitCompletion)
     --profile <name>         Use specific profile
 
 Examples:
@@ -353,6 +355,7 @@ Examples:
   c8ctl create pi --id=order-process --version=2
   c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
   c8ctl create pi --id=order-process --awaitCompletion
+  c8ctl create pi --id=order-process --awaitCompletion --requestTimeout=30000
 `.trim());
 }
 
@@ -400,6 +403,7 @@ Resources and their available flags:
     --version <num>          Process definition version
     --variables <json>       Process variables as JSON string
     --fetchVariables <vars>  Reserved for future use (all variables returned by default)
+    --requestTimeout <ms>    Timeout in milliseconds for process completion
     --profile <name>         Use specific profile
 
 Description:
@@ -410,6 +414,7 @@ Description:
 Examples:
   c8ctl await pi --id=order-process
   c8ctl await pi --id=order-process --variables='{"orderId":"12345"}'
+  c8ctl await pi --id=order-process --requestTimeout=30000
   
   # Equivalent to:
   c8ctl create pi --id=order-process --awaitCompletion

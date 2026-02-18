@@ -63,6 +63,9 @@ c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
 # Create and wait for completion
 c8 create pi --id=order-process --awaitCompletion
 
+# Create and wait with custom timeout (30 seconds)
+c8 create pi --id=order-process --awaitCompletion --requestTimeout=30000
+
 # Note: --fetchVariables is reserved for future API support
 # All variables are currently returned by default
 ```
@@ -71,6 +74,8 @@ c8 create pi --id=order-process --awaitCompletion
 
 The `await` command is an alias for `create` with `--awaitCompletion`. It uses the Camunda 8 API's built-in server-side waiting to create a process instance and wait for completion.
 
+The `--requestTimeout` option specifies the maximum time in milliseconds to wait for the process instance to complete. By default (or when set to 0), the generic request timeout configured in the cluster is used.
+
 ```bash
 # Create and wait for completion (shorthand)
 c8 await pi --id=order-process
@@ -78,6 +83,9 @@ c8 await process-instance --id=order-process
 
 # With variables
 c8 await pi --id=order-process --variables='{"orderId":"12345"}'
+
+# With custom timeout (60 seconds)
+c8 await pi --id=order-process --requestTimeout=60000
 
 # Equivalent to:
 c8 create pi --id=order-process --awaitCompletion
