@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-hello-world",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Default hello world plugin for c8ctl - demonstrates the plugin API",
+  "keywords": ["c8ctl", "c8ctl-plugin"],
+  "main": "c8ctl-plugin.js"
+}

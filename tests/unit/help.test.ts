@@ -172,6 +172,30 @@ describe('Help Module', () => {
     assert.ok(output.includes('plugin'));
   });
 
+  test('showVerbResources shows resources for upgrade', () => {
+    showVerbResources('upgrade');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl upgrade'));
+    assert.ok(output.includes('plugin'));
+  });
+
+  test('showVerbResources shows resources for downgrade', () => {
+    showVerbResources('downgrade');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl downgrade'));
+    assert.ok(output.includes('plugin'));
+  });
+
+  test('showVerbResources shows resources for init', () => {
+    showVerbResources('init');
+    
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl init'));
+    assert.ok(output.includes('plugin'));
+  });
+
   test('showVerbResources shows resources for completion', () => {
     showVerbResources('completion');
     

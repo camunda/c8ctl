@@ -245,6 +245,25 @@ function ensureUserDataDir(): string {
   return dir;
 }
 
+/**
+ * Get the global plugins directory for c8ctl
+ * This is where plugins are installed globally, independent of any project
+ */
+export function getPluginsDir(): string {
+  return join(getUserDataDir(), 'plugins');
+}
+
+/**
+ * Ensure plugins directory exists
+ */
+export function ensurePluginsDir(): string {
+  const dir = getPluginsDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
 function getSessionStatePath(): string {
   return join(ensureUserDataDir(), 'session.json');
 }

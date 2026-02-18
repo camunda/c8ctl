@@ -64,6 +64,9 @@ describe('Completion Module', () => {
     assert.ok(output.includes('create'));
     assert.ok(output.includes('deploy'));
     assert.ok(output.includes('run'));
+    assert.ok(output.includes('upgrade'));
+    assert.ok(output.includes('downgrade'));
+    assert.ok(output.includes('init'));
     
     // Check for resources
     assert.ok(output.includes('process-instance'));
@@ -86,6 +89,9 @@ describe('Completion Module', () => {
     assert.ok(output.includes('list:List resources'));
     assert.ok(output.includes('get:Get resource by key'));
     assert.ok(output.includes('deploy:Deploy BPMN/DMN/forms'));
+    assert.ok(output.includes('upgrade:Upgrade a plugin'));
+    assert.ok(output.includes('downgrade:Downgrade a plugin'));
+    assert.ok(output.includes('init:Create a new plugin from template'));
     
     // Check for flags
     assert.ok(output.includes('--profile[Use specific profile]'));
