@@ -12,8 +12,6 @@
  */
 
 import { writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 
@@ -98,17 +96,12 @@ export async function getProcessInstanceDiagram(key: string, options: {
       takenSequenceFlows: takenSequenceFlows as string[],
     });
 
-    // 8. Output: explicit path, inline terminal, or fallback to temp file + open
+    // 8. Output: save to file if --output, otherwise print inline
     if (options.output) {
       writeFileSync(options.output, pngBuffer);
       logger.success(`Diagram saved to ${options.output}`);
-    } else if (supportsInlineImages()) {
-      printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
     } else {
-      const outputPath = join(tmpdir(), `c8-diagram-${key}.png`);
-      writeFileSync(outputPath, pngBuffer);
-      logger.success(`Diagram saved to ${outputPath}`);
-      await openFile(outputPath);
+      printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
     }
 
   } catch (error) {
@@ -237,37 +230,8 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
 }
 
 /**
- * Detect whether the current terminal supports inline image display.
- * Checks for iTerm2, kitty, WezTerm, VS Code, mintty, and Konsole.
- */
-function supportsInlineImages(): boolean {
-  const env = process.env;
-
-  // iTerm2 (TERM_PROGRAM=iTerm.app or LC_TERMINAL=iTerm2)
-  if (env.TERM_PROGRAM === 'iTerm.app' || env.LC_TERMINAL === 'iTerm2') return true;
-
-  // WezTerm (TERM_PROGRAM=WezTerm)
-  if (env.TERM_PROGRAM === 'WezTerm') return true;
-
-  // kitty (TERM=xterm-kitty)
-  if (env.TERM === 'xterm-kitty') return true;
-
-  // VS Code integrated terminal (TERM_PROGRAM=vscode)
-  if (env.TERM_PROGRAM === 'vscode') return true;
-
-  // mintty (TERM_PROGRAM=mintty) — supports iTerm2 protocol
-  if (env.TERM_PROGRAM === 'mintty') return true;
-
-  // Konsole (KONSOLE_VERSION set)
-  if (env.KONSOLE_VERSION) return true;
-
-  return false;
-}
-
-/**
  * Print a PNG image inline in the terminal using the iTerm2 Inline Images Protocol.
- * Supported by: iTerm2, WezTerm, mintty, VS Code, Konsole, and others.
- * kitty also supports this protocol via compatibility mode.
+ * Supported by: iTerm2, WezTerm, mintty, VS Code, Konsole, kitty (compat mode), and others.
  */
 function printInlineImage(pngBuffer: Buffer, filename: string): void {
   const base64 = pngBuffer.toString('base64');
@@ -275,32 +239,6 @@ function printInlineImage(pngBuffer: Buffer, filename: string): void {
 
   // iTerm2 Inline Images Protocol: OSC 1337 ; File=[args] : <base64> ST
   process.stdout.write(`\x1b]1337;File=${args}:${base64}\x07\n`);
-}
-
-/**
- * Open a file with the system default viewer (cross-platform)
- */
-async function openFile(filePath: string): Promise<void> {
-  const { exec } = await import('node:child_process');
-
-  const platform = process.platform;
-  let cmd: string;
-
-  if (platform === 'darwin') {
-    cmd = `open "${filePath}"`;
-  } else if (platform === 'linux') {
-    const isWSL = process.env.WSL_DISTRO_NAME || process.env.WSLENV;
-    cmd = isWSL ? `wslview "${filePath}" || xdg-open "${filePath}"` : `xdg-open "${filePath}"`;
-  } else {
-    cmd = `xdg-open "${filePath}"`;
-  }
-
-  exec(cmd, (error) => {
-    if (error) {
-      const logger = getLogger();
-      logger.info(`Open the diagram: ${filePath}`);
-    }
-  });
 }
 
 /**
