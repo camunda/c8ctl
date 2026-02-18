@@ -11,7 +11,8 @@
  *                     VS Code, Windows Terminal, etc.)
  */
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 
@@ -101,8 +102,27 @@ export async function getProcessInstanceDiagram(key: string, options: {
 
     // 8. Output: save to file if --output, otherwise print inline
     if (options.output) {
-      writeFileSync(options.output, pngBuffer);
-      logger.success(`Diagram saved to ${options.output}`);
+      try {
+        // Ensure parent directory exists
+        const parentDir = dirname(options.output);
+        mkdirSync(parentDir, { recursive: true });
+        
+        // Write the diagram file
+        writeFileSync(options.output, pngBuffer);
+        logger.success(`Diagram saved to ${options.output}`);
+      } catch (fsError: any) {
+        // Provide actionable error messages for filesystem issues
+        if (fsError.code === 'EACCES') {
+          logger.error(`Permission denied writing to ${options.output}. Check file permissions.`);
+        } else if (fsError.code === 'ENOSPC') {
+          logger.error(`No space left on device when writing to ${options.output}.`);
+        } else if (fsError.code === 'EROFS') {
+          logger.error(`Cannot write to ${options.output}: read-only file system.`);
+        } else {
+          logger.error(`Failed to write diagram to ${options.output}: ${fsError.message}`);
+        }
+        process.exit(1);
+      }
     } else {
       printInlineImage(pngBuffer, `c8-diagram-${key}.png`);
     }
