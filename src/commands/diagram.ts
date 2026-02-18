@@ -7,8 +7,8 @@
  *
  * Output behavior:
  *   --output <path>   Save PNG to specified path
- *   (no --output)     Print inline to terminal if supported (iTerm2, kitty, WezTerm,
- *                     VS Code, Windows Terminal, etc.), otherwise save to temp file and open
+ *   (no --output)     Print inline to supported terminals (iTerm2, kitty, WezTerm,
+ *                     VS Code, Windows Terminal, etc.)
  */
 
 import { writeFileSync } from 'node:fs';
