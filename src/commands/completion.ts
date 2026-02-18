@@ -49,7 +49,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --diagram --output"
 
   case \${cword} in
     1)
@@ -244,6 +244,8 @@ _c8ctl() {
     '--ierrorMessage[Case-insensitive error message filter]:pattern:'
     '--itype[Case-insensitive job type filter]:pattern:'
     '--ivalue[Case-insensitive variable value filter]:pattern:'
+    '--diagram[Render process instance diagram as PNG]'
+    '--output[Output file path for diagram PNG]:path:_files'
   )
 
   case \$CURRENT in
@@ -580,6 +582,10 @@ complete -c c8ctl -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8 -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8ctl -l ivalue -d 'Case-insensitive variable value filter' -r
 complete -c c8 -l ivalue -d 'Case-insensitive variable value filter' -r
+complete -c c8ctl -l diagram -d 'Render process instance diagram as PNG'
+complete -c c8 -l diagram -d 'Render process instance diagram as PNG'
+complete -c c8ctl -l output -d 'Output file path for diagram PNG' -r
+complete -c c8 -l output -d 'Output file path for diagram PNG' -r
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'

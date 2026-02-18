@@ -46,6 +46,22 @@ c8 get process-instance 2251799813685249
 
 # Get process instance with variables
 c8 get pi 2251799813685249 --variables
+
+# Render process instance diagram as PNG
+c8 get pi 2251799813685249 --diagram
+
+# Save diagram to file
+c8 get pi 2251799813685249 --diagram --output=./diagram.png
+```
+
+### Get Process Instance Diagram
+
+```bash
+# Render process instance diagram as PNG (inline terminal display)
+c8 get pi 2251799813685249 --diagram
+
+# Save diagram to a specific file
+c8 get pi 2251799813685249 --diagram --output=./my-diagram.png
 ```
 
 ### Create Process Instance

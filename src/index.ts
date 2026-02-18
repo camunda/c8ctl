@@ -21,6 +21,7 @@ import {
   listProcessDefinitions,
   getProcessDefinition,
 } from './commands/process-definitions.ts';
+import { getProcessInstanceDiagram } from './commands/diagram.ts';
 import {
   searchProcessDefinitions,
   searchProcessInstances,
@@ -76,6 +77,8 @@ function parseCliArgs() {
         version: { type: 'string', short: 'v' },
         all: { type: 'boolean' },
         xml: { type: 'boolean' },
+        diagram: { type: 'boolean' },
+        output: { type: 'string' },
         profile: { type: 'string' },
         bpmnProcessId: { type: 'string' },
         id: { type: 'string' },
@@ -331,8 +334,18 @@ async function main() {
       logger.error('Process instance key required. Usage: c8 get pi <key>');
       process.exit(1);
     }
-    // Check if --variables flag is present (for get command, it's a boolean flag)
-    const includeVariables = process.argv.includes('--variables');
+    // Check if --diagram flag is present via parsed arguments
+    const showDiagram = Boolean(values.diagram);
+    if (showDiagram) {
+      await getProcessInstanceDiagram(args[0], {
+        profile: values.profile as string | undefined,
+        output: values.output as string | undefined,
+      });
+      return;
+    }
+    // Check if --variables flag is present via parsed arguments
+    // When used as a flag without value, it becomes true; with a value it becomes a string
+    const includeVariables = Boolean(values.variables);
     await getProcessInstance(args[0], {
       profile: values.profile as string | undefined,
       variables: includeVariables,
