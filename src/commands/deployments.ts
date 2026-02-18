@@ -14,8 +14,8 @@ const PROCESS_APPLICATION_FILE = '.process-application';
 /**
  * Extract process/decision IDs from BPMN/DMN files to detect duplicates
  */
-function extractDefinitionId(content: Buffer, extension: string): string | null {
-  const text = content.toString('utf-8');
+function extractDefinitionId(content: Uint8Array, extension: string): string | null {
+  const text = new TextDecoder('utf-8').decode(content);
   
   if (extension === '.bpmn') {
     // Extract bpmn:process id attribute
@@ -36,7 +36,7 @@ function extractDefinitionId(content: Buffer, extension: string): string | null 
 interface ResourceFile {
   path: string;
   name: string;
-  content: Buffer;
+  content: Uint8Array;
   isBuildingBlock: boolean;
   isProcessApplication: boolean;
   groupPath?: string; // Path to the root of the group (BB or PA folder)
@@ -300,8 +300,9 @@ export async function deploy(paths: string[], options: {
                         ext === 'dmn' ? 'application/xml' :
                         ext === 'form' ? 'application/json' :
                         'application/octet-stream';
-        // Convert Buffer to Uint8Array for File constructor
-        return new File([new Uint8Array(r.content)], r.name, { type: mimeType });
+        // Normalize bytes type for TS (avoid Uint8Array<ArrayBufferLike> vs BlobPart mismatch)
+        const bytes = new Uint8Array(r.content);
+        return new File([bytes], r.name, { type: mimeType });
       }),
     });
     

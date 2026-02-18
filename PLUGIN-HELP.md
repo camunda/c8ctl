@@ -12,6 +12,12 @@ When users load plugins, their commands automatically appear in the help text. P
 2. **Plugin Section**: If plugins are loaded, a "Plugin Commands" section appears at the bottom of the help text
 3. **Command Listing**: Each plugin command is listed with its optional description
 
+## Plugin definition
+
+A plugin needs to have `c8ctl-plugin` in the `keywords` array in its `package.json`. This is a requirement to make the plugin loadable by c8ctl.
+
+See the example plugin in the `demo-plugin` directory for a working example.
+
 ## Plugin Structure for Help
 
 Plugins can export an optional `metadata` object alongside the required `commands` object:

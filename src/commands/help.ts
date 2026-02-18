@@ -2,22 +2,15 @@
  * Help and version commands
  */
 
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { getLogger } from '../logger.ts';
 import { getPluginCommandsInfo } from '../plugin-loader.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import packageJson from '../../package.json' with { type: 'json' };
 
 /**
  * Get package version
  */
 export function getVersion(): string {
-  const packagePath = join(__dirname, '../../package.json');
-  const packageJson = JSON.parse(readFileSync(packagePath, 'utf-8'));
-  return packageJson.version;
+  return (packageJson as any).version;
 }
 
 /**

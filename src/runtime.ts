@@ -2,10 +2,10 @@
  * c8ctl runtime object with environment information and session state
  */
 
-import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { OutputMode } from './logger.ts';
+import packageJson from '../package.json' with { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,13 +23,7 @@ interface C8ctlEnv {
  * Get c8ctl version from package.json
  */
 function getVersion(): string {
-  try {
-    const packageJsonPath = join(__dirname, '..', 'package.json');
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    return packageJson.version || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
+  return (packageJson as any).version || '0.0.0';
 }
 
 /**

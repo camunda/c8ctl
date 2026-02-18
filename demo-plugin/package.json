@@ -1,0 +1,13 @@
+{
+  "name": "demo-plugin",
+  "version": "1.0.0",
+  "description": "Demonstration plugin for c8ctl",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": ["c8ctl-plugin"],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
