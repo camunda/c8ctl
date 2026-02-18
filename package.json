@@ -19,8 +19,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && npm run copy-assets",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "copy-assets": "node -e \"const fs=require('fs');const path=require('path');fs.mkdirSync('dist/assets/bpmn-js',{recursive:true});fs.cpSync('node_modules/bpmn-js/dist/assets',path.join('dist','assets','bpmn-js','assets'),{recursive:true});fs.copyFileSync('node_modules/bpmn-js/dist/bpmn-viewer.production.min.js',path.join('dist','assets','bpmn-js','bpmn-viewer.production.min.js'))\"",
     "prepublishOnly": "npm run build",
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
@@ -54,6 +55,7 @@
     "@modelcontextprotocol/sdk": "^1.26.0",
     "puppeteer-core": "^24.37.4",
     "supports-terminal-graphics": "^0.1.0"
+    "bpmn-js": "^18.12.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
