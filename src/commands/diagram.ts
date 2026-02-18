@@ -12,10 +12,8 @@
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 
@@ -260,11 +258,12 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
 
 /**
  * Print a PNG image inline in the terminal using the appropriate protocol.
- * Supports both iTerm2 Inline Images Protocol and Kitty Graphics Protocol.
+ * Supports Kitty Graphics Protocol, iTerm2 Inline Images Protocol, and Sixel.
  * 
  * Protocols:
  * - Kitty Graphics Protocol: Supported by Ghostty, Kitty, WezTerm, Konsole, and others
  * - iTerm2 Protocol: Supported by iTerm2, WezTerm, mintty, VS Code, and others
+ * - Sixel: Supported by xterm, mintty, mlterm, and other legacy terminals
  */
 async function printInlineImage(pngBuffer: Buffer, filename: string): Promise<void> {
   const supportsTerminalGraphics = (await import('supports-terminal-graphics')).default;
@@ -276,6 +275,9 @@ async function printInlineImage(pngBuffer: Buffer, filename: string): Promise<vo
   } else if (support.iterm2) {
     // Use iTerm2 Inline Images Protocol
     printIterm2Image(pngBuffer, filename);
+  } else if (support.sixel) {
+    // Use Sixel protocol
+    await printSixelImage(pngBuffer);
   } else {
     // Fallback to iTerm2 protocol (might work in some terminals)
     printIterm2Image(pngBuffer, filename);
@@ -316,6 +318,28 @@ function printIterm2Image(pngBuffer: Buffer, filename: string): void {
 
   // iTerm2 Inline Images Protocol: OSC 1337 ; File=[args] : <base64> ST
   process.stdout.write(`\x1b]1337;File=${args}:${base64}\x07\n`);
+}
+
+/**
+ * Print image using Sixel protocol
+ * Sixel is supported by xterm, mintty, mlterm, and other legacy terminals
+ */
+async function printSixelImage(pngBuffer: Buffer): Promise<void> {
+  const { image2sixel } = await import('sixel');
+  const { PNG } = await import('pngjs');
+  
+  // Decode PNG to raw RGBA data
+  const png = PNG.sync.read(pngBuffer);
+  const width = png.width;
+  const height = png.height;
+  const rgba = png.data;  // RGBA Uint8Array
+  
+  // Convert to Sixel format (256 colors, no background selection)
+  const sixelData = image2sixel(rgba, width, height, 256, 0);
+  
+  // Output Sixel data to terminal
+  process.stdout.write(sixelData);
+  process.stdout.write('\n');
 }
 
 /**
