@@ -20,13 +20,13 @@ set -euo pipefail
 
 # Parse arguments
 VERBOSE=false
-for arg in "$@"; do
-    case $arg in
+while (( $# )); do
+    case $1 in
         -v|--verbose)
             VERBOSE=true
-            shift
             ;;
     esac
+    shift
 done
 
 # Colors for output
