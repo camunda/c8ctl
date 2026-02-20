@@ -364,30 +364,30 @@ fi
 test_start "profile management"
 cleanup_session
 # Step 1: Create the profile
-if ADD_OUTPUT=$(c8_cmd add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy 2>&1); then
+if ADD_OUTPUT=$(c8_cmd add profile e2e-smoke-test --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy 2>&1); then
     debug_output "$ADD_OUTPUT"
-    if ! echo "$ADD_OUTPUT" | grep -q "Profile 'prod' added"; then
+    if ! echo "$ADD_OUTPUT" | grep -q "Profile 'e2e-smoke-test' added"; then
         test_fail "expected success message for profile addition"
     else
         # Step 2: Validate the existence of the profile
         if LIST_OUTPUT=$(c8_cmd 0 list profiles 2>&1); then
             debug_output "$LIST_OUTPUT"
-            if ! echo "$LIST_OUTPUT" | grep -q "prod"; then
-                test_fail "profile 'prod' not found in list after creation"
+            if ! echo "$LIST_OUTPUT" | grep -q "e2e-smoke-test"; then
+                test_fail "profile 'e2e-smoke-test' not found in list after creation"
             elif ! echo "$LIST_OUTPUT" | grep -q "https://camunda.example.com"; then
                 test_fail "base URL not found in profile list"
             else
                 # Step 3: Delete the profile
-                if REMOVE_OUTPUT=$(c8_cmd remove profile prod 2>&1); then
+                if REMOVE_OUTPUT=$(c8_cmd remove profile e2e-smoke-test 2>&1); then
                     debug_output "$REMOVE_OUTPUT"
-                    if ! echo "$REMOVE_OUTPUT" | grep -q "Profile 'prod' removed"; then
+                    if ! echo "$REMOVE_OUTPUT" | grep -q "Profile 'e2e-smoke-test' removed"; then
                         test_fail "expected success message for profile removal"
                     else
                         # Step 4: Evaluate the deleted list
                         if LIST_AFTER=$(c8_cmd 0 list profiles 2>&1); then
                             debug_output "$LIST_AFTER"
-                            if echo "$LIST_AFTER" | grep -q "prod"; then
-                                test_fail "profile 'prod' still appears in list after deletion"
+                            if echo "$LIST_AFTER" | grep -q "e2e-smoke-test"; then
+                                test_fail "profile 'e2e-smoke-test' still appears in list after deletion"
                             else
                                 test_pass
                             fi
