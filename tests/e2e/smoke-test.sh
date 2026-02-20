@@ -112,14 +112,6 @@ test_pass() {
     echo -e "${GREEN}✓ PASS${NC}"
 }
 
-test_fail() {
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-    echo -e "${RED}✗ FAIL${NC}"
-    if [ -n "${1:-}" ]; then
-        echo -e "  ${RED}Error: $1${NC}"
-    fi
-}
-
 cleanup_session() {
     # Clean session state between tests
     local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/c8ctl"
