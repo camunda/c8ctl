@@ -226,8 +226,28 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
     // Re-render after viewport change
     await page.evaluate('window.__viewer && window.__viewer.get("canvas").zoom("fit-viewport")');
 
-    // Brief wait for re-render
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Wait deterministically for re-render instead of using a fixed timeout
+    await page.waitForFunction(
+      (previousClip) => {
+        var svg = document.querySelector('#canvas svg');
+        if (!svg) return false;
+        // getBBox may throw if SVG is not fully initialized; wrap defensively
+        try {
+          var bbox = (svg as any).getBBox();
+          if (!bbox) return false;
+          if (!previousClip || typeof previousClip.width !== 'number' || typeof previousClip.height !== 'number') {
+            // No previous dimensions to compare against; any valid bbox means we're ready
+            return true;
+          }
+          // Wait until the bbox dimensions differ from the previous clip, indicating re-render
+          return bbox.width !== previousClip.width || bbox.height !== previousClip.height;
+        } catch (_e) {
+          return false;
+        }
+      },
+      {},
+      clip,
+    );
 
     // Recalculate clip after re-render
     const finalClip = await page.evaluate(`(function() {
