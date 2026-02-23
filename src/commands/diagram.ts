@@ -196,11 +196,17 @@ async function renderDiagramToPng(data: DiagramData): Promise<Buffer> {
     const html = generateDiagramHtml(data);
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
-    // Wait for bpmn-js to finish rendering
+    // Wait for bpmn-js to finish rendering (either success or error)
     await page.waitForFunction(
-      'window.__diagramRendered === true',
+      'window.__diagramRendered === true || window.__diagramError !== undefined',
       { timeout: 15000 },
     );
+
+    // Propagate any render error from the browser back to Node
+    const renderError = await page.evaluate('window.__diagramError');
+    if (renderError) {
+      throw new Error(`BPMN diagram render failed: ${renderError}`);
+    }
 
     // Get the bounding box of the rendered diagram for tight cropping
     const clip = await page.evaluate(`(function() {
@@ -456,7 +462,7 @@ function generateDiagramHtml(data: DiagramData): string {
         window.__diagramRendered = true;
       } catch (err) {
         console.error('Failed to render BPMN diagram:', err);
-        window.__diagramRendered = true;
+        window.__diagramError = err instanceof Error ? err.message : String(err);
       }
     }
 
