@@ -84,8 +84,6 @@ Flags:
   --profile <name>      Use specific profile for this command
   --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
-  --diagram             Render process instance diagram as PNG (use with 'get pi')
-  --output <path>       Output file path for diagram PNG (use with 'get pi --diagram')
   --variables           Get process instance with variables (use with 'get pi')
   --userTask, --ut      Get form for a user task (optional, use with 'get form')
   --processDefinition, --pd  Get start form for a process definition (optional, use with 'get form')
@@ -151,7 +149,7 @@ Examples:
   c8ctl search ut --iassignee=John     Case-insensitive search by assignee
   c8ctl get pi 123456                Get process instance by key
   c8ctl get pi 123456 --variables    Get process instance with variables
-  c8ctl get pi 123456 --diagram     Render process instance diagram as PNG
+  c8ctl diagram 123456               Render process instance diagram as PNG
   c8ctl get pd 123456                Get process definition by key
   c8ctl get pd 123456 --xml          Get process definition XML
   c8ctl get form 123456              Get form (searches both user task and process definition)
@@ -300,8 +298,6 @@ Resources and their available flags:
 
   process-instance (pi) <key>
     --variables              Include variables for the process instance
-    --diagram                Render a BPMN diagram as PNG with execution highlights
-    --output <path>          Output file path for diagram PNG (default: inline terminal display)
     --profile <name>         Use specific profile
 
   process-definition (pd) <key>
@@ -324,8 +320,6 @@ Resources and their available flags:
 Examples:
   c8ctl get pi 2251799813685249
   c8ctl get pi 2251799813685249 --variables
-  c8ctl get pi 2251799813685249 --diagram
-  c8ctl get pi 2251799813685249 --diagram --output=./diagram.png
   c8ctl get pd 2251799813685250
   c8ctl get pd 2251799813685250 --xml
   c8ctl get inc 2251799813685251
@@ -333,6 +327,8 @@ Examples:
   c8ctl get form 2251799813685251
   c8ctl get form 2251799813685251 --ut
   c8ctl get form 2251799813685252 --pd
+
+Tip: Use "c8ctl diagram <key>" to render a process instance diagram as PNG.
 `.trim());
 }
 

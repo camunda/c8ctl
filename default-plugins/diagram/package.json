@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-diagram",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Process instance BPMN diagram rendering plugin for c8ctl",
+  "keywords": ["c8ctl", "c8ctl-plugin"],
+  "main": "c8ctl-plugin.js"
+}

@@ -20,7 +20,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use output completion help"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use output diagram completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -49,7 +49,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --diagram --output"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --output"
 
   case \${cword} in
     1)
@@ -190,6 +190,7 @@ _c8ctl() {
     'init:Create a new plugin from template'
     'use:Set active profile or tenant'
     'output:Set output format'
+    'diagram:Render process instance diagram as PNG'
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
   )
@@ -244,7 +245,6 @@ _c8ctl() {
     '--ierrorMessage[Case-insensitive error message filter]:pattern:'
     '--itype[Case-insensitive job type filter]:pattern:'
     '--ivalue[Case-insensitive variable value filter]:pattern:'
-    '--diagram[Render process instance diagram as PNG]'
     '--output[Output file path for diagram PNG]:path:_files'
   )
 
@@ -582,8 +582,6 @@ complete -c c8ctl -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8 -l itype -d 'Case-insensitive job type filter' -r
 complete -c c8ctl -l ivalue -d 'Case-insensitive variable value filter' -r
 complete -c c8 -l ivalue -d 'Case-insensitive variable value filter' -r
-complete -c c8ctl -l diagram -d 'Render process instance diagram as PNG'
-complete -c c8 -l diagram -d 'Render process instance diagram as PNG'
 complete -c c8ctl -l output -d 'Output file path for diagram PNG' -r
 complete -c c8 -l output -d 'Output file path for diagram PNG' -r
 
@@ -640,6 +638,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or 
 complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
 complete -c c8 -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'diagram' -d 'Render process instance diagram as PNG'
+complete -c c8 -n '__fish_use_subcommand' -a 'diagram' -d 'Render process instance diagram as PNG'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
 complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
