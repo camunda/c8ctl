@@ -185,7 +185,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     }
   });
 
-  test('get process instance with --diagram flag without --output prints inline', async () => {
+  test('get process instance with --diagram flag without --output prints inline', async (t) => {
     // Deploy and create a process instance
     await deploy(['tests/fixtures/simple.bpmn'], {});
     const result = await createProcessInstance({
@@ -209,10 +209,9 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
       assert.ok(output.includes('\x1b]1337;File='), 'Output should contain iTerm2 inline image protocol');
       assert.ok(output.includes('inline=1'), 'Output should indicate inline display mode');
     } catch (error: any) {
-      // On systems without Chrome/Chromium, this test may fail
-      // Verify it fails with a helpful error message
+      // On systems without Chrome/Chromium, skip the test rather than silently passing
       if (error.stderr && error.stderr.includes('No Chrome or Chromium browser found')) {
-        assert.ok(true, 'Test skipped: Chrome/Chromium not installed');
+        t.skip('Chrome/Chromium not installed');
       } else {
         throw error;
       }
