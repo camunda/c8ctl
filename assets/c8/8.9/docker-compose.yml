@@ -1,9 +1,7 @@
 services:
   camunda:
     image: camunda/camunda:${CAMUNDA_VERSION}
-    # If you want to override via env like the framework: set CAMUNDA_VERSION externally
-    container_name: camunda-engine
-    profiles: ['elasticsearch'] # only there for gh workflow
+    container_name: camunda
     environment:
       SPRING_PROFILES_ACTIVE: 'broker,consolidated-auth'
       ZEEBE_CLOCK_CONTROLLED: 'true'
@@ -38,8 +36,6 @@ services:
       retries: 30
     networks:
       - camunda-net
-    env_file:
-      - envs/.env.database.elasticsearch
 
   # connectors:
   #   image: camunda/connectors-bundle:SNAPSHOT

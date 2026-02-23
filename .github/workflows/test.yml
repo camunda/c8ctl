@@ -37,10 +37,7 @@ jobs:
       - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch up -d
-        env:
-          DATABASE: elasticsearch
-          CAMUNDA_VERSION: 8.9.0-alpha4 #tmp
+          docker compose up -d
           
       - name: Wait for Camunda to be ready
         run: |
@@ -79,16 +76,10 @@ jobs:
         if: always()
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch down -v
-        env:
-          DATABASE: elasticsearch
-          CAMUNDA_VERSION: 8.9.0-alpha4 #tmp
+          docker compose down -v
 
       - name: Show Camunda logs on failure
         if: failure()
         run: |
           cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch logs
-        env:
-          DATABASE: elasticsearch
-          CAMUNDA_VERSION: 8.9.0-alpha4 #tmp
+          docker compose logs
