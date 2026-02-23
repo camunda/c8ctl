@@ -253,7 +253,7 @@ async function renderDiagramToPng(data) {
       throw new Error(`BPMN rendering failed: ${diagramError}`);
     }
 
-    // Zoom to fit-viewport (synchronous in bpmn-js)
+    // Zoom to fit the diagram within the viewport (page.evaluate is always async)
     await page.evaluate('window.__viewer && window.__viewer.get("canvas").zoom("fit-viewport")');
 
     // Calculate bounding box of the rendered diagram for tight cropping

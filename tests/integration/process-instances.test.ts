@@ -206,12 +206,18 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     const { execSync } = await import('node:child_process');
     
     try {
-      execSync(
+      const output = execSync(
         `node src/index.ts diagram ${instanceKey}`,
-        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
+        { encoding: 'binary', cwd: process.cwd(), stdio: 'pipe' }
       );
-      // If it succeeds, some inline image was written to stdout
-      assert.ok(true, 'Diagram command completed');
+      // Verify inline image protocol output (Kitty, iTerm2, or Sixel contains escape sequences)
+      const hasKittyProtocol = output.includes('\x1b_G');
+      const hasIterm2Protocol = output.includes('\x1b]1337;File=');
+      const hasSixelProtocol = output.includes('\x1bPq');
+      assert.ok(
+        hasKittyProtocol || hasIterm2Protocol || hasSixelProtocol,
+        'Output should contain inline image protocol (Kitty, iTerm2, or Sixel)'
+      );
     } catch (error: any) {
       // On systems without Chrome/Chromium, this test may fail
       if (error.stderr && error.stderr.includes('No Chrome or Chromium browser found')) {
