@@ -38,6 +38,8 @@ services:
       retries: 30
     networks:
       - camunda-net
+    env_file:
+      - envs/.env.database.elasticsearch
 
   # connectors:
   #   image: camunda/connectors-bundle:SNAPSHOT
