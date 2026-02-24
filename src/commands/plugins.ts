@@ -263,6 +263,38 @@ function scanInstalledPlugins(nodeModulesPath: string): Set<string> {
 }
 
 /**
+ * Get installed plugin version from package.json
+ */
+export function getInstalledPluginVersion(nodeModulesPath: string, packageName: string): string | null {
+  const packagePath = join(nodeModulesPath, ...packageName.split('/'));
+  const packageJsonPath = join(packagePath, 'package.json');
+
+  if (!existsSync(packageJsonPath)) {
+    return null;
+  }
+
+  try {
+    const pkgJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+    return typeof pkgJson.version === 'string' ? pkgJson.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract version from a registry source like package@version
+ */
+export function getVersionFromSource(source: string, packageName: string): string | null {
+  const packagePrefix = `${packageName}@`;
+  if (!source.startsWith(packagePrefix)) {
+    return null;
+  }
+
+  const version = source.slice(packagePrefix.length).trim();
+  return version.length > 0 ? version : null;
+}
+
+/**
  * List installed plugins
  */
 export function listPlugins(): void {
@@ -278,15 +310,18 @@ export function listPlugins(): void {
     const installedPlugins = scanInstalledPlugins(nodeModulesPath);
     
     // Build unified list with status
-    const plugins: Array<{Name: string, Status: string, Source: string, 'Installed At': string}> = [];
+    const plugins: Array<{Name: string, Version: string, Status: string, Source: string, 'Installed At': string}> = [];
     
     // Add registered plugins
     for (const plugin of registeredPlugins) {
       const isInstalled = installedPlugins.has(plugin.name);
       const installStatus = isInstalled ? '✓ Installed' : '⚠ Not installed';
+      const installedVersion = isInstalled ? getInstalledPluginVersion(nodeModulesPath, plugin.name) : null;
+      const sourceVersion = getVersionFromSource(plugin.source, plugin.name);
       
       plugins.push({
         Name: plugin.name,
+        Version: installedVersion ?? sourceVersion ?? 'Unknown',
         Status: installStatus,
         Source: plugin.source,
         'Installed At': new Date(plugin.installedAt).toLocaleString(),
@@ -299,6 +334,7 @@ export function listPlugins(): void {
     for (const name of installedPlugins) {
       plugins.push({
         Name: name,
+        Version: getInstalledPluginVersion(nodeModulesPath, name) ?? 'Unknown',
         Status: '⚠ Not in registry',
         Source: 'Unknown',
         'Installed At': 'Unknown',

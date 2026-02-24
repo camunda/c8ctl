@@ -812,14 +812,14 @@ c8 unload plugin my-custom-plugin
 ### List Plugins
 
 ```bash
-# Show all installed c8ctl plugins with sync status
+# Show all installed c8ctl plugins with version and sync status
 c8 list plugins
 
 # Example output:
-# Name              | Status      | Source                    | Installed At
-# ------------------+-------------+---------------------------+----------------------
-# my-custom-plugin  | ✓ Installed | my-custom-plugin          | 1/30/2026, 6:00:00 PM
-# local-dev-plugin  | ⚠ Not installed | file:///path/to/plugin | 1/30/2026, 5:00:00 PM
+# Name              | Version | Status          | Source                    | Installed At
+# ------------------+---------+-----------------+---------------------------+----------------------
+# my-custom-plugin  | 1.2.0   | ✓ Installed     | my-custom-plugin          | 1/30/2026, 6:00:00 PM
+# local-dev-plugin  | Unknown | ⚠ Not installed | file:///path/to/plugin    | 1/30/2026, 5:00:00 PM
 
 # If any plugins are out of sync, you'll see a hint to run sync
 ```

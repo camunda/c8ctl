@@ -119,6 +119,16 @@ describe('Plugin Lifecycle Integration Tests', () => {
       
       assert.ok(commandOutput.includes('TEST_COMMAND_EXECUTED'), 
         `Plugin command should execute. Output: ${commandOutput}, Stderr: ${commandStderr}`);
+
+      // Verify plugin list includes version information
+      const listOutput = execSync('node src/index.ts list plugins', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+      assert.ok(listOutput.includes('Version'), 'Plugin list should include Version column');
+      assert.ok(listOutput.includes(testPluginName), 'Plugin list should include the loaded plugin name');
+      assert.ok(listOutput.includes('1.0.0'), 'Plugin list should include the loaded plugin version');
       
       // Unload the plugin using c8ctl unload command
       execSync(`node src/index.ts unload plugin ${testPluginName}`, {

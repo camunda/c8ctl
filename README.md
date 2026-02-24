@@ -349,7 +349,7 @@ c8ctl downgrade plugin <package-name> 1.0.0
 # Unload a plugin
 c8ctl unload plugin <package-name>
 
-# List installed plugins (shows sync status)
+# List installed plugins (shows version and sync status)
 c8ctl list plugins
 
 # Synchronize plugins from registry
@@ -369,7 +369,7 @@ c8ctl help
 - The registry serves as the source of truth for installed plugins
 - Default plugins are bundled with c8ctl and loaded automatically
 - **Plugin commands cannot override built-in commands** - built-in commands always take precedence
-- `c8ctl list plugins` shows sync status:
+- `c8ctl list plugins` shows plugin versions and sync status:
   - `✓ Installed` - Plugin is in registry and installed
   - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
   - `⚠ Not in registry` - Plugin is installed but not tracked in registry
