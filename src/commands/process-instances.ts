@@ -117,6 +117,7 @@ export async function createProcessInstance(options: {
   variables?: string;
   awaitCompletion?: boolean;
   fetchVariables?: boolean;
+  requestTimeout?: number;
 }): Promise<{
   processInstanceKey: string | number;
   variables?: Record<string, unknown>;
@@ -152,6 +153,7 @@ export async function createProcessInstance(options: {
       processDefinitionVersion?: number;
       variables?: Record<string, unknown>;
       awaitCompletion?: boolean;
+      requestTimeout?: number;
     } = {
       processDefinitionId: options.processDefinitionId,
       tenantId,
@@ -174,6 +176,11 @@ export async function createProcessInstance(options: {
     if (options.awaitCompletion) {
       request.awaitCompletion = true;
       logger.info('Waiting for process instance to complete...');
+    }
+
+    // Set requestTimeout if provided
+    if (options.requestTimeout !== undefined) {
+      request.requestTimeout = options.requestTimeout;
     }
 
     const result = await client.createProcessInstance(request as unknown as ProcessInstanceCreationInstructionById);

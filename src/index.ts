@@ -107,6 +107,7 @@ function parseCliArgs() {
         errorType: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'boolean' },
+        requestTimeout: { type: 'string' },
         value: { type: 'string' },
         scopeKey: { type: 'string' },
         fullValue: { type: 'boolean' },
@@ -348,6 +349,7 @@ async function main() {
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
       fetchVariables: values.fetchVariables as boolean | undefined,
+      requestTimeout: (values.requestTimeout && typeof values.requestTimeout === 'string') ? parseInt(values.requestTimeout) : undefined,
     });
     return;
   }
@@ -374,6 +376,7 @@ async function main() {
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as boolean | undefined,
+      requestTimeout: (values.requestTimeout && typeof values.requestTimeout === 'string') ? parseInt(values.requestTimeout) : undefined,
     });
     return;
   }

@@ -35,12 +35,9 @@ jobs:
         run: npm run test:unit
 
       - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
-        run: |
-          cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch up -d
-        env:
-          DATABASE: elasticsearch
-
+        working-directory: assets/c8/${{ matrix.camunda }}
+        run: docker compose up -d
+          
       - name: Wait for Camunda to be ready
         run: |
           echo "Waiting for Camunda at localhost:8080..."
@@ -76,16 +73,10 @@ jobs:
 
       - name: Stop Camunda
         if: always()
-        run: |
-          cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch down -v
-        env:
-          DATABASE: elasticsearch
+        working-directory: assets/c8/${{ matrix.camunda }}
+        run: docker compose down -v
 
       - name: Show Camunda logs on failure
         if: failure()
-        run: |
-          cd assets/c8/${{ matrix.camunda }}
-          DATABASE=elasticsearch docker compose --profile elasticsearch logs
-        env:
-          DATABASE: elasticsearch
+        working-directory: assets/c8/${{ matrix.camunda }}
+        run: docker compose logs
