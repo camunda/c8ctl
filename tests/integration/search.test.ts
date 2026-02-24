@@ -166,9 +166,13 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // Wait for the job to appear in search results
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type' });
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
       if (result?.items && result.items.length > 0) {
-        jobKey = String(result.items[0].jobKey || result.items[0].key);
+        const createdJob = result.items.find((job: any) => (job.state || '').toUpperCase() === 'CREATED') as any;
+        if (!createdJob) {
+          return false;
+        }
+        jobKey = String(createdJob.jobKey || createdJob.key);
         return true;
       }
       return false;
