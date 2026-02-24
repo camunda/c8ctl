@@ -374,6 +374,15 @@ c8ctl help
   - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
   - `⚠ Not in registry` - Plugin is installed but not tracked in registry
 - `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
+- `c8ctl upgrade plugin <name> [version]` respects the plugin source from the registry:
+  - without `version`: reinstalls the registered source as-is
+  - npm package source with `version`: installs `<name>@<version>`
+  - URL/git source with `version`: installs `<source>#<version>`
+  - file source (`file://`) with `version`: version upgrade is not supported; use `load plugin --from` with the desired local plugin checkout
+- `c8ctl downgrade plugin <name> <version>` respects the plugin source from the registry:
+  - npm package source: installs `<name>@<version>`
+  - URL/git source: installs `<source>#<version>`
+  - file source (`file://`): version downgrade is not supported; use `load plugin --from` with the desired local plugin checkout
 
 **Plugin Development:**
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template

@@ -295,6 +295,29 @@ export function getVersionFromSource(source: string, packageName: string): strin
 }
 
 /**
+ * Check if plugin source points to URL/git-style location
+ */
+function isUrlSource(source: string): boolean {
+  return source.includes('://') ||
+    source.startsWith('git+') ||
+    source.startsWith('git@') ||
+    source.startsWith('github:');
+}
+
+/**
+ * Resolve npm install target based on source type and version
+ */
+function resolveInstallTarget(source: string, packageName: string, version?: string): string {
+  if (!version) {
+    return source;
+  }
+
+  return isUrlSource(source)
+    ? `${source.split('#')[0]}#${version}`
+    : `${packageName}@${version}`;
+}
+
+/**
  * List installed plugins
  */
 export function listPlugins(): void {
@@ -482,21 +505,32 @@ export async function upgradePlugin(packageName: string, version?: string): Prom
   
   const pluginEntry = getPluginEntry(packageName);
   const pluginsDir = ensurePluginsDir();
+
+  const source = pluginEntry?.source ?? packageName;
+
+  // Versioned upgrade needs to respect source type
+  // File-based plugins do not have a version selector in npm install syntax
+  if (version && source.startsWith('file:')) {
+    logger.error(`Cannot upgrade file-based plugin "${packageName}" to a specific version.`);
+    logger.info(`Plugin source is: ${source}`);
+    logger.info('Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory');
+    process.exit(1);
+  }
+
+  const installTarget = resolveInstallTarget(source, packageName, version);
   
   try {
-    const versionSpec = version ? `@${version}` : '@latest';
     logger.info(`Upgrading plugin: ${packageName} to ${version || 'latest'}...`);
     
     // Uninstall current version
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
     
-    // Install new version
-    const installTarget = version ? `${packageName}${versionSpec}` : pluginEntry!.source;
+    // Install new version while respecting source type
     execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
     
     // Update registry with new source if version was specified
     if (version) {
-      addPluginToRegistry(packageName, `${packageName}${versionSpec}`);
+      addPluginToRegistry(packageName, installTarget);
     }
     
     // Clear plugin cache
@@ -529,7 +563,21 @@ export async function downgradePlugin(packageName: string, version: string): Pro
     process.exit(1);
   }
   
+  const pluginEntry = getPluginEntry(packageName);
   const pluginsDir = ensurePluginsDir();
+
+  const source = pluginEntry?.source ?? packageName;
+
+  // Downgrade needs to respect the plugin source
+  // File-based plugins do not have a version selector in npm install syntax
+  if (source.startsWith('file:')) {
+    logger.error(`Cannot downgrade file-based plugin "${packageName}" by version.`);
+    logger.info(`Plugin source is: ${source}`);
+    logger.info('Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory');
+    process.exit(1);
+  }
+
+  const installTarget = resolveInstallTarget(source, packageName, version);
   
   try {
     logger.info(`Downgrading plugin: ${packageName} to version ${version}...`);
@@ -537,8 +585,7 @@ export async function downgradePlugin(packageName: string, version: string): Pro
     // Uninstall current version
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
     
-    // Install specific version
-    const installTarget = `${packageName}@${version}`;
+    // Install specific version while respecting source type
     execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
     
     // Update registry with new source

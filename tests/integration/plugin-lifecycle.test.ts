@@ -427,4 +427,172 @@ export const commands = {
       }
     }
   });
+
+  test('downgrade respects file source and fails with actionable hint', async () => {
+    const fileSourcePluginName = 'c8ctl-file-source-plugin';
+    const fileSourcePluginDir = join(process.cwd(), 'test-file-source-plugin-temp');
+    const fileSourceNodeModulesPath = join(pluginsDir, 'node_modules', fileSourcePluginName);
+
+    if (existsSync(fileSourcePluginDir)) {
+      rmSync(fileSourcePluginDir, { recursive: true, force: true });
+    }
+
+    try {
+      mkdirSync(fileSourcePluginDir, { recursive: true });
+
+      writeFileSync(
+        join(fileSourcePluginDir, 'package.json'),
+        JSON.stringify({
+          name: fileSourcePluginName,
+          version: '1.0.0',
+          type: 'module',
+          description: 'Test file-source plugin for downgrade behavior',
+          keywords: ['c8ctl', 'plugin']
+        }, null, 2)
+      );
+
+      writeFileSync(
+        join(fileSourcePluginDir, 'c8ctl-plugin.js'),
+        `export const commands = {
+  'file-source-test': async () => {
+    console.log('FILE_SOURCE_TEST');
+  }
+};
+`
+      );
+
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${fileSourcePluginDir}`], {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+
+      assert.ok(existsSync(fileSourceNodeModulesPath), 'File-source plugin should be installed');
+
+      let downgradeFailed = false;
+      let downgradeOutput = '';
+      try {
+        execSync(`node src/index.ts downgrade plugin ${fileSourcePluginName} 0.9.0`, {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 5000,
+        });
+      } catch (error: any) {
+        downgradeFailed = true;
+        downgradeOutput = `${error.stdout || ''}${error.stderr || ''}`;
+      }
+
+      assert.ok(downgradeFailed, 'Downgrade should fail for file-based plugin source');
+      assert.ok(downgradeOutput.includes('Cannot downgrade file-based plugin'),
+        `Downgrade should explain file-source limitation. Output: ${downgradeOutput}`);
+      assert.ok(downgradeOutput.includes('c8ctl load plugin --from <file-url>'),
+        `Downgrade should provide actionable hint. Output: ${downgradeOutput}`);
+
+      // Plugin should remain installed because downgrade exits before uninstall
+      assert.ok(existsSync(fileSourceNodeModulesPath),
+        'File-source plugin should remain installed after failed downgrade');
+    } finally {
+      if (existsSync(fileSourcePluginDir)) {
+        rmSync(fileSourcePluginDir, { recursive: true, force: true });
+      }
+
+      try {
+        execSync(`node src/index.ts unload plugin ${fileSourcePluginName}`, {
+          cwd: process.cwd(),
+          stdio: 'ignore',
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      if (existsSync(fileSourceNodeModulesPath)) {
+        rmSync(fileSourceNodeModulesPath, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('upgrade respects file source and fails with actionable hint', async () => {
+    const fileSourcePluginName = 'c8ctl-file-source-plugin-upgrade';
+    const fileSourcePluginDir = join(process.cwd(), 'test-file-source-plugin-upgrade-temp');
+    const fileSourceNodeModulesPath = join(pluginsDir, 'node_modules', fileSourcePluginName);
+
+    if (existsSync(fileSourcePluginDir)) {
+      rmSync(fileSourcePluginDir, { recursive: true, force: true });
+    }
+
+    try {
+      mkdirSync(fileSourcePluginDir, { recursive: true });
+
+      writeFileSync(
+        join(fileSourcePluginDir, 'package.json'),
+        JSON.stringify({
+          name: fileSourcePluginName,
+          version: '1.0.0',
+          type: 'module',
+          description: 'Test file-source plugin for upgrade behavior',
+          keywords: ['c8ctl', 'plugin']
+        }, null, 2)
+      );
+
+      writeFileSync(
+        join(fileSourcePluginDir, 'c8ctl-plugin.js'),
+        `export const commands = {
+  'file-source-upgrade-test': async () => {
+    console.log('FILE_SOURCE_UPGRADE_TEST');
+  }
+};
+`
+      );
+
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${fileSourcePluginDir}`], {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+
+      assert.ok(existsSync(fileSourceNodeModulesPath), 'File-source plugin should be installed');
+
+      let upgradeFailed = false;
+      let upgradeOutput = '';
+      try {
+        execSync(`node src/index.ts upgrade plugin ${fileSourcePluginName} 1.1.0`, {
+          cwd: process.cwd(),
+          encoding: 'utf-8',
+          stdio: 'pipe',
+          timeout: 5000,
+        });
+      } catch (error: any) {
+        upgradeFailed = true;
+        upgradeOutput = `${error.stdout || ''}${error.stderr || ''}`;
+      }
+
+      assert.ok(upgradeFailed, 'Versioned upgrade should fail for file-based plugin source');
+      assert.ok(upgradeOutput.includes('Cannot upgrade file-based plugin'),
+        `Upgrade should explain file-source limitation. Output: ${upgradeOutput}`);
+      assert.ok(upgradeOutput.includes('c8ctl load plugin --from <file-url>'),
+        `Upgrade should provide actionable hint. Output: ${upgradeOutput}`);
+
+      // Plugin should remain installed because upgrade exits before uninstall
+      assert.ok(existsSync(fileSourceNodeModulesPath),
+        'File-source plugin should remain installed after failed versioned upgrade');
+    } finally {
+      if (existsSync(fileSourcePluginDir)) {
+        rmSync(fileSourcePluginDir, { recursive: true, force: true });
+      }
+
+      try {
+        execSync(`node src/index.ts unload plugin ${fileSourcePluginName}`, {
+          cwd: process.cwd(),
+          stdio: 'ignore',
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      if (existsSync(fileSourceNodeModulesPath)) {
+        rmSync(fileSourceNodeModulesPath, { recursive: true, force: true });
+      }
+    }
+  });
 });

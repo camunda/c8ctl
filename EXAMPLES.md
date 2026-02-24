@@ -852,6 +852,33 @@ c8 sync plugins
 # ✓ All plugins synced successfully!
 ```
 
+### Downgrade Plugin
+
+```bash
+# Downgrade a plugin by version
+c8 downgrade plugin my-custom-plugin 1.0.0
+
+# Downgrade is source-aware:
+# - npm source: installs my-custom-plugin@1.0.0
+# - git/URL source: installs <source>#1.0.0
+# - file:// source: version downgrade is not supported
+```
+
+### Upgrade Plugin
+
+```bash
+# Upgrade a plugin to latest
+c8 upgrade plugin my-custom-plugin
+
+# Upgrade a plugin to a specific version
+c8 upgrade plugin my-custom-plugin 1.2.3
+
+# Versioned upgrade is source-aware:
+# - npm source: installs my-custom-plugin@1.2.3
+# - git/URL source: installs <source>#1.2.3
+# - file:// source: version upgrade is not supported
+```
+
 **Plugin Development:**
 
 Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin file must export a `commands` object. The `c8ctl` runtime object provides environment information:

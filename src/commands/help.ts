@@ -70,7 +70,7 @@ Commands:
   load      plugin <name>    Load a c8ctl plugin from npm registry
   load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
-  upgrade   plugin <name> [version]  Upgrade a plugin to latest or specific version
+  upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   init      plugin [name]    Create a new plugin from TypeScript template
@@ -167,6 +167,7 @@ Examples:
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
+  c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
 
@@ -273,7 +274,7 @@ Resources and their available flags:
     (Modeler profiles are shown with 'modeler:' prefix)
 
   plugins
-    Shows installed plugins with sync status
+    Shows installed plugins with version and sync status
 
 Examples:
   c8ctl list pi --state=ACTIVE
