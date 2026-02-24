@@ -115,8 +115,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
       });
       if (result?.items && result.items.length > 0) {
         const item = result.items[0] as any;
-        processDefKey = (item.processDefinitionKey || item.processDefinition?.processDefinitionKey || item.key)?.toString();
-        return processDefKey !== undefined;
+        if (item.processDefinitionKey === undefined || item.processDefinitionKey === null) {
+          return false;
+        }
+        processDefKey = item.processDefinitionKey.toString();
+        return true;
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
