@@ -21,6 +21,7 @@ import {
   removeProfile,
   loadModelerConnections,
   connectionToProfile,
+  connectionToClusterConfig,
   profileToClusterConfig,
   validateConnection,
   loadSessionState,
@@ -255,6 +256,35 @@ describe('Config Module', () => {
       assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
       assert.strictEqual(config.username, 'demo');
       assert.strictEqual(config.password, 'demo');
+    });
+
+    test('connectionToClusterConfig keeps cloud audience optional', () => {
+      const config = connectionToClusterConfig({
+        id: 'cloud-1',
+        targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+        camundaCloudClusterUrl: 'https://jfk-1.zeebe.camunda.io/cluster-id',
+        camundaCloudClientId: 'client-id',
+        camundaCloudClientSecret: 'client-secret',
+      });
+
+      assert.strictEqual(config.baseUrl, 'https://jfk-1.zeebe.camunda.io/cluster-id');
+      assert.strictEqual(config.clientId, 'client-id');
+      assert.strictEqual(config.clientSecret, 'client-secret');
+      assert.strictEqual(config.audience, undefined);
+      assert.strictEqual(config.oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
+    });
+
+    test('connectionToClusterConfig preserves explicit cloud audience', () => {
+      const config = connectionToClusterConfig({
+        id: 'cloud-2',
+        targetType: TARGET_TYPES.CAMUNDA_CLOUD,
+        camundaCloudClusterUrl: 'https://jfk-1.zeebe.camunda.io/cluster-id',
+        camundaCloudClientId: 'client-id',
+        camundaCloudClientSecret: 'client-secret',
+        audience: 'zeebe.camunda.io',
+      });
+
+      assert.strictEqual(config.audience, 'zeebe.camunda.io');
     });
   });
 });
