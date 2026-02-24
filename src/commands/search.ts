@@ -53,6 +53,14 @@ export const matchesCaseInsensitive = (value: string | undefined | null, pattern
   return wildcardToRegex(pattern).test(value);
 };
 
+const toBigIntSafe = (value: unknown): bigint => {
+  try {
+    return BigInt(String(value));
+  } catch {
+    return 0n;
+  }
+};
+
 /** Max page size for case-insensitive search (client-side filtering needs broader result set) */
 const CI_PAGE_SIZE = 1000;
 
@@ -166,6 +174,18 @@ export async function searchProcessDefinitions(options: {
     }
 
     const result = await client.searchProcessDefinitions(filter, { consistency: { waitUpToMs: 0 } });
+
+    if (result.items?.length) {
+      result.items = [...result.items].sort((left: any, right: any) => {
+        const versionDelta = (Number(right.version) || 0) - (Number(left.version) || 0);
+        if (versionDelta !== 0) return versionDelta;
+
+        const leftKey = toBigIntSafe(left.processDefinitionKey ?? left.key);
+        const rightKey = toBigIntSafe(right.processDefinitionKey ?? right.key);
+        if (leftKey === rightKey) return 0;
+        return rightKey > leftKey ? 1 : -1;
+      });
+    }
 
     // Client-side case-insensitive post-filtering
     if (hasCiFilter && result.items) {
@@ -668,10 +688,49 @@ export async function searchVariables(options: {
     // By default, truncate values unless --fullValue is specified
     const truncateValues = !options.fullValue;
 
-    const result = await client.searchVariables(
-      { ...filter, truncateValues }, 
+    let result = await client.searchVariables(
+      { ...filter, truncateValues },
       { consistency: { waitUpToMs: 0 } }
     );
+
+    if (hasCiFilter) {
+      const items = [...(result.items || [])];
+      const seenCursors = new Set<string>();
+      let nextCursor = (result as any).page?.endCursor as string | undefined;
+      const totalItems = (result as any).page?.totalItems as number | undefined;
+
+      while (nextCursor && !seenCursors.has(nextCursor)) {
+        if (totalItems !== undefined && items.length >= totalItems) {
+          break;
+        }
+
+        seenCursors.add(nextCursor);
+
+        const pageResult = await client.searchVariables(
+          {
+            ...filter,
+            page: {
+              after: nextCursor as any,
+              limit: CI_PAGE_SIZE,
+            },
+            truncateValues,
+          },
+          { consistency: { waitUpToMs: 0 } }
+        );
+
+        if (!pageResult.items?.length) {
+          break;
+        }
+
+        items.push(...pageResult.items);
+        nextCursor = (pageResult as any).page?.endCursor as string | undefined;
+      }
+
+      result = {
+        ...result,
+        items,
+      } as any;
+    }
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((variable: any) => {

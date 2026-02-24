@@ -445,12 +445,15 @@ export function getProfileOrModeler(name: string): Profile | undefined {
  */
 export function connectionToClusterConfig(conn: Connection): ClusterConfig {
   if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
+    const audience = conn.audience?.trim();
+    const oAuthUrl = conn.oauthURL?.trim();
+
     return {
       baseUrl: conn.camundaCloudClusterUrl || '',
       clientId: conn.camundaCloudClientId,
       clientSecret: conn.camundaCloudClientSecret,
-      audience: conn.camundaCloudClusterUrl, // Cloud uses URL as audience
-      oAuthUrl: 'https://login.cloud.camunda.io/oauth/token',
+      audience: audience || undefined,
+      oAuthUrl: oAuthUrl || 'https://login.cloud.camunda.io/oauth/token',
     };
   }
 

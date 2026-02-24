@@ -70,7 +70,7 @@ Commands:
   load      plugin <name>    Load a c8ctl plugin from npm registry
   load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
-  upgrade   plugin <name> [version]  Upgrade a plugin to latest or specific version
+  upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   init      plugin [name]    Create a new plugin from TypeScript template
@@ -167,6 +167,7 @@ Examples:
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
+  c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
 
@@ -187,6 +188,9 @@ For detailed help on specific commands with all available flags:
   c8ctl help activate                Show activate command with all flags
   c8ctl help publish                 Show publish command with all flags
   c8ctl help correlate               Show correlate command with all flags
+  c8ctl help profiles                Show profile management help
+  c8ctl help plugin                  Show plugin management help
+  c8ctl help plugins                 Alias for plugin management help
 `.trim());
 }
 
@@ -219,7 +223,7 @@ export function showVerbResources(verb: string): void {
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
   };
 
   const available = resources[verb];
@@ -273,7 +277,7 @@ Resources and their available flags:
     (Modeler profiles are shown with 'modeler:' prefix)
 
   plugins
-    Shows installed plugins with sync status
+    Shows installed plugins with version and sync status
 
 Examples:
   c8ctl list pi --state=ACTIVE
@@ -814,6 +818,110 @@ Examples:
 }
 
 /**
+ * Show detailed help for profile management
+ */
+export function showProfilesHelp(): void {
+  console.log(`
+c8ctl profiles - Profile management
+
+Usage: c8ctl <command> profile[s] [args] [flags]
+
+Profile commands:
+
+  list profiles
+    List all profiles (c8ctl + Camunda Modeler profiles).
+    Modeler profiles are shown with "modeler:" prefix.
+
+  add profile <name> [flags]
+    Add a c8ctl-managed profile.
+
+  remove profile <name>
+  rm profile <name>
+    Remove a c8ctl-managed profile.
+
+  use profile <name>
+    Set active profile for the current session.
+
+Flags for add profile:
+  Required for all add profile calls:
+    (none)
+
+  Required for OAuth-secured clusters:
+    --clientId <id>          OAuth client ID
+    --clientSecret <secret>  OAuth client secret
+
+  Optional (with defaults):
+    --baseUrl <url>          Cluster base URL (default: http://localhost:8080/v2)
+    --defaultTenantId <id>   Default tenant ID (default at runtime: <default>)
+
+  Optional (no c8ctl default):
+    --audience <audience>    OAuth audience
+    --oAuthUrl <url>         OAuth token endpoint
+
+Examples:
+  c8ctl list profiles
+  c8ctl add profile local --baseUrl=http://localhost:8080
+  c8ctl add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
+  c8ctl use profile prod
+  c8ctl use profile "modeler:Local Dev"
+  c8ctl remove profile local
+`.trim());
+}
+
+/**
+ * Show detailed help for plugin management
+ */
+export function showPluginHelp(): void {
+  console.log(`
+c8ctl plugin - Plugin management
+
+Usage: c8ctl <command> plugin [args] [flags]
+
+Plugin commands:
+
+  load plugin <name>
+    Load a plugin from npm registry.
+
+  load plugin --from <url>
+    Load a plugin from URL source (file://, https://, git://, github:).
+
+  unload plugin <name>
+    Unload and unregister a plugin.
+
+  list plugins
+    List installed plugins with version and sync status.
+
+  sync plugins
+    Rebuild/reinstall plugins from registry.
+
+  upgrade plugin <name> [version]
+    Upgrade plugin source.
+    - without version: reinstalls registered source as-is
+    - npm source with version: installs <name>@<version>
+    - URL/git source with version: installs <source>#<version>
+    - file:// source with version: not supported, use load plugin --from
+
+  downgrade plugin <name> <version>
+    Downgrade plugin source.
+    - npm source: installs <name>@<version>
+    - URL/git source: installs <source>#<version>
+    - file:// source: not supported, use load plugin --from
+
+  init plugin [name]
+    Create a new plugin scaffold from template.
+
+Examples:
+  c8ctl load plugin my-plugin
+  c8ctl load plugin --from file:///path/to/plugin
+  c8ctl list plugins
+  c8ctl upgrade plugin my-plugin
+  c8ctl upgrade plugin my-plugin 1.2.3
+  c8ctl downgrade plugin my-plugin 1.0.0
+  c8ctl init plugin my-plugin
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -866,6 +974,14 @@ export function showCommandHelp(command: string): void {
       break;
     case 'correlate':
       showCorrelateHelp();
+      break;
+    case 'profiles':
+    case 'profile':
+      showProfilesHelp();
+      break;
+    case 'plugin':
+    case 'plugins':
+      showPluginHelp();
       break;
     default:
       console.log(`\nNo detailed help available for: ${command}`);

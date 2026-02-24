@@ -87,6 +87,8 @@ c8ctl help fail       # Shows fail command with all flags
 c8ctl help activate   # Shows activate command with all flags
 c8ctl help publish    # Shows publish command with all flags
 c8ctl help correlate  # Shows correlate command with all flags
+c8ctl help profiles   # Shows profile management help
+c8ctl help plugin     # Shows plugin management help
 
 # Show version
 c8ctl --version
@@ -237,6 +239,12 @@ c8ctl supports two types of profiles:
 1. **c8ctl profiles**: Managed directly by c8ctl
 2. **Camunda Modeler profiles**: Automatically imported from Camunda Modeler (with `modeler:` prefix)
 
+For profile-related commands and flags, run:
+
+```bash
+c8ctl help profiles
+```
+
 ```bash
 # Add a c8ctl profile
 c8 add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
@@ -246,7 +254,7 @@ c8 list profiles
 
 # Set active profile (works with both types)
 c8 use profile prod
-c8 use profile modeler:Local Dev
+c8 use profile "modeler:Local Dev"
 
 # Remove c8ctl profile (modeler profiles are read-only)
 c8 remove profile prod
@@ -349,7 +357,7 @@ c8ctl downgrade plugin <package-name> 1.0.0
 # Unload a plugin
 c8ctl unload plugin <package-name>
 
-# List installed plugins (shows sync status)
+# List installed plugins (shows version and sync status)
 c8ctl list plugins
 
 # Synchronize plugins from registry
@@ -369,11 +377,20 @@ c8ctl help
 - The registry serves as the source of truth for installed plugins
 - Default plugins are bundled with c8ctl and loaded automatically
 - **Plugin commands cannot override built-in commands** - built-in commands always take precedence
-- `c8ctl list plugins` shows sync status:
+- `c8ctl list plugins` shows plugin versions and sync status:
   - `✓ Installed` - Plugin is in registry and installed
   - `⚠ Not installed` - Plugin is in registry but not in global directory (run `sync`)
   - `⚠ Not in registry` - Plugin is installed but not tracked in registry
 - `c8ctl sync plugins` synchronizes plugins from the registry, rebuilding or reinstalling as needed
+- `c8ctl upgrade plugin <name> [version]` respects the plugin source from the registry:
+  - without `version`: reinstalls the registered source as-is
+  - npm package source with `version`: installs `<name>@<version>`
+  - URL/git source with `version`: installs `<source>#<version>`
+  - file source (`file://`) with `version`: version upgrade is not supported; use `load plugin --from` with the desired local plugin checkout
+- `c8ctl downgrade plugin <name> <version>` respects the plugin source from the registry:
+  - npm package source: installs `<name>@<version>`
+  - URL/git source: installs `<source>#<version>`
+  - file source (`file://`): version downgrade is not supported; use `load plugin --from` with the desired local plugin checkout
 
 **Plugin Development:**
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template

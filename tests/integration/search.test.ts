@@ -101,27 +101,31 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // Deploy a process
     await deploy(['tests/fixtures/simple.bpmn'], {});
 
-    // Poll until process definition is indexed and extract its key
-    let processDefKey: string | undefined;
-    const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'simple-process',
-      });
-      if (result?.items && result.items.length > 0) {
-        const item = result.items[0] as any;
-        processDefKey = (item.processDefinitionKey || item.key)?.toString();
-        return processDefKey !== undefined;
-      }
-      return false;
-    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
-
-    assert.ok(indexed, 'Should find the deployed process');
-    assert.ok(processDefKey, 'Should have process definition key');
-
     // Create an instance using CLI wrapper
     await createProcessInstance({
       processDefinitionId: 'simple-process',
     });
+
+    // Poll until the created instance is indexed and extract the concrete processDefinitionKey
+    // from that instance to avoid races with stale process-definition search results.
+    let processDefKey: string | undefined;
+    const instanceIndexed = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+      });
+      if (result?.items && result.items.length > 0) {
+        const item = result.items[0] as any;
+        if (item.processDefinitionKey === undefined || item.processDefinitionKey === null) {
+          return false;
+        }
+        processDefKey = item.processDefinitionKey.toString();
+        return true;
+      }
+      return false;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(instanceIndexed, 'Created process instance should be indexed');
+    assert.ok(processDefKey, 'Should have process definition key from indexed instance');
 
     // Poll until search by processDefinitionKey finds results
     const found = await pollUntil(async () => {
@@ -166,9 +170,13 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // Wait for the job to appear in search results
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type' });
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
       if (result?.items && result.items.length > 0) {
-        jobKey = String(result.items[0].jobKey || result.items[0].key);
+        const createdJob = result.items.find((job: any) => (job.state || '').toUpperCase() === 'CREATED') as any;
+        if (!createdJob) {
+          return false;
+        }
+        jobKey = String(createdJob.jobKey || createdJob.key);
         return true;
       }
       return false;

@@ -666,13 +666,38 @@ c8ctl supports two types of profiles:
 1. **c8ctl profiles**: Directly managed by c8ctl commands
 2. **Modeler profiles**: Automatically imported from Camunda Modeler (read-only)
 
-### Add c8ctl Profile
+### Show Profile Help
 
 ```bash
-# Add profile with basic auth (localhost)
+# Show all profile-related commands and flags
+c8 help profiles
+```
+
+### Add c8ctl Profile
+
+`c8 add profile <name>` usage rules:
+
+- **Always required**: profile `<name>`
+- **Required for OAuth-secured clusters**: `--clientId`, `--clientSecret`
+- **Optional with defaults**:
+  - `--baseUrl` (default: `http://localhost:8080/v2`)
+  - `--defaultTenantId` (runtime default tenant: `<default>`)
+- **Optional without c8ctl defaults**: `--audience`, `--oAuthUrl`
+
+```bash
+# Minimal local profile (uses default --baseUrl)
+c8 add profile local
+
+# Local profile with explicit URL
 c8 add profile local --baseUrl=http://localhost:8080
 
-# Add profile with OAuth
+# Minimal OAuth profile (required OAuth switches)
+c8 add profile prod \
+  --baseUrl=https://camunda.example.com \
+  --clientId=your-client-id \
+  --clientSecret=your-client-secret
+
+# OAuth profile with explicit audience/token endpoint
 c8 add profile prod \
   --baseUrl=https://camunda.example.com \
   --clientId=your-client-id \
@@ -812,14 +837,14 @@ c8 unload plugin my-custom-plugin
 ### List Plugins
 
 ```bash
-# Show all installed c8ctl plugins with sync status
+# Show all installed c8ctl plugins with version and sync status
 c8 list plugins
 
 # Example output:
-# Name              | Status      | Source                    | Installed At
-# ------------------+-------------+---------------------------+----------------------
-# my-custom-plugin  | ✓ Installed | my-custom-plugin          | 1/30/2026, 6:00:00 PM
-# local-dev-plugin  | ⚠ Not installed | file:///path/to/plugin | 1/30/2026, 5:00:00 PM
+# Name              | Version | Status          | Source                    | Installed At
+# ------------------+---------+-----------------+---------------------------+----------------------
+# my-custom-plugin  | 1.2.0   | ✓ Installed     | my-custom-plugin          | 1/30/2026, 6:00:00 PM
+# local-dev-plugin  | Unknown | ⚠ Not installed | file:///path/to/plugin    | 1/30/2026, 5:00:00 PM
 
 # If any plugins are out of sync, you'll see a hint to run sync
 ```
@@ -850,6 +875,33 @@ c8 sync plugins
 # Synchronization complete:
 #   ✓ Synced: 2 plugin(s)
 # ✓ All plugins synced successfully!
+```
+
+### Downgrade Plugin
+
+```bash
+# Downgrade a plugin by version
+c8 downgrade plugin my-custom-plugin 1.0.0
+
+# Downgrade is source-aware:
+# - npm source: installs my-custom-plugin@1.0.0
+# - git/URL source: installs <source>#1.0.0
+# - file:// source: version downgrade is not supported
+```
+
+### Upgrade Plugin
+
+```bash
+# Upgrade a plugin to latest
+c8 upgrade plugin my-custom-plugin
+
+# Upgrade a plugin to a specific version
+c8 upgrade plugin my-custom-plugin 1.2.3
+
+# Versioned upgrade is source-aware:
+# - npm source: installs my-custom-plugin@1.2.3
+# - git/URL source: installs <source>#1.2.3
+# - file:// source: version upgrade is not supported
 ```
 
 **Plugin Development:**

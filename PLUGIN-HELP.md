@@ -151,6 +151,22 @@ Plugin Commands:
   status                  Check cluster status
 ```
 
+### Source-Aware Upgrade and Downgrade
+
+Plugin version changes (`upgrade` / `downgrade`) use the registry `source` value and therefore behave differently based on source type:
+
+- **npm package source**
+  - `c8ctl upgrade plugin <name> <version>` installs `<name>@<version>`
+  - `c8ctl downgrade plugin <name> <version>` installs `<name>@<version>`
+- **URL/git source**
+  - `c8ctl upgrade plugin <name> <version>` installs `<source>#<version>`
+  - `c8ctl downgrade plugin <name> <version>` installs `<source>#<version>`
+- **file source (`file://`)**
+  - Version-based upgrade/downgrade is not supported
+  - Use `c8ctl load plugin --from <file-url>` after checking out the desired local plugin version
+
+For `c8ctl upgrade plugin <name>` without a version, c8ctl reinstalls the registered source as-is
+
 ## Implementation Details
 
 ### Plugin Loader
