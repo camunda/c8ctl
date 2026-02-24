@@ -20,7 +20,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync use output completion help"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use output completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -40,13 +40,16 @@ _c8ctl_completions() {
   local load_resources="plugin"
   local unload_resources="plugin"
   local sync_resources="plugin plugins"
+  local upgrade_resources="plugin"
+  local downgrade_resources="plugin"
+  local init_resources="plugin"
   local use_resources="profile tenant"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate"
+  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
 
   case \${cword} in
     1)
@@ -107,6 +110,15 @@ _c8ctl_completions() {
           ;;
         sync)
           COMPREPLY=( \$(compgen -W "\${sync_resources}" -- "\${cur}") )
+          ;;
+        upgrade)
+          COMPREPLY=( \$(compgen -W "\${upgrade_resources}" -- "\${cur}") )
+          ;;
+        downgrade)
+          COMPREPLY=( \$(compgen -W "\${downgrade_resources}" -- "\${cur}") )
+          ;;
+        init)
+          COMPREPLY=( \$(compgen -W "\${init_resources}" -- "\${cur}") )
           ;;
         use)
           COMPREPLY=( \$(compgen -W "\${use_resources}" -- "\${cur}") )
@@ -173,6 +185,9 @@ _c8ctl() {
     'load:Load a c8ctl plugin'
     'unload:Unload a c8ctl plugin'
     'sync:Synchronize plugins from registry'
+    'upgrade:Upgrade a plugin'
+    'downgrade:Downgrade a plugin'
+    'init:Create a new plugin from template'
     'use:Set active profile or tenant'
     'output:Set output format'
     'completion:Generate shell completion script'
@@ -212,6 +227,7 @@ _c8ctl() {
     '--version[Process definition version]:version:'
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
+    '--requestTimeout[Timeout in milliseconds for process completion]:milliseconds:'
     '--name[Variable or resource name]:name:'
     '--key[Resource key]:key:'
     '--elementId[Element ID]:id:'
@@ -382,6 +398,24 @@ _c8ctl() {
           )
           _describe 'resource' resources
           ;;
+        upgrade)
+          resources=(
+            'plugin:Upgrade plugin'
+          )
+          _describe 'resource' resources
+          ;;
+        downgrade)
+          resources=(
+            'plugin:Downgrade plugin'
+          )
+          _describe 'resource' resources
+          ;;
+        init)
+          resources=(
+            'plugin:Create new plugin from template'
+          )
+          _describe 'resource' resources
+          ;;
         use)
           resources=(
             'profile:Set active profile'
@@ -421,6 +455,9 @@ _c8ctl() {
             'activate:Show activate command help'
             'publish:Show publish command help'
             'correlate:Show correlate command help'
+            'upgrade:Show upgrade command help'
+            'downgrade:Show downgrade command help'
+            'init:Show init command help'
           )
           _describe 'resource' resources
           ;;
@@ -510,6 +547,8 @@ complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
 complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
+complete -c c8ctl -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
+complete -c c8 -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
 complete -c c8ctl -l name -d 'Variable or resource name' -r
 complete -c c8 -l name -d 'Variable or resource name' -r
 complete -c c8ctl -l key -d 'Resource key' -r
@@ -588,6 +627,12 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plug
 complete -c c8 -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plugin'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
 complete -c c8 -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade a plugin'
+complete -c c8 -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade a plugin'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plugin'
+complete -c c8 -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plugin'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
+complete -c c8 -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
@@ -753,6 +798,18 @@ complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugin' -d 'Synchronize
 complete -c c8ctl -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
 complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
 
+# Resources for 'upgrade' command
+complete -c c8ctl -n '__fish_seen_subcommand_from upgrade' -a 'plugin' -d 'Upgrade plugin'
+complete -c c8 -n '__fish_seen_subcommand_from upgrade' -a 'plugin' -d 'Upgrade plugin'
+
+# Resources for 'downgrade' command
+complete -c c8ctl -n '__fish_seen_subcommand_from downgrade' -a 'plugin' -d 'Downgrade plugin'
+complete -c c8 -n '__fish_seen_subcommand_from downgrade' -a 'plugin' -d 'Downgrade plugin'
+
+# Resources for 'init' command
+complete -c c8ctl -n '__fish_seen_subcommand_from init' -a 'plugin' -d 'Create new plugin from template'
+complete -c c8 -n '__fish_seen_subcommand_from init' -a 'plugin' -d 'Create new plugin from template'
+
 # Resources for 'use' command
 complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
 complete -c c8 -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
@@ -804,6 +861,12 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show pu
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
 `;
 }
 

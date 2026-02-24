@@ -37,7 +37,7 @@ import { getTopology } from './commands/topology.ts';
 import { deploy } from './commands/deployments.ts';
 import { run } from './commands/run.ts';
 import { watchFiles } from './commands/watch.ts';
-import { loadPlugin, unloadPlugin, listPlugins, syncPlugins } from './commands/plugins.ts';
+import { loadPlugin, unloadPlugin, listPlugins, syncPlugins, upgradePlugin, downgradePlugin, initPlugin } from './commands/plugins.ts';
 import { showCompletion } from './commands/completion.ts';
 import { getUserTaskForm, getStartForm, getForm } from './commands/forms.ts';
 import { 
@@ -107,6 +107,7 @@ function parseCliArgs() {
         errorType: { type: 'string' },
         awaitCompletion: { type: 'boolean' },
         fetchVariables: { type: 'boolean' },
+        requestTimeout: { type: 'string' },
         value: { type: 'string' },
         scopeKey: { type: 'string' },
         fullValue: { type: 'boolean' },
@@ -292,6 +293,29 @@ async function main() {
     return;
   }
 
+  if (verb === 'upgrade' && normalizedResource === 'plugin') {
+    if (!args[0]) {
+      logger.error('Package name required. Usage: c8 upgrade plugin <package-name> [version]');
+      process.exit(1);
+    }
+    await upgradePlugin(args[0], args[1]);
+    return;
+  }
+
+  if (verb === 'downgrade' && normalizedResource === 'plugin') {
+    if (!args[0] || !args[1]) {
+      logger.error('Package name and version required. Usage: c8 downgrade plugin <package-name> <version>');
+      process.exit(1);
+    }
+    await downgradePlugin(args[0], args[1]);
+    return;
+  }
+
+  if (verb === 'init' && normalizedResource === 'plugin') {
+    await initPlugin(args[0]);
+    return;
+  }
+
   // Handle process instance commands
   if (verb === 'list' && (normalizedResource === 'process-instance' || normalizedResource === 'process-instances')) {
     await listProcessInstances({
@@ -325,6 +349,7 @@ async function main() {
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
       fetchVariables: values.fetchVariables as boolean | undefined,
+      requestTimeout: (values.requestTimeout && typeof values.requestTimeout === 'string') ? parseInt(values.requestTimeout) : undefined,
     });
     return;
   }
@@ -351,6 +376,7 @@ async function main() {
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as boolean | undefined,
+      requestTimeout: (values.requestTimeout && typeof values.requestTimeout === 'string') ? parseInt(values.requestTimeout) : undefined,
     });
     return;
   }
