@@ -2,10 +2,9 @@
  * Search commands
  */
 
-import { getLogger } from '../logger.ts';
+import { getLogger, Logger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
-import { c8ctl } from '../runtime.ts';
 
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
@@ -60,10 +59,6 @@ const CI_PAGE_SIZE = 1000;
 /**
  * Build a human-readable description of a filter criterion.
  * 
- * NOTE: This function outputs to console.log (not the logger class) because
- * these messages provide UX feedback about the search criteria and are not
- * part of the structured text/JSON output.
- * 
  * @param fieldLabel - Human-readable name of the field being searched
  * @param value - The filter value
  * @param isCaseInsensitive - Whether this is a case-insensitive search
@@ -89,34 +84,20 @@ function formatCriterion(fieldLabel: string, value: string | number | boolean, i
 }
 
 /**
- * Log search criteria to console for better developer experience.
- * 
- * NOTE: Uses console.log directly (not the logger class) because these messages
- * are UX feedback about the search. In JSON mode, outputs proper JSON for Unix pipe compatibility.
- * 
+ * Log search criteria for better developer experience.
+ * Uses the Logger so output respects the current text/JSON mode.
+ *
+ * @param logger - Logger instance to use
  * @param resourceName - Human-readable name of the resource type being searched
  * @param criteria - Array of criterion strings describing the filters
  */
-function logSearchCriteria(resourceName: string, criteria: string[]): void {
-  const mode = c8ctl.outputMode;
-  
-  if (mode === 'json') {
-    // Output JSON for pipe-ability to tools like jq
-    const output = {
-      action: 'search',
-      resource: resourceName,
-      criteria: criteria.length > 0 ? criteria : undefined
-    };
-    console.log(JSON.stringify(output));
+function logSearchCriteria(logger: Logger, resourceName: string, criteria: string[]): void {
+  if (criteria.length === 0) {
+    logger.info(`Searching ${resourceName}`);
+  } else if (criteria.length === 1) {
+    logger.info(`Searching ${resourceName} where ${criteria[0]}`);
   } else {
-    // Text mode output for human readability
-    if (criteria.length === 0) {
-      console.log(`Searching ${resourceName}`);
-    } else if (criteria.length === 1) {
-      console.log(`Searching ${resourceName} where ${criteria[0]}`);
-    } else {
-      console.log(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
-    }
+    logger.info(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
   }
 }
 
@@ -157,7 +138,7 @@ export async function searchProcessDefinitions(options: {
   if (options.iName) {
     criteria.push(formatCriterion('name', options.iName, true));
   }
-  logSearchCriteria('Process Definitions', criteria);
+  logSearchCriteria(logger, 'Process Definitions', criteria);
 
   try {
     const filter: any = {
@@ -253,7 +234,7 @@ export async function searchProcessInstances(options: {
   if (options.iProcessDefinitionId) {
     criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
   }
-  logSearchCriteria('Process Instances', criteria);
+  logSearchCriteria(logger, 'Process Instances', criteria);
 
   try {
     const filter: any = {
@@ -351,7 +332,7 @@ export async function searchUserTasks(options: {
   if (options.iAssignee) {
     criteria.push(formatCriterion('assignee', options.iAssignee, true));
   }
-  logSearchCriteria('User Tasks', criteria);
+  logSearchCriteria(logger, 'User Tasks', criteria);
 
   try {
     const filter: any = {
@@ -458,7 +439,7 @@ export async function searchIncidents(options: {
   if (options.iProcessDefinitionId) {
     criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
   }
-  logSearchCriteria('Incidents', criteria);
+  logSearchCriteria(logger, 'Incidents', criteria);
 
   try {
     const filter: any = {
@@ -558,7 +539,7 @@ export async function searchJobs(options: {
   if (options.iType) {
     criteria.push(formatCriterion('type', options.iType, true));
   }
-  logSearchCriteria('Jobs', criteria);
+  logSearchCriteria(logger, 'Jobs', criteria);
 
   try {
     const filter: any = {
@@ -657,7 +638,7 @@ export async function searchVariables(options: {
   if (options.fullValue) {
     criteria.push(formatCriterion('fullValue', true));
   }
-  logSearchCriteria('Variables', criteria);
+  logSearchCriteria(logger, 'Variables', criteria);
 
   try {
     const filter: any = {
