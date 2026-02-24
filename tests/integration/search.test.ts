@@ -101,27 +101,28 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // Deploy a process
     await deploy(['tests/fixtures/simple.bpmn'], {});
 
-    // Poll until process definition is indexed and extract its key
+    // Create an instance using CLI wrapper
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+
+    // Poll until the created instance is indexed and extract the concrete processDefinitionKey
+    // from that instance to avoid races with stale process-definition search results.
     let processDefKey: string | undefined;
-    const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
+    const instanceIndexed = await pollUntil(async () => {
+      const result = await searchProcessInstances({
         processDefinitionId: 'simple-process',
       });
       if (result?.items && result.items.length > 0) {
         const item = result.items[0] as any;
-        processDefKey = (item.processDefinitionKey || item.key)?.toString();
+        processDefKey = (item.processDefinitionKey || item.processDefinition?.processDefinitionKey || item.key)?.toString();
         return processDefKey !== undefined;
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    assert.ok(indexed, 'Should find the deployed process');
-    assert.ok(processDefKey, 'Should have process definition key');
-
-    // Create an instance using CLI wrapper
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-    });
+    assert.ok(instanceIndexed, 'Created process instance should be indexed');
+    assert.ok(processDefKey, 'Should have process definition key from indexed instance');
 
     // Poll until search by processDefinitionKey finds results
     const found = await pollUntil(async () => {

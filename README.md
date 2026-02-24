@@ -87,6 +87,7 @@ c8ctl help fail       # Shows fail command with all flags
 c8ctl help activate   # Shows activate command with all flags
 c8ctl help publish    # Shows publish command with all flags
 c8ctl help correlate  # Shows correlate command with all flags
+c8ctl help profiles   # Shows profile management help
 c8ctl help plugin     # Shows plugin management help
 
 # Show version
@@ -238,6 +239,12 @@ c8ctl supports two types of profiles:
 1. **c8ctl profiles**: Managed directly by c8ctl
 2. **Camunda Modeler profiles**: Automatically imported from Camunda Modeler (with `modeler:` prefix)
 
+For profile-related commands and flags, run:
+
+```bash
+c8ctl help profiles
+```
+
 ```bash
 # Add a c8ctl profile
 c8 add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
@@ -247,7 +254,7 @@ c8 list profiles
 
 # Set active profile (works with both types)
 c8 use profile prod
-c8 use profile modeler:Local Dev
+c8 use profile "modeler:Local Dev"
 
 # Remove c8ctl profile (modeler profiles are read-only)
 c8 remove profile prod

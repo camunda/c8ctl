@@ -395,6 +395,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl help activate'));
     assert.ok(output.includes('c8ctl help publish'));
     assert.ok(output.includes('c8ctl help correlate'));
+    assert.ok(output.includes('c8ctl help profiles'));
     assert.ok(output.includes('c8ctl help plugin'));
     assert.ok(output.includes('c8ctl help plugins'));
   });
@@ -419,8 +420,31 @@ describe('Help Module', () => {
     assert.ok(output.includes('activate'));
     assert.ok(output.includes('publish'));
     assert.ok(output.includes('correlate'));
+    assert.ok(output.includes('profiles'));
+    assert.ok(output.includes('profile'));
     assert.ok(output.includes('plugin'));
     assert.ok(output.includes('plugins'));
+  });
+
+  test('showCommandHelp shows profile management help', () => {
+    showCommandHelp('profiles');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl profiles'));
+    assert.ok(output.includes('list profiles'));
+    assert.ok(output.includes('add profile <name>'));
+    assert.ok(output.includes('remove profile <name>'));
+    assert.ok(output.includes('use profile <name>'));
+    assert.ok(output.includes('modeler:'));
+  });
+
+  test('showCommandHelp shows profile management help for profile alias', () => {
+    showCommandHelp('profile');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl profiles'));
+    assert.ok(output.includes('add profile <name>'));
+    assert.ok(output.includes('use profile <name>'));
   });
 
   test('showCommandHelp shows plugin management help', () => {

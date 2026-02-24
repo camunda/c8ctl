@@ -46,7 +46,7 @@ _c8ctl_completions() {
   local use_resources="profile tenant"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init plugin"
+  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
@@ -458,6 +458,8 @@ _c8ctl() {
             'upgrade:Show upgrade command help'
             'downgrade:Show downgrade command help'
             'init:Show init command help'
+            'profiles:Show profile management help'
+            'profile:Alias for profile management help'
             'plugin:Show plugin management help'
             'plugins:Alias for plugin management help'
           )
@@ -869,6 +871,10 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show 
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'profiles' -d 'Show profile management help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'profiles' -d 'Show profile management help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'profile' -d 'Alias for profile management help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'profile' -d 'Alias for profile management help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'

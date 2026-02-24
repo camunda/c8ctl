@@ -188,7 +188,9 @@ For detailed help on specific commands with all available flags:
   c8ctl help activate                Show activate command with all flags
   c8ctl help publish                 Show publish command with all flags
   c8ctl help correlate               Show correlate command with all flags
+  c8ctl help profiles                Show profile management help
   c8ctl help plugin                  Show plugin management help
+  c8ctl help plugins                 Alias for plugin management help
 `.trim());
 }
 
@@ -221,7 +223,7 @@ export function showVerbResources(verb: string): void {
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, plugin, plugins',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
   };
 
   const available = resources[verb];
@@ -816,6 +818,57 @@ Examples:
 }
 
 /**
+ * Show detailed help for profile management
+ */
+export function showProfilesHelp(): void {
+  console.log(`
+c8ctl profiles - Profile management
+
+Usage: c8ctl <command> profile[s] [args] [flags]
+
+Profile commands:
+
+  list profiles
+    List all profiles (c8ctl + Camunda Modeler profiles).
+    Modeler profiles are shown with "modeler:" prefix.
+
+  add profile <name> [flags]
+    Add a c8ctl-managed profile.
+
+  remove profile <name>
+  rm profile <name>
+    Remove a c8ctl-managed profile.
+
+  use profile <name>
+    Set active profile for the current session.
+
+Flags for add profile:
+  Required for all add profile calls:
+    (none)
+
+  Required for OAuth-secured clusters:
+    --clientId <id>          OAuth client ID
+    --clientSecret <secret>  OAuth client secret
+
+  Optional (with defaults):
+    --baseUrl <url>          Cluster base URL (default: http://localhost:8080/v2)
+    --defaultTenantId <id>   Default tenant ID (default at runtime: <default>)
+
+  Optional (no c8ctl default):
+    --audience <audience>    OAuth audience
+    --oAuthUrl <url>         OAuth token endpoint
+
+Examples:
+  c8ctl list profiles
+  c8ctl add profile local --baseUrl=http://localhost:8080
+  c8ctl add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
+  c8ctl use profile prod
+  c8ctl use profile "modeler:Local Dev"
+  c8ctl remove profile local
+`.trim());
+}
+
+/**
  * Show detailed help for plugin management
  */
 export function showPluginHelp(): void {
@@ -921,6 +974,10 @@ export function showCommandHelp(command: string): void {
       break;
     case 'correlate':
       showCorrelateHelp();
+      break;
+    case 'profiles':
+    case 'profile':
+      showProfilesHelp();
       break;
     case 'plugin':
     case 'plugins':

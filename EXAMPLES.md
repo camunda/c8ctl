@@ -666,13 +666,38 @@ c8ctl supports two types of profiles:
 1. **c8ctl profiles**: Directly managed by c8ctl commands
 2. **Modeler profiles**: Automatically imported from Camunda Modeler (read-only)
 
-### Add c8ctl Profile
+### Show Profile Help
 
 ```bash
-# Add profile with basic auth (localhost)
+# Show all profile-related commands and flags
+c8 help profiles
+```
+
+### Add c8ctl Profile
+
+`c8 add profile <name>` usage rules:
+
+- **Always required**: profile `<name>`
+- **Required for OAuth-secured clusters**: `--clientId`, `--clientSecret`
+- **Optional with defaults**:
+  - `--baseUrl` (default: `http://localhost:8080/v2`)
+  - `--defaultTenantId` (runtime default tenant: `<default>`)
+- **Optional without c8ctl defaults**: `--audience`, `--oAuthUrl`
+
+```bash
+# Minimal local profile (uses default --baseUrl)
+c8 add profile local
+
+# Local profile with explicit URL
 c8 add profile local --baseUrl=http://localhost:8080
 
-# Add profile with OAuth
+# Minimal OAuth profile (required OAuth switches)
+c8 add profile prod \
+  --baseUrl=https://camunda.example.com \
+  --clientId=your-client-id \
+  --clientSecret=your-client-secret
+
+# OAuth profile with explicit audience/token endpoint
 c8 add profile prod \
   --baseUrl=https://camunda.example.com \
   --clientId=your-client-id \
