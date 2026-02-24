@@ -87,6 +87,7 @@ c8ctl help fail       # Shows fail command with all flags
 c8ctl help activate   # Shows activate command with all flags
 c8ctl help publish    # Shows publish command with all flags
 c8ctl help correlate  # Shows correlate command with all flags
+c8ctl help plugin     # Shows plugin management help
 
 # Show version
 c8ctl --version

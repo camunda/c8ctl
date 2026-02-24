@@ -188,6 +188,7 @@ For detailed help on specific commands with all available flags:
   c8ctl help activate                Show activate command with all flags
   c8ctl help publish                 Show publish command with all flags
   c8ctl help correlate               Show correlate command with all flags
+  c8ctl help plugin                  Show plugin management help
 `.trim());
 }
 
@@ -220,7 +221,7 @@ export function showVerbResources(verb: string): void {
     use: 'profile, tenant',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, plugin, plugins',
   };
 
   const available = resources[verb];
@@ -815,6 +816,59 @@ Examples:
 }
 
 /**
+ * Show detailed help for plugin management
+ */
+export function showPluginHelp(): void {
+  console.log(`
+c8ctl plugin - Plugin management
+
+Usage: c8ctl <command> plugin [args] [flags]
+
+Plugin commands:
+
+  load plugin <name>
+    Load a plugin from npm registry.
+
+  load plugin --from <url>
+    Load a plugin from URL source (file://, https://, git://, github:).
+
+  unload plugin <name>
+    Unload and unregister a plugin.
+
+  list plugins
+    List installed plugins with version and sync status.
+
+  sync plugins
+    Rebuild/reinstall plugins from registry.
+
+  upgrade plugin <name> [version]
+    Upgrade plugin source.
+    - without version: reinstalls registered source as-is
+    - npm source with version: installs <name>@<version>
+    - URL/git source with version: installs <source>#<version>
+    - file:// source with version: not supported, use load plugin --from
+
+  downgrade plugin <name> <version>
+    Downgrade plugin source.
+    - npm source: installs <name>@<version>
+    - URL/git source: installs <source>#<version>
+    - file:// source: not supported, use load plugin --from
+
+  init plugin [name]
+    Create a new plugin scaffold from template.
+
+Examples:
+  c8ctl load plugin my-plugin
+  c8ctl load plugin --from file:///path/to/plugin
+  c8ctl list plugins
+  c8ctl upgrade plugin my-plugin
+  c8ctl upgrade plugin my-plugin 1.2.3
+  c8ctl downgrade plugin my-plugin 1.0.0
+  c8ctl init plugin my-plugin
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -867,6 +921,10 @@ export function showCommandHelp(command: string): void {
       break;
     case 'correlate':
       showCorrelateHelp();
+      break;
+    case 'plugin':
+    case 'plugins':
+      showPluginHelp();
       break;
     default:
       console.log(`\nNo detailed help available for: ${command}`);

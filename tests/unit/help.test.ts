@@ -395,6 +395,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl help activate'));
     assert.ok(output.includes('c8ctl help publish'));
     assert.ok(output.includes('c8ctl help correlate'));
+    assert.ok(output.includes('c8ctl help plugin'));
+    assert.ok(output.includes('c8ctl help plugins'));
   });
 
   test('showVerbResources shows resources for help', () => {
@@ -417,6 +419,29 @@ describe('Help Module', () => {
     assert.ok(output.includes('activate'));
     assert.ok(output.includes('publish'));
     assert.ok(output.includes('correlate'));
+    assert.ok(output.includes('plugin'));
+    assert.ok(output.includes('plugins'));
+  });
+
+  test('showCommandHelp shows plugin management help', () => {
+    showCommandHelp('plugin');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl plugin'));
+    assert.ok(output.includes('load plugin <name>'));
+    assert.ok(output.includes('load plugin --from <url>'));
+    assert.ok(output.includes('list plugins'));
+    assert.ok(output.includes('upgrade plugin <name> [version]'));
+    assert.ok(output.includes('downgrade plugin <name> <version>'));
+  });
+
+  test('showCommandHelp shows plugin help for plugins alias', () => {
+    showCommandHelp('plugins');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl plugin'));
+    assert.ok(output.includes('sync plugins'));
+    assert.ok(output.includes('init plugin [name]'));
   });
 
   test('showCommandHelp handles unknown command', () => {
