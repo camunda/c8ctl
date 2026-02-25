@@ -416,7 +416,7 @@ c8ctl help
 **TypeScript Plugin Autocomplete:**
 
 ```typescript
-import type { C8ctlPluginRuntime } from 'c8ctl/runtime';
+import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
 
 const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
 const tenantId = c8ctl.resolveTenantId();
