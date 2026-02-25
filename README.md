@@ -100,9 +100,11 @@ c8ctl list pi                          # List process instances
 c8ctl list pd                          # List process definitions
 c8ctl get pi 123456                    # Get process instance by key
 c8ctl get pi 123456 --variables        # Get process instance with variables
-c8ctl get pi 123456 --diagram              # Render process instance diagram as PNG
-c8ctl get pi 123456 --diagram --output=./diagram.png  # Save diagram to file
 c8ctl get pd 123456 --xml              # Get process definition as XML
+
+# Render process instance diagram as PNG
+c8ctl diagram 123456                   # Display diagram inline in terminal
+c8ctl diagram 123456 --output=./diagram.png  # Save diagram to file
 
 # Create process instance
 c8ctl create pi --id=myProcess

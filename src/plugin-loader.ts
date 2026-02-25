@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 import { ensurePluginsDir } from './config.ts';
+import { createClient } from './client.ts';
 
 interface PluginCommands {
   [commandName: string]: (args: string[]) => Promise<void>;
@@ -124,6 +125,9 @@ export async function loadInstalledPlugins(): Promise<void> {
   // Make c8ctl runtime available globally for plugins
   // @ts-ignore
   globalThis.c8ctl = c8ctl;
+  // Expose client factory so plugins can create authenticated Camunda clients
+  // @ts-ignore
+  globalThis.c8ctl.createClient = createClient;
   
   // Load default plugins first
   await loadDefaultPlugins();
