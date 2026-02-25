@@ -127,6 +127,7 @@ export async function loadInstalledPlugins(): Promise<void> {
   pluginRuntime.createClient = createClient;
   pluginRuntime.resolveTenantId = resolveTenantId;
   pluginRuntime.getLogger = getLogger;
+  const _typeCheck: C8ctlPluginRuntime = pluginRuntime;
   globalThis.c8ctl = pluginRuntime;
   
   // Load default plugins first
