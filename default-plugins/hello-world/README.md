@@ -72,6 +72,9 @@ globalThis.c8ctl = {
   outputMode: 'text' | 'json';  // Output format
   activeProfile?: string;   // Active connection profile
   activeTenant?: string;    // Active tenant
+  createClient(profile?: string, sdkConfig?: object): CamundaClient; // SDK client factory
+  resolveTenantId(profile?: string): string; // Resolve tenant with c8ctl fallback rules
+  getLogger(): Logger;      // c8ctl logger instance honoring output mode
 };
 ```
 

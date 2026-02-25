@@ -180,6 +180,104 @@ describe('Plugin Lifecycle Integration Tests', () => {
       }
     }
   });
+
+  test('should expose createClient, resolveTenantId and getLogger on plugin runtime object', async () => {
+    const runtimePluginDir = join(process.cwd(), 'test-plugin-runtime-client-temp');
+    const runtimePluginName = 'c8ctl-test-plugin-runtime-client';
+    const runtimeNodeModulesPath = join(pluginsDir, 'node_modules', runtimePluginName);
+
+    if (existsSync(runtimePluginDir)) {
+      rmSync(runtimePluginDir, { recursive: true, force: true });
+    }
+
+    try {
+      mkdirSync(runtimePluginDir, { recursive: true });
+
+      writeFileSync(
+        join(runtimePluginDir, 'package.json'),
+        JSON.stringify({
+          name: runtimePluginName,
+          version: '1.0.0',
+          type: 'module',
+          description: 'Runtime client exposure test plugin',
+          keywords: ['c8ctl', 'plugin'],
+        }, null, 2),
+      );
+
+      writeFileSync(
+        join(runtimePluginDir, 'c8ctl-plugin.js'),
+        `export const commands = {
+  'runtime-client-check': async () => {
+    const hasClient = typeof globalThis.c8ctl?.createClient === 'function';
+    const hasTenantResolver = typeof globalThis.c8ctl?.resolveTenantId === 'function';
+    const hasLoggerGetter = typeof globalThis.c8ctl?.getLogger === 'function';
+    const logger = hasLoggerGetter ? globalThis.c8ctl.getLogger() : null;
+    const hasLoggerInfo = typeof logger?.info === 'function';
+    const tenantId = hasTenantResolver ? globalThis.c8ctl.resolveTenantId() : '';
+    console.log(hasClient ? 'RUNTIME_CLIENT_AVAILABLE' : 'RUNTIME_CLIENT_MISSING');
+    console.log(hasTenantResolver ? 'RUNTIME_TENANT_RESOLVER_AVAILABLE' : 'RUNTIME_TENANT_RESOLVER_MISSING');
+    console.log(hasLoggerGetter ? 'RUNTIME_LOGGER_GETTER_AVAILABLE' : 'RUNTIME_LOGGER_GETTER_MISSING');
+    console.log(hasLoggerInfo ? 'RUNTIME_LOGGER_INFO_AVAILABLE' : 'RUNTIME_LOGGER_INFO_MISSING');
+    if (tenantId) {
+      console.log('RUNTIME_TENANT_ID_RESOLVED');
+    }
+  },
+};
+`,
+      );
+
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${runtimePluginDir}`], {
+        cwd: process.cwd(),
+        stdio: 'pipe',
+      });
+
+      assert.ok(existsSync(runtimeNodeModulesPath), 'Runtime test plugin should be installed');
+
+      const commandOutput = execSync('node src/index.ts runtime-client-check', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      assert.ok(
+        commandOutput.includes('RUNTIME_CLIENT_AVAILABLE'),
+        `Plugin runtime should expose createClient. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_TENANT_RESOLVER_AVAILABLE'),
+        `Plugin runtime should expose resolveTenantId. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_TENANT_ID_RESOLVED'),
+        `Plugin runtime should resolve a tenant id. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_LOGGER_GETTER_AVAILABLE'),
+        `Plugin runtime should expose getLogger. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_LOGGER_INFO_AVAILABLE'),
+        `Plugin runtime logger should provide info(). Output: ${commandOutput}`,
+      );
+    } finally {
+      if (existsSync(runtimePluginDir)) {
+        rmSync(runtimePluginDir, { recursive: true, force: true });
+      }
+
+      try {
+        execSync(`node src/index.ts unload plugin ${runtimePluginName}`, {
+          cwd: process.cwd(),
+          stdio: 'ignore',
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      if (existsSync(runtimeNodeModulesPath)) {
+        rmSync(runtimeNodeModulesPath, { recursive: true, force: true });
+      }
+    }
+  });
   
   test('should complete full plugin lifecycle with init, build, load, execute, and help', async () => {
     const scaffoldPluginName = 'test-scaffold';

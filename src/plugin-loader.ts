@@ -5,8 +5,9 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getLogger } from './logger.ts';
-import { c8ctl } from './runtime.ts';
-import { ensurePluginsDir } from './config.ts';
+import { c8ctl, type C8ctlPluginRuntime } from './runtime.ts';
+import { ensurePluginsDir, resolveTenantId } from './config.ts';
+import { createClient } from './client.ts';
 
 interface PluginCommands {
   [commandName: string]: (args: string[]) => Promise<void>;
@@ -122,8 +123,11 @@ export async function loadInstalledPlugins(): Promise<void> {
   const logger = getLogger();
   
   // Make c8ctl runtime available globally for plugins
-  // @ts-ignore
-  globalThis.c8ctl = c8ctl;
+  const pluginRuntime = c8ctl as unknown as C8ctlPluginRuntime;
+  pluginRuntime.createClient = createClient;
+  pluginRuntime.resolveTenantId = resolveTenantId;
+  pluginRuntime.getLogger = getLogger;
+  globalThis.c8ctl = pluginRuntime;
   
   // Load default plugins first
   await loadDefaultPlugins();

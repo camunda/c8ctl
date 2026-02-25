@@ -396,6 +396,9 @@ c8ctl help
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
 - Generated scaffold includes all necessary files and build configuration
 - Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
+- Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`
+- Plugins can resolve tenant IDs via `globalThis.c8ctl.resolveTenantId(profile?)`
+- Plugins can access c8ctl output-aware logging via `globalThis.c8ctl.getLogger()`
 - See the bundled `hello-world` plugin in `default-plugins/` for a complete example
 
 **Plugin Requirements:**
@@ -405,7 +408,21 @@ c8ctl help
 - Optionally export a `metadata` object to provide help text
 - Plugins are installed globally and work from any directory
 - The runtime object `c8ctl` provides environment information to plugins
+- The runtime object `c8ctl` exposes `createClient(profile?, sdkConfig?)` for creating Camunda SDK clients from plugins
+- The runtime object `c8ctl` exposes `resolveTenantId(profile?)` using the same fallback logic as built-in commands
+- The runtime object `c8ctl` exposes `getLogger()` returning the c8ctl logger instance (respects current output mode)
 - **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
+
+**TypeScript Plugin Autocomplete:**
+
+```typescript
+import type { C8ctlPluginRuntime } from 'c8ctl/runtime';
+
+const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
+const tenantId = c8ctl.resolveTenantId();
+const logger = c8ctl.getLogger();
+logger.info(`Tenant: ${tenantId}`);
+```
 
 **Example Plugin Structure:**
 ```typescript
