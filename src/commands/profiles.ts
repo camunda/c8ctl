@@ -32,7 +32,6 @@ export function listProfiles(): void {
   }
 
   interface ProfileTableRow {
-    Active: string;
     Name: string;
     URL: string;
     Tenant: string;
@@ -44,8 +43,7 @@ export function listProfiles(): void {
     const isModeler = profile.name.startsWith(MODELER_PREFIX);
     
     return {
-      Active: profile.name === activeProfile ? '*' : '',
-      Name: profile.name,
+      Name: profile.name === activeProfile ? `* ${profile.name}` : profile.name,
       URL: profile.baseUrl || '(not set)',
       Tenant: profile.defaultTenantId || '<default>',
       Source: isModeler ? 'Modeler' : 'c8ctl',
