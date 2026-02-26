@@ -43,7 +43,7 @@ export async function listProcessInstances(options: {
     const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((pi: any) => ({
+      let tableData = result.items.map((pi: any) => ({
         Key: `${pi.hasIncident ? '⚠ ' : ''}${pi.processInstanceKey || pi.key}`,
         'Process ID': pi.processDefinitionId,
         State: pi.state,
