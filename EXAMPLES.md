@@ -908,16 +908,21 @@ c8 upgrade plugin my-custom-plugin 1.2.3
 
 Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin file must export a `commands` object. The `c8ctl` runtime object provides environment information:
 
-When bootstrapping with `c8 init plugin <name>`, the generated project also includes an `AGENTS.md` file with an implementation workflow and runtime API reference for coding agents.
+When bootstrapping with `c8ctl init plugin <name>`, the generated project also includes an `AGENTS.md` file with an implementation workflow and runtime API reference for coding agents.
 
 ```typescript
 // c8ctl-plugin.ts
-import { c8ctl } from 'c8ctl/runtime';
+
+// Use import type for TypeScript autocomplete only (not a runtime import)
+import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
+
+// Access the injected runtime via globalThis
+const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
 
 export const commands = {
   analyze: async (args: string[]) => {
-    console.log(`Running on Node ${c8ctl.env.nodeVersion}`);
-    console.log(`Platform: ${c8ctl.env.platform}`);
+    console.log(`Running on Node ${c8ctl.nodeVersion}`);
+    console.log(`Platform: ${c8ctl.platform}`);
     // Custom analysis logic here
   }
 };
