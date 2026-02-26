@@ -273,6 +273,19 @@ See [tests/unit/plugin-loader.test.ts](tests/unit/plugin-loader.test.ts) for uni
 - Help text includes plugin commands
 - Metadata is properly parsed
 
+## AGENTS.md in Scaffolded Plugins
+
+When you bootstrap a plugin with `c8ctl init plugin <name>`, the generated project includes an `AGENTS.md` file.
+
+Treat this file as the default implementation contract for coding agents and contributors. It captures:
+
+- plugin contract expectations (`commands`, optional `metadata`, keywords)
+- available runtime APIs on global `c8ctl`
+- a fast local development loop (`install` → `build` → `load` → `help` → `run`)
+- minimal quality checks before considering work complete
+
+Keeping `AGENTS.md` aligned with your plugin design helps autonomous contributors make correct, minimal, and testable changes.
+
 ## Example Plugin Development Flow
 
 1. Create plugin with commands:

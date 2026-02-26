@@ -320,7 +320,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
         'Init command should succeed');
       assert.ok(existsSync(scaffoldDir), 'Plugin directory should be created');
       assert.ok(existsSync(join(scaffoldDir, 'package.json')), 'package.json should exist');
+      assert.ok(existsSync(join(scaffoldDir, 'c8ctl-plugin.js')), 'Root plugin entrypoint should exist');
       assert.ok(existsSync(join(scaffoldDir, 'src', 'c8ctl-plugin.ts')), 'Plugin source should exist');
+      assert.ok(existsSync(join(scaffoldDir, 'AGENTS.md')), 'AGENTS.md should exist');
       assert.ok(existsSync(join(scaffoldDir, 'tsconfig.json')), 'tsconfig.json should exist');
       
       // Step 2: Add a minimal implementation to the generated skeleton
@@ -367,7 +369,7 @@ export const commands = {
       });
       
       // Verify the build output exists
-      const builtPluginFile = join(scaffoldDir, 'c8ctl-plugin.js');
+      const builtPluginFile = join(scaffoldDir, 'dist', 'c8ctl-plugin.js');
       assert.ok(existsSync(builtPluginFile), 'Built plugin file should exist');
       
       // Step 4: Load the plugin

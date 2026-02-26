@@ -908,6 +908,8 @@ c8 upgrade plugin my-custom-plugin 1.2.3
 
 Plugins must be regular Node.js modules with a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory. The plugin file must export a `commands` object. The `c8ctl` runtime object provides environment information:
 
+When bootstrapping with `c8 init plugin <name>`, the generated project also includes an `AGENTS.md` file with an implementation workflow and runtime API reference for coding agents.
+
 ```typescript
 // c8ctl-plugin.ts
 import { c8ctl } from 'c8ctl/runtime';

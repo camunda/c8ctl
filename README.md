@@ -394,7 +394,7 @@ c8ctl help
 
 **Plugin Development:**
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
-- Generated scaffold includes all necessary files and build configuration
+- Generated scaffold includes all necessary files, build configuration, and an `AGENTS.md` guide for autonomous plugin implementation
 - Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
 - Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`
 - Plugins can resolve tenant IDs via `globalThis.c8ctl.resolveTenantId(profile?)`
