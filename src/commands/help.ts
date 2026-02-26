@@ -91,6 +91,10 @@ Flags:
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
   --requestTimeout <ms> Timeout in milliseconds for process completion (use with --awaitCompletion)
+  --sortBy <column>     Sort list/search output by column name (use with 'list' or 'search')
+  --asc                 Sort in ascending order (default)
+  --desc                Sort in descending order
+  --limit <n>           Maximum number of items to fetch (default: 1000000)
   --version, -v         Show version
   --help, -h            Show help
 
@@ -253,26 +257,46 @@ Resources and their available flags:
     --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
+    --sortBy <column>        Sort by column (Key, Process ID, State, Version, Start Date, Tenant ID)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
     --profile <name>         Use specific profile
     Note: instances with an active incident are marked with ⚠ before the Key
 
   process-definitions (pd)
+    --sortBy <column>        Sort by column (Key, Process ID, Name, Version, Tenant ID)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
     --profile <name>         Use specific profile
 
   user-tasks (ut)
     --state <state>          Filter by state (CREATED, COMPLETED, etc.)
     --assignee <name>        Filter by assignee
     --all                    List all tasks (pagination)
+    --sortBy <column>        Sort by column (Key, Name, State, Assignee, Created, Process Instance, Tenant ID)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
     --profile <name>         Use specific profile
 
   incidents (inc)
     --state <state>          Filter by state (ACTIVE, RESOLVED, etc.)
     --processInstanceKey <key>  Filter by process instance
+    --sortBy <column>        Sort by column (Key, Type, Message, State, Created, Process Instance, Tenant ID)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
     --profile <name>         Use specific profile
 
   jobs
     --state <state>          Filter by state (ACTIVATABLE, ACTIVATED, etc.)
     --type <type>            Filter by job type
+    --sortBy <column>        Sort by column (Key, Type, State, Retries, Created, Process Instance, Tenant ID)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
     --profile <name>         Use specific profile
 
   profiles
@@ -284,9 +308,14 @@ Resources and their available flags:
 
 Examples:
   c8ctl list pi --state=ACTIVE
+  c8ctl list pi --sortBy=State
+  c8ctl list pi --sortBy=State --desc
   c8ctl list ut --assignee=john.doe
+  c8ctl list ut --sortBy=Assignee
   c8ctl list inc --processInstanceKey=123456
+  c8ctl list inc --sortBy=Type --desc
   c8ctl list jobs --type=email-service
+  c8ctl list jobs --sortBy=Retries --asc
   c8ctl list profiles
   c8ctl list plugins
 `.trim());
@@ -505,6 +534,9 @@ Resources and their available flags:
     --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
     --key <key>                       Filter by key
     --parentProcessInstanceKey <key>  Filter by parent process instance key
+    --sortBy <column>                 Sort by column (Key, Process ID, State, Version, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   process-definitions (pd)
@@ -513,6 +545,9 @@ Resources and their available flags:
     --name <name>                     Filter by name
     --iname <pattern>                 Case-insensitive --name filter
     --key <key>                       Filter by key
+    --sortBy <column>                 Sort by column (Key, Process ID, Name, Version, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   user-tasks (ut)
@@ -522,6 +557,9 @@ Resources and their available flags:
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
     --elementId <id>                  Filter by element ID
+    --sortBy <column>                 Sort by column (Key, Name, State, Assignee, Process Instance, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   incidents (inc)
@@ -533,6 +571,9 @@ Resources and their available flags:
     --errorType <type>                Filter by error type
     --errorMessage <msg>              Filter by error message
     --ierrorMessage <pattern>         Case-insensitive --errorMessage filter
+    --sortBy <column>                 Sort by column (Key, Type, Message, State, Process Instance, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   jobs
@@ -541,6 +582,9 @@ Resources and their available flags:
     --itype <pattern>                 Case-insensitive --type filter
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
+    --sortBy <column>                 Sort by column (Key, Type, State, Retries, Process Instance, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   variables
@@ -551,6 +595,10 @@ Resources and their available flags:
     --processInstanceKey <key>        Filter by process instance key
     --scopeKey <key>                  Filter by scope key
     --fullValue                       Return full variable values (default: truncated)
+    --sortBy <column>                 Sort by column (Name, Value, Process Instance, Scope Key, Tenant ID)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
     --profile <name>                  Use specific profile
 
 Wildcard Search:
@@ -567,13 +615,17 @@ Examples:
   c8ctl search pi --bpmnProcessId=order-process
   c8ctl search pd --name='*main*'
   c8ctl search pd --iname='*order*'
+  c8ctl search pd --sortBy=Name --desc
   c8ctl search ut --assignee=john.doe
   c8ctl search ut --iassignee=John
+  c8ctl search ut --sortBy=State --asc
   c8ctl search inc --state=ACTIVE --processInstanceKey=123456
   c8ctl search jobs --type=email-service
   c8ctl search jobs --itype='*SERVICE*'
+  c8ctl search jobs --sortBy=Type --desc
   c8ctl search variables --name=orderId
   c8ctl search variables --value=12345 --fullValue
+  c8ctl search variables --sortBy=Name
 `.trim());
 }
 

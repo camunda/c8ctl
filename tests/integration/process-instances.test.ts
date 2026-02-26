@@ -60,6 +60,42 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Note: items may be empty if Elasticsearch hasn't indexed yet, so we just verify structure
   });
 
+  test('list process instances respects --limit', async () => {
+    // Deploy and create a few instances
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    // List with limit=2 using the project's wrapper function
+    const result = await listProcessInstances({
+      processDefinitionId: 'simple-process',
+      all: true,
+      limit: 2,
+    });
+
+    assert.ok(result, 'Result should be returned');
+    assert.ok(Array.isArray(result.items), 'Result should have items array');
+    assert.ok(result.items.length <= 2, `--limit 2 should return at most 2 items, got ${result.items.length}`);
+  });
+
+  test('list process instances --limit via CLI', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    const { execSync } = await import('node:child_process');
+    const output = execSync(
+      'node --no-warnings src/index.ts list pi --all --limit 1',
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+
+    // Table output: header + separator + data rows
+    const dataRows = output.trim().split('\n').filter(line => !line.startsWith('---') && line.trim().length > 0);
+    // First row is header, remaining are data
+    const itemCount = dataRows.length - 1;
+    assert.ok(itemCount <= 1, `--limit 1 should produce at most 1 data row, got ${itemCount}`);
+  });
+
   test('cancel process instance CLI handles errors gracefully', async () => {
     // Deploy and create an instance
     await deploy(['tests/fixtures/simple.bpmn'], {});

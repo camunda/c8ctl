@@ -3,7 +3,8 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
 /**
@@ -14,6 +15,9 @@ export async function listUserTasks(options: {
   state?: string;
   assignee?: string;
   all?: boolean;
+  sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -37,10 +41,15 @@ export async function listUserTasks(options: {
       filter.filter.assignee = options.assignee;
     }
 
-    const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchUserTasks(f, opts),
+      filter,
+      undefined,
+      options.limit,
+    );
     
-    if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((task: any) => ({
+    if (allItems.length > 0) {
+      let tableData = allItems.map((task: any) => ({
         Key: task.userTaskKey || task.key,
         Name: task.name || task.elementId,
         State: task.state,
@@ -49,6 +58,7 @@ export async function listUserTasks(options: {
         'Process Instance': task.processInstanceKey,
         'Tenant ID': task.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
     } else {
       logger.info('No user tasks found');

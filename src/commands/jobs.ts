@@ -3,7 +3,8 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
 /**
@@ -13,6 +14,9 @@ export async function listJobs(options: {
   profile?: string;
   state?: string;
   type?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -33,10 +37,15 @@ export async function listJobs(options: {
       filter.filter.type = options.type;
     }
 
-    const result = await client.searchJobs(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchJobs(f, opts),
+      filter,
+      undefined,
+      options.limit,
+    );
     
-    if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((job: any) => ({
+    if (allItems.length > 0) {
+      let tableData = allItems.map((job: any) => ({
         Key: job.jobKey || job.key,
         Type: job.type,
         State: job.state,
@@ -45,6 +54,7 @@ export async function listJobs(options: {
         'Process Instance': job.processInstanceKey,
         'Tenant ID': job.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
     } else {
       logger.info('No jobs found');

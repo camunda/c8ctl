@@ -3,7 +3,8 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
 
@@ -15,6 +16,9 @@ export async function listProcessInstances(options: {
   processDefinitionId?: string;
   state?: string;
   all?: boolean;
+  sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -38,10 +42,15 @@ export async function listProcessInstances(options: {
       filter.filter.state = 'ACTIVE';
     }
 
-    const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchProcessInstances(f, opts),
+      filter,
+      undefined,
+      options.limit,
+    );
     
-    if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((pi: any) => ({
+    if (allItems.length > 0) {
+      let tableData = allItems.map((pi: any) => ({
         Key: `${pi.hasIncident ? '⚠ ' : ''}${pi.processInstanceKey || pi.key}`,
         'Process ID': pi.processDefinitionId,
         State: pi.state,
@@ -49,12 +58,13 @@ export async function listProcessInstances(options: {
         'Start Date': pi.startDate || '-',
         'Tenant ID': pi.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
     } else {
       logger.info('No process instances found');
     }
     
-    return result as { items: Array<Record<string, unknown>>; total?: number };
+    return { items: allItems, total: allItems.length };
   } catch (error) {
     logger.error('Failed to list process instances', error as Error);
     process.exit(1);

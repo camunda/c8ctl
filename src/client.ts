@@ -44,3 +44,84 @@ export function createClient(
 
   return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });
 }
+
+/**
+ * Default page size for cursor-based pagination when fetching all results.
+ */
+const DEFAULT_PAGE_SIZE = 100;
+
+/**
+ * Default upper bound on the total number of items fetched.
+ * Prevents runaway memory usage on very large result sets.
+ */
+export const DEFAULT_MAX_ITEMS = 1_000_000;
+
+/**
+ * Paginated API response shape (the page metadata lives alongside items).
+ */
+type PagedResponse<T> = {
+  items?: T[];
+  page?: {
+    totalItems?: bigint | number;
+    endCursor?: string;
+    startCursor?: string;
+    hasMoreTotalItems?: boolean;
+  };
+};
+
+/**
+ * Fetch all pages from a Camunda 8 search endpoint using cursor-based
+ * pagination. The caller supplies a search function that accepts a filter
+ * object (with an optional `page` property) and returns a paged response.
+ *
+ * @param searchFn  – the SDK search method to call (e.g. `client.searchProcessInstances`)
+ * @param filter    – base filter object; a `page` property will be merged in
+ * @param pageSize  – items per page (default 100)
+ * @param maxItems  – stop after collecting this many items (default 1 000 000)
+ * @returns all collected items across every page (up to maxItems)
+ */
+export async function fetchAllPages<T>(
+  searchFn: (filter: any, opts?: any) => Promise<PagedResponse<T>>,
+  filter: Record<string, unknown> = {},
+  pageSize = DEFAULT_PAGE_SIZE,
+  maxItems = DEFAULT_MAX_ITEMS,
+): Promise<T[]> {
+  const allItems: T[] = [];
+  let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  const consistencyOpts = { consistency: { waitUpToMs: 0 } };
+
+  do {
+    const pageFilter = {
+      ...filter,
+      page: {
+        limit: pageSize,
+        ...(cursor ? { after: cursor } : {}),
+      },
+    };
+
+    const result = await searchFn(pageFilter, consistencyOpts);
+
+    if (result.items?.length) {
+      allItems.push(...result.items);
+    }
+
+    if (allItems.length >= maxItems) {
+      allItems.length = maxItems;
+      break;
+    }
+
+    const endCursor = result.page?.endCursor;
+    // totalItems is BigInt from the SDK's Zod schema (z.coerce.bigint()); convert to number
+    const totalItems = result.page?.totalItems !== undefined ? Number(result.page.totalItems) : undefined;
+
+    if (!endCursor || seenCursors.has(endCursor)) break;
+    if (totalItems !== undefined && allItems.length >= totalItems) break;
+    if (!result.items?.length) break;
+
+    seenCursors.add(endCursor);
+    cursor = endCursor;
+  } while (true);
+
+  return allItems;
+}

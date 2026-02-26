@@ -69,6 +69,14 @@ export class Logger {
     }
   }
 
+  warn(message: string): void {
+    if (this.mode === 'text') {
+      this._writeError(`⚠ ${message}`);
+    } else {
+      this._writeError(JSON.stringify({ status: 'warning', message }));
+    }
+  }
+
   debug(message: string, ...args: any[]): void {
     if (this._debugEnabled) {
       if (this.mode === 'text') {
@@ -160,6 +168,41 @@ export class Logger {
       this._writeLog(JSON.stringify(data));
     }
   }
+}
+
+/**
+ * Sort table data by a given column name.
+ * If the column doesn't exist, a warning is logged and the original data is returned unchanged.
+ */
+export type SortOrder = 'asc' | 'desc';
+
+export function sortTableData<T extends Record<string, unknown>>(data: T[], sortBy: string | undefined, logger: Logger, sortOrder: SortOrder = 'asc'): T[] {
+  if (!sortBy || data.length === 0) return data;
+
+  // Find actual key using case-insensitive match
+  const keys = Object.keys(data[0]);
+  const matchedKey = keys.find(k => k.toLowerCase() === sortBy.toLowerCase());
+
+  if (!matchedKey) {
+    logger.warn(`Column '${sortBy}' not found in output. Available columns: ${keys.join(', ')}`);
+    return data;
+  }
+
+  const direction = sortOrder === 'desc' ? -1 : 1;
+
+  return [...data].sort((a, b) => {
+    const va = a[matchedKey];
+    const vb = b[matchedKey];
+    if (va === undefined || va === null) return 1;
+    if (vb === undefined || vb === null) return -1;
+    const sa = String(va);
+    const sb = String(vb);
+    // Use numeric comparison when both values are numeric strings
+    const na = Number(sa);
+    const nb = Number(sb);
+    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * direction;
+    return (sa < sb ? -1 : sa > sb ? 1 : 0) * direction;
+  });
 }
 
 // Singleton instance to be used across the CLI

@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { Logger, getLogger } from '../../src/logger.ts';
+import { Logger, getLogger, sortTableData, type SortOrder } from '../../src/logger.ts';
 import { c8ctl } from '../../src/runtime.ts';
 
 describe('Logger Module', () => {
@@ -75,6 +75,16 @@ describe('Logger Module', () => {
       assert.strictEqual(consoleErrorSpy.length, 1);
       assert.ok(consoleErrorSpy[0].includes('✗'));
       assert.ok(consoleErrorSpy[0].includes('Operation failed'));
+    });
+
+    test('warn outputs with warning symbol in text mode', () => {
+      c8ctl.outputMode = 'text';
+      const logger = new Logger();
+      logger.warn('Something might be wrong');
+      
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      assert.ok(consoleErrorSpy[0].includes('⚠'));
+      assert.ok(consoleErrorSpy[0].includes('Something might be wrong'));
     });
 
     test('error outputs with error object in text mode', () => {
@@ -174,6 +184,17 @@ describe('Logger Module', () => {
       const output = JSON.parse(consoleErrorSpy[0]);
       assert.strictEqual(output.status, 'error');
       assert.strictEqual(output.message, 'Operation failed');
+    });
+
+    test('warn outputs JSON in JSON mode', () => {
+      c8ctl.outputMode = 'json';
+      const logger = new Logger();
+      logger.warn('Something might be wrong');
+      
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
+      assert.strictEqual(output.status, 'warning');
+      assert.strictEqual(output.message, 'Something might be wrong');
     });
 
     test('error outputs JSON with error details in JSON mode', () => {
@@ -478,5 +499,135 @@ describe('Logger Module', () => {
       assert.ok(errorCalls[0].length > 1, 'Should have multiple arguments');
       assert.ok(errorCalls[0][0].includes('Debug with args'));
     });
+  });
+});
+
+describe('sortTableData', () => {
+  let warnMessages: string[];
+  let logger: Logger;
+
+  beforeEach(() => {
+    warnMessages = [];
+    const trackingWriter = {
+      log(...data: any[]): void {},
+      error(...data: any[]): void {
+        warnMessages.push(data.join(' '));
+      },
+    };
+    logger = new Logger(trackingWriter);
+    c8ctl.outputMode = 'text';
+  });
+
+  test('returns original data when sortBy is undefined', () => {
+    const data = [{ Name: 'b' }, { Name: 'a' }];
+    const result = sortTableData(data, undefined, logger);
+    assert.deepStrictEqual(result, data);
+  });
+
+  test('returns original data when data is empty', () => {
+    const result = sortTableData([], 'Name', logger);
+    assert.deepStrictEqual(result, []);
+  });
+
+  test('sorts data by column (ascending)', () => {
+    const data = [{ Name: 'banana' }, { Name: 'apple' }, { Name: 'cherry' }];
+    const result = sortTableData(data, 'Name', logger);
+    assert.deepStrictEqual(result.map(r => r.Name), ['apple', 'banana', 'cherry']);
+  });
+
+  test('sorts data by column case-insensitively', () => {
+    const data = [{ Name: 'banana' }, { Name: 'apple' }];
+    const result = sortTableData(data, 'name', logger);
+    assert.deepStrictEqual(result.map(r => r.Name), ['apple', 'banana']);
+  });
+
+  test('does not mutate original array', () => {
+    const data = [{ Name: 'b' }, { Name: 'a' }];
+    const original = [...data];
+    sortTableData(data, 'Name', logger);
+    assert.deepStrictEqual(data, original);
+  });
+
+  test('warns and returns original data when column not found', () => {
+    const data = [{ Name: 'b' }, { Name: 'a' }];
+    const result = sortTableData(data, 'NonExistent', logger);
+    assert.deepStrictEqual(result, data);
+    assert.strictEqual(warnMessages.length, 1);
+    assert.ok(warnMessages[0].includes('NonExistent'));
+    assert.ok(warnMessages[0].includes('Name'));
+    assert.ok(!warnMessages[0].includes('Warning: Warning:'), 'Should not double-prefix warning');
+  });
+
+  test('sorts numeric-looking strings numerically', () => {
+    const data = [{ Version: '10' }, { Version: '2' }, { Version: '1' }];
+    const result = sortTableData(data, 'Version', logger);
+    assert.deepStrictEqual(result.map(r => r.Version), ['1', '2', '10']);
+  });
+
+  test('places null/undefined values last', () => {
+    const data = [{ State: null }, { State: 'ACTIVE' }, { State: undefined }];
+    const result = sortTableData(data as any, 'State', logger);
+    assert.strictEqual(result[0].State, 'ACTIVE');
+  });
+
+  test('sorts data descending when sortOrder is desc', () => {
+    const data = [{ Name: 'apple' }, { Name: 'cherry' }, { Name: 'banana' }];
+    const result = sortTableData(data, 'Name', logger, 'desc');
+    assert.deepStrictEqual(result.map(r => r.Name), ['cherry', 'banana', 'apple']);
+  });
+
+  test('sorts numeric data descending when sortOrder is desc', () => {
+    const data = [{ Version: '1' }, { Version: '10' }, { Version: '2' }];
+    const result = sortTableData(data, 'Version', logger, 'desc');
+    assert.deepStrictEqual(result.map(r => r.Version), ['10', '2', '1']);
+  });
+
+  test('sorts ascending by default (explicit asc)', () => {
+    const data = [{ Name: 'banana' }, { Name: 'apple' }, { Name: 'cherry' }];
+    const result = sortTableData(data, 'Name', logger, 'asc');
+    assert.deepStrictEqual(result.map(r => r.Name), ['apple', 'banana', 'cherry']);
+  });
+
+  test('places null/undefined last even in descending order', () => {
+    const data = [{ State: null }, { State: 'COMPLETED' }, { State: 'ACTIVE' }, { State: undefined }];
+    const result = sortTableData(data as any, 'State', logger, 'desc');
+    assert.strictEqual(result[0].State, 'COMPLETED');
+    assert.strictEqual(result[1].State, 'ACTIVE');
+  });
+
+  test('sorted output is serialized in order when table() is called in json mode', () => {
+    const logMessages: string[] = [];
+    const trackingWriter = {
+      log(...data: any[]): void { logMessages.push(data.join(' ')); },
+      error(...data: any[]): void {},
+    };
+    const jsonLogger = new Logger(trackingWriter);
+    c8ctl.outputMode = 'json';
+
+    const data = [{ State: 'COMPLETED' }, { State: 'ACTIVE' }, { State: 'CANCELED' }];
+    const sorted = sortTableData(data, 'State', jsonLogger);
+    jsonLogger.table(sorted);
+
+    assert.strictEqual(logMessages.length, 1);
+    const parsed = JSON.parse(logMessages[0]);
+    assert.deepStrictEqual(parsed.map((r: any) => r.State), ['ACTIVE', 'CANCELED', 'COMPLETED']);
+  });
+
+  test('warns with JSON-formatted message in json mode when column not found', () => {
+    const warnJson: string[] = [];
+    const trackingWriter = {
+      log(...data: any[]): void {},
+      error(...data: any[]): void { warnJson.push(data.join(' ')); },
+    };
+    const jsonLogger = new Logger(trackingWriter);
+    c8ctl.outputMode = 'json';
+
+    const data = [{ Name: 'b' }, { Name: 'a' }];
+    sortTableData(data, 'Unknown', jsonLogger);
+
+    assert.strictEqual(warnJson.length, 1);
+    const parsed = JSON.parse(warnJson[0]);
+    assert.strictEqual(parsed.status, 'warning');
+    assert.ok(parsed.message.includes('Unknown'));
   });
 });
