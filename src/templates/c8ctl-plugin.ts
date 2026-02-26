@@ -2,39 +2,10 @@
  * {{PLUGIN_NAME}} - A c8ctl plugin
  */
 
-type OutputMode = 'text' | 'json';
+import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
 
-type PluginLogger = {
-  info(message: string): void;
-  debug(message: string, ...args: unknown[]): void;
-  success(message: string, key?: string | number): void;
-  error(message: string, error?: Error): void;
-  table(data: unknown[]): void;
-  json(data: unknown): void;
-};
-
-// The c8ctl runtime is available globally
-declare const c8ctl: {
-  env: {
-    version: string;
-    nodeVersion: string;
-    platform: string;
-    arch: string;
-    cwd: string;
-    rootDir: string;
-  };
-  version: string;
-  nodeVersion: string;
-  platform: string;
-  arch: string;
-  cwd: string;
-  outputMode: OutputMode;
-  activeProfile?: string;
-  activeTenant?: string;
-  createClient(profileFlag?: string, additionalSdkConfig?: Record<string, unknown>): unknown;
-  resolveTenantId(profileFlag?: string): string;
-  getLogger(mode?: OutputMode): PluginLogger;
-};
+// The c8ctl runtime is always populated by the host before plugin code runs
+const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
 
 // Optional metadata for help text
 export const metadata = {
