@@ -123,12 +123,10 @@ export async function loadInstalledPlugins(): Promise<void> {
   const logger = getLogger();
   
   // Make c8ctl runtime available globally for plugins
-  const pluginRuntime: C8ctlPluginRuntime = {
-    ...(c8ctl as unknown as object),
-    createClient,
-    resolveTenantId,
-    getLogger,
-  };
+  const pluginRuntime = c8ctl as C8ctlPluginRuntime;
+  (pluginRuntime as any).createClient = createClient;
+  (pluginRuntime as any).resolveTenantId = resolveTenantId;
+  (pluginRuntime as any).getLogger = getLogger;
   globalThis.c8ctl = pluginRuntime;
   
   // Load default plugins first
