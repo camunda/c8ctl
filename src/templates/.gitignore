@@ -1,4 +1,1 @@
 node_modules/
-*.js
-*.js.map
-!c8ctl-plugin.js
