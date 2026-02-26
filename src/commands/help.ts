@@ -252,6 +252,7 @@ Resources and their available flags:
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
     --profile <name>         Use specific profile
+    Note: instances with an active incident are marked with ⚠ before the Key
 
   process-definitions (pd)
     --profile <name>         Use specific profile

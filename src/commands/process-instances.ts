@@ -42,7 +42,7 @@ export async function listProcessInstances(options: {
     
     if (result.items && result.items.length > 0) {
       const tableData = result.items.map((pi: any) => ({
-        Key: pi.processInstanceKey || pi.key,
+        Key: `${pi.hasIncident ? '⚠ ' : ''}${pi.processInstanceKey || pi.key}`,
         'Process ID': pi.processDefinitionId,
         State: pi.state,
         Version: pi.processDefinitionVersion || pi.version,
