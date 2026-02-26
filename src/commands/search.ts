@@ -2,8 +2,8 @@
  * Search commands
  */
 
-import { getLogger, Logger } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { getLogger, Logger, sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
@@ -129,6 +129,8 @@ export async function searchProcessDefinitions(options: {
   key?: string;
   iProcessDefinitionId?: string;
   iName?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -206,13 +208,14 @@ export async function searchProcessDefinitions(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((pd: any) => ({
+      let tableData = result.items.map((pd: any) => ({
         Key: pd.processDefinitionKey || pd.key,
         'Process ID': pd.processDefinitionId,
         Name: pd.name || '-',
         Version: pd.version,
         'Tenant ID': pd.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} process definition(s)`);
     } else {
@@ -237,6 +240,8 @@ export async function searchProcessInstances(options: {
   key?: string;
   parentProcessInstanceKey?: string;
   iProcessDefinitionId?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -304,13 +309,14 @@ export async function searchProcessInstances(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((pi: any) => ({
+      let tableData = result.items.map((pi: any) => ({
         Key: pi.processInstanceKey || pi.key,
         'Process ID': pi.processDefinitionId,
         State: pi.state,
         Version: pi.processDefinitionVersion || pi.version,
         'Tenant ID': pi.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} process instance(s)`);
     } else {
@@ -335,6 +341,8 @@ export async function searchUserTasks(options: {
   processDefinitionKey?: string;
   elementId?: string;
   iAssignee?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -402,7 +410,7 @@ export async function searchUserTasks(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((task: any) => ({
+      let tableData = result.items.map((task: any) => ({
         Key: task.userTaskKey || task.key,
         Name: task.name || task.elementId,
         State: task.state,
@@ -410,6 +418,7 @@ export async function searchUserTasks(options: {
         'Process Instance': task.processInstanceKey,
         'Tenant ID': task.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} user task(s)`);
     } else {
@@ -436,6 +445,8 @@ export async function searchIncidents(options: {
   errorMessage?: string;
   iErrorMessage?: string;
   iProcessDefinitionId?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -517,7 +528,7 @@ export async function searchIncidents(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((incident: any) => ({
+      let tableData = result.items.map((incident: any) => ({
         Key: incident.incidentKey || incident.key,
         Type: incident.errorType,
         Message: incident.errorMessage?.substring(0, 50) || '',
@@ -525,6 +536,7 @@ export async function searchIncidents(options: {
         'Process Instance': incident.processInstanceKey,
         'Tenant ID': incident.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} incident(s)`);
     } else {
@@ -548,6 +560,8 @@ export async function searchJobs(options: {
   processInstanceKey?: string;
   processDefinitionKey?: string;
   iType?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -608,7 +622,7 @@ export async function searchJobs(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((job: any) => ({
+      let tableData = result.items.map((job: any) => ({
         Key: job.jobKey || job.key,
         Type: job.type,
         State: job.state,
@@ -616,6 +630,7 @@ export async function searchJobs(options: {
         'Process Instance': job.processInstanceKey,
         'Tenant ID': job.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} job(s)`);
     } else {
@@ -641,6 +656,9 @@ export async function searchVariables(options: {
   fullValue?: boolean;
   iName?: string;
   iValue?: string;
+  sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -700,49 +718,19 @@ export async function searchVariables(options: {
     // By default, truncate values unless --fullValue is specified
     const truncateValues = !options.fullValue;
 
-    let result = await client.searchVariables(
-      { ...filter, truncateValues },
-      { consistency: { waitUpToMs: 0 } }
-    );
+    const allItems = hasCiFilter
+      ? await fetchAllPages(
+          (f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
+          filter,
+          CI_PAGE_SIZE,
+          options.limit,
+        )
+      : (await client.searchVariables(
+          { ...filter, truncateValues },
+          { consistency: { waitUpToMs: 0 } },
+        )).items || [];
 
-    if (hasCiFilter) {
-      const items = [...(result.items || [])];
-      const seenCursors = new Set<string>();
-      let nextCursor = (result as any).page?.endCursor as string | undefined;
-      const totalItems = (result as any).page?.totalItems as number | undefined;
-
-      while (nextCursor && !seenCursors.has(nextCursor)) {
-        if (totalItems !== undefined && items.length >= totalItems) {
-          break;
-        }
-
-        seenCursors.add(nextCursor);
-
-        const pageResult = await client.searchVariables(
-          {
-            ...filter,
-            page: {
-              after: nextCursor as any,
-              limit: CI_PAGE_SIZE,
-            },
-            truncateValues,
-          },
-          { consistency: { waitUpToMs: 0 } }
-        );
-
-        if (!pageResult.items?.length) {
-          break;
-        }
-
-        items.push(...pageResult.items);
-        nextCursor = (pageResult as any).page?.endCursor as string | undefined;
-      }
-
-      result = {
-        ...result,
-        items,
-      } as any;
-    }
+    let result = { items: allItems } as any;
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((variable: any) => {
@@ -762,7 +750,7 @@ export async function searchVariables(options: {
     }
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((variable: any) => {
+      let tableData = result.items.map((variable: any) => {
         const row: any = {
           Name: variable.name,
           Value: variable.value || '',
@@ -777,6 +765,7 @@ export async function searchVariables(options: {
         
         return row;
       });
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
       logger.info(`Found ${result.items.length} variable(s)`);
       

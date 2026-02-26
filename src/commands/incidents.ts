@@ -3,8 +3,8 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { sortTableData } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
 /**
@@ -15,6 +15,8 @@ export async function listIncidents(options: {
   state?: string;
   processInstanceKey?: string;
   sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -35,10 +37,15 @@ export async function listIncidents(options: {
       filter.filter.processInstanceKey = options.processInstanceKey;
     }
 
-    const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchIncidents(f, opts),
+      filter,
+      undefined,
+      options.limit,
+    );
     
-    if (result.items && result.items.length > 0) {
-      let tableData = result.items.map((incident: any) => ({
+    if (allItems.length > 0) {
+      let tableData = allItems.map((incident: any) => ({
         Key: incident.incidentKey || incident.key,
         Type: incident.errorType,
         Message: incident.errorMessage?.substring(0, 50) || '',
@@ -47,7 +54,7 @@ export async function listIncidents(options: {
         'Process Instance': incident.processInstanceKey,
         'Tenant ID': incident.tenantId,
       }));
-      tableData = sortTableData(tableData, options.sortBy, logger);
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
     } else {
       logger.info('No incidents found');

@@ -5,7 +5,7 @@
  */
 
 import { parseArgs } from 'node:util';
-import { getLogger } from './logger.ts';
+import { getLogger, type SortOrder } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
 import { showHelp, showVersion, showVerbResources, showCommandHelp } from './commands/help.ts';
@@ -120,6 +120,9 @@ function parseCliArgs() {
         itype: { type: 'string' },
         ivalue: { type: 'string' },
         sortBy: { type: 'string' },
+        asc: { type: 'boolean' },
+        desc: { type: 'boolean' },
+        limit: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -150,6 +153,20 @@ async function main() {
 
   // Initialize logger with current output mode from c8ctl runtime
   const logger = getLogger(c8ctl.outputMode);
+
+  // Resolve sort order from --asc / --desc flags (default: asc)
+  const sortOrder: SortOrder = values.desc ? 'desc' : 'asc';
+  if (values.asc && values.desc) {
+    logger.error('Cannot specify both --asc and --desc. Use one or the other.');
+    process.exit(1);
+  }
+
+  // Resolve --limit flag (max items to fetch)
+  const limit = values.limit ? parseInt(values.limit as string, 10) : undefined;
+  if (limit !== undefined && (isNaN(limit) || limit < 1)) {
+    logger.error('--limit must be a positive integer.');
+    process.exit(1);
+  }
 
   // Load installed plugins
   await loadInstalledPlugins();
@@ -325,6 +342,8 @@ async function main() {
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
       sortBy: values.sortBy as string | undefined,
+      sortOrder,
+      limit,
     });
     return;
   }
@@ -388,6 +407,8 @@ async function main() {
     await listProcessDefinitions({
       profile: values.profile as string | undefined,
       sortBy: values.sortBy as string | undefined,
+      sortOrder,
+      limit,
     });
     return;
   }
@@ -412,6 +433,8 @@ async function main() {
       assignee: values.assignee as string | undefined,
       all: values.all as boolean | undefined,
       sortBy: values.sortBy as string | undefined,
+      sortOrder,
+      limit,
     });
     return;
   }
@@ -435,6 +458,8 @@ async function main() {
       state: values.state as string | undefined,
       processInstanceKey: values.processInstanceKey as string | undefined,
       sortBy: values.sortBy as string | undefined,
+      sortOrder,
+      limit,
     });
     return;
   }
@@ -468,6 +493,8 @@ async function main() {
       state: values.state as string | undefined,
       type: values.type as string | undefined,
       sortBy: values.sortBy as string | undefined,
+      sortOrder,
+      limit,
     });
     return;
   }
@@ -635,6 +662,8 @@ async function main() {
         key: values.key as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         iName: values.iname as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
       });
       return;
     }
@@ -648,6 +677,8 @@ async function main() {
         key: values.key as string | undefined,
         parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
       });
       return;
     }
@@ -661,6 +692,8 @@ async function main() {
         processDefinitionKey: values.processDefinitionKey as string | undefined,
         elementId: values.elementId as string | undefined,
         iAssignee: values.iassignee as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
       });
       return;
     }
@@ -676,6 +709,8 @@ async function main() {
         errorMessage: values.errorMessage as string | undefined,
         iErrorMessage: values.ierrorMessage as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
       });
       return;
     }
@@ -688,6 +723,8 @@ async function main() {
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
         iType: values.itype as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
       });
       return;
     }
@@ -702,6 +739,9 @@ async function main() {
         fullValue: values.fullValue as boolean | undefined,
         iName: values.iname as string | undefined,
         iValue: values.ivalue as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
       });
       return;
     }

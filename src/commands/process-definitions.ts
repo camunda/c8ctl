@@ -3,8 +3,8 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { sortTableData } from '../logger.ts';
-import { createClient } from '../client.ts';
+import { sortTableData, type SortOrder } from '../logger.ts';
+import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
 /**
@@ -13,6 +13,8 @@ import { resolveTenantId } from '../config.ts';
 export async function listProcessDefinitions(options: {
   profile?: string;
   sortBy?: string;
+  sortOrder?: SortOrder;
+  limit?: number;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -25,17 +27,22 @@ export async function listProcessDefinitions(options: {
       },
     };
 
-    const result = await client.searchProcessDefinitions(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchProcessDefinitions(f, opts),
+      filter,
+      undefined,
+      options.limit,
+    );
     
-    if (result.items && result.items.length > 0) {
-      let tableData = result.items.map((pd: any) => ({
+    if (allItems.length > 0) {
+      let tableData = allItems.map((pd: any) => ({
         Key: pd.processDefinitionKey || pd.key,
         'Process ID': pd.processDefinitionId,
         Name: pd.name || '-',
         Version: pd.version,
         'Tenant ID': pd.tenantId,
       }));
-      tableData = sortTableData(tableData, options.sortBy, logger);
+      tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
     } else {
       logger.info('No process definitions found');

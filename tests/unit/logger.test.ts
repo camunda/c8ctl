@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { Logger, getLogger, sortTableData } from '../../src/logger.ts';
+import { Logger, getLogger, sortTableData, type SortOrder } from '../../src/logger.ts';
 import { c8ctl } from '../../src/runtime.ts';
 
 describe('Logger Module', () => {
@@ -568,6 +568,31 @@ describe('sortTableData', () => {
     const data = [{ State: null }, { State: 'ACTIVE' }, { State: undefined }];
     const result = sortTableData(data as any, 'State', logger);
     assert.strictEqual(result[0].State, 'ACTIVE');
+  });
+
+  test('sorts data descending when sortOrder is desc', () => {
+    const data = [{ Name: 'apple' }, { Name: 'cherry' }, { Name: 'banana' }];
+    const result = sortTableData(data, 'Name', logger, 'desc');
+    assert.deepStrictEqual(result.map(r => r.Name), ['cherry', 'banana', 'apple']);
+  });
+
+  test('sorts numeric data descending when sortOrder is desc', () => {
+    const data = [{ Version: '1' }, { Version: '10' }, { Version: '2' }];
+    const result = sortTableData(data, 'Version', logger, 'desc');
+    assert.deepStrictEqual(result.map(r => r.Version), ['10', '2', '1']);
+  });
+
+  test('sorts ascending by default (explicit asc)', () => {
+    const data = [{ Name: 'banana' }, { Name: 'apple' }, { Name: 'cherry' }];
+    const result = sortTableData(data, 'Name', logger, 'asc');
+    assert.deepStrictEqual(result.map(r => r.Name), ['apple', 'banana', 'cherry']);
+  });
+
+  test('places null/undefined last even in descending order', () => {
+    const data = [{ State: null }, { State: 'COMPLETED' }, { State: 'ACTIVE' }, { State: undefined }];
+    const result = sortTableData(data as any, 'State', logger, 'desc');
+    assert.strictEqual(result[0].State, 'COMPLETED');
+    assert.strictEqual(result[1].State, 'ACTIVE');
   });
 
   test('sorted output is serialized in order when table() is called in json mode', () => {

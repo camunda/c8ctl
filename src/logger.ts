@@ -174,7 +174,9 @@ export class Logger {
  * Sort table data by a given column name.
  * If the column doesn't exist, a warning is logged and the original data is returned unchanged.
  */
-export function sortTableData(data: Array<Record<string, unknown>>, sortBy: string | undefined, logger: Logger): Array<Record<string, unknown>> {
+export type SortOrder = 'asc' | 'desc';
+
+export function sortTableData<T extends Record<string, unknown>>(data: T[], sortBy: string | undefined, logger: Logger, sortOrder: SortOrder = 'asc'): T[] {
   if (!sortBy || data.length === 0) return data;
 
   // Find actual key using case-insensitive match
@@ -186,6 +188,8 @@ export function sortTableData(data: Array<Record<string, unknown>>, sortBy: stri
     return data;
   }
 
+  const direction = sortOrder === 'desc' ? -1 : 1;
+
   return [...data].sort((a, b) => {
     const va = a[matchedKey];
     const vb = b[matchedKey];
@@ -196,8 +200,8 @@ export function sortTableData(data: Array<Record<string, unknown>>, sortBy: stri
     // Use numeric comparison when both values are numeric strings
     const na = Number(sa);
     const nb = Number(sb);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return sa < sb ? -1 : sa > sb ? 1 : 0;
+    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * direction;
+    return (sa < sb ? -1 : sa > sb ? 1 : 0) * direction;
   });
 }
 
