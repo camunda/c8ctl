@@ -569,4 +569,40 @@ describe('sortTableData', () => {
     const result = sortTableData(data as any, 'State', logger);
     assert.strictEqual(result[0].State, 'ACTIVE');
   });
+
+  test('sorted output is serialized in order when table() is called in json mode', () => {
+    const logMessages: string[] = [];
+    const trackingWriter = {
+      log(...data: any[]): void { logMessages.push(data.join(' ')); },
+      error(...data: any[]): void {},
+    };
+    const jsonLogger = new Logger(trackingWriter);
+    c8ctl.outputMode = 'json';
+
+    const data = [{ State: 'COMPLETED' }, { State: 'ACTIVE' }, { State: 'CANCELED' }];
+    const sorted = sortTableData(data, 'State', jsonLogger);
+    jsonLogger.table(sorted);
+
+    assert.strictEqual(logMessages.length, 1);
+    const parsed = JSON.parse(logMessages[0]);
+    assert.deepStrictEqual(parsed.map((r: any) => r.State), ['ACTIVE', 'CANCELED', 'COMPLETED']);
+  });
+
+  test('warns with JSON-formatted message in json mode when column not found', () => {
+    const warnJson: string[] = [];
+    const trackingWriter = {
+      log(...data: any[]): void {},
+      error(...data: any[]): void { warnJson.push(data.join(' ')); },
+    };
+    const jsonLogger = new Logger(trackingWriter);
+    c8ctl.outputMode = 'json';
+
+    const data = [{ Name: 'b' }, { Name: 'a' }];
+    sortTableData(data, 'Unknown', jsonLogger);
+
+    assert.strictEqual(warnJson.length, 1);
+    const parsed = JSON.parse(warnJson[0]);
+    assert.strictEqual(parsed.status, 'warning');
+    assert.ok(parsed.message.includes('Unknown'));
+  });
 });
