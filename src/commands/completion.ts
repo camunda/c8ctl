@@ -20,7 +20,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use output completion help"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output completion help"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -44,6 +44,7 @@ _c8ctl_completions() {
   local downgrade_resources="plugin"
   local init_resources="plugin"
   local use_resources="profile tenant"
+  local which_resources="profile"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
@@ -123,6 +124,9 @@ _c8ctl_completions() {
         use)
           COMPREPLY=( \$(compgen -W "\${use_resources}" -- "\${cur}") )
           ;;
+        which)
+          COMPREPLY=( \$(compgen -W "\${which_resources}" -- "\${cur}") )
+          ;;
         output)
           COMPREPLY=( \$(compgen -W "\${output_resources}" -- "\${cur}") )
           ;;
@@ -189,6 +193,7 @@ _c8ctl() {
     'downgrade:Downgrade a plugin'
     'init:Create a new plugin from template'
     'use:Set active profile or tenant'
+    'which:Show active profile or tenant'
     'output:Set output format'
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
@@ -423,6 +428,12 @@ _c8ctl() {
           )
           _describe 'resource' resources
           ;;
+        which)
+          resources=(
+            'profile:Show active profile'
+          )
+          _describe 'resource' resources
+          ;;
         output)
           resources=(
             'json:JSON output'
@@ -639,6 +650,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin f
 complete -c c8 -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
+complete -c c8 -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
 complete -c c8 -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
@@ -819,6 +832,10 @@ complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set acti
 complete -c c8 -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
 complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'tenant' -d 'Set active tenant'
 complete -c c8 -n '__fish_seen_subcommand_from use' -a 'tenant' -d 'Set active tenant'
+
+# Resources for 'which' command
+complete -c c8ctl -n '__fish_seen_subcommand_from which' -a 'profile' -d 'Show active profile'
+complete -c c8 -n '__fish_seen_subcommand_from which' -a 'profile' -d 'Show active profile'
 
 # Resources for 'output' command
 complete -c c8ctl -n '__fish_seen_subcommand_from output' -a 'json' -d 'JSON output'

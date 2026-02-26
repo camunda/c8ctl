@@ -162,6 +162,7 @@ Examples:
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
   c8ctl use profile prod             Set active profile
+  c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
   c8ctl init plugin my-plugin        Create new plugin from template
   c8ctl load plugin my-plugin        Load plugin from npm registry
@@ -221,6 +222,7 @@ export function showVerbResources(verb: string): void {
     downgrade: 'plugin',
     init: 'plugin',
     use: 'profile, tenant',
+    which: 'profile',
     output: 'json, text',
     completion: 'bash, zsh, fish',
     help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
@@ -832,6 +834,10 @@ Profile commands:
   list profiles
     List all profiles (c8ctl + Camunda Modeler profiles).
     Modeler profiles are shown with "modeler:" prefix.
+    The currently active profile is marked with "*".
+
+  which profile
+    Show the name of the currently active profile.
 
   add profile <name> [flags]
     Add a c8ctl-managed profile.
@@ -861,6 +867,7 @@ Flags for add profile:
 
 Examples:
   c8ctl list profiles
+  c8ctl which profile
   c8ctl add profile local --baseUrl=http://localhost:8080
   c8ctl add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
   c8ctl use profile prod

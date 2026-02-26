@@ -10,7 +10,7 @@ import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
 import { showHelp, showVersion, showVerbResources, showCommandHelp } from './commands/help.ts';
 import { useProfile, useTenant, setOutputFormat } from './commands/session.ts';
-import { listProfiles, addProfile, removeProfile } from './commands/profiles.ts';
+import { listProfiles, addProfile, removeProfile, whichProfile } from './commands/profiles.ts';
 import {
   listProcessInstances,
   getProcessInstance,
@@ -251,6 +251,11 @@ async function main() {
       process.exit(1);
     }
     removeProfile(args[0]);
+    return;
+  }
+
+  if (verb === 'which' && normalizedResource === 'profile') {
+    whichProfile();
     return;
   }
 

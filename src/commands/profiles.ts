@@ -5,6 +5,7 @@
  */
 
 import { getLogger } from '../logger.ts';
+import { c8ctl } from '../runtime.ts';
 import {
   getAllProfiles,
   getProfile,
@@ -37,11 +38,12 @@ export function listProfiles(): void {
     Source: string;
   }
 
+  const activeProfile = c8ctl.activeProfile;
   const tableData: ProfileTableRow[] = profiles.map(profile => {
     const isModeler = profile.name.startsWith(MODELER_PREFIX);
     
     return {
-      Name: profile.name,
+      Name: profile.name === activeProfile ? `* ${profile.name}` : profile.name,
       URL: profile.baseUrl || '(not set)',
       Tenant: profile.defaultTenantId || '<default>',
       Source: isModeler ? 'Modeler' : 'c8ctl',
@@ -159,4 +161,17 @@ export function removeProfile(name: string): void {
     logger.error(`Profile '${name}' not found`);
     process.exit(1);
   }
+}
+
+/**
+ * Show which profile is currently active
+ */
+export function whichProfile(): void {
+  const logger = getLogger();
+  const active = c8ctl.activeProfile;
+  if (!active) {
+    logger.info('No active profile set (using environment / fallback configuration)');
+    return;
+  }
+  logger.info(active);
 }
