@@ -214,10 +214,16 @@ describe('Plugin Lifecycle Integration Tests', () => {
     const logger = hasLoggerGetter ? globalThis.c8ctl.getLogger() : null;
     const hasLoggerInfo = typeof logger?.info === 'function';
     const tenantId = hasTenantResolver ? globalThis.c8ctl.resolveTenantId() : '';
+    const hasVersion = typeof globalThis.c8ctl?.version === 'string' && globalThis.c8ctl.version.length > 0;
+    const hasPlatform = typeof globalThis.c8ctl?.platform === 'string' && globalThis.c8ctl.platform.length > 0;
+    const hasOutputMode = typeof globalThis.c8ctl?.outputMode === 'string' && globalThis.c8ctl.outputMode.length > 0;
     console.log(hasClient ? 'RUNTIME_CLIENT_AVAILABLE' : 'RUNTIME_CLIENT_MISSING');
     console.log(hasTenantResolver ? 'RUNTIME_TENANT_RESOLVER_AVAILABLE' : 'RUNTIME_TENANT_RESOLVER_MISSING');
     console.log(hasLoggerGetter ? 'RUNTIME_LOGGER_GETTER_AVAILABLE' : 'RUNTIME_LOGGER_GETTER_MISSING');
     console.log(hasLoggerInfo ? 'RUNTIME_LOGGER_INFO_AVAILABLE' : 'RUNTIME_LOGGER_INFO_MISSING');
+    console.log(hasVersion ? 'RUNTIME_VERSION_AVAILABLE' : 'RUNTIME_VERSION_MISSING');
+    console.log(hasPlatform ? 'RUNTIME_PLATFORM_AVAILABLE' : 'RUNTIME_PLATFORM_MISSING');
+    console.log(hasOutputMode ? 'RUNTIME_OUTPUT_MODE_AVAILABLE' : 'RUNTIME_OUTPUT_MODE_MISSING');
     if (tenantId) {
       console.log('RUNTIME_TENANT_ID_RESOLVED');
     }
@@ -258,6 +264,18 @@ describe('Plugin Lifecycle Integration Tests', () => {
       assert.ok(
         commandOutput.includes('RUNTIME_LOGGER_INFO_AVAILABLE'),
         `Plugin runtime logger should provide info(). Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_VERSION_AVAILABLE'),
+        `Plugin runtime should preserve version field. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_PLATFORM_AVAILABLE'),
+        `Plugin runtime should preserve platform field. Output: ${commandOutput}`,
+      );
+      assert.ok(
+        commandOutput.includes('RUNTIME_OUTPUT_MODE_AVAILABLE'),
+        `Plugin runtime should preserve outputMode field. Output: ${commandOutput}`,
       );
     } finally {
       if (existsSync(runtimePluginDir)) {
