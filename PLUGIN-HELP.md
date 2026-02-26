@@ -67,7 +67,7 @@ Use the client factory when your plugin needs direct Camunda API access, `resolv
 For TypeScript autocomplete, use the exported runtime type:
 
 ```typescript
-import type { C8ctlPluginRuntime } from 'c8ctl/runtime';
+import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
 
 const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
 const tenantId = c8ctl.resolveTenantId();
@@ -78,7 +78,7 @@ logger.info(`Tenant: ${tenantId}`);
 ### TypeScript Example
 
 ```typescript
-import { c8ctl } from 'c8ctl/runtime';
+import { c8ctl } from '@camunda8/cli/runtime';
 
 // Optional metadata export for help text
 export const metadata = {
@@ -115,7 +115,7 @@ export const commands = {
 ### JavaScript Example
 
 ```javascript
-import { c8ctl } from 'c8ctl/runtime';
+import { c8ctl } from '@camunda8/cli/runtime';
 
 // Optional metadata export
 export const metadata = {
