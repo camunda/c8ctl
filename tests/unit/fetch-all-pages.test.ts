@@ -218,4 +218,26 @@ describe('fetchAllPages', () => {
   test('DEFAULT_MAX_ITEMS is 1000000', () => {
     assert.strictEqual(DEFAULT_MAX_ITEMS, 1_000_000);
   });
+
+  test('handles BigInt totalItems from SDK Zod schema without throwing', async () => {
+    // The Camunda 8 SDK uses z.coerce.bigint() for totalItems, so it returns BigInt at runtime.
+    // fetchAllPages must convert it to number before comparing with allItems.length (a number).
+    let callCount = 0;
+    const bigintTotalItemsSearch = async (_filter: any, _opts?: any) => {
+      callCount++;
+      return {
+        items: [{ id: 1 }, { id: 2 }],
+        page: {
+          totalItems: 2n,  // BigInt, as returned by the SDK
+          endCursor: undefined,
+        },
+      };
+    };
+
+    // Should NOT throw TypeError: Cannot mix BigInt and other types
+    const items = await fetchAllPages(bigintTotalItemsSearch, {});
+
+    assert.strictEqual(callCount, 1, 'should only make one API call');
+    assert.strictEqual(items.length, 2);
+  });
 });

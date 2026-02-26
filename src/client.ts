@@ -62,7 +62,7 @@ export const DEFAULT_MAX_ITEMS = 1_000_000;
 type PagedResponse<T> = {
   items?: T[];
   page?: {
-    totalItems?: number;
+    totalItems?: bigint | number;
     endCursor?: string;
     startCursor?: string;
     hasMoreTotalItems?: boolean;
@@ -111,8 +111,9 @@ export async function fetchAllPages<T>(
       break;
     }
 
-    const endCursor = result.page?.endCursor ?? (result as any).page?.endCursor as string | undefined;
-    const totalItems = result.page?.totalItems ?? (result as any).page?.totalItems as number | undefined;
+    const endCursor = result.page?.endCursor;
+    // totalItems is BigInt from the SDK's Zod schema (z.coerce.bigint()); convert to number
+    const totalItems = result.page?.totalItems !== undefined ? Number(result.page.totalItems) : undefined;
 
     if (!endCursor || seenCursors.has(endCursor)) break;
     if (totalItems !== undefined && allItems.length >= totalItems) break;
