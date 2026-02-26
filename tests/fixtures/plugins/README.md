@@ -30,6 +30,8 @@ export const metadata = {
 export const commands = {
   myCommand: async (args: string[]) => {
     console.log(`Platform: ${c8ctl.env.platform}`);
+    const client = c8ctl.createClient();
+    console.log(`Client factory available: ${typeof client === 'object'}`);
   }
 };
 ```
@@ -61,6 +63,7 @@ export const commands = {
   'my-command': async (args) => {
     console.log(`Args: ${args.join(', ')}`);
     console.log(`Version: ${c8ctl.env.version}`);
+    console.log(`Has client factory: ${typeof c8ctl.createClient === 'function'}`);
   }
 };
 ```
@@ -75,7 +78,8 @@ For a package to be recognized as a c8ctl plugin:
 4. Must export a `commands` object with async functions
 5. Optionally export a `metadata` object for help text display
 6. Access c8ctl runtime via `globalThis.c8ctl` (automatically injected by c8ctl)
-7. Declare `@camunda8/cli` with wildcard `*` as peer dependency
+7. Use `globalThis.c8ctl.createClient(profile?, sdkConfig?)` to create Camunda SDK clients
+8. Declare `@camunda8/cli` with wildcard `*` as peer dependency
 
 > **Note on TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't currently support type stripping in `node_modules`. If your plugin is written in TypeScript, you must transpile it to JavaScript before publishing. Your `c8ctl-plugin.ts` source can be TypeScript, but ensure your build process produces a `c8ctl-plugin.js` file.
 

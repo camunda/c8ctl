@@ -1,0 +1,9 @@
+
+Next steps:
+  1. cd {{PLUGIN_NAME}}
+  2. npm install
+  3. npm run build
+  4. c8ctl load plugin --from file://${PWD}
+  5. c8ctl hello
+
+Edit src/c8ctl-plugin.ts to add your plugin logic.

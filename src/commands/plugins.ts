@@ -5,7 +5,8 @@
 import { getLogger } from '../logger.ts';
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { clearLoadedPlugins } from '../plugin-loader.ts';
 import { ensurePluginsDir } from '../config.ts';
 import {
@@ -13,9 +14,24 @@ import {
   removePluginFromRegistry,
   getRegisteredPlugins,
   isPluginRegistered,
-  getPluginEntry,
-  type PluginEntry,
+  getPluginEntry
 } from '../plugin-registry.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function getTemplate(templateFileName: string): string {
+  const templatePath = join(__dirname, '..', 'templates', templateFileName);
+  return readFileSync(templatePath, 'utf-8');
+}
+
+function renderTemplate(templateFileName: string, replacements: Record<string, string> = {}): string {
+  let content = getTemplate(templateFileName);
+  for (const [key, value] of Object.entries(replacements)) {
+    content = content.replaceAll(`{{${key}}}`, value);
+  }
+  return content;
+}
 
 /**
  * Load a plugin (npm install wrapper)
@@ -625,191 +641,51 @@ export async function initPlugin(pluginName?: string): Promise<void> {
   
   try {
     logger.info(`Creating plugin: ${dirName}...`);
+
+    const templateVars = { PLUGIN_NAME: dirName };
     
     // Create plugin directory
     mkdirSync(pluginDir, { recursive: true });
     
     // Create package.json
-    const packageJson = {
-      name: dirName,
-      version: '1.0.0',
-      type: 'module',
-      description: `A c8ctl plugin`,
-      keywords: ['c8ctl', 'c8ctl-plugin'],
-      main: 'c8ctl-plugin.js',
-      scripts: {
-        build: 'tsc',
-        watch: 'tsc --watch',
-      },
-      devDependencies: {
-        typescript: '^5.0.0',
-        '@types/node': '^22.0.0',
-      },
-    };
-    
-    writeFileSync(
-      join(pluginDir, 'package.json'),
-      JSON.stringify(packageJson, null, 2)
-    );
-    
+    writeFileSync(join(pluginDir, 'package.json'), renderTemplate('package.json', templateVars));
+
     // Create tsconfig.json
-    const tsConfig = {
-      compilerOptions: {
-        target: 'ES2022',
-        module: 'ES2022',
-        moduleResolution: 'node',
-        outDir: '.',
-        rootDir: './src',
-        strict: true,
-        esModuleInterop: true,
-        skipLibCheck: true,
-        forceConsistentCasingInFileNames: true,
-      },
-      include: ['src/**/*'],
-      exclude: ['node_modules'],
-    };
-    
-    writeFileSync(
-      join(pluginDir, 'tsconfig.json'),
-      JSON.stringify(tsConfig, null, 2)
-    );
+    writeFileSync(join(pluginDir, 'tsconfig.json'), getTemplate('tsconfig.json'));
     
     // Create src directory
     mkdirSync(join(pluginDir, 'src'), { recursive: true });
+
+    // Create root c8ctl-plugin.js entry point
+    writeFileSync(join(pluginDir, 'c8ctl-plugin.js'), getTemplate('c8ctl-plugin.js'));
     
     // Create c8ctl-plugin.ts
-    const pluginTemplate = `/**
- * ${dirName} - A c8ctl plugin
- */
-
-// The c8ctl runtime is available globally
-declare const c8ctl: {
-  version: string;
-  nodeVersion: string;
-  platform: string;
-  arch: string;
-  cwd: string;
-  outputMode: 'text' | 'json';
-  activeProfile?: string;
-  activeTenant?: string;
-};
-
-// Optional metadata for help text
-export const metadata = {
-  name: '${dirName}',
-  description: 'A c8ctl plugin',
-  commands: {
-    hello: {
-      description: 'Say hello from the plugin',
-    },
-  },
-};
-
-// Required commands export
-export const commands = {
-  hello: async (args: string[]) => {
-    console.log('Hello from ${dirName}!');
-    console.log('c8ctl version:', c8ctl.version);
-    console.log('Node version:', c8ctl.nodeVersion);
-    
-    if (args.length > 0) {
-      console.log('Arguments:', args.join(', '));
-    }
-    
-    // Example: Access c8ctl runtime
-    console.log('Current directory:', c8ctl.cwd);
-    console.log('Output mode:', c8ctl.outputMode);
-    
-    if (c8ctl.activeProfile) {
-      console.log('Active profile:', c8ctl.activeProfile);
-    }
-  },
-};
-`;
-    
-    writeFileSync(
-      join(pluginDir, 'src', 'c8ctl-plugin.ts'),
-      pluginTemplate
-    );
+    writeFileSync(join(pluginDir, 'src', 'c8ctl-plugin.ts'), renderTemplate('c8ctl-plugin.ts', templateVars));
     
     // Create README.md
-    const readme = `# ${dirName}
-
-A c8ctl plugin.
-
-## Development
-
-1. Install dependencies:
-\`\`\`bash
-npm install
-\`\`\`
-
-2. Build the plugin:
-\`\`\`bash
-npm run build
-\`\`\`
-
-3. Load the plugin for testing:
-\`\`\`bash
-c8ctl load plugin --from file://\${PWD}
-\`\`\`
-
-4. Test the plugin command:
-\`\`\`bash
-c8ctl hello
-\`\`\`
-
-## Plugin Structure
-
-- \`src/c8ctl-plugin.ts\` - Plugin source code (TypeScript)
-- \`c8ctl-plugin.js\` - Compiled plugin file (JavaScript)
-- \`package.json\` - Package metadata with c8ctl keywords
-
-## Publishing
-
-Before publishing, ensure:
-- The plugin is built (\`npm run build\`)
-- The package.json has correct metadata
-- Keywords include 'c8ctl' or 'c8ctl-plugin'
-
-Then publish to npm:
-\`\`\`bash
-npm publish
-\`\`\`
-
-Users can install your plugin with:
-\`\`\`bash
-c8ctl load plugin ${dirName}
-\`\`\`
-`;
+    const readme = renderTemplate('README.md', templateVars);
     
     writeFileSync(
       join(pluginDir, 'README.md'),
       readme
     );
-    
-    // Create .gitignore
-    const gitignore = `node_modules/
-*.js
-*.js.map
-!c8ctl-plugin.js
-`;
-    
+
+    // Create AGENTS.md
+    const agents = getTemplate('AGENTS.md');
+
     writeFileSync(
-      join(pluginDir, '.gitignore'),
-      gitignore
+      join(pluginDir, 'AGENTS.md'),
+      agents
     );
     
+    // Create .gitignore
+    writeFileSync(join(pluginDir, '.gitignore'), getTemplate('.gitignore'));
+    
     logger.success('Plugin scaffolding created successfully!');
-    logger.info('');
-    logger.info(`Next steps:`);
-    logger.info(`  1. cd ${dirName}`);
-    logger.info(`  2. npm install`);
-    logger.info(`  3. npm run build`);
-    logger.info(`  4. c8ctl load plugin --from file://\${PWD}`);
-    logger.info(`  5. c8ctl hello`);
-    logger.info('');
-    logger.info(`Edit src/c8ctl-plugin.ts to add your plugin logic.`);
+    const nextSteps = renderTemplate('init-plugin-next-steps.txt', templateVars);
+    for (const line of nextSteps.split('\n')) {
+      logger.info(line);
+    }
   } catch (error) {
     logger.error('Failed to create plugin', error as Error);
     process.exit(1);

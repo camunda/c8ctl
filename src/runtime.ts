@@ -5,18 +5,40 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { OutputMode } from './logger.ts';
+import type { CamundaClient, CamundaOptions } from '@camunda8/orchestration-cluster-api';
+import type { Logger, OutputMode } from './logger.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-interface C8ctlEnv {
+export interface C8ctlEnv {
   version: string;
   nodeVersion: string;
   platform: string;
   arch: string;
   cwd: string;
   rootDir: string;
+}
+
+export interface C8ctlPluginRuntime {
+  readonly env: C8ctlEnv;
+  readonly version: string;
+  readonly nodeVersion: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly cwd: string;
+  activeProfile?: string;
+  activeTenant?: string;
+  outputMode: OutputMode;
+  createClient(profileFlag?: string, additionalSdkConfig?: Partial<CamundaOptions>): CamundaClient;
+  resolveTenantId(profileFlag?: string): string;
+  getLogger(mode?: OutputMode): Logger;
+}
+
+declare global {
+  // c8ctl runtime exposed to plugins via globalThis
+  // eslint-disable-next-line no-var
+  var c8ctl: C8ctlPluginRuntime | undefined;
 }
 
 /**

@@ -19,9 +19,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm run clean && tsc && npm run copy-plugins",
+    "build": "npm run clean && tsc && npm run copy-plugins && npm run copy-templates",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
+    "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "prepublishOnly": "npm run build",
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",

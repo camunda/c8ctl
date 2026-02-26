@@ -53,10 +53,32 @@ Registry locations by OS:
 
 Plugins can export an optional `metadata` object alongside the required `commands` object:
 
+## Plugin Runtime API
+
+At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8ctl`.
+
+- Environment/session fields: `version`, `nodeVersion`, `platform`, `arch`, `cwd`, `outputMode`, `activeProfile`, `activeTenant`
+- SDK client factory: `createClient(profile?, sdkConfig?)`
+- Tenant resolver: `resolveTenantId(profile?)`
+- Logger accessor: `getLogger()`
+
+Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.
+
+For TypeScript autocomplete, use the exported runtime type:
+
+```typescript
+import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
+
+const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
+const tenantId = c8ctl.resolveTenantId();
+const logger = c8ctl.getLogger();
+logger.info(`Tenant: ${tenantId}`);
+```
+
 ### TypeScript Example
 
 ```typescript
-import { c8ctl } from 'c8ctl/runtime';
+import { c8ctl } from '@camunda8/cli/runtime';
 
 // Optional metadata export for help text
 export const metadata = {
@@ -76,6 +98,10 @@ export const metadata = {
 export const commands = {
   analyze: async (args: string[]) => {
     console.log('Analyzing...');
+    const client = globalThis.c8ctl.createClient();
+    const logger = globalThis.c8ctl.getLogger();
+    logger.info('Plugin logger is ready');
+    console.log('Client ready:', typeof client === 'object');
     // implementation
   },
   
@@ -89,7 +115,7 @@ export const commands = {
 ### JavaScript Example
 
 ```javascript
-import { c8ctl } from 'c8ctl/runtime';
+import { c8ctl } from '@camunda8/cli/runtime';
 
 // Optional metadata export
 export const metadata = {
@@ -246,6 +272,19 @@ See [tests/unit/plugin-loader.test.ts](tests/unit/plugin-loader.test.ts) for uni
 - `getPluginCommandsInfo()` returns correct structure
 - Help text includes plugin commands
 - Metadata is properly parsed
+
+## AGENTS.md in Scaffolded Plugins
+
+When you bootstrap a plugin with `c8ctl init plugin <name>`, the generated project includes an `AGENTS.md` file.
+
+Treat this file as the default implementation contract for coding agents and contributors. It captures:
+
+- plugin contract expectations (`commands`, optional `metadata`, keywords)
+- available runtime APIs on global `c8ctl`
+- a fast local development loop (`install` → `build` → `load` → `help` → `run`)
+- minimal quality checks before considering work complete
+
+Keeping `AGENTS.md` aligned with your plugin design helps autonomous contributors make correct, minimal, and testable changes.
 
 ## Example Plugin Development Flow
 
