@@ -70,6 +70,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('--awaitCompletion'));
     assert.ok(output.includes('--fetchVariables'));
     assert.ok(output.includes('--requestTimeout'));
+    assert.ok(output.includes('--sortBy'));
     assert.ok(output.includes('--version'));
     assert.ok(output.includes('--help'));
     
@@ -224,6 +225,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('--bpmnProcessId'));
     assert.ok(output.includes('--state'));
     assert.ok(output.includes('--assignee'));
+    assert.ok(output.includes('--sortBy'));
     assert.ok(output.includes('user-tasks (ut)'));
     assert.ok(output.includes('incidents (inc)'));
     assert.ok(output.includes('jobs'));

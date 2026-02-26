@@ -91,6 +91,7 @@ Flags:
   --awaitCompletion     Wait for process instance to complete (use with 'create pi')
   --fetchVariables <v>  Reserved for future use (all variables returned by default)
   --requestTimeout <ms> Timeout in milliseconds for process completion (use with --awaitCompletion)
+  --sortBy <column>     Sort list output by column name (use with 'list' commands)
   --version, -v         Show version
   --help, -h            Show help
 
@@ -251,25 +252,30 @@ Resources and their available flags:
     --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
+    --sortBy <column>        Sort by column (Key, Process ID, State, Version, Start Date, Tenant ID)
     --profile <name>         Use specific profile
 
   process-definitions (pd)
+    --sortBy <column>        Sort by column (Key, Process ID, Name, Version, Tenant ID)
     --profile <name>         Use specific profile
 
   user-tasks (ut)
     --state <state>          Filter by state (CREATED, COMPLETED, etc.)
     --assignee <name>        Filter by assignee
     --all                    List all tasks (pagination)
+    --sortBy <column>        Sort by column (Key, Name, State, Assignee, Created, Process Instance, Tenant ID)
     --profile <name>         Use specific profile
 
   incidents (inc)
     --state <state>          Filter by state (ACTIVE, RESOLVED, etc.)
     --processInstanceKey <key>  Filter by process instance
+    --sortBy <column>        Sort by column (Key, Type, Message, State, Created, Process Instance, Tenant ID)
     --profile <name>         Use specific profile
 
   jobs
     --state <state>          Filter by state (ACTIVATABLE, ACTIVATED, etc.)
     --type <type>            Filter by job type
+    --sortBy <column>        Sort by column (Key, Type, State, Retries, Created, Process Instance, Tenant ID)
     --profile <name>         Use specific profile
 
   profiles
@@ -281,9 +287,13 @@ Resources and their available flags:
 
 Examples:
   c8ctl list pi --state=ACTIVE
+  c8ctl list pi --sortBy=State
   c8ctl list ut --assignee=john.doe
+  c8ctl list ut --sortBy=Assignee
   c8ctl list inc --processInstanceKey=123456
+  c8ctl list inc --sortBy=Type
   c8ctl list jobs --type=email-service
+  c8ctl list jobs --sortBy=Retries
   c8ctl list profiles
   c8ctl list plugins
 `.trim());

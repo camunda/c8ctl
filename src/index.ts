@@ -119,6 +119,7 @@ function parseCliArgs() {
         ierrorMessage: { type: 'string' },
         itype: { type: 'string' },
         ivalue: { type: 'string' },
+        sortBy: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -323,6 +324,7 @@ async function main() {
       processDefinitionId: resolveProcessDefinitionId(values),
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
+      sortBy: values.sortBy as string | undefined,
     });
     return;
   }
@@ -385,6 +387,7 @@ async function main() {
   if (verb === 'list' && (normalizedResource === 'process-definition' || normalizedResource === 'process-definitions')) {
     await listProcessDefinitions({
       profile: values.profile as string | undefined,
+      sortBy: values.sortBy as string | undefined,
     });
     return;
   }
@@ -408,6 +411,7 @@ async function main() {
       state: values.state as string | undefined,
       assignee: values.assignee as string | undefined,
       all: values.all as boolean | undefined,
+      sortBy: values.sortBy as string | undefined,
     });
     return;
   }
@@ -430,6 +434,7 @@ async function main() {
       profile: values.profile as string | undefined,
       state: values.state as string | undefined,
       processInstanceKey: values.processInstanceKey as string | undefined,
+      sortBy: values.sortBy as string | undefined,
     });
     return;
   }
@@ -462,6 +467,7 @@ async function main() {
       profile: values.profile as string | undefined,
       state: values.state as string | undefined,
       type: values.type as string | undefined,
+      sortBy: values.sortBy as string | undefined,
     });
     return;
   }

@@ -3,6 +3,7 @@
  */
 
 import { getLogger } from '../logger.ts';
+import { sortTableData } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
@@ -15,6 +16,7 @@ export async function listProcessInstances(options: {
   processDefinitionId?: string;
   state?: string;
   all?: boolean;
+  sortBy?: string;
 }): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -41,7 +43,7 @@ export async function listProcessInstances(options: {
     const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((pi: any) => ({
+      let tableData = result.items.map((pi: any) => ({
         Key: pi.processInstanceKey || pi.key,
         'Process ID': pi.processDefinitionId,
         State: pi.state,
@@ -49,6 +51,7 @@ export async function listProcessInstances(options: {
         'Start Date': pi.startDate || '-',
         'Tenant ID': pi.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger);
       logger.table(tableData);
     } else {
       logger.info('No process instances found');

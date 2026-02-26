@@ -49,7 +49,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
 
   case \${cword} in
     1)
@@ -228,6 +228,7 @@ _c8ctl() {
     '--awaitCompletion[Wait for process instance to complete]'
     '--fetchVariables[Comma-separated variable names]:variables:'
     '--requestTimeout[Timeout in milliseconds for process completion]:milliseconds:'
+    '--sortBy[Sort list output by column name]:column:'
     '--name[Variable or resource name]:name:'
     '--key[Resource key]:key:'
     '--elementId[Element ID]:id:'
@@ -553,6 +554,8 @@ complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
 complete -c c8ctl -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
 complete -c c8 -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
+complete -c c8ctl -l sortBy -d 'Sort list output by column name' -r
+complete -c c8 -l sortBy -d 'Sort list output by column name' -r
 complete -c c8ctl -l name -d 'Variable or resource name' -r
 complete -c c8 -l name -d 'Variable or resource name' -r
 complete -c c8ctl -l key -d 'Resource key' -r

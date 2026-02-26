@@ -3,6 +3,7 @@
  */
 
 import { getLogger } from '../logger.ts';
+import { sortTableData } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 
@@ -13,6 +14,7 @@ export async function listIncidents(options: {
   profile?: string;
   state?: string;
   processInstanceKey?: string;
+  sortBy?: string;
 }): Promise<void> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -36,7 +38,7 @@ export async function listIncidents(options: {
     const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
     
     if (result.items && result.items.length > 0) {
-      const tableData = result.items.map((incident: any) => ({
+      let tableData = result.items.map((incident: any) => ({
         Key: incident.incidentKey || incident.key,
         Type: incident.errorType,
         Message: incident.errorMessage?.substring(0, 50) || '',
@@ -45,6 +47,7 @@ export async function listIncidents(options: {
         'Process Instance': incident.processInstanceKey,
         'Tenant ID': incident.tenantId,
       }));
+      tableData = sortTableData(tableData, options.sortBy, logger);
       logger.table(tableData);
     } else {
       logger.info('No incidents found');
