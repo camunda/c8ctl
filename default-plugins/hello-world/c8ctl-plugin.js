@@ -33,12 +33,8 @@ export const commands = {
       console.log(`   Architecture: ${globalThis.c8ctl.arch}`);
       console.log(`   Working Directory: ${globalThis.c8ctl.cwd}`);
       console.log(`   Output Mode: ${globalThis.c8ctl.outputMode}`);
-      if (typeof globalThis.c8ctl.createClient === 'function') {
-        console.log('   Client Factory: available via globalThis.c8ctl.createClient(profile?, sdkConfig?)');
-      }
-      if (typeof globalThis.c8ctl.getLogger === 'function') {
-        console.log('   Logger Access: available via globalThis.c8ctl.getLogger()');
-      }
+      console.log('   Client Factory: available via globalThis.c8ctl.createClient(profile?, sdkConfig?)');
+      console.log('   Logger Access: available via globalThis.c8ctl.getLogger()');
       
       if (globalThis.c8ctl.activeProfile) {
         console.log(`   Active Profile: ${globalThis.c8ctl.activeProfile}`);
