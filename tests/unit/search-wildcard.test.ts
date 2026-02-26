@@ -4,7 +4,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { toStringFilter, wildcardToRegex, matchesCaseInsensitive, hasUnescapedWildcard } from '../../src/commands/search.ts';
+import { toStringFilter, wildcardToRegex, matchesCaseInsensitive, matchesCaseSensitive, hasUnescapedWildcard } from '../../src/commands/search.ts';
 
 describe('toStringFilter — wildcard detection', () => {
   test('plain string returns the string as-is', () => {
@@ -111,11 +111,55 @@ describe('wildcardToRegex — pattern conversion', () => {
     assert.ok(!regex.test('myXprocessXv1'));
   });
 
-  test('complex mixed pattern', () => {
-    const regex = wildcardToRegex('*-v?.bpmn');
-    assert.ok(regex.test('process-v1.bpmn'));
-    assert.ok(regex.test('PROCESS-V2.BPMN'));
-    assert.ok(!regex.test('process-v12.bpmn'));
+  test('case-sensitive mode rejects wrong case', () => {
+    const regex = wildcardToRegex('hello', false);
+    assert.ok(regex.test('hello'));
+    assert.ok(!regex.test('HELLO'));
+    assert.ok(!regex.test('Hello'));
+  });
+
+  test('case-sensitive mode with wildcard', () => {
+    const regex = wildcardToRegex('Assertion*', false);
+    assert.ok(regex.test('Assertion failure'));
+    assert.ok(!regex.test('assertion failure'));
+    assert.ok(!regex.test('ASSERTION FAILURE'));
+  });
+});
+
+describe('matchesCaseSensitive — value matching', () => {
+  test('exact match requires correct case', () => {
+    assert.ok(matchesCaseSensitive('OrderProcess', 'OrderProcess'));
+    assert.ok(!matchesCaseSensitive('OrderProcess', 'orderprocess'));
+    assert.ok(!matchesCaseSensitive('OrderProcess', 'ORDERPROCESS'));
+  });
+
+  test('wildcard match respects case', () => {
+    assert.ok(matchesCaseSensitive('Assertion failure on evaluate', 'Assertion*'));
+    assert.ok(!matchesCaseSensitive('Assertion failure on evaluate', 'assertion*'));
+    assert.ok(matchesCaseSensitive('Assertion failure on evaluate', '*failure*'));
+    assert.ok(!matchesCaseSensitive('Assertion failure on evaluate', '*FAILURE*'));
+  });
+
+  test('returns false for null or undefined', () => {
+    assert.ok(!matchesCaseSensitive(null, 'test'));
+    assert.ok(!matchesCaseSensitive(undefined, 'test'));
+  });
+
+  test('returns false when pattern does not match', () => {
+    assert.ok(!matchesCaseSensitive('OrderProcess', 'payment*'));
+    assert.ok(!matchesCaseSensitive('hello', 'world'));
+  });
+
+  test('empty pattern matches empty value', () => {
+    assert.ok(matchesCaseSensitive('', ''));
+  });
+
+  test('empty pattern does not match non-empty value', () => {
+    assert.ok(!matchesCaseSensitive('hello', ''));
+  });
+
+  test('non-empty pattern does not match empty value', () => {
+    assert.ok(!matchesCaseSensitive('', 'hello'));
   });
 });
 

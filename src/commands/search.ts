@@ -27,7 +27,7 @@ export const toStringFilter = (value: string): string | { $like: string } =>
  * Convert a wildcard pattern (* and ?) to a case-insensitive RegExp.
  * Handles escaped wildcards (\* and \?).
  */
-export const wildcardToRegex = (pattern: string): RegExp => {
+export const wildcardToRegex = (pattern: string, caseInsensitive = true): RegExp => {
   let regex = '';
   for (let i = 0; i < pattern.length; i++) {
     if (pattern[i] === '\\' && i + 1 < pattern.length && (pattern[i + 1] === '*' || pattern[i + 1] === '?')) {
@@ -41,7 +41,7 @@ export const wildcardToRegex = (pattern: string): RegExp => {
       regex += pattern[i].replace(/[[\]{}()+.,\\^$|#]/g, '\\$&');
     }
   }
-  return new RegExp(`^${regex}$`, 'i');
+  return new RegExp(`^${regex}$`, caseInsensitive ? 'i' : '');
 };
 
 /**
@@ -51,6 +51,15 @@ export const wildcardToRegex = (pattern: string): RegExp => {
 export const matchesCaseInsensitive = (value: string | undefined | null, pattern: string): boolean => {
   if (value == null) return false;
   return wildcardToRegex(pattern).test(value);
+};
+
+/**
+ * Test if a value matches a wildcard pattern case-sensitively.
+ * Without wildcards, performs exact case-sensitive match.
+ */
+export const matchesCaseSensitive = (value: string | undefined | null, pattern: string): boolean => {
+  if (value == null) return false;
+  return wildcardToRegex(pattern, false).test(value);
 };
 
 const toBigIntSafe = (value: unknown): bigint => {
@@ -431,7 +440,9 @@ export async function searchIncidents(options: {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
-  const hasCiFilter = !!(options.iErrorMessage || options.iProcessDefinitionId);
+  // The incident API does not support a $like filter for errorMessage; fall back to client-side filtering for wildcard patterns
+  const errorMessageHasWildcard = !!(options.errorMessage && hasUnescapedWildcard(options.errorMessage));
+  const hasCiFilter = !!(options.iErrorMessage || options.iProcessDefinitionId || errorMessageHasWildcard);
 
   // Build search criteria description for user feedback
   const criteria: string[] = [];
@@ -486,8 +497,8 @@ export async function searchIncidents(options: {
       filter.filter.errorType = options.errorType;
     }
 
-    if (options.errorMessage) {
-      filter.filter.errorMessage = toStringFilter(options.errorMessage);
+    if (options.errorMessage && !errorMessageHasWildcard) {
+      filter.filter.errorMessage = options.errorMessage;
     }
 
     if (options.processDefinitionId) {
@@ -500,6 +511,7 @@ export async function searchIncidents(options: {
       result.items = result.items.filter((incident: any) => {
         if (options.iErrorMessage && !matchesCaseInsensitive(incident.errorMessage, options.iErrorMessage)) return false;
         if (options.iProcessDefinitionId && !matchesCaseInsensitive(incident.processDefinitionId, options.iProcessDefinitionId)) return false;
+        if (errorMessageHasWildcard && options.errorMessage && !matchesCaseSensitive(incident.errorMessage, options.errorMessage)) return false;
         return true;
       });
     }
