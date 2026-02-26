@@ -254,6 +254,7 @@ Resources and their available flags:
     --all                    List all instances (pagination)
     --sortBy <column>        Sort by column (Key, Process ID, State, Version, Start Date, Tenant ID)
     --profile <name>         Use specific profile
+    Note: instances with an active incident are marked with ⚠ before the Key
 
   process-definitions (pd)
     --sortBy <column>        Sort by column (Key, Process ID, Name, Version, Tenant ID)
