@@ -229,6 +229,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('jobs'));
     assert.ok(output.includes('profiles'));
     assert.ok(output.includes('plugins'));
+    assert.ok(output.includes('⚠'), 'list pi help should mention the incident indicator symbol');
+    assert.ok(output.includes('incident'), 'list pi help should explain the indicator is for incidents');
   });
 
   test('showCommandHelp shows get help with resources and flags', () => {
