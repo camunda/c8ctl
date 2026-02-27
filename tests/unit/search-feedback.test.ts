@@ -150,8 +150,29 @@ describe('GLOBAL_FLAGS', () => {
     assert.ok(GLOBAL_FLAGS.has('version'));
   });
 
+  test('contains between and dateField (date range filtering applies to all search commands)', () => {
+    assert.ok(GLOBAL_FLAGS.has('between'));
+    assert.ok(GLOBAL_FLAGS.has('dateField'));
+  });
+
   test('does not contain limit (limit is only valid for variable search)', () => {
     assert.ok(!GLOBAL_FLAGS.has('limit'));
+  });
+
+  test('--between is not flagged as unknown for any search resource', () => {
+    const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
+    for (const resource of resources) {
+      const unknown = detectUnknownSearchFlags({ between: '2024-01-01..2024-12-31' }, resource);
+      assert.deepStrictEqual(unknown, [], `--between incorrectly flagged as unknown for '${resource}'`);
+    }
+  });
+
+  test('--dateField is not flagged as unknown for any search resource', () => {
+    const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
+    for (const resource of resources) {
+      const unknown = detectUnknownSearchFlags({ dateField: 'startDate' }, resource);
+      assert.deepStrictEqual(unknown, [], `--dateField incorrectly flagged as unknown for '${resource}'`);
+    }
   });
 });
 
