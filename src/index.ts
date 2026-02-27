@@ -28,6 +28,7 @@ import {
   searchIncidents,
   searchJobs,
   searchVariables,
+  detectUnknownSearchFlags,
 } from './commands/search.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, getIncident, resolveIncident } from './commands/incidents.ts';
@@ -140,6 +141,17 @@ function parseCliArgs() {
  */
 function resolveProcessDefinitionId(values: any): string | undefined {
   return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
+}
+
+/**
+ * Warn about unrecognized flags for a search resource.
+ */
+function warnUnknownSearchFlags(logger: ReturnType<typeof getLogger>, unknownFlags: string[], resource: string): void {
+  if (unknownFlags.length === 0) return;
+  const flagList = unknownFlags.map(f => `--${f}`).join(', ');
+  logger.warn(
+    `Flag(s) ${flagList} not recognized for 'search ${resource}'. They will be ignored. Run "c8ctl help search" for valid options.`,
+  );
 }
 
 /**
@@ -657,11 +669,13 @@ async function main() {
   // Handle search commands
   if (verb === 'search') {
     const normalizedSearchResource = normalizeResource(resource);
+    const unknownFlags = detectUnknownSearchFlags(values as Record<string, unknown>, normalizedSearchResource);
+    warnUnknownSearchFlags(logger, unknownFlags, resource);
     
     if (normalizedSearchResource === 'process-definition' || normalizedSearchResource === 'process-definitions') {
       await searchProcessDefinitions({
         profile: values.profile as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
         version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
         key: values.key as string | undefined,
@@ -669,6 +683,7 @@ async function main() {
         iName: values.iname as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -676,7 +691,7 @@ async function main() {
     if (normalizedSearchResource === 'process-instance' || normalizedSearchResource === 'process-instances') {
       await searchProcessInstances({
         profile: values.profile as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         processDefinitionKey: values.processDefinitionKey as string | undefined,
         state: values.state as string | undefined,
         key: values.key as string | undefined,
@@ -684,6 +699,7 @@ async function main() {
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -699,6 +715,7 @@ async function main() {
         iAssignee: values.iassignee as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -709,13 +726,14 @@ async function main() {
         state: values.state as string | undefined,
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         errorType: values.errorType as string | undefined,
         errorMessage: values.errorMessage as string | undefined,
         iErrorMessage: values.ierrorMessage as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -730,6 +748,7 @@ async function main() {
         iType: values.itype as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -747,6 +766,7 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         limit,
+        _unknownFlags: unknownFlags,
       });
       return;
     }

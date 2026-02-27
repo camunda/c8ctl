@@ -9,6 +9,46 @@ import { resolveTenantId } from '../config.ts';
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
 /**
+ * Flags that are valid globally (not specific to any search resource).
+ */
+export const GLOBAL_FLAGS = new Set([
+  'profile', 'sortBy', 'asc', 'desc', 'help', 'version', 'limit',
+]);
+
+/**
+ * Valid search filter flags per resource (values keys that are consumed by the search handler).
+ * This map is used to detect when a user passes a flag that looks valid but is not recognized
+ * for the specific resource, causing silent filter drops.
+ */
+export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
+  'process-definition': new Set(['bpmnProcessId', 'id', 'processDefinitionId', 'name', 'key', 'iid', 'iname']),
+  'process-instance': new Set(['bpmnProcessId', 'id', 'processDefinitionId', 'processDefinitionKey', 'state', 'key', 'parentProcessInstanceKey', 'iid']),
+  'user-task': new Set(['state', 'assignee', 'processInstanceKey', 'processDefinitionKey', 'elementId', 'iassignee']),
+  'incident': new Set(['state', 'processInstanceKey', 'processDefinitionKey', 'bpmnProcessId', 'id', 'processDefinitionId', 'errorType', 'errorMessage', 'ierrorMessage', 'iid']),
+  'jobs': new Set(['state', 'type', 'processInstanceKey', 'processDefinitionKey', 'itype']),
+  'variable': new Set(['name', 'value', 'processInstanceKey', 'scopeKey', 'fullValue', 'iname', 'ivalue', 'limit']),
+};
+
+/**
+ * Detect flags the user set that are not recognized for the given search resource.
+ * Returns the list of unknown flag names (without the --prefix).
+ */
+export function detectUnknownSearchFlags(values: Record<string, unknown>, normalizedResource: string): string[] {
+  const validFlags = SEARCH_RESOURCE_FLAGS[normalizedResource]
+    || SEARCH_RESOURCE_FLAGS[normalizedResource.replace(/s$/, '')];
+  if (!validFlags) return [];
+
+  const unknown: string[] = [];
+  for (const [key, val] of Object.entries(values)) {
+    if (val === undefined || val === false) continue; // not set by the user
+    if (GLOBAL_FLAGS.has(key)) continue;
+    if (validFlags.has(key)) continue;
+    unknown.push(key);
+  }
+  return unknown;
+}
+
+/**
  * Detect wildcard characters (* or ?) in a string value and return
  * a $like filter object for the API. Returns the plain string for exact match.
  *
@@ -70,6 +110,9 @@ const toBigIntSafe = (value: unknown): bigint => {
   }
 };
 
+/** Default page size the Camunda REST API uses when no explicit limit is set */
+const API_DEFAULT_PAGE_SIZE = 100;
+
 /** Max page size for case-insensitive search (client-side filtering needs broader result set) */
 const CI_PAGE_SIZE = 1000;
 
@@ -110,11 +153,35 @@ function formatCriterion(fieldLabel: string, value: string | number | boolean, i
  */
 function logSearchCriteria(logger: Logger, resourceName: string, criteria: string[]): void {
   if (criteria.length === 0) {
-    logger.info(`Searching ${resourceName}`);
+    logger.info(`Searching ${resourceName} (no filters)`);
   } else if (criteria.length === 1) {
     logger.info(`Searching ${resourceName} where ${criteria[0]}`);
   } else {
     logger.info(`Searching ${resourceName} where ${criteria.join(' AND ')}`);
+  }
+}
+
+/**
+ * Log a "no results" message with 🕳️ emoji and contextual hint.
+ */
+function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean, unknownFlags?: string[]): void {
+  logger.info(`🕳️ No ${resourceName} found matching the criteria`);
+  if (unknownFlags && unknownFlags.length > 0) {
+    logger.warn(`Possibly unused flag(s): ${unknownFlags.map(f => `--${f}`).join(', ')}. Run "c8ctl help search" for valid options.`);
+  } else if (!hasFilters) {
+    logger.info('No filters were applied. Use "c8ctl help search" to see available filter flags.');
+  }
+}
+
+/**
+ * Log the result count with a truncation warning when the count matches the API default page size.
+ */
+function logResultCount(logger: Logger, count: number, resourceName: string, hasFilters: boolean): void {
+  logger.info(`Found ${count} ${resourceName}`);
+  if (count === API_DEFAULT_PAGE_SIZE && !hasFilters) {
+    logger.warn(`Showing first ${API_DEFAULT_PAGE_SIZE} results (API default page size). More results may exist — add filters to narrow down.`);
+  } else if (count === API_DEFAULT_PAGE_SIZE) {
+    logger.warn(`Result count equals the API default page size (${API_DEFAULT_PAGE_SIZE}). There may be more results.`);
   }
 }
 
@@ -131,6 +198,7 @@ export async function searchProcessDefinitions(options: {
   iName?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -217,9 +285,9 @@ export async function searchProcessDefinitions(options: {
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} process definition(s)`);
+      logResultCount(logger, result.items.length, 'process definition(s)', criteria.length > 0);
     } else {
-      logger.info('No process definitions found matching the criteria');
+      logNoResults(logger, 'process definitions', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
@@ -242,6 +310,7 @@ export async function searchProcessInstances(options: {
   iProcessDefinitionId?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -318,9 +387,9 @@ export async function searchProcessInstances(options: {
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} process instance(s)`);
+      logResultCount(logger, result.items.length, 'process instance(s)', criteria.length > 0);
     } else {
-      logger.info('No process instances found matching the criteria');
+      logNoResults(logger, 'process instances', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
@@ -343,6 +412,7 @@ export async function searchUserTasks(options: {
   iAssignee?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -420,9 +490,9 @@ export async function searchUserTasks(options: {
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} user task(s)`);
+      logResultCount(logger, result.items.length, 'user task(s)', criteria.length > 0);
     } else {
-      logger.info('No user tasks found matching the criteria');
+      logNoResults(logger, 'user tasks', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
@@ -447,6 +517,7 @@ export async function searchIncidents(options: {
   iProcessDefinitionId?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -538,9 +609,9 @@ export async function searchIncidents(options: {
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} incident(s)`);
+      logResultCount(logger, result.items.length, 'incident(s)', criteria.length > 0);
     } else {
-      logger.info('No incidents found matching the criteria');
+      logNoResults(logger, 'incidents', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
@@ -562,6 +633,7 @@ export async function searchJobs(options: {
   iType?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -632,9 +704,9 @@ export async function searchJobs(options: {
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} job(s)`);
+      logResultCount(logger, result.items.length, 'job(s)', criteria.length > 0);
     } else {
-      logger.info('No jobs found matching the criteria');
+      logNoResults(logger, 'jobs', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
@@ -659,6 +731,7 @@ export async function searchVariables(options: {
   sortBy?: string;
   sortOrder?: SortOrder;
   limit?: number;
+  _unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -767,13 +840,13 @@ export async function searchVariables(options: {
       });
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
       logger.table(tableData);
-      logger.info(`Found ${result.items.length} variable(s)`);
+      logResultCount(logger, result.items.length, 'variable(s)', criteria.length > 0);
       
       if (!options.fullValue && result.items.some((v: any) => v.isTruncated)) {
         logger.info('Some values are truncated. Use --fullValue to see full values.');
       }
     } else {
-      logger.info('No variables found matching the criteria');
+      logNoResults(logger, 'variables', criteria.length > 0, options._unknownFlags);
     }
 
     return result as SearchResult;
