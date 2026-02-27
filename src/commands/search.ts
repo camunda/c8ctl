@@ -164,11 +164,9 @@ function logSearchCriteria(logger: Logger, resourceName: string, criteria: strin
 /**
  * Log a "no results" message with 🕳️ emoji and contextual hint.
  */
-function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean, unknownFlags?: string[]): void {
+function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean): void {
   logger.info(`🕳️ No ${resourceName} found matching the criteria`);
-  if (unknownFlags && unknownFlags.length > 0) {
-    logger.warn(`Possibly unused flag(s): ${unknownFlags.map(f => `--${f}`).join(', ')}. Run "c8ctl help search" for valid options.`);
-  } else if (!hasFilters) {
+  if (!hasFilters) {
     logger.info('No filters were applied. Use "c8ctl help search" to see available filter flags.');
   }
 }
