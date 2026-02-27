@@ -296,6 +296,44 @@ describe('Plugin Lifecycle Integration Tests', () => {
       }
     }
   });
+
+  test('init plugin should scaffold all required files', () => {
+    const name = 'test-init-files';
+    const dir = join(process.cwd(), `c8ctl-${name}`);
+
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    try {
+      const output = execSync(`node src/index.ts init plugin ${name}`, {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      assert.ok(output.includes('Plugin scaffolding created successfully'),
+        'Init command should succeed');
+
+      const expectedFiles = [
+        'package.json',
+        'tsconfig.json',
+        'c8ctl-plugin.js',
+        'README.md',
+        'AGENTS.md',
+        '.gitignore',
+        join('src', 'c8ctl-plugin.ts'),
+      ];
+
+      for (const file of expectedFiles) {
+        assert.ok(existsSync(join(dir, file)), `${file} should exist after init`);
+      }
+    } finally {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
   
   test('should complete full plugin lifecycle with init, build, load, execute, and help', async () => {
     const scaffoldPluginName = 'test-scaffold';

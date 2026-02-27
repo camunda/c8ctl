@@ -16,7 +16,8 @@
     "watch": "tsc --watch"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^22.0.0"
+    "@camunda8/cli": "*",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
   }
 }

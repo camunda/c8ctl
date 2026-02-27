@@ -11,7 +11,10 @@
     "c8": "./dist/index.js"
   },
   "exports": {
-    "./runtime": "./dist/runtime.js"
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    }
   },
   "files": [
     "dist",
