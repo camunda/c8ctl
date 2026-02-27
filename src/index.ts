@@ -4,7 +4,9 @@
  * Main entry point
  */
 
+import { realpathSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { getLogger, type SortOrder } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
@@ -810,9 +812,12 @@ async function main() {
 }
 
 // Run the CLI only when invoked directly (not when imported)
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  main().catch((error) => {
-    console.error('Unexpected error:', error);
-    process.exit(1);
-  });
-}
+// Use realpathSync to resolve symlinks (e.g. when installed globally via npm link)
+try {
+  if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    main().catch((error) => {
+      console.error('Unexpected error:', error);
+      process.exit(1);
+    });
+  }
+} catch { /* not invoked directly */ }
