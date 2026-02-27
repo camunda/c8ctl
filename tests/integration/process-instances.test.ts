@@ -13,9 +13,15 @@ import {
   createProcessInstance, 
   listProcessInstances
 } from '../../src/commands/process-instances.ts';
+import { todayRange } from '../utils/date-helpers.ts';
+import { pollUntil } from '../utils/polling.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getUserDataDir } from '../../src/config.ts';
+
+// Polling configuration for Elasticsearch consistency
+const POLL_TIMEOUT_MS = 30000;
+const POLL_INTERVAL_MS = 1000;
 
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   beforeEach(() => {
@@ -174,5 +180,35 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Verify the alias works the same way
     assert.ok(outputWithAlias.includes('completed'), 'Output with await alias should indicate process completed');
     assert.ok(outputWithAlias.includes('variables'), 'Output with await alias should contain variables');
+  });
+
+  test('listProcessInstances with --between spanning today finds recently created instance', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    const found = await pollUntil(async () => {
+      const result = await listProcessInstances({
+        processDefinitionId: 'simple-process',
+        state: 'COMPLETED',
+        between: todayRange(),
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between spanning today should find recently completed process instances in list');
+  });
+
+  test('listProcessInstances with --between in far past returns no instances', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+
+    // Use a date range well before any current test run
+    const result = await listProcessInstances({
+      processDefinitionId: 'simple-process',
+      state: 'COMPLETED',
+      between: '2000-01-01..2000-01-02',
+    });
+
+    assert.ok(result, 'Result should be returned even when empty');
+    assert.strictEqual(result!.items.length, 0, '--between with past date range should return no instances');
   });
 });
