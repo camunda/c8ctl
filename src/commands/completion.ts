@@ -50,7 +50,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue"
 
   case \${cword} in
     1)
@@ -237,6 +237,8 @@ _c8ctl() {
     '--asc[Sort in ascending order (default)]'
     '--desc[Sort in descending order]'
     '--limit[Maximum number of items to fetch]:number:'
+    '--between[Filter by date range (from..to)]:range:'
+    '--dateField[Date field to filter on with --between]:field:'
     '--name[Variable or resource name]:name:'
     '--key[Resource key]:key:'
     '--elementId[Element ID]:id:'
@@ -576,6 +578,10 @@ complete -c c8ctl -l desc -d 'Sort in descending order'
 complete -c c8 -l desc -d 'Sort in descending order'
 complete -c c8ctl -l limit -d 'Maximum number of items to fetch' -r
 complete -c c8 -l limit -d 'Maximum number of items to fetch' -r
+complete -c c8ctl -l between -d 'Filter by date range (from..to)' -r
+complete -c c8 -l between -d 'Filter by date range (from..to)' -r
+complete -c c8ctl -l dateField -d 'Date field to filter on with --between' -r
+complete -c c8 -l dateField -d 'Date field to filter on with --between' -r
 complete -c c8ctl -l name -d 'Variable or resource name' -r
 complete -c c8 -l name -d 'Variable or resource name' -r
 complete -c c8ctl -l key -d 'Resource key' -r

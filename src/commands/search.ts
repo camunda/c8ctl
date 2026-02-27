@@ -5,6 +5,7 @@
 import { getLogger, Logger, sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { parseBetween, buildDateFilter } from '../date-filter.ts';
 
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
@@ -242,6 +243,8 @@ export async function searchProcessInstances(options: {
   iProcessDefinitionId?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  between?: string;
+  dateField?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -267,6 +270,10 @@ export async function searchProcessInstances(options: {
   }
   if (options.iProcessDefinitionId) {
     criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
+  }
+  if (options.between) {
+    const field = options.dateField ?? 'startDate';
+    criteria.push(`'${field}' between "${options.between}"`);
   }
   logSearchCriteria(logger, 'Process Instances', criteria);
 
@@ -297,6 +304,17 @@ export async function searchProcessInstances(options: {
 
     if (options.parentProcessInstanceKey) {
       filter.filter.parentProcessInstanceKey = options.parentProcessInstanceKey;
+    }
+
+    if (options.between) {
+      const parsed = parseBetween(options.between);
+      if (parsed) {
+        const field = options.dateField ?? 'startDate';
+        filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
+      } else {
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        process.exit(1);
+      }
     }
 
     const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
@@ -343,6 +361,8 @@ export async function searchUserTasks(options: {
   iAssignee?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  between?: string;
+  dateField?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -368,6 +388,10 @@ export async function searchUserTasks(options: {
   }
   if (options.iAssignee) {
     criteria.push(formatCriterion('assignee', options.iAssignee, true));
+  }
+  if (options.between) {
+    const field = options.dateField ?? 'creationDate';
+    criteria.push(`'${field}' between "${options.between}"`);
   }
   logSearchCriteria(logger, 'User Tasks', criteria);
 
@@ -398,6 +422,17 @@ export async function searchUserTasks(options: {
 
     if (options.elementId) {
       filter.filter.elementId = options.elementId;
+    }
+
+    if (options.between) {
+      const parsed = parseBetween(options.between);
+      if (parsed) {
+        const field = options.dateField ?? 'creationDate';
+        filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
+      } else {
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        process.exit(1);
+      }
     }
 
     const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
@@ -447,6 +482,7 @@ export async function searchIncidents(options: {
   iProcessDefinitionId?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  between?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -481,6 +517,9 @@ export async function searchIncidents(options: {
   if (options.iProcessDefinitionId) {
     criteria.push(formatCriterion('Process Definition ID', options.iProcessDefinitionId, true));
   }
+  if (options.between) {
+    criteria.push(`'creationTime' between "${options.between}"`);
+  }
   logSearchCriteria(logger, 'Incidents', criteria);
 
   try {
@@ -514,6 +553,16 @@ export async function searchIncidents(options: {
 
     if (options.processDefinitionId) {
       filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
+    }
+
+    if (options.between) {
+      const parsed = parseBetween(options.between);
+      if (parsed) {
+        filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
+      } else {
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        process.exit(1);
+      }
     }
 
     const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
@@ -562,6 +611,8 @@ export async function searchJobs(options: {
   iType?: string;
   sortBy?: string;
   sortOrder?: SortOrder;
+  between?: string;
+  dateField?: string;
 }): Promise<SearchResult | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -584,6 +635,10 @@ export async function searchJobs(options: {
   }
   if (options.iType) {
     criteria.push(formatCriterion('type', options.iType, true));
+  }
+  if (options.between) {
+    const field = options.dateField ?? 'creationTime';
+    criteria.push(`'${field}' between "${options.between}"`);
   }
   logSearchCriteria(logger, 'Jobs', criteria);
 
@@ -610,6 +665,17 @@ export async function searchJobs(options: {
 
     if (options.processDefinitionKey) {
       filter.filter.processDefinitionKey = options.processDefinitionKey;
+    }
+
+    if (options.between) {
+      const parsed = parseBetween(options.between);
+      if (parsed) {
+        const field = options.dateField ?? 'creationTime';
+        filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
+      } else {
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        process.exit(1);
+      }
     }
 
     const result = await client.searchJobs(filter, { consistency: { waitUpToMs: 0 } });

@@ -123,6 +123,8 @@ function parseCliArgs() {
         asc: { type: 'boolean' },
         desc: { type: 'boolean' },
         limit: { type: 'string' },
+        between: { type: 'string' },
+        dateField: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -349,6 +351,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -440,6 +444,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -465,6 +471,7 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
     });
     return;
   }
@@ -500,6 +507,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -684,6 +693,8 @@ async function main() {
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
@@ -699,6 +710,8 @@ async function main() {
         iAssignee: values.iassignee as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
@@ -716,6 +729,7 @@ async function main() {
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        between: values.between as string | undefined,
       });
       return;
     }
@@ -730,6 +744,8 @@ async function main() {
         iType: values.itype as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
