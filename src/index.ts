@@ -124,6 +124,8 @@ function parseCliArgs() {
         asc: { type: 'boolean' },
         desc: { type: 'boolean' },
         limit: { type: 'string' },
+        between: { type: 'string' },
+        dateField: { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -139,7 +141,7 @@ function parseCliArgs() {
 /**
  * Resolve process definition ID from --id, --processDefinitionId, or --bpmnProcessId flag
  */
-function resolveProcessDefinitionId(values: any): string | undefined {
+export function resolveProcessDefinitionId(values: any): string | undefined {
   return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
 }
 
@@ -361,6 +363,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -452,6 +456,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -477,6 +483,7 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
     });
     return;
   }
@@ -512,6 +519,8 @@ async function main() {
       sortBy: values.sortBy as string | undefined,
       sortOrder,
       limit,
+      between: values.between as string | undefined,
+      dateField: values.dateField as string | undefined,
     });
     return;
   }
@@ -700,6 +709,8 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         _unknownFlags: unknownFlags,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
@@ -716,6 +727,8 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         _unknownFlags: unknownFlags,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
@@ -734,6 +747,7 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         _unknownFlags: unknownFlags,
+        between: values.between as string | undefined,
       });
       return;
     }
@@ -749,6 +763,8 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         _unknownFlags: unknownFlags,
+        between: values.between as string | undefined,
+        dateField: values.dateField as string | undefined,
       });
       return;
     }
@@ -793,8 +809,10 @@ async function main() {
   process.exit(1);
 }
 
-// Run the CLI
-main().catch((error) => {
-  console.error('Unexpected error:', error);
-  process.exit(1);
-});
+// Run the CLI only when invoked directly (not when imported)
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  main().catch((error) => {
+    console.error('Unexpected error:', error);
+    process.exit(1);
+  });
+}

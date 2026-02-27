@@ -95,6 +95,8 @@ Flags:
   --asc                 Sort in ascending order (default)
   --desc                Sort in descending order
   --limit <n>           Maximum number of items to fetch (default: 1000000)
+  --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601)
+  --dateField <field>   Date field to filter on with --between (default depends on resource)
   --version, -v         Show version
   --help, -h            Show help
 
@@ -257,6 +259,8 @@ Resources and their available flags:
     --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
+    --between <from>..<to>   Filter by date range (default field: startDate)
+    --dateField <field>      Date field for --between (startDate, endDate)
     --sortBy <column>        Sort by column (Key, Process ID, State, Version, Start Date, Tenant ID)
     --asc                    Sort in ascending order (default)
     --desc                   Sort in descending order
@@ -275,6 +279,8 @@ Resources and their available flags:
     --state <state>          Filter by state (CREATED, COMPLETED, etc.)
     --assignee <name>        Filter by assignee
     --all                    List all tasks (pagination)
+    --between <from>..<to>   Filter by date range (default field: creationDate)
+    --dateField <field>      Date field for --between (creationDate, completionDate, followUpDate, dueDate)
     --sortBy <column>        Sort by column (Key, Name, State, Assignee, Created, Process Instance, Tenant ID)
     --asc                    Sort in ascending order (default)
     --desc                   Sort in descending order
@@ -284,6 +290,7 @@ Resources and their available flags:
   incidents (inc)
     --state <state>          Filter by state (ACTIVE, RESOLVED, etc.)
     --processInstanceKey <key>  Filter by process instance
+    --between <from>..<to>   Filter by date range (field: creationTime)
     --sortBy <column>        Sort by column (Key, Type, Message, State, Created, Process Instance, Tenant ID)
     --asc                    Sort in ascending order (default)
     --desc                   Sort in descending order
@@ -293,6 +300,8 @@ Resources and their available flags:
   jobs
     --state <state>          Filter by state (ACTIVATABLE, ACTIVATED, etc.)
     --type <type>            Filter by job type
+    --between <from>..<to>   Filter by date range (default field: creationTime)
+    --dateField <field>      Date field for --between (creationTime, lastUpdateTime)
     --sortBy <column>        Sort by column (Key, Type, State, Retries, Created, Process Instance, Tenant ID)
     --asc                    Sort in ascending order (default)
     --desc                   Sort in descending order
@@ -308,13 +317,18 @@ Resources and their available flags:
 
 Examples:
   c8ctl list pi --state=ACTIVE
+  c8ctl list pi --between=2024-01-01..2024-12-31
+  c8ctl list pi --between=2024-01-01T00:00:00Z..2024-06-30T23:59:59Z --dateField=endDate
   c8ctl list pi --sortBy=State
   c8ctl list pi --sortBy=State --desc
   c8ctl list ut --assignee=john.doe
+  c8ctl list ut --between=2024-01-01..2024-03-31 --dateField=dueDate
   c8ctl list ut --sortBy=Assignee
   c8ctl list inc --processInstanceKey=123456
+  c8ctl list inc --between=2024-06-01..2024-06-30
   c8ctl list inc --sortBy=Type --desc
   c8ctl list jobs --type=email-service
+  c8ctl list jobs --between=2024-01-01..2024-12-31
   c8ctl list jobs --sortBy=Retries --asc
   c8ctl list profiles
   c8ctl list plugins
@@ -528,19 +542,21 @@ Usage: c8ctl search <resource> [flags]
 Resources and their available flags:
 
   process-instances (pi)
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --processDefinitionKey <key>      Filter by process definition key
     --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
     --key <key>                       Filter by key
     --parentProcessInstanceKey <key>  Filter by parent process instance key
+    --between <from>..<to>            Filter by date range (default field: startDate)
+    --dateField <field>               Date field for --between (startDate, endDate)
     --sortBy <column>                 Sort by column (Key, Process ID, State, Version, Tenant ID)
     --asc                             Sort in ascending order (default)
     --desc                            Sort in descending order
     --profile <name>                  Use specific profile
 
   process-definitions (pd)
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --name <name>                     Filter by name
     --iname <pattern>                 Case-insensitive --name filter
@@ -557,6 +573,8 @@ Resources and their available flags:
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
     --elementId <id>                  Filter by element ID
+    --between <from>..<to>            Filter by date range (default field: creationDate)
+    --dateField <field>               Date field for --between (creationDate, completionDate, followUpDate, dueDate)
     --sortBy <column>                 Sort by column (Key, Name, State, Assignee, Process Instance, Tenant ID)
     --asc                             Sort in ascending order (default)
     --desc                            Sort in descending order
@@ -566,11 +584,12 @@ Resources and their available flags:
     --state <state>                   Filter by state (ACTIVE, RESOLVED, etc.)
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --errorType <type>                Filter by error type
     --errorMessage <msg>              Filter by error message
     --ierrorMessage <pattern>         Case-insensitive --errorMessage filter
+    --between <from>..<to>            Filter by date range (field: creationTime)
     --sortBy <column>                 Sort by column (Key, Type, Message, State, Process Instance, Tenant ID)
     --asc                             Sort in ascending order (default)
     --desc                            Sort in descending order
@@ -582,6 +601,8 @@ Resources and their available flags:
     --itype <pattern>                 Case-insensitive --type filter
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
+    --between <from>..<to>            Filter by date range (default field: creationTime)
+    --dateField <field>               Date field for --between (creationTime, lastUpdateTime)
     --sortBy <column>                 Sort by column (Key, Type, State, Retries, Process Instance, Tenant ID)
     --asc                             Sort in ascending order (default)
     --desc                            Sort in descending order
@@ -601,6 +622,14 @@ Resources and their available flags:
     --limit <n>                       Maximum number of items to fetch (default: 1000000)
     --profile <name>                  Use specific profile
 
+Date Range Filter:
+  Use --between <from>..<to> to filter results by a date range.
+  Dates can be short (YYYY-MM-DD) or full ISO 8601 datetimes.
+  Short dates: 'from' is expanded to T00:00:00.000Z, 'to' to T23:59:59.999Z.
+  Use --dateField to specify which date field to filter on (default depends on resource).
+  Example: --between=2024-01-01..2024-12-31
+  Example: --between=2024-01-01T00:00:00Z..2024-06-30T23:59:59Z --dateField=endDate
+
 Wildcard Search:
   String filters support wildcards: * (any chars) and ? (single char).
   Example: --name='*main*' matches all names containing "main".
@@ -613,15 +642,20 @@ Case-Insensitive Search:
 Examples:
   c8ctl search pi --state=ACTIVE
   c8ctl search pi --bpmnProcessId=order-process
+  c8ctl search pi --between=2024-01-01..2024-12-31
+  c8ctl search pi --between=2024-01-01..2024-06-30 --dateField=endDate
   c8ctl search pd --name='*main*'
   c8ctl search pd --iname='*order*'
   c8ctl search pd --sortBy=Name --desc
   c8ctl search ut --assignee=john.doe
   c8ctl search ut --iassignee=John
+  c8ctl search ut --between=2024-01-01..2024-03-31 --dateField=dueDate
   c8ctl search ut --sortBy=State --asc
   c8ctl search inc --state=ACTIVE --processInstanceKey=123456
+  c8ctl search inc --between=2024-06-01..2024-06-30
   c8ctl search jobs --type=email-service
   c8ctl search jobs --itype='*SERVICE*'
+  c8ctl search jobs --between=2024-01-01..2024-12-31
   c8ctl search jobs --sortBy=Type --desc
   c8ctl search variables --name=orderId
   c8ctl search variables --value=12345 --fullValue

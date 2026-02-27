@@ -6,6 +6,7 @@ import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
 
 /**
@@ -19,6 +20,8 @@ export async function listProcessInstances(options: {
   sortBy?: string;
   sortOrder?: SortOrder;
   limit?: number;
+  between?: string;
+  dateField?: string;
 }): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
@@ -40,6 +43,17 @@ export async function listProcessInstances(options: {
     } else if (!options.all) {
       // By default, exclude COMPLETED instances unless --all is specified
       filter.filter.state = 'ACTIVE';
+    }
+
+    if (options.between) {
+      const parsed = parseBetween(options.between);
+      if (parsed) {
+        const field = options.dateField ?? 'startDate';
+        filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
+      } else {
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        process.exit(1);
+      }
     }
 
     const allItems = await fetchAllPages(

@@ -84,6 +84,10 @@ describe('Help Module', () => {
     assert.ok(output.includes('--ierrorMessage'));
     assert.ok(output.includes('--itype'));
     assert.ok(output.includes('--ivalue'));
+    
+    // Check for date range filter flags
+    assert.ok(output.includes('--between'));
+    assert.ok(output.includes('--dateField'));
   });
 
   test('showVerbResources shows resources for list', () => {
@@ -239,6 +243,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('plugins'));
     assert.ok(output.includes('⚠'), 'list pi help should mention the incident indicator symbol');
     assert.ok(output.includes('incident'), 'list pi help should explain the indicator is for incidents');
+    assert.ok(output.includes('--between'), 'list help should include --between flag');
+    assert.ok(output.includes('--dateField'), 'list help should include --dateField flag');
   });
 
   test('showCommandHelp shows get help with resources and flags', () => {
@@ -290,6 +296,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('jobs'));
     assert.ok(output.includes('variables'));
     assert.ok(output.includes('--bpmnProcessId'));
+    assert.ok(output.includes('--id'));
     assert.ok(output.includes('--iid'));
     assert.ok(output.includes('--iname'));
     assert.ok(output.includes('--sortBy'));
@@ -298,6 +305,9 @@ describe('Help Module', () => {
     assert.ok(output.includes('--limit'));
     assert.ok(output.includes('Wildcard Search'));
     assert.ok(output.includes('Case-Insensitive Search'));
+    assert.ok(output.includes('Date Range Filter'), 'search help should include date range filter section');
+    assert.ok(output.includes('--between'), 'search help should include --between flag');
+    assert.ok(output.includes('--dateField'), 'search help should include --dateField flag');
   });
 
   test('showCommandHelp shows deploy help', () => {

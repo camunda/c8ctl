@@ -678,8 +678,8 @@ export async function initPlugin(pluginName?: string): Promise<void> {
       agents
     );
     
-    // Create .gitignore
-    writeFileSync(join(pluginDir, '.gitignore'), getTemplate('.gitignore'));
+    // Create .gitignore (stored as 'gitignore' to survive npm publish)
+    writeFileSync(join(pluginDir, '.gitignore'), getTemplate('gitignore'));
     
     logger.success('Plugin scaffolding created successfully!');
     const nextSteps = renderTemplate('init-plugin-next-steps.txt', templateVars);
