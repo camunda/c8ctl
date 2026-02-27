@@ -2,6 +2,11 @@
  * Integration tests for global install / symlink invocation
  * Verifies the built binary works when invoked through a symlink,
  * as happens with `npm install -g` or `npm link`.
+ *
+ * npm creates a symlink from the global bin directory to the package's
+ * dist/index.js. Node resolves the symlink, so process.argv[1] is the
+ * symlink path while import.meta.url resolves to the real file. The
+ * entry guard in index.ts must handle this via realpathSync.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -20,7 +25,7 @@ describe('Global Install (symlink) Integration Tests', () => {
   beforeEach(() => {
     tempBinDir = join(tmpdir(), `c8ctl-global-test-${Date.now()}`);
     mkdirSync(tempBinDir, { recursive: true });
-    symlinkPath = join(tempBinDir, 'c8ctl');
+    symlinkPath = join(tempBinDir, 'c8ctl.js');
   });
 
   afterEach(() => {
@@ -47,10 +52,12 @@ describe('Global Install (symlink) Integration Tests', () => {
     assert.ok(result.stdout.includes('Usage:'), 'help output should contain Usage');
   });
 
-  test('binary works when invoked through a symlink (simulates npm link / npm install -g)', () => {
+  test('binary works when node receives a symlink as argv[1] (simulates npm link / npm install -g)', () => {
     symlinkSync(distEntry, symlinkPath);
 
-    const result = spawnSync(symlinkPath, ['help'], {
+    // Use `node <symlink>` — this is how npm global installs work:
+    // the shebang causes node to be invoked with the symlink path as argv[1]
+    const result = spawnSync('node', [symlinkPath, 'help'], {
       encoding: 'utf-8',
       timeout: 10_000,
     });
@@ -63,7 +70,7 @@ describe('Global Install (symlink) Integration Tests', () => {
   test('binary shows version when invoked through a symlink', () => {
     symlinkSync(distEntry, symlinkPath);
 
-    const result = spawnSync(symlinkPath, ['help'], {
+    const result = spawnSync('node', [symlinkPath, 'help'], {
       encoding: 'utf-8',
       timeout: 10_000,
     });
@@ -73,18 +80,18 @@ describe('Global Install (symlink) Integration Tests', () => {
     assert.match(result.stdout, /v\d+\.\d+\.\d+/, 'output should contain a version string');
   });
 
-  test('binary works through a double symlink (symlink → symlink → dist/index.js)', () => {
-    // Simulates npm global bin → node_modules symlink → project dist
+  test('binary works through a double symlink (symlink -> symlink -> dist/index.js)', () => {
+    // Simulates npm global bin -> node_modules symlink -> project dist
     const intermediateDir = join(tempBinDir, 'node_modules');
     mkdirSync(intermediateDir, { recursive: true });
     const intermediatePath = join(intermediateDir, 'index.js');
 
-    // First symlink: intermediate → real file
+    // First symlink: intermediate -> real file
     symlinkSync(distEntry, intermediatePath);
-    // Second symlink: bin entry → intermediate
+    // Second symlink: bin entry -> intermediate
     symlinkSync(intermediatePath, symlinkPath);
 
-    const result = spawnSync(symlinkPath, ['help'], {
+    const result = spawnSync('node', [symlinkPath, 'help'], {
       encoding: 'utf-8',
       timeout: 10_000,
     });
