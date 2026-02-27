@@ -12,7 +12,7 @@ export type SearchResult = { items: Array<Record<string, unknown>>; total?: numb
  * Flags that are valid globally (not specific to any search resource).
  */
 export const GLOBAL_FLAGS = new Set([
-  'profile', 'sortBy', 'asc', 'desc', 'help', 'version', 'limit',
+  'profile', 'sortBy', 'asc', 'desc', 'help', 'version',
 ]);
 
 /**
