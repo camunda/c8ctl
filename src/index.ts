@@ -4,7 +4,9 @@
  * Main entry point
  */
 
+import { realpathSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { getLogger, type SortOrder } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 import { loadSessionState } from './config.ts';
@@ -28,6 +30,7 @@ import {
   searchIncidents,
   searchJobs,
   searchVariables,
+  detectUnknownSearchFlags,
 } from './commands/search.ts';
 import { listUserTasks, completeUserTask } from './commands/user-tasks.ts';
 import { listIncidents, getIncident, resolveIncident } from './commands/incidents.ts';
@@ -142,6 +145,17 @@ function parseCliArgs() {
  */
 export function resolveProcessDefinitionId(values: any): string | undefined {
   return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
+}
+
+/**
+ * Warn about unrecognized flags for a search resource.
+ */
+function warnUnknownSearchFlags(logger: ReturnType<typeof getLogger>, unknownFlags: string[], resource: string): void {
+  if (unknownFlags.length === 0) return;
+  const flagList = unknownFlags.map(f => `--${f}`).join(', ');
+  logger.warn(
+    `Flag(s) ${flagList} not recognized for 'search ${resource}'. They will be ignored. Run "c8ctl help search" for valid options.`,
+  );
 }
 
 /**
@@ -666,18 +680,21 @@ async function main() {
   // Handle search commands
   if (verb === 'search') {
     const normalizedSearchResource = normalizeResource(resource);
+    const unknownFlags = detectUnknownSearchFlags(values as Record<string, unknown>, normalizedSearchResource);
+    warnUnknownSearchFlags(logger, unknownFlags, resource);
     
     if (normalizedSearchResource === 'process-definition' || normalizedSearchResource === 'process-definitions') {
       await searchProcessDefinitions({
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
-        version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
+        version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
         key: values.key as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         iName: values.iname as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -693,6 +710,7 @@ async function main() {
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
         between: values.between as string | undefined,
         dateField: values.dateField as string | undefined,
       });
@@ -710,6 +728,7 @@ async function main() {
         iAssignee: values.iassignee as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
         between: values.between as string | undefined,
         dateField: values.dateField as string | undefined,
       });
@@ -729,6 +748,7 @@ async function main() {
         iProcessDefinitionId: values.iid as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
         between: values.between as string | undefined,
       });
       return;
@@ -744,6 +764,7 @@ async function main() {
         iType: values.itype as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
+        _unknownFlags: unknownFlags,
         between: values.between as string | undefined,
         dateField: values.dateField as string | undefined,
       });
@@ -763,6 +784,7 @@ async function main() {
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         limit,
+        _unknownFlags: unknownFlags,
       });
       return;
     }
@@ -790,9 +812,12 @@ async function main() {
 }
 
 // Run the CLI only when invoked directly (not when imported)
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  main().catch((error) => {
-    console.error('Unexpected error:', error);
-    process.exit(1);
-  });
-}
+// Use realpathSync to resolve symlinks (e.g. when installed globally via npm link)
+try {
+  if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    main().catch((error) => {
+      console.error('Unexpected error:', error);
+      process.exit(1);
+    });
+  }
+} catch { /* not invoked directly */ }
