@@ -686,7 +686,7 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
-        version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
+        version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
         key: values.key as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         iName: values.iname as string | undefined,
