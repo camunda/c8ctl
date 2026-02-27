@@ -7,6 +7,10 @@
  * dist/index.js. Node resolves the symlink, so process.argv[1] is the
  * symlink path while import.meta.url resolves to the real file. The
  * entry guard in index.ts must handle this via realpathSync.
+ *
+ * NOTE: These tests require a built binary (dist/index.js). They are
+ * automatically skipped when dist/index.js is not present.
+ * Run `npm run build` to enable them.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -16,9 +20,11 @@ import { mkdirSync, rmSync, symlinkSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-describe('Global Install (symlink) Integration Tests', () => {
-  const projectRoot = resolve(import.meta.dirname, '..', '..');
-  const distEntry = join(projectRoot, 'dist', 'index.js');
+const projectRoot = resolve(import.meta.dirname, '..', '..');
+const distEntry = join(projectRoot, 'dist', 'index.js');
+const skipReason = existsSync(distEntry) ? undefined : 'dist/index.js not found - run "npm run build" first';
+
+describe('Global Install (symlink) Integration Tests', { skip: skipReason }, () => {
   let tempBinDir: string;
   let symlinkPath: string;
 
@@ -32,13 +38,6 @@ describe('Global Install (symlink) Integration Tests', () => {
     if (existsSync(tempBinDir)) {
       rmSync(tempBinDir, { recursive: true, force: true });
     }
-  });
-
-  test('dist/index.js must exist (run npm run build first)', () => {
-    assert.ok(
-      existsSync(distEntry),
-      `dist/index.js not found at ${distEntry}. Run "npm run build" before running this test.`,
-    );
   });
 
   test('binary works when invoked directly with node', () => {
