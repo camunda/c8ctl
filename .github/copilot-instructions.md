@@ -29,6 +29,8 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 - always consult the GitHub repository camunda/orchestration-cluster-api-js for API details and usage examples. It is the main source of truth for how to interact with the Camunda 8 Orchestration Cluster API. As a backup, a copy of the REST API documentation is available in OpenAPI format in the `assets/c8/rest-api` folder. As a last resort, you should refer to the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api.
 
+- always consult `.github/SDK_GAPS.md` for known SDK limitations before implementing features that interact with the Camunda SDK. When a newer SDK version is available, check whether gaps listed there have been resolved and update the file accordingly (mark resolved items, remove workarounds).
+
 ### Terminal Commands
 
 - avoid heredocs (`<< EOF`) in terminal commands as they don't work reliably in zsh on macOS when executed via tools
