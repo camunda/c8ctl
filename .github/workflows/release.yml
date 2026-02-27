@@ -73,6 +73,8 @@ jobs:
 
       - name: Run integration tests
         run: npm run test:integration
+        env:
+          CAMUNDA_VERSION: ${{ matrix.camunda }}
 
       - name: Stop Camunda
         if: always()
