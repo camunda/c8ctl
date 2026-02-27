@@ -581,12 +581,14 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
   test('searchIncidents with --between spanning today finds recently created incident', async () => {
     await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+    const pi = await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+    const piKey = String(pi!.processInstanceKey);
 
-    // Wait for the job and fail it to produce an incident
+    // Wait for the job and fail it to produce an incident; filter by processInstanceKey to avoid
+    // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED', processInstanceKey: piKey });
       if (result?.items && result.items.length > 0) {
         const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
         if (job) {
@@ -611,10 +613,14 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(found, '--between spanning today should find recently created incidents');
   });
 
-  // NOTE: searchJobs with --between is intentionally not tested here.
-  // The `creationTime` and `lastUpdateTime` date filter fields for jobs
-  // are only present in Camunda 8.9+ (see assets/c8/rest-api/jobs.yaml).
-  // Testing them against Camunda 8.8 causes a "Bad Request" error.
+  // Jobs --between tests require Camunda 8.9+ because `creationTime`/`lastUpdateTime` job search
+  // filter fields are only available in 8.9+ (see assets/c8/rest-api/jobs.yaml).
+  // Skip them when running against 8.8, using the CAMUNDA_VERSION env var set by the GH Actions matrix.
+  const camundaVersion = process.env.CAMUNDA_VERSION;
+  const isCamunda89Plus = camundaVersion !== '8.8';
+  const jobsBetweenSkip = isCamunda89Plus
+    ? false
+    : `creationTime job filter requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion ?? 'unset'})`;
 
   test('list user-tasks --between via CLI does not error', async () => {
     await deploy(['tests/fixtures/list-pis'], {});
@@ -637,12 +643,14 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
   test('list incidents --between via CLI does not error', async () => {
     await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+    const pi = await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+    const piKey = String(pi!.processInstanceKey);
 
-    // Wait for a job and fail it to produce an incident
+    // Wait for a job and fail it to produce an incident; filter by processInstanceKey to avoid
+    // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED', processInstanceKey: piKey });
       if (result?.items && result.items.length > 0) {
         const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
         if (job) { jobKey = String(job.jobKey || job.key); return true; }
@@ -665,6 +673,61 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
     assert.ok(typeof output === 'string', 'CLI should produce string output');
   });
-  // NOTE: `list jobs --between` CLI is intentionally not tested here.
-  // The `creationTime` date filter for jobs requires Camunda 8.9+ (see assets/c8/rest-api/jobs.yaml).
+
+  test('searchJobs with --between spanning today finds recently created job',
+    { skip: jobsBetweenSkip },
+    async () => {
+      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+      const found = await pollUntil(async () => {
+        const result = await searchJobs({
+          type: 'n00b',
+          state: 'CREATED',
+          between: todayRange(),
+        });
+        return !!(result?.items && result.items.length > 0);
+      }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+      assert.ok(found, '--between spanning today should find recently created jobs');
+    });
+
+  test('searchJobs with --between and explicit --dateField=creationTime finds recently created job',
+    { skip: jobsBetweenSkip },
+    async () => {
+      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+      const found = await pollUntil(async () => {
+        const result = await searchJobs({
+          type: 'n00b',
+          between: todayRange(),
+          dateField: 'creationTime',
+        });
+        return !!(result?.items && result.items.length > 0);
+      }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+      assert.ok(found, '--between with --dateField=creationTime should find recently created jobs');
+    });
+
+  test('list jobs --between via CLI does not error',
+    { skip: jobsBetweenSkip },
+    async () => {
+      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+      // Wait for the job to be indexed
+      await pollUntil(async () => {
+        const result = await searchJobs({ type: 'n00b', state: 'CREATED' });
+        return !!(result?.items && result.items.length > 0);
+      }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+      const { execSync } = await import('node:child_process');
+      const output = execSync(
+        `node --no-warnings src/index.ts list jobs --between=${todayRange()}`,
+        { encoding: 'utf8', cwd: process.cwd() }
+      );
+
+      assert.ok(typeof output === 'string', 'CLI should produce string output');
+    });
 });
