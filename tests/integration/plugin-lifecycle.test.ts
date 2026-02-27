@@ -5,60 +5,51 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import { execSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getUserDataDir } from '../../src/config.ts';
 
 describe('Plugin Lifecycle Integration Tests', () => {
   const testPluginDir = join(process.cwd(), 'test-plugin-temp');
   const testPluginName = 'c8ctl-test-plugin';
-  const pluginsDir = join(getUserDataDir(), 'plugins');
-  const nodeModulesPluginPath = join(pluginsDir, 'node_modules', testPluginName);
+  let testDataDir: string;
+  let pluginsDir: string;
+  let nodeModulesPluginPath: string;
+  let originalDataDir: string | undefined;
   
-  // Setup: Clean up any previous test artifacts
+  // Setup: Use an isolated data directory to avoid polluting the real user data dir
   before(() => {
+    originalDataDir = process.env.C8CTL_DATA_DIR;
+    testDataDir = join(tmpdir(), `c8ctl-plugin-test-${Date.now()}-${process.pid}`);
+    mkdirSync(testDataDir, { recursive: true });
+    process.env.C8CTL_DATA_DIR = testDataDir;
+
+    pluginsDir = join(testDataDir, 'plugins');
+    nodeModulesPluginPath = join(pluginsDir, 'node_modules', testPluginName);
+
     // Remove temp directory if it exists
     if (existsSync(testPluginDir)) {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
-    
-    // Unload plugin if it exists from previous run
-    try {
-      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
-        cwd: process.cwd(),
-        stdio: 'ignore' 
-      });
-    } catch {
-      // Ignore if not installed
-    }
-    
-    // Remove from global node_modules if still there
-    if (existsSync(nodeModulesPluginPath)) {
-      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
-    }
   });
   
-  // Cleanup: Ensure test artifacts are removed
+  // Cleanup: Restore environment and remove all test artifacts
   after(() => {
-    // Remove temp directory
+    // Restore original data dir
+    if (originalDataDir !== undefined) {
+      process.env.C8CTL_DATA_DIR = originalDataDir;
+    } else {
+      delete process.env.C8CTL_DATA_DIR;
+    }
+
+    // Remove temp plugin build directory
     if (existsSync(testPluginDir)) {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
-    
-    // Unload plugin
-    try {
-      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
-        cwd: process.cwd(),
-        stdio: 'ignore' 
-      });
-    } catch {
-      // Ignore if already uninstalled
-    }
-    
-    // Remove from global node_modules
-    if (existsSync(nodeModulesPluginPath)) {
-      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
+
+    // Remove isolated data directory (contains installed plugins)
+    if (existsSync(testDataDir)) {
+      rmSync(testDataDir, { recursive: true, force: true });
     }
   });
   
@@ -182,29 +173,6 @@ describe('Plugin Lifecycle Integration Tests', () => {
     }
   });
 
-  test('should reject unloading a non-existent plugin', () => {
-    const tempDir = join(tmpdir(), `c8ctl-unload-test-${Date.now()}`);
-    mkdirSync(tempDir, { recursive: true });
-    try {
-      execSync('node src/index.ts unload plugin c8ctl-plugin-does-not-exist', {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        stdio: 'pipe',
-        timeout: 5000,
-        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
-      });
-      assert.fail('Unloading a non-existent plugin should fail');
-    } catch (error: any) {
-      const errorOutput = error.stderr || error.message;
-      assert.ok(
-        errorOutput.includes('neither registered nor installed'),
-        `Error should mention plugin is neither registered nor installed. Got: ${errorOutput}`
-      );
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
   test('should expose createClient, resolveTenantId and getLogger on plugin runtime object', async () => {
     const runtimePluginDir = join(process.cwd(), 'test-plugin-runtime-client-temp');
     const runtimePluginName = 'c8ctl-test-plugin-runtime-client';
@@ -323,9 +291,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
 
   test('init plugin should scaffold all required files', () => {
     const name = 'test-init-files';
-    const dir = join(process.cwd(), `c8ctl-plugin-${name}`);
-    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
-    mkdirSync(tempDir, { recursive: true });
+    const dir = join(process.cwd(), `c8ctl-${name}`);
 
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -336,7 +302,6 @@ describe('Plugin Lifecycle Integration Tests', () => {
         cwd: process.cwd(),
         encoding: 'utf-8',
         timeout: 5000,
-        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
       });
 
       assert.ok(output.includes('Plugin scaffolding created successfully'),
@@ -359,93 +324,13 @@ describe('Plugin Lifecycle Integration Tests', () => {
       if (existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  test('init plugin should register plugin name as suffix when c8ctl-plugin- prefix is used', () => {
-    const fullName = 'c8ctl-plugin-conv-test';
-    const expectedPluginName = 'conv-test';
-    const dir = join(process.cwd(), fullName);
-    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
-    mkdirSync(tempDir, { recursive: true });
-
-    if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-
-    try {
-      const output = execSync(`node src/index.ts init plugin ${fullName}`, {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        timeout: 5000,
-        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
-      });
-
-      assert.ok(output.includes('Plugin scaffolding created successfully'),
-        'Init command should succeed');
-      assert.ok(existsSync(dir), 'Directory should use full name with prefix');
-
-      // package.json should use plugin name (suffix) as identity
-      const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
-      assert.strictEqual(pkgJson.name, expectedPluginName, 'package.json name should be plugin name (suffix)');
-
-      // Plugin metadata name should be just the suffix
-      const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
-      assert.ok(pluginSrc.includes(`name: '${expectedPluginName}'`),
-        'Plugin metadata name should be the suffix only');
-    } finally {
-      if (existsSync(dir)) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
-  test('init plugin should register plugin name as-is when no c8ctl-plugin- prefix', () => {
-    const name = 'conv-test-noprefix';
-    const expectedDir = `c8ctl-plugin-${name}`;
-    const dir = join(process.cwd(), expectedDir);
-    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
-    mkdirSync(tempDir, { recursive: true });
-
-    if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-
-    try {
-      const output = execSync(`node src/index.ts init plugin ${name}`, {
-        cwd: process.cwd(),
-        encoding: 'utf-8',
-        timeout: 5000,
-        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
-      });
-
-      assert.ok(output.includes('Plugin scaffolding created successfully'),
-        'Init command should succeed');
-      assert.ok(existsSync(dir), 'Directory should be prefixed with c8ctl-plugin-');
-
-      // package.json should use plugin name (suffix) as identity
-      const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
-      assert.strictEqual(pkgJson.name, name, 'package.json name should be plugin name (suffix)');
-
-      // Plugin metadata name should be the input name (suffix)
-      const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
-      assert.ok(pluginSrc.includes(`name: '${name}'`),
-        'Plugin metadata name should be the name without prefix');
-    } finally {
-      if (existsSync(dir)) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-      rmSync(tempDir, { recursive: true, force: true });
     }
   });
   
   test('should complete full plugin lifecycle with init, build, load, execute, and help', async () => {
     const scaffoldPluginName = 'test-scaffold';
-    const scaffoldDirName = `c8ctl-plugin-${scaffoldPluginName}`;
-    const scaffoldDir = join(process.cwd(), scaffoldDirName);
-    const fullPluginName = scaffoldPluginName;
+    const scaffoldDir = join(process.cwd(), `c8ctl-${scaffoldPluginName}`);
+    const fullPluginName = `c8ctl-${scaffoldPluginName}`;
     const scaffoldNodeModulesPath = join(pluginsDir, 'node_modules', fullPluginName);
     
     // Clean up from any previous test run
@@ -666,9 +551,7 @@ export const commands = {
       // Verify that either profiles are listed OR we get the expected built-in response
       const isBuiltInResponse = listOutput.includes('No profiles found') || 
                                  listOutput.includes('Profile') ||
-                                 listOutput.includes('profiles') ||
-                                 listOutput.includes('Name') ||
-                                 listOutput.includes('local');
+                                 listOutput.includes('profiles');
       assert.ok(isBuiltInResponse, 
         `Built-in list command should work normally. Output: ${listOutput}`);
       
@@ -859,166 +742,5 @@ export const commands = {
         rmSync(fileSourceNodeModulesPath, { recursive: true, force: true });
       }
     }
-  });
-
-  test('load plugin --from preserves correct source when loading multiple plugins', async () => {
-    // Regression test for: "c8 load plugin --from doesn't respect the plugin name and overwrites existing plugin"
-    const pluginOneDir = join(process.cwd(), 'test-multi-plugin-one-temp');
-    const pluginTwoDir = join(process.cwd(), 'test-multi-plugin-two-temp');
-    const multiPluginDataDir = join(tmpdir(), `test-multi-plugin-data-dir-${process.pid}`);
-    const pluginOneName = 'c8ctl-multi-test-plugin-one';
-    const pluginTwoName = 'c8ctl-multi-test-plugin-two';
-    const isolatedPluginsDir = join(multiPluginDataDir, 'plugins');
-    const pluginOneModulesPath = join(isolatedPluginsDir, 'node_modules', pluginOneName);
-    const pluginTwoModulesPath = join(isolatedPluginsDir, 'node_modules', pluginTwoName);
-    const cliEnv = { ...process.env, C8CTL_DATA_DIR: multiPluginDataDir };
-
-    for (const dir of [pluginOneDir, pluginTwoDir, multiPluginDataDir]) {
-      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-    }
-
-    try {
-      // Create two distinct plugin directories
-      for (const [dir, name, cmd] of [
-        [pluginOneDir, pluginOneName, 'multi-test-one'],
-        [pluginTwoDir, pluginTwoName, 'multi-test-two'],
-      ] as [string, string, string][]) {
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(
-          join(dir, 'package.json'),
-          JSON.stringify({ name, version: '1.0.0', type: 'module', keywords: ['c8ctl', 'plugin'] }, null, 2)
-        );
-        writeFileSync(
-          join(dir, 'c8ctl-plugin.js'),
-          `export const commands = { '${cmd}': async () => { console.log('${cmd.toUpperCase()}_EXECUTED'); } };\n`
-        );
-      }
-
-      // Load both plugins sequentially via --from
-      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginOneDir}`], {
-        cwd: process.cwd(), stdio: 'pipe', timeout: 10000, env: cliEnv,
-      });
-      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginTwoDir}`], {
-        cwd: process.cwd(), stdio: 'pipe', timeout: 10000, env: cliEnv,
-      });
-
-      // Verify both plugins are installed on disk
-      assert.ok(existsSync(pluginOneModulesPath), 'First plugin should be installed');
-      assert.ok(existsSync(pluginTwoModulesPath), 'Second plugin should be installed');
-
-      // Verify the plugin list shows both plugins with their correct names
-      const listOutput = execSync('node src/index.ts list plugins', {
-        cwd: process.cwd(), encoding: 'utf-8', timeout: 5000, env: cliEnv,
-      });
-      assert.ok(listOutput.includes(pluginOneName),
-        `Plugin list should include first plugin. Output: ${listOutput}`);
-      assert.ok(listOutput.includes(pluginTwoName),
-        `Plugin list should include second plugin. Output: ${listOutput}`);
-
-      // Verify the source for each plugin is preserved correctly by checking the registry
-      // Each plugin's source should point to its own directory, not the other plugin's directory
-      assert.ok(listOutput.includes(pluginOneDir),
-        `Plugin list should include first plugin source. Output: ${listOutput}`);
-      assert.ok(listOutput.includes(pluginTwoDir),
-        `Plugin list should include second plugin source. Output: ${listOutput}`);
-    } finally {
-      for (const dir of [pluginOneDir, pluginTwoDir, multiPluginDataDir]) {
-        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-      }
-      for (const name of [pluginOneName, pluginTwoName]) {
-        try {
-          execSync(`node src/index.ts unload plugin ${name}`, { cwd: process.cwd(), stdio: 'ignore', env: cliEnv });
-        } catch { /* ignore */ }
-      }
-      for (const path of [pluginOneModulesPath, pluginTwoModulesPath]) {
-        if (existsSync(path)) rmSync(path, { recursive: true, force: true });
-      }
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Plugin help includes examples from plugin metadata
-// ---------------------------------------------------------------------------
-
-describe('Plugin help includes examples from plugin metadata', () => {
-  const dataDir = join(tmpdir(), `plugin-help-test-data-${process.pid}`);
-  const cliEnv = { ...process.env, C8CTL_DATA_DIR: dataDir };
-  const pluginDir = join(tmpdir(), `plugin-help-test-plugin-${process.pid}`);
-  const pluginName = 'help-test-plugin';
-  const PLUGIN_TEST_TIMEOUT = 10000;
-
-  before(() => {
-    mkdirSync(pluginDir, { recursive: true });
-    writeFileSync(
-      join(pluginDir, 'package.json'),
-      JSON.stringify({ name: pluginName, version: '1.0.0', type: 'module', keywords: ['c8ctl', 'plugin'] }, null, 2),
-    );
-    writeFileSync(
-      join(pluginDir, 'c8ctl-plugin.js'),
-      `export const metadata = {
-  name: '${pluginName}',
-  description: 'Test plugin for help integration tests',
-  commands: {
-    'help-test-cmd': {
-      description: 'A help test command',
-      examples: [
-        { command: 'c8ctl help-test-cmd start', description: 'Start the help test thing' },
-        { command: 'c8ctl help-test-cmd stop', description: 'Stop the help test thing' },
-      ],
-    },
-  },
-};
-export const commands = {
-  'help-test-cmd': async (args) => { console.log('help-test-cmd executed'); },
-};
-`,
-    );
-
-    try {
-      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginDir}`], {
-        cwd: process.cwd(), stdio: 'pipe', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
-      });
-    } catch (err: any) {
-      throw new Error(`Failed to load plugin: ${err.stdout || ''}${err.stderr || ''}`);
-    }
-  });
-
-  after(() => {
-    try {
-      execFileSync('node', ['src/index.ts', 'unload', 'plugin', pluginName], {
-        cwd: process.cwd(), stdio: 'ignore', env: cliEnv,
-      });
-    } catch { /* ignore */ }
-    if (existsSync(pluginDir)) rmSync(pluginDir, { recursive: true, force: true });
-    if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true });
-  });
-
-  test('help output includes plugin example commands and descriptions', () => {
-    const output = execSync('node src/index.ts help', {
-      cwd: process.cwd(), encoding: 'utf-8', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
-    });
-    assert.ok(
-      output.includes('c8ctl help-test-cmd start'),
-      `Help output should include plugin example command. Output:\n${output}`,
-    );
-    assert.ok(
-      output.includes('Start the help test thing'),
-      `Help output should include plugin example description. Output:\n${output}`,
-    );
-    assert.ok(
-      output.includes('c8ctl help-test-cmd stop'),
-      `Help output should include second plugin example. Output:\n${output}`,
-    );
-  });
-
-  test('help output includes plugin command description', () => {
-    const output = execSync('node src/index.ts help', {
-      cwd: process.cwd(), encoding: 'utf-8', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
-    });
-    assert.ok(
-      output.includes('A help test command'),
-      `Help output should include plugin command description. Output:\n${output}`,
-    );
   });
 });

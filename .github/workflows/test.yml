@@ -96,7 +96,7 @@ jobs:
           echo "Camunda may not be fully ready, but continuing with tests..."
 
       - name: Run integration tests
-        run: npm run test:integration
+        run: npm run test:integration:chaos
         env:
           CAMUNDA_VERSION: ${{ matrix.camunda }}
 

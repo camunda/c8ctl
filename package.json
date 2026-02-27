@@ -1,6 +1,6 @@
 {
   "name": "@camunda8/cli",
-  "version": "0.0.0-semantically-released",
+  "version": "2.0.0-alpha.6",
   "description": "Camunda 8 CLI - minimal-dependency CLI for Camunda 8 operations",
   "type": "module",
   "engines": {
@@ -18,9 +18,6 @@
   },
   "files": [
     "dist",
-    "CONTEXT.md",
-    "EXAMPLES.md",
-    "PLUGIN-HELP.md",
     "README.md",
     "LICENSE"
   ],
@@ -30,9 +27,11 @@
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "prepublishOnly": "npm run build",
-    "test": "node --experimental-strip-types --test --experimental-test-isolation=none tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "node --experimental-strip-types --test --experimental-test-isolation=none tests/unit/*.test.ts",
-    "test:integration": "node --experimental-strip-types --test --experimental-test-isolation=none tests/integration/*.test.ts",
+    "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
+    "test:unit:chaos": "node tests/utils/chaos-runner.mjs tests/unit --setup-first tests/unit/setup.test.ts",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.ts",
+    "test:integration:chaos": "node tests/utils/chaos-runner.mjs tests/integration",
     "dev": "node src/index.ts",
     "cli": "node src/index.ts"
   },
@@ -58,17 +57,16 @@
     "access": "public"
   },
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "8.9.0-alpha.37",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ignore": "^7.0.5"
+    "@camunda8/orchestration-cluster-api": "^8.8.4",
+    "@modelcontextprotocol/sdk": "^1.27.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/github": "^12.0.6",
-    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/npm": "^13.1.4",
     "@semantic-release/release-notes-generator": "^14.1.0",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.3.0",
     "semantic-release": "^25.0.3",
-    "typescript": "^6.0.2"
+    "typescript": "^5.9.3"
   }
 }
