@@ -20,6 +20,7 @@ import {
   searchVariables,
 } from '../../src/commands/search.ts';
 import { pollUntil } from '../utils/polling.ts';
+import { todayRange } from '../utils/date-helpers.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getUserDataDir } from '../../src/config.ts';
@@ -527,5 +528,187 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     });
     assert.ok(!result?.items || result.items.length === 0,
       '--iName="nonexistent-process-name" should return no results');
+  });
+
+  // ── Date Range Filter Tests (--between) ──────────────────────────────
+
+  test('searchProcessInstances with --between spanning today finds recently created instance', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+        state: 'COMPLETED',
+        between: todayRange(),
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between spanning today should find recently completed process instances');
+  });
+
+  test('searchProcessInstances with --between and explicit --dateField=startDate finds instance', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+        between: todayRange(),
+        dateField: 'startDate',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between with --dateField=startDate should find recently started process instances');
+  });
+
+  test('searchUserTasks with --between spanning today finds recently created task', async () => {
+    await deploy(['tests/fixtures/list-pis'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_0t60ay7' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchUserTasks({
+        state: 'CREATED',
+        between: todayRange(),
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between spanning today should find recently created user tasks');
+  });
+
+  test('searchIncidents with --between spanning today finds recently created incident', async () => {
+    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+
+    // Wait for the job and fail it to produce an incident
+    let jobKey: string | undefined;
+    const jobFound = await pollUntil(async () => {
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
+      if (result?.items && result.items.length > 0) {
+        const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
+        if (job) {
+          jobKey = String(job.jobKey || job.key);
+          return true;
+        }
+      }
+      return false;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(jobFound && jobKey, 'Job should exist before failing');
+
+    await failJob(jobKey!, { retries: 0, errorMessage: 'Intentional failure for between test' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchIncidents({
+        state: 'ACTIVE',
+        between: todayRange(),
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between spanning today should find recently created incidents');
+  });
+
+  test('searchJobs with --between spanning today finds recently created job', async () => {
+    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchJobs({
+        type: 'n00b',
+        state: 'CREATED',
+        between: todayRange(),
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between spanning today should find recently created jobs');
+  });
+
+  test('searchJobs with --between and explicit --dateField=creationTime finds recently created job', async () => {
+    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+    const found = await pollUntil(async () => {
+      const result = await searchJobs({
+        type: 'n00b',
+        between: todayRange(),
+        dateField: 'creationTime',
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, '--between with --dateField=creationTime should find recently created jobs');
+  });
+
+  test('list user-tasks --between via CLI does not error', async () => {
+    await deploy(['tests/fixtures/list-pis'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_0t60ay7' });
+
+    // Wait for the task to be indexed
+    await pollUntil(async () => {
+      const result = await searchUserTasks({ state: 'CREATED' });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    const { execSync } = await import('node:child_process');
+    const output = execSync(
+      `node --no-warnings src/index.ts list ut --between=${todayRange()} --all`,
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+
+    assert.ok(typeof output === 'string', 'CLI should produce string output');
+  });
+
+  test('list incidents --between via CLI does not error', async () => {
+    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
+
+    // Wait for a job and fail it to produce an incident
+    let jobKey: string | undefined;
+    await pollUntil(async () => {
+      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
+      if (result?.items && result.items.length > 0) {
+        const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
+        if (job) { jobKey = String(job.jobKey || job.key); return true; }
+      }
+      return false;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    await failJob(jobKey!, { retries: 0, errorMessage: 'Intentional failure for list between test' });
+
+    // Wait for the incident to be indexed
+    await pollUntil(async () => {
+      const result = await searchIncidents({ state: 'ACTIVE' });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    const { execSync } = await import('node:child_process');
+    const output = execSync(
+      `node --no-warnings src/index.ts list inc --between=${todayRange()}`,
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+
+    assert.ok(typeof output === 'string', 'CLI should produce string output');
+  });
+
+  test('list jobs --between via CLI does not error', async () => {
+    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+
+    // Wait for the job to be indexed
+    await pollUntil(async () => {
+      const result = await searchJobs({ type: 'n00b', state: 'CREATED' });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    const { execSync } = await import('node:child_process');
+    const output = execSync(
+      `node --no-warnings src/index.ts list jobs --between=${todayRange()}`,
+      { encoding: 'utf8', cwd: process.cwd() }
+    );
+
+    assert.ok(typeof output === 'string', 'CLI should produce string output');
   });
 });
