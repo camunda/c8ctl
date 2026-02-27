@@ -528,7 +528,7 @@ Usage: c8ctl search <resource> [flags]
 Resources and their available flags:
 
   process-instances (pi)
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --processDefinitionKey <key>      Filter by process definition key
     --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
@@ -540,7 +540,7 @@ Resources and their available flags:
     --profile <name>                  Use specific profile
 
   process-definitions (pd)
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --name <name>                     Filter by name
     --iname <pattern>                 Case-insensitive --name filter
@@ -566,7 +566,7 @@ Resources and their available flags:
     --state <state>                   Filter by state (ACTIVE, RESOLVED, etc.)
     --processInstanceKey <key>        Filter by process instance key
     --processDefinitionKey <key>      Filter by process definition key
-    --bpmnProcessId <id>              Filter by process definition ID
+    --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --errorType <type>                Filter by error type
     --errorMessage <msg>              Filter by error message

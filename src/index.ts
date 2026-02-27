@@ -138,7 +138,7 @@ function parseCliArgs() {
 /**
  * Resolve process definition ID from --id, --processDefinitionId, or --bpmnProcessId flag
  */
-function resolveProcessDefinitionId(values: any): string | undefined {
+export function resolveProcessDefinitionId(values: any): string | undefined {
   return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
 }
 
@@ -661,7 +661,7 @@ async function main() {
     if (normalizedSearchResource === 'process-definition' || normalizedSearchResource === 'process-definitions') {
       await searchProcessDefinitions({
         profile: values.profile as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
         version: (values.version_num && typeof values.version_num === 'string') ? parseInt(values.version_num) : undefined,
         key: values.key as string | undefined,
@@ -676,7 +676,7 @@ async function main() {
     if (normalizedSearchResource === 'process-instance' || normalizedSearchResource === 'process-instances') {
       await searchProcessInstances({
         profile: values.profile as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         processDefinitionKey: values.processDefinitionKey as string | undefined,
         state: values.state as string | undefined,
         key: values.key as string | undefined,
@@ -709,7 +709,7 @@ async function main() {
         state: values.state as string | undefined,
         processInstanceKey: values.processInstanceKey as string | undefined,
         processDefinitionKey: values.processDefinitionKey as string | undefined,
-        processDefinitionId: values.bpmnProcessId as string | undefined,
+        processDefinitionId: resolveProcessDefinitionId(values),
         errorType: values.errorType as string | undefined,
         errorMessage: values.errorMessage as string | undefined,
         iErrorMessage: values.ierrorMessage as string | undefined,
@@ -773,8 +773,10 @@ async function main() {
   process.exit(1);
 }
 
-// Run the CLI
-main().catch((error) => {
-  console.error('Unexpected error:', error);
-  process.exit(1);
-});
+// Run the CLI only when invoked directly (not when imported)
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  main().catch((error) => {
+    console.error('Unexpected error:', error);
+    process.exit(1);
+  });
+}

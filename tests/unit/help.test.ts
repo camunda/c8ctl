@@ -290,6 +290,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('jobs'));
     assert.ok(output.includes('variables'));
     assert.ok(output.includes('--bpmnProcessId'));
+    assert.ok(output.includes('--id'));
     assert.ok(output.includes('--iid'));
     assert.ok(output.includes('--iname'));
     assert.ok(output.includes('--sortBy'));
