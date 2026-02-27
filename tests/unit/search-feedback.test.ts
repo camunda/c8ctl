@@ -132,7 +132,10 @@ describe('GLOBAL_FLAGS', () => {
     assert.ok(GLOBAL_FLAGS.has('desc'));
     assert.ok(GLOBAL_FLAGS.has('help'));
     assert.ok(GLOBAL_FLAGS.has('version'));
-    assert.ok(GLOBAL_FLAGS.has('limit'));
+  });
+
+  test('does not contain limit (limit is only valid for variable search)', () => {
+    assert.ok(!GLOBAL_FLAGS.has('limit'));
   });
 });
 
