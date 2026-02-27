@@ -29,7 +29,9 @@
     "prepublishOnly": "npm run build",
     "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
-    "test:integration": "node --test tests/integration/*.test.ts",
+    "test:unit:chaos": "node tests/utils/chaos-runner.mjs tests/unit --setup-first tests/unit/setup.test.ts",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.ts",
+    "test:integration:chaos": "node tests/utils/chaos-runner.mjs tests/integration",
     "dev": "node src/index.ts",
     "cli": "node src/index.ts"
   },
