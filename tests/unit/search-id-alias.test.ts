@@ -5,10 +5,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { parseArgs } from 'node:util';
+import { resolveProcessDefinitionId } from '../../src/index.ts';
 
 /**
  * Mirrors the relevant subset of the parseArgs config from src/index.ts.
- * Note: src/index.ts cannot be imported directly because it runs main() on import.
  */
 function parseSearchArgs(argv: string[]) {
   const { values } = parseArgs({
@@ -23,11 +23,6 @@ function parseSearchArgs(argv: string[]) {
     strict: false,
   });
   return values;
-}
-
-// Mirrors resolveProcessDefinitionId from src/index.ts
-function resolveProcessDefinitionId(parsedArgs: Record<string, unknown>): string | undefined {
-  return (parsedArgs.id || parsedArgs.processDefinitionId || parsedArgs.bpmnProcessId) as string | undefined;
 }
 
 describe('--id alias for --bpmnProcessId in c8 search', () => {

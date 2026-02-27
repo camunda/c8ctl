@@ -138,7 +138,7 @@ function parseCliArgs() {
 /**
  * Resolve process definition ID from --id, --processDefinitionId, or --bpmnProcessId flag
  */
-function resolveProcessDefinitionId(values: any): string | undefined {
+export function resolveProcessDefinitionId(values: any): string | undefined {
   return (values.id || values.processDefinitionId || values.bpmnProcessId) as string | undefined;
 }
 
@@ -773,8 +773,10 @@ async function main() {
   process.exit(1);
 }
 
-// Run the CLI
-main().catch((error) => {
-  console.error('Unexpected error:', error);
-  process.exit(1);
-});
+// Run the CLI only when invoked directly (not when imported)
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  main().catch((error) => {
+    console.error('Unexpected error:', error);
+    process.exit(1);
+  });
+}
