@@ -112,7 +112,7 @@ const toBigIntSafe = (value: unknown): bigint => {
 };
 
 /** Default page size the Camunda REST API uses when no explicit limit is set */
-const API_DEFAULT_PAGE_SIZE = 100;
+export const API_DEFAULT_PAGE_SIZE = 100;
 
 /** Max page size for case-insensitive search (client-side filtering needs broader result set) */
 const CI_PAGE_SIZE = 1000;
@@ -165,8 +165,13 @@ function logSearchCriteria(logger: Logger, resourceName: string, criteria: strin
 /**
  * Log a "no results" message with 🕳️ emoji and contextual hint.
  */
-function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean): void {
-  logger.info(`🕳️ No ${resourceName} found matching the criteria`);
+export function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean, unknownFlags?: string[]): void {
+  if (unknownFlags && unknownFlags.length > 0) {
+    const flagList = unknownFlags.map(f => `--${f}`).join(', ');
+    logger.info(`🕳️ No ${resourceName} found matching the criteria (ignored unknown flag(s): ${flagList})`);
+  } else {
+    logger.info(`🕳️ No ${resourceName} found matching the criteria`);
+  }
   if (!hasFilters) {
     logger.info('No filters were applied. Use "c8ctl help search" to see available filter flags.');
   }
@@ -175,7 +180,7 @@ function logNoResults(logger: Logger, resourceName: string, hasFilters: boolean)
 /**
  * Log the result count with a truncation warning when the count matches the API default page size.
  */
-function logResultCount(logger: Logger, count: number, resourceName: string, hasFilters: boolean): void {
+export function logResultCount(logger: Logger, count: number, resourceName: string, hasFilters: boolean): void {
   logger.info(`Found ${count} ${resourceName}`);
   if (count === API_DEFAULT_PAGE_SIZE && !hasFilters) {
     logger.warn(`Showing first ${API_DEFAULT_PAGE_SIZE} results (API default page size). More results may exist — add filters to narrow down.`);

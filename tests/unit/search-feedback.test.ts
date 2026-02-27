@@ -1,18 +1,34 @@
 /**
  * Unit tests for search feedback improvements:
- * - Unknown flag detection
- * - Empty result messaging with 🕳️
- * - Truncation warnings
+ * - Unknown flag detection (detectUnknownSearchFlags)
+ * - Empty result messaging with 🕳️ (logNoResults)
+ * - Truncation / page-size warnings (logResultCount)
  * - No-filter hints
+ * - GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS validation
  */
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
   detectUnknownSearchFlags,
+  logNoResults,
+  logResultCount,
   GLOBAL_FLAGS,
   SEARCH_RESOURCE_FLAGS,
 } from '../../src/commands/search.ts';
+import { Logger, type LogWriter } from '../../src/logger.ts';
+
+/** Create a Logger whose output is captured into arrays for assertions. */
+function createTestLogger(): { logger: Logger; logs: string[]; errors: string[] } {
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const logWriter: LogWriter = {
+    log(...data: any[]) { logs.push(data.map(String).join(' ')); },
+    error(...data: any[]) { errors.push(data.map(String).join(' ')); },
+  };
+  const logger = new Logger(logWriter);
+  return { logger, logs, errors };
+}
 
 describe('detectUnknownSearchFlags', () => {
   test('returns empty array when no flags are set', () => {
@@ -214,5 +230,94 @@ describe('SEARCH_RESOURCE_FLAGS', () => {
       assert.ok(SEARCH_RESOURCE_FLAGS[resource], `Missing entry for ${resource}`);
       assert.ok(SEARCH_RESOURCE_FLAGS[resource].size > 0, `Empty flags for ${resource}`);
     }
+  });
+});
+
+describe('logNoResults', () => {
+  test('prints 🕳️ message when no results found with filters', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'process definitions', true);
+    assert.strictEqual(logs.length, 1);
+    assert.ok(logs[0].includes('🕳️'));
+    assert.ok(logs[0].includes('No process definitions found'));
+  });
+
+  test('prints no-filter hint when hasFilters is false', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'user tasks', false);
+    assert.strictEqual(logs.length, 2);
+    assert.ok(logs[0].includes('🕳️'));
+    assert.ok(logs[1].includes('No filters were applied'));
+    assert.ok(logs[1].includes('c8ctl help search'));
+  });
+
+  test('does not print no-filter hint when hasFilters is true', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'incidents', true);
+    assert.strictEqual(logs.length, 1);
+  });
+
+  test('mentions unknown flags when provided', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'jobs', true, ['assignee', 'name']);
+    assert.strictEqual(logs.length, 1);
+    assert.ok(logs[0].includes('--assignee'));
+    assert.ok(logs[0].includes('--name'));
+    assert.ok(logs[0].includes('ignored unknown flag'));
+  });
+
+  test('does not mention unknown flags when array is empty', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'variables', true, []);
+    assert.strictEqual(logs.length, 1);
+    assert.ok(!logs[0].includes('ignored unknown'));
+  });
+
+  test('combines unknown flags and no-filter hint', () => {
+    const { logger, logs } = createTestLogger();
+    logNoResults(logger, 'process instances', false, ['fooBar']);
+    assert.strictEqual(logs.length, 2);
+    assert.ok(logs[0].includes('--fooBar'));
+    assert.ok(logs[1].includes('No filters were applied'));
+  });
+});
+
+describe('logResultCount', () => {
+  test('prints found count', () => {
+    const { logger, logs } = createTestLogger();
+    logResultCount(logger, 5, 'process definition(s)', true);
+    assert.strictEqual(logs.length, 1);
+    assert.ok(logs[0].includes('Found 5 process definition(s)'));
+  });
+
+  test('warns about API default page size when count equals 100 and no filters', () => {
+    const { logger, logs, errors } = createTestLogger();
+    logResultCount(logger, 100, 'process definition(s)', false);
+    assert.strictEqual(logs.length, 1);
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes('API default page size'));
+    assert.ok(errors[0].includes('add filters'));
+  });
+
+  test('warns about page size when count equals 100 with filters', () => {
+    const { logger, logs, errors } = createTestLogger();
+    logResultCount(logger, 100, 'process instance(s)', true);
+    assert.strictEqual(logs.length, 1);
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes('There may be more results'));
+  });
+
+  test('no warning when count is below 100', () => {
+    const { logger, logs, errors } = createTestLogger();
+    logResultCount(logger, 42, 'incidents', false);
+    assert.strictEqual(logs.length, 1);
+    assert.strictEqual(errors.length, 0);
+  });
+
+  test('no warning when count is above 100', () => {
+    const { logger, logs, errors } = createTestLogger();
+    logResultCount(logger, 150, 'variables', true);
+    assert.strictEqual(logs.length, 1);
+    assert.strictEqual(errors.length, 0);
   });
 });
