@@ -5,17 +5,23 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { pollUntil } from '../utils/polling.ts';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+const SPAWN_TIMEOUT_MS = 15_000;
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), 'c8ctl-profile-switch-test-'));
+    testDir = join(tmpdir(), `c8ctl-profile-switch-test-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
     originalEnv = { ...process.env };
     process.env.C8CTL_DATA_DIR = testDir;
     
@@ -134,35 +140,34 @@ describe('Profile Switching Integration Tests', () => {
   });
 
   test('invalid profile causes connection error', async () => {
-    const { execSync } = await import('node:child_process');
-
-    const useOutput = execSync('node src/index.ts use profile invalid', {
-      encoding: 'utf8',
-      cwd: process.cwd(),
-      env: { ...process.env, C8CTL_DATA_DIR: testDir },
-      stdio: 'pipe',
-    });
-    assert.ok(useOutput.includes('Now using profile: invalid'), 'CLI should activate invalid profile');
-
-    try {
-      execSync('node src/index.ts list pi --id Process_0t60ay7', {
-        encoding: 'utf8',
-        cwd: process.cwd(),
+    // Use the CLI as a subprocess so that process.exit(1) happens in the child
+    // process and does not interfere with the test runner.
+    function cliWithProfile(...args: string[]) {
+      return spawnSync('node', [CLI, ...args], {
+        encoding: 'utf-8',
+        cwd: PROJECT_ROOT,
+        timeout: SPAWN_TIMEOUT_MS,
         env: { ...process.env, C8CTL_DATA_DIR: testDir },
-        stdio: 'pipe',
       });
-      assert.fail('CLI command should fail for invalid profile');
-    } catch (error: any) {
-      assert.notStrictEqual(error.status, 0, 'CLI should exit with non-zero status');
-      const stderr = error.stderr ?? '';
-      assert.ok(
-        stderr.includes('Failed to list process instances') ||
-        stderr.includes('ECONNREFUSED') ||
-        stderr.includes('connect') ||
-        stderr.includes('fetch failed'),
-        `Error should mention connection failure. Got: ${stderr}`
-      );
     }
+
+    // Switch to the invalid profile in the isolated data dir
+    const switchResult = cliWithProfile('use', 'profile', 'invalid');
+    assert.strictEqual(
+      switchResult.status, 0,
+      `'use profile invalid' should succeed. stderr: ${switchResult.stderr}`,
+    );
+
+    // Attempting to list process instances with the invalid profile should fail
+    const listResult = cliWithProfile('list', 'pi');
+    assert.strictEqual(listResult.status, 1, 'list pi with invalid profile should exit with code 1');
+    assert.ok(
+      listResult.stderr.includes('Failed to list process instances') ||
+      listResult.stderr.includes('ECONNREFUSED') ||
+      listResult.stderr.includes('connect') ||
+      listResult.stderr.includes('fetch failed'),
+      `stderr should mention connection failure. Got: ${listResult.stderr}`,
+    );
   });
 
   test('switching profiles affects cluster resolution', async () => {
