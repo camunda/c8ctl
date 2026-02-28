@@ -561,6 +561,22 @@ c8ctl <command>
 4. Update help text in `src/commands/help.ts`
 5. Document in `EXAMPLES.md`
 
+## Learning Resources
+
+### Examples and Tutorials
+
+- **[EXAMPLES.md](EXAMPLES.md)** - Comprehensive command-line examples for all operations
+- **[examples/e2e-operations.ipynb](examples/e2e-operations.ipynb)** - Interactive Jupyter Notebook with end-to-end workflows
+- **[examples/README.md](examples/README.md)** - Setup guide for running the notebook locally
+
+The Jupyter notebook provides an interactive learning experience with:
+- Step-by-step operation examples
+- Process deployment and management
+- User task workflows
+- Message correlation
+- Plugin system demonstrations
+- Complete end-to-end scenarios
+
 ## Environment Variables
 
 - `CAMUNDA_BASE_URL`: Cluster base URL
