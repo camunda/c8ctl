@@ -6,9 +6,14 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { pollUntil } from '../utils/polling.ts';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+const SPAWN_TIMEOUT_MS = 15_000;
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
@@ -135,68 +140,34 @@ describe('Profile Switching Integration Tests', () => {
   });
 
   test('invalid profile causes connection error', async () => {
-    const { useProfile } = await import('../../src/commands/session.ts');
-    const { listProcessInstances } = await import('../../src/commands/process-instances.ts');
-    const { c8ctl } = await import('../../src/runtime.ts');
-    
-    // Use the invalid profile
-    useProfile('invalid');
-    assert.strictEqual(c8ctl.activeProfile, 'invalid', 'Invalid profile should be active');
-    
-    // Capture stderr to check for errors
-    const originalError = console.error;
-    const originalExit = process.exit;
-    let capturedErrors: string[] = [];
-    let exitCalled = false;
-    let exitCode: number | undefined;
-    
-    console.error = (...args: any[]) => {
-      capturedErrors.push(args.join(' '));
-    };
-    
-    process.exit = ((code?: number) => {
-      exitCalled = true;
-      exitCode = code;
-      throw new Error('process.exit called');
-    }) as any;
-    
-    try {
-      // Attempt to list process instances - should fail
-      await listProcessInstances({
-        processDefinitionId: 'Process_0t60ay7',
+    // Use the CLI as a subprocess so that process.exit(1) happens in the child
+    // process and does not interfere with the test runner.
+    function cliWithProfile(...args: string[]) {
+      return spawnSync('node', [CLI, ...args], {
+        encoding: 'utf-8',
+        cwd: PROJECT_ROOT,
+        timeout: SPAWN_TIMEOUT_MS,
+        env: { ...process.env, C8CTL_DATA_DIR: testDir },
       });
-      
-      assert.fail('Should have thrown an error or called process.exit');
-    } catch (error: any) {
-      // We expect either process.exit to be called or an error to be thrown
-      const errorOutput = capturedErrors.join('\n');
-      
-      if (error.message === 'process.exit called') {
-        // process.exit was called, which is expected
-        assert.ok(exitCalled, 'process.exit should have been called');
-        assert.strictEqual(exitCode, 1, 'Exit code should be 1');
-        assert.ok(errorOutput.length > 0, 'Should have error output');
-        assert.ok(
-          errorOutput.includes('Failed to list process instances') ||
-          errorOutput.includes('ECONNREFUSED') ||
-          errorOutput.includes('connect') ||
-          errorOutput.includes('fetch failed'),
-          `Error should mention connection failure. Got: ${errorOutput}`
-        );
-      } else {
-        // An error was thrown, which is also acceptable
-        assert.ok(
-          error.message.includes('ECONNREFUSED') ||
-          error.message.includes('connect') ||
-          error.message.includes('Failed') ||
-          error.message.includes('fetch failed'),
-          `Error should mention connection failure. Got: ${error.message}`
-        );
-      }
-    } finally {
-      console.error = originalError;
-      process.exit = originalExit;
     }
+
+    // Switch to the invalid profile in the isolated data dir
+    const switchResult = cliWithProfile('use', 'profile', 'invalid');
+    assert.strictEqual(
+      switchResult.status, 0,
+      `'use profile invalid' should succeed. stderr: ${switchResult.stderr}`,
+    );
+
+    // Attempting to list process instances with the invalid profile should fail
+    const listResult = cliWithProfile('list', 'pi');
+    assert.strictEqual(listResult.status, 1, 'list pi with invalid profile should exit with code 1');
+    assert.ok(
+      listResult.stderr.includes('Failed to list process instances') ||
+      listResult.stderr.includes('ECONNREFUSED') ||
+      listResult.stderr.includes('connect') ||
+      listResult.stderr.includes('fetch failed'),
+      `stderr should mention connection failure. Got: ${listResult.stderr}`,
+    );
   });
 
   test('switching profiles affects cluster resolution', async () => {

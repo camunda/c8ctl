@@ -11,11 +11,7 @@
  *   c8 get  pi   — plain / --variables
  *   c8 get  pd   — plain / --xml
  *   c8 get  inc  — plain
- *   c8 search pi / ut / inc / jobs / variables  — CLI surface (complements function-level
- *     coverage already in search.test.ts)
- *   listProcessDefinitions / listUserTasks / listIncidents / listJobs /
- *     getProcessDefinition / getIncident  — function-level coverage for commands that
- *     lack dedicated integration tests.
+ *   c8 search pi / ut / inc / jobs / variables  — CLI surface
  *
  * Setup pattern: mirrors tests/integration/pagination.test.ts
  *   — isolated C8CTL_DATA_DIR per run
@@ -23,6 +19,11 @@
  *   — pollUntil() waits for Elasticsearch consistency
  *
  * NOTE: Requires a running Camunda 8 instance at http://localhost:8080.
+ *
+ * JSON output field names note:
+ *   logger.table() in JSON mode serializes the table-row objects as-is.
+ *   The column names are the display names (e.g. 'Key', 'Process ID', 'Process Instance'),
+ *   NOT the underlying API field names (processDefinitionKey, processInstanceKey, etc.).
  */
 
 import { test, describe, before, after } from 'node:test';
@@ -33,10 +34,6 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
 import { todayRange } from '../utils/date-helpers.ts';
-import { listUserTasks } from '../../src/commands/user-tasks.ts';
-import { listIncidents, getIncident } from '../../src/commands/incidents.ts';
-import { listJobs } from '../../src/commands/jobs.ts';
-import { listProcessDefinitions, getProcessDefinition } from '../../src/commands/process-definitions.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
@@ -51,13 +48,15 @@ const jobsBetweenSkip: false | string = isCamunda89Plus
   ? false
   : `creationTime job filter requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion ?? 'unset'})`;
 
-// Shared state populated in before() and consumed by get-command tests
+// Shared state populated in before() and consumed by get-command tests.
+// All values extracted from JSON table output use the display column names
+// (Key, 'Process Instance', etc.), not the raw API field names.
 let testBaseDir: string;
 let dataDir: string;
-let activeProcessInstanceKey: string;      // ACTIVE pi (Process_0t60ay7)
-let miniProcessDefinitionKey: string;      // pd key for mini-process-1
-let incidentKey: string;                   // incident key
-let incidentProcessInstanceKey: string;    // PI that owns the incident
+let activeProcessInstanceKey: string;   // ACTIVE pi key (from 'Key' column of search pi)
+let miniProcessDefinitionKey: string;   // pd key for mini-process-1 (from 'Key' column of search pd)
+let incidentKey: string;                // incident key (from 'Key' column of search inc)
+let incidentProcessInstanceKey: string; // PI that owns the incident (from 'Process Instance' column)
 
 /**
  * Invoke the CLI as a child process.
@@ -99,7 +98,7 @@ describe(
       for (const fixture of [
         'tests/fixtures/mini-process.bpmn',
         'tests/fixtures/simple.bpmn',
-        'tests/fixtures/list-pis',
+        'tests/fixtures/list-pis/min-usertask.bpmn',
         'tests/fixtures/simple-service-task.bpmn',
         'tests/fixtures/simple-will-create-incident.bpmn',
       ]) {
@@ -115,7 +114,7 @@ describe(
       for (let i = 0; i < 3; i++) cli('create', 'pi', '--id', 'Process_0t60ay7');
       // simple-process completes immediately → COMPLETED
       for (let i = 0; i < 2; i++) cli('create', 'pi', '--id', 'simple-process');
-      // Process_18glkb3 has service task type 'n00b' → creates CREATED jobs (no worker)
+      // Process_18glkb3 has service task type 'n00b' → creates jobs (no worker)
       for (let i = 0; i < 2; i++) cli('create', 'pi', '--id', 'Process_18glkb3');
       // Process_0yyrstd creates 'unhandled-job-type' job → used to produce an incident
       cli('create', 'pi', '--id', 'Process_0yyrstd');
@@ -123,44 +122,53 @@ describe(
       // Switch to JSON mode for data extraction
       cli('output', 'json');
 
-      // Wait for ACTIVE process instances to be indexed
+      // Wait for ACTIVE process instances to be indexed.
+      // The table JSON columns are: Key, 'Process ID', State, Version, 'Tenant ID'
       await pollUntil(async () => {
         const r = cli('search', 'pi', '--id', 'Process_0t60ay7', '--state', 'ACTIVE');
         if (r.status !== 0) return false;
         try {
           const items: any[] = JSON.parse(r.stdout);
           if (items.length > 0) {
-            activeProcessInstanceKey = String(items[0].processInstanceKey ?? items[0].key);
+            // 'Key' column contains the processInstanceKey value
+            activeProcessInstanceKey = String(items[0].Key);
             return true;
           }
         } catch { /* retry */ }
         return false;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      // Wait for mini-process-1 process definition to be indexed
+      assert.ok(activeProcessInstanceKey, 'before(): ACTIVE process instance must be indexed');
+
+      // Wait for mini-process-1 process definition to be indexed.
+      // The table JSON columns are: Key, 'Process ID', Name, Version, 'Tenant ID'
       await pollUntil(async () => {
         const r = cli('search', 'pd', '--id', 'mini-process-1');
         if (r.status !== 0) return false;
         try {
           const items: any[] = JSON.parse(r.stdout);
           if (items.length > 0) {
-            miniProcessDefinitionKey = String(items[0].processDefinitionKey ?? items[0].key);
+            // 'Key' column contains the processDefinitionKey value
+            miniProcessDefinitionKey = String(items[0].Key);
             return true;
           }
         } catch { /* retry */ }
         return false;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      // Create incident: find the 'unhandled-job-type' job and fail it with retries=0
+      assert.ok(miniProcessDefinitionKey, 'before(): mini-process-1 definition must be indexed');
+
+      // Create incident: find the 'unhandled-job-type' job and fail it with retries=0.
+      // The table JSON columns for jobs: Key, Type, State, Retries, 'Process Instance', 'Tenant ID'
       let incidentJobKey: string | undefined;
       await pollUntil(async () => {
         const r = cli('search', 'jobs', '--type', 'unhandled-job-type', '--state', 'CREATED');
         if (r.status !== 0) return false;
         try {
           const jobs: any[] = JSON.parse(r.stdout);
-          const created = jobs.find(j => (j.state ?? '').toUpperCase() === 'CREATED');
-          if (created) {
-            incidentJobKey = String(created.jobKey ?? created.key);
+          if (jobs.length > 0) {
+            // 'Key' column contains the jobKey value
+            incidentJobKey = String(jobs[0].Key);
             return true;
           }
         } catch { /* retry */ }
@@ -171,23 +179,26 @@ describe(
         cli('fail', 'job', incidentJobKey, '--retries', '0', '--errorMessage', 'Intentional test incident');
       }
 
-      // Wait for the incident to be indexed
+      // Wait for the incident to be indexed.
+      // The table JSON columns for incidents: Key, Type, Message, State, 'Process Instance', 'Tenant ID'
       await pollUntil(async () => {
         const r = cli('search', 'inc', '--state', 'ACTIVE');
         if (r.status !== 0) return false;
         try {
           const items: any[] = JSON.parse(r.stdout);
           if (items.length > 0) {
-            incidentKey = String(items[0].incidentKey ?? items[0].key);
-            incidentProcessInstanceKey = String(items[0].processInstanceKey);
+            // 'Key' column contains the incidentKey value
+            incidentKey = String(items[0].Key);
+            // 'Process Instance' column contains the processInstanceKey value
+            incidentProcessInstanceKey = String(items[0]['Process Instance']);
             return true;
           }
         } catch { /* retry */ }
         return false;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      // Restore text output mode; individual tests set the mode they need
-      cli('output', 'text');
+      assert.ok(incidentKey, 'before(): incident must be indexed');
+      assert.ok(incidentProcessInstanceKey, 'before(): incident processInstanceKey must be set');
     });
 
     after(() => {
@@ -263,7 +274,8 @@ describe(
         assert.strictEqual(r.status, 0, `list pi --sortBy Key --asc exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         if (items.length >= 2) {
-          const keys = items.map((it: any) => String(it.Key).replace('⚠ ', ''));
+          // Strip the '⚠ ' incident prefix before comparing
+          const keys = items.map((it: any) => String(it.Key).replace(/^⚠ /, ''));
           const sorted = [...keys].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
           assert.deepStrictEqual(keys, sorted, 'Items should be sorted ascending by Key');
         }
@@ -275,7 +287,7 @@ describe(
         assert.strictEqual(r.status, 0, `list pi --sortBy Key --desc exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         if (items.length >= 2) {
-          const keys = items.map((it: any) => String(it.Key).replace('⚠ ', ''));
+          const keys = items.map((it: any) => String(it.Key).replace(/^⚠ /, ''));
           const sorted = [...keys].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
           assert.deepStrictEqual(keys, sorted, 'Items should be sorted descending by Key');
         }
@@ -311,8 +323,15 @@ describe(
         cli('output', 'json');
         const r = cli('list', 'pi', '--between', '2000-01-01..2000-01-02');
         assert.strictEqual(r.status, 0, `list pi --between past exited ${r.status}. stderr: ${r.stderr}`);
-        const items = parseJson(r.stdout);
-        assert.strictEqual(items.length, 0, '--between with past range should return no instances');
+        // In JSON mode, logger.table() writes to stdout only when there are results.
+        // An empty result emits logger.info() which goes to stderr in JSON mode,
+        // leaving stdout empty. Either way there should be no items.
+        const out = r.stdout.trim();
+        if (out.length > 0) {
+          const items = parseJson(r.stdout);
+          assert.strictEqual(items.length, 0, '--between with past range should return no instances');
+        }
+        // If stdout is empty, the CLI correctly emitted nothing to stdout (no items found)
       });
 
       test('--between --dateField=startDate finds recent instances', async () => {
@@ -507,6 +526,7 @@ describe(
         assert.strictEqual(r.status, 0, `list inc --processInstanceKey exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should return incidents for the process instance');
+        // 'Process Instance' column contains the processInstanceKey
         assert.ok(
           items.every((it: any) => String(it['Process Instance']) === incidentProcessInstanceKey),
           `All items should belong to processInstanceKey=${incidentProcessInstanceKey}`,
@@ -710,7 +730,8 @@ describe(
 
     // =========================================================================
     // c8 search — CLI surface tests
-    // (function-level coverage lives in tests/integration/search.test.ts)
+    // The search command uses table column names (Key, 'Process ID', State, etc.)
+    // in JSON mode output, not the raw API field names.
     // =========================================================================
 
     describe('search pi via CLI', () => {
@@ -720,8 +741,9 @@ describe(
         assert.strictEqual(r.status, 0, `search pi --id --state exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find active instances with the given process ID');
+        // 'Process ID' column contains the processDefinitionId value
         assert.ok(
-          items.every((it: any) => it.processDefinitionId === 'Process_0t60ay7'),
+          items.every((it: any) => it['Process ID'] === 'Process_0t60ay7'),
           'All items should match Process_0t60ay7',
         );
       });
@@ -732,8 +754,8 @@ describe(
         assert.strictEqual(r.status, 0, `search pi --key exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find the instance by key');
-        const key = String((items[0] as any).processInstanceKey ?? (items[0] as any).key);
-        assert.strictEqual(key, activeProcessInstanceKey, 'Returned key should match');
+        // 'Key' column contains the processInstanceKey value
+        assert.strictEqual(String(items[0].Key), activeProcessInstanceKey, 'Returned key should match');
       });
 
       test('--sortBy processInstanceKey --asc exits 0', () => {
@@ -758,8 +780,9 @@ describe(
         assert.strictEqual(r.status, 0, `search ut --state=CREATED exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find CREATED user tasks');
+        // 'State' column in the JSON table output
         assert.ok(
-          items.every((it: any) => it.state === 'CREATED'),
+          items.every((it: any) => it.State === 'CREATED'),
           'All items should be CREATED',
         );
       });
@@ -786,8 +809,9 @@ describe(
         assert.strictEqual(r.status, 0, `search inc --state=ACTIVE exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find active incidents');
+        // 'State' column in the JSON table output
         assert.ok(
-          items.every((it: any) => it.state === 'ACTIVE'),
+          items.every((it: any) => it.State === 'ACTIVE'),
           'All items should be ACTIVE',
         );
       });
@@ -814,9 +838,10 @@ describe(
         assert.strictEqual(r.status, 0, `search jobs --type=n00b exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find jobs of type n00b');
+        // 'Type' column in the JSON table output
         assert.ok(
-          items.every((it: any) => it.type === 'n00b'),
-          `All items should have type === n00b, got: ${[...new Set(items.map((it: any) => it.type))].join(', ')}`,
+          items.every((it: any) => it.Type === 'n00b'),
+          `All items should have Type === n00b, got: ${[...new Set(items.map((it: any) => it.Type))].join(', ')}`,
         );
       });
 
@@ -826,8 +851,9 @@ describe(
         assert.strictEqual(r.status, 0, `search jobs --state=CREATED exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         assert.ok(items.length > 0, 'Should find jobs in CREATED state');
+        // 'State' column in the JSON table output
         assert.ok(
-          items.every((it: any) => it.state === 'CREATED'),
+          items.every((it: any) => it.State === 'CREATED'),
           'All items should be CREATED',
         );
       });
@@ -861,165 +887,12 @@ describe(
         assert.strictEqual(r.status, 0, `search variables --processInstanceKey exited ${r.status}. stderr: ${r.stderr}`);
         const items = parseJson(r.stdout);
         if (items.length > 0) {
+          // 'Process Instance' column contains the processInstanceKey value
           assert.ok(
-            items.every((it: any) => String(it.processInstanceKey) === activeProcessInstanceKey),
+            items.every((it: any) => String(it['Process Instance']) === activeProcessInstanceKey),
             'All variables should belong to the queried process instance',
           );
         }
-      });
-    });
-
-    // =========================================================================
-    // Function-level tests for list/get commands that lacked direct coverage
-    // =========================================================================
-
-    /**
-     * Temporarily captures console.log calls so we can assert on logger output.
-     * The singleton logger (getLogger()) writes via console.log in text mode.
-     */
-    async function captureLog(fn: () => Promise<void>): Promise<string> {
-      const lines: string[] = [];
-      const origLog = console.log;
-      console.log = (...args: any[]) => lines.push(args.join(' '));
-      try {
-        await fn();
-      } finally {
-        console.log = origLog;
-      }
-      return lines.join('\n');
-    }
-
-    describe('listProcessDefinitions function', () => {
-      test('produces table output containing deployed definitions', async () => {
-        const output = await captureLog(() => listProcessDefinitions({}));
-        assert.ok(output.length > 0, 'listProcessDefinitions should produce output');
-        // Output is a text table — should contain at least one process ID from setup
-        assert.ok(
-          output.includes('mini-process-1') || output.includes('Process ID') || output.includes('No process definitions'),
-          `Output should contain table data or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--limit 1 produces output for at most 1 definition', async () => {
-        const output = await captureLog(() => listProcessDefinitions({ limit: 1 }));
-        assert.ok(output.length > 0, 'Should produce output even with limit');
-      });
-    });
-
-    describe('getProcessDefinition function', () => {
-      test('outputs JSON containing processDefinitionId for the queried key', async () => {
-        const output = await captureLog(() => getProcessDefinition(miniProcessDefinitionKey, {}));
-        assert.ok(output.length > 0, 'getProcessDefinition should produce JSON output');
-        assert.ok(
-          output.includes('mini-process-1'),
-          `Output should contain processDefinitionId "mini-process-1". Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--xml outputs BPMN XML string for the queried key', async () => {
-        const output = await captureLog(() => getProcessDefinition(miniProcessDefinitionKey, { xml: true }));
-        assert.ok(output.length > 0, 'getProcessDefinition with xml:true should produce output');
-        assert.ok(output.includes('bpmn:'), `XML output should contain BPMN namespace. Got: ${output.slice(0, 200)}`);
-        assert.ok(
-          output.includes('mini-process-1'),
-          `XML output should contain the process ID. Got: ${output.slice(0, 200)}`,
-        );
-      });
-    });
-
-    describe('listUserTasks function', () => {
-      test('produces table output containing user tasks', async () => {
-        const output = await captureLog(() => listUserTasks({}));
-        assert.ok(output.length > 0, 'listUserTasks should produce output');
-        assert.ok(
-          output.includes('CREATED') || output.includes('State') || output.includes('No user tasks'),
-          `Output should contain task data or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--state=CREATED filter produces output', async () => {
-        const output = await captureLog(() => listUserTasks({ state: 'CREATED' }));
-        assert.ok(output.length > 0, 'listUserTasks with state filter should produce output');
-        // Should contain task data (CREATED) or the no-data message
-        assert.ok(
-          output.includes('CREATED') || output.includes('No user tasks'),
-          `Output should mention CREATED tasks or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--limit 1 returns at most one row in table output', async () => {
-        const output = await captureLog(() => listUserTasks({ limit: 1 }));
-        assert.ok(output.length > 0, 'listUserTasks with limit should produce output');
-      });
-    });
-
-    describe('listIncidents function', () => {
-      test('produces table output containing at least one ACTIVE incident', async () => {
-        const output = await captureLog(() => listIncidents({ state: 'ACTIVE' }));
-        assert.ok(output.length > 0, 'listIncidents should produce output');
-        assert.ok(
-          output.includes('ACTIVE') || output.includes('State'),
-          `Output should contain ACTIVE incident data. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--processInstanceKey filters to matching PI', async () => {
-        const output = await captureLog(() => listIncidents({ processInstanceKey: incidentProcessInstanceKey }));
-        assert.ok(output.length > 0, 'listIncidents with processInstanceKey should produce output');
-        assert.ok(
-          output.includes(incidentProcessInstanceKey) || output.includes('Process Instance'),
-          `Output should contain the process instance key. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--limit 1 produces output', async () => {
-        const output = await captureLog(() => listIncidents({ limit: 1 }));
-        assert.ok(output.length > 0, 'listIncidents with limit should produce output');
-      });
-    });
-
-    describe('getIncident function', () => {
-      test('outputs JSON containing the incident key', async () => {
-        const output = await captureLog(() => getIncident(incidentKey, {}));
-        assert.ok(output.length > 0, 'getIncident should produce JSON output');
-        assert.ok(
-          output.includes(incidentKey),
-          `Output should contain incident key ${incidentKey}. Got: ${output.slice(0, 200)}`,
-        );
-      });
-    });
-
-    describe('listJobs function', () => {
-      test('produces table output containing jobs', async () => {
-        const output = await captureLog(() => listJobs({}));
-        assert.ok(output.length > 0, 'listJobs should produce output');
-        assert.ok(
-          output.includes('n00b') || output.includes('Type') || output.includes('No jobs'),
-          `Output should contain job data or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--state=CREATED filter produces output', async () => {
-        const output = await captureLog(() => listJobs({ state: 'CREATED' }));
-        assert.ok(output.length > 0, 'listJobs with state filter should produce output');
-        assert.ok(
-          output.includes('CREATED') || output.includes('No jobs'),
-          `Output should mention CREATED jobs or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--type=n00b filter produces output containing n00b type', async () => {
-        const output = await captureLog(() => listJobs({ type: 'n00b' }));
-        assert.ok(output.length > 0, 'listJobs with type filter should produce output');
-        assert.ok(
-          output.includes('n00b') || output.includes('No jobs'),
-          `Output should contain n00b type or no-data message. Got: ${output.slice(0, 200)}`,
-        );
-      });
-
-      test('--limit 1 produces output', async () => {
-        const output = await captureLog(() => listJobs({ limit: 1 }));
-        assert.ok(output.length > 0, 'listJobs with limit should produce output');
       });
     });
   },
