@@ -65,3 +65,10 @@ class MyClass {
   }
 }
 ```
+
+- prefer object-style function parameters over long parameter lists to be most flexible with parameter order. Example:
+
+```typescript
+function createUser({ name, email, age }: { name: string; email: string; age: number }) {
+  // function body
+}

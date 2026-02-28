@@ -3,7 +3,7 @@
  */
 
 import { getLogger, Logger, sortTableData, type SortOrder } from '../logger.ts';
-import { createClient, fetchAllPages } from '../client.ts';
+import { createClient, fetchAllPages, DEFAULT_PAGE_SIZE } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 
@@ -257,7 +257,7 @@ export async function searchProcessDefinitions(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchProcessDefinitions(f, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
     const result = { items: allItems } as any;
 
@@ -393,7 +393,7 @@ export async function searchProcessInstances(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchProcessInstances(f, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
     const result = { items: allItems } as any;
 
@@ -515,7 +515,7 @@ export async function searchUserTasks(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchUserTasks(f, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
     const result = { items: allItems } as any;
 
@@ -649,7 +649,7 @@ export async function searchIncidents(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchIncidents(f, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
     const result = { items: allItems } as any;
 
@@ -766,7 +766,7 @@ export async function searchJobs(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchJobs(f, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
     const result = { items: allItems } as any;
 
@@ -876,7 +876,7 @@ export async function searchVariables(options: {
     const allItems = await fetchAllPages(
       (f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
       filter,
-      hasCiFilter ? CI_PAGE_SIZE : undefined,
+      hasCiFilter ? CI_PAGE_SIZE : DEFAULT_PAGE_SIZE,
       options.limit,
     );
 
