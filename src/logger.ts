@@ -65,7 +65,9 @@ export class Logger {
     if (this.mode === 'text') {
       this._writeLog(message);
     } else {
-      this._writeLog(JSON.stringify({ status: 'info', message }));
+    
+      // unix convention suggest: info and warning messages should go to stderr, while only the main output goes to stdout
+      this._writeError(JSON.stringify({ status: 'info', message }));
     }
   }
 
@@ -102,9 +104,9 @@ export class Logger {
       }
     } else {
       if (key !== undefined) {
-        this._writeLog(JSON.stringify({ status: 'success', message, key }));
+        this._writeError(JSON.stringify({ status: 'success', message, key }));
       } else {
-        this._writeLog(JSON.stringify({ status: 'success', message }));
+        this._writeError(JSON.stringify({ status: 'success', message }));
       }
     }
   }

@@ -141,35 +141,35 @@ describe('Logger Module', () => {
   });
 
   describe('JSON Mode', () => {
-    test('info outputs JSON in JSON mode', () => {
+    test('info outputs JSON to stderr in JSON mode', () => {
       c8ctl.outputMode = 'json';
       const logger = new Logger();
       logger.info('Test message');
       
-      assert.strictEqual(consoleLogSpy.length, 1);
-      const output = JSON.parse(consoleLogSpy[0]);
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
       assert.strictEqual(output.status, 'info');
       assert.strictEqual(output.message, 'Test message');
     });
 
-    test('success outputs JSON in JSON mode', () => {
+    test('success outputs JSON to stderr in JSON mode', () => {
       c8ctl.outputMode = 'json';
       const logger = new Logger();
       logger.success('Operation successful');
       
-      assert.strictEqual(consoleLogSpy.length, 1);
-      const output = JSON.parse(consoleLogSpy[0]);
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
       assert.strictEqual(output.status, 'success');
       assert.strictEqual(output.message, 'Operation successful');
     });
 
-    test('success outputs JSON with key in JSON mode', () => {
+    test('success outputs JSON with key to stderr in JSON mode', () => {
       c8ctl.outputMode = 'json';
       const logger = new Logger();
       logger.success('Process created', 123456);
       
-      assert.strictEqual(consoleLogSpy.length, 1);
-      const output = JSON.parse(consoleLogSpy[0]);
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
       assert.strictEqual(output.status, 'success');
       assert.strictEqual(output.message, 'Process created');
       assert.strictEqual(output.key, 123456);
@@ -254,8 +254,8 @@ describe('Logger Module', () => {
       assert.strictEqual(c8ctl.outputMode, 'json');
       logger.success('Test 2');
       
-      assert.strictEqual(consoleLogSpy.length, 1);
-      const output = JSON.parse(consoleLogSpy[0]);
+      assert.strictEqual(consoleErrorSpy.length, 1);
+      const output = JSON.parse(consoleErrorSpy[0]);
       assert.strictEqual(output.status, 'success');
     });
 
@@ -463,18 +463,18 @@ describe('Logger Module', () => {
       logger.success('JSON success', 456);
       logger.error('JSON error');
 
-      // Verify JSON output was captured
-      assert.strictEqual(logOutput.length, 2);
-      const infoObj = JSON.parse(logOutput[0]);
+      // info and success go to stderr in JSON mode (alongside error)
+      assert.strictEqual(logOutput.length, 0);
+      assert.strictEqual(errorOutput.length, 3);
+      const infoObj = JSON.parse(errorOutput[0]);
       assert.strictEqual(infoObj.status, 'info');
       assert.strictEqual(infoObj.message, 'JSON info');
 
-      const successObj = JSON.parse(logOutput[1]);
+      const successObj = JSON.parse(errorOutput[1]);
       assert.strictEqual(successObj.status, 'success');
       assert.strictEqual(successObj.key, 456);
 
-      assert.strictEqual(errorOutput.length, 1);
-      const errorObj = JSON.parse(errorOutput[0]);
+      const errorObj = JSON.parse(errorOutput[2]);
       assert.strictEqual(errorObj.status, 'error');
       assert.strictEqual(errorObj.message, 'JSON error');
     });

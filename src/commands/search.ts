@@ -3,7 +3,7 @@
  */
 
 import { getLogger, Logger, sortTableData, type SortOrder } from '../logger.ts';
-import { createClient, fetchAllPages } from '../client.ts';
+import { createClient, fetchAllPages, DEFAULT_PAGE_SIZE } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 
@@ -238,8 +238,6 @@ export async function searchProcessDefinitions(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.processDefinitionId) {
       filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
     }
@@ -256,7 +254,12 @@ export async function searchProcessDefinitions(options: {
       filter.filter.processDefinitionKey = options.key;
     }
 
-    const result = await client.searchProcessDefinitions(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchProcessDefinitions(f, opts),
+      filter,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
+    );
+    const result = { items: allItems } as any;
 
     if (result.items?.length) {
       result.items = [...result.items].sort((left: any, right: any) => {
@@ -356,8 +359,6 @@ export async function searchProcessInstances(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.processDefinitionId) {
       filter.filter.processDefinitionId = toStringFilter(options.processDefinitionId);
     }
@@ -389,7 +390,12 @@ export async function searchProcessInstances(options: {
       }
     }
 
-    const result = await client.searchProcessInstances(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchProcessInstances(f, opts),
+      filter,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
+    );
+    const result = { items: allItems } as any;
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((pi: any) => {
@@ -475,8 +481,6 @@ export async function searchUserTasks(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.state) {
       filter.filter.state = options.state;
     }
@@ -508,7 +512,12 @@ export async function searchUserTasks(options: {
       }
     }
 
-    const result = await client.searchUserTasks(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchUserTasks(f, opts),
+      filter,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
+    );
+    const result = { items: allItems } as any;
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((task: any) => {
@@ -603,8 +612,6 @@ export async function searchIncidents(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.state) {
       filter.filter.state = options.state;
     }
@@ -639,7 +646,12 @@ export async function searchIncidents(options: {
       }
     }
 
-    const result = await client.searchIncidents(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchIncidents(f, opts),
+      filter,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
+    );
+    const result = { items: allItems } as any;
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((incident: any) => {
@@ -724,8 +736,6 @@ export async function searchJobs(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.state) {
       filter.filter.state = options.state;
     }
@@ -753,7 +763,12 @@ export async function searchJobs(options: {
       }
     }
 
-    const result = await client.searchJobs(filter, { consistency: { waitUpToMs: 0 } });
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchJobs(f, opts),
+      filter,
+      ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
+    );
+    const result = { items: allItems } as any;
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((job: any) => {
@@ -839,8 +854,6 @@ export async function searchVariables(options: {
       },
     };
 
-    if (hasCiFilter) filter.page = { limit: CI_PAGE_SIZE };
-
     if (options.name) {
       filter.filter.name = toStringFilter(options.name);
     }
@@ -860,17 +873,12 @@ export async function searchVariables(options: {
     // By default, truncate values unless --fullValue is specified
     const truncateValues = !options.fullValue;
 
-    const allItems = hasCiFilter
-      ? await fetchAllPages(
-          (f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
-          filter,
-          CI_PAGE_SIZE,
-          options.limit,
-        )
-      : (await client.searchVariables(
-          { ...filter, truncateValues },
-          { consistency: { waitUpToMs: 0 } },
-        )).items || [];
+    const allItems = await fetchAllPages(
+      (f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
+      filter,
+      hasCiFilter ? CI_PAGE_SIZE : DEFAULT_PAGE_SIZE,
+      options.limit,
+    );
 
     let result = { items: allItems } as any;
 

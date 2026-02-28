@@ -48,7 +48,7 @@ export function createClient(
 /**
  * Default page size for cursor-based pagination when fetching all results.
  */
-const DEFAULT_PAGE_SIZE = 100;
+export const DEFAULT_PAGE_SIZE = 100;
 
 /**
  * Default upper bound on the total number of items fetched.
