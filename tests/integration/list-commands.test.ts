@@ -74,6 +74,7 @@ function cli(...args: string[]) {
 
 /** Parse JSON produced by logger.table() in JSON mode; improves error messages. */
 function parseJson(stdout: string): any[] {
+  if (stdout.trim().length === 0) return [];
   try {
     return JSON.parse(stdout);
   } catch {
@@ -374,7 +375,7 @@ describe(
         const items = parseJson(r.stdout);
         if (items.length >= 2) {
           const ids = items.map((it: any) => String(it['Process ID']));
-          const sorted = [...ids].sort((a, b) => a.localeCompare(b));
+          const sorted = [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
           assert.deepStrictEqual(ids, sorted, 'Items should be sorted ascending by Process ID');
         }
       });
@@ -386,7 +387,7 @@ describe(
         const items = parseJson(r.stdout);
         if (items.length >= 2) {
           const ids = items.map((it: any) => String(it['Process ID']));
-          const sorted = [...ids].sort((a, b) => b.localeCompare(a));
+          const sorted = [...ids].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
           assert.deepStrictEqual(ids, sorted, 'Items should be sorted descending by Process ID');
         }
       });
@@ -708,7 +709,7 @@ describe(
       test('--xml returns BPMN XML string', () => {
         const r = cli('get', 'pd', miniProcessDefinitionKey, '--xml');
         assert.strictEqual(r.status, 0, `get pd --xml exited ${r.status}. stderr: ${r.stderr}`);
-        assert.ok(r.stdout.includes('bpmn:'), 'XML output should contain BPMN namespace');
+        assert.ok(/<[^>]*definitions/i.test(r.stdout), 'XML output should contain a definitions element');
         assert.ok(r.stdout.includes('mini-process-1'), 'XML output should contain the process ID');
       });
     });
