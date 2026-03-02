@@ -7,57 +7,49 @@ import assert from 'node:assert';
 import { execSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { getUserDataDir } from '../../src/config.ts';
+import { tmpdir } from 'node:os';
 
 describe('Plugin Lifecycle Integration Tests', () => {
   const testPluginDir = join(process.cwd(), 'test-plugin-temp');
   const testPluginName = 'c8ctl-test-plugin';
-  const pluginsDir = join(getUserDataDir(), 'plugins');
-  const nodeModulesPluginPath = join(pluginsDir, 'node_modules', testPluginName);
+  let testDataDir: string;
+  let pluginsDir: string;
+  let nodeModulesPluginPath: string;
+  let originalDataDir: string | undefined;
   
-  // Setup: Clean up any previous test artifacts
+  // Setup: Use an isolated data directory to avoid polluting the real user data dir
   before(() => {
+    originalDataDir = process.env.C8CTL_DATA_DIR;
+    testDataDir = join(tmpdir(), `c8ctl-plugin-test-${Date.now()}-${process.pid}`);
+    mkdirSync(testDataDir, { recursive: true });
+    process.env.C8CTL_DATA_DIR = testDataDir;
+
+    pluginsDir = join(testDataDir, 'plugins');
+    nodeModulesPluginPath = join(pluginsDir, 'node_modules', testPluginName);
+
     // Remove temp directory if it exists
     if (existsSync(testPluginDir)) {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
-    
-    // Unload plugin if it exists from previous run
-    try {
-      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
-        cwd: process.cwd(),
-        stdio: 'ignore' 
-      });
-    } catch {
-      // Ignore if not installed
-    }
-    
-    // Remove from global node_modules if still there
-    if (existsSync(nodeModulesPluginPath)) {
-      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
-    }
   });
   
-  // Cleanup: Ensure test artifacts are removed
+  // Cleanup: Restore environment and remove all test artifacts
   after(() => {
-    // Remove temp directory
+    // Restore original data dir
+    if (originalDataDir !== undefined) {
+      process.env.C8CTL_DATA_DIR = originalDataDir;
+    } else {
+      delete process.env.C8CTL_DATA_DIR;
+    }
+
+    // Remove temp plugin build directory
     if (existsSync(testPluginDir)) {
       rmSync(testPluginDir, { recursive: true, force: true });
     }
-    
-    // Unload plugin
-    try {
-      execSync(`node src/index.ts unload plugin ${testPluginName}`, { 
-        cwd: process.cwd(),
-        stdio: 'ignore' 
-      });
-    } catch {
-      // Ignore if already uninstalled
-    }
-    
-    // Remove from global node_modules
-    if (existsSync(nodeModulesPluginPath)) {
-      rmSync(nodeModulesPluginPath, { recursive: true, force: true });
+
+    // Remove isolated data directory (contains installed plugins)
+    if (existsSync(testDataDir)) {
+      rmSync(testDataDir, { recursive: true, force: true });
     }
   });
   
