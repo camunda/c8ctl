@@ -707,6 +707,7 @@ describe(
       });
 
       test('--xml returns BPMN XML string', () => {
+        cli('output', 'text');
         const r = cli('get', 'pd', miniProcessDefinitionKey, '--xml');
         assert.strictEqual(r.status, 0, `get pd --xml exited ${r.status}. stderr: ${r.stderr}`);
         assert.ok(/<[^>]*definitions/i.test(r.stdout), 'XML output should contain a definitions element');
