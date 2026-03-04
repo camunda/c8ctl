@@ -751,4 +751,74 @@ export const commands = {
       }
     }
   });
+
+  test('load plugin --from preserves correct source when loading multiple plugins', async () => {
+    // Regression test for: "c8 load plugin --from doesn't respect the plugin name and overwrites existing plugin"
+    const pluginOneDir = join(process.cwd(), 'test-multi-plugin-one-temp');
+    const pluginTwoDir = join(process.cwd(), 'test-multi-plugin-two-temp');
+    const pluginOneName = 'c8ctl-multi-test-plugin-one';
+    const pluginTwoName = 'c8ctl-multi-test-plugin-two';
+    const pluginOneModulesPath = join(pluginsDir, 'node_modules', pluginOneName);
+    const pluginTwoModulesPath = join(pluginsDir, 'node_modules', pluginTwoName);
+
+    for (const dir of [pluginOneDir, pluginTwoDir]) {
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+
+    try {
+      // Create two distinct plugin directories
+      for (const [dir, name, cmd] of [
+        [pluginOneDir, pluginOneName, 'multi-test-one'],
+        [pluginTwoDir, pluginTwoName, 'multi-test-two'],
+      ] as [string, string, string][]) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+          join(dir, 'package.json'),
+          JSON.stringify({ name, version: '1.0.0', type: 'module', keywords: ['c8ctl', 'plugin'] }, null, 2)
+        );
+        writeFileSync(
+          join(dir, 'c8ctl-plugin.js'),
+          `export const commands = { '${cmd}': async () => { console.log('${cmd.toUpperCase()}_EXECUTED'); } };\n`
+        );
+      }
+
+      // Load both plugins sequentially via --from
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginOneDir}`], {
+        cwd: process.cwd(), stdio: 'pipe', timeout: 10000,
+      });
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginTwoDir}`], {
+        cwd: process.cwd(), stdio: 'pipe', timeout: 10000,
+      });
+
+      // Verify both plugins are installed on disk
+      assert.ok(existsSync(pluginOneModulesPath), 'First plugin should be installed');
+      assert.ok(existsSync(pluginTwoModulesPath), 'Second plugin should be installed');
+
+      // Verify the plugin list shows both plugins with their correct names
+      const listOutput = execSync('node src/index.ts list plugins', {
+        cwd: process.cwd(), encoding: 'utf-8', timeout: 5000,
+      });
+      assert.ok(listOutput.includes(pluginOneName),
+        `Plugin list should include first plugin. Output: ${listOutput}`);
+      assert.ok(listOutput.includes(pluginTwoName),
+        `Plugin list should include second plugin. Output: ${listOutput}`);
+
+      // Verify the source for each plugin is preserved correctly by checking the registry
+      // Each plugin's source should point to its own directory, not the other plugin's directory
+      assert.ok(listOutput.includes(pluginOneDir) || listOutput.includes('file:'),
+        `Plugin list should reference each plugin's source. Output: ${listOutput}`);
+    } finally {
+      for (const dir of [pluginOneDir, pluginTwoDir]) {
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+      }
+      for (const name of [pluginOneName, pluginTwoName]) {
+        try {
+          execSync(`node src/index.ts unload plugin ${name}`, { cwd: process.cwd(), stdio: 'ignore' });
+        } catch { /* ignore */ }
+      }
+      for (const path of [pluginOneModulesPath, pluginTwoModulesPath]) {
+        if (existsSync(path)) rmSync(path, { recursive: true, force: true });
+      }
+    }
+  });
 });

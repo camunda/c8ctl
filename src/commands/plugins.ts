@@ -60,12 +60,16 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     let pluginSource: string;
     
     if (fromUrl) {
+      // Snapshot existing plugins before installation so we can identify the new one
+      const nodeModulesPath = join(pluginsDir, 'node_modules');
+      const existingPluginNames = getInstalledPluginNames(nodeModulesPath);
+
       // Install from URL (file://, https://, git://, etc.)
       logger.info(`Loading plugin from: ${fromUrl}...`);
       execSync(`npm install ${fromUrl} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
       
       // Extract package name from installed package
-      pluginName = extractPackageNameFromUrl(fromUrl, pluginsDir);
+      pluginName = extractPackageNameFromUrl(fromUrl, pluginsDir, existingPluginNames);
       pluginSource = fromUrl;
       
       // Validate plugin name
@@ -170,15 +174,73 @@ function scanForPlugin(nodeModulesPath: string, entries: string[]): string | nul
 }
 
 /**
- * Extract package name from URL or installed package
- * Tries to read package.json from installed package, falls back to URL parsing
+ * Get the names of all valid c8ctl plugins currently in node_modules
  */
-function extractPackageNameFromUrl(url: string, pluginsDir: string): string {
+function getInstalledPluginNames(nodeModulesPath: string): Set<string> {
+  const names = new Set<string>();
+  if (!existsSync(nodeModulesPath)) return names;
+  try {
+    for (const entry of readdirSync(nodeModulesPath).filter(e => !e.startsWith('.'))) {
+      if (entry.startsWith('@')) {
+        const scopePath = join(nodeModulesPath, entry);
+        try {
+          for (const pkg of readdirSync(scopePath)) {
+            const pkgPath = join(scopePath, pkg);
+            if (isValidPlugin(pkgPath)) {
+              const name = getPackageName(pkgPath);
+              if (name) names.add(name);
+            }
+          }
+        } catch { /* skip */ }
+      } else {
+        const pkgPath = join(nodeModulesPath, entry);
+        if (isValidPlugin(pkgPath)) {
+          const name = getPackageName(pkgPath);
+          if (name) names.add(name);
+        }
+      }
+    }
+  } catch { /* skip */ }
+  return names;
+}
+
+/**
+ * Extract package name from URL or installed package
+ * Tries to read package.json from installed package, falls back to URL parsing.
+ * When existingNames is provided, prefers a newly installed plugin not in that set.
+ */
+function extractPackageNameFromUrl(url: string, pluginsDir: string, existingNames?: Set<string>): string {
   // Try to scan node_modules to find the package by reading package.json
   try {
     const nodeModulesPath = join(pluginsDir, 'node_modules');
     if (existsSync(nodeModulesPath)) {
       const entries = readdirSync(nodeModulesPath);
+
+      if (existingNames) {
+        // Prefer the newly installed plugin (not present before install)
+        for (const entry of entries.filter(e => !e.startsWith('.'))) {
+          if (entry.startsWith('@')) {
+            const scopePath = join(nodeModulesPath, entry);
+            try {
+              for (const pkg of readdirSync(scopePath)) {
+                const pkgPath = join(scopePath, pkg);
+                const name = getPackageName(pkgPath);
+                if (name && !existingNames.has(name) && isValidPlugin(pkgPath)) {
+                  return name;
+                }
+              }
+            } catch { /* skip */ }
+          } else {
+            const pkgPath = join(nodeModulesPath, entry);
+            const name = getPackageName(pkgPath);
+            if (name && !existingNames.has(name) && isValidPlugin(pkgPath)) {
+              return name;
+            }
+          }
+        }
+      }
+
+      // Fallback: return the first valid plugin found
       const foundName = scanForPlugin(nodeModulesPath, entries);
       if (foundName) return foundName;
     }
