@@ -142,6 +142,30 @@ function getPackageName(pkgPath: string): string | null {
 }
 
 /**
+ * Try to read package name from source URL/path package.json
+ */
+function getPackageNameFromSourceUrl(url: string): string | null {
+  let sourcePath: string | null = null;
+  try {
+    if (url.startsWith('file:')) {
+      sourcePath = fileURLToPath(url);
+    } else if (!/^[a-zA-Z]+:/.test(url)) {
+      sourcePath = url;
+    }
+  } catch {
+    sourcePath = null;
+  }
+
+  if (!sourcePath) return null;
+
+  const packageName = getPackageName(sourcePath);
+  if (packageName && packageName.trim() !== '') {
+    return packageName;
+  }
+  return null;
+}
+
+/**
  * Scan directory entries for c8ctl plugins
  */
 function scanForPlugin(nodeModulesPath: string, entries: string[]): string | null {
@@ -210,6 +234,11 @@ function getInstalledPluginNames(nodeModulesPath: string): Set<string> {
  * When existingNames is provided, prefers a newly installed plugin not in that set.
  */
 function extractPackageNameFromUrl(url: string, pluginsDir: string, existingNames?: Set<string>): string {
+  const sourcePackageName = getPackageNameFromSourceUrl(url);
+  if (sourcePackageName) {
+    return sourcePackageName;
+  }
+
   // Try to scan node_modules to find the package by reading package.json
   try {
     const nodeModulesPath = join(pluginsDir, 'node_modules');
