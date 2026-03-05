@@ -3,7 +3,7 @@
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  */
 
-import { test, describe, beforeEach, after } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -18,10 +18,16 @@ const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
 const POLL_TIMEOUT_MS = ELASTICSEARCH_CONSISTENCY_WAIT_MS + 10_000;
 const POLL_INTERVAL_MS = 2_000;
 
-const dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-pd-test-'));
+let dataDir = '';
+
+type ProcessDefinition = {
+  processDefinitionKey: string | number;
+  processDefinitionId: string;
+  version?: number;
+};
 
 function cli(...args: string[]) {
-  return spawnSync('node', [CLI, ...args], {
+  return spawnSync('node', ['--experimental-strip-types', CLI, ...args], {
     encoding: 'utf-8',
     cwd: PROJECT_ROOT,
     env: { ...process.env, C8CTL_DATA_DIR: dataDir },
@@ -29,8 +35,13 @@ function cli(...args: string[]) {
   });
 }
 
-function parseJsonOutput<T = any>(output: string): T {
-  return JSON.parse(output) as T;
+function parseJsonOutput<T>(output: string): T {
+  try {
+    return JSON.parse(output) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    assert.fail(`Expected valid JSON output (${message}), got:\n${output}`);
+  }
 }
 
 async function deployAndGetProcessDefinitionKey() {
@@ -40,25 +51,27 @@ async function deployAndGetProcessDefinitionKey() {
   const outputResult = cli('output', 'json');
   assert.strictEqual(outputResult.status, 0, `Setting output mode should exit 0. stderr: ${outputResult.stderr}`);
 
+  let latestItems: ProcessDefinition[] = [];
   await pollUntil(async () => {
     const searchResult = cli('search', 'pd', '--id=simple-process');
     if (searchResult.status !== 0) return false;
     try {
-      const items = parseJsonOutput<any[]>(searchResult.stdout);
-      return items.length > 0;
+      latestItems = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
+      return latestItems.length > 0;
     } catch {
       return false;
     }
   }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-  const searchResult = cli('search', 'pd', '--id=simple-process');
-  assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
-  const items = parseJsonOutput<any[]>(searchResult.stdout);
-  assert.ok(items.length > 0, 'Should have at least one process definition');
-  return String(items[0].processDefinitionKey);
+  assert.ok(latestItems.length > 0, 'Should have at least one process definition');
+  return String(latestItems[0].processDefinitionKey);
 }
 
 describe('Process Definition Integration Tests (requires Camunda 8 at localhost:8080)', () => {
+  before(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-pd-test-'));
+  });
+
   beforeEach(() => {
     rmSync(join(dataDir, 'session.json'), { force: true });
   });
@@ -72,8 +85,9 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
     const searchResult = cli('search', 'pd', '--id=simple-process');
     assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
-    const items = parseJsonOutput<any[]>(searchResult.stdout);
-    const firstItem = items.find(item => String(item.processDefinitionKey) === processDefinitionKey) ?? items[0];
+    const items = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
+    const firstItem = items.find(item => String(item.processDefinitionKey) === processDefinitionKey);
+    assert.ok(firstItem, `Expected to find process definition ${processDefinitionKey}`);
 
     assert.ok(firstItem.processDefinitionKey, 'Process definition should have a key');
     assert.ok(firstItem.processDefinitionId, 'Process definition should have an ID');
@@ -85,7 +99,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
     const getResult = cli('get', 'pd', processDefinitionKey);
     assert.strictEqual(getResult.status, 0, `Get should exit 0. stderr: ${getResult.stderr}`);
-    const definition = parseJsonOutput<any>(getResult.stdout);
+    const definition = parseJsonOutput<ProcessDefinition>(getResult.stdout);
 
     assert.ok(definition, 'Process definition should be returned');
     assert.strictEqual(String(definition.processDefinitionKey), processDefinitionKey, 'Keys should match');
