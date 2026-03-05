@@ -7,6 +7,7 @@ import assert from 'node:assert';
 import { execSync, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { getUserDataDir } from '../../src/config.ts';
 
 describe('Plugin Lifecycle Integration Tests', () => {
@@ -756,7 +757,7 @@ export const commands = {
     // Regression test for: "c8 load plugin --from doesn't respect the plugin name and overwrites existing plugin"
     const pluginOneDir = join(process.cwd(), 'test-multi-plugin-one-temp');
     const pluginTwoDir = join(process.cwd(), 'test-multi-plugin-two-temp');
-    const multiPluginDataDir = join(process.cwd(), 'test-multi-plugin-data-dir');
+    const multiPluginDataDir = join(tmpdir(), `test-multi-plugin-data-dir-${process.pid}`);
     const pluginOneName = 'c8ctl-multi-test-plugin-one';
     const pluginTwoName = 'c8ctl-multi-test-plugin-two';
     const isolatedPluginsDir = join(multiPluginDataDir, 'plugins');

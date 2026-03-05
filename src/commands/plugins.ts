@@ -145,11 +145,12 @@ function getPackageName(pkgPath: string): string | null {
  * Try to read package name from source URL/path package.json
  */
 function getPackageNameFromSourceUrl(url: string): string | null {
+  const URL_SCHEME_PATTERN = /^[a-zA-Z]+:/;
   let sourcePath: string | null = null;
   try {
     if (url.startsWith('file:')) {
       sourcePath = fileURLToPath(url);
-    } else if (!/^[a-zA-Z]+:/.test(url)) {
+    } else if (!URL_SCHEME_PATTERN.test(url)) {
       sourcePath = url;
     }
   } catch {
