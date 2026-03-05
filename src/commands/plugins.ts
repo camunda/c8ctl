@@ -61,8 +61,7 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
     
     if (fromUrl) {
       // Snapshot existing plugins before installation so we can identify the new one
-      const nodeModulesPath = join(pluginsDir, 'node_modules');
-      const existingPluginNames = getInstalledPluginNames(nodeModulesPath);
+      const existingPluginNames = getInstalledPluginNames(pluginsDir);
 
       // Install from URL (file://, https://, git://, etc.)
       logger.info(`Loading plugin from: ${fromUrl}...`);
@@ -166,66 +165,50 @@ function getPackageNameFromSourceUrl(url: string): string | null {
   return null;
 }
 
-/**
- * Scan directory entries for c8ctl plugins
- */
-function scanForPlugin(nodeModulesPath: string, entries: string[]): string | null {
-  for (const entry of entries.filter(e => !e.startsWith('.'))) {
-    const pkgPath = entry.startsWith('@')
-      ? null // Scoped packages handled separately
-      : join(nodeModulesPath, entry);
-    
-    if (pkgPath && isValidPlugin(pkgPath)) {
-      return getPackageName(pkgPath);
+function listTopLevelDependencies(pluginsDir: string): string[] {
+  const parseDependencyNames = (value: string): string[] => {
+    try {
+      const parsed = JSON.parse(value) as { dependencies?: Record<string, unknown> };
+      return Object.keys(parsed.dependencies ?? {});
+    } catch {
+      return [];
     }
-    
-    // Handle scoped packages
-    if (entry.startsWith('@')) {
-      const scopePath = join(nodeModulesPath, entry);
-      try {
-        const scopedPackages = readdirSync(scopePath);
-        for (const scopedPkg of scopedPackages) {
-          const pkgPath = join(scopePath, scopedPkg);
-          if (isValidPlugin(pkgPath)) {
-            return getPackageName(pkgPath);
-          }
-        }
-      } catch {
-        // Skip scoped packages that can't be read
-      }
-    }
+  };
+
+  try {
+    const output = execSync(`npm list --depth 0 --json --prefix "${pluginsDir}"`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    return parseDependencyNames(output);
+  } catch (error) {
+    const stdout = (error as { stdout?: Buffer | string }).stdout;
+    if (!stdout) return [];
+    return parseDependencyNames(typeof stdout === 'string' ? stdout : stdout.toString('utf-8'));
   }
-  return null;
+}
+
+function resolvePackagePath(nodeModulesPath: string, packageName: string): string {
+  return join(nodeModulesPath, ...packageName.split('/'));
 }
 
 /**
  * Get the names of all valid c8ctl plugins currently in node_modules
  */
-function getInstalledPluginNames(nodeModulesPath: string): Set<string> {
+function getInstalledPluginNames(pluginsDir: string): Set<string> {
   const names = new Set<string>();
+  const nodeModulesPath = join(pluginsDir, 'node_modules');
   if (!existsSync(nodeModulesPath)) return names;
-  try {
-    for (const entry of readdirSync(nodeModulesPath).filter(e => !e.startsWith('.'))) {
-      if (entry.startsWith('@')) {
-        const scopePath = join(nodeModulesPath, entry);
-        try {
-          for (const pkg of readdirSync(scopePath)) {
-            const pkgPath = join(scopePath, pkg);
-            if (isValidPlugin(pkgPath)) {
-              const name = getPackageName(pkgPath);
-              if (name) names.add(name);
-            }
-          }
-        } catch { /* skip */ }
-      } else {
-        const pkgPath = join(nodeModulesPath, entry);
-        if (isValidPlugin(pkgPath)) {
-          const name = getPackageName(pkgPath);
-          if (name) names.add(name);
-        }
-      }
+
+  for (const dependencyName of listTopLevelDependencies(pluginsDir)) {
+    const pkgPath = resolvePackagePath(nodeModulesPath, dependencyName);
+    if (!isValidPlugin(pkgPath)) continue;
+    const name = getPackageName(pkgPath);
+    if (name) {
+      names.add(name);
     }
-  } catch { /* skip */ }
+  }
+
   return names;
 }
 
@@ -244,35 +227,26 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
   try {
     const nodeModulesPath = join(pluginsDir, 'node_modules');
     if (existsSync(nodeModulesPath)) {
-      const entries = readdirSync(nodeModulesPath);
+      const dependencyNames = listTopLevelDependencies(pluginsDir);
 
       if (existingNames) {
         // Prefer the newly installed plugin (not present before install)
-        for (const entry of entries.filter(e => !e.startsWith('.'))) {
-          if (entry.startsWith('@')) {
-            const scopePath = join(nodeModulesPath, entry);
-            try {
-              for (const pkg of readdirSync(scopePath)) {
-                const pkgPath = join(scopePath, pkg);
-                const name = getPackageName(pkgPath);
-                if (name && !existingNames.has(name) && isValidPlugin(pkgPath)) {
-                  return name;
-                }
-              }
-            } catch { /* skip */ }
-          } else {
-            const pkgPath = join(nodeModulesPath, entry);
-            const name = getPackageName(pkgPath);
-            if (name && !existingNames.has(name) && isValidPlugin(pkgPath)) {
-              return name;
-            }
+        for (const dependencyName of dependencyNames) {
+          const pkgPath = resolvePackagePath(nodeModulesPath, dependencyName);
+          const name = getPackageName(pkgPath);
+          if (name && !existingNames.has(name) && isValidPlugin(pkgPath)) {
+            return name;
           }
         }
       }
 
       // Fallback: return the first valid plugin found
-      const foundName = scanForPlugin(nodeModulesPath, entries);
-      if (foundName) return foundName;
+      for (const dependencyName of dependencyNames) {
+        const pkgPath = resolvePackagePath(nodeModulesPath, dependencyName);
+        if (!isValidPlugin(pkgPath)) continue;
+        const name = getPackageName(pkgPath);
+        if (name) return name;
+      }
     }
   } catch (error) {
     // Fall through to URL-based name extraction
