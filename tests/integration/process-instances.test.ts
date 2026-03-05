@@ -6,7 +6,7 @@
  * not the underlying @camunda8/orchestration-cluster-api npm module directly.
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { deploy } from '../../src/commands/deployments.ts';
 import { 
@@ -15,21 +15,29 @@ import {
 } from '../../src/commands/process-instances.ts';
 import { todayRange } from '../utils/date-helpers.ts';
 import { pollUntil } from '../utils/polling.ts';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { getUserDataDir } from '../../src/config.ts';
+import { tmpdir } from 'node:os';
 
 // Polling configuration for Elasticsearch consistency
 const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
 
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
+  let testDir: string;
+  let originalEnv: NodeJS.ProcessEnv;
+
   beforeEach(() => {
-    // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(getUserDataDir(), 'session.json');
-    if (existsSync(sessionPath)) {
-      unlinkSync(sessionPath);
+    testDir = mkdtempSync(join(tmpdir(), 'c8ctl-process-instances-test-'));
+    originalEnv = { ...process.env };
+    process.env.C8CTL_DATA_DIR = testDir;
+  });
+
+  afterEach(() => {
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
     }
+    process.env = originalEnv;
   });
 
   test('create process instance returns key', async () => {
