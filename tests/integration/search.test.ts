@@ -8,6 +8,7 @@
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
 import { deploy } from '../../src/commands/deployments.ts';
 import { createProcessInstance } from '../../src/commands/process-instances.ts';
 import { failJob } from '../../src/commands/jobs.ts';
@@ -20,7 +21,7 @@ import {
   searchVariables,
 } from '../../src/commands/search.ts';
 import { pollUntil } from '../utils/polling.ts';
-import { todayRange } from '../utils/date-helpers.ts';
+import { todayRange, MS_PER_DAY } from '../utils/date-helpers.ts';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getUserDataDir } from '../../src/config.ts';
@@ -564,6 +565,44 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(found, '--between with --dateField=startDate should find recently started process instances');
   });
 
+  test('searchProcessInstances with open-ended --between=..<to> finds recently created instance', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+
+    const tomorrow = new Date(Date.now() + MS_PER_DAY).toISOString().slice(0, 10);
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+        state: 'COMPLETED',
+        between: `..${tomorrow}`,
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'open-ended upper-bound --between should find recently completed process instances');
+  });
+
+  test('searchProcessInstances with open-ended --between=<from>.. finds recently created instance', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({
+      processDefinitionId: 'simple-process',
+    });
+
+    const yesterday = new Date(Date.now() - MS_PER_DAY).toISOString().slice(0, 10);
+    const found = await pollUntil(async () => {
+      const result = await searchProcessInstances({
+        processDefinitionId: 'simple-process',
+        state: 'COMPLETED',
+        between: `${yesterday}..`,
+      });
+      return !!(result?.items && result.items.length > 0);
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'open-ended lower-bound --between should find recently completed process instances');
+  });
+
   test('searchUserTasks with --between spanning today finds recently created task', async () => {
     await deploy(['tests/fixtures/list-pis'], {});
     await createProcessInstance({ processDefinitionId: 'Process_0t60ay7' });
@@ -632,13 +671,14 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
       return !!(result?.items && result.items.length > 0);
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const { execSync } = await import('node:child_process');
-    const output = execSync(
-      `node --no-warnings src/index.ts list ut --between=${todayRange()} --all`,
-      { encoding: 'utf8', cwd: process.cwd() }
-    );
+    const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'ut', `--between=${todayRange()}`, '--all'], {
+      encoding: 'utf8',
+      cwd: process.cwd(),
+      stdio: 'pipe',
+    });
 
-    assert.ok(typeof output === 'string', 'CLI should produce string output');
+    assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
+    assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
   });
 
   test('list incidents --between via CLI does not error', async () => {
@@ -665,13 +705,14 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
       return !!(result?.items && result.items.length > 0);
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const { execSync } = await import('node:child_process');
-    const output = execSync(
-      `node --no-warnings src/index.ts list inc --between=${todayRange()}`,
-      { encoding: 'utf8', cwd: process.cwd() }
-    );
+    const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'inc', `--between=${todayRange()}`], {
+      encoding: 'utf8',
+      cwd: process.cwd(),
+      stdio: 'pipe',
+    });
 
-    assert.ok(typeof output === 'string', 'CLI should produce string output');
+    assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
+    assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
   });
 
   test('searchJobs with --between spanning today finds recently created job',
@@ -722,12 +763,13 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
         return !!(result?.items && result.items.length > 0);
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      const { execSync } = await import('node:child_process');
-      const output = execSync(
-        `node --no-warnings src/index.ts list jobs --between=${todayRange()}`,
-        { encoding: 'utf8', cwd: process.cwd() }
-      );
+      const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'jobs', `--between=${todayRange()}`], {
+        encoding: 'utf8',
+        cwd: process.cwd(),
+        stdio: 'pipe',
+      });
 
-      assert.ok(typeof output === 'string', 'CLI should produce string output');
+      assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
+      assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
     });
 });

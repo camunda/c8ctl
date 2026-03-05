@@ -95,7 +95,7 @@ Flags:
   --asc                 Sort in ascending order (default)
   --desc                Sort in descending order
   --limit <n>           Maximum number of items to fetch (default: 1000000)
-  --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601)
+  --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601; omit either end for open-ended range)
   --dateField <field>   Date field to filter on with --between (default depends on resource)
   --version, -v         Show version
   --help, -h            Show help
@@ -626,9 +626,12 @@ Date Range Filter:
   Use --between <from>..<to> to filter results by a date range.
   Dates can be short (YYYY-MM-DD) or full ISO 8601 datetimes.
   Short dates: 'from' is expanded to T00:00:00.000Z, 'to' to T23:59:59.999Z.
+  Either end may be omitted for an open-ended range.
   Use --dateField to specify which date field to filter on (default depends on resource).
   Example: --between=2024-01-01..2024-12-31
   Example: --between=2024-01-01T00:00:00Z..2024-06-30T23:59:59Z --dateField=endDate
+  Example: --between=..2024-12-31 (everything until end of 2024)
+  Example: --between=2024-01-01.. (everything from start of 2024)
 
 Wildcard Search:
   String filters support wildcards: * (any chars) and ? (single char).
