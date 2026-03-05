@@ -3,7 +3,7 @@
  */
 
 import { getLogger } from '../logger.ts';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,8 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+type NpmListOutput = { dependencies?: Record<string, unknown> };
+type ExecFileErrorWithStdout = Error & { status?: number; stdout?: Buffer | string };
 
 function getTemplate(templateFileName: string): string {
   const templatePath = join(__dirname, '..', 'templates', templateFileName);
@@ -166,23 +168,28 @@ function getPackageNameFromSourceUrl(url: string): string | null {
 }
 
 function listTopLevelDependencies(pluginsDir: string): string[] {
+  const npmListArgs = ['list', '--depth', '0', '--json', '--prefix', pluginsDir];
   const parseDependencyNames = (value: string): string[] => {
     try {
-      const parsed = JSON.parse(value) as { dependencies?: Record<string, unknown> };
-      return Object.keys(parsed.dependencies ?? {});
+      const parsed = JSON.parse(value) as unknown;
+      if (typeof parsed !== 'object' || parsed === null) return [];
+      const { dependencies } = parsed as NpmListOutput;
+      if (!dependencies || typeof dependencies !== 'object') return [];
+      return Object.keys(dependencies);
     } catch {
       return [];
     }
   };
 
   try {
-    const output = execSync(`npm list --depth 0 --json --prefix "${pluginsDir}"`, {
+    const output = execFileSync('npm', npmListArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
     return parseDependencyNames(output);
   } catch (error) {
-    const stdout = (error as { stdout?: Buffer | string }).stdout;
+    // npm list can return non-zero exit codes (e.g. unmet peer deps) and still print valid JSON to stdout
+    const { stdout } = error as ExecFileErrorWithStdout;
     if (!stdout) return [];
     return parseDependencyNames(typeof stdout === 'string' ? stdout : stdout.toString('utf-8'));
   }
