@@ -67,6 +67,11 @@ function normalizeResource(resource: string): string {
   return aliases[resource] || resource;
 }
 
+function isUrl(input: string): boolean {
+  return /^(https?|git(\+https|\+ssh)?|file):\/\//i.test(input) ||
+    /^(github|gitlab|bitbucket):/i.test(input);
+}
+
 /**
  * Parse command line arguments
  */
@@ -300,20 +305,23 @@ async function main() {
   }
 
   if (verb === 'load' && normalizedResource === 'plugin') {
-    const fromUrl = values.from as string | undefined;
-    const packageName = args[0];
-    
-    // Ensure exclusive usage
-    if (packageName && fromUrl) {
-      logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
+    const fromFlag = values.from as string | undefined;
+    const arg = args[0];
+
+    if (fromFlag && arg) {
+      logger.error('Cannot specify both a positional argument and --from flag. Use either "c8 load plugin <name-or-url>" or "c8 load plugin --from <url>"');
       process.exit(1);
     }
-    
-    if (!packageName && !fromUrl) {
-      logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
+
+    if (!arg && !fromFlag) {
+      logger.error('Package name or URL required. Usage: c8 load plugin <package-name-or-url>');
       process.exit(1);
     }
-    
+
+    // Auto-detect URLs passed as positional argument (--from is optional for URLs)
+    const fromUrl = fromFlag ?? (arg && isUrl(arg) ? arg : undefined);
+    const packageName = fromUrl ? undefined : arg;
+
     await loadPlugin(packageName, fromUrl);
     return;
   }

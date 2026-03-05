@@ -477,7 +477,7 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl plugin'));
     assert.ok(output.includes('load plugin <name>'));
-    assert.ok(output.includes('load plugin --from <url>'));
+    assert.ok(output.includes('load plugin <url>'));
     assert.ok(output.includes('list plugins'));
     assert.ok(output.includes('upgrade plugin <name> [version]'));
     assert.ok(output.includes('downgrade plugin <name> <version>'));
