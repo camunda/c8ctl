@@ -21,9 +21,13 @@ const POLL_INTERVAL_MS = 2_000;
 let dataDir = '';
 
 type ProcessDefinition = {
-  processDefinitionKey: string | number;
-  processDefinitionId: string;
+  processDefinitionKey?: string | number;
+  key?: string | number;
+  Key?: string | number;
+  processDefinitionId?: string;
+  'Process ID'?: string;
   version?: number;
+  Version?: number;
 };
 
 function cli(...args: string[]) {
@@ -42,6 +46,14 @@ function parseJsonOutput<T>(output: string): T {
     const message = error instanceof Error ? error.message : String(error);
     assert.fail(`Expected valid JSON output (${message}), got:\n${output}`);
   }
+}
+
+function getProcessDefinitionKey(item: ProcessDefinition): string | number | undefined {
+  return item.processDefinitionKey ?? item.key ?? item.Key;
+}
+
+function getProcessDefinitionId(item: ProcessDefinition): string | undefined {
+  return item.processDefinitionId ?? item['Process ID'];
 }
 
 async function deployAndGetProcessDefinitionKey() {
@@ -64,7 +76,9 @@ async function deployAndGetProcessDefinitionKey() {
   }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
   assert.ok(latestItems.length > 0, 'Should have at least one process definition');
-  return String(latestItems[0].processDefinitionKey);
+  const processDefinitionKey = getProcessDefinitionKey(latestItems[0]);
+  assert.ok(processDefinitionKey, 'Process definition should have a key');
+  return String(processDefinitionKey);
 }
 
 describe('Process Definition Integration Tests (requires Camunda 8 at localhost:8080)', () => {
@@ -86,12 +100,12 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
     const searchResult = cli('search', 'pd', '--id=simple-process');
     assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
     const items = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
-    const firstItem = items.find(item => String(item.processDefinitionKey) === processDefinitionKey);
+    const firstItem = items.find(item => String(getProcessDefinitionKey(item)) === processDefinitionKey);
     assert.ok(firstItem, `Expected to find process definition ${processDefinitionKey}`);
 
-    assert.ok(firstItem.processDefinitionKey, 'Process definition should have a key');
-    assert.ok(firstItem.processDefinitionId, 'Process definition should have an ID');
-    assert.ok(firstItem.version !== undefined, 'Process definition should have a version');
+    assert.ok(getProcessDefinitionKey(firstItem), 'Process definition should have a key');
+    assert.ok(getProcessDefinitionId(firstItem), 'Process definition should have an ID');
+    assert.ok((firstItem.version ?? firstItem.Version) !== undefined, 'Process definition should have a version');
   });
 
   test('get process definition by key returns definition details', async () => {
@@ -108,6 +122,8 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
   test('get process definition XML returns BPMN content', async () => {
     const processDefinitionKey = await deployAndGetProcessDefinitionKey();
+    const outputResult = cli('output', 'text');
+    assert.strictEqual(outputResult.status, 0, `Setting output mode should exit 0. stderr: ${outputResult.stderr}`);
 
     const getXmlResult = cli('get', 'pd', processDefinitionKey, '--xml');
     assert.strictEqual(getXmlResult.status, 0, `Get XML should exit 0. stderr: ${getXmlResult.stderr}`);
