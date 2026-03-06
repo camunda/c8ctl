@@ -16,6 +16,7 @@ Comprehensive examples for all c8ctl operations.
 - [Profile Management](#profile-management)
 - [Session Management](#session-management)
 - [Plugin Management](#plugin-management)
+- [Agent / Programmatic Consumption](#agent--programmatic-consumption)
 
 ---
 
@@ -1025,4 +1026,63 @@ export CAMUNDA_DEFAULT_TENANT_ID=my-tenant
 
 # Now commands use these credentials
 c8 list pi
+```
+
+
+---
+
+## Agent / Programmatic Consumption
+
+These examples use flags designed specifically for AI agents and programmatic consumers.
+See [`CONTEXT.md`](./CONTEXT.md) for the complete agent reference.
+
+### `--fields` — Reduce Context Window Size
+
+```bash
+# List process instances with only Key and State
+c8 output json
+c8 list pi --fields Key,State
+
+# Search with selected fields (case-insensitive field names)
+c8 search pd --fields Key,processDefinitionId,name | jq .
+
+# Works with any list/search/get command
+c8 list ut --fields Key,State,Assignee
+c8 search inc --state=ACTIVE --fields Key,Type,processInstanceKey
+c8 get pi 2251799813685249 --fields processInstanceKey,state,processDefinitionId
+```
+
+### `--dry-run` — Preview Mutations Without Executing
+
+```bash
+# Preview creating a process instance
+c8 create pi --id=my-process --dry-run
+# Output: {"dryRun":true,"command":"create process-instance","method":"POST","url":"...","body":{...}}
+
+# Preview deploying resources
+c8 deploy ./my-process.bpmn --dry-run
+
+# Preview cancelling a process instance
+c8 cancel pi 2251799813685249 --dry-run
+
+# Preview completing a user task
+c8 complete ut 2251799813685250 --variables='{"approved":true}' --dry-run
+
+# Preview publishing a message
+c8 publish msg order-received --correlationKey=order-123 --dry-run
+
+# Recommended agent workflow:
+# 1. Run with --dry-run, show user the would-be API call
+c8 create pi --id=my-process --variables='{"key":"value"}' --dry-run
+# 2. After user confirmation, execute
+c8 create pi --id=my-process --variables='{"key":"value"}'
+```
+
+### Machine-Readable Help (JSON Mode)
+
+```bash
+c8 output json
+c8 help          # → structured JSON command reference
+c8 help list     # → JSON for list command
+c8 help search   # → JSON for search command
 ```

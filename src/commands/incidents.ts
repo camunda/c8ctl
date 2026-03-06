@@ -5,8 +5,9 @@
 import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
+import { c8ctl } from '../runtime.ts';
 
 /**
  * List incidents
@@ -102,6 +103,20 @@ export async function resolveIncident(key: string, options: {
   profile?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'resolve incident',
+      method: 'POST',
+      url: `${config.baseUrl}/incidents/${key}/resolution`,
+      body: {},
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {

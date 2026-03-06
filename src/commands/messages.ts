@@ -4,7 +4,8 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
+import { c8ctl } from '../runtime.ts';
 
 /**
  * Publish message
@@ -16,6 +17,28 @@ export async function publishMessage(name: string, options: {
   timeToLive?: number;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const tenantId = resolveTenantId(options.profile);
+    const body: Record<string, unknown> = {
+      name,
+      tenantId,
+      correlationKey: options.correlationKey || '',
+    };
+    if (options.variables) body.variables = JSON.parse(options.variables);
+    if (options.timeToLive !== undefined) body.timeToLive = options.timeToLive;
+    logger.json({
+      dryRun: true,
+      command: 'publish message',
+      method: 'POST',
+      url: `${config.baseUrl}/messages/publication`,
+      body,
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
 
@@ -48,7 +71,7 @@ export async function publishMessage(name: string, options: {
 }
 
 /**
- * Correlate message (same as publish in most cases)
+ * Correlate message
  */
 export async function correlateMessage(name: string, options: {
   profile?: string;
@@ -56,7 +79,31 @@ export async function correlateMessage(name: string, options: {
   variables?: string;
   timeToLive?: number;
 }): Promise<void> {
-  // For now, correlate is the same as publish
+  const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing (uses correlation endpoint)
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const tenantId = resolveTenantId(options.profile);
+    const body: Record<string, unknown> = {
+      name,
+      tenantId,
+      correlationKey: options.correlationKey || '',
+    };
+    if (options.variables) body.variables = JSON.parse(options.variables);
+    if (options.timeToLive !== undefined) body.timeToLive = options.timeToLive;
+    logger.json({
+      dryRun: true,
+      command: 'correlate message',
+      method: 'POST',
+      url: `${config.baseUrl}/messages/correlation`,
+      body,
+      note: 'SDK limitation: actual execution currently uses /messages/publication endpoint',
+    });
+    return;
+  }
+
+  // For now, correlate is the same as publish in most cases
   // In the SDK, both use the same underlying method
   await publishMessage(name, options);
 }
