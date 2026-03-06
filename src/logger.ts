@@ -160,9 +160,9 @@ export class Logger {
 
   table(data: any[]): void {
     const fields = c8ctl.fields;
-    // Apply --fields filtering when set
+    // Apply --fields filtering when set (only for object elements)
     const filteredData = fields && fields.length > 0
-      ? data.map(obj => filterObjectFields(obj, fields))
+      ? data.map(obj => (obj && typeof obj === 'object' ? filterObjectFields(obj as Record<string, unknown>, fields) : obj))
       : data;
 
     if (this.mode === 'text') {

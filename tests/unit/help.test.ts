@@ -540,8 +540,8 @@ describe('Help Module', () => {
     showHelp();
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('mutating') || output.includes('preview'), 
-      '--dry-run description should explain it is for mutating commands');
+    assert.ok(output.includes('mutating'), 
+      '--dry-run description should explicitly mention mutating commands');
   });
 
   // ── JSON Mode Help ────────────────────────────────────────────────────────

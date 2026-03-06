@@ -144,8 +144,25 @@ describe('--fields flag (output field filtering)', () => {
       c8ctl.outputMode = 'json';
       c8ctl.fields = ['someField'];
       const logger = new Logger();
+
+      // String
       logger.json('plain string value');
       assert.strictEqual(JSON.parse(consoleLogSpy[0]), 'plain string value');
+
+      // Number
+      consoleLogSpy.length = 0;
+      logger.json(42);
+      assert.strictEqual(JSON.parse(consoleLogSpy[0]), 42);
+
+      // Boolean
+      consoleLogSpy.length = 0;
+      logger.json(true);
+      assert.strictEqual(JSON.parse(consoleLogSpy[0]), true);
+
+      // null
+      consoleLogSpy.length = 0;
+      logger.json(null);
+      assert.strictEqual(JSON.parse(consoleLogSpy[0]), null);
     });
   });
 });

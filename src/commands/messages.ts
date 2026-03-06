@@ -98,6 +98,7 @@ export async function correlateMessage(name: string, options: {
       method: 'POST',
       url: `${config.baseUrl}/messages/correlation`,
       body,
+      note: 'SDK limitation: actual execution currently uses /messages/publication endpoint',
     });
     return;
   }

@@ -243,7 +243,7 @@ export async function deploy(paths: string[], options: {
         url: `${config.baseUrl}/deployments`,
         body: {
           tenantId,
-          resources: resources.map(r => ({ name: r.name, path: r.path })),
+          resources: resources.map(r => ({ name: r.name })),
         },
       });
       return;
