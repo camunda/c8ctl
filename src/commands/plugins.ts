@@ -23,7 +23,7 @@ type NpmListOutput = { dependencies?: Record<string, unknown> };
 type ExecFileErrorWithStdout = Error & { status?: number; stdout?: Buffer | string };
 
 function isAcceptedUrl(input: string): boolean {
-  return /^(https?\/\/|git(\+https|\+ssh)?\/\/|file\/\/?):/i.test(input);
+  return /^(https?:\/\/|git(\+https|\+ssh)?:\/\/|file:\/\/?)/i.test(input);
 }
 
 function getTemplate(templateFileName: string): string {
