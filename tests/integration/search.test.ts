@@ -2,72 +2,106 @@
  * Integration tests for search commands
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  *
- * These tests validate the project's wrapper functions in src/commands/search.ts,
- * not the underlying @camunda8/orchestration-cluster-api npm module directly.
+ * These tests validate the search CLI commands, which exercise the project's wrapper
+ * functions in src/commands/search.ts. All CLI calls use async subprocesses to
+ * avoid Node 24 IPC deserialization errors that occur with direct TypeScript imports.
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
-import { deploy } from '../../src/commands/deployments.ts';
-import { createProcessInstance } from '../../src/commands/process-instances.ts';
-import { failJob } from '../../src/commands/jobs.ts';
-import {
-  searchProcessDefinitions,
-  searchProcessInstances,
-  searchUserTasks,
-  searchIncidents,
-  searchJobs,
-  searchVariables,
-} from '../../src/commands/search.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn, type SpawnResult } from '../utils/spawn.ts';
 import { todayRange, MS_PER_DAY } from '../utils/date-helpers.ts';
-import { existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
-import { getUserDataDir } from '../../src/config.ts';
 
 // Polling configuration for Elasticsearch consistency
 const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
 
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+let dataDir = '';
+
+type ProcessDefinitionRow = { Key: string | number; 'Process ID': string; Name: string; Version: number; 'Tenant ID': string; };
+type ProcessInstanceRow = { Key: string | number; 'Process ID': string; State: string; Version: number; 'Tenant ID': string; };
+type UserTaskRow = { Key: string | number; Name: string; State: string; Assignee: string; 'Process Instance': string | number; 'Tenant ID': string; };
+type IncidentRow = { Key: string | number; Type: string; Message: string; State: string; 'Process Instance': string | number; 'Tenant ID': string; };
+type JobRow = { Key: string | number; Type: string; State: string; Retries: number; 'Process Instance': string | number; 'Tenant ID': string; };
+type VariableRow = { Name: string; Value: string; 'Process Instance': string | number; 'Scope Key': string | number; 'Tenant ID': string; };
+
+function cli(...args: string[]) {
+  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+  });
+}
+
+function parseJsonOutput<T>(stdout: string): T {
+  try {
+    return JSON.parse(stdout) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    assert.fail(`Expected valid JSON output (${message}), got:\n${stdout}`);
+  }
+}
+
+function parseItems<T>(stdout: string): T[] {
+  if (!stdout.trim()) return [];
+  return parseJsonOutput<T[]>(stdout);
+}
+
+/** Extract the created resource key from the success message in CLI stderr (JSON mode). */
+function parseCreatedKey(result: SpawnResult): string | undefined {
+  for (const line of result.stderr.split('\n').filter(Boolean)) {
+    try {
+      const data = JSON.parse(line);
+      if (data.status === 'success' && data.key !== undefined) {
+        return String(data.key);
+      }
+    } catch { /* skip non-JSON lines */ }
+  }
+  return undefined;
+}
+
 describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080)', () => {
-  beforeEach(() => {
-    // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(getUserDataDir(), 'session.json');
-    if (existsSync(sessionPath)) {
-      unlinkSync(sessionPath);
-    }
+  before(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-search-test-'));
+  });
+
+  beforeEach(async () => {
+    // Clear session state before each test, then restore JSON output mode
+    rmSync(join(dataDir, 'session.json'), { force: true });
+    await cli('output', 'json');
+  });
+
+  after(() => {
+    rmSync(dataDir, { recursive: true, force: true });
   });
 
   test('search process definitions by processDefinitionId', async () => {
-    // Deploy a process to ensure at least one exists
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
 
-    // Poll until the search command finds the deployed process definition
     const found = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'simple-process',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pd', '--id=simple-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find the deployed process definition');
   });
 
   test('search process definitions with filters', async () => {
-    // Deploy a process
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
 
-    // Poll until the process definition is indexed and extract its key
     let processDefKey: string | undefined;
     const found = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'simple-process',
-      });
-      if (result?.items && result.items.length > 0) {
-        const item = result.items[0] as any;
-        processDefKey = (item.processDefinitionKey || item.key)?.toString();
-        return processDefKey !== undefined;
+      const result = await cli('search', 'pd', '--id=simple-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      if (items.length > 0) {
+        processDefKey = String(items[0].Key);
+        return true;
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -75,190 +109,134 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(found, 'Should find the deployed process');
     assert.ok(processDefKey, 'Should have process definition key');
 
-    // Search by key using the command function
-    const result = await searchProcessDefinitions({ key: processDefKey });
-    assert.ok(result?.items && result.items.length > 0, 'Search by key should find the process');
+    // Search by key
+    const keyResult = await cli('search', 'pd', `--key=${processDefKey}`);
+    const keyItems = parseItems<ProcessDefinitionRow>(keyResult.stdout);
+    assert.ok(keyItems.length > 0, 'Search by key should find the process');
   });
 
   test('search process instances by state', async () => {
-    // Deploy and create an instance using CLI wrappers
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
-    // Poll until completed process instances appear in search results
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-        state: 'COMPLETED',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find completed process instances');
   });
 
   test('search process instances by processDefinitionKey', async () => {
-    // Deploy a process
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
-    // Create an instance using CLI wrapper
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-    });
-
-    // Poll until the created instance is indexed and extract the concrete processDefinitionKey
-    // from that instance to avoid races with stale process-definition search results.
+    // Get processDefinitionKey from pd search, and wait for a process instance to be indexed
     let processDefKey: string | undefined;
     const instanceIndexed = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-      });
-      if (result?.items && result.items.length > 0) {
-        const item = result.items[0] as any;
-        if (item.processDefinitionKey === undefined || item.processDefinitionKey === null) {
-          return false;
-        }
-        processDefKey = item.processDefinitionKey.toString();
+      const pdResult = await cli('search', 'pd', '--id=simple-process');
+      const pdItems = parseItems<ProcessDefinitionRow>(pdResult.stdout);
+      const piResult = await cli('search', 'pi', '--id=simple-process');
+      const piItems = parseItems<ProcessInstanceRow>(piResult.stdout);
+      if (pdItems.length > 0 && piItems.length > 0) {
+        processDefKey = String(pdItems[0].Key);
         return true;
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(instanceIndexed, 'Created process instance should be indexed');
-    assert.ok(processDefKey, 'Should have process definition key from indexed instance');
+    assert.ok(processDefKey, 'Should have process definition key');
 
     // Poll until search by processDefinitionKey finds results
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionKey: processDefKey,
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', `--processDefinitionKey=${processDefKey}`);
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search by processDefinitionKey should find process instances');
   });
 
   test('search user tasks with filters', async () => {
-    // Deploy a process with a user task
-    await deploy(['tests/fixtures/list-pis'], {});
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
-    // Create an instance to generate a user task
-    await createProcessInstance({
-      processDefinitionId: 'Process_0t60ay7',
-    });
-
-    // Poll until the user task appears in search results
     const found = await pollUntil(async () => {
-      const result = await searchUserTasks({
-        state: 'CREATED',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'ut', '--state=CREATED');
+      const items = parseItems<UserTaskRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find created user tasks');
   });
 
   test('search incidents with filters', async () => {
-    // Deploy a process with a service task that will create a job
-    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    await cli('create', 'pi', '--id=Process_0yyrstd');
 
-    // Create an instance — the service task creates a job with type 'unhandled-job-type' and retries=0
-    await createProcessInstance({
-      processDefinitionId: 'Process_0yyrstd',
-    });
-
-    // Wait for the job to appear in search results
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED' });
-      if (result?.items && result.items.length > 0) {
-        const createdJob = result.items.find((job: any) => (job.state || '').toUpperCase() === 'CREATED') as any;
-        if (!createdJob) {
-          return false;
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED');
+      const items = parseItems<JobRow>(result.stdout);
+      if (items.length > 0) {
+        const createdJob = items.find(j => String(j.State).toUpperCase() === 'CREATED');
+        if (createdJob) {
+          jobKey = String(createdJob.Key);
+          return true;
         }
-        jobKey = String(createdJob.jobKey || createdJob.key);
-        return true;
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(jobFound && jobKey, 'Job should appear before failing it');
 
-    // Explicitly fail the job with retries=0 to trigger an incident
-    await failJob(jobKey, { retries: 0, errorMessage: 'Intentional failure for incident test' });
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for incident test');
 
-    // Poll until the incident appears in search results
     const found = await pollUntil(async () => {
-      const result = await searchIncidents({
-        state: 'ACTIVE',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'inc', '--state=ACTIVE');
+      const items = parseItems<IncidentRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find active incidents');
   });
 
   test('search jobs with filters', async () => {
-    // Deploy a process with a service task (job)
-    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
-    // Create an instance to generate jobs
-    await createProcessInstance({
-      processDefinitionId: 'Process_18glkb3',
-    });
-
-    // Poll until the job appears in search results
     const found = await pollUntil(async () => {
-      const result = await searchJobs({
-        type: 'n00b',
-        state: 'CREATED',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED');
+      const items = parseItems<JobRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find created jobs');
   });
 
   test('search variables with filters', async () => {
-    // Deploy a process and create an instance with variables
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ testVar: 'testValue', count: 42, flag: true })}`);
 
-    // Create an instance with variables using the CLI wrapper
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-      variables: JSON.stringify({ testVar: 'testValue', count: 42, flag: true }),
-    });
-
-    // Poll until the variable appears in search results
     const found = await pollUntil(async () => {
-      const result = await searchVariables({
-        name: 'testVar',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'vars', '--name=testVar');
+      const items = parseItems<VariableRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search should find variable by name');
   });
 
   test('search variables with fullValue option', async () => {
-    // Deploy a process and create an instance with a long variable value
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    const longValue = 'a'.repeat(1000);
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ longVar: longValue })}`);
 
-    const longValue = 'a'.repeat(1000); // Create a long value that might be truncated
-
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-      variables: JSON.stringify({ longVar: longValue }),
-    });
-
-    // Poll until the variable appears in search results with full value
     const found = await pollUntil(async () => {
-      const result = await searchVariables({
-        name: 'longVar',
-        fullValue: true,
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'vars', '--name=longVar', '--fullValue');
+      const items = parseItems<VariableRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search with fullValue should find the variable');
@@ -267,371 +245,319 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   // ── Wildcard Search Tests ──────────────────────────────────────────
 
   test('wildcard * on process definition name matches multiple results', async () => {
-    // Deploy processes that have names set in BPMN
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
-    await deploy(['tests/fixtures/sample-project/sub-folder/sub.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
-    // Wildcard *Process should match "Main Process" and "Sub Process"
     const found = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        name: '*Process',
-      });
-      return !!(result?.items && result.items.length >= 2);
+      const result = await cli('search', 'pd', '--name=*Process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Wildcard --name="*Process" should match named process definitions');
   });
 
   test('wildcard ? on process definition ID matches single character', async () => {
-    // Deploy both main.bpmn and sub.bpmn
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
-    await deploy(['tests/fixtures/sample-project/sub-folder/sub.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
-    // "ma??-process" should match "main-process" but NOT "sub-process"
     const found = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'ma??-process',
-      });
-      if (!result?.items || result.items.length === 0) return false;
-      // Verify only main-process matched
-      return result.items.every((pd: any) => pd.processDefinitionId === 'main-process');
+      const result = await cli('search', 'pd', '--id=ma??-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      if (items.length === 0) return false;
+      return items.every(pd => String(pd['Process ID']) === 'main-process');
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Wildcard --id="ma??-process" should match only main-process');
   });
 
   test('wildcard * on process definition ID matches multiple processes', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
-    await deploy(['tests/fixtures/sample-project/sub-folder/sub.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     // "*-process" should match both main-process and sub-process (and possibly simple-process)
     const found = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: '*-process',
-      });
-      return !!(result?.items && result.items.length >= 2);
+      const result = await cli('search', 'pd', '--id=*-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Wildcard --id="*-process" should match multiple process definitions');
   });
 
   test('wildcard * on variable name matches deployed variables', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-      variables: JSON.stringify({ wildcardTestAlpha: 'a', wildcardTestBeta: 'b' }),
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ wildcardTestAlpha: 'a', wildcardTestBeta: 'b' })}`);
 
-    // "wildcardTest*" should match both variables
     const found = await pollUntil(async () => {
-      const result = await searchVariables({
-        name: 'wildcardTest*',
-      });
-      return !!(result?.items && result.items.length >= 2);
+      const result = await cli('search', 'vars', '--name=wildcardTest*');
+      const items = parseItems<VariableRow>(result.stdout);
+      return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Wildcard --name="wildcardTest*" should match multiple variables');
   });
 
   test('wildcard * on job type matches jobs', async () => {
-    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'Process_18glkb3',
-    });
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
-    // "n*" should match job type "n00b"
     const found = await pollUntil(async () => {
-      const result = await searchJobs({
-        type: 'n*',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'jobs', '--type=n*');
+      const items = parseItems<JobRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Wildcard --type="n*" should match job type "n00b"');
   });
 
   test('wildcard ? on job type requires exact character count', async () => {
-    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'Process_18glkb3',
-    });
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
     // Wait for the job to be indexed first
     const indexed = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'n00b' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'jobs', '--type=n00b');
+      const items = parseItems<JobRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Job should be indexed');
 
     // "n?b" should NOT match "n00b" (too few ? chars)
-    const result = await searchJobs({ type: 'n?b' });
-    assert.ok(!result?.items || result.items.length === 0, 'Wildcard "n?b" should not match "n00b" (needs 2 chars)');
+    const result = await cli('search', 'jobs', '--type=n?b');
+    const items = parseItems<JobRow>(result.stdout);
+    assert.ok(items.length === 0, 'Wildcard "n?b" should not match "n00b" (needs 2 chars)');
 
     // "n??b" SHOULD match "n00b"
-    const result2 = await searchJobs({ type: 'n??b' });
-    assert.ok(result2?.items && result2.items.length > 0, 'Wildcard "n??b" should match "n00b"');
+    const result2 = await cli('search', 'jobs', '--type=n??b');
+    const items2 = parseItems<JobRow>(result2.stdout);
+    assert.ok(items2.length > 0, 'Wildcard "n??b" should match "n00b"');
   });
 
   // ── Case-Insensitive Search Tests ──────────────────────────────────
 
   test('case-insensitive search on process definition name', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
-    // Wait for indexing with exact name first
     const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'main-process',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pd', '--id=main-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
-    // --iName='main process' should match "Main Process" (different case)
-    const result = await searchProcessDefinitions({
-      iName: 'main process',
-    });
-    assert.ok(result?.items && result.items.length > 0, '--iName="main process" should match "Main Process"');
-    assert.strictEqual((result!.items[0] as any).processDefinitionId, 'main-process');
+    // --iname='main process' should match "Main Process" (different case)
+    const result = await cli('search', 'pd', '--iname=main process');
+    const items = parseItems<ProcessDefinitionRow>(result.stdout);
+    assert.ok(items.length > 0, '--iname="main process" should match "Main Process"');
+    assert.strictEqual(String(items[0]['Process ID']), 'main-process');
   });
 
   test('case-insensitive search on process definition name with ALL CAPS', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({
-        processDefinitionId: 'main-process',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pd', '--id=main-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
-    // --iName='MAIN PROCESS' should match "Main Process"
-    const result = await searchProcessDefinitions({
-      iName: 'MAIN PROCESS',
-    });
-    assert.ok(result?.items && result.items.length > 0, '--iName="MAIN PROCESS" should match "Main Process"');
+    // --iname='MAIN PROCESS' should match "Main Process"
+    const result = await cli('search', 'pd', '--iname=MAIN PROCESS');
+    const items = parseItems<ProcessDefinitionRow>(result.stdout);
+    assert.ok(items.length > 0, '--iname="MAIN PROCESS" should match "Main Process"');
   });
 
   test('case-insensitive wildcard search on process definition name', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
-    await deploy(['tests/fixtures/sample-project/sub-folder/sub.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     // Wait for both to be indexed
     const indexed = await pollUntil(async () => {
-      const r1 = await searchProcessDefinitions({ processDefinitionId: 'main-process' });
-      const r2 = await searchProcessDefinitions({ processDefinitionId: 'sub-process' });
-      return !!(r1?.items?.length && r2?.items?.length);
+      const r1 = await cli('search', 'pd', '--id=main-process');
+      const r2 = await cli('search', 'pd', '--id=sub-process');
+      const i1 = parseItems<ProcessDefinitionRow>(r1.stdout);
+      const i2 = parseItems<ProcessDefinitionRow>(r2.stdout);
+      return i1.length > 0 && i2.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Both processes should be indexed');
 
-    // --iName='*PROCESS' should match "Main Process" and "Sub Process" (case-insensitive)
-    const result = await searchProcessDefinitions({
-      iName: '*PROCESS',
-    });
-    assert.ok(result?.items && result.items.length >= 2,
-      '--iName="*PROCESS" should match multiple named process definitions');
+    // --iname='*PROCESS' should match "Main Process" and "Sub Process" (case-insensitive)
+    const result = await cli('search', 'pd', '--iname=*PROCESS');
+    const items = parseItems<ProcessDefinitionRow>(result.stdout);
+    assert.ok(items.length >= 2, '--iname="*PROCESS" should match multiple named process definitions');
   });
 
   test('case-insensitive search on process definition ID', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({ processDefinitionId: 'main-process' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pd', '--id=main-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
-    // --iProcessDefinitionId='MAIN-PROCESS' should match "main-process"
-    const result = await searchProcessDefinitions({
-      iProcessDefinitionId: 'MAIN-PROCESS',
-    });
-    assert.ok(result?.items && result.items.length > 0,
-      '--iProcessDefinitionId="MAIN-PROCESS" should match "main-process"');
+    // --iid='MAIN-PROCESS' should match "main-process"
+    const result = await cli('search', 'pd', '--iid=MAIN-PROCESS');
+    const items = parseItems<ProcessDefinitionRow>(result.stdout);
+    assert.ok(items.length > 0, '--iid="MAIN-PROCESS" should match "main-process"');
   });
 
   test('case-insensitive search on variable name', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-      variables: JSON.stringify({ CamelCaseVar: 'hello' }),
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ CamelCaseVar: 'hello' })}`);
 
-    // Wait for the variable to be indexed
     const indexed = await pollUntil(async () => {
-      const result = await searchVariables({ name: 'CamelCaseVar' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'vars', '--name=CamelCaseVar');
+      const items = parseItems<VariableRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Variable should be indexed');
 
-    // --iName='camelcasevar' should match "CamelCaseVar"
-    const result = await searchVariables({
-      iName: 'camelcasevar',
-    });
-    assert.ok(result?.items && result.items.length > 0,
-      '--iName="camelcasevar" should match "CamelCaseVar"');
+    // --iname='camelcasevar' should match "CamelCaseVar"
+    const result = await cli('search', 'vars', '--iname=camelcasevar');
+    const items = parseItems<VariableRow>(result.stdout);
+    assert.ok(items.length > 0, '--iname="camelcasevar" should match "CamelCaseVar"');
   });
 
   test('case-insensitive search on variable value', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-      variables: JSON.stringify({ statusVar: 'PendingReview' }),
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ statusVar: 'PendingReview' })}`);
 
-    // Wait for the variable to be indexed
     const indexed = await pollUntil(async () => {
-      const result = await searchVariables({ name: 'statusVar' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'vars', '--name=statusVar');
+      const items = parseItems<VariableRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Variable should be indexed');
 
-    // --iValue='pendingreview' should match "PendingReview"
-    const result = await searchVariables({
-      iValue: 'pendingreview',
-    });
-    assert.ok(result?.items && result.items.length > 0,
-      '--iValue="pendingreview" should match "PendingReview"');
+    // --ivalue='pendingreview' should match "PendingReview"
+    const result = await cli('search', 'vars', '--ivalue=pendingreview');
+    const items = parseItems<VariableRow>(result.stdout);
+    assert.ok(items.length > 0, '--ivalue="pendingreview" should match "PendingReview"');
   });
 
   test('case-insensitive search on job type', async () => {
-    await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'Process_18glkb3',
-    });
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
-    // Wait for the job to be indexed
     const indexed = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'n00b' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'jobs', '--type=n00b');
+      const items = parseItems<JobRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Job should be indexed');
 
-    // --iType='N00B' should match "n00b"
-    const result = await searchJobs({
-      iType: 'N00B',
-    });
-    assert.ok(result?.items && result.items.length > 0,
-      '--iType="N00B" should match job type "n00b"');
+    // --itype='N00B' should match "n00b"
+    const result = await cli('search', 'jobs', '--itype=N00B');
+    const items = parseItems<JobRow>(result.stdout);
+    assert.ok(items.length > 0, '--itype="N00B" should match job type "n00b"');
   });
 
   test('case-insensitive search does not match non-matching pattern', async () => {
-    await deploy(['tests/fixtures/sample-project/main.bpmn'], {});
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = await searchProcessDefinitions({ processDefinitionId: 'main-process' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pd', '--id=main-process');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
-    // --iName='nonexistent' should return no results
-    const result = await searchProcessDefinitions({
-      iName: 'nonexistent-process-name',
-    });
-    assert.ok(!result?.items || result.items.length === 0,
-      '--iName="nonexistent-process-name" should return no results');
+    // --iname='nonexistent' should return no results
+    const result = await cli('search', 'pd', '--iname=nonexistent-process-name');
+    const items = parseItems<ProcessDefinitionRow>(result.stdout);
+    assert.ok(items.length === 0, '--iname="nonexistent-process-name" should return no results');
   });
 
   // ── Date Range Filter Tests (--between) ──────────────────────────────
 
   test('searchProcessInstances with --between spanning today finds recently created instance', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-        state: 'COMPLETED',
-        between: todayRange(),
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${todayRange()}`);
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, '--between spanning today should find recently completed process instances');
   });
 
   test('searchProcessInstances with --between and explicit --dateField=startDate finds instance', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-        between: todayRange(),
-        dateField: 'startDate',
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', '--id=simple-process', `--between=${todayRange()}`, '--dateField=startDate');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, '--between with --dateField=startDate should find recently started process instances');
   });
 
   test('searchProcessInstances with open-ended --between=..<to> finds recently created instance', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const tomorrow = new Date(Date.now() + MS_PER_DAY).toISOString().slice(0, 10);
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-        state: 'COMPLETED',
-        between: `..${tomorrow}`,
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=..${tomorrow}`);
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'open-ended upper-bound --between should find recently completed process instances');
   });
 
   test('searchProcessInstances with open-ended --between=<from>.. finds recently created instance', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
-      processDefinitionId: 'simple-process',
-    });
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const yesterday = new Date(Date.now() - MS_PER_DAY).toISOString().slice(0, 10);
     const found = await pollUntil(async () => {
-      const result = await searchProcessInstances({
-        processDefinitionId: 'simple-process',
-        state: 'COMPLETED',
-        between: `${yesterday}..`,
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${yesterday}..`);
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'open-ended lower-bound --between should find recently completed process instances');
   });
 
   test('searchUserTasks with --between spanning today finds recently created task', async () => {
-    await deploy(['tests/fixtures/list-pis'], {});
-    await createProcessInstance({ processDefinitionId: 'Process_0t60ay7' });
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
     const found = await pollUntil(async () => {
-      const result = await searchUserTasks({
-        state: 'CREATED',
-        between: todayRange(),
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'ut', '--state=CREATED', `--between=${todayRange()}`);
+      const items = parseItems<UserTaskRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, '--between spanning today should find recently created user tasks');
   });
 
   test('searchIncidents with --between spanning today finds recently created incident', async () => {
-    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
-    const pi = await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
-    const piKey = String(pi!.processInstanceKey);
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    const createResult = await cli('create', 'pi', '--id=Process_0yyrstd');
+    assert.strictEqual(createResult.status, 0, `Create PI should exit 0. stderr: ${createResult.stderr}`);
+    const piKey = parseCreatedKey(createResult);
+    assert.ok(piKey, 'Should have process instance key');
 
     // Wait for the job and fail it to produce an incident; filter by processInstanceKey to avoid
     // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED', processInstanceKey: piKey });
-      if (result?.items && result.items.length > 0) {
-        const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
+      const items = parseItems<JobRow>(result.stdout);
+      if (items.length > 0) {
+        const job = items.find(j => String(j.State).toUpperCase() === 'CREATED');
         if (job) {
-          jobKey = String(job.jobKey || job.key);
+          jobKey = String(job.Key);
           return true;
         }
       }
@@ -639,14 +565,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(jobFound && jobKey, 'Job should exist before failing');
 
-    await failJob(jobKey!, { retries: 0, errorMessage: 'Intentional failure for between test' });
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for between test');
 
     const found = await pollUntil(async () => {
-      const result = await searchIncidents({
-        state: 'ACTIVE',
-        between: todayRange(),
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'inc', '--state=ACTIVE', `--between=${todayRange()}`);
+      const items = parseItems<IncidentRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, '--between spanning today should find recently created incidents');
@@ -662,54 +586,51 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     : `creationTime job filter requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion ?? 'unset'})`;
 
   test('list user-tasks --between via CLI does not error', async () => {
-    await deploy(['tests/fixtures/list-pis'], {});
-    await createProcessInstance({ processDefinitionId: 'Process_0t60ay7' });
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
     // Wait for the task to be indexed
     await pollUntil(async () => {
-      const result = await searchUserTasks({ state: 'CREATED' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'ut', '--state=CREATED');
+      const items = parseItems<UserTaskRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'ut', `--between=${todayRange()}`, '--all'], {
-      encoding: 'utf8',
-      cwd: process.cwd(),
-      stdio: 'pipe',
-    });
+    const result = await cli('list', 'ut', `--between=${todayRange()}`, '--all');
 
     assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
     assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
   });
 
   test('list incidents --between via CLI does not error', async () => {
-    await deploy(['tests/fixtures/simple-will-create-incident.bpmn'], {});
-    const pi = await createProcessInstance({ processDefinitionId: 'Process_0yyrstd' });
-    const piKey = String(pi!.processInstanceKey);
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    const createResult = await cli('create', 'pi', '--id=Process_0yyrstd');
+    assert.strictEqual(createResult.status, 0, `Create PI should exit 0. stderr: ${createResult.stderr}`);
+    const piKey = parseCreatedKey(createResult);
+    assert.ok(piKey, 'Should have process instance key');
 
     // Wait for a job and fail it to produce an incident; filter by processInstanceKey to avoid
     // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     await pollUntil(async () => {
-      const result = await searchJobs({ type: 'unhandled-job-type', state: 'CREATED', processInstanceKey: piKey });
-      if (result?.items && result.items.length > 0) {
-        const job = result.items.find((j: any) => (j.state || '').toUpperCase() === 'CREATED') as any;
-        if (job) { jobKey = String(job.jobKey || job.key); return true; }
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
+      const items = parseItems<JobRow>(result.stdout);
+      if (items.length > 0) {
+        const job = items.find(j => String(j.State).toUpperCase() === 'CREATED');
+        if (job) { jobKey = String(job.Key); return true; }
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
-    await failJob(jobKey!, { retries: 0, errorMessage: 'Intentional failure for list between test' });
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for list between test');
 
     // Wait for the incident to be indexed
     await pollUntil(async () => {
-      const result = await searchIncidents({ state: 'ACTIVE' });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli('search', 'inc', '--state=ACTIVE');
+      const items = parseItems<IncidentRow>(result.stdout);
+      return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'inc', `--between=${todayRange()}`], {
-      encoding: 'utf8',
-      cwd: process.cwd(),
-      stdio: 'pipe',
-    });
+    const result = await cli('list', 'inc', `--between=${todayRange()}`);
 
     assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
     assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
@@ -718,16 +639,13 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('searchJobs with --between spanning today finds recently created job',
     { skip: jobsBetweenSkip },
     async () => {
-      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       const found = await pollUntil(async () => {
-        const result = await searchJobs({
-          type: 'n00b',
-          state: 'CREATED',
-          between: todayRange(),
-        });
-        return !!(result?.items && result.items.length > 0);
+        const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED', `--between=${todayRange()}`);
+        const items = parseItems<JobRow>(result.stdout);
+        return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
       assert.ok(found, '--between spanning today should find recently created jobs');
@@ -736,16 +654,13 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('searchJobs with --between and explicit --dateField=creationTime finds recently created job',
     { skip: jobsBetweenSkip },
     async () => {
-      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       const found = await pollUntil(async () => {
-        const result = await searchJobs({
-          type: 'n00b',
-          between: todayRange(),
-          dateField: 'creationTime',
-        });
-        return !!(result?.items && result.items.length > 0);
+        const result = await cli('search', 'jobs', '--type=n00b', `--between=${todayRange()}`, '--dateField=creationTime');
+        const items = parseItems<JobRow>(result.stdout);
+        return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
       assert.ok(found, '--between with --dateField=creationTime should find recently created jobs');
@@ -754,20 +669,17 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('list jobs --between via CLI does not error',
     { skip: jobsBetweenSkip },
     async () => {
-      await deploy(['tests/fixtures/simple-service-task.bpmn'], {});
-      await createProcessInstance({ processDefinitionId: 'Process_18glkb3' });
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       // Wait for the job to be indexed
       await pollUntil(async () => {
-        const result = await searchJobs({ type: 'n00b', state: 'CREATED' });
-        return !!(result?.items && result.items.length > 0);
+        const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED');
+        const items = parseItems<JobRow>(result.stdout);
+        return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      const result = spawnSync('node', ['--no-warnings', 'src/index.ts', 'list', 'jobs', `--between=${todayRange()}`], {
-        encoding: 'utf8',
-        cwd: process.cwd(),
-        stdio: 'pipe',
-      });
+      const result = await cli('list', 'jobs', `--between=${todayRange()}`);
 
       assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
       assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');

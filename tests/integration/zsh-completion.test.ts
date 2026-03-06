@@ -6,17 +6,17 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
+import { asyncSpawn } from '../utils/spawn.ts';
 
-// Check if zsh is available
+// Check if zsh is available (sync check is fine — runs once before tests)
 function isZshAvailable(): boolean {
   const result = spawnSync('which', ['zsh'], { encoding: 'utf-8' });
   return result.status === 0;
 }
 
 describe('Zsh Completion Integration Tests', () => {
-  test('zsh completion script is generated without errors', () => {
-    const result = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion script is generated without errors', async () => {
+    const result = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -25,10 +25,9 @@ describe('Zsh Completion Integration Tests', () => {
     assert.ok(result.stdout.includes('_c8ctl'), 'Should contain completion function');
   });
 
-  test('zsh completion script loads without errors in zsh', { skip: !isZshAvailable() ? 'zsh not available' : false }, () => {
+  test('zsh completion script loads without errors in zsh', { skip: !isZshAvailable() ? 'zsh not available' : false }, async () => {
     // Generate completion script
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -64,8 +63,7 @@ echo "SUCCESS"
 '
 `;
 
-    const result = spawnSync('sh', ['-c', testScript], {
-      encoding: 'utf-8',
+    const result = await asyncSpawn('sh', ['-c', testScript], {
       env: { ...process.env, PATH: process.env.PATH },
     });
 
@@ -73,9 +71,8 @@ echo "SUCCESS"
     assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
   });
 
-  test('zsh completion completes verbs starting with "l"', { skip: !isZshAvailable() ? 'zsh not available' : false }, () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion completes verbs starting with "l"', { skip: !isZshAvailable() ? 'zsh not available' : false }, async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -112,8 +109,7 @@ echo "SUCCESS"
 '
 `;
 
-    const result = spawnSync('sh', ['-c', testScript], {
-      encoding: 'utf-8',
+    const result = await asyncSpawn('sh', ['-c', testScript], {
       env: { ...process.env, PATH: process.env.PATH },
     });
 
@@ -121,9 +117,8 @@ echo "SUCCESS"
     assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
   });
 
-  test('zsh completion script structure is valid', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion script structure is valid', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -137,9 +132,8 @@ echo "SUCCESS"
     assert.ok(!script.includes('_c8ctl "$@"'), 'Should NOT call _c8ctl at top level (compdef handles registration)');
   });
 
-  test('zsh completion has resources for "list" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion has resources for "list" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -153,9 +147,8 @@ echo "SUCCESS"
     assert.ok(script.includes('plugins'), 'Should include plugins');
   });
 
-  test('zsh completion has resources for "get" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion has resources for "get" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -168,9 +161,8 @@ echo "SUCCESS"
     assert.ok(getSection[0].includes('topology'), 'Should include topology');
   });
 
-  test('zsh completion supports shell types for "completion" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion supports shell types for "completion" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -184,9 +176,8 @@ echo "SUCCESS"
     assert.ok(completionSection[0].includes('fish'), 'Should include fish');
   });
 
-  test('zsh completion includes aliases (pi for process-instance)', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion includes aliases (pi for process-instance)', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -198,9 +189,8 @@ echo "SUCCESS"
     assert.ok(script.includes("'msg:"), 'Should include msg alias');
   });
 
-  test('zsh completion includes flags with descriptions', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion includes flags with descriptions', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 
@@ -212,9 +202,8 @@ echo "SUCCESS"
     assert.ok(script.includes('--variables[JSON variables]'), 'Should include --variables flag');
   });
 
-  test('zsh completion uses _arguments for flag completion', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'zsh'], {
-      encoding: 'utf-8',
+  test('zsh completion uses _arguments for flag completion', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'zsh'], {
       cwd: process.cwd(),
     });
 

@@ -5,15 +5,11 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { asyncSpawn } from '../utils/spawn.ts';
 
 describe('Bash Completion Integration Tests', () => {
-  test('bash completion script is generated without errors', () => {
-    const result = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion script is generated without errors', async () => {
+    const result = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -22,10 +18,9 @@ describe('Bash Completion Integration Tests', () => {
     assert.ok(result.stdout.includes('complete -F _c8ctl_completions c8ctl'), 'Should register completion');
   });
 
-  test('bash completion script loads without errors in bash', () => {
+  test('bash completion script loads without errors in bash', async () => {
     // Generate completion script
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -45,17 +40,14 @@ complete -p c8ctl | grep -q "_c8ctl_completions" || exit 2
 echo "SUCCESS"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Bash script should succeed');
     assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
   });
 
-  test('bash completion completes verbs starting with "l"', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion completes verbs starting with "l"', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -72,18 +64,15 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('list'), 'Should complete to "list"');
     assert.ok(result.stdout.includes('load'), 'Should complete to "load"');
   });
 
-  test('bash completion completes resources for "list" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion completes resources for "list" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -100,9 +89,7 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('process-instances'), 'Should include "process-instances"');
@@ -110,9 +97,8 @@ echo "\${COMPREPLY[@]}"
     assert.ok(result.stdout.includes('plugins'), 'Should include "plugins"');
   });
 
-  test('bash completion completes shell types for "completion" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion completes shell types for "completion" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -129,9 +115,7 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('bash'), 'Should include "bash"');
@@ -139,9 +123,8 @@ echo "\${COMPREPLY[@]}"
     assert.ok(result.stdout.includes('fish'), 'Should include "fish"');
   });
 
-  test('bash completion completes resources for "get" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion completes resources for "get" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -158,18 +141,15 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('process-instance'), 'Should include "process-instance"');
     assert.ok(result.stdout.includes('topology'), 'Should include "topology"');
   });
 
-  test('bash completion handles flags correctly', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion handles flags correctly', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -186,17 +166,14 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('--help'), 'Should include "--help" flag');
   });
 
-  test('bash completion completes aliases (pi for process-instance)', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion completes aliases (pi for process-instance)', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 
@@ -213,17 +190,14 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = spawnSync('bash', ['--norc', '--noprofile', '-c', testScript], {
-      encoding: 'utf-8',
-    });
+    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
 
     assert.strictEqual(result.status, 0, 'Completion test should succeed');
     assert.ok(result.stdout.includes('pi'), 'Should include "pi" alias');
   });
 
-  test('bash completion does not use external dependencies', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'bash'], {
-      encoding: 'utf-8',
+  test('bash completion does not use external dependencies', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
       cwd: process.cwd(),
     });
 

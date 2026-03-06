@@ -27,9 +27,9 @@
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "prepublishOnly": "npm run build",
-    "test": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "node --test tests/unit/setup.test.ts tests/unit/*.test.ts",
-    "test:integration": "node --test tests/integration/*.test.ts",
+    "test": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts",
+    "test:integration": "node --experimental-strip-types --test tests/integration/*.test.ts",
     "dev": "node src/index.ts",
     "cli": "node src/index.ts"
   },
@@ -56,14 +56,14 @@
   },
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^8.8.4",
-    "@modelcontextprotocol/sdk": "^1.27.0"
+    "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/github": "^12.0.6",
-    "@semantic-release/npm": "^13.1.4",
+    "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.0",
-    "@types/node": "^25.3.0",
+    "@types/node": "^25.3.5",
     "semantic-release": "^25.0.3",
     "typescript": "^5.9.3"
   }

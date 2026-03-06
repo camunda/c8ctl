@@ -11,11 +11,11 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn } from '../utils/spawn.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
@@ -43,11 +43,9 @@ let dataDir: string;
  * Uses a dedicated C8CTL_DATA_DIR so session state is isolated.
  */
 function cli(...args: string[]) {
-  return spawnSync('node', [CLI, ...args], {
-    encoding: 'utf-8',
-    timeout: SPAWN_TIMEOUT_MS,
+  return asyncSpawn('node', [CLI, ...args], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, C8CTL_DATA_DIR: dataDir },
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
   });
 }
 
@@ -61,7 +59,7 @@ function bpmnWithId(id: string): string {
 }
 
 describe('Pagination beyond CI_PAGE_SIZE (requires Camunda 8 at localhost:8080)', { timeout: 600_000 }, () => {
-  before(() => {
+  before(async () => {
     // Create temp directories for BPMN files and CLI data dir
     const base = join(tmpdir(), `c8ctl-pagination-test-${Date.now()}`);
     bpmnDir = join(base, 'bpmn');
@@ -81,7 +79,7 @@ describe('Pagination beyond CI_PAGE_SIZE (requires Camunda 8 at localhost:8080)'
     for (let i = 0; i < allFiles.length; i += DEPLOY_BATCH_SIZE) {
       const batch = allFiles.slice(i, i + DEPLOY_BATCH_SIZE);
       const batchPaths = batch.map(f => join(bpmnDir, f));
-      const result = cli('deploy', ...batchPaths);
+      const result = await cli('deploy', ...batchPaths);
       assert.strictEqual(
         result.status, 0,
         `Deploy batch ${Math.floor(i / DEPLOY_BATCH_SIZE) + 1} should exit 0. stderr: ${result.stderr}`,
@@ -98,11 +96,11 @@ describe('Pagination beyond CI_PAGE_SIZE (requires Camunda 8 at localhost:8080)'
 
   test(`search pd --id=mini-process-* returns all ${DEPLOY_COUNT} definitions`, { timeout: POLL_TIMEOUT_MS + 30_000 }, async () => {
     // Switch output to JSON for easy parsing
-    cli('output', 'json');
+    await cli('output', 'json');
 
     // Poll until Elasticsearch has indexed all deployed definitions
     await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=mini-process-*');
+      const result = await cli('search', 'pd', '--id=mini-process-*');
       if (result.status !== 0) return false;
       try {
         return JSON.parse(result.stdout).length >= DEPLOY_COUNT;
@@ -110,7 +108,7 @@ describe('Pagination beyond CI_PAGE_SIZE (requires Camunda 8 at localhost:8080)'
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     // Final assertion
-    const finalResult = cli('search', 'pd', '--id=mini-process-*');
+    const finalResult = await cli('search', 'pd', '--id=mini-process-*');
     assert.strictEqual(finalResult.status, 0, `search should exit 0. stderr: ${finalResult.stderr}`);
 
     const items = JSON.parse(finalResult.stdout);
@@ -119,17 +117,17 @@ describe('Pagination beyond CI_PAGE_SIZE (requires Camunda 8 at localhost:8080)'
   });
 
   test(`list pd returns all ${DEPLOY_COUNT} definitions`, { timeout: POLL_TIMEOUT_MS + 30_000 }, async () => {
-    cli('output', 'json');
+    await cli('output', 'json');
 
     await pollUntil(async () => {
-      const result = cli('list', 'pd');
+      const result = await cli('list', 'pd');
       if (result.status !== 0) return false;
       try {
         return JSON.parse(result.stdout).length >= DEPLOY_COUNT;
       } catch { return false; }
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const finalResult = cli('list', 'pd');
+    const finalResult = await cli('list', 'pd');
     assert.strictEqual(finalResult.status, 0, `list pd should exit 0. stderr: ${finalResult.stderr}`);
 
     const items = JSON.parse(finalResult.stdout);
