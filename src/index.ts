@@ -48,7 +48,6 @@ import {
   executePluginCommand
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
-import { openApp, openUrl } from './commands/open.ts';
 
 /**
  * Normalize resource aliases
@@ -60,7 +59,6 @@ function normalizeResource(resource: string): string {
     ut: 'user-task',
     inc: 'incident',
     msg: 'message',
-    vars: 'variable',
     profile: 'profile',
     profiles: 'profile',
     plugin: 'plugin',
@@ -70,84 +68,106 @@ function normalizeResource(resource: string): string {
 }
 
 /**
- * Parse --version flag value into a number, or undefined if not set.
- */
-function parseVersionFlag(values: Record<string, unknown>): number | undefined {
-  return (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined;
-}
-
-/**
  * Parse command line arguments
  */
+const CLI_OPTION_DEFINITIONS = {
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'string', short: 'v' },
+  all: { type: 'boolean' },
+  xml: { type: 'boolean' },
+  profile: { type: 'string' },
+  bpmnProcessId: { type: 'string' },
+  id: { type: 'string' },
+  processDefinitionId: { type: 'string' },
+  processInstanceKey: { type: 'string' },
+  processDefinitionKey: { type: 'string' },
+  parentProcessInstanceKey: { type: 'string' },
+  variables: { type: 'string' },
+  state: { type: 'string' },
+  assignee: { type: 'string' },
+  type: { type: 'string' },
+  correlationKey: { type: 'string' },
+  timeToLive: { type: 'string' },
+  maxJobsToActivate: { type: 'string' },
+  timeout: { type: 'string' },
+  worker: { type: 'string' },
+  retries: { type: 'string' },
+  errorMessage: { type: 'string' },
+  baseUrl: { type: 'string' },
+  clientId: { type: 'string' },
+  clientSecret: { type: 'string' },
+  audience: { type: 'string' },
+  oAuthUrl: { type: 'string' },
+  defaultTenantId: { type: 'string' },
+  from: { type: 'string' },
+  name: { type: 'string' },
+  key: { type: 'string' },
+  elementId: { type: 'string' },
+  errorType: { type: 'string' },
+  awaitCompletion: { type: 'boolean' },
+  fetchVariables: { type: 'boolean' },
+  requestTimeout: { type: 'string' },
+  value: { type: 'string' },
+  scopeKey: { type: 'string' },
+  fullValue: { type: 'boolean' },
+  userTask: { type: 'boolean' },
+  processDefinition: { type: 'boolean' },
+  iname: { type: 'string' },
+  iid: { type: 'string' },
+  iassignee: { type: 'string' },
+  ierrorMessage: { type: 'string' },
+  itype: { type: 'string' },
+  ivalue: { type: 'string' },
+  sortBy: { type: 'string' },
+  asc: { type: 'boolean' },
+  desc: { type: 'boolean' },
+  limit: { type: 'string' },
+  between: { type: 'string' },
+  dateField: { type: 'string' },
+} as const;
+
+/**
+ * Find duplicate non-boolean CLI flags from parseArgs tokens.
+ * Returns normalized flag names (without `--`) that were provided more than once.
+ */
+type ParseOptionToken = { kind: 'option'; name: string };
+
+function isParseOptionToken(token: unknown): token is ParseOptionToken {
+  return !!token
+    && typeof token === 'object'
+    && (token as { kind?: unknown }).kind === 'option'
+    && typeof (token as { name?: unknown }).name === 'string';
+}
+
+function findDuplicateNonBooleanFlags(tokens: unknown[]): string[] {
+  const counts = new Map<string, number>();
+  for (const token of tokens) {
+    if (!isParseOptionToken(token)) continue;
+    const { name } = token;
+    const definition = CLI_OPTION_DEFINITIONS[name as keyof typeof CLI_OPTION_DEFINITIONS];
+    if (!definition || definition.type === 'boolean') continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+    .sort();
+}
+
 function parseCliArgs() {
   try {
-    const { values, positionals } = parseArgs({
+    const { values, positionals, tokens } = parseArgs({
       args: process.argv.slice(2),
-      options: {
-        help: { type: 'boolean', short: 'h' },
-        version: { type: 'string', short: 'v' },
-        all: { type: 'boolean' },
-        xml: { type: 'boolean' },
-        profile: { type: 'string' },
-        bpmnProcessId: { type: 'string' },
-        id: { type: 'string' },
-        processDefinitionId: { type: 'string' },
-        processInstanceKey: { type: 'string' },
-        processDefinitionKey: { type: 'string' },
-        parentProcessInstanceKey: { type: 'string' },
-        variables: { type: 'string' },
-        state: { type: 'string' },
-        assignee: { type: 'string' },
-        type: { type: 'string' },
-        correlationKey: { type: 'string' },
-        timeToLive: { type: 'string' },
-        maxJobsToActivate: { type: 'string' },
-        timeout: { type: 'string' },
-        worker: { type: 'string' },
-        retries: { type: 'string' },
-        errorMessage: { type: 'string' },
-        baseUrl: { type: 'string' },
-        clientId: { type: 'string' },
-        clientSecret: { type: 'string' },
-        audience: { type: 'string' },
-        oAuthUrl: { type: 'string' },
-        defaultTenantId: { type: 'string' },
-        from: { type: 'string' },
-        name: { type: 'string' },
-        key: { type: 'string' },
-        elementId: { type: 'string' },
-        errorType: { type: 'string' },
-        awaitCompletion: { type: 'boolean' },
-        fetchVariables: { type: 'boolean' },
-        requestTimeout: { type: 'string' },
-        value: { type: 'string' },
-        scopeKey: { type: 'string' },
-        fullValue: { type: 'boolean' },
-        userTask: { type: 'boolean' },
-        processDefinition: { type: 'boolean' },
-        iname: { type: 'string' },
-        iid: { type: 'string' },
-        iassignee: { type: 'string' },
-        ierrorMessage: { type: 'string' },
-        itype: { type: 'string' },
-        ivalue: { type: 'string' },
-        sortBy: { type: 'string' },
-        asc: { type: 'boolean' },
-        desc: { type: 'boolean' },
-        limit: { type: 'string' },
-        between: { type: 'string' },
-        dateField: { type: 'string' },
-        fields: { type: 'string' },
-        'dry-run': { type: 'boolean' },
-        verbose: { type: 'boolean' },
-        force: { type: 'boolean' },
-        none: { type: 'boolean' },
-        'from-file': { type: 'string' },
-        'from-env': { type: 'boolean' },
-      },
+      options: CLI_OPTION_DEFINITIONS,
       allowPositionals: true,
       strict: false,
+      tokens: true,
     });
+
+    const duplicates = findDuplicateNonBooleanFlags(tokens);
+    if (duplicates.length > 0) {
+      throw new Error(`Cannot specify the same flag multiple times: ${duplicates.map(flag => `--${flag}`).join(', ')}`);
+    }
 
     return { values, positionals };
   } catch (error: any) {
@@ -200,21 +220,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Resolve --fields flag (agent feature: filter output keys)
-  if (values.fields && typeof values.fields === 'string') {
-    c8ctl.fields = values.fields.split(',').map(f => f.trim()).filter(Boolean);
-  }
-
-  // Resolve --dry-run flag (agent feature: emit API request without executing)
-  if (values['dry-run']) {
-    c8ctl.dryRun = true;
-  }
-
-  // Resolve --verbose flag (enable SDK trace logging and surface raw errors)
-  if (values.verbose) {
-    c8ctl.verbose = true;
-  }
-
   // Load installed plugins
   await loadInstalledPlugins();
 
@@ -260,10 +265,6 @@ async function main() {
   // Handle session commands
   if (verb === 'use') {
     if (normalizedResource === 'profile') {
-      if (values.none) {
-        useProfile('--none');
-        return;
-      }
       if (!args[0]) {
         logger.error('Profile name required. Usage: c8 use profile <name>');
         process.exit(1);
@@ -303,8 +304,6 @@ async function main() {
       logger.error('Profile name required. Usage: c8 add profile <name> --baseUrl=<url>');
       process.exit(1);
     }
-    const envFile = typeof values['from-file'] === 'string' ? values['from-file'] : undefined;
-    const fromEnv = values['from-env'] === true;
     addProfile(args[0], {
       url: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
       clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
@@ -312,8 +311,6 @@ async function main() {
       audience: typeof values.audience === 'string' ? values.audience : undefined,
       oauthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
       tenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
-      envFile,
-      fromEnv,
     });
     return;
   }
@@ -341,6 +338,18 @@ async function main() {
   if (verb === 'load' && normalizedResource === 'plugin') {
     const fromUrl = values.from as string | undefined;
     const packageName = args[0];
+    
+    // Ensure exclusive usage
+    if (packageName && fromUrl) {
+      logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
+      process.exit(1);
+    }
+    
+    if (!packageName && !fromUrl) {
+      logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
+      process.exit(1);
+    }
+    
     await loadPlugin(packageName, fromUrl);
     return;
   }
@@ -350,7 +359,7 @@ async function main() {
       logger.error('Package name required. Usage: c8 unload plugin <package-name>');
       process.exit(1);
     }
-    await unloadPlugin(args[0], { force: values.force as boolean | undefined });
+    await unloadPlugin(args[0]);
     return;
   }
 
@@ -387,7 +396,6 @@ async function main() {
     await listProcessInstances({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: parseVersionFlag(values),
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
       sortBy: values.sortBy as string | undefined,
@@ -417,7 +425,7 @@ async function main() {
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: parseVersionFlag(values),
+      version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
       fetchVariables: values.fetchVariables as boolean | undefined,
@@ -444,7 +452,7 @@ async function main() {
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: parseVersionFlag(values),
+      version: values.version as number | undefined,
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as boolean | undefined,
@@ -693,26 +701,7 @@ async function main() {
     const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
-      force: values.force as boolean | undefined,
     });
-    return;
-  }
-
-  // Handle open command
-  if (verb === 'open') {
-    await openApp(resource, {
-      profile: values.profile as string | undefined,
-      dryRun: values['dry-run'] as boolean | undefined,
-    });
-    return;
-  }
-
-  // Handle feedback command
-  if (verb === 'feedback') {
-    const logger = getLogger();
-    const url = 'https://github.com/camunda/c8ctl/issues';
-    logger.info(`Opening feedback page: ${url}`);
-    openUrl(url);
     return;
   }
 
@@ -735,7 +724,7 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
-        version: parseVersionFlag(values),
+        version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
         key: values.key as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         iName: values.iname as string | undefined,
@@ -751,7 +740,6 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         processDefinitionKey: values.processDefinitionKey as string | undefined,
-        version: parseVersionFlag(values),
         state: values.state as string | undefined,
         key: values.key as string | undefined,
         parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,
@@ -864,9 +852,6 @@ async function main() {
 try {
   if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
     main().catch((error) => {
-      if (c8ctl.verbose) {
-        throw error;
-      }
       console.error('Unexpected error:', error);
       process.exit(1);
     });
