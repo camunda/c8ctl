@@ -3,107 +3,118 @@
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
-import { createClient } from '../../src/client.ts';
-import { deploy } from '../../src/commands/deployments.ts';
-import { existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
-import { getUserDataDir } from '../../src/config.ts';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pollUntil } from '../utils/polling.ts';
 
 // Wait time for Elasticsearch to index data before search queries
 const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 8000;
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+const POLL_TIMEOUT_MS = ELASTICSEARCH_CONSISTENCY_WAIT_MS + 10_000;
+const POLL_INTERVAL_MS = 2_000;
+
+let dataDir = '';
+
+type ProcessDefinition = {
+  processDefinitionKey: string | number;
+  processDefinitionId: string;
+  version?: number;
+};
+
+function cli(...args: string[]) {
+  return spawnSync('node', ['--experimental-strip-types', CLI, ...args], {
+    encoding: 'utf-8',
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir },
+    stdio: 'pipe',
+  });
+}
+
+function parseJsonOutput<T>(output: string): T {
+  try {
+    return JSON.parse(output) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    assert.fail(`Expected valid JSON output (${message}), got:\n${output}`);
+  }
+}
+
+async function deployAndGetProcessDefinitionKey() {
+  const deployResult = cli('deploy', 'tests/fixtures/simple.bpmn');
+  assert.strictEqual(deployResult.status, 0, `Deploy should exit 0. stderr: ${deployResult.stderr}`);
+
+  const outputResult = cli('output', 'json');
+  assert.strictEqual(outputResult.status, 0, `Setting output mode should exit 0. stderr: ${outputResult.stderr}`);
+
+  let latestItems: ProcessDefinition[] = [];
+  await pollUntil(async () => {
+    const searchResult = cli('search', 'pd', '--id=simple-process');
+    if (searchResult.status !== 0) return false;
+    try {
+      latestItems = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
+      return latestItems.length > 0;
+    } catch {
+      return false;
+    }
+  }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+  assert.ok(latestItems.length > 0, 'Should have at least one process definition');
+  return String(latestItems[0].processDefinitionKey);
+}
 
 describe('Process Definition Integration Tests (requires Camunda 8 at localhost:8080)', () => {
+  before(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-pd-test-'));
+  });
+
   beforeEach(() => {
-    // Clear session state before each test to ensure clean tenant resolution
-    const sessionPath = join(getUserDataDir(), 'session.json');
-    if (existsSync(sessionPath)) {
-      unlinkSync(sessionPath);
-    }
+    rmSync(join(dataDir, 'session.json'), { force: true });
+  });
+
+  after(() => {
+    rmSync(dataDir, { recursive: true, force: true });
   });
 
   test('list process definitions returns deployed processes', async () => {
-    const client = createClient();
-    
-    // First deploy a process to ensure at least one exists
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Search for process definitions
-    const result = await client.searchProcessDefinitions({
-      filter: {
-        processDefinitionId: 'simple-process',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    // Verify we get results
-    assert.ok(result, 'Search result should exist');
-    assert.ok(Array.isArray(result.items), 'Items should be an array');
-    assert.ok(result.items.length > 0, 'Should have at least one process definition');
-    
-    // Verify the structure of returned items
-    const firstItem = result.items[0];
+    const processDefinitionKey = await deployAndGetProcessDefinitionKey();
+
+    const searchResult = cli('search', 'pd', '--id=simple-process');
+    assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
+    const items = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
+    const firstItem = items.find(item => String(item.processDefinitionKey) === processDefinitionKey);
+    assert.ok(firstItem, `Expected to find process definition ${processDefinitionKey}`);
+
     assert.ok(firstItem.processDefinitionKey, 'Process definition should have a key');
     assert.ok(firstItem.processDefinitionId, 'Process definition should have an ID');
     assert.ok(firstItem.version !== undefined, 'Process definition should have a version');
   });
 
   test('get process definition by key returns definition details', async () => {
-    const client = createClient();
-    
-    // Deploy a process first
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Search to get the process definition key
-    const searchResult = await client.searchProcessDefinitions({
-      filter: {
-        processDefinitionId: 'simple-process',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(searchResult.items && searchResult.items.length > 0, 'Should find the deployed process');
-    
-    const processDefinitionKey = searchResult.items[0].processDefinitionKey;
-    
-    // Get the process definition by key
-    const definition = await client.getProcessDefinition(
-      { processDefinitionKey: processDefinitionKey as any },
-      { consistency: { waitUpToMs: 0 } }
-    );
-    
-    // Verify the definition details
+    const processDefinitionKey = await deployAndGetProcessDefinitionKey();
+
+    const getResult = cli('get', 'pd', processDefinitionKey);
+    assert.strictEqual(getResult.status, 0, `Get should exit 0. stderr: ${getResult.stderr}`);
+    const definition = parseJsonOutput<ProcessDefinition>(getResult.stdout);
+
     assert.ok(definition, 'Process definition should be returned');
-    assert.strictEqual(definition.processDefinitionKey, processDefinitionKey, 'Keys should match');
+    assert.strictEqual(String(definition.processDefinitionKey), processDefinitionKey, 'Keys should match');
     assert.strictEqual(definition.processDefinitionId, 'simple-process', 'IDs should match');
   });
 
   test('get process definition XML returns BPMN content', async () => {
-    const client = createClient();
-    
-    // Deploy a process first
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    
-    // Search to get the process definition key
-    const searchResult = await client.searchProcessDefinitions({
-      filter: {
-        processDefinitionId: 'simple-process',
-      },
-    }, { consistency: { waitUpToMs: ELASTICSEARCH_CONSISTENCY_WAIT_MS } });
-    
-    assert.ok(searchResult.items && searchResult.items.length > 0, 'Should find the deployed process');
-    
-    const processDefinitionKey = searchResult.items[0].processDefinitionKey;
-    
-    // Get the process definition XML
-    const xml = await client.getProcessDefinitionXml(
-      { processDefinitionKey: processDefinitionKey as any },
-      { consistency: { waitUpToMs: 0 } }
-    );
-    
-    // Verify XML content is returned
-    assert.ok(xml, 'XML should be returned');
-    assert.ok(typeof xml === 'string', 'XML should be a string');
-    assert.ok(xml.includes('bpmn:'), 'XML should contain BPMN namespace');
-    assert.ok(xml.includes('simple-process'), 'XML should contain the process ID');
+    const processDefinitionKey = await deployAndGetProcessDefinitionKey();
+
+    const getXmlResult = cli('get', 'pd', processDefinitionKey, '--xml');
+    assert.strictEqual(getXmlResult.status, 0, `Get XML should exit 0. stderr: ${getXmlResult.stderr}`);
+
+    assert.ok(getXmlResult.stdout, 'XML should be returned');
+    assert.ok(typeof getXmlResult.stdout === 'string', 'XML should be a string');
+    assert.ok(getXmlResult.stdout.includes('bpmn:'), 'XML should contain BPMN namespace');
+    assert.ok(getXmlResult.stdout.includes('simple-process'), 'XML should contain the process ID');
   });
 });

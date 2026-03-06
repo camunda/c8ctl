@@ -3,33 +3,41 @@
  *
  * Supports ISO 8601 datetime strings and short date strings (YYYY-MM-DD).
  * Short dates are expanded: 'from' gets T00:00:00.000Z, 'to' gets T23:59:59.999Z.
+ * Open-ended ranges are supported: '..<to>' (everything until a date) or '<from>..' (everything from a date).
  */
 
 /**
  * Parse a `--between` value of the form `<from>..<to>`.
- * Returns `{ from, to }` as ISO 8601 strings, or null on parse failure.
+ * Either side may be omitted for an open-ended range (e.g. `..2024-12-31` or `2024-01-01..`).
+ * Returns `{ from?, to? }` as ISO 8601 strings, or null on parse failure.
+ * Returns null if the separator `..` is absent or if both sides are empty.
  */
-export function parseBetween(value: string): { from: string; to: string } | null {
+export function parseBetween(value: string): { from?: string; to?: string } | null {
   const separatorIndex = value.indexOf('..');
   if (separatorIndex < 0) return null;
 
   const rawFrom = value.slice(0, separatorIndex).trim();
   const rawTo = value.slice(separatorIndex + 2).trim();
-  if (!rawFrom || !rawTo) return null;
+  if (!rawFrom && !rawTo) return null;
 
-  const from = expandDate(rawFrom, 'start');
-  const to = expandDate(rawTo, 'end');
-  if (!from || !to) return null;
+  const from = rawFrom ? expandDate(rawFrom, 'start') ?? undefined : undefined;
+  const to = rawTo ? expandDate(rawTo, 'end') ?? undefined : undefined;
+  if (rawFrom && !from) return null;
+  if (rawTo && !to) return null;
 
   return { from, to };
 }
 
 /**
  * Build an AdvancedDateTimeFilter object for a `--between` range.
- * Returns `{ $gte: from, $lte: to }` as expected by the Camunda REST API.
+ * Only includes `$gte`/`$lte` fields when the corresponding bound is provided,
+ * supporting open-ended ranges.
  */
-export function buildDateFilter(from: string, to: string): { $gte: string; $lte: string } {
-  return { $gte: from, $lte: to };
+export function buildDateFilter(from?: string, to?: string): { $gte?: string; $lte?: string } {
+  const filter: { $gte?: string; $lte?: string } = {};
+  if (from) filter.$gte = from;
+  if (to) filter.$lte = to;
+  return filter;
 }
 
 /**
