@@ -21,6 +21,12 @@ const POLL_INTERVAL_MS = 2_000;
 let dataDir = '';
 
 type ProcessDefinition = {
+  Key: string | number;
+  'Process ID': string;
+  Version?: number;
+};
+
+type RawProcessDefinition = {
   processDefinitionKey: string | number;
   processDefinitionId: string;
   version?: number;
@@ -64,7 +70,7 @@ async function deployAndGetProcessDefinitionKey() {
   }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
   assert.ok(latestItems.length > 0, 'Should have at least one process definition');
-  return String(latestItems[0].processDefinitionKey);
+  return String(latestItems[0].Key);
 }
 
 describe('Process Definition Integration Tests (requires Camunda 8 at localhost:8080)', () => {
@@ -86,12 +92,12 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
     const searchResult = cli('search', 'pd', '--id=simple-process');
     assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
     const items = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
-    const firstItem = items.find(item => String(item.processDefinitionKey) === processDefinitionKey);
+    const firstItem = items.find(item => String(item.Key) === processDefinitionKey);
     assert.ok(firstItem, `Expected to find process definition ${processDefinitionKey}`);
 
-    assert.ok(firstItem.processDefinitionKey, 'Process definition should have a key');
-    assert.ok(firstItem.processDefinitionId, 'Process definition should have an ID');
-    assert.ok(firstItem.version !== undefined, 'Process definition should have a version');
+    assert.ok(firstItem.Key, 'Process definition should have a key');
+    assert.ok(firstItem['Process ID'], 'Process definition should have an ID');
+    assert.ok(firstItem.Version !== undefined, 'Process definition should have a version');
   });
 
   test('get process definition by key returns definition details', async () => {
@@ -99,7 +105,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
     const getResult = cli('get', 'pd', processDefinitionKey);
     assert.strictEqual(getResult.status, 0, `Get should exit 0. stderr: ${getResult.stderr}`);
-    const definition = parseJsonOutput<ProcessDefinition>(getResult.stdout);
+    const definition = parseJsonOutput<RawProcessDefinition>(getResult.stdout);
 
     assert.ok(definition, 'Process definition should be returned');
     assert.strictEqual(String(definition.processDefinitionKey), processDefinitionKey, 'Keys should match');

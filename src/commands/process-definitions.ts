@@ -69,7 +69,7 @@ export async function getProcessDefinition(key: string, options: {
         { processDefinitionKey: key as any },
         { consistency: { waitUpToMs: 0 } }
       );
-      logger.info(result);
+      logger.output(result);
     } else {
       const result = await client.getProcessDefinition(
         { processDefinitionKey: key as any },

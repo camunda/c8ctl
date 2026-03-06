@@ -170,6 +170,14 @@ export class Logger {
       this._writeLog(JSON.stringify(data));
     }
   }
+
+  /**
+   * Write primary command output to stdout as-is, regardless of output mode.
+   * Use this for non-structured content (e.g. XML, plain text). 
+   */
+  output(content: string): void {
+    this._writeLog(content);
+  }
 }
 
 /**
