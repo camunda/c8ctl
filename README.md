@@ -12,13 +12,13 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
-- **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys 
+- **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
 ## Beware the 🤖
 
-*Full transparency*:  
+_Full transparency_:  
 this cli is also a pilot-coding experiment, practicing [Agentic Engineering](https://addyosmani.com/blog/agentic-engineering/).  
 Guided by humans, the codebase is (mostly) built by your friendly neighborhood LLM, fully dogfooding the Human-in-the-Loop pattern.
 
@@ -236,6 +236,7 @@ c8ctl list process-instances
 ### Profile Management
 
 c8ctl supports two types of profiles:
+
 1. **c8ctl profiles**: Managed directly by c8ctl
 2. **Camunda Modeler profiles**: Automatically imported from Camunda Modeler (with `modeler:` prefix)
 
@@ -263,6 +264,7 @@ c8 remove profile prod
 #### Camunda Modeler Integration
 
 c8ctl automatically reads profiles from Camunda Modeler's `profiles.json` file. These profiles are:
+
 - **Read-only**: Cannot be modified or deleted via c8ctl
 - **Prefixed**: Always displayed with `modeler:` prefix (e.g., `modeler:Local Dev`)
 - **Dynamic**: Loaded fresh on each command execution (no caching)
@@ -272,6 +274,7 @@ c8ctl automatically reads profiles from Camunda Modeler's `profiles.json` file. 
   - Windows: `%APPDATA%\camunda-modeler\profiles.json`
 
 **Using modeler profiles:**
+
 ```bash
 # List includes modeler profiles with 'modeler:' prefix
 c8 list profiles
@@ -287,6 +290,7 @@ c8 list pi --profile=modeler:Cloud Cluster
 ```
 
 **URL Construction:**
+
 - **Self-managed** (localhost): Appends `/v2` to the URL (e.g., `http://localhost:8080/v2`)
 - **Cloud**: Uses the cluster URL as-is (e.g., `https://abc123.region.zeebe.camunda.io`)
 - **Any port**: Supports any port number in the URL
@@ -370,6 +374,7 @@ c8ctl help
 ```
 
 **Global Plugin System:**
+
 - Plugins are installed to a global directory (OS-specific, see table above)
 - Plugin registry file (`plugins.json`) tracks all installed plugins
 - No local `package.json` is required in your working directory
@@ -393,6 +398,7 @@ c8ctl help
   - file source (`file://`): version downgrade is not supported; use `load plugin --from` with the desired local plugin checkout
 
 **Plugin Development:**
+
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
 - Generated scaffold includes all necessary files, build configuration, and an `AGENTS.md` guide for autonomous plugin implementation
 - Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
@@ -402,6 +408,7 @@ c8ctl help
 - See the bundled `hello-world` plugin in `default-plugins/` for a complete example
 
 **Plugin Requirements:**
+
 - Plugin packages must be regular Node.js modules
 - They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
 - The plugin file must export a `commands` object
@@ -425,6 +432,7 @@ logger.info(`Tenant: ${tenantId}`);
 ```
 
 **Example Plugin Structure:**
+
 ```typescript
 // c8ctl-plugin.ts
 export const metadata = {
@@ -456,11 +464,12 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 
 ### Command Structure
 
-```
+```shell
 c8ctl <verb> <resource> [arguments] [flags]
 ```
 
-**Verbs**: 
+**Verbs**:
+
 - `list` - List resources
 - `search` - Search resources with filters
 - `get` - Get resource by key
@@ -513,10 +522,9 @@ Integration tests require a running Camunda 8 instance at `http://localhost:8080
 
 - **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
 
-
 ### Project Structure
 
-```
+```shell
 c8ctl/
 ├── src/
 │   ├── index.ts              # CLI entry point
@@ -581,6 +589,7 @@ Configuration is stored in platform-specific user data directories:
 - **Windows**: `%APPDATA%\c8ctl\`
 
 Files:
+
 - `profiles.json`: Saved cluster configurations
 - `session.json`: Active profile, tenant, and output mode
 - `plugins.json`: Plugin registry tracking installed plugins
@@ -594,6 +603,7 @@ c8ctl automatically reads profiles from Camunda Modeler (if installed):
 - **Windows**: `%APPDATA%\camunda-modeler\profiles.json`
 
 Modeler profiles are:
+
 - Read-only in c8ctl (managed via Camunda Modeler)
 - Automatically loaded on each command execution
 - Prefixed with `modeler:` when used in c8ctl
@@ -601,7 +611,7 @@ Modeler profiles are:
 
 ## License
 
-Apache 2.0 - see LICENSE.md 
+Apache 2.0 - see LICENSE.md
 
 ## Contributing
 

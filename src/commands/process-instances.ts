@@ -51,7 +51,7 @@ export async function listProcessInstances(options: {
         const field = options.dateField ?? 'startDate';
         filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
       } else {
-        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31 or ISO 8601 datetimes)');
+        logger.error('Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)');
         process.exit(1);
       }
     }
