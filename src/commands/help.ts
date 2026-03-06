@@ -51,7 +51,7 @@ Usage: c8ctl <command> [resource] [options]
 
 Commands:
   list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
-  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables)
+  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables/vars)
   get       <resource> <key> Get resource by key (pi, pd, inc, topology, form)
   create    <resource>       Create resource (pi)
   cancel    <resource> <key> Cancel resource (pi)
@@ -207,7 +207,7 @@ For detailed help on specific commands with all available flags:
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
     list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables',
+    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables (vars)',
     get: 'process-instance (pi), process-definition (pd), incident (inc), topology, form',
     create: 'process-instance (pi)',
     complete: 'user-task (ut), job',

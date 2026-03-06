@@ -493,7 +493,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `output` - Set output format
 - `completion` - Generate shell completion script
 
-**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables, message (msg), topology, profile, tenant, plugin
+**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables (vars), message (msg), topology, profile, tenant, plugin
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 

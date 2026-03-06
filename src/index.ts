@@ -59,6 +59,7 @@ function normalizeResource(resource: string): string {
     ut: 'user-task',
     inc: 'incident',
     msg: 'message',
+    vars: 'variable',
     profile: 'profile',
     profiles: 'profile',
     plugin: 'plugin',

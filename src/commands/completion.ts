@@ -24,7 +24,7 @@ _c8ctl_completions() {
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
-  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable"
+  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable vars"
   local get_resources="process-instance pi process-definition pd incident inc topology form"
   local create_resources="process-instance pi"
   local cancel_resources="process-instance pi"
@@ -300,6 +300,7 @@ _c8ctl() {
             'jobs:Search jobs'
             'variables:Search variables'
             'variable:Search variables'
+            'vars:Search variables'
           )
           _describe 'resource' resources
           ;;
@@ -738,6 +739,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Sea
 complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Search variables'
 complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
 complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
 
 # Resources for 'get' command
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
