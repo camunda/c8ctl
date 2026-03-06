@@ -3,17 +3,17 @@
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  *
  * These tests validate the search CLI commands, which exercise the project's wrapper
- * functions in src/commands/search.ts. All CLI calls use spawnSync subprocesses to
+ * functions in src/commands/search.ts. All CLI calls use async subprocesses to
  * avoid Node 24 IPC deserialization errors that occur with direct TypeScript imports.
  */
 
 import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn, type SpawnResult } from '../utils/spawn.ts';
 import { todayRange, MS_PER_DAY } from '../utils/date-helpers.ts';
 
 // Polling configuration for Elasticsearch consistency
@@ -32,11 +32,9 @@ type JobRow = { Key: string | number; Type: string; State: string; Retries: numb
 type VariableRow = { Name: string; Value: string; 'Process Instance': string | number; 'Scope Key': string | number; 'Tenant ID': string; };
 
 function cli(...args: string[]) {
-  return spawnSync('node', ['--experimental-strip-types', CLI, ...args], {
-    encoding: 'utf-8',
+  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, C8CTL_DATA_DIR: dataDir },
-    stdio: 'pipe',
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
   });
 }
 
@@ -55,7 +53,7 @@ function parseItems<T>(stdout: string): T[] {
 }
 
 /** Extract the created resource key from the success message in CLI stderr (JSON mode). */
-function parseCreatedKey(result: ReturnType<typeof spawnSync>): string | undefined {
+function parseCreatedKey(result: SpawnResult): string | undefined {
   for (const line of result.stderr.split('\n').filter(Boolean)) {
     try {
       const data = JSON.parse(line);
@@ -72,10 +70,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-search-test-'));
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Clear session state before each test, then restore JSON output mode
     rmSync(join(dataDir, 'session.json'), { force: true });
-    cli('output', 'json');
+    await cli('output', 'json');
   });
 
   after(() => {
@@ -83,10 +81,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search process definitions by processDefinitionId', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=simple-process');
+      const result = await cli('search', 'pd', '--id=simple-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -95,11 +93,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search process definitions with filters', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
 
     let processDefKey: string | undefined;
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=simple-process');
+      const result = await cli('search', 'pd', '--id=simple-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       if (items.length > 0) {
         processDefKey = String(items[0].Key);
@@ -112,17 +110,17 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(processDefKey, 'Should have process definition key');
 
     // Search by key
-    const keyResult = cli('search', 'pd', `--key=${processDefKey}`);
+    const keyResult = await cli('search', 'pd', `--key=${processDefKey}`);
     const keyItems = parseItems<ProcessDefinitionRow>(keyResult.stdout);
     assert.ok(keyItems.length > 0, 'Search by key should find the process');
   });
 
   test('search process instances by state', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', '--id=simple-process', '--state=COMPLETED');
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED');
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -131,15 +129,15 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search process instances by processDefinitionKey', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     // Get processDefinitionKey from pd search, and wait for a process instance to be indexed
     let processDefKey: string | undefined;
     const instanceIndexed = await pollUntil(async () => {
-      const pdResult = cli('search', 'pd', '--id=simple-process');
+      const pdResult = await cli('search', 'pd', '--id=simple-process');
       const pdItems = parseItems<ProcessDefinitionRow>(pdResult.stdout);
-      const piResult = cli('search', 'pi', '--id=simple-process');
+      const piResult = await cli('search', 'pi', '--id=simple-process');
       const piItems = parseItems<ProcessInstanceRow>(piResult.stdout);
       if (pdItems.length > 0 && piItems.length > 0) {
         processDefKey = String(pdItems[0].Key);
@@ -153,7 +151,7 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
     // Poll until search by processDefinitionKey finds results
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', `--processDefinitionKey=${processDefKey}`);
+      const result = await cli('search', 'pi', `--processDefinitionKey=${processDefKey}`);
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -162,11 +160,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search user tasks with filters', async () => {
-    cli('deploy', 'tests/fixtures/list-pis');
-    cli('create', 'pi', '--id=Process_0t60ay7');
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'ut', '--state=CREATED');
+      const result = await cli('search', 'ut', '--state=CREATED');
       const items = parseItems<UserTaskRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -175,12 +173,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search incidents with filters', async () => {
-    cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
-    cli('create', 'pi', '--id=Process_0yyrstd');
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    await cli('create', 'pi', '--id=Process_0yyrstd');
 
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED');
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED');
       const items = parseItems<JobRow>(result.stdout);
       if (items.length > 0) {
         const createdJob = items.find(j => String(j.State).toUpperCase() === 'CREATED');
@@ -193,10 +191,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(jobFound && jobKey, 'Job should appear before failing it');
 
-    cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for incident test');
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for incident test');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'inc', '--state=ACTIVE');
+      const result = await cli('search', 'inc', '--state=ACTIVE');
       const items = parseItems<IncidentRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -205,11 +203,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search jobs with filters', async () => {
-    cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-    cli('create', 'pi', '--id=Process_18glkb3');
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=n00b', '--state=CREATED');
+      const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED');
       const items = parseItems<JobRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -218,11 +216,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search variables with filters', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ testVar: 'testValue', count: 42, flag: true })}`);
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ testVar: 'testValue', count: 42, flag: true })}`);
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'vars', '--name=testVar');
+      const result = await cli('search', 'vars', '--name=testVar');
       const items = parseItems<VariableRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -231,12 +229,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('search variables with fullValue option', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
     const longValue = 'a'.repeat(1000);
-    cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ longVar: longValue })}`);
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ longVar: longValue })}`);
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'vars', '--name=longVar', '--fullValue');
+      const result = await cli('search', 'vars', '--name=longVar', '--fullValue');
       const items = parseItems<VariableRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -247,11 +245,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   // ── Wildcard Search Tests ──────────────────────────────────────────
 
   test('wildcard * on process definition name matches multiple results', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
-    cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--name=*Process');
+      const result = await cli('search', 'pd', '--name=*Process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -260,11 +258,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('wildcard ? on process definition ID matches single character', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
-    cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=ma??-process');
+      const result = await cli('search', 'pd', '--id=ma??-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       if (items.length === 0) return false;
       return items.every(pd => String(pd['Process ID']) === 'main-process');
@@ -274,12 +272,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('wildcard * on process definition ID matches multiple processes', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
-    cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     // "*-process" should match both main-process and sub-process (and possibly simple-process)
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=*-process');
+      const result = await cli('search', 'pd', '--id=*-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -288,11 +286,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('wildcard * on variable name matches deployed variables', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ wildcardTestAlpha: 'a', wildcardTestBeta: 'b' })}`);
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ wildcardTestAlpha: 'a', wildcardTestBeta: 'b' })}`);
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'vars', '--name=wildcardTest*');
+      const result = await cli('search', 'vars', '--name=wildcardTest*');
       const items = parseItems<VariableRow>(result.stdout);
       return items.length >= 2;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -301,11 +299,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('wildcard * on job type matches jobs', async () => {
-    cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-    cli('create', 'pi', '--id=Process_18glkb3');
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=n*');
+      const result = await cli('search', 'jobs', '--type=n*');
       const items = parseItems<JobRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -314,24 +312,24 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('wildcard ? on job type requires exact character count', async () => {
-    cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-    cli('create', 'pi', '--id=Process_18glkb3');
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
     // Wait for the job to be indexed first
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=n00b');
+      const result = await cli('search', 'jobs', '--type=n00b');
       const items = parseItems<JobRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Job should be indexed');
 
     // "n?b" should NOT match "n00b" (too few ? chars)
-    const result = cli('search', 'jobs', '--type=n?b');
+    const result = await cli('search', 'jobs', '--type=n?b');
     const items = parseItems<JobRow>(result.stdout);
     assert.ok(items.length === 0, 'Wildcard "n?b" should not match "n00b" (needs 2 chars)');
 
     // "n??b" SHOULD match "n00b"
-    const result2 = cli('search', 'jobs', '--type=n??b');
+    const result2 = await cli('search', 'jobs', '--type=n??b');
     const items2 = parseItems<JobRow>(result2.stdout);
     assert.ok(items2.length > 0, 'Wildcard "n??b" should match "n00b"');
   });
@@ -339,46 +337,46 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   // ── Case-Insensitive Search Tests ──────────────────────────────────
 
   test('case-insensitive search on process definition name', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=main-process');
+      const result = await cli('search', 'pd', '--id=main-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
     // --iname='main process' should match "Main Process" (different case)
-    const result = cli('search', 'pd', '--iname=main process');
+    const result = await cli('search', 'pd', '--iname=main process');
     const items = parseItems<ProcessDefinitionRow>(result.stdout);
     assert.ok(items.length > 0, '--iname="main process" should match "Main Process"');
     assert.strictEqual(String(items[0]['Process ID']), 'main-process');
   });
 
   test('case-insensitive search on process definition name with ALL CAPS', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=main-process');
+      const result = await cli('search', 'pd', '--id=main-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
     // --iname='MAIN PROCESS' should match "Main Process"
-    const result = cli('search', 'pd', '--iname=MAIN PROCESS');
+    const result = await cli('search', 'pd', '--iname=MAIN PROCESS');
     const items = parseItems<ProcessDefinitionRow>(result.stdout);
     assert.ok(items.length > 0, '--iname="MAIN PROCESS" should match "Main Process"');
   });
 
   test('case-insensitive wildcard search on process definition name', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
-    cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/sub-folder/sub.bpmn');
 
     // Wait for both to be indexed
     const indexed = await pollUntil(async () => {
-      const r1 = cli('search', 'pd', '--id=main-process');
-      const r2 = cli('search', 'pd', '--id=sub-process');
+      const r1 = await cli('search', 'pd', '--id=main-process');
+      const r2 = await cli('search', 'pd', '--id=sub-process');
       const i1 = parseItems<ProcessDefinitionRow>(r1.stdout);
       const i2 = parseItems<ProcessDefinitionRow>(r2.stdout);
       return i1.length > 0 && i2.length > 0;
@@ -386,90 +384,90 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(indexed, 'Both processes should be indexed');
 
     // --iname='*PROCESS' should match "Main Process" and "Sub Process" (case-insensitive)
-    const result = cli('search', 'pd', '--iname=*PROCESS');
+    const result = await cli('search', 'pd', '--iname=*PROCESS');
     const items = parseItems<ProcessDefinitionRow>(result.stdout);
     assert.ok(items.length >= 2, '--iname="*PROCESS" should match multiple named process definitions');
   });
 
   test('case-insensitive search on process definition ID', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=main-process');
+      const result = await cli('search', 'pd', '--id=main-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
     // --iid='MAIN-PROCESS' should match "main-process"
-    const result = cli('search', 'pd', '--iid=MAIN-PROCESS');
+    const result = await cli('search', 'pd', '--iid=MAIN-PROCESS');
     const items = parseItems<ProcessDefinitionRow>(result.stdout);
     assert.ok(items.length > 0, '--iid="MAIN-PROCESS" should match "main-process"');
   });
 
   test('case-insensitive search on variable name', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ CamelCaseVar: 'hello' })}`);
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ CamelCaseVar: 'hello' })}`);
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'vars', '--name=CamelCaseVar');
+      const result = await cli('search', 'vars', '--name=CamelCaseVar');
       const items = parseItems<VariableRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Variable should be indexed');
 
     // --iname='camelcasevar' should match "CamelCaseVar"
-    const result = cli('search', 'vars', '--iname=camelcasevar');
+    const result = await cli('search', 'vars', '--iname=camelcasevar');
     const items = parseItems<VariableRow>(result.stdout);
     assert.ok(items.length > 0, '--iname="camelcasevar" should match "CamelCaseVar"');
   });
 
   test('case-insensitive search on variable value', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ statusVar: 'PendingReview' })}`);
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process', `--variables=${JSON.stringify({ statusVar: 'PendingReview' })}`);
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'vars', '--name=statusVar');
+      const result = await cli('search', 'vars', '--name=statusVar');
       const items = parseItems<VariableRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Variable should be indexed');
 
     // --ivalue='pendingreview' should match "PendingReview"
-    const result = cli('search', 'vars', '--ivalue=pendingreview');
+    const result = await cli('search', 'vars', '--ivalue=pendingreview');
     const items = parseItems<VariableRow>(result.stdout);
     assert.ok(items.length > 0, '--ivalue="pendingreview" should match "PendingReview"');
   });
 
   test('case-insensitive search on job type', async () => {
-    cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-    cli('create', 'pi', '--id=Process_18glkb3');
+    await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+    await cli('create', 'pi', '--id=Process_18glkb3');
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=n00b');
+      const result = await cli('search', 'jobs', '--type=n00b');
       const items = parseItems<JobRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Job should be indexed');
 
     // --itype='N00B' should match "n00b"
-    const result = cli('search', 'jobs', '--itype=N00B');
+    const result = await cli('search', 'jobs', '--itype=N00B');
     const items = parseItems<JobRow>(result.stdout);
     assert.ok(items.length > 0, '--itype="N00B" should match job type "n00b"');
   });
 
   test('case-insensitive search does not match non-matching pattern', async () => {
-    cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
+    await cli('deploy', 'tests/fixtures/sample-project/main.bpmn');
 
     const indexed = await pollUntil(async () => {
-      const result = cli('search', 'pd', '--id=main-process');
+      const result = await cli('search', 'pd', '--id=main-process');
       const items = parseItems<ProcessDefinitionRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(indexed, 'Process should be indexed');
 
     // --iname='nonexistent' should return no results
-    const result = cli('search', 'pd', '--iname=nonexistent-process-name');
+    const result = await cli('search', 'pd', '--iname=nonexistent-process-name');
     const items = parseItems<ProcessDefinitionRow>(result.stdout);
     assert.ok(items.length === 0, '--iname="nonexistent-process-name" should return no results');
   });
@@ -477,11 +475,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   // ── Date Range Filter Tests (--between) ──────────────────────────────
 
   test('searchProcessInstances with --between spanning today finds recently created instance', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${todayRange()}`);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${todayRange()}`);
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -490,11 +488,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('searchProcessInstances with --between and explicit --dateField=startDate finds instance', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', '--id=simple-process', `--between=${todayRange()}`, '--dateField=startDate');
+      const result = await cli('search', 'pi', '--id=simple-process', `--between=${todayRange()}`, '--dateField=startDate');
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -503,12 +501,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('searchProcessInstances with open-ended --between=..<to> finds recently created instance', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const tomorrow = new Date(Date.now() + MS_PER_DAY).toISOString().slice(0, 10);
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=..${tomorrow}`);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=..${tomorrow}`);
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -517,12 +515,12 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('searchProcessInstances with open-ended --between=<from>.. finds recently created instance', async () => {
-    cli('deploy', 'tests/fixtures/simple.bpmn');
-    cli('create', 'pi', '--id=simple-process');
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
 
     const yesterday = new Date(Date.now() - MS_PER_DAY).toISOString().slice(0, 10);
     const found = await pollUntil(async () => {
-      const result = cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${yesterday}..`);
+      const result = await cli('search', 'pi', '--id=simple-process', '--state=COMPLETED', `--between=${yesterday}..`);
       const items = parseItems<ProcessInstanceRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -531,11 +529,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('searchUserTasks with --between spanning today finds recently created task', async () => {
-    cli('deploy', 'tests/fixtures/list-pis');
-    cli('create', 'pi', '--id=Process_0t60ay7');
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'ut', '--state=CREATED', `--between=${todayRange()}`);
+      const result = await cli('search', 'ut', '--state=CREATED', `--between=${todayRange()}`);
       const items = parseItems<UserTaskRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -544,8 +542,8 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   });
 
   test('searchIncidents with --between spanning today finds recently created incident', async () => {
-    cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
-    const createResult = cli('create', 'pi', '--id=Process_0yyrstd');
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    const createResult = await cli('create', 'pi', '--id=Process_0yyrstd');
     assert.strictEqual(createResult.status, 0, `Create PI should exit 0. stderr: ${createResult.stderr}`);
     const piKey = parseCreatedKey(createResult);
     assert.ok(piKey, 'Should have process instance key');
@@ -554,7 +552,7 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     const jobFound = await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
       const items = parseItems<JobRow>(result.stdout);
       if (items.length > 0) {
         const job = items.find(j => String(j.State).toUpperCase() === 'CREATED');
@@ -567,10 +565,10 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(jobFound && jobKey, 'Job should exist before failing');
 
-    cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for between test');
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for between test');
 
     const found = await pollUntil(async () => {
-      const result = cli('search', 'inc', '--state=ACTIVE', `--between=${todayRange()}`);
+      const result = await cli('search', 'inc', '--state=ACTIVE', `--between=${todayRange()}`);
       const items = parseItems<IncidentRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -588,25 +586,25 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     : `creationTime job filter requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion ?? 'unset'})`;
 
   test('list user-tasks --between via CLI does not error', async () => {
-    cli('deploy', 'tests/fixtures/list-pis');
-    cli('create', 'pi', '--id=Process_0t60ay7');
+    await cli('deploy', 'tests/fixtures/list-pis');
+    await cli('create', 'pi', '--id=Process_0t60ay7');
 
     // Wait for the task to be indexed
     await pollUntil(async () => {
-      const result = cli('search', 'ut', '--state=CREATED');
+      const result = await cli('search', 'ut', '--state=CREATED');
       const items = parseItems<UserTaskRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const result = cli('list', 'ut', `--between=${todayRange()}`, '--all');
+    const result = await cli('list', 'ut', `--between=${todayRange()}`, '--all');
 
     assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
     assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
   });
 
   test('list incidents --between via CLI does not error', async () => {
-    cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
-    const createResult = cli('create', 'pi', '--id=Process_0yyrstd');
+    await cli('deploy', 'tests/fixtures/simple-will-create-incident.bpmn');
+    const createResult = await cli('create', 'pi', '--id=Process_0yyrstd');
     assert.strictEqual(createResult.status, 0, `Create PI should exit 0. stderr: ${createResult.stderr}`);
     const piKey = parseCreatedKey(createResult);
     assert.ok(piKey, 'Should have process instance key');
@@ -615,7 +613,7 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     // picking up jobs from previous tests that may still appear as CREATED in the search index
     let jobKey: string | undefined;
     await pollUntil(async () => {
-      const result = cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
+      const result = await cli('search', 'jobs', '--type=unhandled-job-type', '--state=CREATED', `--processInstanceKey=${piKey}`);
       const items = parseItems<JobRow>(result.stdout);
       if (items.length > 0) {
         const job = items.find(j => String(j.State).toUpperCase() === 'CREATED');
@@ -623,16 +621,16 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
       }
       return false;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
-    cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for list between test');
+    await cli('fail', 'job', jobKey!, '--retries=0', '--errorMessage=Intentional failure for list between test');
 
     // Wait for the incident to be indexed
     await pollUntil(async () => {
-      const result = cli('search', 'inc', '--state=ACTIVE');
+      const result = await cli('search', 'inc', '--state=ACTIVE');
       const items = parseItems<IncidentRow>(result.stdout);
       return items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    const result = cli('list', 'inc', `--between=${todayRange()}`);
+    const result = await cli('list', 'inc', `--between=${todayRange()}`);
 
     assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
     assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');
@@ -641,11 +639,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('searchJobs with --between spanning today finds recently created job',
     { skip: jobsBetweenSkip },
     async () => {
-      cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-      cli('create', 'pi', '--id=Process_18glkb3');
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       const found = await pollUntil(async () => {
-        const result = cli('search', 'jobs', '--type=n00b', '--state=CREATED', `--between=${todayRange()}`);
+        const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED', `--between=${todayRange()}`);
         const items = parseItems<JobRow>(result.stdout);
         return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -656,11 +654,11 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('searchJobs with --between and explicit --dateField=creationTime finds recently created job',
     { skip: jobsBetweenSkip },
     async () => {
-      cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-      cli('create', 'pi', '--id=Process_18glkb3');
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       const found = await pollUntil(async () => {
-        const result = cli('search', 'jobs', '--type=n00b', `--between=${todayRange()}`, '--dateField=creationTime');
+        const result = await cli('search', 'jobs', '--type=n00b', `--between=${todayRange()}`, '--dateField=creationTime');
         const items = parseItems<JobRow>(result.stdout);
         return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
@@ -671,17 +669,17 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
   test('list jobs --between via CLI does not error',
     { skip: jobsBetweenSkip },
     async () => {
-      cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
-      cli('create', 'pi', '--id=Process_18glkb3');
+      await cli('deploy', 'tests/fixtures/simple-service-task.bpmn');
+      await cli('create', 'pi', '--id=Process_18glkb3');
 
       // Wait for the job to be indexed
       await pollUntil(async () => {
-        const result = cli('search', 'jobs', '--type=n00b', '--state=CREATED');
+        const result = await cli('search', 'jobs', '--type=n00b', '--state=CREATED');
         const items = parseItems<JobRow>(result.stdout);
         return items.length > 0;
       }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-      const result = cli('list', 'jobs', `--between=${todayRange()}`);
+      const result = await cli('list', 'jobs', `--between=${todayRange()}`);
 
       assert.strictEqual(result.status, 0, `CLI should exit 0. stderr: ${result.stderr}`);
       assert.ok(typeof result.stdout === 'string', 'CLI should produce string output');

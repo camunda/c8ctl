@@ -5,11 +5,11 @@
 
 import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn } from '../utils/spawn.ts';
 
 // Wait time for Elasticsearch to index data before search queries
 const ELASTICSEARCH_CONSISTENCY_WAIT_MS = 8000;
@@ -33,11 +33,9 @@ type RawProcessDefinition = {
 };
 
 function cli(...args: string[]) {
-  return spawnSync('node', ['--experimental-strip-types', CLI, ...args], {
-    encoding: 'utf-8',
+  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
     cwd: PROJECT_ROOT,
-    env: { ...process.env, C8CTL_DATA_DIR: dataDir },
-    stdio: 'pipe',
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
   });
 }
 
@@ -51,15 +49,15 @@ function parseJsonOutput<T>(output: string): T {
 }
 
 async function deployAndGetProcessDefinitionKey() {
-  const deployResult = cli('deploy', 'tests/fixtures/simple.bpmn');
+  const deployResult = await cli('deploy', 'tests/fixtures/simple.bpmn');
   assert.strictEqual(deployResult.status, 0, `Deploy should exit 0. stderr: ${deployResult.stderr}`);
 
-  const outputResult = cli('output', 'json');
+  const outputResult = await cli('output', 'json');
   assert.strictEqual(outputResult.status, 0, `Setting output mode should exit 0. stderr: ${outputResult.stderr}`);
 
   let latestItems: ProcessDefinition[] = [];
   await pollUntil(async () => {
-    const searchResult = cli('search', 'pd', '--id=simple-process');
+    const searchResult = await cli('search', 'pd', '--id=simple-process');
     if (searchResult.status !== 0) return false;
     try {
       latestItems = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
@@ -89,7 +87,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
   test('list process definitions returns deployed processes', async () => {
     const processDefinitionKey = await deployAndGetProcessDefinitionKey();
 
-    const searchResult = cli('search', 'pd', '--id=simple-process');
+    const searchResult = await cli('search', 'pd', '--id=simple-process');
     assert.strictEqual(searchResult.status, 0, `Search should exit 0. stderr: ${searchResult.stderr}`);
     const items = parseJsonOutput<ProcessDefinition[]>(searchResult.stdout);
     const firstItem = items.find(item => String(item.Key) === processDefinitionKey);
@@ -103,7 +101,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
   test('get process definition by key returns definition details', async () => {
     const processDefinitionKey = await deployAndGetProcessDefinitionKey();
 
-    const getResult = cli('get', 'pd', processDefinitionKey);
+    const getResult = await cli('get', 'pd', processDefinitionKey);
     assert.strictEqual(getResult.status, 0, `Get should exit 0. stderr: ${getResult.stderr}`);
     const definition = parseJsonOutput<RawProcessDefinition>(getResult.stdout);
 
@@ -115,7 +113,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
   test('get process definition XML returns BPMN content', async () => {
     const processDefinitionKey = await deployAndGetProcessDefinitionKey();
 
-    const getXmlResult = cli('get', 'pd', processDefinitionKey, '--xml');
+    const getXmlResult = await cli('get', 'pd', processDefinitionKey, '--xml');
     assert.strictEqual(getXmlResult.status, 0, `Get XML should exit 0. stderr: ${getXmlResult.stderr}`);
 
     assert.ok(getXmlResult.stdout, 'XML should be returned');

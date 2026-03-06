@@ -6,17 +6,17 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
+import { asyncSpawn } from '../utils/spawn.ts';
 
-// Check if fish is available
+// Check if fish is available (sync check is fine — runs once before tests)
 function isFishAvailable(): boolean {
   const result = spawnSync('which', ['fish'], { encoding: 'utf-8' });
   return result.status === 0;
 }
 
 describe('Fish Completion Integration Tests', () => {
-  test('fish completion script is generated without errors', () => {
-    const result = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion script is generated without errors', async () => {
+    const result = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -26,10 +26,9 @@ describe('Fish Completion Integration Tests', () => {
     assert.ok(result.stdout.includes('complete -c c8'), 'Should contain complete commands for c8');
   });
 
-  test('fish completion script loads without errors in fish', { skip: !isFishAvailable() ? 'fish not available' : false }, () => {
+  test('fish completion script loads without errors in fish', { skip: !isFishAvailable() ? 'fish not available' : false }, async () => {
     // Generate completion script
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -58,8 +57,7 @@ echo "SUCCESS"
 ' 2>&1
 `;
 
-    const result = spawnSync('sh', ['-c', testScript], {
-      encoding: 'utf-8',
+    const result = await asyncSpawn('sh', ['-c', testScript], {
       env: { ...process.env, PATH: process.env.PATH },
     });
 
@@ -67,9 +65,8 @@ echo "SUCCESS"
     assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
   });
 
-  test('fish completion includes verbs', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion includes verbs', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -85,9 +82,8 @@ echo "SUCCESS"
     assert.ok(script.includes("'completion'"), 'Should include completion verb');
   });
 
-  test('fish completion uses __fish_use_subcommand condition', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion uses __fish_use_subcommand condition', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -104,9 +100,8 @@ echo "SUCCESS"
     );
   });
 
-  test('fish completion has resources for "list" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion has resources for "list" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -135,9 +130,8 @@ echo "SUCCESS"
     );
   });
 
-  test('fish completion has resources for "get" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion has resources for "get" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -153,9 +147,8 @@ echo "SUCCESS"
     );
   });
 
-  test('fish completion supports shell types for "completion" command', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion supports shell types for "completion" command', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -175,9 +168,8 @@ echo "SUCCESS"
     );
   });
 
-  test('fish completion includes aliases (pi for process-instance)', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion includes aliases (pi for process-instance)', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -189,9 +181,8 @@ echo "SUCCESS"
     assert.ok(script.includes("'msg'"), 'Should include msg alias');
   });
 
-  test('fish completion includes flags with descriptions', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion includes flags with descriptions', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -205,9 +196,8 @@ echo "SUCCESS"
     assert.ok(script.includes("-l baseUrl -d 'Cluster base URL'"), 'Should include --baseUrl flag');
   });
 
-  test('fish completion clears existing completions', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion clears existing completions', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -218,9 +208,8 @@ echo "SUCCESS"
     assert.ok(script.includes('complete -c c8 -e'), 'Should clear c8 completions');
   });
 
-  test('fish completion has flags for both c8ctl and c8 commands', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion has flags for both c8ctl and c8 commands', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -231,9 +220,8 @@ echo "SUCCESS"
     assert.ok(script.includes('complete -c c8 -s h -l help'), 'Should have flags for c8');
   });
 
-  test('fish completion uses -r flag for options requiring arguments', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion uses -r flag for options requiring arguments', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
@@ -254,9 +242,8 @@ echo "SUCCESS"
     );
   });
 
-  test('fish completion structure is valid', () => {
-    const completionResult = spawnSync('node', ['src/index.ts', 'completion', 'fish'], {
-      encoding: 'utf-8',
+  test('fish completion structure is valid', async () => {
+    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
       cwd: process.cwd(),
     });
 
