@@ -70,68 +70,104 @@ function normalizeResource(resource: string): string {
 /**
  * Parse command line arguments
  */
+const CLI_OPTION_DEFINITIONS = {
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'string', short: 'v' },
+  all: { type: 'boolean' },
+  xml: { type: 'boolean' },
+  profile: { type: 'string' },
+  bpmnProcessId: { type: 'string' },
+  id: { type: 'string' },
+  processDefinitionId: { type: 'string' },
+  processInstanceKey: { type: 'string' },
+  processDefinitionKey: { type: 'string' },
+  parentProcessInstanceKey: { type: 'string' },
+  variables: { type: 'string' },
+  state: { type: 'string' },
+  assignee: { type: 'string' },
+  type: { type: 'string' },
+  correlationKey: { type: 'string' },
+  timeToLive: { type: 'string' },
+  maxJobsToActivate: { type: 'string' },
+  timeout: { type: 'string' },
+  worker: { type: 'string' },
+  retries: { type: 'string' },
+  errorMessage: { type: 'string' },
+  baseUrl: { type: 'string' },
+  clientId: { type: 'string' },
+  clientSecret: { type: 'string' },
+  audience: { type: 'string' },
+  oAuthUrl: { type: 'string' },
+  defaultTenantId: { type: 'string' },
+  from: { type: 'string' },
+  name: { type: 'string' },
+  key: { type: 'string' },
+  elementId: { type: 'string' },
+  errorType: { type: 'string' },
+  awaitCompletion: { type: 'boolean' },
+  fetchVariables: { type: 'boolean' },
+  requestTimeout: { type: 'string' },
+  value: { type: 'string' },
+  scopeKey: { type: 'string' },
+  fullValue: { type: 'boolean' },
+  userTask: { type: 'boolean' },
+  processDefinition: { type: 'boolean' },
+  iname: { type: 'string' },
+  iid: { type: 'string' },
+  iassignee: { type: 'string' },
+  ierrorMessage: { type: 'string' },
+  itype: { type: 'string' },
+  ivalue: { type: 'string' },
+  sortBy: { type: 'string' },
+  asc: { type: 'boolean' },
+  desc: { type: 'boolean' },
+  limit: { type: 'string' },
+  between: { type: 'string' },
+  dateField: { type: 'string' },
+} as const;
+
+/**
+ * Find duplicate non-boolean CLI flags from parseArgs tokens.
+ * Returns normalized flag names (without `--`) that were provided more than once.
+ */
+type ParseOptionToken = { kind: 'option'; name: string };
+
+function isParseOptionToken(token: unknown): token is ParseOptionToken {
+  return !!token
+    && typeof token === 'object'
+    && (token as { kind?: unknown }).kind === 'option'
+    && typeof (token as { name?: unknown }).name === 'string';
+}
+
+function findDuplicateNonBooleanFlags(tokens: unknown[]): string[] {
+  const counts = new Map<string, number>();
+  for (const token of tokens) {
+    if (!isParseOptionToken(token)) continue;
+    const { name } = token;
+    const definition = CLI_OPTION_DEFINITIONS[name as keyof typeof CLI_OPTION_DEFINITIONS];
+    if (!definition || definition.type === 'boolean') continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+    .sort();
+}
+
 function parseCliArgs() {
   try {
-    const { values, positionals } = parseArgs({
+    const { values, positionals, tokens } = parseArgs({
       args: process.argv.slice(2),
-      options: {
-        help: { type: 'boolean', short: 'h' },
-        version: { type: 'string', short: 'v' },
-        all: { type: 'boolean' },
-        xml: { type: 'boolean' },
-        profile: { type: 'string' },
-        bpmnProcessId: { type: 'string' },
-        id: { type: 'string' },
-        processDefinitionId: { type: 'string' },
-        processInstanceKey: { type: 'string' },
-        processDefinitionKey: { type: 'string' },
-        parentProcessInstanceKey: { type: 'string' },
-        variables: { type: 'string' },
-        state: { type: 'string' },
-        assignee: { type: 'string' },
-        type: { type: 'string' },
-        correlationKey: { type: 'string' },
-        timeToLive: { type: 'string' },
-        maxJobsToActivate: { type: 'string' },
-        timeout: { type: 'string' },
-        worker: { type: 'string' },
-        retries: { type: 'string' },
-        errorMessage: { type: 'string' },
-        baseUrl: { type: 'string' },
-        clientId: { type: 'string' },
-        clientSecret: { type: 'string' },
-        audience: { type: 'string' },
-        oAuthUrl: { type: 'string' },
-        defaultTenantId: { type: 'string' },
-        from: { type: 'string' },
-        name: { type: 'string' },
-        key: { type: 'string' },
-        elementId: { type: 'string' },
-        errorType: { type: 'string' },
-        awaitCompletion: { type: 'boolean' },
-        fetchVariables: { type: 'boolean' },
-        requestTimeout: { type: 'string' },
-        value: { type: 'string' },
-        scopeKey: { type: 'string' },
-        fullValue: { type: 'boolean' },
-        userTask: { type: 'boolean' },
-        processDefinition: { type: 'boolean' },
-        iname: { type: 'string' },
-        iid: { type: 'string' },
-        iassignee: { type: 'string' },
-        ierrorMessage: { type: 'string' },
-        itype: { type: 'string' },
-        ivalue: { type: 'string' },
-        sortBy: { type: 'string' },
-        asc: { type: 'boolean' },
-        desc: { type: 'boolean' },
-        limit: { type: 'string' },
-        between: { type: 'string' },
-        dateField: { type: 'string' },
-      },
+      options: CLI_OPTION_DEFINITIONS,
       allowPositionals: true,
       strict: false,
+      tokens: true,
     });
+
+    const duplicates = findDuplicateNonBooleanFlags(tokens);
+    if (duplicates.length > 0) {
+      throw new Error(`Cannot specify the same flag multiple times: ${duplicates.map(flag => `--${flag}`).join(', ')}`);
+    }
 
     return { values, positionals };
   } catch (error: any) {

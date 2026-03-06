@@ -4,22 +4,24 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { spawnSync } from 'node:child_process';
+import { join, resolve } from 'node:path';
 import { showCompletion } from '../../src/commands/completion.ts';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
 
 describe('Completion Module', () => {
   let consoleLogSpy: any[];
   let consoleErrorSpy: any[];
   let originalLog: typeof console.log;
   let originalError: typeof console.error;
-  let processExitStub: ((code: number) => never) | undefined;
-  let exitCode: number | undefined;
 
   beforeEach(() => {
     consoleLogSpy = [];
     consoleErrorSpy = [];
     originalLog = console.log;
     originalError = console.error;
-    exitCode = undefined;
     
     console.log = (...args: any[]) => {
       consoleLogSpy.push(args.join(' '));
@@ -28,21 +30,11 @@ describe('Completion Module', () => {
     console.error = (...args: any[]) => {
       consoleErrorSpy.push(args.join(' '));
     };
-
-    // Stub process.exit to capture exit codes
-    processExitStub = process.exit;
-    (process.exit as any) = (code: number) => {
-      exitCode = code;
-      throw new Error(`process.exit(${code})`);
-    };
   });
 
   afterEach(() => {
     console.log = originalLog;
     console.error = originalError;
-    if (processExitStub) {
-      process.exit = processExitStub;
-    }
   });
 
   test('generates bash completion script', () => {
@@ -119,36 +111,28 @@ describe('Completion Module', () => {
     assert.ok(output.includes('-l profile'));
   });
 
+  // Error cases: run the CLI as a subprocess so that process.exit happens
+  // in a child process and does not interfere with the test runner.
+
   test('handles missing shell argument', () => {
-    try {
-      showCompletion(undefined);
-      assert.fail('Should have thrown an error');
-    } catch (error: any) {
-      assert.ok(error.message.includes('process.exit(1)'));
-      assert.strictEqual(exitCode, 1);
-    }
-    
-    const errorOutput = consoleErrorSpy.join('\n');
-    assert.ok(errorOutput.includes('Shell type required'));
-    assert.ok(errorOutput.includes('c8 completion <bash|zsh|fish>'));
+    const result = spawnSync('node', [CLI, 'completion'], {
+      encoding: 'utf-8',
+      cwd: PROJECT_ROOT,
+    });
+    assert.strictEqual(result.status, 1, 'Should exit with code 1');
+    assert.ok(result.stderr.includes('Shell type required'), `stderr should mention "Shell type required". Got: ${result.stderr}`);
+    assert.ok(result.stderr.includes('c8 completion <bash|zsh|fish>'), `stderr should include usage hint. Got: ${result.stderr}`);
   });
 
   test('handles unknown shell', () => {
-    try {
-      showCompletion('powershell');
-      assert.fail('Should have thrown an error');
-    } catch (error: any) {
-      assert.ok(error.message.includes('process.exit(1)'));
-      assert.strictEqual(exitCode, 1);
-    }
-    
-    // logger.error outputs to console.error
-    const errorOutput = consoleErrorSpy.join('\n');
-    assert.ok(errorOutput.includes('Unknown shell: powershell'));
-    
-    // logger.info outputs to console.log
-    const logOutput = consoleLogSpy.join('\n');
-    assert.ok(logOutput.includes('Supported shells: bash, zsh, fish'));
+    const result = spawnSync('node', [CLI, 'completion', 'powershell'], {
+      encoding: 'utf-8',
+      cwd: PROJECT_ROOT,
+    });
+    assert.strictEqual(result.status, 1, 'Should exit with code 1');
+    assert.ok(result.stderr.includes('Unknown shell: powershell'), `stderr should mention "Unknown shell: powershell". Got: ${result.stderr}`);
+    // logger.info() in text mode goes to stdout
+    assert.ok(result.stdout.includes('Supported shells: bash, zsh, fish'), `stdout should list supported shells. Got: ${result.stdout}`);
   });
 
   test('handles case-insensitive shell names', () => {

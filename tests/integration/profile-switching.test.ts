@@ -8,7 +8,12 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { pollUntil } from '../utils/polling.ts';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+const SPAWN_TIMEOUT_MS = 15_000;
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
@@ -163,6 +168,24 @@ describe('Profile Switching Integration Tests', () => {
         `Error should mention connection failure. Got: ${stderr}`
       );
     }
+
+    // Switch to the invalid profile in the isolated data dir
+    const switchResult = cliWithProfile('use', 'profile', 'invalid');
+    assert.strictEqual(
+      switchResult.status, 0,
+      `'use profile invalid' should succeed. stderr: ${switchResult.stderr}`,
+    );
+
+    // Attempting to list process instances with the invalid profile should fail
+    const listResult = cliWithProfile('list', 'pi');
+    assert.strictEqual(listResult.status, 1, 'list pi with invalid profile should exit with code 1');
+    assert.ok(
+      listResult.stderr.includes('Failed to list process instances') ||
+      listResult.stderr.includes('ECONNREFUSED') ||
+      listResult.stderr.includes('connect') ||
+      listResult.stderr.includes('fetch failed'),
+      `stderr should mention connection failure. Got: ${listResult.stderr}`,
+    );
   });
 
   test('switching profiles affects cluster resolution', async () => {
