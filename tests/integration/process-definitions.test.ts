@@ -22,12 +22,12 @@ let dataDir = '';
 
 type ProcessDefinition = {
   processDefinitionKey?: string | number;
-  key?: string | number;
-  Key?: string | number;
+  key?: string | number; // legacy API field name
+  Key?: string | number; // CLI table column in JSON mode
   processDefinitionId?: string;
-  'Process ID'?: string;
+  'Process ID'?: string; // CLI table column in JSON mode
   version?: number;
-  Version?: number;
+  Version?: number; // CLI table column in JSON mode
 };
 
 function cli(...args: string[]) {
@@ -48,12 +48,29 @@ function parseJsonOutput<T>(output: string): T {
   }
 }
 
+function getFirstDefinedField<K extends keyof ProcessDefinition>(
+  item: ProcessDefinition,
+  fields: K[],
+): ProcessDefinition[K] | undefined {
+  for (const field of fields) {
+    const value = item[field];
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 function getProcessDefinitionKey(item: ProcessDefinition): string | number | undefined {
-  return item.processDefinitionKey ?? item.key ?? item.Key;
+  return getFirstDefinedField(item, ['processDefinitionKey', 'key', 'Key']);
 }
 
 function getProcessDefinitionId(item: ProcessDefinition): string | undefined {
-  return item.processDefinitionId ?? item['Process ID'];
+  const processId = getFirstDefinedField(item, ['processDefinitionId', 'Process ID']);
+  return typeof processId === 'string' ? processId : undefined;
+}
+
+function getProcessDefinitionVersion(item: ProcessDefinition): number | undefined {
+  const version = getFirstDefinedField(item, ['version', 'Version']);
+  return typeof version === 'number' ? version : undefined;
 }
 
 async function deployAndGetProcessDefinitionKey() {
@@ -105,7 +122,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
     assert.ok(getProcessDefinitionKey(firstItem), 'Process definition should have a key');
     assert.ok(getProcessDefinitionId(firstItem), 'Process definition should have an ID');
-    assert.ok((firstItem.version ?? firstItem.Version) !== undefined, 'Process definition should have a version');
+    assert.ok(getProcessDefinitionVersion(firstItem) !== undefined, 'Process definition should have a version');
   });
 
   test('get process definition by key returns definition details', async () => {
@@ -122,6 +139,7 @@ describe('Process Definition Integration Tests (requires Camunda 8 at localhost:
 
   test('get process definition XML returns BPMN content', async () => {
     const processDefinitionKey = await deployAndGetProcessDefinitionKey();
+    // XML retrieval uses logger.info(), which writes to stderr in JSON mode.
     const outputResult = cli('output', 'text');
     assert.strictEqual(outputResult.status, 0, `Setting output mode should exit 0. stderr: ${outputResult.stderr}`);
 
