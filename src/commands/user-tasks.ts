@@ -5,8 +5,9 @@
 import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
+import { c8ctl } from '../runtime.ts';
 
 /**
  * List user tasks
@@ -91,6 +92,22 @@ export async function completeUserTask(key: string, options: {
   variables?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const body: Record<string, unknown> = {};
+    if (options.variables) body.variables = JSON.parse(options.variables);
+    logger.json({
+      dryRun: true,
+      command: 'complete user-task',
+      method: 'POST',
+      url: `${config.baseUrl}/user-tasks/${key}/completion`,
+      body,
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {

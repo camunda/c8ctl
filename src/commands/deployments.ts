@@ -4,7 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname, extname, basename, relative } from 'node:path';
@@ -211,7 +211,6 @@ export async function deploy(paths: string[], options: {
   profile?: string;
 }): Promise<void> {
   const logger = getLogger();
-  const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
   const resources: ResourceFile[] = [];
 
@@ -233,6 +232,24 @@ export async function deploy(paths: string[], options: {
       logger.error('No BPMN/DMN/Form files found in the specified paths');
       process.exit(1);
     }
+
+    // Dry-run: emit the would-be API request without executing
+    if (c8ctl.dryRun) {
+      const config = resolveClusterConfig(options.profile);
+      logger.json({
+        dryRun: true,
+        command: 'deploy',
+        method: 'POST',
+        url: `${config.baseUrl}/deployments`,
+        body: {
+          tenantId,
+          resources: resources.map(r => ({ name: r.name, path: r.path })),
+        },
+      });
+      return;
+    }
+
+    const client = createClient(options.profile);
 
     // Calculate relative paths for display
     const basePath = basePaths.length === 1 ? basePaths[0] : process.cwd();

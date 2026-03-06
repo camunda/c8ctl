@@ -5,8 +5,9 @@
 import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
+import { c8ctl } from '../runtime.ts';
 
 /**
  * List jobs
@@ -89,6 +90,27 @@ export async function activateJobs(type: string, options: {
   worker?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const tenantId = resolveTenantId(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'activate jobs',
+      method: 'POST',
+      url: `${config.baseUrl}/jobs/activation`,
+      body: {
+        type,
+        tenantIds: [tenantId],
+        maxJobsToActivate: options.maxJobsToActivate || 10,
+        timeout: options.timeout || 60000,
+        worker: options.worker || 'c8ctl',
+      },
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
 
@@ -129,6 +151,22 @@ export async function completeJob(key: string, options: {
   variables?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const body: Record<string, unknown> = {};
+    if (options.variables) body.variables = JSON.parse(options.variables);
+    logger.json({
+      dryRun: true,
+      command: 'complete job',
+      method: 'POST',
+      url: `${config.baseUrl}/jobs/${key}/completion`,
+      body,
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {
@@ -162,6 +200,23 @@ export async function failJob(key: string, options: {
   errorMessage?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'fail job',
+      method: 'POST',
+      url: `${config.baseUrl}/jobs/${key}/failure`,
+      body: {
+        retries: options.retries !== undefined ? options.retries : 0,
+        errorMessage: options.errorMessage || 'Job failed via c8ctl',
+      },
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {

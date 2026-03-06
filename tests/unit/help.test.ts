@@ -5,14 +5,18 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { getVersion, showVersion, showHelp, showVerbResources, showCommandHelp } from '../../src/commands/help.ts';
+import { c8ctl } from '../../src/runtime.ts';
 
 describe('Help Module', () => {
   let consoleLogSpy: any[];
   let originalLog: typeof console.log;
+  let originalOutputMode: typeof c8ctl.outputMode;
 
   beforeEach(() => {
     consoleLogSpy = [];
     originalLog = console.log;
+    originalOutputMode = c8ctl.outputMode;
+    c8ctl.outputMode = 'text';
     
     console.log = (...args: any[]) => {
       consoleLogSpy.push(args.join(' '));
@@ -21,6 +25,7 @@ describe('Help Module', () => {
 
   afterEach(() => {
     console.log = originalLog;
+    c8ctl.outputMode = originalOutputMode;
   });
 
   test('getVersion returns package version', () => {
@@ -498,5 +503,112 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('No detailed help available'));
     assert.ok(output.includes('unknown'));
+  });
+
+  // ── Agent Flags ──────────────────────────────────────────────────────────
+
+  test('showHelp includes agent flags section', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('Agent Flags'), 'help should include Agent Flags section header');
+    assert.ok(output.includes('--fields'), 'help should include --fields flag');
+    assert.ok(output.includes('--dry-run'), 'help should include --dry-run flag');
+  });
+
+  test('showHelp agent flags section is clearly separated', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    // Section header should be visually separated (uses ━ or similar separator)
+    assert.ok(output.includes('Agent Flags'), 'should have Agent Flags header');
+    // Should appear after standard flags section
+    const agentPos = output.indexOf('Agent Flags');
+    const flagsPos = output.indexOf('--profile');
+    assert.ok(agentPos > flagsPos, 'Agent Flags section should appear after standard flags');
+  });
+
+  test('showHelp --fields description explains context window purpose', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('context window') || output.includes('context'), 
+      '--fields description should mention context window');
+  });
+
+  test('showHelp --dry-run description explains it is for mutating commands', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('mutating') || output.includes('preview'), 
+      '--dry-run description should explain it is for mutating commands');
+  });
+
+  // ── JSON Mode Help ────────────────────────────────────────────────────────
+
+  test('showHelp emits JSON structure in JSON mode', () => {
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showHelp();
+
+    console.log = originalConsoleLog;
+    assert.ok(jsonSpy.length > 0, 'should have output');
+    const parsed = JSON.parse(jsonSpy[0]);
+    assert.ok(parsed.version, 'JSON help should include version');
+    assert.ok(Array.isArray(parsed.commands), 'JSON help should include commands array');
+    assert.ok(Array.isArray(parsed.agentFlags), 'JSON help should include agentFlags array');
+    assert.ok(Array.isArray(parsed.globalFlags), 'JSON help should include globalFlags array');
+    assert.ok(parsed.resourceAliases, 'JSON help should include resourceAliases');
+  });
+
+  test('JSON help agentFlags contains --fields and --dry-run', () => {
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showHelp();
+
+    console.log = originalConsoleLog;
+    const parsed = JSON.parse(jsonSpy[0]);
+    const flagNames = parsed.agentFlags.map((f: any) => f.flag);
+    assert.ok(flagNames.includes('--fields'), 'agentFlags should include --fields');
+    assert.ok(flagNames.includes('--dry-run'), 'agentFlags should include --dry-run');
+  });
+
+  test('JSON help commands marks mutating commands', () => {
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showHelp();
+
+    console.log = originalConsoleLog;
+    const parsed = JSON.parse(jsonSpy[0]);
+    const createCmd = parsed.commands.find((c: any) => c.verb === 'create');
+    assert.ok(createCmd, 'commands should include create');
+    assert.strictEqual(createCmd.mutating, true, 'create should be mutating');
+    const listCmd = parsed.commands.find((c: any) => c.verb === 'list');
+    assert.ok(listCmd, 'commands should include list');
+    assert.strictEqual(listCmd.mutating, false, 'list should not be mutating');
+  });
+
+  test('showCommandHelp emits JSON in JSON mode', () => {
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showCommandHelp('list');
+
+    console.log = originalConsoleLog;
+    assert.ok(jsonSpy.length > 0, 'should have output');
+    const parsed = JSON.parse(jsonSpy[0]);
+    assert.strictEqual(parsed.command, 'list');
+    assert.ok(Array.isArray(parsed.agentFlags), 'should include agentFlags');
   });
 });
