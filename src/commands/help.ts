@@ -68,7 +68,7 @@ Commands:
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
   load      plugin <name>    Load a c8ctl plugin from npm registry
-  load      plugin <url>     Load a c8ctl plugin from URL (https://, git://, file://)
+  load      plugin --from <url>  Load a c8ctl plugin from URL (https://, git://, file://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
@@ -82,7 +82,7 @@ Commands:
 
 Flags:
   --profile <name>      Use specific profile for this command
-  --from <url>          Load plugin from URL, alternative to passing URL as positional arg (use with 'load plugin')
+  --from <url>          Load plugin from URL (use with 'load plugin')
   --xml                 Get process definition as XML (use with 'get pd')
   --variables           Get process instance with variables (use with 'get pi')
   --userTask, --ut      Get form for a user task (optional, use with 'get form')
@@ -172,7 +172,7 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl init plugin my-plugin        Create new plugin from template
   c8ctl load plugin my-plugin        Load plugin from npm registry
-  c8ctl load plugin https://github.com/org/plugin  Load plugin from URL
+  c8ctl load plugin --from https://github.com/org/plugin  Load plugin from URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
   c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
@@ -979,8 +979,8 @@ Plugin commands:
   load plugin <name>
     Load a plugin from npm registry.
 
-  load plugin <url>
-    Load a plugin from URL source (https://, http://, git://, git+https://, git+ssh://, file://, github:, gitlab:, bitbucket:). The --from flag is also accepted for backwards compatibility.
+  load plugin --from <url>
+    Load a plugin from URL source (file://, https://, git://, github:).
 
   unload plugin <name>
     Unload and unregister a plugin.
@@ -1009,8 +1009,8 @@ Plugin commands:
 
 Examples:
   c8ctl load plugin my-plugin
-  c8ctl load plugin https://github.com/org/plugin
-  c8ctl load plugin file:///path/to/plugin
+  c8ctl load plugin --from https://github.com/org/plugin
+  c8ctl load plugin --from file:///path/to/plugin
   c8ctl list plugins
   c8ctl upgrade plugin my-plugin
   c8ctl upgrade plugin my-plugin 1.2.3
