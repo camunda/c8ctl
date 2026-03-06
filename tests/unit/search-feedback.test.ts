@@ -138,6 +138,25 @@ describe('detectUnknownSearchFlags', () => {
     const unknown = detectUnknownSearchFlags(values, 'process-definition');
     assert.deepStrictEqual(unknown, ['fooBarBaz']);
   });
+
+  test('mixed valid+invalid search-pi flags detect invalid flag without dropping valid one', () => {
+    const values = { state: 'ACTIVE', assignee: 'userx' };
+    const unknown = detectUnknownSearchFlags(values, 'process-instance');
+    assert.deepStrictEqual(unknown, ['assignee']);
+    assert.ok('state' in values);
+    assert.strictEqual(values.state, 'ACTIVE');
+  });
+
+  test('complex valid search-pi switch mix is fully recognized', () => {
+    const values = {
+      between: '2026-02-20..2026-02-28',
+      sortBy: 'Version',
+      desc: true,
+      iid: '*t60*',
+    };
+    const unknown = detectUnknownSearchFlags(values, 'process-instance');
+    assert.deepStrictEqual(unknown, []);
+  });
 });
 
 describe('GLOBAL_FLAGS', () => {
