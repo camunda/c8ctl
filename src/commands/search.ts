@@ -410,6 +410,7 @@ export async function searchProcessInstances(options: {
         'Process ID': pi.processDefinitionId,
         State: pi.state,
         Version: pi.processDefinitionVersion || pi.version,
+        'Start Date': pi.startDate || '-',
         'Tenant ID': pi.tenantId,
       }));
       tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
@@ -532,6 +533,7 @@ export async function searchUserTasks(options: {
         Name: task.name || task.elementId,
         State: task.state,
         Assignee: task.assignee || '(unassigned)',
+        Created: task.creationDate || '-',
         'Process Instance': task.processInstanceKey,
         'Tenant ID': task.tenantId,
       }));
@@ -668,6 +670,7 @@ export async function searchIncidents(options: {
         Type: incident.errorType,
         Message: incident.errorMessage?.substring(0, 50) || '',
         State: incident.state,
+        Created: incident.creationTime || '-',
         'Process Instance': incident.processInstanceKey,
         'Tenant ID': incident.tenantId,
       }));
@@ -783,6 +786,7 @@ export async function searchJobs(options: {
         Type: job.type,
         State: job.state,
         Retries: job.retries,
+        Created: job.creationTime || '-',
         'Process Instance': job.processInstanceKey,
         'Tenant ID': job.tenantId,
       }));
