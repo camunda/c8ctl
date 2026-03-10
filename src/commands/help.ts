@@ -68,7 +68,7 @@ Commands:
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
   load      plugin <name>    Load a c8ctl plugin from npm registry
-  load      plugin --from    Load a c8ctl plugin from URL (file://, https://, git://)
+  load      plugin --from <url>  Load a c8ctl plugin from URL (https://, git://, file://)
   unload    plugin <name>    Unload a c8ctl plugin (npm uninstall wrapper)
   upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
@@ -172,7 +172,7 @@ Examples:
   c8ctl output json                  Switch to JSON output
   c8ctl init plugin my-plugin        Create new plugin from template
   c8ctl load plugin my-plugin        Load plugin from npm registry
-  c8ctl load plugin --from file:///path/to/plugin  Load plugin from file URL
+  c8ctl load plugin --from https://github.com/org/plugin  Load plugin from URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
   c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
@@ -1009,6 +1009,7 @@ Plugin commands:
 
 Examples:
   c8ctl load plugin my-plugin
+  c8ctl load plugin --from https://github.com/org/plugin
   c8ctl load plugin --from file:///path/to/plugin
   c8ctl list plugins
   c8ctl upgrade plugin my-plugin

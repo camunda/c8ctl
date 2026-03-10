@@ -303,18 +303,6 @@ async function main() {
   if (verb === 'load' && normalizedResource === 'plugin') {
     const fromUrl = values.from as string | undefined;
     const packageName = args[0];
-    
-    // Ensure exclusive usage
-    if (packageName && fromUrl) {
-      logger.error('Cannot specify both package name and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
-      process.exit(1);
-    }
-    
-    if (!packageName && !fromUrl) {
-      logger.error('Package name or --from URL required. Usage: c8 load plugin <package-name> OR c8 load plugin --from <url>');
-      process.exit(1);
-    }
-    
     await loadPlugin(packageName, fromUrl);
     return;
   }

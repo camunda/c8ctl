@@ -22,6 +22,10 @@ const __dirname = dirname(__filename);
 type NpmListOutput = { dependencies?: Record<string, unknown> };
 type ExecFileErrorWithStdout = Error & { status?: number; stdout?: Buffer | string };
 
+function isAcceptedUrl(input: string): boolean {
+  return /^(https?:\/\/|git(\+https|\+ssh)?:\/\/|file:\/\/?)/i.test(input);
+}
+
 function getTemplate(templateFileName: string): string {
   const templatePath = join(__dirname, '..', 'templates', templateFileName);
   return readFileSync(templatePath, 'utf-8');
@@ -40,17 +44,27 @@ function renderTemplate(templateFileName: string, replacements: Record<string, s
  * Supports either package name or --from flag with URL
  * Installs to global plugins directory
  */
-export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): Promise<void> {
+export async function loadPlugin(packageName?: string, fromUrl?: string): Promise<void> {
   const logger = getLogger();
   
-  // Validate exclusive usage
-  if (packageNameOrFrom && fromUrl) {
-    logger.error('Cannot specify both package name and --from flag. Use either "c8ctl load plugin <name>" or "c8ctl load plugin --from <url>"');
+  // Validate input
+  if (fromUrl && packageName) {
+    logger.error('Cannot specify both a positional argument and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"');
     process.exit(1);
   }
   
-  if (!packageNameOrFrom && !fromUrl) {
-    logger.error('Package name or --from URL required. Usage: c8ctl load plugin <package-name> OR c8ctl load plugin --from <url>');
+  if (!packageName && !fromUrl) {
+    logger.error('Package name or URL required. Usage: c8 load plugin <name> or c8 load plugin --from <url>');
+    process.exit(1);
+  }
+  
+  if (fromUrl && !isAcceptedUrl(fromUrl)) {
+    logger.error('Invalid URL format. Accepted URL formats include file://, https://, git:// (see help for more)');
+    process.exit(1);
+  }
+  
+  if (packageName && isAcceptedUrl(packageName)) {
+    logger.error('Package name cannot be a URL. If you want to load from a URL, use the --from flag. Usage: c8 load plugin --from <url>');
     process.exit(1);
   }
   
@@ -83,13 +97,13 @@ export async function loadPlugin(packageNameOrFrom?: string, fromUrl?: string): 
       logger.success('Plugin loaded successfully from URL', fromUrl);
     } else {
       // Install from npm registry by package name
-      logger.info(`Loading plugin: ${packageNameOrFrom}...`);
-      execSync(`npm install ${packageNameOrFrom} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
+      logger.info(`Loading plugin: ${packageName}...`);
+      execSync(`npm install ${packageName} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
       
-      pluginName = packageNameOrFrom!;
-      pluginSource = packageNameOrFrom!;
+      pluginName = packageName!;
+      pluginSource = packageName!;
       
-      logger.success('Plugin loaded successfully', packageNameOrFrom);
+      logger.success('Plugin loaded successfully', packageName);
     }
     
     // Add to plugin registry
