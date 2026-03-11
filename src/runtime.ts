@@ -30,6 +30,10 @@ export interface C8ctlPluginRuntime {
   activeProfile?: string;
   activeTenant?: string;
   outputMode: OutputMode;
+  /** Agent flag: comma-separated list of fields to include in output (applied at logger level) */
+  fields?: string[];
+  /** Agent flag: when true, mutating commands emit the would-be API request as JSON without executing it */
+  dryRun?: boolean;
   createClient(profileFlag?: string, additionalSdkConfig?: Partial<CamundaOptions>): CamundaClient;
   resolveTenantId(profileFlag?: string): string;
   getLogger(mode?: OutputMode): Logger;
@@ -61,6 +65,8 @@ class C8ctl {
   private _activeProfile?: string;
   private _activeTenant?: string;
   private _outputMode: OutputMode = 'text';
+  private _fields?: string[];
+  private _dryRun?: boolean;
 
   readonly env: C8ctlEnv = {
     version: getVersion(),
@@ -114,6 +120,22 @@ class C8ctl {
 
   set outputMode(value: OutputMode) {
     this._outputMode = value;
+  }
+
+  get fields(): string[] | undefined {
+    return this._fields;
+  }
+
+  set fields(value: string[] | undefined) {
+    this._fields = value;
+  }
+
+  get dryRun(): boolean | undefined {
+    return this._dryRun;
+  }
+
+  set dryRun(value: boolean | undefined) {
+    this._dryRun = value;
   }
 }
 

@@ -5,8 +5,9 @@
 import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
-import { resolveTenantId } from '../config.ts';
+import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
+import { c8ctl } from '../runtime.ts';
 import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
 
 /**
@@ -148,13 +149,36 @@ export async function createProcessInstance(options: {
   [key: string]: unknown;
 } | undefined> {
   const logger = getLogger();
-  const client = createClient(options.profile);
-  const tenantId = resolveTenantId(options.profile);
 
   if (!options.processDefinitionId) {
     logger.error('processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag');
     process.exit(1);
   }
+
+  const tenantId = resolveTenantId(options.profile);
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    const body: Record<string, unknown> = {
+      processDefinitionId: options.processDefinitionId,
+      tenantId,
+    };
+    if (options.version !== undefined) body.processDefinitionVersion = options.version;
+    if (options.variables) body.variables = JSON.parse(options.variables);
+    if (options.awaitCompletion) body.awaitCompletion = true;
+    if (options.requestTimeout !== undefined) body.requestTimeout = options.requestTimeout;
+    logger.json({
+      dryRun: true,
+      command: 'create process-instance',
+      method: 'POST',
+      url: `${config.baseUrl}/process-instances`,
+      body,
+    });
+    return;
+  }
+
+  const client = createClient(options.profile);
 
   // Validate: fetchVariables requires awaitCompletion
   if (options.fetchVariables && !options.awaitCompletion) {
@@ -236,6 +260,20 @@ export async function cancelProcessInstance(key: string, options: {
   profile?: string;
 }): Promise<void> {
   const logger = getLogger();
+
+  // Dry-run: emit the would-be API request without executing
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'cancel process-instance',
+      method: 'POST',
+      url: `${config.baseUrl}/process-instances/${key}/cancellation`,
+      body: {},
+    });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {

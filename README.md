@@ -462,6 +462,76 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 - `inc` = incident(s)
 - `msg` = message
 
+---
+
+## Agent Usage (AI / Programmatic Consumption)
+
+c8ctl ships two flags designed specifically for AI agents and programmatic consumers.
+They appear in their own clearly labelled section in `c8ctl help`.
+
+> For a full machine-readable reference, see [`CONTEXT.md`](./CONTEXT.md).
+
+### `--fields <comma-separated>`
+
+Filters output to only the specified field names. Applies to all `list`, `search`,
+and `get` commands. Field matching is **case-insensitive**.
+
+```bash
+# Only return Key and State columns — reduces context window size
+c8ctl list pi --fields Key,State
+c8ctl search pd --fields Key,processDefinitionId,name
+
+# Works in both text and JSON modes
+c8ctl output json
+c8ctl list pi --fields Key,State,processDefinitionId | jq .
+```
+
+### `--dry-run`
+
+Previews the API request that **would** be sent without executing it.
+Applies to all mutating commands: `create`, `cancel`, `deploy`, `complete`,
+`fail`, `activate`, `resolve`, `publish`, `correlate`.
+
+Emits a JSON object to stdout and exits 0:
+```json
+{
+  "dryRun": true,
+  "command": "create process-instance",
+  "method": "POST",
+  "url": "http://localhost:8080/v2/process-instances",
+  "body": { "processDefinitionId": "my-process", "tenantId": "<default>" }
+}
+```
+
+**Recommended agent workflow for mutations:**
+1. Run with `--dry-run` and show the user the would-be API call
+2. Wait for user confirmation
+3. Re-run without `--dry-run` to execute
+
+```bash
+# Preview before creating
+c8ctl create pi --id=my-process --dry-run
+
+# Preview a deployment
+c8ctl deploy ./my-process.bpmn --dry-run
+
+# Preview cancelling a process instance
+c8ctl cancel pi 2251799813685249 --dry-run
+```
+
+### Machine-Readable Help (JSON Mode)
+
+In JSON output mode, `c8ctl help` emits structured JSON containing the full
+command tree, flags (with types), and agent flags:
+
+```bash
+c8ctl output json
+c8ctl help          # → JSON with commands[], globalFlags[], agentFlags[], resourceAliases
+c8ctl help list     # → JSON for specific command
+```
+
+---
+
 ### Command Structure
 
 ```shell

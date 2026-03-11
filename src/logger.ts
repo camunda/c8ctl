@@ -7,6 +7,35 @@ import { c8ctl } from './runtime.ts';
 
 export type OutputMode = 'text' | 'json';
 
+/**
+ * Filter a single object to only include the specified fields.
+ * Field matching is case-insensitive.
+ */
+function filterObjectFields(obj: Record<string, unknown>, fields: string[]): Record<string, unknown> {
+  const lowerFields = fields.map(f => f.toLowerCase());
+  return Object.fromEntries(
+    Object.entries(obj).filter(([key]) => lowerFields.includes(key.toLowerCase()))
+  );
+}
+
+/**
+ * Apply --fields filtering to arbitrary data.
+ * - Array: filter each element's keys
+ * - Object: filter object keys
+ * - Primitive: return as-is
+ */
+function filterFields(data: any, fields: string[]): any {
+  if (Array.isArray(data)) {
+    return data.map(item =>
+      item && typeof item === 'object' ? filterObjectFields(item as Record<string, unknown>, fields) : item
+    );
+  }
+  if (data && typeof data === 'object') {
+    return filterObjectFields(data as Record<string, unknown>, fields);
+  }
+  return data;
+}
+
 export type LogWriter = {
   log(...data: any[]): void;
   error(...data: any[]): void;
@@ -130,21 +159,27 @@ export class Logger {
   }
 
   table(data: any[]): void {
+    const fields = c8ctl.fields;
+    // Apply --fields filtering when set (only for object elements)
+    const filteredData = fields && fields.length > 0
+      ? data.map(obj => (obj && typeof obj === 'object' ? filterObjectFields(obj as Record<string, unknown>, fields) : obj))
+      : data;
+
     if (this.mode === 'text') {
-      if (data.length === 0) {
+      if (filteredData.length === 0) {
         this._writeLog('No data to display');
         return;
       }
       
       // Get all unique keys from all objects
-      const keys = Array.from(new Set(data.flatMap(obj => Object.keys(obj))));
+      const keys = Array.from(new Set(filteredData.flatMap(obj => Object.keys(obj))));
       
       // Calculate column widths
       const widths: Record<string, number> = {};
       keys.forEach(key => {
         widths[key] = Math.max(
           key.length,
-          ...data.map(obj => String(obj[key] ?? '').length)
+          ...filteredData.map(obj => String(obj[key] ?? '').length)
         );
       });
 
@@ -154,20 +189,24 @@ export class Logger {
       this._writeLog(keys.map(key => '-'.repeat(widths[key])).join('-+-'));
 
       // Print rows
-      data.forEach(obj => {
+      filteredData.forEach(obj => {
         const row = keys.map(key => String(obj[key] ?? '').padEnd(widths[key])).join(' | ');
         this._writeLog(row);
       });
     } else {
-      this._writeLog(JSON.stringify(data, null, 2));
+      this._writeLog(JSON.stringify(filteredData, null, 2));
     }
   }
 
   json(data: any): void {
+    const fields = c8ctl.fields;
+    // Apply --fields filtering when set
+    const filteredData = fields && fields.length > 0 ? filterFields(data, fields) : data;
+
     if (this.mode === 'text') {
-      this._writeLog(JSON.stringify(data, null, 2));
+      this._writeLog(JSON.stringify(filteredData, null, 2));
     } else {
-      this._writeLog(JSON.stringify(data));
+      this._writeLog(JSON.stringify(filteredData));
     }
   }
 

@@ -6,10 +6,111 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getLogger } from '../logger.ts';
-import { getPluginCommandsInfo } from '../plugin-loader.ts';
+import { getPluginCommandsInfo, type PluginCommandInfo } from '../plugin-loader.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * Build structured JSON help data for machine/agent consumption.
+ * Returned by showHelp() and showCommandHelp() in JSON output mode.
+ */
+function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[]): object {
+  return {
+    version,
+    usage: 'c8ctl <command> [resource] [options]',
+    commands: [
+      { verb: 'list',      resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','profiles','plugins'], description: 'List resources', mutating: false },
+      { verb: 'search',    resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','vars'], description: 'Search resources with filters', mutating: false },
+      { verb: 'get',       resource: '<resource> <key>', resources: ['pi','pd','inc','topology','form'],  description: 'Get resource by key', mutating: false },
+      { verb: 'create',    resource: '<resource>',       resources: ['pi'], description: 'Create resource', mutating: true },
+      { verb: 'cancel',    resource: '<resource> <key>', resources: ['pi'], description: 'Cancel resource', mutating: true },
+      { verb: 'await',     resource: '<resource>',       resources: ['pi'], description: 'Create and await completion (alias for create --awaitCompletion)', mutating: true },
+      { verb: 'complete',  resource: '<resource> <key>', resources: ['ut','job'], description: 'Complete resource', mutating: true },
+      { verb: 'fail',      resource: 'job <key>',        resources: ['job'], description: 'Fail a job', mutating: true },
+      { verb: 'activate',  resource: 'jobs <type>',      resources: ['jobs'], description: 'Activate jobs by type', mutating: true },
+      { verb: 'resolve',   resource: 'inc <key>',        resources: ['inc'], description: 'Resolve incident', mutating: true },
+      { verb: 'publish',   resource: 'msg <name>',       resources: ['msg'], description: 'Publish message', mutating: true },
+      { verb: 'correlate', resource: 'msg <name>',       resources: ['msg'], description: 'Correlate message', mutating: true },
+      { verb: 'deploy',    resource: '[path...]',        resources: [], description: 'Deploy BPMN/DMN/forms', mutating: true },
+      { verb: 'run',       resource: '<path>',           resources: [], description: 'Deploy and start process', mutating: true },
+      { verb: 'watch',     resource: '[path...]',        resources: [], description: 'Watch files for changes and auto-deploy', mutating: false },
+      { verb: 'add',       resource: 'profile <name>',   resources: ['profile'], description: 'Add a profile', mutating: false },
+      { verb: 'remove',    resource: 'profile <name>',   resources: ['profile'], description: 'Remove a profile (alias: rm)', mutating: false },
+      { verb: 'load',      resource: 'plugin <name>',    resources: ['plugin'], description: 'Load a c8ctl plugin', mutating: false },
+      { verb: 'unload',    resource: 'plugin <name>',    resources: ['plugin'], description: 'Unload a c8ctl plugin', mutating: false },
+      { verb: 'upgrade',   resource: 'plugin <name>',    resources: ['plugin'], description: 'Upgrade a plugin', mutating: false },
+      { verb: 'downgrade', resource: 'plugin <name> <version>', resources: ['plugin'], description: 'Downgrade a plugin to a specific version', mutating: false },
+      { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
+      { verb: 'init',      resource: 'plugin [name]',    resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
+      { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
+      { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
+      { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
+      { verb: 'mcp-proxy', resource: '[mcp-path]',       resources: [], description: 'Start a STDIO to remote HTTP MCP proxy server', mutating: false },
+      { verb: 'help',      resource: '[command]',        resources: [], description: 'Show help', mutating: false },
+      ...pluginCommandsInfo.map(cmd => ({
+        verb: cmd.commandName, resource: '', resources: [], description: cmd.description || '', mutating: false,
+      })),
+    ],
+    resourceAliases: {
+      pi: 'process-instance(s)',
+      pd: 'process-definition(s)',
+      ut: 'user-task(s)',
+      inc: 'incident(s)',
+      msg: 'message',
+      vars: 'variable(s)',
+    },
+    globalFlags: [
+      { flag: '--profile', type: 'string', description: 'Use specific profile for this command' },
+      { flag: '--sortBy',  type: 'string', description: 'Sort list/search output by column name' },
+      { flag: '--asc',     type: 'boolean', description: 'Sort in ascending order (default)' },
+      { flag: '--desc',    type: 'boolean', description: 'Sort in descending order' },
+      { flag: '--limit',   type: 'string', description: 'Maximum number of items to fetch (default: 1000000)' },
+      { flag: '--between', type: 'string', description: 'Filter by date range: <from>..<to> (YYYY-MM-DD or ISO 8601; open-ended: ..to or from..)' },
+      { flag: '--dateField', type: 'string', description: 'Date field to filter on with --between (default depends on resource)' },
+      { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
+      { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
+      { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
+      { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
+    ],
+    searchFlags: [
+      { flag: '--bpmnProcessId',           type: 'string',  description: 'Filter by process definition ID' },
+      { flag: '--processDefinitionKey',    type: 'string',  description: 'Filter by process definition key' },
+      { flag: '--processInstanceKey',      type: 'string',  description: 'Filter by process instance key' },
+      { flag: '--parentProcessInstanceKey',type: 'string',  description: 'Filter by parent process instance key' },
+      { flag: '--name',                    type: 'string',  description: 'Filter by name (variables, process definitions); supports wildcards * and ?' },
+      { flag: '--key',                     type: 'string',  description: 'Filter by key' },
+      { flag: '--assignee',                type: 'string',  description: 'Filter by assignee (user tasks)' },
+      { flag: '--elementId',               type: 'string',  description: 'Filter by element ID (user tasks)' },
+      { flag: '--errorType',               type: 'string',  description: 'Filter by error type (incidents)' },
+      { flag: '--errorMessage',            type: 'string',  description: 'Filter by error message (incidents); supports wildcards' },
+      { flag: '--type',                    type: 'string',  description: 'Filter by type (jobs); supports wildcards' },
+      { flag: '--value',                   type: 'string',  description: 'Filter by variable value' },
+      { flag: '--scopeKey',                type: 'string',  description: 'Filter by scope key (variables)' },
+      { flag: '--fullValue',               type: 'boolean', description: 'Return full variable values (default: truncated)' },
+      { flag: '--iname',                   type: 'string',  description: 'Case-insensitive --name filter (supports wildcards)' },
+      { flag: '--iid',                     type: 'string',  description: 'Case-insensitive --bpmnProcessId filter' },
+      { flag: '--iassignee',               type: 'string',  description: 'Case-insensitive --assignee filter' },
+      { flag: '--ierrorMessage',           type: 'string',  description: 'Case-insensitive --errorMessage filter' },
+      { flag: '--itype',                   type: 'string',  description: 'Case-insensitive --type filter' },
+      { flag: '--ivalue',                  type: 'string',  description: 'Case-insensitive --value filter' },
+    ],
+    agentFlags: [
+      {
+        flag: '--fields',
+        type: 'string',
+        description: 'Comma-separated list of output fields to include. Reduces context window size. Case-insensitive. Example: --fields Key,State,processDefinitionId',
+        appliesTo: 'all list/search/get commands',
+      },
+      {
+        flag: '--dry-run',
+        type: 'boolean',
+        description: 'Preview the API request that would be sent without executing it. Emits { dryRun, command, method, url, body } as JSON. Always exits 0.',
+        appliesTo: 'mutating commands: create, cancel, deploy, complete, fail, activate, resolve, publish, correlate',
+      },
+    ],
+  };
+}
 
 /**
  * Get package version
@@ -32,8 +133,15 @@ export function showVersion(): void {
  * Display full help
  */
 export function showHelp(): void {
+  const logger = getLogger();
   const version = getVersion();
   const pluginCommandsInfo = getPluginCommandsInfo();
+
+  // JSON mode: emit structured command tree for machine consumption
+  if (logger.mode === 'json') {
+    logger.json(buildHelpJson(version, pluginCommandsInfo));
+    return;
+  }
   
   let pluginSection = '';
   if (pluginCommandsInfo.length > 0) {
@@ -138,6 +246,24 @@ Resource Aliases:
   ut   = user-task(s)
   inc  = incident(s)
   msg  = message
+
+━━━ Agent Flags (for programmatic / AI-agent consumption) ━━━
+
+  --fields <columns>    Comma-separated list of output fields to include.
+                        Reduces context window size when parsing output.
+                        Example: c8ctl list pi --fields Key,State,processDefinitionId
+                        Applies to all list/search/get commands. Case-insensitive.
+
+  --dry-run             Preview the API request that would be sent, without executing it.
+                        Emits JSON: { dryRun, command, method, url, body }
+                        Applies to all mutating commands: create, cancel, deploy, complete,
+                        fail, activate, resolve, publish, correlate.
+                        Always exits 0. Use before confirming a mutating operation.
+
+  Note: In JSON output mode (c8ctl output json), help is returned as structured JSON.
+        Use 'c8ctl output json && c8ctl help' to get machine-readable command reference.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Examples:
   c8ctl list pi                      List process instances
@@ -1023,6 +1149,24 @@ Examples:
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
+  const logger = getLogger();
+
+  // JSON mode: emit structured help for machine/agent consumption
+  if (logger.mode === 'json') {
+    const version = getVersion();
+    const pluginCommandsInfo = getPluginCommandsInfo();
+    const allHelp = buildHelpJson(version, pluginCommandsInfo) as any;
+    const commandEntry = allHelp.commands?.find((c: any) => c.verb === command);
+    logger.json({
+      command,
+      ...(commandEntry ?? { verb: command, description: `No detailed help available for: ${command}` }),
+      globalFlags: allHelp.globalFlags,
+      searchFlags: allHelp.searchFlags,
+      agentFlags: allHelp.agentFlags,
+    });
+    return;
+  }
+
   switch (command) {
     case 'list':
       showListHelp();

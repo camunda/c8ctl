@@ -129,6 +129,8 @@ function parseCliArgs() {
         limit: { type: 'string' },
         between: { type: 'string' },
         dateField: { type: 'string' },
+        fields: { type: 'string' },
+        'dry-run': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -183,6 +185,16 @@ async function main() {
   if (limit !== undefined && (isNaN(limit) || limit < 1)) {
     logger.error('--limit must be a positive integer.');
     process.exit(1);
+  }
+
+  // Resolve --fields flag (agent feature: filter output keys)
+  if (values.fields && typeof values.fields === 'string') {
+    c8ctl.fields = values.fields.split(',').map(f => f.trim()).filter(Boolean);
+  }
+
+  // Resolve --dry-run flag (agent feature: emit API request without executing)
+  if (values['dry-run']) {
+    c8ctl.dryRun = true;
   }
 
   // Load installed plugins
