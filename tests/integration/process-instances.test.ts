@@ -15,7 +15,7 @@ import {
 } from '../../src/commands/process-instances.ts';
 import { todayRange } from '../utils/date-helpers.ts';
 import { pollUntil } from '../utils/polling.ts';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -94,26 +94,20 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
   });
 
   test('list process instances filters by version', async () => {
+    // Deploy v1
     await deploy(['tests/fixtures/simple.bpmn'], {});
     await createProcessInstance({ processDefinitionId: 'simple-process' });
 
-    // List with version=1
-    const result = await listProcessInstances({
-      processDefinitionId: 'simple-process',
-      version: 1,
-      all: true,
-    });
-
-    assert.ok(result, 'Result should be returned');
-    assert.ok(Array.isArray(result.items), 'Result should have items array');
-  });
-
-  test('list process instances --version filters correctly via CLI', async () => {
-    await deploy(['tests/fixtures/simple.bpmn'], {});
+    // Deploy v2 with a minimal change (different task name)
+    const v2Bpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
+      .replace('name="Do Something"', 'name="Do Something v2"');
+    const v2Path = join(testDir, 'simple-v2.bpmn');
+    writeFileSync(v2Path, v2Bpmn);
+    await deploy([v2Path], {});
     await createProcessInstance({ processDefinitionId: 'simple-process' });
 
-    // Wait for Elasticsearch to index
-    const indexed = await pollUntil(async () => {
+    // Wait for both versions to be indexed
+    const v1Indexed = await pollUntil(async () => {
       const result = await listProcessInstances({
         processDefinitionId: 'simple-process',
         version: 1,
@@ -121,16 +115,42 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
       });
       return result !== undefined && result.items.length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
-    assert.ok(indexed, 'Version 1 instances should be indexed');
+    assert.ok(v1Indexed, 'Version 1 instances should be indexed');
 
-    // A non-existing version should return no items
-    const noResult = await listProcessInstances({
+    const v2Indexed = await pollUntil(async () => {
+      const result = await listProcessInstances({
+        processDefinitionId: 'simple-process',
+        version: 2,
+        all: true,
+      });
+      return result !== undefined && result.items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(v2Indexed, 'Version 2 instances should be indexed');
+
+    // Verify version filtering is exclusive
+    const v1Result = await listProcessInstances({
       processDefinitionId: 'simple-process',
-      version: 9999,
+      version: 1,
       all: true,
     });
-    assert.ok(noResult, 'Result should be returned');
-    assert.strictEqual(noResult.items.length, 0, 'Non-existing version should return no results');
+    assert.ok(v1Result, 'v1 result should be returned');
+    assert.ok(v1Result.items.length > 0, 'Should find v1 instances');
+    assert.ok(
+      v1Result.items.every((pi) => Number((pi as Record<string, unknown>).processDefinitionVersion ?? (pi as Record<string, unknown>).version) === 1),
+      'All version 1 results should be version 1',
+    );
+
+    const v2Result = await listProcessInstances({
+      processDefinitionId: 'simple-process',
+      version: 2,
+      all: true,
+    });
+    assert.ok(v2Result, 'v2 result should be returned');
+    assert.ok(v2Result.items.length > 0, 'Should find v2 instances');
+    assert.ok(
+      v2Result.items.every((pi) => Number((pi as Record<string, unknown>).processDefinitionVersion ?? (pi as Record<string, unknown>).version) === 2),
+      'All version 2 results should be version 2',
+    );
   });
 
   test('list process instances --limit via CLI', async () => {
