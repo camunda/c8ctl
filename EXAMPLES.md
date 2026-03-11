@@ -37,6 +37,9 @@ c8 list pi --id=order-process
 
 # Filter by state
 c8 list pi --state=ACTIVE
+
+# Filter by process definition version
+c8 list pi --id=order-process --version=2
 ```
 
 ### Get Process Instance by Key
@@ -309,6 +312,9 @@ c8 search process-definitions --bpmnProcessId=order-process
 # Search by name
 c8 search pd --name=Order
 
+# Search by version
+c8 search pd --id=order-process --version=2
+
 # Search by key
 c8 search pd --key=2251799813685249
 
@@ -329,6 +335,9 @@ c8 search pi --state=COMPLETED
 # Search by process definition ID
 c8 search pi --id=order-process
 c8 search pi --bpmnProcessId=order-process
+
+# Search by process definition version
+c8 search pi --id=order-process --version=2
 
 # Search by process definition key
 c8 search pi --processDefinitionKey=2251799813685249

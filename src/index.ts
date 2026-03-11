@@ -361,6 +361,7 @@ async function main() {
     await listProcessInstances({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
+      version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
       sortBy: values.sortBy as string | undefined,
@@ -705,6 +706,7 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         processDefinitionKey: values.processDefinitionKey as string | undefined,
+        version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
         state: values.state as string | undefined,
         key: values.key as string | undefined,
         parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,

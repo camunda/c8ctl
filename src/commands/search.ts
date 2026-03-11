@@ -311,6 +311,7 @@ export async function searchProcessInstances(options: {
   profile?: string;
   processDefinitionId?: string;
   processDefinitionKey?: string;
+  version?: number;
   state?: string;
   key?: string;
   parentProcessInstanceKey?: string;
@@ -336,6 +337,9 @@ export async function searchProcessInstances(options: {
   }
   if (options.state) {
     criteria.push(formatCriterion('state', options.state));
+  }
+  if (options.version !== undefined) {
+    criteria.push(formatCriterion('version', options.version));
   }
   if (options.key) {
     criteria.push(formatCriterion('key', options.key));
@@ -365,6 +369,10 @@ export async function searchProcessInstances(options: {
 
     if (options.processDefinitionKey) {
       filter.filter.processDefinitionKey = options.processDefinitionKey;
+    }
+
+    if (options.version !== undefined) {
+      filter.filter.processDefinitionVersion = options.version;
     }
 
     if (options.state) {

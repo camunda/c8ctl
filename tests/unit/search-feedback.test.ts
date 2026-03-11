@@ -122,6 +122,18 @@ describe('detectUnknownSearchFlags', () => {
     assert.deepStrictEqual(unknown, []);
   });
 
+  test('--version is valid for process-instance search (global flag)', () => {
+    const values = { version: '2' };
+    const unknown = detectUnknownSearchFlags(values, 'process-instance');
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('--version is valid for process-definition search (global flag)', () => {
+    const values = { version: '3' };
+    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    assert.deepStrictEqual(unknown, []);
+  });
+
   test('--processDefinitionId is valid for incident search', () => {
     const values = { processDefinitionId: 'my-process' };
     const unknown = detectUnknownSearchFlags(values, 'incident');

@@ -16,6 +16,7 @@ import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestra
 export async function listProcessInstances(options: {
   profile?: string;
   processDefinitionId?: string;
+  version?: number;
   state?: string;
   all?: boolean;
   sortBy?: string;
@@ -37,6 +38,10 @@ export async function listProcessInstances(options: {
 
     if (options.processDefinitionId) {
       filter.filter.processDefinitionId = options.processDefinitionId;
+    }
+
+    if (options.version !== undefined) {
+      filter.filter.processDefinitionVersion = options.version;
     }
 
     if (options.state) {
