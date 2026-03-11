@@ -31,6 +31,12 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 - always consult `.github/SDK_GAPS.md` for known SDK limitations before implementing features that interact with the Camunda SDK. When a newer SDK version is available, check whether gaps listed there have been resolved and update the file accordingly (mark resolved items, remove workarounds).
 
+### BPMN and DMN Validation
+
+- when creating or modifying `.bpmn` files, validate them with [bpmnlint](https://github.com/bpmn-io/bpmnlint) by running `npx bpmnlint <file>` before considering the task complete
+- when creating or modifying `.dmn` files, validate them with [dmnlint](https://github.com/bpmn-io/dmnlint) by running `npx dmnlint <file>` before considering the task complete
+- fix any reported errors before proceeding
+
 ### Terminal Commands
 
 - avoid heredocs (`<< EOF`) in terminal commands as they don't work reliably in zsh on macOS when executed via tools
