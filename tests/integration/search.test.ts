@@ -25,10 +25,10 @@ const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
 let dataDir = '';
 
 type ProcessDefinitionRow = { Key: string | number; 'Process ID': string; Name: string; Version: number; 'Tenant ID': string; };
-type ProcessInstanceRow = { Key: string | number; 'Process ID': string; State: string; Version: number; 'Tenant ID': string; };
-type UserTaskRow = { Key: string | number; Name: string; State: string; Assignee: string; 'Process Instance': string | number; 'Tenant ID': string; };
-type IncidentRow = { Key: string | number; Type: string; Message: string; State: string; 'Process Instance': string | number; 'Tenant ID': string; };
-type JobRow = { Key: string | number; Type: string; State: string; Retries: number; 'Process Instance': string | number; 'Tenant ID': string; };
+type ProcessInstanceRow = { Key: string | number; 'Process ID': string; State: string; Version: number; 'Start Date': string; 'Tenant ID': string; };
+type UserTaskRow = { Key: string | number; Name: string; State: string; Assignee: string; Created: string; 'Process Instance': string | number; 'Tenant ID': string; };
+type IncidentRow = { Key: string | number; Type: string; Message: string; State: string; Created: string; 'Process Instance': string | number; 'Tenant ID': string; };
+type JobRow = { Key: string | number; Type: string; State: string; Retries: number; Created: string; 'Process Instance': string | number; 'Tenant ID': string; };
 type VariableRow = { Name: string; Value: string; 'Process Instance': string | number; 'Scope Key': string | number; 'Tenant ID': string; };
 
 function cli(...args: string[]) {
