@@ -93,6 +93,46 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     assert.ok(result.items.length <= 2, `--limit 2 should return at most 2 items, got ${result.items.length}`);
   });
 
+  test('list process instances filters by version', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    // List with version=1
+    const result = await listProcessInstances({
+      processDefinitionId: 'simple-process',
+      version: 1,
+      all: true,
+    });
+
+    assert.ok(result, 'Result should be returned');
+    assert.ok(Array.isArray(result.items), 'Result should have items array');
+  });
+
+  test('list process instances --version filters correctly via CLI', async () => {
+    await deploy(['tests/fixtures/simple.bpmn'], {});
+    await createProcessInstance({ processDefinitionId: 'simple-process' });
+
+    // Wait for Elasticsearch to index
+    const indexed = await pollUntil(async () => {
+      const result = await listProcessInstances({
+        processDefinitionId: 'simple-process',
+        version: 1,
+        all: true,
+      });
+      return result !== undefined && result.items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(indexed, 'Version 1 instances should be indexed');
+
+    // A non-existing version should return no items
+    const noResult = await listProcessInstances({
+      processDefinitionId: 'simple-process',
+      version: 9999,
+      all: true,
+    });
+    assert.ok(noResult, 'Result should be returned');
+    assert.strictEqual(noResult.items.length, 0, 'Non-existing version should return no results');
+  });
+
   test('list process instances --limit via CLI', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
     await createProcessInstance({ processDefinitionId: 'simple-process' });

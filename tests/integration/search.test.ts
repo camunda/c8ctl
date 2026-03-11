@@ -159,6 +159,49 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     assert.ok(found, 'Search by processDefinitionKey should find process instances');
   });
 
+  test('search process instances by version', async () => {
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
+
+    const found = await pollUntil(async () => {
+      const result = await cli('search', 'pi', '--id=simple-process', '--version=1');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find process instances matching version 1');
+  });
+
+  test('search process instances by version filters correctly', async () => {
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
+
+    // Wait until results are indexed
+    const indexed = await pollUntil(async () => {
+      const result = await cli('search', 'pi', '--id=simple-process', '--version=1');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(indexed, 'Version 1 instances should be indexed');
+
+    // Search with a very high version that shouldn't match
+    const noResult = await cli('search', 'pi', '--id=simple-process', '--version=9999');
+    const noItems = parseItems<ProcessInstanceRow>(noResult.stdout);
+    assert.strictEqual(noItems.length, 0, 'Search with non-existing version should return no results');
+  });
+
+  test('search process definitions by version', async () => {
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+
+    const found = await pollUntil(async () => {
+      const result = await cli('search', 'pd', '--id=simple-process', '--version=1');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+
+    assert.ok(found, 'Search should find process definition matching version 1');
+  });
+
   test('search user tasks with filters', async () => {
     await cli('deploy', 'tests/fixtures/list-pis');
     await cli('create', 'pi', '--id=Process_0t60ay7');
