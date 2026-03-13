@@ -131,7 +131,9 @@ c8ctl get form 123456 --pd                   # Get start form for process defini
 
 # Search resources with filters
 c8ctl search pi --state=ACTIVE         # Search active process instances
+c8ctl search pi --id=myProcess --version=2  # Search process instances by ID and version
 c8ctl search pd --id=myProcess         # Search process definitions by ID
+c8ctl search pd --version=2            # Search process definitions by version
 c8ctl search pd --name='*order*'       # Wildcard search (* = any chars, ? = single char)
 c8ctl search pd --id='process-v?'      # Single-char wildcard (matches process-v1, process-v2, …)
 c8ctl search pd --iname='*ORDER*'      # Case-insensitive search (--i prefix)

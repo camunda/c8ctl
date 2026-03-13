@@ -69,6 +69,13 @@ function normalizeResource(resource: string): string {
 }
 
 /**
+ * Parse --version flag value into a number, or undefined if not set.
+ */
+function parseVersionFlag(values: Record<string, unknown>): number | undefined {
+  return (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined;
+}
+
+/**
  * Parse command line arguments
  */
 function parseCliArgs() {
@@ -361,6 +368,7 @@ async function main() {
     await listProcessInstances({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
+      version: parseVersionFlag(values),
       state: values.state as string | undefined,
       all: values.all as boolean | undefined,
       sortBy: values.sortBy as string | undefined,
@@ -390,7 +398,7 @@ async function main() {
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
+      version: parseVersionFlag(values),
       variables: values.variables as string | undefined,
       awaitCompletion: values.awaitCompletion as boolean | undefined,
       fetchVariables: values.fetchVariables as boolean | undefined,
@@ -417,7 +425,7 @@ async function main() {
     await createProcessInstance({
       profile: values.profile as string | undefined,
       processDefinitionId: resolveProcessDefinitionId(values),
-      version: values.version as number | undefined,
+      version: parseVersionFlag(values),
       variables: values.variables as string | undefined,
       awaitCompletion: true,  // Always true for await command
       fetchVariables: values.fetchVariables as boolean | undefined,
@@ -689,7 +697,7 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         name: values.name as string | undefined,
-        version: (values.version && typeof values.version === 'string') ? parseInt(values.version) : undefined,
+        version: parseVersionFlag(values),
         key: values.key as string | undefined,
         iProcessDefinitionId: values.iid as string | undefined,
         iName: values.iname as string | undefined,
@@ -705,6 +713,7 @@ async function main() {
         profile: values.profile as string | undefined,
         processDefinitionId: resolveProcessDefinitionId(values),
         processDefinitionKey: values.processDefinitionKey as string | undefined,
+        version: parseVersionFlag(values),
         state: values.state as string | undefined,
         key: values.key as string | undefined,
         parentProcessInstanceKey: values.parentProcessInstanceKey as string | undefined,

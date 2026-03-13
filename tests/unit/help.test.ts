@@ -250,6 +250,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('incident'), 'list pi help should explain the indicator is for incidents');
     assert.ok(output.includes('--between'), 'list help should include --between flag');
     assert.ok(output.includes('--dateField'), 'list help should include --dateField flag');
+    assert.ok(output.includes('--version'), 'list pi help should include --version flag');
   });
 
   test('showCommandHelp shows get help with resources and flags', () => {
@@ -313,6 +314,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('Date Range Filter'), 'search help should include date range filter section');
     assert.ok(output.includes('--between'), 'search help should include --between flag');
     assert.ok(output.includes('--dateField'), 'search help should include --dateField flag');
+    assert.ok(output.includes('--version'), 'search help should include --version flag for pi and pd');
   });
 
   test('showCommandHelp shows deploy help', () => {

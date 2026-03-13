@@ -9,7 +9,7 @@
 
 import { test, describe, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
@@ -157,6 +157,81 @@ describe('Search Command Integration Tests (requires Camunda 8 at localhost:8080
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
     assert.ok(found, 'Search by processDefinitionKey should find process instances');
+  });
+
+  test('search process instances by version', async () => {
+    // Deploy v1
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+    await cli('create', 'pi', '--id=simple-process');
+
+    // Deploy v2 with a minimal change (different task name)
+    const v2Bpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
+      .replace('name="Do Something"', 'name="Do Something v2"');
+    const v2Path = join(dataDir, 'simple-v2.bpmn');
+    writeFileSync(v2Path, v2Bpmn);
+    await cli('deploy', v2Path);
+    await cli('create', 'pi', '--id=simple-process');
+
+    // Wait until v1 instances are indexed
+    const v1Found = await pollUntil(async () => {
+      const result = await cli('search', 'pi', '--id=simple-process', '--version=1');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(v1Found, 'Search should find process instances matching version 1');
+
+    // Wait until v2 instances are indexed
+    const v2Found = await pollUntil(async () => {
+      const result = await cli('search', 'pi', '--id=simple-process', '--version=2');
+      const items = parseItems<ProcessInstanceRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(v2Found, 'Search should find process instances matching version 2');
+
+    // Verify version filtering is exclusive
+    const v1Result = await cli('search', 'pi', '--id=simple-process', '--version=1');
+    const v1Items = parseItems<ProcessInstanceRow>(v1Result.stdout);
+    assert.ok(v1Items.every(i => Number(i.Version) === 1), 'All version 1 results should be version 1');
+
+    const v2Result = await cli('search', 'pi', '--id=simple-process', '--version=2');
+    const v2Items = parseItems<ProcessInstanceRow>(v2Result.stdout);
+    assert.ok(v2Items.every(i => Number(i.Version) === 2), 'All version 2 results should be version 2');
+  });
+
+  test('search process definitions by version', async () => {
+    // Deploy v1
+    await cli('deploy', 'tests/fixtures/simple.bpmn');
+
+    // Deploy v2 with a minimal change (different task name)
+    const v2Bpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
+      .replace('name="Do Something"', 'name="Do Something v2"');
+    const v2Path = join(dataDir, 'simple-v2.bpmn');
+    writeFileSync(v2Path, v2Bpmn);
+    await cli('deploy', v2Path);
+
+    // Wait until both versions are indexed
+    const v1Found = await pollUntil(async () => {
+      const result = await cli('search', 'pd', '--id=simple-process', '--version=1');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(v1Found, 'Search should find process definition version 1');
+
+    const v2Found = await pollUntil(async () => {
+      const result = await cli('search', 'pd', '--id=simple-process', '--version=2');
+      const items = parseItems<ProcessDefinitionRow>(result.stdout);
+      return items.length > 0;
+    }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
+    assert.ok(v2Found, 'Search should find process definition version 2');
+
+    // Verify filtering is exclusive
+    const v1Result = await cli('search', 'pd', '--id=simple-process', '--version=1');
+    const v1Items = parseItems<ProcessDefinitionRow>(v1Result.stdout);
+    assert.ok(v1Items.every(pd => Number(pd.Version) === 1), 'All version 1 results should be version 1');
+
+    const v2Result = await cli('search', 'pd', '--id=simple-process', '--version=2');
+    const v2Items = parseItems<ProcessDefinitionRow>(v2Result.stdout);
+    assert.ok(v2Items.every(pd => Number(pd.Version) === 2), 'All version 2 results should be version 2');
   });
 
   test('search user tasks with filters', async () => {

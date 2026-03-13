@@ -383,6 +383,7 @@ Resources and their available flags:
 
   process-instances (pi)
     --id <id>                Filter by process definition ID (alias: --bpmnProcessId)
+    --version <num>          Filter by process definition version
     --state <state>          Filter by state (ACTIVE, COMPLETED, etc.)
     --all                    List all instances (pagination)
     --between <from>..<to>   Filter by date range (default field: startDate)
@@ -671,6 +672,7 @@ Resources and their available flags:
     --bpmnProcessId, --id <id>        Filter by process definition ID
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --processDefinitionKey <key>      Filter by process definition key
+    --version <num>                   Filter by process definition version
     --state <state>                   Filter by state (ACTIVE, COMPLETED, etc.)
     --key <key>                       Filter by key
     --parentProcessInstanceKey <key>  Filter by parent process instance key
@@ -686,6 +688,7 @@ Resources and their available flags:
     --iid <pattern>                   Case-insensitive --bpmnProcessId filter
     --name <name>                     Filter by name
     --iname <pattern>                 Case-insensitive --name filter
+    --version <num>                   Filter by process definition version
     --key <key>                       Filter by key
     --sortBy <column>                 Sort by column (Key, Process ID, Name, Version, Tenant ID)
     --asc                             Sort in ascending order (default)
