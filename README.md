@@ -159,16 +159,16 @@ c8ctl can automatically download and start a local Camunda 8 cluster for develop
 
 ```bash
 # Start local Camunda 8 cluster (downloads c8run if needed)
-c8ctl c8-cluster start
+c8ctl start c8-cluster
 
 # Start specific version
-c8ctl c8-cluster start --version 8.7
+c8ctl start c8-cluster --c8-version 8.7
 
 # Stop local cluster
-c8ctl c8-cluster stop
+c8ctl stop c8-cluster
 ```
 
-The `c8-cluster start` command will:
+The `start c8-cluster` command will:
 1. Check if c8run is installed in the cache directory
 2. Download and extract c8run if needed (supports macOS and Linux)
 3. Start the cluster in daemon mode
