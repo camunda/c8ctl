@@ -25,17 +25,31 @@ describe('c8-cluster Integration Tests', () => {
     );
   });
 
-  test('c8-cluster requires an action (start/stop)', () => {
-    const result = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'c8-cluster'], {
+  test('start/stop commands require c8-cluster resource', () => {
+    // Test 'start' without resource
+    const resultStart = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'start'], {
       encoding: 'utf-8',
       stdio: 'pipe',
     });
 
-    // Should show error about unknown action or require action
-    assert.notStrictEqual(result.status, 0, 'c8-cluster without action should fail');
+    // Should show error about unknown command or missing resource
     assert.ok(
-      result.stderr.includes('Unknown c8-cluster action') || result.stderr.includes('start') || result.stderr.includes('stop'),
-      'Error should mention available actions'
+      resultStart.stderr.includes('Unknown command: start') ||
+      resultStart.stdout.includes('Unknown command: start'),
+      'start without resource should show unknown command error'
+    );
+
+    // Test 'stop' without resource
+    const resultStop = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'stop'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    // Should show error about unknown command or missing resource
+    assert.ok(
+      resultStop.stderr.includes('Unknown command: stop') ||
+      resultStop.stdout.includes('Unknown command: stop'),
+      'stop without resource should show unknown command error'
     );
   });
 

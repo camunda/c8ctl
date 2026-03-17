@@ -689,27 +689,21 @@ async function main() {
     return;
   }
 
-  // Handle c8-cluster command
-  if (verb === 'c8-cluster') {
-    const action = resource; // start or stop
+  // Handle start c8-cluster command
+  if (verb === 'start' && normalizedResource === 'c8-cluster') {
+    await startCluster({
+      version: values.version as string | undefined,
+      force: values.force as boolean | undefined,
+    });
+    return;
+  }
 
-    if (action === 'start') {
-      await startCluster({
-        version: values.version as string | undefined,
-        force: values.force as boolean | undefined,
-      });
-      return;
-    }
-
-    if (action === 'stop') {
-      await stopCluster({
-        version: values.version as string | undefined,
-      });
-      return;
-    }
-
-    logger.error(`Unknown c8-cluster action: ${action}. Use 'start' or 'stop'.`);
-    process.exit(1);
+  // Handle stop c8-cluster command
+  if (verb === 'stop' && normalizedResource === 'c8-cluster') {
+    await stopCluster({
+      version: values.version as string | undefined,
+    });
+    return;
   }
 
   // Handle search commands

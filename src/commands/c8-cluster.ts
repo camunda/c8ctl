@@ -412,7 +412,7 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
       // Check if process is still running
       process.kill(pid, 0);
       logger.warn(`c8run is already running (PID: ${pid})`);
-      logger.info('Use "c8ctl c8-cluster stop" to stop it first.');
+      logger.info('Use "c8ctl stop c8-cluster" to stop it first.');
       return;
     } catch (error) {
       // Process not running, clean up stale PID file

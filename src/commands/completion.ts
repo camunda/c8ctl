@@ -20,7 +20,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output completion help c8-cluster mcp-proxy"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output start stop completion help mcp-proxy"
 
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -46,9 +46,10 @@ _c8ctl_completions() {
   local use_resources="profile tenant"
   local which_resources="profile"
   local output_resources="json text"
+  local start_resources="c8-cluster"
+  local stop_resources="c8-cluster"
   local completion_resources="bash zsh fish"
-  local c8_cluster_resources="start stop"
-  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins c8-cluster"
+  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init start stop profiles profile plugin plugins"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force"
@@ -131,11 +132,14 @@ _c8ctl_completions() {
         output)
           COMPREPLY=( \$(compgen -W "\${output_resources}" -- "\${cur}") )
           ;;
+        start)
+          COMPREPLY=( \$(compgen -W "\${start_resources}" -- "\${cur}") )
+          ;;
+        stop)
+          COMPREPLY=( \$(compgen -W "\${stop_resources}" -- "\${cur}") )
+          ;;
         completion)
           COMPREPLY=( \$(compgen -W "\${completion_resources}" -- "\${cur}") )
-          ;;
-        c8-cluster)
-          COMPREPLY=( \$(compgen -W "\${c8_cluster_resources}" -- "\${cur}") )
           ;;
         help)
           COMPREPLY=( \$(compgen -W "\${help_resources}" -- "\${cur}") )
@@ -199,7 +203,8 @@ _c8ctl() {
     'use:Set active profile or tenant'
     'which:Show active profile or tenant'
     'output:Set output format'
-    'c8-cluster:Manage local Camunda 8 cluster'
+    'start:Start local Camunda 8 cluster'
+    'stop:Stop local Camunda 8 cluster'
     'mcp-proxy:Start a STDIO to remote HTTP MCP proxy server'
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
@@ -465,10 +470,15 @@ _c8ctl() {
           )
           _describe 'resource' resources
           ;;
-        c8-cluster)
+        start)
           resources=(
-            'start:Start local Camunda 8 cluster'
-            'stop:Stop local Camunda 8 cluster'
+            'c8-cluster:Start local Camunda 8 cluster'
+          )
+          _describe 'resource' resources
+          ;;
+        stop)
+          resources=(
+            'c8-cluster:Stop local Camunda 8 cluster'
           )
           _describe 'resource' resources
           ;;
@@ -492,7 +502,8 @@ _c8ctl() {
             'upgrade:Show upgrade command help'
             'downgrade:Show downgrade command help'
             'init:Show init command help'
-            'c8-cluster:Show c8-cluster command help'
+            'start:Show start command help'
+            'stop:Show stop command help'
             'profiles:Show profile management help'
             'profile:Alias for profile management help'
             'plugin:Show plugin management help'
@@ -696,8 +707,10 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
 complete -c c8 -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
 complete -c c8 -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'c8-cluster' -d 'Manage local Camunda 8 cluster'
-complete -c c8 -n '__fish_use_subcommand' -a 'c8-cluster' -d 'Manage local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'start' -d 'Start local Camunda 8 cluster'
+complete -c c8 -n '__fish_use_subcommand' -a 'start' -d 'Start local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'stop' -d 'Stop local Camunda 8 cluster'
+complete -c c8 -n '__fish_use_subcommand' -a 'stop' -d 'Stop local Camunda 8 cluster'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'mcp-proxy' -d 'Start a STDIO to remote HTTP MCP proxy server'
 complete -c c8 -n '__fish_use_subcommand' -a 'mcp-proxy' -d 'Start a STDIO to remote HTTP MCP proxy server'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
@@ -705,11 +718,13 @@ complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed he
 complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 
-# Resources for 'c8-cluster' command
-complete -c c8ctl -n '__fish_seen_subcommand_from c8-cluster' -a 'start' -d 'Start local Camunda 8 cluster'
-complete -c c8 -n '__fish_seen_subcommand_from c8-cluster' -a 'start' -d 'Start local Camunda 8 cluster'
-complete -c c8ctl -n '__fish_seen_subcommand_from c8-cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
-complete -c c8 -n '__fish_seen_subcommand_from c8-cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
+# Resources for 'start' command
+complete -c c8ctl -n '__fish_seen_subcommand_from start' -a 'c8-cluster' -d 'Start local Camunda 8 cluster'
+complete -c c8 -n '__fish_seen_subcommand_from start' -a 'c8-cluster' -d 'Start local Camunda 8 cluster'
+
+# Resources for 'stop' command
+complete -c c8ctl -n '__fish_seen_subcommand_from stop' -a 'c8-cluster' -d 'Stop local Camunda 8 cluster'
+complete -c c8 -n '__fish_seen_subcommand_from stop' -a 'c8-cluster' -d 'Stop local Camunda 8 cluster'
 
 # Resources for 'list' command
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'
