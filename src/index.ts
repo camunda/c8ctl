@@ -141,6 +141,7 @@ function parseCliArgs() {
         fields: { type: 'string' },
         'dry-run': { type: 'boolean' },
         force: { type: 'boolean' },
+        debug: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -695,6 +696,7 @@ async function main() {
     await startCluster({
       version: (values.c8Version || values.version) as string | undefined,
       force: values.force as boolean | undefined,
+      debug: values.debug as boolean | undefined,
     });
     return;
   }

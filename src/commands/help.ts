@@ -73,6 +73,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
       { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
       { flag: '--c8-version', type: 'string', description: 'Camunda version to use (use with start c8-cluster; e.g., 8.8, 8.9-alpha, stable, latest)' },
+      { flag: '--debug',      type: 'boolean', description: 'Show all output from c8run start (use with start c8-cluster)' },
       { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
       { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
     ],
@@ -211,6 +212,7 @@ Flags:
   --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601; omit either end for open-ended range)
   --dateField <field>   Date field to filter on with --between (default depends on resource)
   --c8-version <version>  Camunda version to use (use with 'start c8-cluster'; e.g., 8.8, 8.9-alpha, stable, latest)
+  --debug                 Show all output from c8run start (use with 'start c8-cluster')
   --version, -v         Show version
   --help, -h            Show help
 
@@ -300,6 +302,7 @@ Examples:
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
   c8ctl start c8-cluster             Start local Camunda 8 cluster
+  c8ctl start c8-cluster --debug     Start cluster with live output
   c8ctl start c8-cluster --c8-version 8.7  Start specific version
   c8ctl stop c8-cluster              Stop local Camunda 8 cluster
   c8ctl use profile prod             Set active profile

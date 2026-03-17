@@ -52,7 +52,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init start stop profiles profile plugin plugins"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force --c8-version"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force --c8-version --debug"
 
   case \${cword} in
     1)
@@ -270,6 +270,7 @@ _c8ctl() {
     '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
     '--c8-version[Camunda version to use (use with start c8-cluster)]:version:'
+    '--debug[Show all output from c8run start (use with start c8-cluster)]'
     '--force[Continue watching after deployment errors (watch command)]'
   )
 
@@ -722,6 +723,8 @@ complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell com
 # Resources for 'start' command
 complete -c c8ctl -n '__fish_seen_subcommand_from start' -a 'c8-cluster' -d 'Start local Camunda 8 cluster'
 complete -c c8 -n '__fish_seen_subcommand_from start' -a 'c8-cluster' -d 'Start local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_seen_subcommand_from start; and __fish_seen_subcommand_from c8-cluster' -l 'debug' -d 'Show all output from c8run start'
+complete -c c8 -n '__fish_seen_subcommand_from start; and __fish_seen_subcommand_from c8-cluster' -l 'debug' -d 'Show all output from c8run start'
 
 # Resources for 'stop' command
 complete -c c8ctl -n '__fish_seen_subcommand_from stop' -a 'c8-cluster' -d 'Stop local Camunda 8 cluster'

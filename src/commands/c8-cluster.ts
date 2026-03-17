@@ -397,7 +397,7 @@ async function waitForClusterReady(maxWaitMs: number = 120000): Promise<boolean>
 /**
  * Start c8run process
  */
-async function startC8Run(config: C8RunConfig): Promise<void> {
+async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
   const binaryPath = getC8RunBinaryPath(config);
 
   if (!existsSync(binaryPath)) {
@@ -422,9 +422,9 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
 
   logger.info('Starting Camunda 8 local cluster...');
 
-  // Start the process in detached mode
+  // In debug mode show all c8run output; otherwise suppress it
   const proc = spawn(binaryPath, ['start'], {
-    stdio: 'ignore',
+    stdio: debug ? 'inherit' : 'ignore',
     detached: true,
     cwd: dirname(binaryPath), // c8run needs to run from its installation directory
   });
@@ -432,8 +432,12 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
   // Save PID for stop command
   writeFileSync(pidFile, proc.pid!.toString());
 
-  // Unref so parent can exit
-  proc.unref();
+  // In normal mode unref so parent can exit naturally after the health check;
+  // in debug mode we exit explicitly below so that inherited stdio doesn't
+  // keep the parent alive indefinitely.
+  if (!debug) {
+    proc.unref();
+  }
 
   logger.info(`c8run started with PID: ${proc.pid}`);
 
@@ -443,6 +447,11 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
   if (isReady) {
     // Print summary
     printSummary();
+    // In debug mode the inherited stdio keeps the parent alive; exit explicitly
+    // so c8run continues running independently (it is already detached).
+    if (debug) {
+      process.exit(0);
+    }
   } else {
     logger.error('Cluster failed to start within timeout. Check logs for details.');
     process.exit(1);
@@ -551,6 +560,7 @@ function printSummary(): void {
 export interface C8ClusterOptions {
   version?: string;
   force?: boolean;
+  debug?: boolean;
 }
 
 /**
@@ -570,7 +580,7 @@ export async function startCluster(options: C8ClusterOptions = {}): Promise<void
     await ensureC8RunInstalled(config);
 
     // Start c8run
-    await startC8Run(config);
+    await startC8Run(config, options.debug ?? false);
 
   } catch (error) {
     logger.error(`Failed to start c8-cluster: ${error}`);

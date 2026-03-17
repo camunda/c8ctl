@@ -88,4 +88,44 @@ describe('c8-cluster Integration Tests', () => {
     assert.ok(result.stdout.includes('start'), 'Fish completion should include start action');
     assert.ok(result.stdout.includes('stop'), 'Fish completion should include stop action');
   });
+
+  test('help includes --debug flag for start c8-cluster', () => {
+    const result = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'help'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    assert.strictEqual(result.status, 0, 'Help command should succeed');
+    assert.ok(result.stdout.includes('--debug'), 'Help should mention --debug flag');
+  });
+
+  test('bash completion includes --debug flag', () => {
+    const result = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'completion', 'bash'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    assert.strictEqual(result.status, 0, 'Bash completion should succeed');
+    assert.ok(result.stdout.includes('--debug'), 'Bash completion should include --debug flag');
+  });
+
+  test('zsh completion includes --debug flag', () => {
+    const result = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'completion', 'zsh'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    assert.strictEqual(result.status, 0, 'Zsh completion should succeed');
+    assert.ok(result.stdout.includes('--debug'), 'Zsh completion should include --debug flag');
+  });
+
+  test('fish completion includes --debug flag', () => {
+    const result = spawnSync('node', ['--experimental-strip-types', CLI_PATH, 'completion', 'fish'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    assert.strictEqual(result.status, 0, 'Fish completion should succeed');
+    assert.ok(result.stdout.includes('--debug'), 'Fish completion should include --debug flag');
+  });
 });
