@@ -149,8 +149,10 @@ describe('Plugin Structure', () => {
         assert.ok(plugin.metadata,                           'Has metadata export');
         assert.ok(plugin.commands,                           'Has commands export');
         assert.ok(typeof plugin.commands.top === 'function', 'top is a function');
-      } catch {
-        // In development (no compiled output), verify the file structure instead
+      } catch (error: any) {
+        // In development (no compiled output), src/runtime.js doesn't exist yet.
+        // Only swallow module-not-found errors; re-throw anything unexpected.
+        if (error?.code !== 'ERR_MODULE_NOT_FOUND') throw error;
         const content = readFileSync(topPluginJs, 'utf-8');
         assert.ok(content.length > 0,                        'Plugin file exists and has content');
         assert.ok(content.includes('export const commands'), 'Has commands export');

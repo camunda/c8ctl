@@ -6,8 +6,6 @@ Interactive process-instance monitor for [c8ctl](https://github.com/camunda/c8ct
 
 `c8 top` provides a live, full-screen terminal view of running Camunda 8 process instances. Navigate the list with the keyboard and press **Enter** to drill into the full details of any selected instance — including its variables.
 
-![c8 top screenshot](docs/screenshot.png)
-
 ## Usage
 
 ```bash
@@ -73,6 +71,10 @@ It is implemented as a pure Node.js ESM module with no external dependencies:
 - Terminal UI uses ANSI escape codes written directly to `stdout`
 - Keyboard input is handled via Node.js's built-in `readline.emitKeypressEvents()`
 - Process instances are fetched from the Camunda 8 REST API via the c8ctl runtime client
+
+## Limitations
+
+- The list view fetches up to **500 process instances** per refresh. For environments with more than 500 active instances the list will be truncated; use the `search pi` command with pagination for full result sets.
 
 ## Requirements
 

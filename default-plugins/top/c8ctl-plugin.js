@@ -245,7 +245,11 @@ export const commands = {
           const maxV = Math.max(1, H - fields.length - 10);
           const show = vars.slice(0, maxV);
           for (const v of show) {
-            const raw = v.value !== undefined ? JSON.stringify(v.value) : '─';
+        const raw = (() => {
+            if (v.value === undefined) return '─';
+            try { return JSON.stringify(v.value); }
+            catch { return String(v.value); }
+          })();
             const val = raw.length > W - 24 ? raw.slice(0, W - 27) + '…' : raw;
             out('    ' + B + cell((v.name ?? '') + ':', 18) + R + ' ' + val + '\n');
           }
@@ -331,7 +335,7 @@ export const commands = {
 
     /* ── cleanup ──────────────────────────────────────────────────────────── */
     const cleanup = () => {
-      clearInterval(s.timer);
+      if (s.timer) clearInterval(s.timer);
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
       process.stdin.pause();
       out(CLEAR + GOTO_HOME + SHOW_CURSOR);
