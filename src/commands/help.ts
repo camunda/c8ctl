@@ -872,6 +872,7 @@ Description:
 
 Flags:
   --profile <name>         Use specific profile
+  --force                  Continue watching after deployment errors
 
 Supported File Types:
   - BPMN files (.bpmn)
@@ -884,6 +885,7 @@ Examples:
   c8ctl watch ./src ./forms             Watch multiple directories
   c8ctl w ./src                         Use short alias
   c8ctl watch --profile=dev             Watch using specific profile
+  c8ctl watch --force                   Keep watching after failed deploys
 `.trim());
 }
 

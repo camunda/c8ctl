@@ -209,6 +209,7 @@ function findDuplicateDefinitionIds(resources: ResourceFile[]): Map<string, stri
  */
 export async function deploy(paths: string[], options: {
   profile?: string;
+  continueOnError?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const tenantId = resolveTenantId(options.profile);
@@ -399,14 +400,14 @@ export async function deploy(paths: string[], options: {
       logger.table(displayData);
     }
   } catch (error) {
-    handleDeploymentError(error, resources, logger);
+    handleDeploymentError(error, resources, logger, options.continueOnError);
   }
 }
 
 /**
  * Format and display deployment errors with actionable guidance
  */
-function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>): never {
+function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): void {
   const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
 
   // Try to interpret common transport/network issues first for actionable guidance
@@ -470,6 +471,10 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
   // Provide actionable hints based on error type
   logMessage('');
   printDeploymentHints(title, detail, status, resources);
+
+  if (continueOnError) {
+    return;
+  }
   process.exit(1);
 }
 
