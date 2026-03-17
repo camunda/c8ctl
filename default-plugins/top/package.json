@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-top",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Interactive process-instance monitor for c8ctl — like htop for Camunda 8",
+  "keywords": ["c8ctl", "c8ctl-plugin"],
+  "main": "c8ctl-plugin.js"
+}

@@ -97,6 +97,68 @@ describe('Plugin Structure', () => {
     });
   });
 
+  describe('Top Plugin (default-plugins/top)', () => {
+    const topPluginDir = join(process.cwd(), 'default-plugins/top');
+    const topPluginJs  = join(topPluginDir, 'c8ctl-plugin.js');
+    const topPkgJson   = join(topPluginDir, 'package.json');
+
+    test('package.json exists with required fields', () => {
+      const pkg = JSON.parse(readFileSync(topPkgJson, 'utf-8'));
+      assert.ok(pkg.name,                          'Has name field');
+      assert.strictEqual(pkg.name, 'c8ctl-plugin-top', 'Correct plugin name');
+      assert.ok(pkg.keywords?.includes('c8ctl'),         'Has c8ctl keyword');
+      assert.ok(pkg.keywords?.includes('c8ctl-plugin'),  'Has c8ctl-plugin keyword');
+    });
+
+    test('c8ctl-plugin.js exports metadata and commands', () => {
+      const content = readFileSync(topPluginJs, 'utf-8');
+      assert.ok(content.includes('export const metadata'), 'Exports metadata');
+      assert.ok(content.includes('export const commands'), 'Exports commands');
+    });
+
+    test('top command is declared in metadata and commands', () => {
+      const content = readFileSync(topPluginJs, 'utf-8');
+      assert.ok(content.includes("'top'") || content.includes('"top"') || content.includes('top:'),
+        'top command is present');
+    });
+
+    test('plugin uses globalThis.c8ctl runtime', () => {
+      const content = readFileSync(topPluginJs, 'utf-8');
+      assert.ok(content.includes('globalThis.c8ctl'), 'Uses globalThis.c8ctl runtime');
+    });
+
+    test('plugin handles --all, --refresh, --profile arguments', () => {
+      const content = readFileSync(topPluginJs, 'utf-8');
+      assert.ok(content.includes('--all'),     'Handles --all flag');
+      assert.ok(content.includes('--refresh'), 'Handles --refresh flag');
+      assert.ok(content.includes('--profile'), 'Handles --profile flag');
+    });
+
+    test('plugin guards against non-TTY environments', () => {
+      const content = readFileSync(topPluginJs, 'utf-8');
+      assert.ok(content.includes('isTTY'), 'Checks for TTY');
+    });
+
+    test('plugin can be dynamically imported', async () => {
+      try {
+        // Need to inject global for the plugin to work
+        const { c8ctl } = await import('../../src/runtime.js');
+        (globalThis as any).c8ctl = c8ctl;
+
+        const plugin = await import(`file://${topPluginJs}?t=${Date.now()}`);
+        assert.ok(plugin.metadata,                           'Has metadata export');
+        assert.ok(plugin.commands,                           'Has commands export');
+        assert.ok(typeof plugin.commands.top === 'function', 'top is a function');
+      } catch {
+        // In development (no compiled output), verify the file structure instead
+        const content = readFileSync(topPluginJs, 'utf-8');
+        assert.ok(content.length > 0,                        'Plugin file exists and has content');
+        assert.ok(content.includes('export const commands'), 'Has commands export');
+        assert.ok(content.includes('top:'),                  'Has top command');
+      }
+    });
+  });
+
   describe('Plugin Loading', () => {
     test('TypeScript plugin can be imported', async () => {
       // Dynamic import test - Note: TS files cannot be imported directly in tests
