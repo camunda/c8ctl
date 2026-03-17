@@ -366,6 +366,42 @@ interface C8RunProcess {
 
 let runningProcess: C8RunProcess | null = null;
 
+interface StartupSummarySection {
+  startMarker: string;
+  endMarker: string;
+}
+
+const STARTUP_SUMMARY_SECTIONS: StartupSummarySection[] = [
+  {
+    startMarker: '- Operate:                http://localhost:8080/operate',
+    endMarker: 'Run `./c8run help` to see available commands and options.',
+  },
+  {
+    startMarker: 'Access each component at the following urls with these default credentials:',
+    endMarker: 'Refer to https://docs.camunda.io/docs/guides/getting-started-java-spring/ for help getting started with Camunda',
+  },
+];
+
+export function extractStartupSummary(rawOutput: string): string | null {
+  for (const section of STARTUP_SUMMARY_SECTIONS) {
+    const startIndex = rawOutput.indexOf(section.startMarker);
+    if (startIndex === -1) {
+      continue;
+    }
+
+    const endIndex = rawOutput.indexOf(section.endMarker, startIndex);
+    if (endIndex === -1) {
+      continue;
+    }
+
+    return rawOutput
+      .slice(startIndex, endIndex + section.endMarker.length)
+      .trim();
+  }
+
+  return null;
+}
+
 /**
  * Wait for c8run to be ready by polling health endpoint
  */
@@ -402,6 +438,7 @@ async function waitForClusterReady(maxWaitMs: number = 120000): Promise<boolean>
  */
 async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
   const binaryPath = getC8RunBinaryPath(config);
+  let startupOutput = '';
 
   if (!existsSync(binaryPath)) {
     throw new Error(`c8run binary not found at ${binaryPath}`);
@@ -426,23 +463,35 @@ async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
 
   logger.info('Starting Camunda 8 local cluster...');
 
-  // In debug mode show all c8run output; otherwise suppress it
+  // Capture c8run output so we can print its own startup summary. In debug mode,
+  // stream the same raw output through to the terminal.
   const proc = spawn(binaryPath, ['start'], {
-    stdio: debug ? 'inherit' : 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
     cwd: dirname(binaryPath), // c8run needs to run from its installation directory
+  });
+
+  const handleOutput = (chunk: Buffer | string, stream: NodeJS.WriteStream): void => {
+    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+    startupOutput += text;
+    if (debug) {
+      stream.write(text);
+    }
+  };
+
+  proc.stdout?.on('data', (chunk) => {
+    handleOutput(chunk, process.stdout);
+  });
+
+  proc.stderr?.on('data', (chunk) => {
+    handleOutput(chunk, process.stderr);
   });
 
   // Save PID for stop command
   writeFileSync(pidFile, proc.pid!.toString());
   writeFileSync(versionFile, config.version);
 
-  // In normal mode unref so parent can exit naturally after the health check;
-  // in debug mode we exit explicitly below so that inherited stdio doesn't
-  // keep the parent alive indefinitely.
-  if (!debug) {
-    proc.unref();
-  }
+  proc.unref();
 
   logger.info(`c8run started with PID: ${proc.pid}`);
 
@@ -450,10 +499,7 @@ async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
   const isReady = await waitForClusterReady();
 
   if (isReady) {
-    // Print summary
-    printSummary();
-    // In debug mode the inherited stdio keeps the parent alive; exit explicitly
-    // so c8run continues running independently (it is already detached).
+    printSummary(startupOutput);
     if (debug) {
       process.exit(0);
     }
@@ -564,26 +610,21 @@ async function stopC8Run(config: C8RunConfig): Promise<void> {
 /**
  * Print structured summary with endpoints and credentials
  */
-function printSummary(): void {
-  const lines = [
-    '+---------------------------------------------------------------+',
-    '| Camunda 8 is running locally                                  |',
-    '|                                                               |',
-    '| Operate   -> http://localhost:8080                            |',
-    '| Tasklist  -> http://localhost:8080                            |',
-    '| Zeebe gRPC-> localhost:26500                                  |',
-    '| REST API  -> http://localhost:8080                            |',
-    '| Login     -> demo / demo                                      |',
-    '+---------------------------------------------------------------+',
-  ];
+function printSummary(rawOutput: string): void {
+  const summary = extractStartupSummary(rawOutput);
 
-  console.log('\n' + lines.join('\n') + '\n');
+  if (summary) {
+    console.log(`\n${summary}\n`);
+    return;
+  }
 
-  // Suggest next steps
-  logger.info('Next steps:');
-  logger.info('  • Deploy a process: c8 deploy <file.bpmn>');
-  logger.info('  • List processes: c8 list pd');
-  logger.info('  • Start an instance: c8 create pi --bpmnProcessId <processId>');
+  const fallbackOutput = rawOutput.trim();
+  if (fallbackOutput) {
+    console.log(`\n${fallbackOutput}\n`);
+    return;
+  }
+
+  logger.warn('Cluster started, but no startup summary was captured from c8run output.');
 }
 
 // ============================================================================
