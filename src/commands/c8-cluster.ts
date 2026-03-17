@@ -366,40 +366,15 @@ interface C8RunProcess {
 
 let runningProcess: C8RunProcess | null = null;
 
-interface StartupSummarySection {
-  startMarker: string;
-  endMarker: string;
-}
-
-const STARTUP_SUMMARY_SECTIONS: StartupSummarySection[] = [
-  {
-    startMarker: '- Operate:                http://localhost:8080/operate',
-    endMarker: 'Run `./c8run help` to see available commands and options.',
-  },
-  {
-    startMarker: 'Access each component at the following urls with these default credentials:',
-    endMarker: 'Refer to https://docs.camunda.io/docs/guides/getting-started-java-spring/ for help getting started with Camunda',
-  },
-];
+const STARTUP_SUMMARY_MARKER = '- Operate:';
 
 export function extractStartupSummary(rawOutput: string): string | null {
-  for (const section of STARTUP_SUMMARY_SECTIONS) {
-    const startIndex = rawOutput.indexOf(section.startMarker);
-    if (startIndex === -1) {
-      continue;
-    }
-
-    const endIndex = rawOutput.indexOf(section.endMarker, startIndex);
-    if (endIndex === -1) {
-      continue;
-    }
-
-    return rawOutput
-      .slice(startIndex, endIndex + section.endMarker.length)
-      .trim();
+  const startIndex = rawOutput.indexOf(STARTUP_SUMMARY_MARKER);
+  if (startIndex === -1) {
+    return null;
   }
 
-  return null;
+  return rawOutput.slice(startIndex).trim();
 }
 
 /**

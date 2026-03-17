@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import { extractStartupSummary } from '../../src/commands/c8-cluster.ts';
 
 describe('extractStartupSummary', () => {
-  test('extracts the 8.9 startup section verbatim', () => {
+  test('extracts everything after - Operate: marker', () => {
     const rawOutput = `noise before
 - Operate:                http://localhost:8080/operate
 - Tasklist:               http://localhost:8080/tasklist
@@ -43,12 +43,12 @@ noise after`;
 
     assert.ok(summary);
     assert.strictEqual(summary?.startsWith('- Operate:                http://localhost:8080/operate'), true);
-    assert.strictEqual(summary?.endsWith('Run `./c8run help` to see available commands and options.'), true);
+    assert.strictEqual(summary?.endsWith('noise after'), true);
     assert.strictEqual(summary?.includes('noise before'), false);
-    assert.strictEqual(summary?.includes('noise after'), false);
+    assert.strictEqual(summary?.includes('noise after'), true);
   });
 
-  test('extracts the 8.8 startup section verbatim', () => {
+  test('returns null when - Operate: marker is not present', () => {
     const rawOutput = `noise before
 Access each component at the following urls with these default credentials:
 - username: demo
@@ -69,19 +69,7 @@ When using the Desktop Modeler, Authentication may be set to None.
 Refer to https://docs.camunda.io/docs/guides/getting-started-java-spring/ for help getting started with Camunda
 noise after`;
 
-    const summary = extractStartupSummary(rawOutput);
-
-    assert.ok(summary);
-    assert.strictEqual(
-      summary?.startsWith('Access each component at the following urls with these default credentials:'),
-      true,
-    );
-    assert.strictEqual(
-      summary?.endsWith('Refer to https://docs.camunda.io/docs/guides/getting-started-java-spring/ for help getting started with Camunda'),
-      true,
-    );
-    assert.strictEqual(summary?.includes('noise before'), false);
-    assert.strictEqual(summary?.includes('noise after'), false);
+    assert.strictEqual(extractStartupSummary(rawOutput), null);
   });
 
   test('returns null when no known startup section is present', () => {
