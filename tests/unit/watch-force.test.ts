@@ -11,20 +11,16 @@ import { tmpdir } from 'node:os';
 
 describe('Watch Force Mode', () => {
   let testDir: string;
-  let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `c8ctl-watch-force-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
-    originalEnv = { ...process.env };
-    process.env.XDG_DATA_HOME = testDir;
   });
 
   afterEach(() => {
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
-    process.env = originalEnv;
   });
 
   test('help watch shows --force flag', () => {
@@ -36,6 +32,7 @@ describe('Watch Force Mode', () => {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 5000,
+      env: { ...process.env, C8CTL_DATA_DIR: testDir },
     });
 
     assert.ok(result.stdout.includes('--force'), 'help output should include --force flag');
@@ -52,6 +49,7 @@ describe('Watch Force Mode', () => {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 5000,
+      env: { ...process.env, C8CTL_DATA_DIR: testDir },
     });
 
     assert.ok(result.stdout.includes('--force'), 'help output for alias w should include --force flag');
@@ -72,7 +70,7 @@ describe('Watch Force Mode', () => {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 3000,
-      env: { ...process.env, XDG_DATA_HOME: testDir },
+      env: { ...process.env, C8CTL_DATA_DIR: testDir },
     });
 
     // The watch command will timeout (exit due to timeout), but we should see the force mode message
@@ -93,7 +91,7 @@ describe('Watch Force Mode', () => {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: 3000,
-      env: { ...process.env, XDG_DATA_HOME: testDir },
+      env: { ...process.env, C8CTL_DATA_DIR: testDir },
     });
 
     const output = (result.stdout || '') + (result.stderr || '');
