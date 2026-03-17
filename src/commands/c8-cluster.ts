@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { chmod, readFile } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, basename } from 'node:path';
+import { join, basename, dirname } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { getLogger } from '../logger.ts';
 
@@ -426,6 +426,7 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
   const proc = spawn(binaryPath, ['start'], {
     stdio: 'ignore',
     detached: true,
+    cwd: dirname(binaryPath), // c8run needs to run from its installation directory
   });
 
   // Save PID for stop command
@@ -479,6 +480,7 @@ async function stopC8Run(config: C8RunConfig): Promise<void> {
     return new Promise((resolve, reject) => {
       const proc = spawn(binaryPath, ['stop'], {
         stdio: 'inherit',
+        cwd: dirname(binaryPath), // c8run needs to run from its installation directory
       });
 
       proc.on('exit', (code) => {
