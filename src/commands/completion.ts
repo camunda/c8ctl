@@ -52,7 +52,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init start stop profiles profile plugin plugins"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force --c8-version --debug"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force --debug"
 
   case \${cword} in
     1)
@@ -269,7 +269,7 @@ _c8ctl() {
     '--ivalue[Case-insensitive variable value filter]:pattern:'
     '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
-    '--c8-version[Camunda version to use (use with start c8-cluster)]:version:'
+    '--version[Show CLI version (no command) or choose Camunda version for start/stop c8-cluster]:version:'
     '--debug[Show all output from c8run start (use with start c8-cluster)]'
     '--force[Continue watching after deployment errors (watch command)]'
   )

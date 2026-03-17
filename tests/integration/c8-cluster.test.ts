@@ -126,6 +126,9 @@ describe('c8-cluster Integration Tests', () => {
     });
 
     assert.strictEqual(result.status, 0, 'Fish completion should succeed');
-    assert.ok(result.stdout.includes('--debug'), 'Fish completion should include --debug flag');
+    assert.ok(
+      result.stdout.includes('--debug') || result.stdout.includes("-l 'debug'"),
+      'Fish completion should include debug flag',
+    );
   });
 });

@@ -72,9 +72,8 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--dateField', type: 'string', description: 'Date field to filter on with --between (default depends on resource)' },
       { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
       { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
-      { flag: '--c8-version', type: 'string', description: 'Camunda version to use (use with start c8-cluster; e.g., 8.8, 8.9-alpha, stable, latest)' },
+      { flag: '--version', type: 'string', short: '-v', description: 'Show CLI version when used without a command; use with start/stop c8-cluster to select Camunda version (e.g., 8.8, 8.9.0-alpha5, stable, latest)' },
       { flag: '--debug',      type: 'boolean', description: 'Show all output from c8run start (use with start c8-cluster)' },
-      { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
       { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
     ],
     searchFlags: [
@@ -211,9 +210,8 @@ Flags:
   --limit <n>           Maximum number of items to fetch (default: 1000000)
   --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601; omit either end for open-ended range)
   --dateField <field>   Date field to filter on with --between (default depends on resource)
-  --c8-version <version>  Camunda version to use (use with 'start c8-cluster'; e.g., 8.8, 8.9-alpha, stable, latest)
+  --version, -v         Show CLI version when used without a command; use with 'start/stop c8-cluster' to select Camunda version (e.g., 8.8, 8.9.0-alpha5, stable, latest)
   --debug                 Show all output from c8run start (use with 'start c8-cluster')
-  --version, -v         Show version
   --help, -h            Show help
 
 Search Flags:
@@ -303,7 +301,7 @@ Examples:
   c8ctl watch ./src                  Watch directory for changes
   c8ctl start c8-cluster             Start local Camunda 8 cluster
   c8ctl start c8-cluster --debug     Start cluster with live output
-  c8ctl start c8-cluster --c8-version 8.7  Start specific version
+  c8ctl start c8-cluster --version 8.9.0-alpha5  Start specific version
   c8ctl stop c8-cluster              Stop local Camunda 8 cluster
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile

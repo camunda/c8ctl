@@ -162,7 +162,7 @@ c8ctl can automatically download and start a local Camunda 8 cluster for develop
 c8ctl start c8-cluster
 
 # Start specific version
-c8ctl start c8-cluster --c8-version 8.7
+c8ctl start c8-cluster --version 8.9.0-alpha5
 
 # Stop local cluster
 c8ctl stop c8-cluster

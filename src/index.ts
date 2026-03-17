@@ -86,7 +86,6 @@ function parseCliArgs() {
       options: {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'string', short: 'v' },
-        c8Version: { type: 'string' },
         all: { type: 'boolean' },
         xml: { type: 'boolean' },
         profile: { type: 'string' },
@@ -694,7 +693,7 @@ async function main() {
   // Handle start c8-cluster command
   if (verb === 'start' && normalizedResource === 'c8-cluster') {
     await startCluster({
-      version: (values.c8Version || values.version) as string | undefined,
+      version: values.version as string | undefined,
       force: values.force as boolean | undefined,
       debug: values.debug as boolean | undefined,
     });
@@ -704,7 +703,7 @@ async function main() {
   // Handle stop c8-cluster command
   if (verb === 'stop' && normalizedResource === 'c8-cluster') {
     await stopCluster({
-      version: (values.c8Version || values.version) as string | undefined,
+      version: values.version as string | undefined,
     });
     return;
   }
