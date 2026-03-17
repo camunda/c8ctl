@@ -17,6 +17,10 @@ const VALID_BPMN = join(PROJECT_ROOT, 'tests', 'fixtures', 'simple.bpmn');
 const POLL_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
 
+// Mirror the watch command's deploy cooldown (DEPLOY_COOLDOWN) with a small buffer
+const WATCH_DEPLOY_COOLDOWN_MS = 1_000;
+const WATCH_COOLDOWN_BUFFER_MS = 500;
+
 /**
  * Generate an invalid BPMN that Camunda will reject during deployment.
  * Uses a sequence flow referencing a non-existent target, making it structurally invalid.
@@ -152,7 +156,7 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       // Wait for the cooldown to elapse before triggering the next deploy
       const cooldownStart = Date.now();
       const cooldownElapsed = await pollUntil(
-        async () => Date.now() - cooldownStart >= 2500,
+        async () => Date.now() - cooldownStart >= WATCH_DEPLOY_COOLDOWN_MS + WATCH_COOLDOWN_BUFFER_MS,
         POLL_TIMEOUT_MS,
         POLL_INTERVAL_MS,
       );
