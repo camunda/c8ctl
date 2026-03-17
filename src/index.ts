@@ -48,6 +48,7 @@ import {
   executePluginCommand
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
+import { startCluster, stopCluster } from './commands/c8-cluster.ts';
 
 /**
  * Normalize resource aliases
@@ -686,6 +687,29 @@ async function main() {
       profile: values.profile as string | undefined,
     });
     return;
+  }
+
+  // Handle c8-cluster command
+  if (verb === 'c8-cluster') {
+    const action = resource; // start or stop
+
+    if (action === 'start') {
+      await startCluster({
+        version: values.version as string | undefined,
+        force: values.force as boolean | undefined,
+      });
+      return;
+    }
+
+    if (action === 'stop') {
+      await stopCluster({
+        version: values.version as string | undefined,
+      });
+      return;
+    }
+
+    logger.error(`Unknown c8-cluster action: ${action}. Use 'start' or 'stop'.`);
+    process.exit(1);
   }
 
   // Handle search commands

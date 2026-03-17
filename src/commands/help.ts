@@ -184,6 +184,8 @@ Commands:
   init      plugin [name]    Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
+  c8-cluster start           Download and start local Camunda 8 cluster (c8run)
+  c8-cluster stop            Stop local Camunda 8 cluster
   completion bash|zsh|fish   Generate shell completion script
   mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
   help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
@@ -293,6 +295,9 @@ Examples:
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
+  c8ctl c8-cluster start             Start local Camunda 8 cluster
+  c8ctl c8-cluster start --version 8.7  Start specific version
+  c8ctl c8-cluster stop              Stop local Camunda 8 cluster
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
