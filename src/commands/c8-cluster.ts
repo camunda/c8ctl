@@ -368,7 +368,7 @@ let runningProcess: C8RunProcess | null = null;
  */
 async function waitForClusterReady(maxWaitMs: number = 120000): Promise<boolean> {
   const startTime = Date.now();
-  const healthUrl = 'http://localhost:8080/actuator/health';
+  const healthUrl = 'http://localhost:9600/actuator/health';
 
   logger.info('Waiting for cluster to be ready...');
 
