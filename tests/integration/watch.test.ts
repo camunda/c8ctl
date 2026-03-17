@@ -151,10 +151,14 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       // Step 3: correct the same file in place with valid BPMN content
       // Wait for the cooldown to elapse before triggering the next deploy
       const cooldownStart = Date.now();
-      await pollUntil(
+      const cooldownElapsed = await pollUntil(
         async () => Date.now() - cooldownStart >= 2500,
         POLL_TIMEOUT_MS,
         POLL_INTERVAL_MS,
+      );
+      assert.ok(
+        cooldownElapsed,
+        `Expected cooldown to elapse before correcting BPMN file.\nActual output:\n${watch.getOutput()}`,
       );
       writeFileSync(bpmnFile, validBpmn());
 
