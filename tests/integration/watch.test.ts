@@ -10,7 +10,6 @@ import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
-import { asyncSpawn } from '../utils/spawn.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
@@ -61,13 +60,6 @@ function startWatch(watchDir: string, dataDir: string, extraArgs: string[] = [])
   };
 }
 
-function cli(dataDir: string, ...args: string[]) {
-  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
-    cwd: PROJECT_ROOT,
-    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
-  });
-}
-
 describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   let dataDir: string;
   let watchDir: string;
@@ -87,7 +79,7 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
     const watch = startWatch(testWatchDir, dataDir);
 
     try {
-      // Wait for the watcher to initialise
+      // Wait for the watcher to initialize
       await pollUntil(
         async () => watch.getOutput().includes('Watching for changes'),
         5000,
@@ -116,7 +108,7 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
     const watch = startWatch(testWatchDir, dataDir, ['--force']);
 
     try {
-      // Wait for the watcher to initialise (should show force mode message)
+      // Wait for the watcher to initialize (should show force mode message)
       await pollUntil(
         async () => watch.getOutput().includes('Force mode'),
         5000,
