@@ -6,7 +6,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { chmod, readFile } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, basename } from 'node:path';
@@ -266,22 +266,62 @@ async function extractArchive(archivePath: string, targetDir: string): Promise<v
 }
 
 /**
+ * Find the actual c8run binary path within the extraction directory.
+ * The extraction creates a nested structure like: c8run-8.8/c8run-8.8.16/c8run
+ * This function finds the latest version subdirectory.
+ */
+function findC8RunBinaryPath(config: C8RunConfig): string | null {
+  const installDir = join(config.cacheDir, `c8run-${config.version}`);
+  const platformInfo = getPlatformIdentifier();
+
+  if (!existsSync(installDir)) {
+    return null;
+  }
+
+  // Read all entries in the install directory
+  const entries = readdirSync(installDir, { withFileTypes: true });
+
+  // Find directories that match c8run-{version} pattern
+  const versionDirs = entries
+    .filter(entry => entry.isDirectory() && entry.name.startsWith(`c8run-${config.version}`))
+    .map(entry => entry.name)
+    .sort()
+    .reverse(); // Sort descending to get latest version first
+
+  // Try each version directory to find the binary
+  for (const versionDir of versionDirs) {
+    const binaryPath = join(installDir, versionDir, platformInfo.executable);
+    if (existsSync(binaryPath)) {
+      return binaryPath;
+    }
+  }
+
+  // Fallback: check if binary is directly in installDir (old structure)
+  const directPath = join(installDir, platformInfo.executable);
+  if (existsSync(directPath)) {
+    return directPath;
+  }
+
+  return null;
+}
+
+/**
  * Check if c8run is already installed
  */
 function isC8RunInstalled(config: C8RunConfig): boolean {
-  const installDir = join(config.cacheDir, `c8run-${config.version}`);
-  const platformInfo = getPlatformIdentifier();
-  const binaryPath = join(installDir, platformInfo.executable);
-  return existsSync(binaryPath);
+  const binaryPath = findC8RunBinaryPath(config);
+  return binaryPath !== null;
 }
 
 /**
  * Get path to c8run binary
  */
 function getC8RunBinaryPath(config: C8RunConfig): string {
-  const installDir = join(config.cacheDir, `c8run-${config.version}`);
-  const platformInfo = getPlatformIdentifier();
-  return join(installDir, platformInfo.executable);
+  const binaryPath = findC8RunBinaryPath(config);
+  if (!binaryPath) {
+    throw new Error(`c8run ${config.version} binary not found in cache directory`);
+  }
+  return binaryPath;
 }
 
 /**
