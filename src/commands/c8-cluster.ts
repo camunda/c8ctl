@@ -285,6 +285,37 @@ interface C8RunProcess {
 let runningProcess: C8RunProcess | null = null;
 
 /**
+ * Wait for c8run to be ready by polling health endpoint
+ */
+async function waitForClusterReady(maxWaitMs: number = 120000): Promise<boolean> {
+  const startTime = Date.now();
+  const healthUrl = 'http://localhost:8080/actuator/health';
+
+  logger.info('Waiting for cluster to be ready...');
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const response = await fetch(healthUrl);
+      if (response.ok) {
+        const data: any = await response.json();
+        if (data.status === 'UP') {
+          logger.info('Cluster is ready!');
+          return true;
+        }
+      }
+    } catch (error) {
+      // Cluster not ready yet, continue polling
+    }
+
+    // Wait 2 seconds before next check
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  logger.warn('Cluster did not become ready within timeout.');
+  return false;
+}
+
+/**
  * Start c8run process
  */
 async function startC8Run(config: C8RunConfig): Promise<void> {
@@ -294,46 +325,48 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
     throw new Error(`c8run binary not found at ${binaryPath}`);
   }
 
-  logger.info('Starting Camunda 8 local cluster...');
-
-  // Start the process
-  const proc = spawn(binaryPath, ['start'], {
-    stdio: 'inherit',
-    detached: false,
-  });
-
-  runningProcess = {
-    process: proc,
-    pid: proc.pid!,
-  };
-
-  // Save PID for stop command
+  // Check if already running
   const pidFile = join(config.cacheDir, 'c8run.pid');
-  writeFileSync(pidFile, proc.pid!.toString());
-
-  // Wait for startup (simplified - in reality we'd check health endpoints)
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  // Print summary
-  printSummary();
-
-  // Handle process exit
-  proc.on('exit', (code, signal) => {
-    logger.info(`c8run process exited with code ${code}, signal ${signal}`);
-    runningProcess = null;
-
-    // Clean up PID file
-    if (existsSync(pidFile)) {
+  if (existsSync(pidFile)) {
+    const pid = parseInt(readFileSync(pidFile, 'utf-8').trim());
+    try {
+      // Check if process is still running
+      process.kill(pid, 0);
+      logger.warn(`c8run is already running (PID: ${pid})`);
+      logger.info('Use "c8ctl c8-cluster stop" to stop it first.');
+      return;
+    } catch (error) {
+      // Process not running, clean up stale PID file
       rmSync(pidFile);
     }
+  }
+
+  logger.info('Starting Camunda 8 local cluster...');
+
+  // Start the process in detached mode
+  const proc = spawn(binaryPath, ['start'], {
+    stdio: 'ignore',
+    detached: true,
   });
 
-  // Handle signals for graceful shutdown
-  process.on('SIGINT', () => stopC8Run(config));
-  process.on('SIGTERM', () => stopC8Run(config));
+  // Save PID for stop command
+  writeFileSync(pidFile, proc.pid!.toString());
 
-  // Keep process running
-  await new Promise(() => {}); // Never resolves, keeps process alive
+  // Unref so parent can exit
+  proc.unref();
+
+  logger.info(`c8run started with PID: ${proc.pid}`);
+
+  // Wait for cluster to be ready
+  const isReady = await waitForClusterReady();
+
+  if (isReady) {
+    // Print summary
+    printSummary();
+  } else {
+    logger.error('Cluster failed to start within timeout. Check logs for details.');
+    process.exit(1);
+  }
 }
 
 /**
@@ -341,34 +374,67 @@ async function startC8Run(config: C8RunConfig): Promise<void> {
  */
 async function stopC8Run(config: C8RunConfig): Promise<void> {
   const pidFile = join(config.cacheDir, 'c8run.pid');
+  const binaryPath = getC8RunBinaryPath(config);
 
-  if (runningProcess) {
-    logger.info('Stopping c8run process...');
-    runningProcess.process.kill('SIGTERM');
-    runningProcess = null;
+  if (!existsSync(pidFile)) {
+    logger.warn('No running c8run process found.');
+    return;
+  }
 
-    // Clean up PID file
-    if (existsSync(pidFile)) {
-      rmSync(pidFile);
-    }
+  const pid = parseInt(readFileSync(pidFile, 'utf-8').trim());
 
-    logger.info('c8run stopped.');
-    process.exit(0);
-  } else if (existsSync(pidFile)) {
-    // Process was started in a different session
-    const pid = parseInt(readFileSync(pidFile, 'utf-8').trim());
-    logger.info(`Stopping c8run process (PID: ${pid})...`);
+  // Check if process is actually running
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    // Process not running
+    logger.warn('c8run process is not running (stale PID file).');
+    rmSync(pidFile);
+    return;
+  }
 
+  logger.info(`Stopping c8run process (PID: ${pid})...`);
+
+  // Use c8run's stop command if available
+  if (existsSync(binaryPath)) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(binaryPath, ['stop'], {
+        stdio: 'inherit',
+      });
+
+      proc.on('exit', (code) => {
+        if (code === 0) {
+          // Clean up PID file
+          if (existsSync(pidFile)) {
+            rmSync(pidFile);
+          }
+          logger.info('c8run stopped.');
+          resolve();
+        } else {
+          reject(new Error(`Stop command failed with code ${code}`));
+        }
+      });
+
+      proc.on('error', reject);
+    });
+  } else {
+    // Fallback: send SIGTERM to the process
     try {
       process.kill(pid, 'SIGTERM');
-      rmSync(pidFile);
+
+      // Wait a bit for graceful shutdown
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Clean up PID file
+      if (existsSync(pidFile)) {
+        rmSync(pidFile);
+      }
+
       logger.info('c8run stopped.');
     } catch (error) {
       logger.error(`Failed to stop process: ${error}`);
-      process.exit(1);
+      throw error;
     }
-  } else {
-    logger.warn('No running c8run process found.');
   }
 }
 
