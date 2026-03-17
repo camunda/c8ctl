@@ -33,6 +33,26 @@ function invalidBpmn(): string {
 </bpmn:definitions>`;
 }
 
+/**
+ * Generate a valid BPMN that Camunda will accept during deployment.
+ * Mirrors simple.bpmn but with a distinct process ID to avoid fixture conflicts.
+ */
+function validBpmn(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  id="Definitions_corrected" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="corrected-process" isExecutable="true">
+    <bpmn:startEvent id="Start">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:endEvent id="End">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start" targetRef="End" />
+  </bpmn:process>
+</bpmn:definitions>`;
+}
+
 /** Spawn a watch process and collect its combined stdout+stderr output. */
 function startWatch(watchDir: string, dataDir: string, extraArgs: string[] = []) {
   const child = spawn(
@@ -105,6 +125,7 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
   test('watch --force continues watching after invalid BPMN deployment error', async () => {
     const testWatchDir = mkdtempSync(join(tmpdir(), 'c8ctl-watch-force-'));
+    const bpmnFile = join(testWatchDir, 'process.bpmn');
     const watch = startWatch(testWatchDir, dataDir, ['--force']);
 
     try {
@@ -116,9 +137,9 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       );
 
       // Step 1: write an invalid BPMN to trigger a deployment error
-      writeFileSync(join(testWatchDir, 'broken.bpmn'), invalidBpmn());
+      writeFileSync(bpmnFile, invalidBpmn());
 
-      // Wait for the deployment error message
+      // Step 2: watch mode continues — wait for the deployment error message
       const errorSeen = await pollUntil(
         async () => watch.getOutput().includes('Deployment failed'),
         POLL_TIMEOUT_MS,
@@ -127,19 +148,19 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
       assert.ok(errorSeen, `Expected deployment error in watch output.\nActual output:\n${watch.getOutput()}`);
 
-      // Step 2: the watcher should still be running — drop a valid file
+      // Step 3: correct the same file in place with valid BPMN content
       // Wait for the cooldown to elapse before triggering the next deploy
       await new Promise(resolve => setTimeout(resolve, 1500));
-      copyFileSync(VALID_BPMN, join(testWatchDir, 'simple.bpmn'));
+      writeFileSync(bpmnFile, validBpmn());
 
-      // Wait for the successful deployment
+      // Step 4: watch detects the correction and deploys again — successfully
       const deployed = await pollUntil(
         async () => watch.getOutput().includes('Deployment successful'),
         POLL_TIMEOUT_MS,
         POLL_INTERVAL_MS,
       );
 
-      assert.ok(deployed, `Expected successful deployment after error recovery.\nActual output:\n${watch.getOutput()}`);
+      assert.ok(deployed, `Expected successful deployment after correcting the file.\nActual output:\n${watch.getOutput()}`);
     } finally {
       await watch.kill();
       rmSync(testWatchDir, { recursive: true, force: true });
