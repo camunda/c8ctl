@@ -138,6 +138,7 @@ function parseCliArgs() {
         dateField: { type: 'string' },
         fields: { type: 'string' },
         'dry-run': { type: 'boolean' },
+        force: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -674,6 +675,7 @@ async function main() {
     const paths = resource ? [resource, ...args] : (args.length > 0 ? args : ['.']);
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
+      force: values.force as boolean | undefined,
     });
     return;
   }

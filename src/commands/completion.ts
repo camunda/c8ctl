@@ -50,7 +50,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force"
 
   case \${cword} in
     1)
@@ -258,6 +258,7 @@ _c8ctl() {
     '--ivalue[Case-insensitive variable value filter]:pattern:'
     '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
+    '--force[Continue watching after deployment errors (watch command)]'
   )
 
   case \$CURRENT in
@@ -623,6 +624,8 @@ complete -c c8ctl -l fields -d 'Agent: comma-separated output fields to include'
 complete -c c8 -l fields -d 'Agent: comma-separated output fields to include' -r
 complete -c c8ctl -l dry-run -d 'Agent: preview API request without executing'
 complete -c c8 -l dry-run -d 'Agent: preview API request without executing'
+complete -c c8ctl -l force -d 'Continue watching after deployment errors'
+complete -c c8 -l force -d 'Continue watching after deployment errors'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'

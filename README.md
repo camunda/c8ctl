@@ -149,6 +149,7 @@ c8ctl deploy ./my-process.bpmn         # Deploy a single file
 c8ctl deploy                           # Deploy current directory
 c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl watch                            # Watch for changes and auto-deploy
+c8ctl watch --force                    # Keep watching after failed deploys
 ```
 
 For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).

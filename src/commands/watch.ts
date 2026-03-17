@@ -15,6 +15,7 @@ const WATCHED_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
  */
 export async function watchFiles(paths: string[], options: {
   profile?: string;
+  force?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   
@@ -35,6 +36,9 @@ export async function watchFiles(paths: string[], options: {
 
   logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(', ')}`);
   logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(', ')}`);
+  if (options.force) {
+    logger.info('🔒 Force mode: will continue watching after deployment errors');
+  }
   logger.info('Press Ctrl+C to stop watching\n');
 
   // Keep track of recently deployed files to avoid duplicate deploys
@@ -73,7 +77,7 @@ export async function watchFiles(paths: string[], options: {
       recentlyDeployed.set(fullPath, now);
 
       try {
-        await deploy([fullPath], { profile: options.profile });
+        await deploy([fullPath], { profile: options.profile, continueOnError: options.force });
       } catch (error) {
         logger.error(`Failed to deploy ${basename(filename)}`, error as Error);
       }
