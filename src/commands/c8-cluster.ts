@@ -50,19 +50,31 @@ function getCacheDir(): string {
 /**
  * Determine platform identifier for c8run downloads
  */
-function getPlatformIdentifier(): { platform: string; extension: string; executable: string } {
+function getPlatformIdentifier(): { platform: string; arch: string; extension: string; executable: string } {
   const platform = osPlatform();
   const arch = osArch();
 
+  // Map Node.js arch to Camunda arch naming
+  let camundaArch: string;
+  if (arch === 'x64') {
+    camundaArch = 'x86_64';
+  } else if (arch === 'arm64') {
+    camundaArch = 'aarch64';
+  } else {
+    throw new Error(`Unsupported architecture: ${arch}`);
+  }
+
   if (platform === 'darwin') {
     return {
-      platform: 'macos',
-      extension: 'tar.gz',
+      platform: 'darwin',
+      arch: camundaArch,
+      extension: 'zip',
       executable: 'c8run',
     };
   } else if (platform === 'linux') {
     return {
       platform: 'linux',
+      arch: camundaArch,
       extension: 'tar.gz',
       executable: 'c8run',
     };
@@ -71,6 +83,7 @@ function getPlatformIdentifier(): { platform: string; extension: string; executa
     logger.warn('Native Windows is not supported. Please use WSL (Windows Subsystem for Linux).');
     return {
       platform: 'linux',
+      arch: camundaArch,
       extension: 'tar.gz',
       executable: 'c8run',
     };
@@ -115,8 +128,8 @@ async function downloadC8Run(config: C8RunConfig): Promise<string> {
   const platformInfo = getPlatformIdentifier();
 
   // Construct download URL
-  // Format: https://downloads.camunda.cloud/release/camunda/c8run/8.8/camunda-c8run-8.8.0-macos.tar.gz
-  const downloadUrl = `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda-c8run-${version}.0-${platformInfo.platform}.${platformInfo.extension}`;
+  // Format: https://downloads.camunda.cloud/release/camunda/c8run/8.8/camunda8-run-8.8-darwin-aarch64.zip
+  const downloadUrl = `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
 
   logger.info(`Downloading Camunda ${version} for ${platformInfo.platform}...`);
   logger.debug(`URL: ${downloadUrl}`);
@@ -125,7 +138,7 @@ async function downloadC8Run(config: C8RunConfig): Promise<string> {
   const cacheDir = config.cacheDir;
   mkdirSync(cacheDir, { recursive: true });
 
-  const targetFile = join(cacheDir, `c8run-${version}-${platformInfo.platform}.${platformInfo.extension}`);
+  const targetFile = join(cacheDir, `c8run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`);
 
   // Download with progress
   const response = await fetch(downloadUrl);
@@ -204,26 +217,52 @@ async function extractArchive(archivePath: string, targetDir: string): Promise<v
 
   mkdirSync(targetDir, { recursive: true });
 
-  // Use tar to extract
   const platform = osPlatform();
-  const tarCommand = platform === 'darwin' || platform === 'linux' ? 'tar' : 'tar'; // WSL has tar
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn(tarCommand, ['-xzf', archivePath, '-C', targetDir], {
-      stdio: 'inherit',
+  // Determine extraction method based on file extension
+  if (archivePath.endsWith('.zip')) {
+    // Use unzip for .zip files
+    return new Promise((resolve, reject) => {
+      const proc = spawn('unzip', ['-q', archivePath, '-d', targetDir], {
+        stdio: 'inherit',
+      });
+
+      proc.on('exit', (code) => {
+        if (code === 0) {
+          logger.info('Extraction complete.');
+          resolve();
+        } else {
+          reject(new Error(`Extraction failed with code ${code}`));
+        }
+      });
+
+      proc.on('error', (err) => {
+        reject(new Error(`Failed to run unzip command: ${err.message}. Make sure unzip is installed.`));
+      });
     });
+  } else if (archivePath.endsWith('.tar.gz')) {
+    // Use tar for .tar.gz files
+    const tarCommand = platform === 'darwin' || platform === 'linux' ? 'tar' : 'tar'; // WSL has tar
 
-    proc.on('exit', (code) => {
-      if (code === 0) {
-        logger.info('Extraction complete.');
-        resolve();
-      } else {
-        reject(new Error(`Extraction failed with code ${code}`));
-      }
+    return new Promise((resolve, reject) => {
+      const proc = spawn(tarCommand, ['-xzf', archivePath, '-C', targetDir], {
+        stdio: 'inherit',
+      });
+
+      proc.on('exit', (code) => {
+        if (code === 0) {
+          logger.info('Extraction complete.');
+          resolve();
+        } else {
+          reject(new Error(`Extraction failed with code ${code}`));
+        }
+      });
+
+      proc.on('error', reject);
     });
-
-    proc.on('error', reject);
-  });
+  } else {
+    throw new Error(`Unsupported archive format: ${archivePath}`);
+  }
 }
 
 /**
