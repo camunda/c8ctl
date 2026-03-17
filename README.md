@@ -5,6 +5,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 ## Features
 
 - **Minimal Dependencies**: Only one runtime dependency (`@camunda8/orchestration-cluster-api`)
+- **Local Cluster Management**: Download and start c8run for local development with a single command
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
@@ -150,6 +151,45 @@ c8ctl deploy                           # Deploy current directory
 c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl watch                            # Watch for changes and auto-deploy
 c8ctl watch --force                    # Keep watching after failed deploys
+```
+
+### Local Cluster Management (c8run)
+
+c8ctl can automatically download and start a local Camunda 8 cluster for development using `c8run`:
+
+```bash
+# Start local Camunda 8 cluster (downloads c8run if needed)
+c8ctl c8-cluster start
+
+# Start specific version
+c8ctl c8-cluster start --version 8.7
+
+# Stop local cluster
+c8ctl c8-cluster stop
+```
+
+The `c8-cluster start` command will:
+1. Check if c8run is installed in the cache directory
+2. Download and extract c8run if needed (supports macOS and Linux)
+3. Start the cluster in daemon mode
+4. Poll health endpoints until the cluster is ready
+5. Print a structured summary with:
+   - Operate URL: `http://localhost:8080`
+   - Tasklist URL: `http://localhost:8080`
+   - Zeebe gRPC: `localhost:26500`
+   - REST API: `http://localhost:8080`
+   - Default credentials: `demo / demo`
+
+**Cache Directory**: c8run is cached in platform-specific locations:
+- macOS: `~/Library/Caches/c8run`
+- Linux: `~/.cache/c8run` (or `$XDG_CACHE_HOME/c8run`)
+- Override with `C8RUN_CACHE_DIR` environment variable
+
+**Version Resolution**:
+- `stable` or `latest` → latest stable version (currently 8.8)
+- `alpha` or `latest-alpha` → latest alpha version
+- Specific version: `8.7`, `8.8`, etc.
+
 ```
 
 For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).
