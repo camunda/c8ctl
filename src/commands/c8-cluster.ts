@@ -6,7 +6,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { chmod, readFile } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, basename, dirname } from 'node:path';
@@ -23,6 +23,9 @@ interface C8RunConfig {
   cacheDir: string;
   version: string;
 }
+
+const PID_MARKER_FILE = 'c8run.pid';
+const VERSION_MARKER_FILE = 'c8run.version';
 
 /**
  * Get the cache directory for c8run installations
@@ -404,20 +407,21 @@ async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
     throw new Error(`c8run binary not found at ${binaryPath}`);
   }
 
-  // Check if already running
-  const pidFile = join(config.cacheDir, 'c8run.pid');
+  // Check if already running — c8run start exits immediately after launching Java
+  // services so the saved PID is never alive; rely solely on the PID file as a
+  // "cluster was started" marker (stop removes it on successful shutdown).
+  const pidFile = join(config.cacheDir, PID_MARKER_FILE);
+  const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
   if (existsSync(pidFile)) {
-    const pid = parseInt(readFileSync(pidFile, 'utf-8').trim());
-    try {
-      // Check if process is still running
-      process.kill(pid, 0);
-      logger.warn(`c8run is already running (PID: ${pid})`);
-      logger.info('Use "c8ctl stop c8-cluster" to stop it first.');
-      return;
-    } catch (error) {
-      // Process not running, clean up stale PID file
-      rmSync(pidFile);
+    logger.warn('A c8run cluster appears to be running already.');
+    if (existsSync(versionFile)) {
+      const runningVersion = readFileSync(versionFile, 'utf-8').trim();
+      if (runningVersion) {
+        logger.info(`Detected running version marker: ${runningVersion}`);
+      }
     }
+    logger.info('Use "c8ctl stop c8-cluster" to stop it first.');
+    return;
   }
 
   logger.info('Starting Camunda 8 local cluster...');
@@ -431,6 +435,7 @@ async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
 
   // Save PID for stop command
   writeFileSync(pidFile, proc.pid!.toString());
+  writeFileSync(versionFile, config.version);
 
   // In normal mode unref so parent can exit naturally after the health check;
   // in debug mode we exit explicitly below so that inherited stdio doesn't
@@ -462,70 +467,98 @@ async function startC8Run(config: C8RunConfig, debug = false): Promise<void> {
  * Stop c8run process
  */
 async function stopC8Run(config: C8RunConfig): Promise<void> {
-  const pidFile = join(config.cacheDir, 'c8run.pid');
-  const binaryPath = getC8RunBinaryPath(config);
+  const pidFile = join(config.cacheDir, PID_MARKER_FILE);
+  const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
-  if (!existsSync(pidFile)) {
-    logger.warn('No running c8run process found.');
+  const markerExists = existsSync(pidFile) || existsSync(versionFile);
+  const installedVersions = existsSync(config.cacheDir)
+    ? readdirSync(config.cacheDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
+      .map((entry) => entry.name.slice('c8run-'.length))
+      .sort()
+    : [];
+
+  if (!markerExists && installedVersions.length === 0) {
+    logger.warn('No running c8run process found (use "start c8-cluster" to start one).');
     return;
   }
 
-  const pid = parseInt(readFileSync(pidFile, 'utf-8').trim());
+  const versionsToTry: string[] = [];
 
-  // Check if process is actually running
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    // Process not running
-    logger.warn('c8run process is not running (stale PID file).');
-    rmSync(pidFile);
-    return;
-  }
-
-  logger.info(`Stopping c8run process (PID: ${pid})...`);
-
-  // Use c8run's stop command if available
-  if (existsSync(binaryPath)) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn(binaryPath, ['stop'], {
-        stdio: 'inherit',
-        cwd: dirname(binaryPath), // c8run needs to run from its installation directory
-      });
-
-      proc.on('exit', (code) => {
-        if (code === 0) {
-          // Clean up PID file
-          if (existsSync(pidFile)) {
-            rmSync(pidFile);
-          }
-          logger.info('c8run stopped.');
-          resolve();
-        } else {
-          reject(new Error(`Stop command failed with code ${code}`));
-        }
-      });
-
-      proc.on('error', reject);
-    });
-  } else {
-    // Fallback: send SIGTERM to the process
-    try {
-      process.kill(pid, 'SIGTERM');
-
-      // Wait a bit for graceful shutdown
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Clean up PID file
-      if (existsSync(pidFile)) {
-        rmSync(pidFile);
-      }
-
-      logger.info('c8run stopped.');
-    } catch (error) {
-      logger.error(`Failed to stop process: ${error}`);
-      throw error;
+  if (existsSync(versionFile)) {
+    const markerVersion = readFileSync(versionFile, 'utf-8').trim();
+    if (markerVersion) {
+      versionsToTry.push(markerVersion);
     }
   }
+
+  // If we cannot determine the running version from markers (or markers are
+  // missing due to an earlier failed stop), try all installed versions.
+  if (versionsToTry.length === 0) {
+    if (installedVersions.length === 0) {
+      versionsToTry.push(config.version);
+    } else {
+      versionsToTry.push(...installedVersions);
+    }
+  }
+
+  logger.info('Stopping Camunda 8 local cluster...');
+
+  let attempted = 0;
+  let hadSuccessfulStop = false;
+  let lastError: Error | undefined;
+
+  for (const version of versionsToTry) {
+    const versionConfig: C8RunConfig = { cacheDir: config.cacheDir, version };
+    let binaryPath: string;
+    try {
+      binaryPath = getC8RunBinaryPath(versionConfig);
+    } catch {
+      continue;
+    }
+
+    attempted += 1;
+    logger.debug(`Trying c8run stop with version ${version}...`);
+
+    // c8run start exits after launching Java services, so its PID is no longer
+    // alive by the time we call stop. Delegate to "c8run stop" for teardown.
+    // We may need to run multiple versions here to recover from missing markers.
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      const proc = spawn(binaryPath, ['stop'], {
+        stdio: 'inherit',
+        cwd: dirname(binaryPath),
+      });
+
+      proc.on('exit', resolve);
+      proc.on('error', reject);
+    }).catch((error) => {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      return -1;
+    });
+
+    if (exitCode === 0 || exitCode === null) {
+      hadSuccessfulStop = true;
+    } else if (exitCode !== -1) {
+      lastError = new Error(`Stop command failed with code ${exitCode}`);
+    }
+  }
+
+  if (existsSync(pidFile)) {
+    rmSync(pidFile);
+  }
+  if (existsSync(versionFile)) {
+    rmSync(versionFile);
+  }
+
+  if (attempted === 0) {
+    throw new Error('Could not find an installed c8run binary to execute stop.');
+  }
+
+  if (!hadSuccessfulStop && lastError) {
+    throw lastError;
+  }
+
+  logger.info('c8run stopped.');
 }
 
 /**
