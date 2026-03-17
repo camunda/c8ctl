@@ -407,7 +407,7 @@ export async function deploy(paths: string[], options: {
 /**
  * Format and display deployment errors with actionable guidance
  */
-function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): never | void {
+function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): void {
   const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
 
   // Try to interpret common transport/network issues first for actionable guidance
