@@ -6,7 +6,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, copyFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
@@ -141,7 +141,11 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       );
 
       // Step 1: write an invalid BPMN to trigger a deployment error
-      writeFileSync(bpmnFile, invalidBpmn());
+      // Use atomic write (write-to-temp + rename) to prevent fs.watch from
+      // seeing a truncated/empty file mid-write.
+      const tmpInvalid = bpmnFile + '.tmp';
+      writeFileSync(tmpInvalid, invalidBpmn());
+      renameSync(tmpInvalid, bpmnFile);
 
       // Step 2: watch mode continues — wait for the deployment error message
       const errorSeen = await pollUntil(
@@ -164,7 +168,9 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
         cooldownElapsed,
         `Expected cooldown to elapse before correcting BPMN file.\nActual output:\n${watch.getOutput()}`,
       );
-      writeFileSync(bpmnFile, validBpmn());
+      const tmpValid = bpmnFile + '.tmp';
+      writeFileSync(tmpValid, validBpmn());
+      renameSync(tmpValid, bpmnFile);
 
       // Step 4: watch detects the correction and deploys again — successfully
       const deployed = await pollUntil(
