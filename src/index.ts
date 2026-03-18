@@ -49,6 +49,15 @@ import {
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
 import { openApp, openUrl } from './commands/open.ts';
+import {
+  listUsers, searchIdentityUsers, getIdentityUser, createIdentityUser, deleteIdentityUser,
+  listRoles, searchIdentityRoles, getIdentityRole, createIdentityRole, deleteIdentityRole,
+  listGroups, searchIdentityGroups, getIdentityGroup, createIdentityGroup, deleteIdentityGroup,
+  listTenants, searchIdentityTenants, getIdentityTenant, createIdentityTenant, deleteIdentityTenant,
+  listAuthorizations, searchIdentityAuthorizations, getIdentityAuthorization, createIdentityAuthorization, deleteIdentityAuthorization,
+  listMappingRules, searchIdentityMappingRules, getIdentityMappingRule, createIdentityMappingRule, deleteIdentityMappingRule,
+  handleAssign, handleUnassign,
+} from './commands/identity.ts';
 
 /**
  * Normalize resource aliases
@@ -65,6 +74,15 @@ function normalizeResource(resource: string): string {
     profiles: 'profile',
     plugin: 'plugin',
     plugins: 'plugin',
+    auth: 'authorization',
+    authorizations: 'authorization',
+    mr: 'mapping-rule',
+    'mapping-rules': 'mapping-rule',
+    al: 'audit-log',
+    users: 'user',
+    roles: 'role',
+    groups: 'group',
+    tenants: 'tenant',
   };
   return aliases[resource] || resource;
 }
@@ -144,6 +162,26 @@ function parseCliArgs() {
         none: { type: 'boolean' },
         'from-file': { type: 'string' },
         'from-env': { type: 'boolean' },
+        username: { type: 'string' },
+        email: { type: 'string' },
+        password: { type: 'string' },
+        ownerId: { type: 'string' },
+        ownerType: { type: 'string' },
+        resourceType: { type: 'string' },
+        resourceId: { type: 'string' },
+        permissions: { type: 'string' },
+        tenantId: { type: 'string' },
+        claimName: { type: 'string' },
+        claimValue: { type: 'string' },
+        mappingRuleId: { type: 'string' },
+        'to-user': { type: 'string' },
+        'to-group': { type: 'string' },
+        'to-tenant': { type: 'string' },
+        'to-mapping-rule': { type: 'string' },
+        'from-user': { type: 'string' },
+        'from-group': { type: 'string' },
+        'from-tenant': { type: 'string' },
+        'from-mapping-rule': { type: 'string' },
       },
       allowPositionals: true,
       strict: false,
@@ -837,8 +875,252 @@ async function main() {
       return;
     }
 
+    if (normalizedSearchResource === 'user' || normalizedSearchResource === 'users') {
+      await searchIdentityUsers({
+        profile: values.profile as string | undefined,
+        username: values.username as string | undefined,
+        name: values.name as string | undefined,
+        email: values.email as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'role' || normalizedSearchResource === 'roles') {
+      await searchIdentityRoles({
+        profile: values.profile as string | undefined,
+        name: values.name as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'group' || normalizedSearchResource === 'groups') {
+      await searchIdentityGroups({
+        profile: values.profile as string | undefined,
+        name: values.name as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'tenant' || normalizedSearchResource === 'tenants') {
+      await searchIdentityTenants({
+        profile: values.profile as string | undefined,
+        name: values.name as string | undefined,
+        tenantId: values.tenantId as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'authorization' || normalizedSearchResource === 'authorizations') {
+      await searchIdentityAuthorizations({
+        profile: values.profile as string | undefined,
+        ownerId: values.ownerId as string | undefined,
+        ownerType: values.ownerType as string | undefined,
+        resourceType: values.resourceType as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
+    if (normalizedSearchResource === 'mapping-rule' || normalizedSearchResource === 'mapping-rules') {
+      await searchIdentityMappingRules({
+        profile: values.profile as string | undefined,
+        name: values.name as string | undefined,
+        claimName: values.claimName as string | undefined,
+        claimValue: values.claimValue as string | undefined,
+        sortBy: values.sortBy as string | undefined,
+        sortOrder,
+        limit,
+      });
+      return;
+    }
+
     // If resource not recognized for search, show available resources
     showVerbResources('search');
+    return;
+  }
+
+  // Handle identity list commands
+  if (verb === 'list' && (normalizedResource === 'user' || normalizedResource === 'users')) {
+    await listUsers({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+  if (verb === 'list' && (normalizedResource === 'role' || normalizedResource === 'roles')) {
+    await listRoles({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+  if (verb === 'list' && (normalizedResource === 'group' || normalizedResource === 'groups')) {
+    await listGroups({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+  if (verb === 'list' && (normalizedResource === 'tenant' || normalizedResource === 'tenants')) {
+    await listTenants({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+  if (verb === 'list' && (normalizedResource === 'authorization' || normalizedResource === 'authorizations')) {
+    await listAuthorizations({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+  if (verb === 'list' && (normalizedResource === 'mapping-rule' || normalizedResource === 'mapping-rules')) {
+    await listMappingRules({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
+    return;
+  }
+
+  // Handle identity get commands
+  if (verb === 'get' && normalizedResource === 'user') {
+    if (!args[0]) { logger.error('Username required. Usage: c8 get user <username>'); process.exit(1); }
+    await getIdentityUser(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'get' && normalizedResource === 'role') {
+    if (!args[0]) { logger.error('Role ID required. Usage: c8 get role <roleId>'); process.exit(1); }
+    await getIdentityRole(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'get' && normalizedResource === 'group') {
+    if (!args[0]) { logger.error('Group ID required. Usage: c8 get group <groupId>'); process.exit(1); }
+    await getIdentityGroup(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'get' && normalizedResource === 'tenant') {
+    if (!args[0]) { logger.error('Tenant ID required. Usage: c8 get tenant <tenantId>'); process.exit(1); }
+    await getIdentityTenant(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'get' && normalizedResource === 'authorization') {
+    if (!args[0]) { logger.error('Authorization key required. Usage: c8 get auth <key>'); process.exit(1); }
+    await getIdentityAuthorization(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'get' && normalizedResource === 'mapping-rule') {
+    if (!args[0]) { logger.error('Mapping rule ID required. Usage: c8 get mapping-rule <id>'); process.exit(1); }
+    await getIdentityMappingRule(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+
+  // Handle identity create commands
+  if (verb === 'create' && normalizedResource === 'user') {
+    await createIdentityUser({
+      profile: values.profile as string | undefined,
+      username: values.username as string | undefined,
+      name: values.name as string | undefined,
+      email: values.email as string | undefined,
+      password: values.password as string | undefined,
+    });
+    return;
+  }
+  if (verb === 'create' && normalizedResource === 'role') {
+    await createIdentityRole({
+      profile: values.profile as string | undefined,
+      name: values.name as string | undefined,
+    });
+    return;
+  }
+  if (verb === 'create' && normalizedResource === 'group') {
+    await createIdentityGroup({
+      profile: values.profile as string | undefined,
+      name: values.name as string | undefined,
+    });
+    return;
+  }
+  if (verb === 'create' && normalizedResource === 'tenant') {
+    await createIdentityTenant({
+      profile: values.profile as string | undefined,
+      tenantId: values.tenantId as string | undefined,
+      name: values.name as string | undefined,
+    });
+    return;
+  }
+  if (verb === 'create' && normalizedResource === 'authorization') {
+    await createIdentityAuthorization({
+      profile: values.profile as string | undefined,
+      ownerId: values.ownerId as string | undefined,
+      ownerType: values.ownerType as string | undefined,
+      resourceType: values.resourceType as string | undefined,
+      resourceId: values.resourceId as string | undefined,
+      permissions: values.permissions as string | undefined,
+    });
+    return;
+  }
+  if (verb === 'create' && normalizedResource === 'mapping-rule') {
+    await createIdentityMappingRule({
+      profile: values.profile as string | undefined,
+      name: values.name as string | undefined,
+      claimName: values.claimName as string | undefined,
+      claimValue: values.claimValue as string | undefined,
+    });
+    return;
+  }
+
+  // Handle identity delete commands
+  if (verb === 'delete' && normalizedResource === 'user') {
+    if (!args[0]) { logger.error('Username required. Usage: c8 delete user <username>'); process.exit(1); }
+    await deleteIdentityUser(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'delete' && normalizedResource === 'role') {
+    if (!args[0]) { logger.error('Role ID required. Usage: c8 delete role <roleId>'); process.exit(1); }
+    await deleteIdentityRole(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'delete' && normalizedResource === 'group') {
+    if (!args[0]) { logger.error('Group ID required. Usage: c8 delete group <groupId>'); process.exit(1); }
+    await deleteIdentityGroup(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'delete' && normalizedResource === 'tenant') {
+    if (!args[0]) { logger.error('Tenant ID required. Usage: c8 delete tenant <tenantId>'); process.exit(1); }
+    await deleteIdentityTenant(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'delete' && normalizedResource === 'authorization') {
+    if (!args[0]) { logger.error('Authorization key required. Usage: c8 delete auth <key>'); process.exit(1); }
+    await deleteIdentityAuthorization(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+  if (verb === 'delete' && normalizedResource === 'mapping-rule') {
+    if (!args[0]) { logger.error('Mapping rule ID required. Usage: c8 delete mapping-rule <id>'); process.exit(1); }
+    await deleteIdentityMappingRule(args[0], { profile: values.profile as string | undefined });
+    return;
+  }
+
+  // Handle assign/unassign commands
+  if (verb === 'assign') {
+    if (!normalizedResource) {
+      showVerbResources('assign');
+      return;
+    }
+    if (!args[0]) {
+      logger.error(`ID required. Usage: c8 assign ${normalizedResource} <id> --to-<target>=<targetId>`);
+      process.exit(1);
+    }
+    await handleAssign(normalizedResource, args[0], values as Record<string, unknown>, { profile: values.profile as string | undefined });
+    return;
+  }
+
+  if (verb === 'unassign') {
+    if (!normalizedResource) {
+      showVerbResources('unassign');
+      return;
+    }
+    if (!args[0]) {
+      logger.error(`ID required. Usage: c8 unassign ${normalizedResource} <id> --from-<target>=<targetId>`);
+      process.exit(1);
+    }
+    await handleUnassign(normalizedResource, args[0], values as Record<string, unknown>, { profile: values.profile as string | undefined });
     return;
   }
 
