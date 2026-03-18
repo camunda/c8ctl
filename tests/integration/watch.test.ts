@@ -6,16 +6,20 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, copyFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { DEPLOY_COOLDOWN } from '../../src/commands/watch.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
 const VALID_BPMN = join(PROJECT_ROOT, 'tests', 'fixtures', 'simple.bpmn');
 const POLL_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
+
+// Mirror the watch command's deploy cooldown with a small buffer
+const WATCH_COOLDOWN_BUFFER_MS = 500;
 
 /**
  * Generate an invalid BPMN that Camunda will reject during deployment.
@@ -137,7 +141,11 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       );
 
       // Step 1: write an invalid BPMN to trigger a deployment error
-      writeFileSync(bpmnFile, invalidBpmn());
+      // Use atomic write (write-to-temp + rename) to prevent fs.watch from
+      // seeing a truncated/empty file mid-write.
+      const tmpInvalid = bpmnFile + '.tmp';
+      writeFileSync(tmpInvalid, invalidBpmn());
+      renameSync(tmpInvalid, bpmnFile);
 
       // Step 2: watch mode continues — wait for the deployment error message
       const errorSeen = await pollUntil(
@@ -150,8 +158,19 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
       // Step 3: correct the same file in place with valid BPMN content
       // Wait for the cooldown to elapse before triggering the next deploy
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      writeFileSync(bpmnFile, validBpmn());
+      const cooldownStart = Date.now();
+      const cooldownElapsed = await pollUntil(
+        async () => Date.now() - cooldownStart >= DEPLOY_COOLDOWN + WATCH_COOLDOWN_BUFFER_MS,
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+      assert.ok(
+        cooldownElapsed,
+        `Expected cooldown to elapse before correcting BPMN file.\nActual output:\n${watch.getOutput()}`,
+      );
+      const tmpValid = bpmnFile + '.tmp';
+      writeFileSync(tmpValid, validBpmn());
+      renameSync(tmpValid, bpmnFile);
 
       // Step 4: watch detects the correction and deploys again — successfully
       const deployed = await pollUntil(

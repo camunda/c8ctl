@@ -36,40 +36,32 @@ export async function pollUntil(
   maxDuration: number,
   interval: number
 ): Promise<boolean> {
-  const startTime = Date.now();
+  const deadline = Date.now() + maxDuration;
   const maxAttempts = Math.ceil(maxDuration / interval);
-  
+  let attempt = 0;
+
   DEBUG && console.debug(`[Polling] Starting poll - max duration: ${maxDuration}ms, interval: ${interval}ms, max attempts: ${maxAttempts}`);
-  
-  const attemptPoll = async (attemptNumber: number): Promise<boolean> => {
-    const elapsedTime = Date.now() - startTime;
-    
-    // Check timeout conditions
-    if (attemptNumber >= maxAttempts || elapsedTime >= maxDuration) {
-      DEBUG && console.debug(`[Polling] Timeout reached after ${attemptNumber} attempts (${elapsedTime}ms elapsed)`);
-      return false;
-    }
-    
-    DEBUG && console.debug(`[Polling] Attempt ${attemptNumber + 1}/${maxAttempts} (${elapsedTime}ms elapsed)`);
-    
+
+  while (Date.now() < deadline) {
+    attempt++;
+    const elapsedTime = Date.now() - (deadline - maxDuration);
+
+    DEBUG && console.debug(`[Polling] Attempt ${attempt}/${maxAttempts} (${elapsedTime}ms elapsed)`);
+
     try {
-      // Check if condition is met
-      const conditionMet = await checkCondition();
-      if (conditionMet) {
-        DEBUG && console.debug(`[Polling] ✓ Condition met after ${attemptNumber + 1} attempts (${elapsedTime}ms elapsed)`);
+      if (await checkCondition()) {
+        DEBUG && console.debug(`[Polling] ✓ Condition met after ${attempt} attempts (${elapsedTime}ms elapsed)`);
         return true;
       }
       DEBUG && console.debug(`[Polling] Condition not yet met, will retry...`);
     } catch (error) {
-      // Continue polling on error - condition not met yet
       const errorMessage = error instanceof Error ? error.message : String(error);
-      DEBUG && console.debug(`[Polling] Error during attempt ${attemptNumber + 1}: ${errorMessage} - continuing...`);
+      DEBUG && console.debug(`[Polling] Error during attempt ${attempt}: ${errorMessage} - continuing...`);
     }
-    
-    // Wait before next attempt
+
     await new Promise(resolve => setTimeout(resolve, interval));
-    return attemptPoll(attemptNumber + 1);
-  };
-  
-  return attemptPoll(0);
+  }
+
+  DEBUG && console.debug(`[Polling] Timeout reached after ${attempt} attempts (${maxDuration}ms elapsed)`);
+  return false;
 }
