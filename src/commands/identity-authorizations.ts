@@ -71,7 +71,7 @@ export async function searchIdentityAuthorizations(options: {
     if (options.ownerId) filter.ownerId = toStringFilter(options.ownerId);
     if (options.ownerType) filter.ownerType = options.ownerType;
     if (options.resourceType) filter.resourceType = options.resourceType;
-    if (options.resourceId) filter.resourceId = toStringFilter(options.resourceId);
+    if (options.resourceId) filter.resourceIds = [options.resourceId];
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
