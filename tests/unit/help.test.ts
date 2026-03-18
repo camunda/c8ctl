@@ -663,4 +663,256 @@ describe('Help Module', () => {
     assert.ok(Array.isArray(parsed.agentFlags), 'should include agentFlags');
   });
 
+  // ── Identity Resources ──────────────────────────────────────────────────
+
+  test('showVerbResources shows identity resources for list', () => {
+    showVerbResources('list');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('users'), 'list resources should include users');
+    assert.ok(output.includes('roles'), 'list resources should include roles');
+    assert.ok(output.includes('groups'), 'list resources should include groups');
+    assert.ok(output.includes('tenants'), 'list resources should include tenants');
+    assert.ok(output.includes('auth'), 'list resources should include auth alias');
+    assert.ok(output.includes('mapping-rules'), 'list resources should include mapping-rules');
+  });
+
+  test('showVerbResources shows identity resources for search', () => {
+    showVerbResources('search');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('users'), 'search resources should include users');
+    assert.ok(output.includes('roles'), 'search resources should include roles');
+    assert.ok(output.includes('groups'), 'search resources should include groups');
+    assert.ok(output.includes('tenants'), 'search resources should include tenants');
+    assert.ok(output.includes('auth'), 'search resources should include auth alias');
+    assert.ok(output.includes('mapping-rules'), 'search resources should include mapping-rules');
+  });
+
+  test('showVerbResources shows identity resources for get', () => {
+    showVerbResources('get');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('user'), 'get resources should include user');
+    assert.ok(output.includes('role'), 'get resources should include role');
+    assert.ok(output.includes('group'), 'get resources should include group');
+    assert.ok(output.includes('tenant'), 'get resources should include tenant');
+    assert.ok(output.includes('auth'), 'get resources should include auth alias');
+    assert.ok(output.includes('mapping-rule'), 'get resources should include mapping-rule');
+  });
+
+  test('showVerbResources shows identity resources for create', () => {
+    showVerbResources('create');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('user'), 'create resources should include user');
+    assert.ok(output.includes('role'), 'create resources should include role');
+    assert.ok(output.includes('group'), 'create resources should include group');
+    assert.ok(output.includes('tenant'), 'create resources should include tenant');
+    assert.ok(output.includes('auth'), 'create resources should include auth alias');
+    assert.ok(output.includes('mapping-rule'), 'create resources should include mapping-rule');
+  });
+
+  test('showVerbResources shows resources for delete', () => {
+    showVerbResources('delete');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl delete'));
+    assert.ok(output.includes('user'), 'delete resources should include user');
+    assert.ok(output.includes('role'), 'delete resources should include role');
+    assert.ok(output.includes('group'), 'delete resources should include group');
+    assert.ok(output.includes('tenant'), 'delete resources should include tenant');
+    assert.ok(output.includes('auth'), 'delete resources should include auth alias');
+    assert.ok(output.includes('mapping-rule'), 'delete resources should include mapping-rule');
+  });
+
+  test('showVerbResources shows resources for assign', () => {
+    showVerbResources('assign');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl assign'));
+    assert.ok(output.includes('role'), 'assign resources should include role');
+    assert.ok(output.includes('user'), 'assign resources should include user');
+    assert.ok(output.includes('group'), 'assign resources should include group');
+    assert.ok(output.includes('mapping-rule'), 'assign resources should include mapping-rule');
+  });
+
+  test('showVerbResources shows resources for unassign', () => {
+    showVerbResources('unassign');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl unassign'));
+    assert.ok(output.includes('role'), 'unassign resources should include role');
+    assert.ok(output.includes('user'), 'unassign resources should include user');
+    assert.ok(output.includes('group'), 'unassign resources should include group');
+    assert.ok(output.includes('mapping-rule'), 'unassign resources should include mapping-rule');
+  });
+
+  test('showCommandHelp shows delete help', () => {
+    showCommandHelp('delete');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl delete'));
+    assert.ok(output.includes('user'));
+    assert.ok(output.includes('role'));
+    assert.ok(output.includes('group'));
+    assert.ok(output.includes('tenant'));
+    assert.ok(output.includes('authorization'));
+    assert.ok(output.includes('mapping-rule'));
+  });
+
+  test('showCommandHelp shows assign help', () => {
+    showCommandHelp('assign');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl assign'));
+    assert.ok(output.includes('--to-user'));
+    assert.ok(output.includes('--to-group'));
+    assert.ok(output.includes('--to-tenant'));
+    assert.ok(output.includes('--to-mapping-rule'));
+  });
+
+  test('showCommandHelp shows unassign help', () => {
+    showCommandHelp('unassign');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl unassign'));
+    assert.ok(output.includes('--from-user'));
+    assert.ok(output.includes('--from-group'));
+    assert.ok(output.includes('--from-tenant'));
+    assert.ok(output.includes('--from-mapping-rule'));
+  });
+
+  test('showHelp includes identity resources', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('users'), 'help should include users resource');
+    assert.ok(output.includes('roles'), 'help should include roles resource');
+    assert.ok(output.includes('groups'), 'help should include groups resource');
+    assert.ok(output.includes('tenants'), 'help should include tenants resource');
+    assert.ok(output.includes('auth'), 'help should include auth alias');
+    assert.ok(output.includes('mapping-rule'), 'help should include mapping-rule resource');
+  });
+
+  test('showHelp includes delete, assign, unassign commands', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('delete'), 'help should include delete command');
+    assert.ok(output.includes('assign'), 'help should include assign command');
+    assert.ok(output.includes('unassign'), 'help should include unassign command');
+  });
+
+  test('showHelp includes identity resource aliases', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('auth'), 'help should include auth alias');
+    assert.ok(output.includes('mr'), 'help should include mr alias');
+  });
+
+  test('showCommandHelp list includes identity resources', () => {
+    showCommandHelp('list');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('users'), 'list help should include users');
+    assert.ok(output.includes('roles'), 'list help should include roles');
+    assert.ok(output.includes('groups'), 'list help should include groups');
+    assert.ok(output.includes('tenants'), 'list help should include tenants');
+    assert.ok(output.includes('authorizations (auth)'), 'list help should include authorizations');
+    assert.ok(output.includes('mapping-rules (mr)'), 'list help should include mapping-rules');
+  });
+
+  test('showCommandHelp get includes identity resources', () => {
+    showCommandHelp('get');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('user'), 'get help should include user');
+    assert.ok(output.includes('role'), 'get help should include role');
+    assert.ok(output.includes('group'), 'get help should include group');
+    assert.ok(output.includes('tenant'), 'get help should include tenant');
+    assert.ok(output.includes('authorization (auth)'), 'get help should include authorization');
+    assert.ok(output.includes('mapping-rule (mr)'), 'get help should include mapping-rule');
+  });
+
+  test('showCommandHelp create includes identity resources', () => {
+    showCommandHelp('create');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('user'), 'create help should include user');
+    assert.ok(output.includes('--username'), 'create help should include --username flag');
+    assert.ok(output.includes('--email'), 'create help should include --email flag');
+    assert.ok(output.includes('--password'), 'create help should include --password flag');
+    assert.ok(output.includes('role'), 'create help should include role');
+    assert.ok(output.includes('group'), 'create help should include group');
+    assert.ok(output.includes('tenant'), 'create help should include tenant');
+    assert.ok(output.includes('--tenantId'), 'create help should include --tenantId flag');
+    assert.ok(output.includes('authorization (auth)'), 'create help should include authorization');
+    assert.ok(output.includes('--ownerId'), 'create help should include --ownerId flag');
+    assert.ok(output.includes('--ownerType'), 'create help should include --ownerType flag');
+    assert.ok(output.includes('--resourceType'), 'create help should include --resourceType flag');
+    assert.ok(output.includes('--permissions'), 'create help should include --permissions flag');
+    assert.ok(output.includes('mapping-rule (mr)'), 'create help should include mapping-rule');
+    assert.ok(output.includes('--claimName'), 'create help should include --claimName flag');
+    assert.ok(output.includes('--claimValue'), 'create help should include --claimValue flag');
+  });
+
+  test('showCommandHelp search includes identity resources', () => {
+    showCommandHelp('search');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('users'), 'search help should include users');
+    assert.ok(output.includes('--username'), 'search help should include --username flag');
+    assert.ok(output.includes('--email'), 'search help should include --email flag');
+    assert.ok(output.includes('roles'), 'search help should include roles');
+    assert.ok(output.includes('groups'), 'search help should include groups');
+    assert.ok(output.includes('tenants'), 'search help should include tenants');
+    assert.ok(output.includes('authorizations (auth)'), 'search help should include authorizations');
+    assert.ok(output.includes('--ownerId'), 'search help should include --ownerId flag');
+    assert.ok(output.includes('mapping-rules (mr)'), 'search help should include mapping-rules');
+    assert.ok(output.includes('--claimName'), 'search help should include --claimName flag');
+  });
+
+  test('showVerbResources help includes identity verbs', () => {
+    showVerbResources('help');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('delete'), 'help resources should include delete');
+    assert.ok(output.includes('assign'), 'help resources should include assign');
+    assert.ok(output.includes('unassign'), 'help resources should include unassign');
+  });
+
+  test('JSON help includes identity resources and verbs', () => {
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showHelp();
+
+    console.log = originalConsoleLog;
+    const parsed = JSON.parse(jsonSpy[0]);
+
+    // Check for new verbs
+    const verbs = parsed.commands.map((c: any) => c.verb);
+    assert.ok(verbs.includes('delete'), 'JSON help should include delete verb');
+    assert.ok(verbs.includes('assign'), 'JSON help should include assign verb');
+    assert.ok(verbs.includes('unassign'), 'JSON help should include unassign verb');
+
+    // Check for identity resource aliases
+    assert.ok(parsed.resourceAliases.auth, 'JSON help should include auth alias');
+    assert.ok(parsed.resourceAliases.mr, 'JSON help should include mr alias');
+
+    // Check identity resources in list verb
+    const listCmd = parsed.commands.find((c: any) => c.verb === 'list');
+    assert.ok(listCmd.resources.includes('users'), 'list resources should include users');
+    assert.ok(listCmd.resources.includes('roles'), 'list resources should include roles');
+    assert.ok(listCmd.resources.includes('auth'), 'list resources should include auth');
+
+    // Check delete is mutating
+    const deleteCmd = parsed.commands.find((c: any) => c.verb === 'delete');
+    assert.ok(deleteCmd, 'commands should include delete');
+    assert.strictEqual(deleteCmd.mutating, true, 'delete should be mutating');
+  });
 });
