@@ -9,6 +9,7 @@ import { getLogger } from '../logger.ts';
 import { deploy } from './deployments.ts';
 
 const WATCHED_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
+export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 
 /**
  * Watch for file changes and auto-deploy
@@ -43,7 +44,6 @@ export async function watchFiles(paths: string[], options: {
 
   // Keep track of recently deployed files to avoid duplicate deploys
   const recentlyDeployed = new Map<string, number>();
-  const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 
   // Watch each path
   for (const path of resolvedPaths) {

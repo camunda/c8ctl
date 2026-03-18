@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { DEPLOY_COOLDOWN } from '../../src/commands/watch.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
@@ -17,8 +18,7 @@ const VALID_BPMN = join(PROJECT_ROOT, 'tests', 'fixtures', 'simple.bpmn');
 const POLL_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
 
-// Mirror the watch command's deploy cooldown (DEPLOY_COOLDOWN) with a small buffer
-const WATCH_DEPLOY_COOLDOWN_MS = 1_000;
+// Mirror the watch command's deploy cooldown with a small buffer
 const WATCH_COOLDOWN_BUFFER_MS = 500;
 
 /**
@@ -156,7 +156,7 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       // Wait for the cooldown to elapse before triggering the next deploy
       const cooldownStart = Date.now();
       const cooldownElapsed = await pollUntil(
-        async () => Date.now() - cooldownStart >= WATCH_DEPLOY_COOLDOWN_MS + WATCH_COOLDOWN_BUFFER_MS,
+        async () => Date.now() - cooldownStart >= DEPLOY_COOLDOWN + WATCH_COOLDOWN_BUFFER_MS,
         POLL_TIMEOUT_MS,
         POLL_INTERVAL_MS,
       );
