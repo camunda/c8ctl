@@ -134,6 +134,7 @@ To create a similar plugin:
 
    ```bash
    c8ctl init plugin my-plugin
+   c8ctl init plugin --name my-plugin
    ```
 
 2. Or manually create the structure following this example

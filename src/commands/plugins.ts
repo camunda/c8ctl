@@ -709,14 +709,14 @@ export async function downgradePlugin(packageName: string, version: string): Pro
 /**
  * Initialize a new plugin project with TypeScript template
  */
-export async function initPlugin(pluginName?: string): Promise<void> {
+export async function initPlugin({ positionalName, nameFlag }: { positionalName?: string; nameFlag?: string } = {}): Promise<void> {
   const logger = getLogger();
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { resolve } = await import('node:path');
   
-  // Use provided name or default
-  const name = pluginName || 'my-c8ctl-plugin';
-  const dirName = name.startsWith('c8ctl-') ? name : `c8ctl-${name}`;
+  // --name flag takes precedence over positional argument
+  const name = nameFlag || positionalName || 'myplugin';
+  const dirName = name.startsWith('c8ctl-plugin-') ? name : `c8ctl-plugin-${name}`;
   const pluginDir = resolve(process.cwd(), dirName);
   
   // Check if directory already exists

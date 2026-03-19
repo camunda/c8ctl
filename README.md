@@ -344,6 +344,7 @@ The plugin system uses OS-specific directories:
 ```bash
 # Create a new plugin from template
 c8ctl init plugin my-plugin
+c8ctl init plugin --name my-plugin
 
 # Load a plugin from npm registry
 c8ctl load plugin <package-name>
@@ -402,7 +403,7 @@ c8ctl help
 
 **Plugin Development:**
 
-- Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
+- Use `c8ctl init plugin <name>` or `c8ctl init plugin --name <name>` to scaffold a new plugin with TypeScript template
 - Generated scaffold includes all necessary files, build configuration, and an `AGENTS.md` guide for autonomous plugin implementation
 - Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
 - Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`
