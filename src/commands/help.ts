@@ -20,10 +20,13 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
     version,
     usage: 'c8ctl <command> [resource] [options]',
     commands: [
-      { verb: 'list',      resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','profiles','plugins'], description: 'List resources', mutating: false },
-      { verb: 'search',    resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','vars'], description: 'Search resources with filters', mutating: false },
-      { verb: 'get',       resource: '<resource> <key>', resources: ['pi','pd','inc','topology','form'],  description: 'Get resource by key', mutating: false },
-      { verb: 'create',    resource: '<resource>',       resources: ['pi'], description: 'Create resource', mutating: true },
+      { verb: 'list',      resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','profiles','plugins','users','roles','groups','tenants','auth','mapping-rules'], description: 'List resources (process, identity)', mutating: false },
+      { verb: 'search',    resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','vars','users','roles','groups','tenants','auth','mapping-rules'], description: 'Search resources with filters', mutating: false },
+      { verb: 'get',       resource: '<resource> <key>', resources: ['pi','pd','inc','topology','form','user','role','group','tenant','auth','mapping-rule'],  description: 'Get resource by key', mutating: false },
+      { verb: 'create',    resource: '<resource>',       resources: ['pi','user','role','group','tenant','auth','mapping-rule'], description: 'Create resource', mutating: true },
+      { verb: 'delete',    resource: '<resource> <key>', resources: ['user','role','group','tenant','auth','mapping-rule'], description: 'Delete resource', mutating: true },
+      { verb: 'assign',    resource: '<resource> <id> --to-<target>=<id>', resources: ['role','user','group','mapping-rule'], description: 'Assign resource to target', mutating: true },
+      { verb: 'unassign',  resource: '<resource> <id> --from-<target>=<id>', resources: ['role','user','group','mapping-rule'], description: 'Unassign resource from target', mutating: true },
       { verb: 'cancel',    resource: '<resource> <key>', resources: ['pi'], description: 'Cancel resource', mutating: true },
       { verb: 'await',     resource: '<resource>',       resources: ['pi'], description: 'Create and await completion (alias for create --awaitCompletion)', mutating: true },
       { verb: 'complete',  resource: '<resource> <key>', resources: ['ut','job'], description: 'Complete resource', mutating: true },
@@ -59,6 +62,9 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       inc: 'incident(s)',
       msg: 'message',
       vars: 'variable(s)',
+      auth: 'authorization(s)',
+      mr: 'mapping-rule(s)',
+      al: 'audit-log(s)',
     },
     globalFlags: [
       { flag: '--profile', type: 'string', description: 'Use specific profile for this command' },
@@ -94,6 +100,13 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--ierrorMessage',           type: 'string',  description: 'Case-insensitive --errorMessage filter' },
       { flag: '--itype',                   type: 'string',  description: 'Case-insensitive --type filter' },
       { flag: '--ivalue',                  type: 'string',  description: 'Case-insensitive --value filter' },
+      { flag: '--username',                type: 'string',  description: 'Filter by username (users)' },
+      { flag: '--email',                   type: 'string',  description: 'Filter by email (users)' },
+      { flag: '--ownerId',                 type: 'string',  description: 'Filter by owner ID (authorizations)' },
+      { flag: '--ownerType',               type: 'string',  description: 'Filter by owner type (authorizations)' },
+      { flag: '--resourceType',            type: 'string',  description: 'Filter by resource type (authorizations)' },
+      { flag: '--claimName',               type: 'string',  description: 'Filter by claim name (mapping rules)' },
+      { flag: '--claimValue',              type: 'string',  description: 'Filter by claim value (mapping rules)' },
     ],
     agentFlags: [
       {
@@ -106,7 +119,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
         flag: '--dry-run',
         type: 'boolean',
         description: 'Preview the API request that would be sent without executing it. Emits { dryRun, command, method, url, body } as JSON. Always exits 0.',
-        appliesTo: 'mutating commands: create, cancel, deploy, complete, fail, activate, resolve, publish, correlate',
+        appliesTo: 'mutating commands: create, cancel, deploy, complete, fail, activate, resolve, publish, correlate, delete, assign, unassign',
       },
     ],
   };
@@ -158,10 +171,13 @@ c8ctl - Camunda 8 CLI v${version}
 Usage: c8ctl <command> [resource] [options]
 
 Commands:
-  list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles)
-  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables/vars)
-  get       <resource> <key> Get resource by key (pi, pd, inc, topology, form)
-  create    <resource>       Create resource (pi)
+  list      <resource>       List resources (pi, pd, ut, inc, jobs, profiles, users, roles, groups, tenants, auth, mapping-rules)
+  search    <resource>       Search resources with filters (pi, pd, ut, inc, jobs, variables/vars, users, roles, groups, tenants, auth, mapping-rules)
+  get       <resource> <key> Get resource by key (pi, pd, inc, topology, form, user, role, group, tenant, auth, mapping-rule)
+  create    <resource>       Create resource (pi, user, role, group, tenant, auth, mapping-rule)
+  delete    <resource> <key> Delete resource (user, role, group, tenant, auth, mapping-rule)
+  assign    <resource> <id>  Assign resource to target (role, user, group, mapping-rule)
+  unassign  <resource> <id>  Unassign resource from target (role, user, group, mapping-rule)
   cancel    <resource> <key> Cancel resource (pi)
   await     <resource>       Create and await completion (pi, alias for create --awaitCompletion)
   complete  <resource> <key> Complete resource (ut, job)
@@ -186,7 +202,7 @@ Commands:
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
   mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
-  help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
+  help      [command]        Show help (detailed help for list, get, create, complete, await, delete, assign, unassign)${pluginSection}
 
 Flags:
   --profile <name>      Use specific profile for this command
@@ -246,6 +262,8 @@ Resource Aliases:
   ut   = user-task(s)
   inc  = incident(s)
   msg  = message
+  auth = authorization(s)
+  mr   = mapping-rule(s)
 
 ━━━ Agent Flags (for programmatic / AI-agent consumption) ━━━
 
@@ -257,7 +275,7 @@ Resource Aliases:
   --dry-run             Preview the API request that would be sent, without executing it.
                         Emits JSON: { dryRun, command, method, url, body }
                         Applies to all mutating commands: create, cancel, deploy, complete,
-                        fail, activate, resolve, publish, correlate.
+                        fail, activate, resolve, publish, correlate, delete, assign, unassign.
                         Always exits 0. Use before confirming a mutating operation.
 
   Note: In JSON output mode (c8ctl output json), help is returned as structured JSON.
@@ -303,6 +321,12 @@ Examples:
   c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
   c8ctl completion bash              Generate bash completion script
+  c8ctl list users                     List users
+  c8ctl get user john                  Get user by username
+  c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret
+  c8ctl delete user john               Delete user
+  c8ctl assign role admin --to-user=john  Assign role to user
+  c8ctl unassign role admin --from-user=john  Unassign role from user
 
 For detailed help on specific commands with all available flags:
   c8ctl help list                    Show all list resources and their flags
@@ -321,6 +345,9 @@ For detailed help on specific commands with all available flags:
   c8ctl help activate                Show activate command with all flags
   c8ctl help publish                 Show publish command with all flags
   c8ctl help correlate               Show correlate command with all flags
+  c8ctl help delete                    Show delete command with all flags
+  c8ctl help assign                    Show assign command with all flags
+  c8ctl help unassign                  Show unassign command with all flags
   c8ctl help profiles                Show profile management help
   c8ctl help plugin                  Show plugin management help
   c8ctl help plugins                 Alias for plugin management help
@@ -332,10 +359,13 @@ For detailed help on specific commands with all available flags:
  */
 export function showVerbResources(verb: string): void {
   const resources: Record<string, string> = {
-    list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins',
-    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables (vars)',
-    get: 'process-instance (pi), process-definition (pd), incident (inc), topology, form',
-    create: 'process-instance (pi)',
+    list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins, users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)',
+    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables (vars), users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)',
+    get: 'process-instance (pi), process-definition (pd), incident (inc), topology, form, user, role, group, tenant, authorization (auth), mapping-rule (mr)',
+    create: 'process-instance (pi), user, role, group, tenant, authorization (auth), mapping-rule (mr)',
+    delete: 'user, role, group, tenant, authorization (auth), mapping-rule (mr)',
+    assign: 'role, user, group, mapping-rule',
+    unassign: 'role, user, group, mapping-rule',
     complete: 'user-task (ut), job',
     cancel: 'process-instance (pi)',
     await: 'process-instance (pi)',
@@ -357,7 +387,7 @@ export function showVerbResources(verb: string): void {
     which: 'profile',
     output: 'json, text',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, delete, assign, unassign, upgrade, downgrade, init, profiles, profile, plugin, plugins',
   };
 
   const available = resources[verb];
@@ -442,6 +472,48 @@ Resources and their available flags:
   plugins
     Shows installed plugins with version and sync status
 
+  users
+    --sortBy <column>        Sort by column (Username, Name, Email)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
+  roles
+    --sortBy <column>        Sort by column (Role ID, Name, Description)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
+  groups
+    --sortBy <column>        Sort by column (Group ID, Name, Description)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
+  tenants
+    --sortBy <column>        Sort by column (Tenant ID, Name, Description)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
+  authorizations (auth)
+    --sortBy <column>        Sort by column (Key, Owner ID, Owner Type, Resource Type, Resource ID, Permissions)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
+  mapping-rules (mr)
+    --sortBy <column>        Sort by column (Mapping Rule ID, Name, Claim Name, Claim Value)
+    --asc                    Sort in ascending order (default)
+    --desc                   Sort in descending order
+    --limit <n>              Maximum number of items to fetch (default: 1000000)
+    --profile <name>         Use specific profile
+
 Examples:
   c8ctl list pi --state=ACTIVE
   c8ctl list pi --between=2024-01-01..2024-12-31
@@ -459,12 +531,14 @@ Examples:
   c8ctl list jobs --sortBy=Retries --asc
   c8ctl list profiles
   c8ctl list plugins
+  c8ctl list users
+  c8ctl list roles
+  c8ctl list groups
+  c8ctl list tenants
+  c8ctl list auth
+  c8ctl list mapping-rules
 `.trim());
 }
-
-/**
- * Show detailed help for get command
- */
 export function showGetHelp(): void {
   console.log(`
 c8ctl get - Get resource by key
@@ -494,6 +568,24 @@ Resources and their available flags:
     
     If no flag is specified, searches both user task and process definition.
 
+  user <username>
+    --profile <name>         Use specific profile
+
+  role <roleId>
+    --profile <name>         Use specific profile
+
+  group <groupId>
+    --profile <name>         Use specific profile
+
+  tenant <tenantId>
+    --profile <name>         Use specific profile
+
+  authorization (auth) <key>
+    --profile <name>         Use specific profile
+
+  mapping-rule (mr) <id>
+    --profile <name>         Use specific profile
+
 Examples:
   c8ctl get pi 2251799813685249
   c8ctl get pi 2251799813685249 --variables
@@ -504,6 +596,12 @@ Examples:
   c8ctl get form 2251799813685251
   c8ctl get form 2251799813685251 --ut
   c8ctl get form 2251799813685252 --pd
+  c8ctl get user john
+  c8ctl get role my-role
+  c8ctl get group developers
+  c8ctl get tenant prod
+  c8ctl get auth 123456
+  c8ctl get mapping-rule abc123
 `.trim());
 }
 
@@ -527,12 +625,52 @@ Resources and their available flags:
     --requestTimeout <ms>    Timeout in milliseconds for process completion (use with --awaitCompletion)
     --profile <name>         Use specific profile
 
+  user
+    --username <name>        Username (required)
+    --name <name>            Display name
+    --email <email>          Email address
+    --password <pwd>         Password (required)
+    --profile <name>         Use specific profile
+
+  role
+    --name <name>            Role name (required)
+    --profile <name>         Use specific profile
+
+  group
+    --name <name>            Group name (required)
+    --profile <name>         Use specific profile
+
+  tenant
+    --tenantId <id>          Tenant ID (required)
+    --name <name>            Tenant name (required)
+    --profile <name>         Use specific profile
+
+  authorization (auth)
+    --ownerId <id>           Owner ID (required)
+    --ownerType <type>       Owner type: USER, GROUP, ROLE, MAPPING_RULE (required)
+    --resourceType <type>    Resource type (required)
+    --resourceId <id>        Resource ID (required)
+    --permissions <perms>    Comma-separated permissions: READ,CREATE,UPDATE,DELETE (required)
+    --profile <name>         Use specific profile
+
+  mapping-rule (mr)
+    --name <name>            Mapping rule name (required)
+    --claimName <name>       Claim name (required)
+    --claimValue <value>     Claim value (required)
+    --profile <name>         Use specific profile
+
 Examples:
   c8ctl create pi --id=order-process
   c8ctl create pi --id=order-process --version=2
   c8ctl create pi --id=order-process --variables='{"orderId":"12345"}'
   c8ctl create pi --id=order-process --awaitCompletion
   c8ctl create pi --id=order-process --awaitCompletion --requestTimeout=30000
+  c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret
+  c8ctl create role --name=my-role
+  c8ctl create group --name=developers
+  c8ctl create tenant --tenantId=prod --name='Production'
+  c8ctl create auth --ownerId=john --ownerType=USER --resourceType=process-definition --resourceId='*' --permissions=READ,CREATE
+  c8ctl create mapping-rule --name=my-rule --claimName=department --claimValue=engineering
 `.trim());
 }
 
@@ -751,6 +889,61 @@ Resources and their available flags:
     --limit <n>                       Maximum number of items to fetch (default: 1000000)
     --profile <name>                  Use specific profile
 
+  users
+    --username <name>                 Filter by username
+    --name <name>                     Filter by name
+    --email <email>                   Filter by email
+    --sortBy <column>                 Sort by column (Username, Name, Email)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
+  roles
+    --name <name>                     Filter by name
+    --sortBy <column>                 Sort by column (Role ID, Name, Description)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
+  groups
+    --name <name>                     Filter by name
+    --sortBy <column>                 Sort by column (Group ID, Name, Description)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
+  tenants
+    --name <name>                     Filter by name
+    --tenantId <id>                   Filter by tenant ID
+    --sortBy <column>                 Sort by column (Tenant ID, Name, Description)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
+  authorizations (auth)
+    --ownerId <id>                    Filter by owner ID
+    --ownerType <type>                Filter by owner type
+    --resourceType <type>             Filter by resource type
+    --sortBy <column>                 Sort by column (Key, Owner ID, Owner Type, Resource Type, Resource ID, Permissions)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
+  mapping-rules (mr)
+    --name <name>                     Filter by name
+    --claimName <name>                Filter by claim name
+    --claimValue <value>              Filter by claim value
+    --sortBy <column>                 Sort by column (Mapping Rule ID, Name, Claim Name, Claim Value)
+    --asc                             Sort in ascending order (default)
+    --desc                            Sort in descending order
+    --limit <n>                       Maximum number of items to fetch (default: 1000000)
+    --profile <name>                  Use specific profile
+
 Date Range Filter:
   Use --between <from>..<to> to filter results by a date range.
   Dates can be short (YYYY-MM-DD) or full ISO 8601 datetimes.
@@ -792,6 +985,12 @@ Examples:
   c8ctl search variables --name=orderId
   c8ctl search variables --value=12345 --fullValue
   c8ctl search variables --sortBy=Name
+  c8ctl search users --name=John
+  c8ctl search roles --name=admin
+  c8ctl search groups --name=developers
+  c8ctl search tenants --name='*prod*'
+  c8ctl search auth --ownerId=john --resourceType=process-definition
+  c8ctl search mapping-rules --claimName=department
 `.trim());
 }
 
@@ -1151,6 +1350,128 @@ Examples:
 }
 
 /**
+ * Show detailed help for delete command
+ */
+export function showDeleteHelp(): void {
+  console.log(`
+c8ctl delete - Delete a resource
+
+Usage: c8ctl delete <resource> <id> [flags]
+
+Resources and their available flags:
+
+  user <username>
+    --profile <name>         Use specific profile
+
+  role <roleId>
+    --profile <name>         Use specific profile
+
+  group <groupId>
+    --profile <name>         Use specific profile
+
+  tenant <tenantId>
+    --profile <name>         Use specific profile
+
+  authorization (auth) <key>
+    --profile <name>         Use specific profile
+
+  mapping-rule (mr) <id>
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl delete user john
+  c8ctl delete role my-role
+  c8ctl delete group developers
+  c8ctl delete tenant prod
+  c8ctl delete auth 123456
+  c8ctl delete mapping-rule abc123
+`.trim());
+}
+
+/**
+ * Show detailed help for assign command
+ */
+export function showAssignHelp(): void {
+  console.log(`
+c8ctl assign - Assign a resource to a target
+
+Usage: c8ctl assign <resource> <id> --to-<target>=<targetId> [flags]
+
+Resources:
+
+  role <roleId>
+    --to-user <username>     Assign role to user
+    --to-group <groupId>     Assign role to group
+    --to-tenant <tenantId>   Assign role to tenant
+    --to-mapping-rule <id>   Assign role to mapping rule
+    --profile <name>         Use specific profile
+
+  user <username>
+    --to-group <groupId>     Assign user to group
+    --to-tenant <tenantId>   Assign user to tenant
+    --profile <name>         Use specific profile
+
+  group <groupId>
+    --to-tenant <tenantId>   Assign group to tenant
+    --profile <name>         Use specific profile
+
+  mapping-rule <id>
+    --to-group <groupId>     Assign mapping rule to group
+    --to-tenant <tenantId>   Assign mapping rule to tenant
+    --profile <name>         Use specific profile
+
+Examples:
+  c8ctl assign role admin --to-user=john
+  c8ctl assign role admin --to-group=developers
+  c8ctl assign user john --to-group=developers
+  c8ctl assign user john --to-tenant=prod
+  c8ctl assign group developers --to-tenant=prod
+  c8ctl assign mapping-rule my-rule --to-group=developers
+`.trim());
+}
+
+/**
+ * Show detailed help for unassign command
+ */
+export function showUnassignHelp(): void {
+  console.log(`
+c8ctl unassign - Unassign a resource from a target
+
+Usage: c8ctl unassign <resource> <id> --from-<target>=<targetId> [flags]
+
+Resources:
+
+  role <roleId>
+    --from-user <username>     Unassign role from user
+    --from-group <groupId>     Unassign role from group
+    --from-tenant <tenantId>   Unassign role from tenant
+    --from-mapping-rule <id>   Unassign role from mapping rule
+    --profile <name>           Use specific profile
+
+  user <username>
+    --from-group <groupId>     Unassign user from group
+    --from-tenant <tenantId>   Unassign user from tenant
+    --profile <name>           Use specific profile
+
+  group <groupId>
+    --from-tenant <tenantId>   Unassign group from tenant
+    --profile <name>           Use specific profile
+
+  mapping-rule <id>
+    --from-group <groupId>     Unassign mapping rule from group
+    --from-tenant <tenantId>   Unassign mapping rule from tenant
+    --profile <name>           Use specific profile
+
+Examples:
+  c8ctl unassign role admin --from-user=john
+  c8ctl unassign role admin --from-group=developers
+  c8ctl unassign user john --from-group=developers
+  c8ctl unassign group developers --from-tenant=prod
+  c8ctl unassign mapping-rule my-rule --from-group=developers
+`.trim());
+}
+
+/**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
@@ -1221,6 +1542,15 @@ export function showCommandHelp(command: string): void {
       break;
     case 'correlate':
       showCorrelateHelp();
+      break;
+    case 'delete':
+      showDeleteHelp();
+      break;
+    case 'assign':
+      showAssignHelp();
+      break;
+    case 'unassign':
+      showUnassignHelp();
       break;
     case 'profiles':
     case 'profile':
