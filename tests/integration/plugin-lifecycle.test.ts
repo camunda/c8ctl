@@ -182,6 +182,24 @@ describe('Plugin Lifecycle Integration Tests', () => {
     }
   });
 
+  test('should reject unloading a non-existent plugin', () => {
+    try {
+      execSync('node src/index.ts unload plugin c8ctl-plugin-does-not-exist', {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 5000
+      });
+      assert.fail('Unloading a non-existent plugin should fail');
+    } catch (error: any) {
+      const errorOutput = error.stderr || error.message;
+      assert.ok(
+        errorOutput.includes('not registered'),
+        `Error should mention plugin is not registered. Got: ${errorOutput}`
+      );
+    }
+  });
+
   test('should expose createClient, resolveTenantId and getLogger on plugin runtime object', async () => {
     const runtimePluginDir = join(process.cwd(), 'test-plugin-runtime-client-temp');
     const runtimePluginName = 'c8ctl-test-plugin-runtime-client';

@@ -290,12 +290,19 @@ export async function unloadPlugin(packageName: string): Promise<void> {
     process.exit(1);
   }
   
+  // Check if plugin is registered
+  if (!isPluginRegistered(packageName)) {
+    logger.error(`Plugin "${packageName}" is not registered.`);
+    logger.info('Run "c8ctl list plugins" to see installed plugins');
+    process.exit(1);
+  }
+  
   // Get global plugins directory
   const pluginsDir = ensurePluginsDir();
   
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
-    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
     
     // Only remove from registry after successful uninstall
     removePluginFromRegistry(packageName);
