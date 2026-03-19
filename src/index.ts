@@ -360,7 +360,7 @@ async function main() {
   }
 
   if (verb === 'init' && normalizedResource === 'plugin') {
-    await initPlugin({ positionalName: args[0], nameFlag: values.name as string | undefined });
+    await initPlugin(args[0]);
     return;
   }
 

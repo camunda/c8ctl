@@ -709,14 +709,15 @@ export async function downgradePlugin(packageName: string, version: string): Pro
 /**
  * Initialize a new plugin project with TypeScript template
  */
-export async function initPlugin({ positionalName, nameFlag }: { positionalName?: string; nameFlag?: string } = {}): Promise<void> {
+export async function initPlugin(positionalName?: string): Promise<void> {
   const logger = getLogger();
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { resolve } = await import('node:path');
   
-  // --name flag takes precedence over positional argument
-  const name = nameFlag || positionalName || 'myplugin';
+  const name = positionalName || 'myplugin';
   const dirName = name.startsWith('c8ctl-plugin-') ? name : `c8ctl-plugin-${name}`;
+  // Convention over configuration: plugin name is the suffix after 'c8ctl-plugin-'
+  const pluginName = dirName.startsWith('c8ctl-plugin-') ? dirName.slice('c8ctl-plugin-'.length) : dirName;
   const pluginDir = resolve(process.cwd(), dirName);
   
   // Check if directory already exists
@@ -729,7 +730,7 @@ export async function initPlugin({ positionalName, nameFlag }: { positionalName?
   try {
     logger.info(`Creating plugin: ${dirName}...`);
 
-    const templateVars = { PLUGIN_NAME: dirName };
+    const templateVars = { PLUGIN_NAME: pluginName, PLUGIN_DIR: dirName };
     
     // Create plugin directory
     mkdirSync(pluginDir, { recursive: true });

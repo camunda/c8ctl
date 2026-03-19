@@ -5,7 +5,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import { execSync, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getUserDataDir } from '../../src/config.ts';
@@ -329,6 +329,76 @@ describe('Plugin Lifecycle Integration Tests', () => {
       for (const file of expectedFiles) {
         assert.ok(existsSync(join(dir, file)), `${file} should exist after init`);
       }
+    } finally {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('init plugin should register plugin name as suffix when c8ctl-plugin- prefix is used', () => {
+    const fullName = 'c8ctl-plugin-conv-test';
+    const expectedPluginName = 'conv-test';
+    const dir = join(process.cwd(), fullName);
+
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    try {
+      const output = execSync(`node src/index.ts init plugin ${fullName}`, {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      assert.ok(output.includes('Plugin scaffolding created successfully'),
+        'Init command should succeed');
+      assert.ok(existsSync(dir), 'Directory should use full name with prefix');
+
+      // package.json should use full directory name as npm package name
+      const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
+      assert.strictEqual(pkgJson.name, fullName, 'package.json name should be full directory name');
+
+      // Plugin metadata name should be just the suffix
+      const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
+      assert.ok(pluginSrc.includes(`name: '${expectedPluginName}'`),
+        'Plugin metadata name should be the suffix only');
+    } finally {
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  test('init plugin should register plugin name as-is when no c8ctl-plugin- prefix', () => {
+    const name = 'conv-test-noprefix';
+    const expectedDir = `c8ctl-plugin-${name}`;
+    const dir = join(process.cwd(), expectedDir);
+
+    if (existsSync(dir)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    try {
+      const output = execSync(`node src/index.ts init plugin ${name}`, {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 5000,
+      });
+
+      assert.ok(output.includes('Plugin scaffolding created successfully'),
+        'Init command should succeed');
+      assert.ok(existsSync(dir), 'Directory should be prefixed with c8ctl-plugin-');
+
+      // package.json should use full directory name
+      const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
+      assert.strictEqual(pkgJson.name, expectedDir, 'package.json name should be full directory name');
+
+      // Plugin metadata name should be the input name (suffix)
+      const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
+      assert.ok(pluginSrc.includes(`name: '${name}'`),
+        'Plugin metadata name should be the name without prefix');
     } finally {
       if (existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });

@@ -1,4 +1,4 @@
-# {{PLUGIN_NAME}}
+# {{PLUGIN_DIR}}
 
 A c8ctl plugin.
 
@@ -45,5 +45,5 @@ npm publish
 
 Users can install your plugin with:
 ```bash
-c8ctl load plugin {{PLUGIN_NAME}}
+c8ctl load plugin {{PLUGIN_DIR}}
 ```
