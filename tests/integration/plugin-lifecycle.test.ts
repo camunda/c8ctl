@@ -356,9 +356,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
         'Init command should succeed');
       assert.ok(existsSync(dir), 'Directory should use full name with prefix');
 
-      // package.json should use full directory name as npm package name
+      // package.json should use plugin name (suffix) as identity
       const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
-      assert.strictEqual(pkgJson.name, fullName, 'package.json name should be full directory name');
+      assert.strictEqual(pkgJson.name, expectedPluginName, 'package.json name should be plugin name (suffix)');
 
       // Plugin metadata name should be just the suffix
       const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
@@ -391,9 +391,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
         'Init command should succeed');
       assert.ok(existsSync(dir), 'Directory should be prefixed with c8ctl-plugin-');
 
-      // package.json should use full directory name
+      // package.json should use plugin name (suffix) as identity
       const pkgJson = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8'));
-      assert.strictEqual(pkgJson.name, expectedDir, 'package.json name should be full directory name');
+      assert.strictEqual(pkgJson.name, name, 'package.json name should be plugin name (suffix)');
 
       // Plugin metadata name should be the input name (suffix)
       const pluginSrc = readFileSync(join(dir, 'src', 'c8ctl-plugin.ts'), 'utf-8');
