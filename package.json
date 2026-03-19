@@ -18,6 +18,9 @@
   },
   "files": [
     "dist",
+    "CONTEXT.md",
+    "EXAMPLES.md",
+    "PLUGIN-HELP.md",
     "README.md",
     "LICENSE"
   ],
