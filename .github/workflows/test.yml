@@ -7,17 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
-    runs-on: ubuntu-latest
+  unit-test:
+    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         node: [22, 24]
-        camunda: ['8.8', '8.9']
-    
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,11 +34,61 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+  integration-test:
+    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+        camunda: ['8.8', '8.9']
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install Docker (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install docker colima
+          colima start --memory 4 --cpu 2
+
+      - name: Install Docker (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install docker-desktop -y --no-progress
+          & "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+          $timeout = 120
+          $elapsed = 0
+          while ($elapsed -lt $timeout) {
+            try {
+              docker info 2>&1 | Out-Null
+              if ($LASTEXITCODE -eq 0) { Write-Host "Docker is ready"; break }
+            } catch {}
+            Start-Sleep -Seconds 5
+            $elapsed += 5
+            Write-Host "Waiting for Docker... ($elapsed s)"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose up -d
-          
+
       - name: Wait for Camunda to be ready
+        shell: bash
         run: |
           echo "Waiting for Camunda at localhost:8080..."
           # First wait for topology endpoint
