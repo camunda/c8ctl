@@ -48,6 +48,7 @@ import {
   executePluginCommand
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
+import { startCluster, stopCluster } from './commands/c8-cluster.ts';
 
 /**
  * Normalize resource aliases
@@ -139,6 +140,7 @@ function parseCliArgs() {
         fields: { type: 'string' },
         'dry-run': { type: 'boolean' },
         force: { type: 'boolean' },
+        debug: { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -684,6 +686,24 @@ async function main() {
   if (verb === 'mcp-proxy') {
     await mcpProxy(positionals.slice(1), {
       profile: values.profile as string | undefined,
+    });
+    return;
+  }
+
+  // Handle start c8-cluster command
+  if (verb === 'start' && normalizedResource === 'c8-cluster') {
+    await startCluster({
+      version: values.version as string | undefined,
+      force: values.force as boolean | undefined,
+      debug: values.debug as boolean | undefined,
+    });
+    return;
+  }
+
+  // Handle stop c8-cluster command
+  if (verb === 'stop' && normalizedResource === 'c8-cluster') {
+    await stopCluster({
+      version: values.version as string | undefined,
     });
     return;
   }

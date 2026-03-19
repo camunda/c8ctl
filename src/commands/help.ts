@@ -45,6 +45,8 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'init',      resource: 'plugin [name]',    resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
       { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
       { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
+      { verb: 'start',     resource: 'c8-cluster',       resources: ['c8-cluster'], description: 'Start local Camunda 8 cluster', mutating: false },
+      { verb: 'stop',      resource: 'c8-cluster',       resources: ['c8-cluster'], description: 'Stop local Camunda 8 cluster', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
       { verb: 'mcp-proxy', resource: '[mcp-path]',       resources: [], description: 'Start a STDIO to remote HTTP MCP proxy server', mutating: false },
       { verb: 'help',      resource: '[command]',        resources: [], description: 'Show help', mutating: false },
@@ -70,7 +72,8 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--dateField', type: 'string', description: 'Date field to filter on with --between (default depends on resource)' },
       { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
       { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
-      { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
+      { flag: '--version', type: 'string', short: '-v', description: 'Show CLI version when used without a command; use with start/stop c8-cluster to select Camunda version (e.g., 8.8, 8.9.0-alpha5, stable, latest)' },
+      { flag: '--debug',      type: 'boolean', description: 'Show all output from c8run start (use with start c8-cluster)' },
       { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
     ],
     searchFlags: [
@@ -184,6 +187,8 @@ Commands:
   init      plugin [name]    Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
+  start     c8-cluster       Download and start local Camunda 8 cluster (c8run)
+  stop      c8-cluster       Stop local Camunda 8 cluster
   completion bash|zsh|fish   Generate shell completion script
   mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
   help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
@@ -205,7 +210,8 @@ Flags:
   --limit <n>           Maximum number of items to fetch (default: 1000000)
   --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601; omit either end for open-ended range)
   --dateField <field>   Date field to filter on with --between (default depends on resource)
-  --version, -v         Show version
+  --version, -v         Show CLI version when used without a command; use with 'start/stop c8-cluster' to select Camunda version (e.g., 8.8, 8.9.0-alpha5, stable, latest)
+  --debug                 Show all output from c8run start (use with 'start c8-cluster')
   --help, -h            Show help
 
 Search Flags:
@@ -293,6 +299,10 @@ Examples:
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
+  c8ctl start c8-cluster             Start local Camunda 8 cluster
+  c8ctl start c8-cluster --debug     Start cluster with live output
+  c8ctl start c8-cluster --version 8.9.0-alpha5  Start specific version
+  c8ctl stop c8-cluster              Stop local Camunda 8 cluster
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
