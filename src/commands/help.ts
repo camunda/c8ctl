@@ -42,7 +42,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'upgrade',   resource: 'plugin <name>',    resources: ['plugin'], description: 'Upgrade a plugin', mutating: false },
       { verb: 'downgrade', resource: 'plugin <name> <version>', resources: ['plugin'], description: 'Downgrade a plugin to a specific version', mutating: false },
       { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
-      { verb: 'init',      resource: 'plugin [name] [--name <name>]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
+      { verb: 'init',      resource: 'plugin [name]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
       { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
       { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
@@ -1136,9 +1136,15 @@ Plugin commands:
     - URL/git source: installs <source>#<version>
     - file:// source: not supported, use load plugin --from
 
-  init plugin [name] [--name <name>]
+  init plugin [name]
     Create a new plugin scaffold from template.
     Default name: c8ctl-plugin-myplugin
+
+    Convention over configuration: the directory is always prefixed with
+    "c8ctl-plugin-". The plugin is registered by the suffix after the prefix.
+    Example: "c8ctl init plugin foo" creates directory "c8ctl-plugin-foo"
+    and registers plugin name "foo". Likewise, "c8ctl init plugin
+    c8ctl-plugin-foo" produces the same result.
 
 Examples:
   c8ctl load plugin my-plugin
@@ -1149,7 +1155,6 @@ Examples:
   c8ctl upgrade plugin my-plugin 1.2.3
   c8ctl downgrade plugin my-plugin 1.0.0
   c8ctl init plugin my-plugin
-  c8ctl init plugin --name my-plugin
 `.trim());
 }
 

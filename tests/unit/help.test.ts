@@ -497,7 +497,7 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl plugin'));
     assert.ok(output.includes('sync plugins'));
-    assert.ok(output.includes('init plugin [name] [--name <name>]'));
+    assert.ok(output.includes('init plugin [name]'));
   });
 
   test('showCommandHelp handles unknown command', () => {
