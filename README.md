@@ -403,7 +403,7 @@ c8ctl help
 **Plugin Development:**
 
 - Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
-- Convention over configuration: the directory is always prefixed with `c8ctl-plugin-`, and the plugin is registered by the suffix after the prefix (e.g., `c8ctl init plugin c8ctl-plugin-bla` creates directory `c8ctl-plugin-bla` and registers plugin name `bla`)
+- Convention over configuration: the directory is always prefixed with `c8ctl-plugin-`, and the plugin is registered by the suffix after the prefix (e.g., `c8ctl init plugin c8ctl-plugin-foo` creates directory `c8ctl-plugin-foo` and registers plugin name `foo`)
 - Generated scaffold includes all necessary files, build configuration, and an `AGENTS.md` guide for autonomous plugin implementation
 - Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
 - Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`

@@ -1142,9 +1142,9 @@ Plugin commands:
 
     Convention over configuration: the directory is always prefixed with
     "c8ctl-plugin-". The plugin is registered by the suffix after the prefix.
-    Example: "c8ctl init plugin bla" creates directory "c8ctl-plugin-bla"
-    and registers plugin name "bla". Likewise, "c8ctl init plugin
-    c8ctl-plugin-bla" produces the same result.
+    Example: "c8ctl init plugin foo" creates directory "c8ctl-plugin-foo"
+    and registers plugin name "foo". Likewise, "c8ctl init plugin
+    c8ctl-plugin-foo" produces the same result.
 
 Examples:
   c8ctl load plugin my-plugin
