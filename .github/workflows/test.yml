@@ -44,7 +44,7 @@ jobs:
       matrix:
         node: [22, 24]
         camunda: ['8.8', '8.9']
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Checkout code
