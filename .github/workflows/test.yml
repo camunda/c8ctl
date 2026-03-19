@@ -56,11 +56,14 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
-      - name: Install Docker (macOS)
+      - name: Install Podman (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install docker colima
-          colima start --memory 4 --cpu 2
+          brew install podman docker-compose
+          podman machine init --memory 4096 --cpus 2
+          podman machine start
+          # Symlink podman as docker for compose compatibility
+          sudo ln -sf $(which podman) /usr/local/bin/docker
 
       - name: Install Docker (Windows)
         if: runner.os == 'Windows'
