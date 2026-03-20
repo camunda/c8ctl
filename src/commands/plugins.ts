@@ -284,34 +284,51 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
  */
 export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
-  
+
   if (!packageName) {
     logger.error('Package name required. Usage: c8ctl unload plugin <package-name>');
     process.exit(1);
   }
-  
-  // Check if plugin is registered
-  if (!isPluginRegistered(packageName)) {
-    logger.error(`Plugin "${packageName}" is not registered.`);
+
+  // Get global plugins directory
+  const pluginsDir = ensurePluginsDir();
+
+  // Check registry and installation status independently
+  const isRegistered = isPluginRegistered(packageName);
+  let isInstalled = false;
+
+  try {
+    const npmListOutput = execSync(
+      `npm ls "${packageName}" --prefix "${pluginsDir}" --depth=0 --json`,
+      { stdio: ['pipe', 'pipe', 'ignore'] }
+    ).toString();
+    const parsed = JSON.parse(npmListOutput) as NpmListOutput;
+    isInstalled = !!parsed.dependencies && Object.prototype.hasOwnProperty.call(parsed.dependencies, packageName);
+  } catch {
+    // npm ls may fail if the package is not installed; treat as "not installed"
+    isInstalled = false;
+  }
+
+  if (!isRegistered && !isInstalled) {
+    logger.error(`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`);
     logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
-  
-  // Get global plugins directory
-  const pluginsDir = ensurePluginsDir();
-  
+
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
-    
-    // Only remove from registry after successful uninstall
-    removePluginFromRegistry(packageName);
-    logger.debug(`Removed ${packageName} from plugin registry`);
-    
+
+    // Only remove from registry after successful uninstall and if it was registered
+    if (isRegistered) {
+      removePluginFromRegistry(packageName);
+      logger.debug(`Removed ${packageName} from plugin registry`);
+    }
+
     // Clear the loaded plugins cache so the plugin is no longer available
     // This affects the current process - plugin will be gone immediately
     clearLoadedPlugins();
-    
+
     logger.success('Plugin unloaded successfully', packageName);
     logger.info('Plugin commands are no longer available');
   } catch (error) {

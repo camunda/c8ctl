@@ -130,11 +130,10 @@ When users run `c8ctl list`, the built-in `list` command will execute instead. C
 
 To create a similar plugin:
 
-1. Use the scaffolding command:
+1. Use the scaffolding command (plugin name as positional argument):
 
    ```bash
    c8ctl init plugin my-plugin
-   c8ctl init plugin --name my-plugin
    ```
 
 2. Or manually create the structure following this example
