@@ -284,27 +284,51 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
  */
 export async function unloadPlugin(packageName: string): Promise<void> {
   const logger = getLogger();
-  
+
   if (!packageName) {
     logger.error('Package name required. Usage: c8ctl unload plugin <package-name>');
     process.exit(1);
   }
-  
+
   // Get global plugins directory
   const pluginsDir = ensurePluginsDir();
-  
+
+  // Check registry and installation status independently
+  const isRegistered = isPluginRegistered(packageName);
+  let isInstalled = false;
+
+  try {
+    const npmListOutput = execSync(
+      `npm ls "${packageName}" --prefix "${pluginsDir}" --depth=0 --json`,
+      { stdio: ['pipe', 'pipe', 'ignore'] }
+    ).toString();
+    const parsed = JSON.parse(npmListOutput) as NpmListOutput;
+    isInstalled = !!parsed.dependencies && Object.prototype.hasOwnProperty.call(parsed.dependencies, packageName);
+  } catch {
+    // npm ls may fail if the package is not installed; treat as "not installed"
+    isInstalled = false;
+  }
+
+  if (!isRegistered && !isInstalled) {
+    logger.error(`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`);
+    logger.info('Run "c8ctl list plugins" to see installed plugins');
+    process.exit(1);
+  }
+
   try {
     logger.info(`Unloading plugin: ${packageName}...`);
-    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'inherit' });
-    
-    // Only remove from registry after successful uninstall
-    removePluginFromRegistry(packageName);
-    logger.debug(`Removed ${packageName} from plugin registry`);
-    
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+
+    // Only remove from registry after successful uninstall and if it was registered
+    if (isRegistered) {
+      removePluginFromRegistry(packageName);
+      logger.debug(`Removed ${packageName} from plugin registry`);
+    }
+
     // Clear the loaded plugins cache so the plugin is no longer available
     // This affects the current process - plugin will be gone immediately
     clearLoadedPlugins();
-    
+
     logger.success('Plugin unloaded successfully', packageName);
     logger.info('Plugin commands are no longer available');
   } catch (error) {
@@ -709,14 +733,15 @@ export async function downgradePlugin(packageName: string, version: string): Pro
 /**
  * Initialize a new plugin project with TypeScript template
  */
-export async function initPlugin(pluginName?: string): Promise<void> {
+export async function initPlugin(positionalName?: string): Promise<void> {
   const logger = getLogger();
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { resolve } = await import('node:path');
   
-  // Use provided name or default
-  const name = pluginName || 'my-c8ctl-plugin';
-  const dirName = name.startsWith('c8ctl-') ? name : `c8ctl-${name}`;
+  const name = positionalName || 'myplugin';
+  const dirName = name.startsWith('c8ctl-plugin-') ? name : `c8ctl-plugin-${name}`;
+  // Convention over configuration: plugin name is the suffix after 'c8ctl-plugin-'
+  const pluginName = dirName.startsWith('c8ctl-plugin-') ? dirName.slice('c8ctl-plugin-'.length) : dirName;
   const pluginDir = resolve(process.cwd(), dirName);
   
   // Check if directory already exists
@@ -729,7 +754,7 @@ export async function initPlugin(pluginName?: string): Promise<void> {
   try {
     logger.info(`Creating plugin: ${dirName}...`);
 
-    const templateVars = { PLUGIN_NAME: dirName };
+    const templateVars = { PLUGIN_NAME: pluginName, PLUGIN_DIR: dirName };
     
     // Create plugin directory
     mkdirSync(pluginDir, { recursive: true });

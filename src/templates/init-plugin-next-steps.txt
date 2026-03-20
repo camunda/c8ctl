@@ -1,6 +1,6 @@
 
 Next steps:
-  1. cd {{PLUGIN_NAME}}
+  1. cd {{PLUGIN_DIR}}
   2. npm install
   3. npm run build
   4. c8ctl load plugin --from file://${PWD}

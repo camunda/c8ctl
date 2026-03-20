@@ -42,7 +42,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'upgrade',   resource: 'plugin <name>',    resources: ['plugin'], description: 'Upgrade a plugin', mutating: false },
       { verb: 'downgrade', resource: 'plugin <name> <version>', resources: ['plugin'], description: 'Downgrade a plugin to a specific version', mutating: false },
       { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
-      { verb: 'init',      resource: 'plugin [name]',    resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
+      { verb: 'init',      resource: 'plugin [name]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
       { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
       { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
@@ -181,7 +181,7 @@ Commands:
   upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
-  init      plugin [name]    Create a new plugin from TypeScript template
+  init      plugin [name]   Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
@@ -296,7 +296,7 @@ Examples:
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
-  c8ctl init plugin my-plugin        Create new plugin from template
+  c8ctl init plugin my-plugin        Create new plugin from template (c8ctl-plugin-my-plugin)
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from https://github.com/org/plugin  Load plugin from URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
@@ -1137,6 +1137,13 @@ Plugin commands:
 
   init plugin [name]
     Create a new plugin scaffold from template.
+    Default name: c8ctl-plugin-myplugin
+
+    Convention over configuration: the directory is always prefixed with
+    "c8ctl-plugin-". The plugin is registered by the suffix after the prefix.
+    Example: "c8ctl init plugin foo" creates directory "c8ctl-plugin-foo"
+    and registers plugin name "foo". Likewise, "c8ctl init plugin
+    c8ctl-plugin-foo" produces the same result.
 
 Examples:
   c8ctl load plugin my-plugin
