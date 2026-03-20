@@ -1117,6 +1117,9 @@ Plugin commands:
   unload plugin <name>
     Unload and unregister a plugin.
 
+  unload plugin <name> --force
+    Force-remove a plugin that is installed but not in the registry (limbo state).
+
   list plugins
     List installed plugins with version and sync status.
 
@@ -1151,6 +1154,8 @@ Examples:
   c8ctl load plugin --from https://github.com/org/plugin
   c8ctl load plugin --from file:///path/to/plugin
   c8ctl list plugins
+  c8ctl unload plugin my-plugin
+  c8ctl unload plugin my-plugin --force
   c8ctl upgrade plugin my-plugin
   c8ctl upgrade plugin my-plugin 1.2.3
   c8ctl downgrade plugin my-plugin 1.0.0

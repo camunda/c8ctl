@@ -282,7 +282,7 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
  * Unload a plugin (npm uninstall wrapper)
  * Uninstalls from global plugins directory
  */
-export async function unloadPlugin(packageName: string): Promise<void> {
+export async function unloadPlugin(packageName: string, { force = false }: { force?: boolean } = {}): Promise<void> {
   const logger = getLogger();
   
   if (!packageName) {
@@ -290,23 +290,36 @@ export async function unloadPlugin(packageName: string): Promise<void> {
     process.exit(1);
   }
   
-  // Check if plugin is registered
-  if (!isPluginRegistered(packageName)) {
-    logger.error(`Plugin "${packageName}" is not registered.`);
+  const pluginsDir = ensurePluginsDir();
+  const nodeModulesPath = join(pluginsDir, 'node_modules');
+  const isRegistered = isPluginRegistered(packageName);
+  const isInstalled = scanInstalledPlugins(nodeModulesPath).has(packageName);
+  
+  if (!isRegistered && !isInstalled) {
+    logger.error(`Plugin "${packageName}" is neither registered nor installed.`);
     logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
   
-  // Get global plugins directory
-  const pluginsDir = ensurePluginsDir();
+  if (!isRegistered && !force) {
+    logger.error(`Plugin "${packageName}" is installed but not in the registry (limbo state).`);
+    logger.info('Use --force to forcefully remove it, or run "c8ctl list plugins" to inspect the state');
+    process.exit(1);
+  }
   
   try {
-    logger.info(`Unloading plugin: ${packageName}...`);
+    if (force && !isRegistered) {
+      logger.info(`Force-removing plugin: ${packageName}...`);
+    } else {
+      logger.info(`Unloading plugin: ${packageName}...`);
+    }
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
     
-    // Only remove from registry after successful uninstall
-    removePluginFromRegistry(packageName);
-    logger.debug(`Removed ${packageName} from plugin registry`);
+    // Remove from registry if registered
+    if (isRegistered) {
+      removePluginFromRegistry(packageName);
+      logger.debug(`Removed ${packageName} from plugin registry`);
+    }
     
     // Clear the loaded plugins cache so the plugin is no longer available
     // This affects the current process - plugin will be gone immediately
