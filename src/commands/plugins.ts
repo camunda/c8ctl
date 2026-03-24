@@ -282,7 +282,7 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
  * Unload a plugin (npm uninstall wrapper)
  * Uninstalls from global plugins directory
  */
-export async function unloadPlugin(packageName: string): Promise<void> {
+export async function unloadPlugin(packageName: string, { force = false }: { force?: boolean } = {}): Promise<void> {
   const logger = getLogger();
 
   if (!packageName) {
@@ -316,7 +316,11 @@ export async function unloadPlugin(packageName: string): Promise<void> {
   }
 
   try {
-    logger.info(`Unloading plugin: ${packageName}...`);
+    if (force && !isRegistered) {
+      logger.info(`Force-removing plugin: ${packageName}...`);
+    } else {
+      logger.info(`Unloading plugin: ${packageName}...`);
+    }
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
 
     // Only remove from registry after successful uninstall and if it was registered
