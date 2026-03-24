@@ -426,8 +426,9 @@ describe('Plugin Lifecycle Integration Tests', () => {
   
   test('should complete full plugin lifecycle with init, build, load, execute, and help', async () => {
     const scaffoldPluginName = 'test-scaffold';
-    const scaffoldDir = join(process.cwd(), `c8ctl-plugin-${scaffoldPluginName}`);
-    const fullPluginName = `c8ctl-plugin-${scaffoldPluginName}`;
+    const scaffoldDirName = `c8ctl-plugin-${scaffoldPluginName}`;
+    const scaffoldDir = join(process.cwd(), scaffoldDirName);
+    const fullPluginName = scaffoldPluginName;
     const scaffoldNodeModulesPath = join(pluginsDir, 'node_modules', fullPluginName);
     
     // Clean up from any previous test run

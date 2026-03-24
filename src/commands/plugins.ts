@@ -284,29 +284,37 @@ function extractPackageNameFromUrl(url: string, pluginsDir: string, existingName
  */
 export async function unloadPlugin(packageName: string, { force = false }: { force?: boolean } = {}): Promise<void> {
   const logger = getLogger();
-  
+
   if (!packageName) {
     logger.error('Package name required. Usage: c8ctl unload plugin <package-name>');
     process.exit(1);
   }
-  
+
+  // Get global plugins directory
   const pluginsDir = ensurePluginsDir();
-  const nodeModulesPath = join(pluginsDir, 'node_modules');
+
+  // Check registry and installation status independently
   const isRegistered = isPluginRegistered(packageName);
-  const isInstalled = scanInstalledPlugins(nodeModulesPath).has(packageName);
-  
+  let isInstalled = false;
+
+  try {
+    const npmListOutput = execSync(
+      `npm ls "${packageName}" --prefix "${pluginsDir}" --depth=0 --json`,
+      { stdio: ['pipe', 'pipe', 'ignore'] }
+    ).toString();
+    const parsed = JSON.parse(npmListOutput) as NpmListOutput;
+    isInstalled = !!parsed.dependencies && Object.prototype.hasOwnProperty.call(parsed.dependencies, packageName);
+  } catch {
+    // npm ls may fail if the package is not installed; treat as "not installed"
+    isInstalled = false;
+  }
+
   if (!isRegistered && !isInstalled) {
-    logger.error(`Plugin "${packageName}" is neither registered nor installed.`);
+    logger.error(`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`);
     logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
-  
-  if (!isRegistered && !force) {
-    logger.error(`Plugin "${packageName}" is installed but not in the registry (limbo state).`);
-    logger.info('Use --force to forcefully remove it, or run "c8ctl list plugins" to inspect the state');
-    process.exit(1);
-  }
-  
+
   try {
     if (force && !isRegistered) {
       logger.info(`Force-removing plugin: ${packageName}...`);
@@ -314,17 +322,17 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
       logger.info(`Unloading plugin: ${packageName}...`);
     }
     execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
-    
-    // Remove from registry if registered
+
+    // Only remove from registry after successful uninstall and if it was registered
     if (isRegistered) {
       removePluginFromRegistry(packageName);
       logger.debug(`Removed ${packageName} from plugin registry`);
     }
-    
+
     // Clear the loaded plugins cache so the plugin is no longer available
     // This affects the current process - plugin will be gone immediately
     clearLoadedPlugins();
-    
+
     logger.success('Plugin unloaded successfully', packageName);
     logger.info('Plugin commands are no longer available');
   } catch (error) {

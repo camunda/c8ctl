@@ -181,7 +181,7 @@ Commands:
   upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
-  init      plugin [name] [--name <name>]  Create a new plugin from TypeScript template
+  init      plugin [name]   Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
@@ -297,7 +297,6 @@ Examples:
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
   c8ctl init plugin my-plugin        Create new plugin from template (c8ctl-plugin-my-plugin)
-  c8ctl init plugin --name my-plugin  Create new plugin from template (c8ctl-plugin-my-plugin)
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from https://github.com/org/plugin  Load plugin from URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
