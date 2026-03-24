@@ -3,8 +3,43 @@
  */
 
 import { createCamundaClient, type CamundaClient, type CamundaOptions } from '@camunda8/orchestration-cluster-api';
-import { resolveClusterConfig } from './config.ts';
+import { resolveClusterConfig, DEFAULT_PROFILE, getProfileOrModeler } from './config.ts';
+import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
+
+/**
+ * Inform the user once per process about which connection source is being used,
+ * when no explicit profile or environment variable has been configured.
+ */
+let _connectionSourceInfoShown = false;
+
+/** Reset the connection source info flag (for testing). */
+export function resetConnectionSourceInfo(): void {
+  _connectionSourceInfoShown = false;
+}
+
+function notifyConnectionSource(profileFlag?: string): void {
+  if (_connectionSourceInfoShown) return;
+
+  // Only show the note when no explicit profile was provided via flag
+  // and the session is still on the default profile
+  const usingDefault = !profileFlag &&
+    (!c8ctl.activeProfile || c8ctl.activeProfile === DEFAULT_PROFILE);
+  if (!usingDefault) return;
+
+  // Only show the note when no explicitly-configured 'local' profile exists
+  const hasLocalProfile = !!getProfileOrModeler(DEFAULT_PROFILE);
+  if (hasLocalProfile) return;
+
+  _connectionSourceInfoShown = true;
+  const logger = getLogger();
+  if (process.env.CAMUNDA_BASE_URL) {
+    logger.info(`CAMUNDA_BASE_URL is set. Using environment variable configuration (${process.env.CAMUNDA_BASE_URL}).`);
+  } else {
+    logger.info('CAMUNDA_BASE_URL is not set. Falling back to local cluster defaults (http://localhost:8080).');
+    logger.info('Configure a profile: c8ctl add profile local --baseUrl http://localhost:8080');
+  }
+}
 
 /**
  * Create a Camunda 8 cluster client with resolved configuration
@@ -13,6 +48,7 @@ export function createClient(
   profileFlag?: string,
   additionalSdkConfig: Partial<CamundaOptions> = {},
 ): CamundaClient {
+  notifyConnectionSource(profileFlag);
   const config = resolveClusterConfig(profileFlag);
 
   // Build config object for the SDK

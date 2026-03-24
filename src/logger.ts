@@ -41,6 +41,41 @@ export type LogWriter = {
   error(...data: any[]): void;
 };
 
+/**
+ * Detect if an error is a connection/network failure when using the local cluster,
+ * and return an actionable hint for the user if so.
+ */
+function getLocalClusterHint(error?: Error): string | undefined {
+  if (!error) return undefined;
+
+  // Only emit the hint when the active profile is 'local' (the default) or not set
+  if (c8ctl.activeProfile !== undefined && c8ctl.activeProfile !== 'local') return undefined;
+
+  const isConnectionError = isNetworkError(error);
+  if (!isConnectionError) return undefined;
+
+  return 'Hint: Is the local cluster running? Start it with: c8ctl start c8-cluster';
+}
+
+/**
+ * Return true when the error indicates that a TCP connection could not be established.
+ */
+function isNetworkError(error: Error): boolean {
+  const message = error.message || '';
+  // Node.js native fetch surfaces this when the TCP connection is refused
+  if (message.toLowerCase().includes('fetch failed')) return true;
+
+  const anyErr = error as unknown as { code?: string; cause?: { code?: string } };
+  const code = anyErr.code ?? anyErr.cause?.code;
+  if (code) {
+    return ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH', 'ECONNRESET', 'ETIMEDOUT'].includes(code);
+  }
+  // Fetch abort (timeout) is also a connectivity issue
+  if (error.name === 'AbortError') return true;
+
+  return false;
+}
+
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
     console.log(...data);
@@ -146,6 +181,10 @@ export class Logger {
       if (error) {
         this._writeError(`  ${error.message}`);
       }
+      const hint = getLocalClusterHint(error);
+      if (hint) {
+        this._writeError(`  ${hint}`);
+      }
     } else {
       const output: any = { status: 'error', message };
       if (error) {
@@ -153,6 +192,10 @@ export class Logger {
         if (error.stack) {
           output.stack = error.stack;
         }
+      }
+      const hint = getLocalClusterHint(error);
+      if (hint) {
+        output.hint = hint;
       }
       this._writeError(JSON.stringify(output));
     }

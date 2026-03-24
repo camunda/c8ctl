@@ -558,6 +558,9 @@ export function getTargetTypeLabel(conn: Connection): string {
 // Session State Management
 // ============================================================================
 
+/** The default profile used when no profile has been explicitly selected */
+export const DEFAULT_PROFILE = 'local';
+
 /**
  * Load session state from disk and populate c8ctl runtime object
  */
@@ -565,6 +568,8 @@ export function loadSessionState(): SessionState {
   const path = getSessionStatePath();
 
   if (!existsSync(path)) {
+    // No session file: apply the default profile
+    c8ctl.activeProfile = DEFAULT_PROFILE;
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -576,7 +581,8 @@ export function loadSessionState(): SessionState {
     const data = readFileSync(path, 'utf-8');
     const state = JSON.parse(data) as SessionState;
 
-    c8ctl.activeProfile = state.activeProfile === null ? undefined : state.activeProfile;
+    // Fall back to the default profile when none is stored
+    c8ctl.activeProfile = state.activeProfile ?? DEFAULT_PROFILE;
     c8ctl.activeTenant = state.activeTenant === null ? undefined : state.activeTenant;
     c8ctl.outputMode = state.outputMode || 'text';
 
@@ -586,6 +592,7 @@ export function loadSessionState(): SessionState {
       outputMode: c8ctl.outputMode,
     };
   } catch {
+    c8ctl.activeProfile = DEFAULT_PROFILE;
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
