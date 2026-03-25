@@ -16,6 +16,7 @@ Comprehensive examples for all c8ctl operations.
 - [Profile Management](#profile-management)
 - [Session Management](#session-management)
 - [Plugin Management](#plugin-management)
+- [Local Cluster](#local-cluster)
 - [Agent / Programmatic Consumption](#agent--programmatic-consumption)
 
 ---
@@ -815,6 +816,46 @@ c8 list pi
 
 # Switch back to human-readable text
 c8 output text
+```
+
+---
+
+## Local Cluster
+
+### Start a Local Cluster
+
+```bash
+# Start a local Camunda 8 cluster (downloads c8run automatically if needed)
+c8 cluster start
+
+# Start a specific version
+c8 cluster start 8.9.0-alpha5
+
+# Start with debug output (streams raw c8run logs)
+c8 cluster start --debug
+```
+
+### Stop a Local Cluster
+
+```bash
+c8 cluster stop
+```
+
+### Typical Local Development Workflow
+
+```bash
+# Start local cluster
+c8 cluster start
+
+# Set up a local profile
+c8 add profile local --baseUrl=http://localhost:8080
+c8 use profile local
+
+# Deploy and run a process
+c8 run ./my-process.bpmn
+
+# When done, stop the cluster
+c8 cluster stop
 ```
 
 ---
