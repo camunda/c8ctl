@@ -18,7 +18,7 @@ import {
   readdirSync,
   readFileSync,
 } from 'node:fs';
-import { chmod, readFile } from 'node:fs/promises';
+import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -110,9 +110,9 @@ function getPlatformIdentifier() {
   } else if (platform === 'linux') {
     return { platform: 'linux', arch: camundaArch, extension: 'tar.gz', executable: 'c8run' };
   } else if (platform === 'win32') {
-    const logger = getLogger();
-    logger.warn('Native Windows is not supported. Please use WSL (Windows Subsystem for Linux).');
-    return { platform: 'linux', arch: camundaArch, extension: 'tar.gz', executable: 'c8run' };
+    const message = 'Native Windows is not supported. Please run c8ctl under WSL (Windows Subsystem for Linux).';
+    getLogger().error(message);
+    throw new Error(message);
   }
 
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
@@ -161,34 +161,45 @@ async function downloadC8Run(config) {
   }
 
   const totalSize = parseInt(response.headers.get('content-length') || '0');
+
+  if (!response.body) {
+    throw new Error(
+      `Failed to download c8run ${version}: empty response body\n` +
+        `URL: ${downloadUrl}\n` +
+        `Please try again or use a different version.`,
+    );
+  }
+
   const fileStream = createWriteStream(targetFile);
 
   let downloadedSize = 0;
   let lastReportedPercentage = 0;
 
-  if (response.body) {
-    const reader = response.body.getReader();
+  const reader = response.body.getReader();
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-      fileStream.write(value);
-      downloadedSize += value.length;
+    fileStream.write(value);
+    downloadedSize += value.length;
 
-      if (totalSize > 0) {
-        const percentage = Math.floor((downloadedSize / totalSize) * 100);
-        if (percentage >= lastReportedPercentage + 10) {
-          logger.info(
-            `Progress: ${percentage}% (${Math.floor(downloadedSize / 1024 / 1024)} MB / ${Math.floor(totalSize / 1024 / 1024)} MB)`,
-          );
-          lastReportedPercentage = percentage;
-        }
+    if (totalSize > 0) {
+      const percentage = Math.floor((downloadedSize / totalSize) * 100);
+      if (percentage >= lastReportedPercentage + 10) {
+        logger.info(
+          `Progress: ${percentage}% (${Math.floor(downloadedSize / 1024 / 1024)} MB / ${Math.floor(totalSize / 1024 / 1024)} MB)`,
+        );
+        lastReportedPercentage = percentage;
       }
     }
   }
 
-  fileStream.end();
+  await new Promise((resolve, reject) => {
+    fileStream.on('finish', resolve);
+    fileStream.on('error', reject);
+    fileStream.end();
+  });
 
   logger.info(
     `Downloaded and saved to ${targetFile} (${Math.floor(downloadedSize / 1024 / 1024)} MB)`,
@@ -408,6 +419,11 @@ async function startC8Run(config, debug = false) {
     cwd: dirname(binaryPath),
   });
 
+  if (typeof proc.pid !== 'number') {
+    logger.error('Failed to start cluster process: no PID received from c8run. Check logs for details.');
+    process.exit(1);
+  }
+
   let startupOutput = '';
 
   const handleOutput = (chunk, stream) => {
@@ -427,9 +443,26 @@ async function startC8Run(config, debug = false) {
   });
 
   // Wait for the c8run Go binary to exit — it spawns Java services then exits
-  await new Promise((resolve) => {
-    proc.on('close', resolve);
+  let exitCode = null;
+  let exitSignal = null;
+
+  await new Promise((resolve, reject) => {
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn c8run: ${err.message}`));
+    });
+    proc.on('close', (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      resolve();
+    });
   });
+
+  if (exitCode !== 0) {
+    logger.error(
+      `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
+    );
+    process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
+  }
 
   writeFileSync(pidFile, proc.pid.toString());
   writeFileSync(versionFile, config.version);
@@ -440,9 +473,6 @@ async function startC8Run(config, debug = false) {
 
   if (isReady) {
     printSummary(startupOutput, config.version);
-    if (debug) {
-      process.exit(0);
-    }
   } else {
     logger.error(
       'Cluster failed to start within timeout. Check logs for details.',
