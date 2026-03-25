@@ -116,6 +116,20 @@ function getPlatformIdentifier() {
   throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
 
+/**
+ * Validate a version spec string to prevent path traversal attacks.
+ * Allows only alphanumeric characters, dots, hyphens, and underscores,
+ * and explicitly rejects double-dot sequences.
+ */
+function validateVersionSpec(versionSpec) {
+  if (!/^(?!.*\.\.)([0-9A-Za-z._-]+)$/.test(versionSpec)) {
+    throw new Error(
+      `Invalid version string: "${versionSpec}". ` +
+        'Version must contain only alphanumeric characters, dots, hyphens, and underscores.',
+    );
+  }
+}
+
 async function resolveVersion(versionSpec) {
   if (versionSpec === 'latest' || versionSpec === 'stable') {
     return '8.8';
@@ -648,6 +662,12 @@ export const commands = {
     }
 
     const versionSpec = parsed.version || 'stable';
+    try {
+      validateVersionSpec(versionSpec);
+    } catch (error) {
+      logger.error(error.message);
+      process.exit(1);
+    }
     const version = await resolveVersion(versionSpec);
     const config = { cacheDir: getCacheDir(), version };
 
