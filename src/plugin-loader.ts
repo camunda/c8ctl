@@ -19,6 +19,7 @@ interface PluginMetadata {
   commands?: {
     [commandName: string]: {
       description?: string;
+      examples?: { command: string; description: string }[];
     };
   };
 }
@@ -286,6 +287,7 @@ export interface PluginCommandInfo {
   commandName: string;
   pluginName: string;
   description?: string;
+  examples?: { command: string; description: string }[];
 }
 
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
@@ -297,6 +299,7 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
         commandName,
         pluginName: plugin.name,
         description: plugin.metadata?.commands?.[commandName]?.description,
+        examples: plugin.metadata?.commands?.[commandName]?.examples,
       });
     }
   }
@@ -309,4 +312,11 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
  */
 export function clearLoadedPlugins(): void {
   loadedPlugins.clear();
+}
+
+/**
+ * Register a plugin programmatically (for testing only)
+ */
+export function _registerPluginForTesting(name: string, commands: PluginCommands, metadata?: PluginMetadata): void {
+  loadedPlugins.set(name, { name, commands, metadata });
 }

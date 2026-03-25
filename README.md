@@ -570,7 +570,7 @@ npm run test:unit
 
 Integration tests require a running Camunda 8 instance at `http://localhost:8080`.
 
-1. Start a local Camunda 8 instance (e.g., using c8run)
+1. Start a local Camunda 8 instance (e.g., using `c8ctl cluster start`)
 2. Run: `npm run test:integration`
 
 ## Development
