@@ -6,6 +6,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { getVersion, showVersion, showHelp, showVerbResources, showCommandHelp } from '../../src/commands/help.ts';
 import { c8ctl } from '../../src/runtime.ts';
+import { clearLoadedPlugins, _registerPluginForTesting } from '../../src/plugin-loader.ts';
 
 describe('Help Module', () => {
   let consoleLogSpy: any[];
@@ -613,5 +614,98 @@ describe('Help Module', () => {
     const parsed = JSON.parse(jsonSpy[0]);
     assert.strictEqual(parsed.command, 'list');
     assert.ok(Array.isArray(parsed.agentFlags), 'should include agentFlags');
+  });
+
+  // ── Plugin Examples in Help ───────────────────────────────────────────────
+
+  test('showHelp renders plugin examples in text mode', () => {
+    clearLoadedPlugins();
+    _registerPluginForTesting(
+      'test-plugin',
+      { 'test-cmd': async () => {} },
+      {
+        name: 'test-plugin',
+        commands: {
+          'test-cmd': {
+            description: 'A test command',
+            examples: [
+              { command: 'c8ctl test-cmd start', description: 'Start the thing' },
+              { command: 'c8ctl test-cmd stop', description: 'Stop the thing' },
+            ],
+          },
+        },
+      },
+    );
+
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl test-cmd start'), 'should include plugin example command');
+    assert.ok(output.includes('Start the thing'), 'should include plugin example description');
+    assert.ok(output.includes('c8ctl test-cmd stop'), 'should include second plugin example');
+    assert.ok(output.includes('Plugin Commands'), 'should include Plugin Commands section');
+    assert.ok(output.includes('A test command'), 'should include plugin command description');
+
+    clearLoadedPlugins();
+  });
+
+  test('showHelp JSON includes plugin examples', () => {
+    clearLoadedPlugins();
+    _registerPluginForTesting(
+      'test-plugin',
+      { 'test-cmd': async () => {} },
+      {
+        name: 'test-plugin',
+        commands: {
+          'test-cmd': {
+            description: 'A test command',
+            examples: [
+              { command: 'c8ctl test-cmd run', description: 'Run it' },
+            ],
+          },
+        },
+      },
+    );
+
+    c8ctl.outputMode = 'json';
+    const jsonSpy: string[] = [];
+    const originalConsoleLog = console.log;
+    console.log = (...args: any[]) => { jsonSpy.push(args.join(' ')); };
+
+    showHelp();
+
+    console.log = originalConsoleLog;
+    const parsed = JSON.parse(jsonSpy[0]);
+    const pluginCmd = parsed.commands.find((c: any) => c.verb === 'test-cmd');
+    assert.ok(pluginCmd, 'JSON commands should include plugin command');
+    assert.ok(Array.isArray(pluginCmd.examples), 'plugin command should have examples array');
+    assert.strictEqual(pluginCmd.examples.length, 1);
+    assert.strictEqual(pluginCmd.examples[0].command, 'c8ctl test-cmd run');
+
+    clearLoadedPlugins();
+  });
+
+  test('showHelp does not render plugin examples section when no examples', () => {
+    clearLoadedPlugins();
+    _registerPluginForTesting(
+      'no-examples',
+      { 'bare-cmd': async () => {} },
+      {
+        name: 'no-examples',
+        commands: { 'bare-cmd': { description: 'Bare command' } },
+      },
+    );
+
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    // The examples section exists, but no extra plugin examples should be injected
+    // Count occurrences of 'bare-cmd' — should appear in Plugin Commands but not in Examples
+    const examplesIdx = output.indexOf('Examples:');
+    const forDetailedIdx = output.indexOf('For detailed help');
+    const examplesSection = output.slice(examplesIdx, forDetailedIdx);
+    assert.ok(!examplesSection.includes('bare-cmd'), 'plugin without examples should not appear in examples section');
+
+    clearLoadedPlugins();
   });
 });

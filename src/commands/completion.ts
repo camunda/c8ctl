@@ -8,6 +8,7 @@ import { getLogger } from '../logger.ts';
  * Generate bash completion script
  */
 function generateBashCompletion(): string {
+
   return `# c8ctl bash completion
 _c8ctl_completions() {
   local cur prev words cword
@@ -20,7 +21,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output completion help"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output completion help cluster"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -47,7 +48,8 @@ _c8ctl_completions() {
   local which_resources="profile"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins"
+  local cluster_resources="start stop"
+  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force"
@@ -136,6 +138,9 @@ _c8ctl_completions() {
         help)
           COMPREPLY=( \$(compgen -W "\${help_resources}" -- "\${cur}") )
           ;;
+        cluster)
+          COMPREPLY=( \$(compgen -W "\${cluster_resources}" -- "\${cur}") )
+          ;;
         deploy|run|watch)
           # Complete with files
           COMPREPLY=( \$(compgen -f -- "\${cur}") )
@@ -162,6 +167,7 @@ complete -F _c8ctl_completions c8
  * Generate zsh completion script
  */
 function generateZshCompletion(): string {
+
   return `#compdef c8ctl c8
 
 _c8ctl() {
@@ -197,6 +203,7 @@ _c8ctl() {
     'output:Set output format'
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
+    'cluster:Manage local Camunda 8 cluster'
   )
 
   flags=(
@@ -483,6 +490,14 @@ _c8ctl() {
             'profile:Alias for profile management help'
             'plugin:Show plugin management help'
             'plugins:Alias for plugin management help'
+            'cluster:Show cluster command help'
+          )
+          _describe 'resource' resources
+          ;;
+        cluster)
+          resources=(
+            'start:Start local Camunda 8 cluster'
+            'stop:Stop local Camunda 8 cluster'
           )
           _describe 'resource' resources
           ;;
@@ -686,6 +701,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed
 complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
+complete -c c8 -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
 
 # Resources for 'list' command
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'
@@ -926,6 +943,14 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plu
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'Show cluster command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'Show cluster command help'
+
+# Resources for 'cluster' command
+complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
+complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
+complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
 `;
 }
 
