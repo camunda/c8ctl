@@ -490,7 +490,7 @@ _c8ctl() {
             'profile:Alias for profile management help'
             'plugin:Show plugin management help'
             'plugins:Alias for plugin management help'
-            'cluster:Show cluster command help'
+            'cluster:No detailed help; use c8ctl help for general usage'
           )
           _describe 'resource' resources
           ;;
@@ -943,8 +943,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plu
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'Show cluster command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'Show cluster command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
 
 # Resources for 'cluster' command
 complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
