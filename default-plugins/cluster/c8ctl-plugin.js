@@ -479,18 +479,15 @@ async function startC8Run(config, debug = false) {
     process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
   }
 
-  writeFileSync(markerFile, 'running');
-  writeFileSync(versionFile, config.version);
-
   logger.info('Cluster process launched, waiting for cluster to be ready...');
 
   const isReady = await waitForClusterReady();
 
   if (isReady) {
+    writeFileSync(markerFile, 'running');
+    writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
   } else {
-    rmSync(markerFile, { force: true });
-    rmSync(versionFile, { force: true });
     logger.error(
       'Cluster failed to start within timeout. Check logs for details.',
     );
@@ -503,7 +500,7 @@ async function stopC8Run(config) {
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
-  const markerExists = existsSync(markerFile) || existsSync(versionFile);
+  const markerExists = existsSync(markerFile);
   const installedVersions = existsSync(config.cacheDir)
     ? readdirSync(config.cacheDir, { withFileTypes: true })
         .filter(
@@ -580,6 +577,15 @@ async function stopC8Run(config) {
     }
   }
 
+  // Always clean up markers, even if stop failed — a stale marker
+  // would permanently block future starts.
+  if (existsSync(markerFile)) {
+    rmSync(markerFile);
+  }
+  if (existsSync(versionFile)) {
+    rmSync(versionFile);
+  }
+
   if (attempted === 0) {
     throw new Error(
       'Could not find an installed c8run binary to execute stop.',
@@ -588,13 +594,6 @@ async function stopC8Run(config) {
 
   if (!hadSuccessfulStop && lastError) {
     throw lastError;
-  }
-
-  if (existsSync(markerFile)) {
-    rmSync(markerFile);
-  }
-  if (existsSync(versionFile)) {
-    rmSync(versionFile);
   }
 
   logger.info('Cluster stopped.');
