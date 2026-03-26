@@ -130,6 +130,12 @@ export function validateVersionSpec(versionSpec) {
   }
 }
 
+const VERSION_ALIASES = new Set(['latest', 'stable', 'alpha', 'latest-alpha']);
+
+function isVersionAlias(versionSpec) {
+  return VERSION_ALIASES.has(versionSpec);
+}
+
 async function resolveVersion(versionSpec) {
   if (versionSpec === 'latest' || versionSpec === 'stable') {
     // e.g., linking to https://downloads.camunda.cloud/release/camunda/c8run/8.8/, which always has latest stable. Needs updating when 8.9 stable is released.
@@ -318,8 +324,32 @@ function getC8RunBinaryPath(config) {
   return binaryPath;
 }
 
+function purgeInstalledVersion(config) {
+  const logger = getLogger();
+  const installDir = join(config.cacheDir, `c8run-${config.version}`);
+  const platformInfo = getPlatformIdentifier();
+  const archiveFile = join(
+    config.cacheDir,
+    `c8run-${config.version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`,
+  );
+
+  if (existsSync(installDir)) {
+    logger.info(`Removing cached non-pinned installation for ${config.version} since a new version might have been released, ensuring you are on latest...`);
+    rmSync(installDir, { recursive: true });
+  }
+  if (existsSync(archiveFile)) {
+    rmSync(archiveFile);
+  }
+}
+
 async function ensureC8RunInstalled(config) {
   const logger = getLogger();
+
+  // When a version alias (e.g. "stable", "alpha") was used, always
+  // re-download because the actual artifact behind the alias may have changed.
+  if (config.isAlias) {
+    purgeInstalledVersion(config);
+  }
 
   if (isC8RunInstalled(config)) {
     logger.info(`c8run ${config.version} is already installed.`);
@@ -332,6 +362,11 @@ async function ensureC8RunInstalled(config) {
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   await extractArchive(archivePath, installDir);
+
+  // Clean up the downloaded archive to save disk space
+  if (existsSync(archivePath)) {
+    rmSync(archivePath);
+  }
 
   const binaryPath = getC8RunBinaryPath(config);
   await chmod(binaryPath, 0o755);
@@ -688,7 +723,7 @@ export const commands = {
       process.exit(1);
     }
     const version = await resolveVersion(versionSpec);
-    const config = { cacheDir: getCacheDir(), version };
+    const config = { cacheDir: getCacheDir(), version, isAlias: isVersionAlias(versionSpec) };
 
     if (parsed.subcommand === 'start') {
       try {
