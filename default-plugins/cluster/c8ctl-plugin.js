@@ -63,7 +63,7 @@ function getLogger() {
 // Configuration
 // ---------------------------------------------------------------------------
 
-const PID_MARKER_FILE = 'cluster.pid';
+const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
 
 function getCacheDir() {
@@ -409,10 +409,10 @@ async function startC8Run(config, debug = false) {
     throw new Error(`c8run binary not found at ${binaryPath}`);
   }
 
-  const pidFile = join(config.cacheDir, PID_MARKER_FILE);
+  const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
-  if (existsSync(pidFile)) {
+  if (existsSync(markerFile)) {
     logger.warn('A cluster appears to be running already.');
     if (existsSync(versionFile)) {
       const runningVersion = readFileSync(versionFile, 'utf-8').trim();
@@ -479,7 +479,7 @@ async function startC8Run(config, debug = false) {
     process.exit(typeof exitCode === 'number' && exitCode > 0 ? exitCode : 1);
   }
 
-  writeFileSync(pidFile, proc.pid.toString());
+  writeFileSync(markerFile, 'running');
   writeFileSync(versionFile, config.version);
 
   logger.info('Cluster process launched, waiting for cluster to be ready...');
@@ -489,7 +489,7 @@ async function startC8Run(config, debug = false) {
   if (isReady) {
     printSummary(startupOutput, config.version);
   } else {
-    rmSync(pidFile, { force: true });
+    rmSync(markerFile, { force: true });
     rmSync(versionFile, { force: true });
     logger.error(
       'Cluster failed to start within timeout. Check logs for details.',
@@ -500,10 +500,10 @@ async function startC8Run(config, debug = false) {
 
 async function stopC8Run(config) {
   const logger = getLogger();
-  const pidFile = join(config.cacheDir, PID_MARKER_FILE);
+  const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
-  const markerExists = existsSync(pidFile) || existsSync(versionFile);
+  const markerExists = existsSync(markerFile) || existsSync(versionFile);
   const installedVersions = existsSync(config.cacheDir)
     ? readdirSync(config.cacheDir, { withFileTypes: true })
         .filter(
@@ -590,8 +590,8 @@ async function stopC8Run(config) {
     throw lastError;
   }
 
-  if (existsSync(pidFile)) {
-    rmSync(pidFile);
+  if (existsSync(markerFile)) {
+    rmSync(markerFile);
   }
   if (existsSync(versionFile)) {
     rmSync(versionFile);
