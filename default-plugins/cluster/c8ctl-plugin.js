@@ -614,7 +614,7 @@ function parsePluginArgs(args) {
       const next = args[i + 1];
       if (!next || next.startsWith('-')) {
         throw new Error(
-          'Missing value for --c8-version. Please provide a version, for example: c8ctl cluster start 8.6.0 --c8-version 8.6.0'
+          'Missing value for --c8-version. Please provide a version, for example: c8ctl cluster start --c8-version 8.6.0'
         );
       }
       result.version = next;
