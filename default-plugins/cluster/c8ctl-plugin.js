@@ -132,10 +132,12 @@ export function validateVersionSpec(versionSpec) {
 
 async function resolveVersion(versionSpec) {
   if (versionSpec === 'latest' || versionSpec === 'stable') {
+    // e.g., linking to https://downloads.camunda.cloud/release/camunda/c8run/8.8/, which always has latest stable. Needs updating when 8.9 stable is released.
     return '8.8';
   }
   if (versionSpec === 'alpha' || versionSpec === 'latest-alpha') {
-    return '8.9-alpha';
+    // e.g., linking to https://downloads.camunda.cloud/release/camunda/c8run/8.9/, which always has latest alpha. Needs updating when 8.9 stable is released.
+    return '8.9';
   }
   return versionSpec;
 }
