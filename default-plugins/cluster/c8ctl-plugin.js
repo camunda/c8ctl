@@ -34,7 +34,7 @@ export const metadata = {
       description:
         'Manage local Camunda 8 cluster — use "c8ctl cluster start [version]" or "c8ctl cluster stop"',
       examples: [
-        { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
+        { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest alpha)' },
         { command: 'c8ctl cluster start 8.9.0-alpha5', description: 'Start a specific version' },
         { command: 'c8ctl cluster stop', description: 'Stop the running cluster' },
       ],
@@ -704,18 +704,18 @@ export const commands = {
       console.log('  stop    Stop the running local Camunda 8 cluster');
       console.log('');
       console.log('Options:');
-      console.log('  <version>              Camunda version to use (default: stable / 8.8)');
+      console.log('  <version>              Camunda version to use (default: alpha / 8.9)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
       console.log('Examples:');
-      console.log('  c8ctl cluster start              # Start latest stable (8.8)');
+      console.log('  c8ctl cluster start              # Start latest alpha (8.9)');
       console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
       console.log('  c8ctl cluster stop');
       return;
     }
 
-    const versionSpec = parsed.version || 'stable';
+    const versionSpec = parsed.version || 'alpha';
     try {
       validateVersionSpec(versionSpec);
     } catch (error) {
