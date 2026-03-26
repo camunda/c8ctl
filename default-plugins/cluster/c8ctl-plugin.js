@@ -568,6 +568,7 @@ async function stopC8Run(config) {
 
     if (exitCode === 0 || (exitCode === null && !exitSignal)) {
       hadSuccessfulStop = true;
+      break;
     } else if (exitCode === null && exitSignal) {
       lastError = new Error(
         `Stop command terminated by signal ${exitSignal}`,
