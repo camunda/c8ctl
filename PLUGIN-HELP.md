@@ -87,6 +87,10 @@ export const metadata = {
   commands: {
     analyze: {
       description: 'Analyze BPMN processes for best practices',
+      examples: [
+        { command: 'c8ctl analyze --all', description: 'Analyze all deployed processes' },
+        { command: 'c8ctl analyze --id=myProcess', description: 'Analyze a specific process' },
+      ],
     },
     optimize: {
       description: 'Optimize process definitions',
@@ -124,6 +128,10 @@ export const metadata = {
   commands: {
     'deploy-all': {
       description: 'Deploy all resources in a directory',
+      examples: [
+        { command: 'c8ctl deploy-all ./src', description: 'Deploy resources from ./src' },
+        { command: 'c8ctl deploy-all ./src --dry-run', description: 'Preview without deploying' },
+      ],
     },
     status: {
       description: 'Check cluster status',
@@ -175,6 +183,35 @@ Plugin Commands:
   optimize                Optimize process definitions
   deploy-all              Deploy all resources in a directory
   status                  Check cluster status
+
+Examples:
+  ...
+  c8ctl analyze --all                 Analyze all deployed processes
+  c8ctl analyze --id=myProcess        Analyze a specific process
+  c8ctl deploy-all ./src              Deploy resources from ./src
+  c8ctl deploy-all ./src --dry-run    Preview without deploying
+```
+
+### JSON Help Output
+
+In JSON mode (`c8ctl help --output json`), plugin commands appear in the `commands` array with their `examples` included:
+
+```json
+{
+  "commands": [
+    {
+      "verb": "analyze",
+      "resource": "",
+      "resources": [],
+      "description": "Analyze BPMN processes for best practices",
+      "mutating": false,
+      "examples": [
+        { "command": "c8ctl analyze --all", "description": "Analyze all deployed processes" },
+        { "command": "c8ctl analyze --id=myProcess", "description": "Analyze a specific process" }
+      ]
+    }
+  ]
+}
 ```
 
 ### Source-Aware Upgrade and Downgrade
@@ -221,6 +258,10 @@ interface PluginMetadata {
   commands?: {
     [commandName: string]: {
       description?: string;  // Command description (shown in help)
+      examples?: {           // Usage examples (shown in help Examples section)
+        command: string;     // Example command string
+        description: string; // Brief description of what the example does
+      }[];
     };
   };
 }
@@ -229,11 +270,12 @@ interface PluginMetadata {
 ## Best Practices
 
 1. **Always provide descriptions**: Helps users discover and understand your commands
-2. **Keep descriptions concise**: Aim for one line (< 60 characters)
-3. **Use imperative verbs**: Start with action words (Analyze, Deploy, Check, etc.)
-4. **Match command names**: Ensure metadata command names match exported functions
-5. **Use unique command names**: Plugin commands cannot override built-in commands (see [Command Precedence](#command-precedence))
-6. **TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't support type stripping in `node_modules`. Transpile TypeScript to JavaScript before publishing your plugin.
+2. **Add usage examples**: The `examples` array in metadata shows up in `c8ctl help` and JSON help output, helping users understand how to use your commands
+3. **Keep descriptions concise**: Aim for one line (< 60 characters)
+4. **Use imperative verbs**: Start with action words (Analyze, Deploy, Check, etc.)
+5. **Match command names**: Ensure metadata command names match exported functions
+6. **Use unique command names**: Plugin commands cannot override built-in commands (see [Command Precedence](#command-precedence))
+7. **TypeScript plugins**: The `c8ctl-plugin.js` entry point must be JavaScript. Node.js doesn't support type stripping in `node_modules`. Transpile TypeScript to JavaScript before publishing your plugin.
 
 ## Command Precedence
 
@@ -302,7 +344,10 @@ export const commands = {
 export const metadata = {
   commands: {
     myCommand: {
-      description: 'Description shown in help'
+      description: 'Description shown in help',
+      examples: [
+        { command: 'c8ctl myCommand --flag', description: 'Example with flag' },
+      ],
     }
   }
 };

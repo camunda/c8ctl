@@ -22,31 +22,6 @@ _Full transparency_:
 this cli is also a pilot-coding experiment, practicing [Agentic Engineering](https://addyosmani.com/blog/agentic-engineering/).  
 Guided by humans, the codebase is (mostly) built by your friendly neighborhood LLM, fully dogfooding the Human-in-the-Loop pattern.
 
-## Architecture
-
-### Core Components
-
-- **Logger** (`src/logger.ts`): Handles output in text or JSON mode
-- **Config** (`src/config.ts`): Manages profiles, session state, and credential resolution
-- **Client** (`src/client.ts`): Factory for creating Camunda 8 SDK clients
-- **Commands** (`src/commands/`): Domain-specific command handlers
-
-### Credential Resolution Order
-
-1. `--profile` flag (one-off override, supports both c8ctl and modeler profiles)
-2. Active profile from session state
-3. Environment variables (`CAMUNDA_*`)
-4. Localhost fallback (`http://localhost:8080/v2`)
-
-**Note**: Modeler profiles can be used anywhere a c8ctl profile is expected by using the `modeler:` prefix (e.g., `--profile=modeler:Local Dev` or `c8 use profile modeler:Cloud Cluster`).
-
-### Tenant Resolution Order
-
-1. Active tenant from session state
-2. Default tenant from active profile
-3. `CAMUNDA_DEFAULT_TENANT_ID` environment variable
-4. `<default>` tenant
-
 ## Installation
 
 ### Requirements
@@ -536,6 +511,13 @@ c8ctl help list     # → JSON for specific command
 
 ---
 
+### Core Components
+
+- **Logger** (`src/logger.ts`): Handles output in text or JSON mode
+- **Config** (`src/config.ts`): Manages profiles, session state, and credential resolution
+- **Client** (`src/client.ts`): Factory for creating Camunda 8 SDK clients
+- **Commands** (`src/commands/`): Domain-specific command handlers
+
 ### Command Structure
 
 ```shell
@@ -589,7 +571,7 @@ npm run test:unit
 
 Integration tests require a running Camunda 8 instance at `http://localhost:8080`.
 
-1. Start a local Camunda 8 instance (e.g., using c8run)
+1. Start a local Camunda 8 instance (e.g., using `c8ctl cluster start`)
 2. Run: `npm run test:integration`
 
 ## Development

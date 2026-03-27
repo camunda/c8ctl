@@ -614,4 +614,5 @@ describe('Help Module', () => {
     assert.strictEqual(parsed.command, 'list');
     assert.ok(Array.isArray(parsed.agentFlags), 'should include agentFlags');
   });
+
 });

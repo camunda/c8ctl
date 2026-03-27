@@ -50,6 +50,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'help',      resource: '[command]',        resources: [], description: 'Show help', mutating: false },
       ...pluginCommandsInfo.map(cmd => ({
         verb: cmd.commandName, resource: '', resources: [], description: cmd.description || '', mutating: false,
+        examples: cmd.examples || [],
       })),
     ],
     resourceAliases: {
@@ -149,6 +150,13 @@ export function showHelp(): void {
     for (const cmd of pluginCommandsInfo) {
       const desc = cmd.description ? `  ${cmd.description}` : '';
       pluginSection += `\n  ${cmd.commandName.padEnd(20)}${desc}`;
+    }
+  }
+
+  let pluginExamples = '';
+  for (const cmd of pluginCommandsInfo) {
+    for (const ex of cmd.examples ?? []) {
+      pluginExamples += `\n  ${ex.command.padEnd(35)}${ex.description}`;
     }
   }
   
@@ -302,7 +310,7 @@ Examples:
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
   c8ctl upgrade plugin my-plugin 1.2.3  Upgrade plugin to a specific version (source-aware)
   c8ctl sync plugin                  Synchronize plugins
-  c8ctl completion bash              Generate bash completion script
+  c8ctl completion bash              Generate bash completion script${pluginExamples}
 
 For detailed help on specific commands with all available flags:
   c8ctl help list                    Show all list resources and their flags
