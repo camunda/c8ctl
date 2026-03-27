@@ -352,3 +352,49 @@ describe('Cluster Plugin – purgeInstalledVersion', () => {
     assert.doesNotThrow(() => plugin.purgeInstalledVersion(config));
   });
 });
+
+// ---------------------------------------------------------------------------
+// ensureC8RunInstalled
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – ensureC8RunInstalled', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns without error when binary is already installed', async () => {
+    const config = { cacheDir: tempDir, version: '8.8', isAlias: false };
+    // Create the binary structure so isC8RunInstalled returns true
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    // Should return without attempting a download
+    await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
+  });
+
+  test('purges install dir when version is an alias before checking', async () => {
+    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    // Set up a binary so purge has something to remove
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    assert.strictEqual(plugin.isC8RunInstalled(config), true, 'should be installed before test');
+
+    // When isAlias=true, ensureC8RunInstalled calls purgeInstalledVersion then downloads.
+    // Downloading in a unit test would make a real HTTP request, so we test the purge
+    // side-effect separately using purgeInstalledVersion (the function ensureC8RunInstalled delegates to).
+    plugin.purgeInstalledVersion(config);
+
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be purged');
+    assert.strictEqual(plugin.isC8RunInstalled(config), false, 'should not be installed after purge');
+  });
+});

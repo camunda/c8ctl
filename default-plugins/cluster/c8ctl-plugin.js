@@ -24,6 +24,30 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
+// Version aliases (loaded from package.json c8ctl.versionAliases)
+// ---------------------------------------------------------------------------
+
+let _versionAliases = {};
+try {
+  const _pluginPackageJson = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
+  );
+  _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
+} catch (err) {
+  // Fall back to empty aliases if package.json is missing or malformed; plugin continues without alias support
+  console.error(`[cluster plugin] Warning: Failed to load version aliases from package.json, using defaults: ${err}`);
+}
+const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
+
+function isVersionAlias(versionSpec) {
+  return VERSION_ALIASES.has(versionSpec);
+}
+
+async function resolveVersion(versionSpec) {
+  return _versionAliases[versionSpec] ?? versionSpec;
+}
+
+// ---------------------------------------------------------------------------
 // Plugin metadata
 // ---------------------------------------------------------------------------
 
@@ -130,26 +154,6 @@ export function validateVersionSpec(versionSpec) {
         'Version must contain only alphanumeric characters, dots, hyphens, and underscores.',
     );
   }
-}
-
-let _versionAliases = {};
-try {
-  const _pluginPackageJson = JSON.parse(
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
-  );
-  _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
-} catch (err) {
-  // Fall back to empty aliases if package.json is missing or malformed; plugin continues without alias support
-  console.error(`[cluster plugin] Warning: Failed to load version aliases from package.json, using defaults: ${err}`);
-}
-const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
-
-function isVersionAlias(versionSpec) {
-  return VERSION_ALIASES.has(versionSpec);
-}
-
-async function resolveVersion(versionSpec) {
-  return _versionAliases[versionSpec] ?? versionSpec;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +350,7 @@ export function purgeInstalledVersion(config) {
   }
 }
 
-async function ensureC8RunInstalled(config) {
+export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
   // When a version alias (e.g. "stable", "alpha") was used, always
