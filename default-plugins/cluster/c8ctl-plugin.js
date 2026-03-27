@@ -43,7 +43,7 @@ function isVersionAlias(versionSpec) {
   return VERSION_ALIASES.has(versionSpec);
 }
 
-async function resolveVersion(versionSpec) {
+function resolveVersion(versionSpec) {
   return _versionAliases[versionSpec] ?? versionSpec;
 }
 
@@ -730,7 +730,7 @@ export const commands = {
       logger.error(error.message);
       process.exit(1);
     }
-    const version = await resolveVersion(versionSpec);
+    const version = resolveVersion(versionSpec);
     const config = { cacheDir: getCacheDir(), version, isAlias: isVersionAlias(versionSpec) };
 
     if (parsed.subcommand === 'start') {
