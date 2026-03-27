@@ -7,17 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
-    runs-on: ubuntu-latest
+  unit-test:
+    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
         node: [22, 24]
-        camunda: ['8.8', '8.9']
-    
+        os: [ubuntu-latest, macos-latest]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,11 +34,37 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+  integration-test:
+    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+        camunda: ['8.8', '8.9']
+        os: [ubuntu-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Start Camunda ${{ matrix.camunda }} with Docker Compose
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose up -d
-          
+
       - name: Wait for Camunda to be ready
+        shell: bash
         run: |
           echo "Waiting for Camunda at localhost:8080..."
           # First wait for topology endpoint
@@ -51,9 +77,10 @@ jobs:
             sleep 5
           done
           
-          # Then wait an additional 30 seconds for broker to fully initialize
-          echo "Waiting additional time for broker to initialize..."
-          sleep 30
+          # # Then wait an additional 30 seconds for broker to fully initialize
+          # echo "Waiting additional time for broker to initialize..."
+          # # let's try removing this and rely on topology detecting health instead
+          # sleep 30 
           
           # Verify we can actually deploy
           echo "Testing deployment capability..."
