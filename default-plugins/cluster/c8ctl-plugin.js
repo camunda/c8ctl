@@ -140,7 +140,7 @@ try {
   _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
 } catch (err) {
   // Fall back to empty aliases if package.json is missing or malformed
-  console.error(`[cluster plugin] Warning: could not load version aliases from package.json: ${err.message}`);
+  console.error(`[cluster plugin] Warning: could not load version aliases from package.json: ${err}`);
 }
 const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
 

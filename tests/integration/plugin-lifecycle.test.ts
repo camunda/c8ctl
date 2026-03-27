@@ -838,8 +838,6 @@ describe('Plugin help includes examples from plugin metadata', () => {
   const cliEnv = { ...process.env, C8CTL_DATA_DIR: dataDir };
   const pluginDir = join(tmpdir(), `plugin-help-test-plugin-${process.pid}`);
   const pluginName = 'help-test-plugin';
-  const pluginsDir = join(dataDir, 'plugins');
-  const nodeModulesPluginPath = join(pluginsDir, 'node_modules', pluginName);
   const PLUGIN_TEST_TIMEOUT = 10000;
 
   before(() => {
@@ -869,20 +867,23 @@ export const commands = {
 `,
     );
 
-    execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginDir}`], {
-      cwd: process.cwd(), stdio: 'pipe', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
-    });
+    try {
+      execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginDir}`], {
+        cwd: process.cwd(), stdio: 'pipe', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
+      });
+    } catch (err: any) {
+      throw new Error(`Failed to load plugin: ${err.stdout || ''}${err.stderr || ''}`);
+    }
   });
 
   after(() => {
     try {
-      execSync(`node src/index.ts unload plugin ${pluginName}`, {
+      execFileSync('node', ['src/index.ts', 'unload', 'plugin', pluginName], {
         cwd: process.cwd(), stdio: 'ignore', env: cliEnv,
       });
     } catch { /* ignore */ }
     if (existsSync(pluginDir)) rmSync(pluginDir, { recursive: true, force: true });
     if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true });
-    if (existsSync(nodeModulesPluginPath)) rmSync(nodeModulesPluginPath, { recursive: true, force: true });
   });
 
   test('help output includes plugin example commands and descriptions', () => {
