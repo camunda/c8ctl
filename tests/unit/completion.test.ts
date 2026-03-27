@@ -72,6 +72,10 @@ describe('Completion Module', () => {
     assert.ok(output.includes('process-instance'));
     assert.ok(output.includes('user-task'));
     assert.ok(output.includes('incident'));
+
+    // Check for plugin commands
+    assert.ok(output.includes('cluster'), 'Should include cluster verb');
+    assert.ok(output.includes('"start stop"'), 'Should include cluster start/stop subcommands');
   });
 
   test('generates zsh completion script', () => {
@@ -96,6 +100,11 @@ describe('Completion Module', () => {
     // Check for flags
     assert.ok(output.includes('--profile[Use specific profile]'));
     assert.ok(output.includes('--help[Show help]'));
+
+    // Check for plugin commands
+    assert.ok(output.includes("'cluster:Manage local Camunda 8 cluster'"), 'Should include cluster verb');
+    assert.ok(output.includes("'start:Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
+    assert.ok(output.includes("'stop:Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
   });
 
   test('generates fish completion script', () => {
@@ -117,6 +126,11 @@ describe('Completion Module', () => {
     // Check for flags
     assert.ok(output.includes('-s h -l help'));
     assert.ok(output.includes('-l profile'));
+
+    // Check for plugin commands
+    assert.ok(output.includes("'cluster' -d 'Manage local Camunda 8 cluster'"), 'Should include cluster verb');
+    assert.ok(output.includes("'start' -d 'Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
+    assert.ok(output.includes("'stop' -d 'Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
   });
 
   test('handles missing shell argument', () => {

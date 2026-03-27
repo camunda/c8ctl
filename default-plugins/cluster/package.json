@@ -1,0 +1,16 @@
+{
+  "name": "c8ctl-plugin-cluster",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl plugin to download, start, and stop a local Camunda 8 cluster",
+  "keywords": ["c8ctl", "c8ctl-plugin", "cluster", "camunda"],
+  "main": "c8ctl-plugin.js",
+  "c8ctl": {
+    "versionAliases": {
+      "latest": "8.8",
+      "stable": "8.8",
+      "alpha": "8.9",
+      "latest-alpha": "8.9"
+    }
+  }
+}
