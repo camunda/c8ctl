@@ -314,9 +314,4 @@ export function clearLoadedPlugins(): void {
   loadedPlugins.clear();
 }
 
-/**
- * Register a plugin programmatically (for testing only)
- */
-export function _registerPluginForTesting(name: string, commands: PluginCommands, metadata?: PluginMetadata): void {
-  loadedPlugins.set(name, { name, commands, metadata });
-}
+

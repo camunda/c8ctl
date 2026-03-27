@@ -21,6 +21,7 @@ import {
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Plugin metadata
@@ -65,6 +66,7 @@ function getLogger() {
 
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
+const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
 
 function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
@@ -130,22 +132,24 @@ export function validateVersionSpec(versionSpec) {
   }
 }
 
-const VERSION_ALIASES = new Set(['latest', 'stable', 'alpha', 'latest-alpha']);
+let _versionAliases = {};
+try {
+  const _pluginPackageJson = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
+  );
+  _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
+} catch (err) {
+  // Fall back to empty aliases if package.json is missing or malformed
+  console.error(`[cluster plugin] Warning: could not load version aliases from package.json: ${err.message}`);
+}
+const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
 
 function isVersionAlias(versionSpec) {
   return VERSION_ALIASES.has(versionSpec);
 }
 
 async function resolveVersion(versionSpec) {
-  if (versionSpec === 'latest' || versionSpec === 'stable') {
-    // e.g., linking to https://downloads.camunda.cloud/release/camunda/c8run/8.8/, which always has latest stable. Needs updating when 8.9 stable is released.
-    return '8.8';
-  }
-  if (versionSpec === 'alpha' || versionSpec === 'latest-alpha') {
-    // e.g., linking to https://downloads.camunda.cloud/release/camunda/c8run/8.9/, which always has latest alpha. Needs updating when 8.9 stable is released.
-    return '8.9';
-  }
-  return versionSpec;
+  return _versionAliases[versionSpec] ?? versionSpec;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,7 +279,7 @@ async function extractArchive(archivePath, targetDir) {
   }
 }
 
-function findC8RunBinaryPath(config) {
+export function findC8RunBinaryPath(config) {
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   const platformInfo = getPlatformIdentifier();
 
@@ -310,11 +314,11 @@ function findC8RunBinaryPath(config) {
   return null;
 }
 
-function isC8RunInstalled(config) {
+export function isC8RunInstalled(config) {
   return findC8RunBinaryPath(config) !== null;
 }
 
-function getC8RunBinaryPath(config) {
+export function getC8RunBinaryPath(config) {
   const binaryPath = findC8RunBinaryPath(config);
   if (!binaryPath) {
     throw new Error(
@@ -324,7 +328,7 @@ function getC8RunBinaryPath(config) {
   return binaryPath;
 }
 
-function purgeInstalledVersion(config) {
+export function purgeInstalledVersion(config) {
   const logger = getLogger();
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   const platformInfo = getPlatformIdentifier();
@@ -388,7 +392,7 @@ function extractStartupSummary(rawOutput) {
   return rawOutput.slice(startIndex).trim();
 }
 
-async function waitForClusterReady(maxWaitMs = 120000) {
+async function waitForClusterReady(maxWaitMs = CLUSTER_STARTUP_TIMEOUT_MS) {
   const logger = getLogger();
   const startTime = Date.now();
   const healthUrl = 'http://localhost:9600/actuator/health';
@@ -641,7 +645,7 @@ async function stopC8Run(config) {
 // Argument parsing helper
 // ---------------------------------------------------------------------------
 
-function parsePluginArgs(args) {
+export function parsePluginArgs(args) {
   const result = { subcommand: null, version: null, debug: false };
 
   let i = 0;

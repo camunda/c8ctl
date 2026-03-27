@@ -828,3 +828,88 @@ export const commands = {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Plugin help includes examples from plugin metadata
+// ---------------------------------------------------------------------------
+
+describe('Plugin help includes examples from plugin metadata', () => {
+  const dataDir = join(tmpdir(), `plugin-help-test-data-${process.pid}`);
+  const cliEnv = { ...process.env, C8CTL_DATA_DIR: dataDir };
+  const pluginDir = join(tmpdir(), `plugin-help-test-plugin-${process.pid}`);
+  const pluginName = 'help-test-plugin';
+  const pluginsDir = join(dataDir, 'plugins');
+  const nodeModulesPluginPath = join(pluginsDir, 'node_modules', pluginName);
+  const PLUGIN_TEST_TIMEOUT = 10000;
+
+  before(() => {
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'package.json'),
+      JSON.stringify({ name: pluginName, version: '1.0.0', type: 'module', keywords: ['c8ctl', 'plugin'] }, null, 2),
+    );
+    writeFileSync(
+      join(pluginDir, 'c8ctl-plugin.js'),
+      `export const metadata = {
+  name: '${pluginName}',
+  description: 'Test plugin for help integration tests',
+  commands: {
+    'help-test-cmd': {
+      description: 'A help test command',
+      examples: [
+        { command: 'c8ctl help-test-cmd start', description: 'Start the help test thing' },
+        { command: 'c8ctl help-test-cmd stop', description: 'Stop the help test thing' },
+      ],
+    },
+  },
+};
+export const commands = {
+  'help-test-cmd': async (args) => { console.log('help-test-cmd executed'); },
+};
+`,
+    );
+
+    execFileSync('node', ['src/index.ts', 'load', 'plugin', '--from', `file:${pluginDir}`], {
+      cwd: process.cwd(), stdio: 'pipe', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
+    });
+  });
+
+  after(() => {
+    try {
+      execSync(`node src/index.ts unload plugin ${pluginName}`, {
+        cwd: process.cwd(), stdio: 'ignore', env: cliEnv,
+      });
+    } catch { /* ignore */ }
+    if (existsSync(pluginDir)) rmSync(pluginDir, { recursive: true, force: true });
+    if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true });
+    if (existsSync(nodeModulesPluginPath)) rmSync(nodeModulesPluginPath, { recursive: true, force: true });
+  });
+
+  test('help output includes plugin example commands and descriptions', () => {
+    const output = execSync('node src/index.ts help', {
+      cwd: process.cwd(), encoding: 'utf-8', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
+    });
+    assert.ok(
+      output.includes('c8ctl help-test-cmd start'),
+      `Help output should include plugin example command. Output:\n${output}`,
+    );
+    assert.ok(
+      output.includes('Start the help test thing'),
+      `Help output should include plugin example description. Output:\n${output}`,
+    );
+    assert.ok(
+      output.includes('c8ctl help-test-cmd stop'),
+      `Help output should include second plugin example. Output:\n${output}`,
+    );
+  });
+
+  test('help output includes plugin command description', () => {
+    const output = execSync('node src/index.ts help', {
+      cwd: process.cwd(), encoding: 'utf-8', timeout: PLUGIN_TEST_TIMEOUT, env: cliEnv,
+    });
+    assert.ok(
+      output.includes('A help test command'),
+      `Help output should include plugin command description. Output:\n${output}`,
+    );
+  });
+});

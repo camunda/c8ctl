@@ -4,6 +4,9 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const plugin = await import('../../default-plugins/cluster/c8ctl-plugin.js');
 
@@ -161,5 +164,191 @@ describe('Cluster Plugin – version validation', () => {
         `Version "${version}" should not trigger a validation error`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePluginArgs
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – parsePluginArgs', () => {
+  test('returns null subcommand with no args', () => {
+    const result = plugin.parsePluginArgs([]);
+    assert.strictEqual(result.subcommand, null);
+    assert.strictEqual(result.version, null);
+    assert.strictEqual(result.debug, false);
+  });
+
+  test('parses start subcommand', () => {
+    const result = plugin.parsePluginArgs(['start']);
+    assert.strictEqual(result.subcommand, 'start');
+  });
+
+  test('parses stop subcommand', () => {
+    const result = plugin.parsePluginArgs(['stop']);
+    assert.strictEqual(result.subcommand, 'stop');
+  });
+
+  test('parses positional version after subcommand', () => {
+    const result = plugin.parsePluginArgs(['start', '8.8']);
+    assert.strictEqual(result.subcommand, 'start');
+    assert.strictEqual(result.version, '8.8');
+  });
+
+  test('parses --c8-version flag', () => {
+    const result = plugin.parsePluginArgs(['start', '--c8-version', '8.8']);
+    assert.strictEqual(result.subcommand, 'start');
+    assert.strictEqual(result.version, '8.8');
+  });
+
+  test('parses --debug flag', () => {
+    const result = plugin.parsePluginArgs(['start', '--debug']);
+    assert.strictEqual(result.debug, true);
+  });
+
+  test('throws when --c8-version has no value (end of args)', () => {
+    assert.throws(
+      () => plugin.parsePluginArgs(['--c8-version']),
+      /Missing value for --c8-version/,
+    );
+  });
+
+  test('throws when --c8-version is followed by another flag', () => {
+    assert.throws(
+      () => plugin.parsePluginArgs(['--c8-version', '--debug']),
+      /Missing value for --c8-version/,
+    );
+  });
+
+  test('throws when --c8-version value is another flag after subcommand', () => {
+    assert.throws(
+      () => plugin.parsePluginArgs(['start', '--c8-version', '--debug']),
+      /Missing value for --c8-version/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findC8RunBinaryPath / isC8RunInstalled / getC8RunBinaryPath
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – findC8RunBinaryPath', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns null when install dir does not exist', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const result = plugin.findC8RunBinaryPath(config);
+    assert.strictEqual(result, null);
+  });
+
+  test('returns null when install dir exists but no binary', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    mkdirSync(join(tempDir, 'c8run-8.8'), { recursive: true });
+    const result = plugin.findC8RunBinaryPath(config);
+    assert.strictEqual(result, null);
+  });
+
+  test('returns path when binary exists in versioned subdir', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    const result = plugin.findC8RunBinaryPath(config);
+    assert.ok(result !== null, 'should find binary');
+    assert.ok(result!.includes('c8run'), 'path should reference binary name');
+  });
+});
+
+describe('Cluster Plugin – isC8RunInstalled', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns false when not installed', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.strictEqual(plugin.isC8RunInstalled(config), false);
+  });
+
+  test('returns true when binary exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    assert.strictEqual(plugin.isC8RunInstalled(config), true);
+  });
+});
+
+describe('Cluster Plugin – getC8RunBinaryPath', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('throws when binary not found', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.throws(
+      () => plugin.getC8RunBinaryPath(config),
+      /c8run 8\.8 binary not found/,
+    );
+  });
+
+  test('returns path when binary exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    const result = plugin.getC8RunBinaryPath(config);
+    assert.ok(typeof result === 'string' && result.length > 0, 'should return a non-empty path');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// purgeInstalledVersion
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – purgeInstalledVersion', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('removes the install dir when it exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const installDir = join(tempDir, 'c8run-8.8');
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(join(installDir, 'dummy'), '');
+
+    plugin.purgeInstalledVersion(config);
+
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+  });
+
+  test('does not throw when install dir does not exist', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.doesNotThrow(() => plugin.purgeInstalledVersion(config));
   });
 });
