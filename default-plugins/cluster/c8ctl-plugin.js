@@ -139,8 +139,8 @@ try {
   );
   _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
 } catch (err) {
-  // Fall back to empty aliases if package.json is missing or malformed
-  console.error(`[cluster plugin] Warning: could not load version aliases from package.json: ${err}`);
+  // Fall back to empty aliases if package.json is missing or malformed; plugin continues without alias support
+  console.error(`[cluster plugin] Warning: Failed to load version aliases from package.json, using defaults: ${err}`);
 }
 const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
 
