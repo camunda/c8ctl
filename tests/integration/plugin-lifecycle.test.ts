@@ -194,8 +194,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
     } catch (error: any) {
       const errorOutput = error.stderr || error.message;
       assert.ok(
-        errorOutput.includes('not registered'),
-        `Error should mention plugin is not registered. Got: ${errorOutput}`
+        errorOutput.includes('neither registered nor installed'),
+        `Error should mention plugin is neither registered nor installed. Got: ${errorOutput}`
       );
     }
   });
