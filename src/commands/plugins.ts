@@ -4,7 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { execFileSync, execSync } from 'node:child_process';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clearLoadedPlugins } from '../plugin-loader.ts';
@@ -309,9 +309,19 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
     isInstalled = false;
   }
 
-  if (!isRegistered && !isInstalled) {
+  // Also check for physical presence in node_modules (limbo state detection)
+  const isPhysicallyPresent = !isInstalled && existsSync(join(pluginsDir, 'node_modules', packageName));
+
+  if (!isRegistered && !isInstalled && !isPhysicallyPresent) {
     logger.error(`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`);
     logger.info('Run "c8ctl list plugins" to see installed plugins');
+    process.exit(1);
+  }
+
+  // Limbo state: physically present in node_modules but not in the registry
+  if (isPhysicallyPresent && !isRegistered && !force) {
+    logger.error(`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`);
+    logger.info('Use --force to remove it: c8ctl unload plugin ' + packageName + ' --force');
     process.exit(1);
   }
 
@@ -321,7 +331,13 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
     } else {
       logger.info(`Unloading plugin: ${packageName}...`);
     }
-    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+
+    if (isPhysicallyPresent && force) {
+      // Limbo plugin: physically remove from node_modules since npm uninstall may not work
+      rmSync(join(pluginsDir, 'node_modules', packageName), { recursive: true, force: true });
+    } else {
+      execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+    }
 
     // Only remove from registry after successful uninstall and if it was registered
     if (isRegistered) {
