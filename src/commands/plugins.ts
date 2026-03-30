@@ -290,72 +290,41 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
     process.exit(1);
   }
 
-  // Get global plugins directory
   const pluginsDir = ensurePluginsDir();
-
-  // Check registry and installation status independently
   const isRegistered = isPluginRegistered(packageName);
-  let isInstalled = false;
+  const isPresent = existsSync(join(pluginsDir, 'node_modules', packageName));
 
-  try {
-    const npmListOutput = execSync(
-      `npm ls "${packageName}" --prefix "${pluginsDir}" --depth=0 --json`,
-      { stdio: ['pipe', 'pipe', 'ignore'] }
-    ).toString();
-    const parsed = JSON.parse(npmListOutput) as NpmListOutput;
-    isInstalled = !!parsed.dependencies && Object.prototype.hasOwnProperty.call(parsed.dependencies, packageName);
-  } catch {
-    // npm ls may fail if the package is not installed; treat as "not installed"
-    isInstalled = false;
-  }
-
-  // Also check for physical presence in node_modules (limbo state detection)
-  const isPhysicallyPresent = !isInstalled && existsSync(join(pluginsDir, 'node_modules', packageName));
-
-  if (!isRegistered && !isInstalled && !isPhysicallyPresent) {
+  if (!isRegistered && !isPresent) {
     logger.error(`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`);
     logger.info('Run "c8ctl list plugins" to see installed plugins');
     process.exit(1);
   }
 
-  // Limbo state: physically present in node_modules but not in the registry
-  if (isPhysicallyPresent && !isRegistered && !force) {
+  // Limbo state: present in node_modules but not in the registry — requires --force
+  if (!isRegistered && !force) {
     logger.error(`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`);
-    logger.info('Use --force to remove it: c8ctl unload plugin ' + packageName + ' --force');
+    logger.info('Use --force to remove it: c8 unload plugin ' + packageName + ' --force');
     process.exit(1);
   }
+
+  const action = isRegistered ? 'Unloading' : 'Force-removing';
+  logger.info(`${action} plugin: ${packageName}...`);
 
   try {
-    if (force && !isRegistered) {
-      logger.info(`Force-removing plugin: ${packageName}...`);
-    } else {
-      logger.info(`Unloading plugin: ${packageName}...`);
-    }
-
-    if (isPhysicallyPresent && force) {
-      // Limbo plugin: physically remove from node_modules since npm uninstall may not work
-      rmSync(join(pluginsDir, 'node_modules', packageName), { recursive: true, force: true });
-    } else {
-      execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
-    }
-
-    // Only remove from registry after successful uninstall and if it was registered
-    if (isRegistered) {
-      removePluginFromRegistry(packageName);
-      logger.debug(`Removed ${packageName} from plugin registry`);
-    }
-
-    // Clear the loaded plugins cache so the plugin is no longer available
-    // This affects the current process - plugin will be gone immediately
-    clearLoadedPlugins();
-
-    logger.success('Plugin unloaded successfully', packageName);
-    logger.info('Plugin commands are no longer available');
-  } catch (error) {
-    logger.error('Failed to unload plugin', error as Error);
-    logger.info('Verify the plugin name is correct by running "c8ctl list plugins"');
-    process.exit(1);
+    execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, { stdio: 'pipe' });
+  } catch {
+    // npm uninstall may fail for untracked/extraneous packages; fall back to physical removal
+    rmSync(join(pluginsDir, 'node_modules', packageName), { recursive: true, force: true });
   }
+
+  if (isRegistered) {
+    removePluginFromRegistry(packageName);
+    logger.debug(`Removed ${packageName} from plugin registry`);
+  }
+
+  clearLoadedPlugins();
+  logger.success('Plugin unloaded successfully', packageName);
+  logger.info('Plugin commands are no longer available');
 }
 
 /**
