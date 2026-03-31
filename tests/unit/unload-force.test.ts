@@ -8,7 +8,6 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { clearRegistryCache } from '../../src/plugin-registry.ts';
 
 describe('Unload Plugin --force mode', () => {
   let testDir: string;
@@ -16,11 +15,9 @@ describe('Unload Plugin --force mode', () => {
   beforeEach(() => {
     testDir = join(tmpdir(), `c8ctl-unload-force-test-${Date.now()}`);
     mkdirSync(testDir, { recursive: true });
-    clearRegistryCache();
   });
 
   afterEach(() => {
-    clearRegistryCache();
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
@@ -86,10 +83,15 @@ describe('Unload Plugin --force mode', () => {
   });
 
   test('unload plugin without --force on limbo plugin (installed but not registered) shows limbo error', () => {
-    // Simulate a limbo plugin: installed in node_modules but not in the registry
+    // Simulate a limbo plugin: installed in node_modules but not in the registry.
+    // Include a package.json so it looks like a properly installed npm package.
     const pluginsNodeModulesDir = join(testDir, 'plugins', 'node_modules', 'limbo-test-plugin');
     mkdirSync(pluginsNodeModulesDir, { recursive: true });
     writeFileSync(join(pluginsNodeModulesDir, 'c8ctl-plugin.js'), 'export const commands = {};');
+    writeFileSync(
+      join(pluginsNodeModulesDir, 'package.json'),
+      JSON.stringify({ name: 'limbo-test-plugin', version: '1.0.0', main: 'c8ctl-plugin.js' }, null, 2),
+    );
 
     const result = spawnSync('node', [
       '--experimental-strip-types',

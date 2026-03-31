@@ -265,7 +265,7 @@ _c8ctl() {
     '--ivalue[Case-insensitive variable value filter]:pattern:'
     '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
-    '--force[Continue watching after deployment errors (watch command)]'
+    '--force[Continue watching after deployment errors (watch command) or force-remove a limbo plugin (unload plugin)]'
   )
 
   case \$CURRENT in
@@ -639,8 +639,8 @@ complete -c c8ctl -l fields -d 'Agent: comma-separated output fields to include'
 complete -c c8 -l fields -d 'Agent: comma-separated output fields to include' -r
 complete -c c8ctl -l dry-run -d 'Agent: preview API request without executing'
 complete -c c8 -l dry-run -d 'Agent: preview API request without executing'
-complete -c c8ctl -l force -d 'Continue watching after deployment errors'
-complete -c c8 -l force -d 'Continue watching after deployment errors'
+complete -c c8ctl -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
+complete -c c8 -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'

@@ -189,7 +189,7 @@ Commands:
   upgrade   plugin <name> [version]  Upgrade a plugin (respects source type)
   downgrade plugin <name> <version>  Downgrade a plugin to a specific version
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
-  init      plugin [name]   Create a new plugin from TypeScript template
+  init      plugin [name]    Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script

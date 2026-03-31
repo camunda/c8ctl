@@ -129,6 +129,7 @@ describe('Form Integration Tests', () => {
     // This BPMN doesn't have a start form, so the CLI should indicate no form
     const formResult = await cli('get', 'form', processDefinitionKey!, '--pd');
     // The CLI logs "no associated start form" to stderr and exits 0
+    assert.strictEqual(formResult.status, 0, 'get form --pd should exit with status 0 for a process with no start form');
     const output = formResult.stdout + formResult.stderr;
     assert.ok(
       output.includes('no associated start form') || formResult.stdout.trim() === '',

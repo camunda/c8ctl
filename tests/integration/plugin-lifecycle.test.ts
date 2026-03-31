@@ -183,12 +183,15 @@ describe('Plugin Lifecycle Integration Tests', () => {
   });
 
   test('should reject unloading a non-existent plugin', () => {
+    const tempDir = join(tmpdir(), `c8ctl-unload-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
     try {
       execSync('node src/index.ts unload plugin c8ctl-plugin-does-not-exist', {
         cwd: process.cwd(),
         encoding: 'utf-8',
         stdio: 'pipe',
-        timeout: 5000
+        timeout: 5000,
+        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
       });
       assert.fail('Unloading a non-existent plugin should fail');
     } catch (error: any) {
@@ -197,6 +200,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
         errorOutput.includes('neither registered nor installed'),
         `Error should mention plugin is neither registered nor installed. Got: ${errorOutput}`
       );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -319,6 +324,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
   test('init plugin should scaffold all required files', () => {
     const name = 'test-init-files';
     const dir = join(process.cwd(), `c8ctl-plugin-${name}`);
+    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
 
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -329,6 +336,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
         cwd: process.cwd(),
         encoding: 'utf-8',
         timeout: 5000,
+        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
       });
 
       assert.ok(output.includes('Plugin scaffolding created successfully'),
@@ -351,6 +359,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       if (existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -358,6 +367,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
     const fullName = 'c8ctl-plugin-conv-test';
     const expectedPluginName = 'conv-test';
     const dir = join(process.cwd(), fullName);
+    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
 
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -368,6 +379,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
         cwd: process.cwd(),
         encoding: 'utf-8',
         timeout: 5000,
+        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
       });
 
       assert.ok(output.includes('Plugin scaffolding created successfully'),
@@ -386,6 +398,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       if (existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -393,6 +406,8 @@ describe('Plugin Lifecycle Integration Tests', () => {
     const name = 'conv-test-noprefix';
     const expectedDir = `c8ctl-plugin-${name}`;
     const dir = join(process.cwd(), expectedDir);
+    const tempDir = join(tmpdir(), `c8ctl-init-test-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
 
     if (existsSync(dir)) {
       rmSync(dir, { recursive: true, force: true });
@@ -403,6 +418,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
         cwd: process.cwd(),
         encoding: 'utf-8',
         timeout: 5000,
+        env: { ...process.env, C8CTL_DATA_DIR: tempDir },
       });
 
       assert.ok(output.includes('Plugin scaffolding created successfully'),
@@ -421,6 +437,7 @@ describe('Plugin Lifecycle Integration Tests', () => {
       if (existsSync(dir)) {
         rmSync(dir, { recursive: true, force: true });
       }
+      rmSync(tempDir, { recursive: true, force: true });
     }
   });
   
