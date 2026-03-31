@@ -12,6 +12,7 @@ import {
   getProfileOrModeler,
   addProfile as addProfileConfig,
   removeProfile as removeProfileConfig,
+  DEFAULT_PROFILE,
   MODELER_PREFIX,
   type Profile,
 } from '../config.ts';
@@ -170,7 +171,7 @@ export function whichProfile(): void {
   const logger = getLogger();
   const active = c8ctl.activeProfile;
   if (!active) {
-    logger.info('No active profile set (using environment / fallback configuration)');
+    logger.info(`${DEFAULT_PROFILE} (default)`);
     return;
   }
   logger.info(active);

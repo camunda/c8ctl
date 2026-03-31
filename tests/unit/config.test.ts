@@ -340,10 +340,10 @@ describe('Config Module', () => {
       assert.strictEqual(profile.username, 'admin');
     });
 
-    test('loadSessionState defaults activeProfile to "local" when no session file exists', () => {
+    test('loadSessionState does not set activeProfile when no session file exists', () => {
       const state = loadSessionState();
-      assert.strictEqual(state.activeProfile, 'local');
-      assert.strictEqual(c8ctl.activeProfile, 'local');
+      assert.strictEqual(state.activeProfile, undefined);
+      assert.strictEqual(c8ctl.activeProfile, undefined);
     });
 
     test('loadSessionState creates local profile in profiles.json', () => {
@@ -354,13 +354,13 @@ describe('Config Module', () => {
       assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
     });
 
-    test('loadSessionState defaults activeProfile to "local" when session file has null activeProfile', () => {
+    test('loadSessionState leaves activeProfile undefined when session file has null activeProfile', () => {
       const sessionPath = join(testDataDir, 'session.json');
       writeFileSync(sessionPath, JSON.stringify({ activeProfile: null, outputMode: 'text' }), 'utf-8');
 
       const state = loadSessionState();
-      assert.strictEqual(state.activeProfile, 'local');
-      assert.strictEqual(c8ctl.activeProfile, 'local');
+      assert.strictEqual(state.activeProfile, undefined);
+      assert.strictEqual(c8ctl.activeProfile, undefined);
     });
 
     test('loadSessionState preserves an explicitly-set profile', () => {
@@ -372,8 +372,8 @@ describe('Config Module', () => {
       assert.strictEqual(c8ctl.activeProfile, 'prod');
     });
 
-    test('resolveClusterConfig uses the manifested local profile', () => {
-      // After loadSessionState, the local profile should exist and be used
+    test('resolveClusterConfig falls back to manifested local profile when no env vars set', () => {
+      // After loadSessionState, the local profile exists but activeProfile is undefined
       loadSessionState();
       delete process.env.CAMUNDA_BASE_URL;
       delete process.env.CAMUNDA_CLIENT_ID;
@@ -384,14 +384,22 @@ describe('Config Module', () => {
       assert.strictEqual(config.username, 'demo');
     });
 
-    test('resolveClusterConfig uses user-customized local profile', () => {
-      // Add a 'local' profile to profiles.json with custom settings
+    test('resolveClusterConfig prefers env vars over default local profile', () => {
+      // activeProfile is undefined → env vars should win over the default 'local' profile
+      loadSessionState();
+      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
+
+      const config = resolveClusterConfig();
+      assert.strictEqual(config.baseUrl, 'https://env-cluster.example.com');
+    });
+
+    test('resolveClusterConfig prefers explicitly-selected profile over env vars', () => {
+      // When user explicitly does `c8ctl use profile local`, env vars should NOT win
       addProfile({ name: 'local', baseUrl: 'http://localhost:9000/v2', username: 'admin', password: 'admin' });
       c8ctl.activeProfile = 'local';
       process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
 
       const config = resolveClusterConfig();
-      // The configured 'local' profile takes precedence over env vars
       assert.strictEqual(config.baseUrl, 'http://localhost:9000/v2');
       assert.strictEqual(config.username, 'admin');
     });

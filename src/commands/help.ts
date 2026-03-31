@@ -1127,12 +1127,13 @@ Profile commands:
 Connection resolution order (highest to lowest priority):
   1. --profile <name> flag on the current command
   2. Active session profile (set with: c8ctl use profile <name>)
-  3. Profile from profiles.json (default: 'local')
+  3. Environment variables (CAMUNDA_BASE_URL, CAMUNDA_CLIENT_ID, …)
+  4. Default 'local' profile from profiles.json
 
 Default profile: "local"
   c8ctl ships with a built-in 'local' profile (http://localhost:8080, demo/demo).
-  It is created automatically and set as the active profile on first use.
-  Customize it with: c8ctl add profile local --baseUrl <url>
+  It is created automatically in profiles.json on first use.
+  Override it: c8ctl add profile local --baseUrl <url>
 
 Flags for add profile:
   Required for all add profile calls:

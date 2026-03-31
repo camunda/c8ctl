@@ -8,6 +8,7 @@ import {
   setActiveTenant,
   setOutputMode,
   getProfileOrModeler,
+  DEFAULT_PROFILE,
 } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import type { OutputMode } from '../logger.ts';
@@ -64,7 +65,7 @@ export function showSessionState(): void {
   const logger = getLogger();
   
   logger.info('\nCurrent Session State:');
-  logger.info(`  Active Profile: ${c8ctl.activeProfile || '(none)'}`);
+  logger.info(`  Active Profile: ${c8ctl.activeProfile || `${DEFAULT_PROFILE} (default)`}`);
   logger.info(`  Active Tenant: ${c8ctl.activeTenant || '(none)'}`);
   logger.info(`  Output Mode: ${c8ctl.outputMode}`);
   logger.info('');

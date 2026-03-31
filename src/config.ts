@@ -581,15 +581,19 @@ export function ensureDefaultProfile(): void {
 }
 
 /**
- * Load session state from disk and populate c8ctl runtime object
+ * Load session state from disk and populate c8ctl runtime object.
+ *
+ * activeProfile is left undefined when the user has not explicitly selected
+ * one (via `c8ctl use profile`).  resolveClusterConfig() will then fall
+ * through to env vars before using the default 'local' profile.
  */
 export function loadSessionState(): SessionState {
+  // Always make sure the 'local' profile exists in profiles.json
+  ensureDefaultProfile();
+
   const path = getSessionStatePath();
 
   if (!existsSync(path)) {
-    // No session file: apply the default profile and ensure it exists
-    c8ctl.activeProfile = DEFAULT_PROFILE;
-    ensureDefaultProfile();
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -601,12 +605,9 @@ export function loadSessionState(): SessionState {
     const data = readFileSync(path, 'utf-8');
     const state = JSON.parse(data) as SessionState;
 
-    // Fall back to the default profile when none is stored
-    c8ctl.activeProfile = state.activeProfile ?? DEFAULT_PROFILE;
+    c8ctl.activeProfile = state.activeProfile ?? undefined;
     c8ctl.activeTenant = state.activeTenant === null ? undefined : state.activeTenant;
     c8ctl.outputMode = state.outputMode || 'text';
-
-    ensureDefaultProfile();
 
     return {
       activeProfile: c8ctl.activeProfile,
@@ -614,8 +615,6 @@ export function loadSessionState(): SessionState {
       outputMode: c8ctl.outputMode,
     };
   } catch {
-    c8ctl.activeProfile = DEFAULT_PROFILE;
-    ensureDefaultProfile();
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -678,7 +677,7 @@ export function setOutputMode(mode: OutputMode): void {
 
 /**
  * Resolve cluster configuration from session, flags, env vars, or defaults
- * Priority: profileFlag → session profile → env vars → localhost fallback
+ * Priority: profileFlag → session profile → env vars → default 'local' profile
  */
 export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   // 1. Try profile flag (profile name, including modeler: prefix)
@@ -689,7 +688,7 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
     }
   }
 
-  // 2. Try session profile
+  // 2. Try session profile (only when user explicitly selected one)
   if (c8ctl.activeProfile) {
     const profile = getProfileOrModeler(c8ctl.activeProfile);
     if (profile) {
@@ -718,9 +717,13 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
     };
   }
 
-  // 4. Localhost fallback with basic auth (demo/demo)
-  // Safety net – normally unreachable because ensureDefaultProfile() creates
-  // the 'local' profile during startup.
+  // 4. Default 'local' profile (manifested by ensureDefaultProfile at startup)
+  const localProfile = getProfile(DEFAULT_PROFILE);
+  if (localProfile) {
+    return profileToClusterConfig(localProfile);
+  }
+
+  // 5. Hardcoded fallback (safety net, should not be reached)
   return {
     baseUrl: 'http://localhost:8080/v2',
     username: 'demo',
