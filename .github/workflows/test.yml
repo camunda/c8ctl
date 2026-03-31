@@ -100,12 +100,12 @@ jobs:
         env:
           CAMUNDA_VERSION: ${{ matrix.camunda }}
 
-      - name: Stop Camunda
-        if: always()
-        working-directory: assets/c8/${{ matrix.camunda }}
-        run: docker compose down -v
-
       - name: Show Camunda logs on failure
         if: failure()
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose logs
+
+      - name: Stop Camunda
+        if: always()
+        working-directory: assets/c8/${{ matrix.camunda }}
+        run: docker compose down -v

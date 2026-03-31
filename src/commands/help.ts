@@ -42,7 +42,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'upgrade',   resource: 'plugin <name>',    resources: ['plugin'], description: 'Upgrade a plugin', mutating: false },
       { verb: 'downgrade', resource: 'plugin <name> <version>', resources: ['plugin'], description: 'Downgrade a plugin to a specific version', mutating: false },
       { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
-      { verb: 'init',      resource: 'plugin [name]',    resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
+      { verb: 'init',      resource: 'plugin [name]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
       { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
       { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
@@ -304,7 +304,7 @@ Examples:
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
-  c8ctl init plugin my-plugin        Create new plugin from template
+  c8ctl init plugin my-plugin        Create new plugin from template (c8ctl-plugin-my-plugin)
   c8ctl load plugin my-plugin        Load plugin from npm registry
   c8ctl load plugin --from https://github.com/org/plugin  Load plugin from URL
   c8ctl upgrade plugin my-plugin     Upgrade plugin to latest version
@@ -1124,6 +1124,9 @@ Plugin commands:
   unload plugin <name>
     Unload and unregister a plugin.
 
+  unload plugin <name> --force
+    Force-remove a plugin that is installed but not in the registry (limbo state).
+
   list plugins
     List installed plugins with version and sync status.
 
@@ -1145,12 +1148,21 @@ Plugin commands:
 
   init plugin [name]
     Create a new plugin scaffold from template.
+    Default name: c8ctl-plugin-myplugin
+
+    Convention over configuration: the directory is always prefixed with
+    "c8ctl-plugin-". The plugin is registered by the suffix after the prefix.
+    Example: "c8ctl init plugin foo" creates directory "c8ctl-plugin-foo"
+    and registers plugin name "foo". Likewise, "c8ctl init plugin
+    c8ctl-plugin-foo" produces the same result.
 
 Examples:
   c8ctl load plugin my-plugin
   c8ctl load plugin --from https://github.com/org/plugin
   c8ctl load plugin --from file:///path/to/plugin
   c8ctl list plugins
+  c8ctl unload plugin my-plugin
+  c8ctl unload plugin my-plugin --force
   c8ctl upgrade plugin my-plugin
   c8ctl upgrade plugin my-plugin 1.2.3
   c8ctl downgrade plugin my-plugin 1.0.0

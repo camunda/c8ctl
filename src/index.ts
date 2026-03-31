@@ -332,7 +332,7 @@ async function main() {
       logger.error('Package name required. Usage: c8 unload plugin <package-name>');
       process.exit(1);
     }
-    await unloadPlugin(args[0]);
+    await unloadPlugin(args[0], { force: values.force as boolean | undefined });
     return;
   }
 

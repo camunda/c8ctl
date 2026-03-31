@@ -122,7 +122,7 @@ export async function getForm(key: string, options: {
       logger.error(`Failed to get form: not found as ${errors[0].type}`, errors[0].error as Error);
       process.exit(1);
     } else {
-      logger.error(`Failed to get form: not found as user task or process definition`);
+      logger.error('Failed to get form: not found as user task or process definition');
       process.exit(1);
     }
   } else if (results.length === 1) {
