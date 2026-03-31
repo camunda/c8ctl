@@ -32,6 +32,8 @@ import {
   resolveClusterConfig,
   resolveTenantId,
   DEFAULT_PROFILE,
+  DEFAULT_PROFILE_CONFIG,
+  ensureDefaultProfile,
   TARGET_TYPES,
   AUTH_TYPES,
   type Profile,
@@ -313,14 +315,46 @@ describe('Config Module', () => {
       assert.strictEqual(DEFAULT_PROFILE, 'local');
     });
 
+    test('DEFAULT_PROFILE_CONFIG has localhost defaults', () => {
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.name, 'local');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.username, 'demo');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.password, 'demo');
+    });
+
+    test('ensureDefaultProfile creates the local profile when it does not exist', () => {
+      assert.strictEqual(getProfile('local'), undefined);
+      ensureDefaultProfile();
+      const profile = getProfile('local');
+      assert.ok(profile);
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(profile.username, 'demo');
+    });
+
+    test('ensureDefaultProfile does not overwrite a user-configured local profile', () => {
+      addProfile({ name: 'local', baseUrl: 'http://custom:9090/v2', username: 'admin', password: 'admin' });
+      ensureDefaultProfile();
+      const profile = getProfile('local');
+      assert.ok(profile);
+      assert.strictEqual(profile.baseUrl, 'http://custom:9090/v2');
+      assert.strictEqual(profile.username, 'admin');
+    });
+
     test('loadSessionState defaults activeProfile to "local" when no session file exists', () => {
       const state = loadSessionState();
       assert.strictEqual(state.activeProfile, 'local');
       assert.strictEqual(c8ctl.activeProfile, 'local');
     });
 
+    test('loadSessionState creates local profile in profiles.json', () => {
+      assert.strictEqual(getProfile('local'), undefined);
+      loadSessionState();
+      const profile = getProfile('local');
+      assert.ok(profile, 'local profile should be created by loadSessionState');
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+    });
+
     test('loadSessionState defaults activeProfile to "local" when session file has null activeProfile', () => {
-      // Write a session file with null activeProfile (user cleared profile)
       const sessionPath = join(testDataDir, 'session.json');
       writeFileSync(sessionPath, JSON.stringify({ activeProfile: null, outputMode: 'text' }), 'utf-8');
 
@@ -338,17 +372,9 @@ describe('Config Module', () => {
       assert.strictEqual(c8ctl.activeProfile, 'prod');
     });
 
-    test('resolveClusterConfig falls back to env vars when "local" profile is not configured', () => {
-      // No 'local' profile in profiles.json, but env var is set
-      c8ctl.activeProfile = 'local';
-      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
-
-      const config = resolveClusterConfig();
-      assert.strictEqual(config.baseUrl, 'https://env-cluster.example.com');
-    });
-
-    test('resolveClusterConfig falls back to localhost when "local" profile and env vars are absent', () => {
-      c8ctl.activeProfile = 'local';
+    test('resolveClusterConfig uses the manifested local profile', () => {
+      // After loadSessionState, the local profile should exist and be used
+      loadSessionState();
       delete process.env.CAMUNDA_BASE_URL;
       delete process.env.CAMUNDA_CLIENT_ID;
       delete process.env.CAMUNDA_USERNAME;
@@ -358,8 +384,8 @@ describe('Config Module', () => {
       assert.strictEqual(config.username, 'demo');
     });
 
-    test('resolveClusterConfig uses configured "local" profile over env vars', () => {
-      // Add a 'local' profile to profiles.json
+    test('resolveClusterConfig uses user-customized local profile', () => {
+      // Add a 'local' profile to profiles.json with custom settings
       addProfile({ name: 'local', baseUrl: 'http://localhost:9000/v2', username: 'admin', password: 'admin' });
       c8ctl.activeProfile = 'local';
       process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';

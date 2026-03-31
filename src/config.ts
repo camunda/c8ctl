@@ -561,6 +561,25 @@ export function getTargetTypeLabel(conn: Connection): string {
 /** The default profile used when no profile has been explicitly selected */
 export const DEFAULT_PROFILE = 'local';
 
+/** The default profile configuration that matches the previous localhost fallback */
+export const DEFAULT_PROFILE_CONFIG: Profile = {
+  name: DEFAULT_PROFILE,
+  baseUrl: 'http://localhost:8080/v2',
+  username: 'demo',
+  password: 'demo',
+};
+
+/**
+ * Ensure the default 'local' profile exists in profiles.json.
+ * If no 'local' profile is configured, creates one with the localhost defaults.
+ */
+export function ensureDefaultProfile(): void {
+  const existing = getProfile(DEFAULT_PROFILE);
+  if (!existing) {
+    addProfile({ ...DEFAULT_PROFILE_CONFIG });
+  }
+}
+
 /**
  * Load session state from disk and populate c8ctl runtime object
  */
@@ -568,8 +587,9 @@ export function loadSessionState(): SessionState {
   const path = getSessionStatePath();
 
   if (!existsSync(path)) {
-    // No session file: apply the default profile
+    // No session file: apply the default profile and ensure it exists
     c8ctl.activeProfile = DEFAULT_PROFILE;
+    ensureDefaultProfile();
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -586,6 +606,8 @@ export function loadSessionState(): SessionState {
     c8ctl.activeTenant = state.activeTenant === null ? undefined : state.activeTenant;
     c8ctl.outputMode = state.outputMode || 'text';
 
+    ensureDefaultProfile();
+
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -593,6 +615,7 @@ export function loadSessionState(): SessionState {
     };
   } catch {
     c8ctl.activeProfile = DEFAULT_PROFILE;
+    ensureDefaultProfile();
     return {
       activeProfile: c8ctl.activeProfile,
       activeTenant: c8ctl.activeTenant,
@@ -696,6 +719,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   }
 
   // 4. Localhost fallback with basic auth (demo/demo)
+  // Safety net – normally unreachable because ensureDefaultProfile() creates
+  // the 'local' profile during startup.
   return {
     baseUrl: 'http://localhost:8080/v2',
     username: 'demo',
