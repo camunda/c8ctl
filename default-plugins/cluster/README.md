@@ -12,7 +12,7 @@ c8ctl cluster start 8.9.0-alpha5
 c8ctl cluster start stable
 c8ctl cluster start alpha
 
-# Starting without specifying a version defaults to alpha
+# Starting without specifying a version uses the default alias (alpha, unless overridden in package.json)
 c8ctl cluster start
 
 # Start with debug output (streams raw c8run logs)
