@@ -124,6 +124,15 @@ describe('Cluster Plugin – command usage output', () => {
     const output = captured.join('\n');
     assert.ok(output.includes('Examples'), 'Should contain an Examples section');
   });
+
+  test('usage lists version aliases', async () => {
+    await plugin.commands['cluster']([]);
+
+    const output = captured.join('\n');
+    assert.ok(output.includes('Version aliases'), 'Should contain a Version aliases section');
+    assert.ok(output.includes('alpha'), 'Should list the alpha alias');
+    assert.ok(output.includes('stable'), 'Should list the stable alias');
+  });
 });
 
 // ---------------------------------------------------------------------------
