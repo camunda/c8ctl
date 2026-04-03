@@ -130,8 +130,8 @@ describe('Cluster Plugin – command usage output', () => {
 
     const output = captured.join('\n');
     assert.ok(output.includes('Version aliases'), 'Should contain a Version aliases section');
-    assert.ok(output.includes('alpha'), 'Should list the alpha alias');
-    assert.ok(output.includes('stable'), 'Should list the stable alias');
+    assert.ok(/^\s+alpha\s+→/m.test(output), 'Should list the alpha alias with arrow separator');
+    assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
   });
 });
 
