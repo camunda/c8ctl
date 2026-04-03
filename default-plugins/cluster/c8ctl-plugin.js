@@ -51,6 +51,12 @@ function getVersionAliasEntries() {
   return Object.entries(_versionAliases);
 }
 
+function getDefaultAlias() {
+  if ('alpha' in _versionAliases) return 'alpha';
+  const first = Object.keys(_versionAliases)[0];
+  return first ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Plugin metadata
 // ---------------------------------------------------------------------------
@@ -715,25 +721,43 @@ export const commands = {
       console.log('  start   Download (if needed) and start a local Camunda 8 cluster');
       console.log('  stop    Stop the running local Camunda 8 cluster');
       console.log('');
+      const defaultAlias = getDefaultAlias();
+      const defaultDesc = defaultAlias ? `default: ${defaultAlias}` : 'no default alias configured';
       console.log('Options:');
-      console.log('  <version>              Camunda version or alias (default: alpha)');
+      console.log(`  <version>              Camunda version or alias (${defaultDesc})`);
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
       console.log('Version aliases:');
-      for (const [alias, resolved] of getVersionAliasEntries()) {
-        console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+      const aliasEntries = getVersionAliasEntries();
+      if (aliasEntries.length === 0) {
+        console.log('  (no aliases configured)');
+      } else {
+        for (const [alias, resolved] of aliasEntries) {
+          console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+        }
       }
       console.log('');
       console.log('Examples:');
-      console.log('  c8ctl cluster start              # Start using default alias (alpha)');
+      if (defaultAlias) {
+        console.log(`  c8ctl cluster start              # Start using default alias (${defaultAlias})`);
+      } else {
+        console.log('  c8ctl cluster start <version>    # Start with explicit version (no default configured)');
+      }
       console.log('  c8ctl cluster start stable       # Start latest stable release');
       console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
       console.log('  c8ctl cluster stop');
       return;
     }
 
-    const versionSpec = parsed.version || 'alpha';
+    const defaultAlias = getDefaultAlias();
+    if (!parsed.version && !defaultAlias) {
+      logger.error(
+        'No version specified and no version aliases are configured. Please specify a version explicitly (e.g. c8ctl cluster start 8.9.0-alpha5).',
+      );
+      process.exit(1);
+    }
+    const versionSpec = parsed.version || defaultAlias;
     if (!parsed.version) {
       logger.info(`No version specified, using default: "${versionSpec}"`);
     }
