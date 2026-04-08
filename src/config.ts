@@ -12,6 +12,11 @@ import { randomUUID } from 'node:crypto';
 import type { OutputMode } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 
+function isDebugEnabled(): boolean {
+  return process.env.DEBUG === '1' || process.env.DEBUG === 'true' ||
+         process.env.C8CTL_DEBUG === '1' || process.env.C8CTL_DEBUG === 'true';
+}
+
 // ============================================================================
 // Constants - matching Camunda Modeler exactly
 // ============================================================================
@@ -647,8 +652,8 @@ export function setOutputMode(mode: OutputMode): void {
 // ============================================================================
 
 /**
- * Resolve cluster configuration from session, flags, env vars, or defaults
- * Priority: profileFlag → session profile → env vars → localhost fallback
+ * Resolve cluster configuration from flags, env vars, session, or defaults
+ * Priority: profileFlag → env vars → session profile → localhost fallback
  */
 export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   // 1. Try profile flag (profile name, including modeler: prefix)
@@ -659,15 +664,8 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
     }
   }
 
-  // 2. Try session profile
-  if (c8ctl.activeProfile) {
-    const profile = getProfileOrModeler(c8ctl.activeProfile);
-    if (profile) {
-      return profileToClusterConfig(profile);
-    }
-  }
-
-  // 3. Try environment variables
+  // 2. Try environment variables (explicit env vars represent stronger user intent
+  //    than a persisted session profile, and align with 12-factor conventions)
   const baseUrl = process.env.CAMUNDA_BASE_URL;
   const clientId = process.env.CAMUNDA_CLIENT_ID;
   const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
@@ -677,6 +675,9 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   const password = process.env.CAMUNDA_PASSWORD;
 
   if (baseUrl) {
+    if (c8ctl.activeProfile && isDebugEnabled()) {
+      console.error(`[DEBUG] Using CAMUNDA_* environment variables (overriding session profile "${c8ctl.activeProfile}")`);
+    }
     return {
       baseUrl,
       clientId,
@@ -688,6 +689,14 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
     };
   }
 
+  // 3. Try session profile
+  if (c8ctl.activeProfile) {
+    const profile = getProfileOrModeler(c8ctl.activeProfile);
+    if (profile) {
+      return profileToClusterConfig(profile);
+    }
+  }
+
   // 4. Localhost fallback with basic auth (demo/demo)
   return {
     baseUrl: 'http://localhost:8080/v2',
@@ -697,30 +706,37 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
 }
 
 /**
- * Resolve tenant ID from session, profile, env vars, or default
- * Priority: session tenant → profile tenant → env var → '<default>'
+ * Resolve tenant ID from flag, env vars, session, or default
+ * Priority: profile flag tenant → env var → session tenant → profile tenant → '<default>'
  */
 export function resolveTenantId(profileFlag?: string): string {
-  // 1. Try session tenant
-  if (c8ctl.activeTenant) {
-    return c8ctl.activeTenant;
-  }
-
-  // 2. Try profile default tenant (from flag or session)
-  const profileName = profileFlag || c8ctl.activeProfile;
-  if (profileName) {
-    const profile = getProfileOrModeler(profileName);
+  // 1. Try profile flag's default tenant
+  if (profileFlag) {
+    const profile = getProfileOrModeler(profileFlag);
     if (profile?.defaultTenantId) {
       return profile.defaultTenantId;
     }
   }
 
-  // 3. Try environment variable
+  // 2. Try environment variable
   const envTenant = process.env.CAMUNDA_DEFAULT_TENANT_ID;
   if (envTenant) {
     return envTenant;
   }
 
-  // 4. Default tenant
+  // 3. Try session tenant
+  if (c8ctl.activeTenant) {
+    return c8ctl.activeTenant;
+  }
+
+  // 4. Try session profile's default tenant
+  if (c8ctl.activeProfile) {
+    const profile = getProfileOrModeler(c8ctl.activeProfile);
+    if (profile?.defaultTenantId) {
+      return profile.defaultTenantId;
+    }
+  }
+
+  // 5. Default tenant
   return '<default>';
 }

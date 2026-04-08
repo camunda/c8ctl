@@ -468,6 +468,26 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
     logMessage('\n' + formatDeploymentErrorDetail(detail));
   }
 
+  // In debug mode, dump the full error chain for troubleshooting
+  if (logger.debugEnabled) {
+    logger.debug('Full error details:');
+    if (error instanceof Error) {
+      logger.debug(`  name: ${error.name}`);
+      logger.debug(`  message: ${error.message}`);
+      if (error.stack) {
+        logger.debug(`  stack: ${error.stack}`);
+      }
+      if (error.cause) {
+        logger.debug(`  cause: ${error.cause instanceof Error ? `${error.cause.name}: ${error.cause.message}` : String(error.cause)}`);
+        if (error.cause instanceof Error && error.cause.stack) {
+          logger.debug(`  cause stack: ${error.cause.stack}`);
+        }
+      }
+    } else {
+      logger.debug(`  raw error: ${JSON.stringify(error, null, 2)}`);
+    }
+  }
+
   // Provide actionable hints based on error type
   logMessage('');
   printDeploymentHints(title, detail, status, resources);

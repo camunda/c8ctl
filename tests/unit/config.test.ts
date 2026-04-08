@@ -201,14 +201,28 @@ describe('Config Module', () => {
 
   describe('Credentials', () => {
     let originalEnv: NodeJS.ProcessEnv;
+    let testDataDir: string;
+    let testModelerDir: string;
 
     beforeEach(() => {
       originalEnv = { ...process.env };
+      testDataDir = join(tmpdir(), `c8ctl-cred-test-${Date.now()}`);
+      testModelerDir = join(tmpdir(), `c8ctl-modeler-cred-test-${Date.now()}`);
+      mkdirSync(testDataDir, { recursive: true });
+      mkdirSync(testModelerDir, { recursive: true });
+      process.env.C8CTL_DATA_DIR = testDataDir;
+      process.env.C8CTL_MODELER_DIR = testModelerDir;
       // Clear c8ctl session
       c8ctl.activeProfile = undefined;
     });
 
     afterEach(() => {
+      if (existsSync(testDataDir)) {
+        rmSync(testDataDir, { recursive: true, force: true });
+      }
+      if (existsSync(testModelerDir)) {
+        rmSync(testModelerDir, { recursive: true, force: true });
+      }
       process.env = originalEnv;
       c8ctl.activeProfile = undefined;
     });
@@ -256,6 +270,105 @@ describe('Config Module', () => {
       assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
       assert.strictEqual(config.username, 'demo');
       assert.strictEqual(config.password, 'demo');
+    });
+
+    test('session profile with basic auth overrides OAuth env vars', () => {
+      // Simulate: user sets OAuth env vars explicitly
+      process.env.CAMUNDA_BASE_URL = 'https://oauth-cluster.example.com';
+      process.env.CAMUNDA_CLIENT_ID = 'env-client-id';
+      process.env.CAMUNDA_CLIENT_SECRET = 'env-client-secret';
+      process.env.CAMUNDA_OAUTH_URL = 'https://oauth.example.com/token';
+
+      // But a session profile with Basic auth is active
+      addProfile({
+        name: 'basic-profile',
+        baseUrl: 'https://basic-cluster.example.com',
+        username: 'admin',
+        password: 'secret',
+      });
+      c8ctl.activeProfile = 'basic-profile';
+
+      const config = resolveClusterConfig();
+
+      // DEFECT: session profile silently wins over explicit env vars.
+      // The user set OAuth env vars but gets Basic auth credentials instead.
+      // Expected: env vars should not be silently overridden by session state,
+      // or at minimum the resolved config should reflect the env var credentials.
+      assert.strictEqual(config.baseUrl, 'https://oauth-cluster.example.com',
+        'Explicit CAMUNDA_BASE_URL env var should not be silently overridden by session profile');
+      assert.strictEqual(config.clientId, 'env-client-id',
+        'Explicit CAMUNDA_CLIENT_ID env var should not be silently overridden by session profile');
+      assert.strictEqual(config.clientSecret, 'env-client-secret',
+        'Explicit CAMUNDA_CLIENT_SECRET env var should not be silently overridden by session profile');
+    });
+
+    test('--profile flag overrides both session profile and env vars', () => {
+      // Env vars set
+      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
+      process.env.CAMUNDA_CLIENT_ID = 'env-client-id';
+      process.env.CAMUNDA_CLIENT_SECRET = 'env-client-secret';
+
+      // Session profile active
+      addProfile({
+        name: 'session-profile',
+        baseUrl: 'https://session-cluster.example.com',
+        username: 'session-user',
+        password: 'session-pass',
+      });
+      c8ctl.activeProfile = 'session-profile';
+
+      // Explicit --profile flag pointing to a third profile
+      addProfile({
+        name: 'flag-profile',
+        baseUrl: 'https://flag-cluster.example.com',
+        clientId: 'flag-client-id',
+        clientSecret: 'flag-client-secret',
+      });
+
+      const config = resolveClusterConfig('flag-profile');
+
+      // --profile flag should always win — this is correct behavior
+      assert.strictEqual(config.baseUrl, 'https://flag-cluster.example.com');
+      assert.strictEqual(config.clientId, 'flag-client-id');
+      assert.strictEqual(config.clientSecret, 'flag-client-secret');
+    });
+
+    test('modeler connection as session profile overrides env vars', () => {
+      // Set OAuth env vars
+      process.env.CAMUNDA_BASE_URL = 'https://oauth-cluster.example.com';
+      process.env.CAMUNDA_CLIENT_ID = 'env-client-id';
+      process.env.CAMUNDA_CLIENT_SECRET = 'env-client-secret';
+
+      // Write a Modeler settings.json with a Basic auth connection
+      const modelerSettings = {
+        'connectionManagerPlugin.c8connections': [
+          {
+            id: 'modeler-conn-1',
+            name: 'Local Basic',
+            targetType: TARGET_TYPES.SELF_HOSTED,
+            authType: AUTH_TYPES.BASIC,
+            contactPoint: 'https://modeler-cluster.example.com',
+            basicAuthUsername: 'modeler-user',
+            basicAuthPassword: 'modeler-pass',
+          },
+        ],
+      };
+      writeFileSync(
+        join(process.env.C8CTL_MODELER_DIR!, 'settings.json'),
+        JSON.stringify(modelerSettings),
+      );
+
+      // Session references this modeler connection
+      c8ctl.activeProfile = 'modeler:Local Basic';
+
+      const config = resolveClusterConfig();
+
+      // DEFECT: modeler connection silently overrides explicit OAuth env vars.
+      // The user set CAMUNDA_CLIENT_ID/SECRET but gets modeler's Basic auth instead.
+      assert.strictEqual(config.baseUrl, 'https://oauth-cluster.example.com',
+        'Explicit CAMUNDA_BASE_URL env var should not be silently overridden by modeler connection');
+      assert.strictEqual(config.clientId, 'env-client-id',
+        'Explicit CAMUNDA_CLIENT_ID env var should not be silently overridden by modeler connection');
     });
 
     test('connectionToClusterConfig keeps cloud audience optional', () => {

@@ -177,8 +177,8 @@ Fish will automatically load the completion on next shell start.
 Credentials are resolved in the following order:
 
 1. `--profile` flag (one-off override)
-2. Active profile from session state
-3. Environment variables (`CAMUNDA_*`)
+2. Environment variables (`CAMUNDA_*`)
+3. Active profile from session state
 4. Localhost fallback (`http://localhost:8080`)
 
 **Note**: Credential configuration via environment variables follows the same conventions as the `@camunda8/orchestration-cluster-api` module.
@@ -198,10 +198,11 @@ c8ctl list process-instances --profile prod
 
 Tenants are resolved in the following order:
 
-1. Active tenant from session state
-2. Default tenant from active profile
-3. `CAMUNDA_DEFAULT_TENANT_ID` environment variable
-4. `<default>` tenant
+1. `--profile` flag's default tenant
+2. `CAMUNDA_DEFAULT_TENANT_ID` environment variable
+3. Active tenant from session state
+4. Default tenant from active profile
+5. `<default>` tenant
 
 ```bash
 # Set active tenant for the session

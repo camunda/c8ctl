@@ -117,4 +117,17 @@ describe('Deployment Logging', () => {
       throw new Error(`Unexpected deployment output: ${output}`);
     }
   });
+
+  test('debug mode shows full error details on deployment failure', () => {
+    // Set debug mode
+    process.env.C8CTL_DEBUG = '1';
+    const output = executeDeployment('tests/fixtures/list-pis');
+    
+    // When deployment fails (no server), debug output should include error details
+    if (output.includes('fetch failed') || output.includes('ECONNREFUSED')) {
+      assert.match(output, /\[DEBUG /, 'Should include DEBUG log entries when C8CTL_DEBUG=1');
+      assert.match(output, /Full error details/, 'Should include full error details in debug mode');
+    }
+    // If a server is running and deployment succeeds, debug details are not emitted
+  });
 });
