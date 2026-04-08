@@ -4,7 +4,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { deriveAppUrl, OPEN_APPS } from '../../src/commands/open.ts';
+import { deriveAppUrl, getBrowserCommand, OPEN_APPS } from '../../src/commands/open.ts';
 
 describe('open command', () => {
   describe('deriveAppUrl', () => {
@@ -36,6 +36,47 @@ describe('open command', () => {
       for (const app of OPEN_APPS) {
         const url = deriveAppUrl('http://localhost:8080/v2', app);
         assert.strictEqual(url, `http://localhost:8080/${app}`, `expected correct URL for ${app}`);
+      }
+    });
+  });
+
+  describe('getBrowserCommand', () => {
+    const url = 'http://localhost:8080/operate';
+
+    test('returns xdg-open on Linux', () => {
+      // Simulate platform() returning 'linux'
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+      try {
+        const { command, args } = getBrowserCommand(url);
+        assert.strictEqual(command, 'xdg-open');
+        assert.deepStrictEqual(args, [url]);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original, configurable: true });
+      }
+    });
+
+    test('returns open on macOS', () => {
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+      try {
+        const { command, args } = getBrowserCommand(url);
+        assert.strictEqual(command, 'open');
+        assert.deepStrictEqual(args, [url]);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original, configurable: true });
+      }
+    });
+
+    test('returns cmd.exe on Windows', () => {
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      try {
+        const { command, args } = getBrowserCommand(url);
+        assert.strictEqual(command, 'cmd.exe');
+        assert.deepStrictEqual(args, ['/c', 'start', '', url]);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original, configurable: true });
       }
     });
   });

@@ -24,26 +24,27 @@ export function deriveAppUrl(baseUrl: string, app: AppName): string {
 }
 
 /**
+ * Determine the platform-appropriate command and arguments to open a URL.
+ * Exported for testing.
+ */
+export function getBrowserCommand(url: string): { command: string; args: string[] } {
+  const plat = platform();
+  if (plat === 'darwin') {
+    return { command: 'open', args: [url] };
+  }
+  if (plat === 'win32') {
+    return { command: 'cmd.exe', args: ['/c', 'start', '', url] };
+  }
+  // Linux / WSL
+  return { command: 'xdg-open', args: [url] };
+}
+
+/**
  * Open a URL in the default system browser.
  * Works on macOS, Linux, and Windows (WSL).
  */
 export function openUrl(url: string): void {
-  const plat = platform();
-  let command: string;
-  let args: string[];
-
-  if (plat === 'darwin') {
-    command = 'open';
-    args = [url];
-  } else if (plat === 'win32') {
-    command = 'cmd.exe';
-    args = ['/c', 'start', '', url];
-  } else {
-    // Linux / WSL
-    command = 'xdg-open';
-    args = [url];
-  }
-
+  const { command, args } = getBrowserCommand(url);
   spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
 }
 

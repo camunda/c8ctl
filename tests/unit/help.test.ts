@@ -381,7 +381,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl help open'), 'help should include c8ctl help open link');
   });
 
-  test('showCancel help', () => {
+  test('showCommandHelp shows cancel help', () => {
     showCommandHelp('cancel');
     
     const output = consoleLogSpy.join('\n');
