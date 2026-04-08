@@ -91,7 +91,6 @@ function getLogger() {
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
 const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
@@ -161,19 +160,23 @@ export function validateVersionSpec(versionSpec) {
 // Download & installation
 // ---------------------------------------------------------------------------
 
+function getDownloadUrl(version) {
+  const platformInfo = getPlatformIdentifier();
+  return `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+}
+
 async function downloadC8Run(config) {
   const logger = getLogger();
   const version = config.version;
-  const platformInfo = getPlatformIdentifier();
 
-  const downloadUrl =
-    `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  const downloadUrl = getDownloadUrl(version);
 
-  logger.info(`Downloading Camunda ${version} for ${platformInfo.platform}...`);
+  logger.info(`Downloading Camunda ${version} for ${getPlatformIdentifier().platform}...`);
 
   const cacheDir = config.cacheDir;
   mkdirSync(cacheDir, { recursive: true });
 
+  const platformInfo = getPlatformIdentifier();
   const targetFile = join(
     cacheDir,
     `c8run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`,
@@ -198,6 +201,11 @@ async function downloadC8Run(config) {
         `Please try again or use a different version.`,
     );
   }
+
+  const etag = response.headers.get('etag') || response.headers.get('last-modified') || null;
+  // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
+  // values are date strings. Both are used as opaque version tokens for equality
+  // comparison — the format difference does not affect correctness.
 
   const fileStream = createWriteStream(targetFile);
 
@@ -234,7 +242,7 @@ async function downloadC8Run(config) {
     `Downloaded and saved to ${targetFile} (${Math.floor(downloadedSize / 1024 / 1024)} MB)`,
   );
 
-  return targetFile;
+  return { archivePath: targetFile, etag };
 }
 
 async function extractArchive(archivePath, targetDir) {
@@ -343,56 +351,87 @@ export function purgeInstalledVersion(config) {
   );
 
   if (existsSync(installDir)) {
-    logger.info(`Removing cached non-pinned installation for ${config.version} since a new version might have been released, ensuring you are on latest...`);
+    logger.info(`Removing cached installation for ${config.version} since a newer version is available...`);
     rmSync(installDir, { recursive: true });
   }
   if (existsSync(archiveFile)) {
     rmSync(archiveFile);
   }
-}
 
-function getUpdateCheckFilePath(config) {
-  return join(config.cacheDir, `c8run-${config.version}-last-check`);
-}
-
-export function shouldCheckForUpdates(config) {
-  const checkFile = getUpdateCheckFilePath(config);
-  if (!existsSync(checkFile)) {
-    return true;
+  // Remove stored ETag so the next install records a fresh one
+  const etagFile = getETagFilePath(config);
+  if (existsSync(etagFile)) {
+    rmSync(etagFile);
   }
+}
+
+function getETagFilePath(config) {
+  return join(config.cacheDir, `c8run-${config.version}.etag`);
+}
+
+export function readStoredETag(config) {
+  const etagFile = getETagFilePath(config);
+  if (!existsSync(etagFile)) return null;
   try {
-    const lastCheck = parseInt(readFileSync(checkFile, 'utf-8').trim(), 10);
-    return isNaN(lastCheck) || Date.now() - lastCheck > UPDATE_CHECK_INTERVAL_MS;
+    return readFileSync(etagFile, 'utf-8').trim() || null;
   } catch {
-    return true;
+    return null;
   }
 }
 
-export function recordUpdateCheck(config) {
+export function storeETag(config, etag) {
   mkdirSync(config.cacheDir, { recursive: true });
-  writeFileSync(getUpdateCheckFilePath(config), String(Date.now()));
+  writeFileSync(getETagFilePath(config), etag);
+}
+
+export async function hasNewerVersionAvailable(config) {
+  const storedETag = readStoredETag(config);
+  if (!storedETag) {
+    // No ETag stored yet — treat as update available so we record one after install
+    return true;
+  }
+
+  const downloadUrl = getDownloadUrl(config.version);
+  try {
+    const response = await fetch(downloadUrl, { method: 'HEAD' });
+    if (!response.ok) {
+      // Can't determine — keep the current installation
+      return false;
+    }
+    const remoteETag = response.headers.get('etag') || response.headers.get('last-modified');
+    if (!remoteETag) {
+      // Server provides no version signal — keep the current installation
+      return false;
+    }
+    return remoteETag !== storedETag;
+  } catch {
+    // Network error — keep the current installation (allows offline use)
+    return false;
+  }
 }
 
 export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
-  // When a version alias (e.g. "stable", "alpha") was used, check for updates
-  // at most once per day to avoid re-downloading on every start.
-  if (config.isAlias && shouldCheckForUpdates(config)) {
-    purgeInstalledVersion(config);
-  }
-
   if (isC8RunInstalled(config)) {
-    logger.info(`c8run ${config.version} is already installed.`);
     if (config.isAlias) {
-      recordUpdateCheck(config);
+      // No explicit version on command line — check if a newer release is available
+      const hasUpdate = await hasNewerVersionAvailable(config);
+      if (!hasUpdate) {
+        logger.info(`c8run ${config.version} is already installed and up to date.`);
+        return;
+      }
+      purgeInstalledVersion(config);
+    } else {
+      // Exact version pinned by the user — never re-download
+      logger.info(`c8run ${config.version} is already installed.`);
+      return;
     }
-    return;
   }
 
   logger.info('No local installation found. Setting up...');
 
-  const archivePath = await downloadC8Run(config);
+  const { archivePath, etag } = await downloadC8Run(config);
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   await extractArchive(archivePath, installDir);
@@ -405,8 +444,9 @@ export async function ensureC8RunInstalled(config) {
   const binaryPath = getC8RunBinaryPath(config);
   await chmod(binaryPath, 0o755);
 
-  if (config.isAlias) {
-    recordUpdateCheck(config);
+  // Store the ETag so future alias-based starts can detect new releases
+  if (config.isAlias && etag) {
+    storeETag(config, etag);
   }
 
   logger.info(`c8run ${config.version} installed successfully.`);
