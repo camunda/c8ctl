@@ -29,6 +29,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
+    "postinstall": "patch --forward -p1 -i patches/npm+11.12.1.patch || [ $? -eq 1 ]",
     "prepublishOnly": "npm run build",
     "test": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
     "test:unit": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts",
@@ -59,7 +60,7 @@
   },
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^8.8.4",
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
@@ -69,5 +70,25 @@
     "@types/node": "^25.5.0",
     "semantic-release": "^25.0.3",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@hono/node-server": "1.19.13",
+    "brace-expansion": "5.0.5",
+    "express-rate-limit": "8.3.2",
+    "handlebars": "4.7.9",
+    "hono": "4.12.12",
+    "lodash-es": "4.18.1",
+    "minimatch": "10.2.5",
+    "npm": {
+      ".": "11.12.1",
+      "brace-expansion": "5.0.5",
+      "minimatch": "10.2.5",
+      "picomatch": "4.0.4",
+      "tar": "7.5.13"
+    },
+    "path-to-regexp": "8.4.2",
+    "picomatch": "4.0.4",
+    "tar": "7.5.13",
+    "undici": "7.24.7"
   }
 }
