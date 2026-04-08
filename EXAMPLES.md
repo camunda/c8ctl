@@ -932,6 +932,46 @@ c8 cluster stop
 
 ---
 
+## Open Camunda Applications
+
+Open Camunda web applications directly from the command line. The URL is derived
+automatically from the active profile's base URL.
+
+### Open Camunda Operate
+
+```bash
+# Open Operate for the currently active profile
+c8 open operate
+
+# Open Operate using a specific profile
+c8 open operate --profile=prod
+```
+
+### Open Camunda Tasklist
+
+```bash
+c8 open tasklist
+c8 open tasklist --profile=staging
+```
+
+### Open Camunda Web Modeler
+
+```bash
+c8 open modeler
+```
+
+### Open Camunda Optimize
+
+```bash
+c8 open optimize
+```
+
+**URL derivation:** The command strips the API path suffix (e.g. `/v2`) from the
+profile's `baseUrl` and appends the application path.  
+Example: `baseUrl=http://localhost:8080/v2` → `http://localhost:8080/operate`
+
+---
+
 ## Plugin Management
 
 ### Load Plugin

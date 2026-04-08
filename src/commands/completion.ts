@@ -21,7 +21,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch add remove rm load unload sync upgrade downgrade init use which output completion help cluster"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -49,7 +49,8 @@ _c8ctl_completions() {
   local output_resources="json text"
   local completion_resources="bash zsh fish"
   local cluster_resources="start stop status list list-remote install delete log logs"
-  local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
+  local open_resources="operate tasklist modeler optimize"
+  local help_resources="list get create complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force"
@@ -141,6 +142,9 @@ _c8ctl_completions() {
         cluster)
           COMPREPLY=( \$(compgen -W "\${cluster_resources}" -- "\${cur}") )
           ;;
+        open)
+          COMPREPLY=( \$(compgen -W "\${open_resources}" -- "\${cur}") )
+          ;;
         deploy|run|watch)
           # Complete with files
           COMPREPLY=( \$(compgen -f -- "\${cur}") )
@@ -201,6 +205,7 @@ _c8ctl() {
     'use:Set active profile or tenant'
     'which:Show active profile or tenant'
     'output:Set output format'
+    'open:Open Camunda web application in browser'
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
     'cluster:Manage local Camunda 8 cluster'
@@ -478,6 +483,7 @@ _c8ctl() {
             'deploy:Show deploy command help'
             'run:Show run command help'
             'watch:Show watch command help'
+            'open:Show open command help'
             'cancel:Show cancel command help'
             'resolve:Show resolve command help'
             'fail:Show fail command help'
@@ -499,6 +505,15 @@ _c8ctl() {
           resources=(
             'start:Start local Camunda 8 cluster'
             'stop:Stop local Camunda 8 cluster'
+          )
+          _describe 'resource' resources
+          ;;
+        open)
+          resources=(
+            'operate:Open Camunda Operate'
+            'tasklist:Open Camunda Tasklist'
+            'modeler:Open Camunda Web Modeler'
+            'optimize:Open Camunda Optimize'
           )
           _describe 'resource' resources
           ;;
@@ -676,6 +691,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'run' -d 'Deploy and start proce
 complete -c c8 -n '__fish_use_subcommand' -a 'run' -d 'Deploy and start process'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'watch' -d 'Watch files and auto-deploy'
 complete -c c8 -n '__fish_use_subcommand' -a 'watch' -d 'Watch files and auto-deploy'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'open' -d 'Open Camunda web application in browser'
+complete -c c8 -n '__fish_use_subcommand' -a 'open' -d 'Open Camunda web application in browser'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'add' -d 'Add a profile'
 complete -c c8 -n '__fish_use_subcommand' -a 'add' -d 'Add a profile'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'remove' -d 'Remove a profile'
@@ -920,6 +937,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run co
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'open' -d 'Show open command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'open' -d 'Show open command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'resolve' -d 'Show resolve command help'
@@ -954,6 +973,16 @@ complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start 
 complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
 complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
 complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
+
+# Resources for 'open' command
+complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'operate' -d 'Open Camunda Operate'
+complete -c c8 -n '__fish_seen_subcommand_from open' -a 'operate' -d 'Open Camunda Operate'
+complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'tasklist' -d 'Open Camunda Tasklist'
+complete -c c8 -n '__fish_seen_subcommand_from open' -a 'tasklist' -d 'Open Camunda Tasklist'
+complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'modeler' -d 'Open Camunda Web Modeler'
+complete -c c8 -n '__fish_seen_subcommand_from open' -a 'modeler' -d 'Open Camunda Web Modeler'
+complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'optimize' -d 'Open Camunda Optimize'
+complete -c c8 -n '__fish_seen_subcommand_from open' -a 'optimize' -d 'Open Camunda Optimize'
 `;
 }
 

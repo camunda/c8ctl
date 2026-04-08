@@ -14,6 +14,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
+- **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
@@ -57,6 +58,7 @@ c8ctl help search     # Shows all search resources and their flags
 c8ctl help deploy     # Shows deploy command with all flags
 c8ctl help run        # Shows run command with all flags
 c8ctl help watch      # Shows watch command with all flags
+c8ctl help open       # Shows open command with all apps
 c8ctl help cancel     # Shows cancel command with all flags
 c8ctl help resolve    # Shows resolve command with all flags
 c8ctl help fail       # Shows fail command with all flags
@@ -126,6 +128,13 @@ c8ctl deploy                           # Deploy current directory
 c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl watch                            # Watch for changes and auto-deploy
 c8ctl watch --force                    # Keep watching after failed deploys
+
+# Open Camunda web applications
+c8ctl open operate                     # Open Camunda Operate in browser
+c8ctl open tasklist                    # Open Camunda Tasklist in browser
+c8ctl open modeler                     # Open Camunda Web Modeler in browser
+c8ctl open optimize                    # Open Camunda Optimize in browser
+c8ctl open operate --profile=prod      # Open Operate with a specific profile
 ```
 
 ### Ignoring Files (`.c8ignore`)
