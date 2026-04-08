@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -354,6 +354,78 @@ describe('Cluster Plugin – purgeInstalledVersion', () => {
 });
 
 // ---------------------------------------------------------------------------
+// shouldCheckForUpdates / recordUpdateCheck
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – shouldCheckForUpdates', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns true when no check file exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.strictEqual(plugin.shouldCheckForUpdates(config), true);
+  });
+
+  test('returns false when last check was recent (within 24 hours)', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.recordUpdateCheck(config);
+    assert.strictEqual(plugin.shouldCheckForUpdates(config), false);
+  });
+
+  test('returns true when last check was more than 24 hours ago', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const checkFile = join(tempDir, 'c8run-8.8-last-check');
+    const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    writeFileSync(checkFile, String(twoDaysAgo));
+    assert.strictEqual(plugin.shouldCheckForUpdates(config), true);
+  });
+
+  test('returns true when check file contains invalid content', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const checkFile = join(tempDir, 'c8run-8.8-last-check');
+    writeFileSync(checkFile, 'not-a-timestamp');
+    assert.strictEqual(plugin.shouldCheckForUpdates(config), true);
+  });
+});
+
+describe('Cluster Plugin – recordUpdateCheck', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('writes a timestamp to the check file', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const before = Date.now();
+    plugin.recordUpdateCheck(config);
+    const after = Date.now();
+    const checkFile = join(tempDir, 'c8run-8.8-last-check');
+    assert.ok(existsSync(checkFile), 'check file should exist after recordUpdateCheck');
+    const timestamp = parseInt(readFileSync(checkFile, 'utf-8').trim(), 10);
+    assert.ok(timestamp >= before && timestamp <= after, 'timestamp should be current');
+  });
+
+  test('creates the cache dir if it does not exist', () => {
+    const nestedDir = join(tempDir, 'nested', 'cache');
+    const config = { cacheDir: nestedDir, version: '8.8' };
+    assert.doesNotThrow(() => plugin.recordUpdateCheck(config));
+    assert.ok(existsSync(nestedDir), 'cache dir should be created');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ensureC8RunInstalled
 // ---------------------------------------------------------------------------
 
@@ -379,22 +451,40 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
     await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
   });
 
-  test('purges install dir when version is an alias before checking', async () => {
+  test('does not purge alias install when last check was recent (within 24 hours)', async () => {
     const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
-    // Set up a binary so purge has something to remove
     const installDir = join(tempDir, 'c8run-8.8');
     const binaryDir = join(installDir, 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
 
+    // Record a recent check so shouldCheckForUpdates returns false
+    plugin.recordUpdateCheck(config);
+
+    // ensureC8RunInstalled should skip the purge and return without error
+    await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
+
+    // Installation should still be present
+    assert.strictEqual(existsSync(installDir), true, 'install dir should NOT be purged when check is recent');
+  });
+
+  test('purges and re-checks alias install when last check is older than 24 hours', async () => {
+    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    // Write a stale timestamp (2 days ago)
+    const checkFile = join(tempDir, 'c8run-8.8-last-check');
+    writeFileSync(checkFile, String(Date.now() - 2 * 24 * 60 * 60 * 1000));
+
     assert.strictEqual(plugin.isC8RunInstalled(config), true, 'should be installed before test');
 
-    // When isAlias=true, ensureC8RunInstalled calls purgeInstalledVersion then downloads.
-    // Downloading in a unit test would make a real HTTP request, so we test the purge
-    // side-effect separately using purgeInstalledVersion (the function ensureC8RunInstalled delegates to).
+    // purgeInstalledVersion is what ensureC8RunInstalled delegates to — test the side-effect
     plugin.purgeInstalledVersion(config);
 
-    assert.strictEqual(existsSync(installDir), false, 'install dir should be purged');
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be purged when check is stale');
     assert.strictEqual(plugin.isC8RunInstalled(config), false, 'should not be installed after purge');
   });
 });

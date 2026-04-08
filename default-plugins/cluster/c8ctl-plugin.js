@@ -91,6 +91,7 @@ function getLogger() {
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
 const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
@@ -350,17 +351,42 @@ export function purgeInstalledVersion(config) {
   }
 }
 
+function getUpdateCheckFilePath(config) {
+  return join(config.cacheDir, `c8run-${config.version}-last-check`);
+}
+
+export function shouldCheckForUpdates(config) {
+  const checkFile = getUpdateCheckFilePath(config);
+  if (!existsSync(checkFile)) {
+    return true;
+  }
+  try {
+    const lastCheck = parseInt(readFileSync(checkFile, 'utf-8').trim(), 10);
+    return isNaN(lastCheck) || Date.now() - lastCheck > UPDATE_CHECK_INTERVAL_MS;
+  } catch {
+    return true;
+  }
+}
+
+export function recordUpdateCheck(config) {
+  mkdirSync(config.cacheDir, { recursive: true });
+  writeFileSync(getUpdateCheckFilePath(config), String(Date.now()));
+}
+
 export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
-  // When a version alias (e.g. "stable", "alpha") was used, always
-  // re-download because the actual artifact behind the alias may have changed.
-  if (config.isAlias) {
+  // When a version alias (e.g. "stable", "alpha") was used, check for updates
+  // at most once per day to avoid re-downloading on every start.
+  if (config.isAlias && shouldCheckForUpdates(config)) {
     purgeInstalledVersion(config);
   }
 
   if (isC8RunInstalled(config)) {
     logger.info(`c8run ${config.version} is already installed.`);
+    if (config.isAlias) {
+      recordUpdateCheck(config);
+    }
     return;
   }
 
@@ -378,6 +404,10 @@ export async function ensureC8RunInstalled(config) {
 
   const binaryPath = getC8RunBinaryPath(config);
   await chmod(binaryPath, 0o755);
+
+  if (config.isAlias) {
+    recordUpdateCheck(config);
+  }
 
   logger.info(`c8run ${config.version} installed successfully.`);
 }
