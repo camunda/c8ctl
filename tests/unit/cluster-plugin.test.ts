@@ -1104,14 +1104,17 @@ describe('Cluster Plugin – logs, list-remote, install, delete subcommands', ()
   let captured: string[];
   let originalLog: typeof console.log;
   let originalWarn: typeof console.warn;
+  let originalError: typeof console.error;
   let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
     captured = [];
     originalLog = console.log;
     originalWarn = console.warn;
+    originalError = console.error;
     console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
     console.warn = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
     originalFetch = globalThis.fetch;
     Object.defineProperty(globalThis, 'fetch', {
       value: async () => { throw new Error('Connection refused'); },
@@ -1123,6 +1126,7 @@ describe('Cluster Plugin – logs, list-remote, install, delete subcommands', ()
   afterEach(() => {
     console.log = originalLog;
     console.warn = originalWarn;
+    console.error = originalError;
     Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
   });
 
@@ -1176,6 +1180,32 @@ describe('Cluster Plugin – logs, list-remote, install, delete subcommands', ()
     }
     const output = captured.join('\n');
     assert.ok(!output.includes('Usage:'), 'install subcommand should not print usage');
+  });
+
+  test('install without version exits with error', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['install']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(output.includes('specify a version'), 'install without version should prompt for one');
+  });
+
+  test('delete without version exits with error', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['delete']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(output.includes('specify a version'), 'delete without version should prompt for one');
   });
 });
 
@@ -1239,7 +1269,7 @@ describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', ()
 
   test('start (checkForUpdateHint=true) does not block or re-download, but checks remote for hint', async () => {
     // Simulate: 8.8 is installed locally with an old ETag, remote has a new ETag
-    const config = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
+    const config: any = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
     const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
@@ -1254,8 +1284,8 @@ describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', ()
 
     await plugin.ensureC8RunInstalled(config);
 
-    // Allow the non-blocking hint check to settle
-    await new Promise((r) => setTimeout(r, 50));
+    // Await the hint promise (stored on config by ensureC8RunInstalled)
+    await config._hintPromise;
 
     // start DOES fire a remote check for the hint
     assert.strictEqual(fetchCalled, true, 'start should check remote for update hint');
@@ -1287,7 +1317,7 @@ describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', ()
   });
 
   test('start with minor version succeeds offline (hint check swallows error)', async () => {
-    const config = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
+    const config: any = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
     const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
@@ -1303,8 +1333,11 @@ describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', ()
       'start with local minor version should succeed even when network fails',
     );
 
-    // Allow the non-blocking hint check to settle (should swallow the error)
-    await new Promise((r) => setTimeout(r, 50));
+    // Await the hint promise — it should resolve (swallowing the error) without throwing
+    await assert.doesNotReject(
+      () => config._hintPromise,
+      'hint check should swallow network errors',
+    );
 
     // Install should still be there
     assert.ok(existsSync(join(tempDir, 'c8run-8.8')), 'should not purge the install');

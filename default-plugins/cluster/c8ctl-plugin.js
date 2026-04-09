@@ -525,11 +525,10 @@ export async function hasNewerVersionAvailable(config) {
 
   const downloadUrl = getDownloadUrl(config.version);
   let remoteETag;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
     const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
-    clearTimeout(timeout);
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
@@ -542,6 +541,8 @@ export async function hasNewerVersionAvailable(config) {
   } catch {
     // Network error — keep the current installation (allows offline use)
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (!storedETag) {
@@ -571,9 +572,10 @@ export async function ensureC8RunInstalled(config) {
       // Use local installation as-is (start subcommand, or pinned version)
       logger.info(`c8run ${config.version} is already installed.`);
 
-      // For rolling versions on start, do a bounded non-blocking check and hint
+      // For rolling versions on start, do a bounded non-blocking check and hint.
+      // We store the promise so tests can await it, but we don't block the caller.
       if (config.checkForUpdateHint) {
-        hasNewerVersionAvailable(config)
+        config._hintPromise = hasNewerVersionAvailable(config)
           .then((hasUpdate) => {
             if (hasUpdate) {
               logger.info(
@@ -903,11 +905,14 @@ export async function clusterStatus(cacheDir) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
-    const response = await fetch(CLUSTER_URLS.health, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (response.ok) {
-      const data = await response.json();
-      isHealthy = data.status === 'UP';
+    try {
+      const response = await fetch(CLUSTER_URLS.health, { signal: controller.signal });
+      if (response.ok) {
+        const data = await response.json();
+        isHealthy = data.status === 'UP';
+      }
+    } finally {
+      clearTimeout(timeout);
     }
   } catch {
     // Health endpoint not reachable
@@ -1072,21 +1077,27 @@ export async function deleteVersion(cacheDir, versionSpec) {
 
   validateVersionSpec(versionSpec);
 
+  // Resolve named aliases (stable/alpha) to the actual cached version name.
+  // Major.minor patterns like 8.8 are used as-is since the cache dir is named c8run-8.8.
+  const resolvedVersion = isVersionAlias(versionSpec)
+    ? await resolveVersion(versionSpec)
+    : versionSpec;
+
   // Prevent deleting a currently running version
   const versionFile = join(cacheDir, VERSION_MARKER_FILE);
   const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
 
   if (existsSync(markerFile) && existsSync(versionFile)) {
     const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-    if (runningVersion === versionSpec) {
+    if (runningVersion === resolvedVersion) {
       logger.error(
-        `Version ${versionSpec} is currently running. Stop it first with: c8ctl cluster stop`
+        `Version ${resolvedVersion} is currently running. Stop it first with: c8ctl cluster stop`
       );
       process.exit(1);
     }
   }
 
-  const config = { cacheDir, version: versionSpec };
+  const config = { cacheDir, version: resolvedVersion };
 
   if (!isC8RunInstalled(config)) {
     logger.warn(`Version ${versionSpec} is not installed locally.`);
@@ -1158,10 +1169,19 @@ export async function streamLogs(cacheDir) {
   };
   process.on('SIGINT', sigintHandler);
 
-  await new Promise((resolve) => {
-    tail.on('close', () => {
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
       process.removeListener('SIGINT', sigintHandler);
+    };
+
+    tail.once('close', () => {
+      cleanup();
       resolve();
+    });
+
+    tail.once('error', (error) => {
+      cleanup();
+      reject(error);
     });
   });
 }
@@ -1230,7 +1250,7 @@ export const commands = {
       console.log('  c8ctl cluster start [<version>] [--debug]');
       console.log('  c8ctl cluster stop');
       console.log('  c8ctl cluster status');
-      console.log('  c8ctl cluster logs');
+      console.log('  c8ctl cluster logs              (alias: log)');
       console.log('  c8ctl cluster list');
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install <version>');
@@ -1271,7 +1291,7 @@ export const commands = {
       console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
       console.log('  c8ctl cluster stop');
       console.log('  c8ctl cluster status');
-      console.log('  c8ctl cluster logs');
+      console.log('  c8ctl cluster logs              (alias: log)');
       console.log('  c8ctl cluster list');
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install 8.8');
@@ -1317,6 +1337,15 @@ export const commands = {
         process.exit(1);
       }
       return;
+    }
+
+    // install and delete require an explicit version argument
+    if (!parsed.version && (parsed.subcommand === 'install' || parsed.subcommand === 'delete')) {
+      const example = parsed.subcommand === 'delete'
+        ? 'c8ctl cluster delete 8.8'
+        : 'c8ctl cluster install stable';
+      logger.error(`Please specify a version. Example: ${example}`);
+      process.exit(1);
     }
 
     if (parsed.subcommand === 'delete') {
