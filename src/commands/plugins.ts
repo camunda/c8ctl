@@ -607,9 +607,10 @@ export async function syncPlugins(): Promise<void> {
       logger.error(`  - ${failure.plugin}: ${failure.error}`);
     }
     logger.info('');
-    logger.info('Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"');
-    logger.info('For more details on the error, run with the --verbose flag');
-    process.exit(1);
+    const syncError = new Error(failures.map(f => `${f.plugin}: ${f.error}`).join('; '));
+    handleCommandError(logger, `Failed to sync ${failedCount} plugin(s)`, syncError, [
+      'Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"',
+    ]);
   }
   
   logger.success('All plugins synced successfully!');
