@@ -101,6 +101,7 @@ describe('Form Integration Tests', () => {
     // Retrieve the form via CLI
     const formResult = await cli('get', 'form', userTaskKey!, '--ut');
     assert.strictEqual(formResult.status, 0, `get form should exit 0. stderr: ${formResult.stderr}`);
+    console.log(formResult.stdout) // @DEBUG
     const form = parseJson<Record<string, unknown>>(formResult.stdout);
 
     assert.ok(form, 'Form should be retrieved');
