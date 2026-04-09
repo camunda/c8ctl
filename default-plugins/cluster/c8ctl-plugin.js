@@ -178,6 +178,8 @@ function getLogger() {
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
 const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
+const HEALTH_CHECK_TIMEOUT_MS = 3_000;
+const ALIAS_COLUMN_WIDTH = 22;
 
 function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
@@ -837,7 +839,7 @@ export async function clusterStatus(cacheDir) {
   let isHealthy = false;
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3_000);
+    const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
     const response = await fetch(CLUSTER_URLS.health, { signal: controller.signal });
     clearTimeout(timeout);
     if (response.ok) {
@@ -848,7 +850,14 @@ export async function clusterStatus(cacheDir) {
     // Health endpoint not reachable
   }
 
-  const status = isHealthy ? 'running' : markerExists ? 'starting or unresponsive' : 'stopped';
+  let status;
+  if (isHealthy) {
+    status = 'running';
+  } else if (markerExists) {
+    status = 'starting or unresponsive';
+  } else {
+    status = 'stopped';
+  }
 
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
     logger.json({ status, version, urls: isHealthy ? CLUSTER_URLS : undefined });
@@ -922,7 +931,7 @@ export async function listInstalledVersions(cacheDir) {
   console.log('');
   console.log('Version aliases (dynamically resolved):');
   for (const [alias, resolved] of aliasEntries) {
-    console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+    console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
   console.log('');
 }
@@ -1004,7 +1013,7 @@ export const commands = {
       console.log('');
       console.log('Version aliases (dynamically resolved):');
       for (const [alias, resolved] of await getVersionAliasEntries()) {
-        console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+        console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
       console.log('');
       console.log('Examples:');
