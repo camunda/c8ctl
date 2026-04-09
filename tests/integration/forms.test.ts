@@ -67,7 +67,7 @@ describe('Form Integration Tests', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  test('get form for user task after deploying list-pis fixtures', async () => {
+  test('get form for user task after deploying list-pis fixtures', async (t) => {
     await cli('deploy', 'tests/fixtures/list-pis');
 
     // Poll until process definition is indexed
@@ -101,7 +101,7 @@ describe('Form Integration Tests', () => {
     // Retrieve the form via CLI
     const formResult = await cli('get', 'form', userTaskKey!, '--ut');
     assert.strictEqual(formResult.status, 0, `get form should exit 0. stderr: ${formResult.stderr}`);
-    console.log(formResult.stdout) // @DEBUG
+    t.diagnostic('*************', formResult.stdout) // @DEBUG
     const form = parseJson<Record<string, unknown>>(formResult.stdout);
 
     assert.ok(form, 'Form should be retrieved');
@@ -179,7 +179,7 @@ describe('Form Integration Tests', () => {
     assert.ok(form.formKey, 'Retrieved form should have formKey');
   });
 
-  test('getForm finds user task form with user task key', async () => {
+  test('getForm finds user task form with user task key', async (t) => {
     await cli('deploy', 'tests/fixtures/list-pis');
 
     // Poll until process definition is indexed
@@ -199,6 +199,7 @@ describe('Form Integration Tests', () => {
     let userTaskKey: string | undefined;
     const userTaskFound = await pollUntil(async () => {
       const result = await cli('search', 'ut', `--processInstanceKey=${piKey}`);
+      t.diagnostic('****UserTaskRow', result.stdout)
       const items = parseJson<UserTaskRow[]>(result.stdout);
       if (items.length > 0) {
         userTaskKey = String(items[0].Key);
