@@ -384,6 +384,16 @@ describe('Cluster Plugin – purgeInstalledVersion', () => {
 
     assert.strictEqual(existsSync(etagFile), false, 'ETag file should be removed by purge');
   });
+
+  test('accepts a custom reason for the log message', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const installDir = join(tempDir, 'c8run-8.8');
+    mkdirSync(installDir, { recursive: true });
+
+    // Should not throw when called with reason
+    assert.doesNotThrow(() => plugin.purgeInstalledVersion(config, { reason: 'as requested' }));
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -820,6 +830,20 @@ describe('Cluster Plugin – listInstalledVersions', () => {
     assert.ok(output.includes('8.9'), 'Should list installed version 8.9');
   });
 
+  test('sorts versions numerically (8.9 before 8.10)', async () => {
+    mkdirSync(join(tempDir, 'c8run-8.10'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.9'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.6'), { recursive: true });
+
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    const idx6 = output.indexOf('8.6');
+    const idx9 = output.indexOf('8.9');
+    const idx10 = output.indexOf('8.10');
+    assert.ok(idx6 < idx9, '8.6 should appear before 8.9');
+    assert.ok(idx9 < idx10, '8.9 should appear before 8.10');
+  });
+
   test('always shows version aliases section', async () => {
     await plugin.listInstalledVersions(tempDir);
     const output = captured.join('\n');
@@ -1028,6 +1052,31 @@ describe('Cluster Plugin – listRemoteVersions', () => {
     assert.ok(output.includes('8.8'), 'Should list version 8.8');
     assert.ok(output.includes('8.9.0-alpha1'), 'Should list alpha version');
     assert.ok(output.includes('Available versions'), 'Should have a header');
+  });
+
+  test('sorts versions numerically (8.9 before 8.10, alpha2 before alpha10)', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.10/">8.10</a>
+          <a href="8.9/">8.9</a>
+          <a href="8.9.0-alpha10/">8.9.0-alpha10</a>
+          <a href="8.9.0-alpha2/">8.9.0-alpha2</a>
+        `,
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.listRemoteVersions();
+    const output = captured.join('\n');
+    const alpha2Idx = output.indexOf('8.9.0-alpha2');
+    const alpha10Idx = output.indexOf('8.9.0-alpha10');
+    const v9Idx = output.indexOf('8.9\n') >= 0 ? output.indexOf('8.9\n') : output.indexOf('  8.9');
+    const v10Idx = output.indexOf('8.10');
+    assert.ok(alpha2Idx < alpha10Idx, 'alpha2 should appear before alpha10');
+    assert.ok(v9Idx < v10Idx, '8.9 should appear before 8.10');
   });
 
   test('exits with error when network fails', async () => {

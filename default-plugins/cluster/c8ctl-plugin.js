@@ -132,11 +132,50 @@ async function getDynamicAliases() {
   return _dynamicAliases;
 }
 
-async function resolveVersion(versionSpec) {
+async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
+
+  // When preferLocal is set (e.g. start), try the persisted alias mapping first
+  if (preferLocal && cacheDir) {
+    const local = readLocalAliasMapping(cacheDir, versionSpec);
+    if (local) return local;
+  }
+
   const dynamic = await getDynamicAliases();
-  if (dynamic?.[versionSpec]) return dynamic[versionSpec];
-  return _fallbackAliases[versionSpec] ?? versionSpec;
+  const resolved = dynamic?.[versionSpec] ?? _fallbackAliases[versionSpec] ?? versionSpec;
+
+  // Persist the resolved mapping for future offline use
+  if (cacheDir && dynamic?.[versionSpec]) {
+    storeLocalAliasMapping(cacheDir, versionSpec, resolved);
+  }
+
+  return resolved;
+}
+
+function getAliasMappingPath(cacheDir, alias) {
+  return join(cacheDir, `alias-${alias}.resolved`);
+}
+
+function readLocalAliasMapping(cacheDir, alias) {
+  const filePath = getAliasMappingPath(cacheDir, alias);
+  if (!existsSync(filePath)) return null;
+  try {
+    const value = readFileSync(filePath, 'utf-8').trim();
+    // Only use the cached mapping if the version is actually installed
+    const config = { cacheDir, version: value };
+    return isC8RunInstalled(config) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeLocalAliasMapping(cacheDir, alias, resolved) {
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
+  } catch {
+    // Best-effort — don't break the command if we can't persist
+  }
 }
 
 async function getVersionAliasEntries() {
@@ -477,7 +516,7 @@ export function getC8RunBinaryPath(config) {
   return binaryPath;
 }
 
-export function purgeInstalledVersion(config) {
+export function purgeInstalledVersion(config, { reason } = {}) {
   const logger = getLogger();
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   const platformInfo = getPlatformIdentifier();
@@ -487,7 +526,8 @@ export function purgeInstalledVersion(config) {
   );
 
   if (existsSync(installDir)) {
-    logger.info(`Removing cached installation for ${config.version} since a newer version is available...`);
+    const msg = reason || 'since a newer version is available';
+    logger.info(`Removing cached installation for ${config.version} ${msg}...`);
     rmSync(installDir, { recursive: true });
   }
   if (existsSync(archiveFile)) {
@@ -968,12 +1008,8 @@ export async function clusterStatus(cacheDir) {
 export async function listInstalledVersions(cacheDir) {
   const logger = getLogger();
 
-  const installedVersions = existsSync(cacheDir)
-    ? readdirSync(cacheDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
-        .map((entry) => entry.name.slice('c8run-'.length))
-        .sort()
-    : [];
+  const installedVersions = getInstalledVersionsList(cacheDir)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const aliasEntries = await getVersionAliasEntries();
 
@@ -1034,10 +1070,10 @@ export async function listRemoteVersions() {
   }
 
   const sorted = [...new Set(versionMatches)].sort((a, b) => {
-    // Sort by major.minor, then full string for alphas
+    // Sort by major.minor, then full string with numeric comparison for patches/alphas
     const [aMaj, aMin] = a.split('.').map(Number);
     const [bMaj, bMin] = b.split('.').map(Number);
-    return aMaj - bMaj || aMin - bMin || a.localeCompare(b);
+    return aMaj - bMaj || aMin - bMin || a.localeCompare(b, undefined, { numeric: true });
   });
 
   const aliasEntries = await getVersionAliasEntries();
@@ -1104,7 +1140,7 @@ export async function deleteVersion(cacheDir, versionSpec) {
     return;
   }
 
-  purgeInstalledVersion(config);
+  purgeInstalledVersion(config, { reason: 'as requested' });
   logger.info(`Version ${versionSpec} has been deleted.`);
 }
 
@@ -1368,13 +1404,18 @@ export const commands = {
       logger.error(error.message);
       process.exit(1);
     }
-    const version = await resolveVersion(versionSpec);
+    const theCacheDir = getCacheDir();
+    const version = await resolveVersion(versionSpec, {
+      // start: prefer locally-cached alias mapping to avoid a network fetch when already installed
+      preferLocal: parsed.subcommand === 'start',
+      cacheDir: theCacheDir,
+    });
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
     const rolling = isRollingVersion(versionSpec);
     const config = {
-      cacheDir: getCacheDir(),
+      cacheDir: theCacheDir,
       version,
       isRolling: rolling,
       // install: check remote for updates when version is rolling (blocks until done)
