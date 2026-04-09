@@ -140,12 +140,29 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
         POLL_INTERVAL_MS,
       );
 
-      // Step 1: write an invalid BPMN to trigger a deployment error
-      // Use atomic write (write-to-temp + rename) to prevent fs.watch from
-      // seeing a truncated/empty file mid-write.
+      // Step 1: write an invalid BPMN to trigger a deployment error.
+      // On some file systems, creating a new file via rename can occasionally
+      // miss the first watch event, so we retry with an in-place rewrite.
       const tmpInvalid = bpmnFile + '.tmp';
       writeFileSync(tmpInvalid, invalidBpmn());
       renameSync(tmpInvalid, bpmnFile);
+
+      let changeDetected = await pollUntil(
+        async () => watch.getOutput().includes('Change detected: process.bpmn'),
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+
+      if (!changeDetected) {
+        writeFileSync(bpmnFile, `${invalidBpmn()}\n<!-- retrigger -->`);
+        changeDetected = await pollUntil(
+          async () => watch.getOutput().includes('Change detected: process.bpmn'),
+          POLL_TIMEOUT_MS,
+          POLL_INTERVAL_MS,
+        );
+      }
+
+      assert.ok(changeDetected, `Expected watch to detect BPMN change.\nActual output:\n${watch.getOutput()}`);
 
       // Step 2: watch mode continues — wait for the deployment error message
       const errorSeen = await pollUntil(

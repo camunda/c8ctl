@@ -367,6 +367,158 @@ describe('Cluster Plugin – purgeInstalledVersion', () => {
     const config = { cacheDir: tempDir, version: '8.8' };
     assert.doesNotThrow(() => plugin.purgeInstalledVersion(config));
   });
+
+  test('also removes the stored ETag file when it exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"abc123"');
+    const etagFile = join(tempDir, 'c8run-8.8.etag');
+    assert.ok(existsSync(etagFile), 'ETag file should exist before purge');
+
+    plugin.purgeInstalledVersion(config);
+
+    assert.strictEqual(existsSync(etagFile), false, 'ETag file should be removed by purge');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readStoredETag / storeETag
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – readStoredETag / storeETag', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('readStoredETag returns null when no ETag file exists', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.strictEqual(plugin.readStoredETag(config), null);
+  });
+
+  test('storeETag writes and readStoredETag reads back the value', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-value-123"');
+    assert.strictEqual(plugin.readStoredETag(config), '"etag-value-123"');
+  });
+
+  test('storeETag creates the cache dir if it does not exist', () => {
+    const nestedDir = join(tempDir, 'nested', 'cache');
+    const config = { cacheDir: nestedDir, version: '8.8' };
+    assert.doesNotThrow(() => plugin.storeETag(config, '"etag"'));
+    assert.ok(existsSync(nestedDir), 'cache dir should be created');
+  });
+
+  test('readStoredETag returns null for empty file', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    writeFileSync(join(tempDir, 'c8run-8.8.etag'), '');
+    assert.strictEqual(plugin.readStoredETag(config), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasNewerVersionAvailable
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – hasNewerVersionAvailable', () => {
+  let tempDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  // Minimal stub type matching only what the plugin uses
+  type FetchStub = (url: string, init?: RequestInit) => Promise<{ ok: boolean; headers: { get: (h: string) => string | null } }>;
+
+  function stubFetch(impl: FetchStub) {
+    // We must replace globalThis.fetch which is typed as readonly in strict TS;
+    // Object.defineProperty allows the replacement without an unsafe cast.
+    Object.defineProperty(globalThis, 'fetch', { value: impl, writable: true, configurable: true });
+  }
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('returns false and records ETag when no ETag is stored (upgrade scenario)', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    assert.strictEqual(plugin.readStoredETag(config), null, 'no ETag stored initially');
+
+    stubFetch(async () => ({
+      ok: true,
+      headers: { get: (h: string) => h === 'etag' ? '"etag-initial"' : null },
+    }));
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, false, 'should not trigger re-download on first check');
+    assert.strictEqual(plugin.readStoredETag(config), '"etag-initial"', 'should record the remote ETag for future checks');
+  });
+
+  test('returns false when stored ETag matches remote ETag', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-abc"');
+
+    stubFetch(async () => ({
+      ok: true,
+      headers: { get: (h: string) => h === 'etag' ? '"etag-abc"' : null },
+    }));
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, false, 'same ETag means no new version');
+  });
+
+  test('returns true when stored ETag differs from remote ETag', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-old"');
+
+    stubFetch(async () => ({
+      ok: true,
+      headers: { get: (h: string) => h === 'etag' ? '"etag-new"' : null },
+    }));
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, true, 'different ETag means new version available');
+  });
+
+  test('returns false when network request fails', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-abc"');
+
+    stubFetch(async () => { throw new Error('Network error'); });
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, false, 'network failure should not force a re-download');
+  });
+
+  test('returns false when server responds with non-OK status', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-abc"');
+
+    stubFetch(async () => ({ ok: false, headers: { get: () => null } }));
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, false, 'server error should not force a re-download');
+  });
+
+  test('returns false when server provides no ETag or Last-Modified', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    plugin.storeETag(config, '"etag-abc"');
+
+    stubFetch(async () => ({
+      ok: true,
+      headers: { get: () => null },
+    }));
+
+    const result = await plugin.hasNewerVersionAvailable(config);
+    assert.strictEqual(result, false, 'no version signal from server should not force re-download');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -384,33 +536,67 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
     if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test('returns without error when binary is already installed', async () => {
-    const config = { cacheDir: tempDir, version: '8.8', isAlias: false };
-    // Create the binary structure so isC8RunInstalled returns true
-    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+  test('returns without error when exact version is already installed', async () => {
+    const config = { cacheDir: tempDir, version: '8.8.1', isAlias: false };
+    const binaryDir = join(tempDir, 'c8run-8.8.1', 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
 
-    // Should return without attempting a download
     await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
   });
 
-  test('purges install dir when version is an alias before checking', async () => {
-    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
-    // Set up a binary so purge has something to remove
-    const installDir = join(tempDir, 'c8run-8.8');
+  test('does not purge exact version when already installed (never re-download)', async () => {
+    const config = { cacheDir: tempDir, version: '8.8.1', isAlias: false };
+    const installDir = join(tempDir, 'c8run-8.8.1');
     const binaryDir = join(installDir, 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
 
+    await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
+
+    assert.strictEqual(existsSync(installDir), true, 'exact version install dir should NOT be purged');
+  });
+
+  test('does not purge alias install when remote ETag matches stored ETag', async () => {
+    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeETag(config, '"etag-current"');
+
+    const originalFetch = globalThis.fetch;
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        headers: { get: (h: string) => h === 'etag' ? '"etag-current"' : null },
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
+      assert.strictEqual(existsSync(installDir), true, 'install dir should NOT be purged when ETag matches');
+    } finally {
+      Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+    }
+  });
+
+  test('purgeInstalledVersion removes install dir and ETag file', async () => {
+    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeETag(config, '"etag-old"');
+
     assert.strictEqual(plugin.isC8RunInstalled(config), true, 'should be installed before test');
 
-    // When isAlias=true, ensureC8RunInstalled calls purgeInstalledVersion then downloads.
-    // Downloading in a unit test would make a real HTTP request, so we test the purge
-    // side-effect separately using purgeInstalledVersion (the function ensureC8RunInstalled delegates to).
     plugin.purgeInstalledVersion(config);
 
-    assert.strictEqual(existsSync(installDir), false, 'install dir should be purged');
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+    assert.strictEqual(plugin.readStoredETag(config), null, 'ETag file should be removed');
     assert.strictEqual(plugin.isC8RunInstalled(config), false, 'should not be installed after purge');
   });
 });

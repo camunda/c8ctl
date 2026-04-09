@@ -245,19 +245,23 @@ export function validateVersionSpec(versionSpec) {
 // Download & installation
 // ---------------------------------------------------------------------------
 
+function getDownloadUrl(version) {
+  const platformInfo = getPlatformIdentifier();
+  return `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+}
+
 async function downloadC8Run(config) {
   const logger = getLogger();
   const version = config.version;
-  const platformInfo = getPlatformIdentifier();
 
-  const downloadUrl =
-    `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  const downloadUrl = getDownloadUrl(version);
 
-  logger.info(`Downloading Camunda ${version} for ${platformInfo.platform}...`);
+  logger.info(`Downloading Camunda ${version} for ${getPlatformIdentifier().platform}...`);
 
   const cacheDir = config.cacheDir;
   mkdirSync(cacheDir, { recursive: true });
 
+  const platformInfo = getPlatformIdentifier();
   const targetFile = join(
     cacheDir,
     `c8run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`,
@@ -282,6 +286,11 @@ async function downloadC8Run(config) {
         `Please try again or use a different version.`,
     );
   }
+
+  const etag = response.headers.get('etag') || response.headers.get('last-modified') || null;
+  // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
+  // values are date strings. Both are used as opaque version tokens for equality
+  // comparison — the format difference does not affect correctness.
 
   const fileStream = createWriteStream(targetFile);
 
@@ -318,7 +327,7 @@ async function downloadC8Run(config) {
     `Downloaded and saved to ${targetFile} (${Math.floor(downloadedSize / 1024 / 1024)} MB)`,
   );
 
-  return targetFile;
+  return { archivePath: targetFile, etag };
 }
 
 async function extractArchive(archivePath, targetDir) {
@@ -427,31 +436,96 @@ export function purgeInstalledVersion(config) {
   );
 
   if (existsSync(installDir)) {
-    logger.info(`Removing cached non-pinned installation for ${config.version} since a new version might have been released, ensuring you are on latest...`);
+    logger.info(`Removing cached installation for ${config.version} since a newer version is available...`);
     rmSync(installDir, { recursive: true });
   }
   if (existsSync(archiveFile)) {
     rmSync(archiveFile);
   }
+
+  // Remove stored ETag so the next install records a fresh one
+  const etagFile = getETagFilePath(config);
+  if (existsSync(etagFile)) {
+    rmSync(etagFile);
+  }
+}
+
+function getETagFilePath(config) {
+  return join(config.cacheDir, `c8run-${config.version}.etag`);
+}
+
+export function readStoredETag(config) {
+  const etagFile = getETagFilePath(config);
+  if (!existsSync(etagFile)) return null;
+  try {
+    return readFileSync(etagFile, 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function storeETag(config, etag) {
+  mkdirSync(config.cacheDir, { recursive: true });
+  writeFileSync(getETagFilePath(config), etag);
+}
+
+export async function hasNewerVersionAvailable(config) {
+  const storedETag = readStoredETag(config);
+
+  const downloadUrl = getDownloadUrl(config.version);
+  let remoteETag;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeout);
+    if (!response.ok) {
+      // Can't determine — keep the current installation
+      return false;
+    }
+    remoteETag = response.headers.get('etag') || response.headers.get('last-modified');
+    if (!remoteETag) {
+      // Server provides no version signal — keep the current installation
+      return false;
+    }
+  } catch {
+    // Network error — keep the current installation (allows offline use)
+    return false;
+  }
+
+  if (!storedETag) {
+    // No ETag stored yet (e.g. first run after upgrade to this version).
+    // Record the current remote ETag so future checks can compare, but
+    // do NOT treat this as "update available" — the existing install is fine.
+    storeETag(config, remoteETag);
+    return false;
+  }
+
+  return remoteETag !== storedETag;
 }
 
 export async function ensureC8RunInstalled(config) {
   const logger = getLogger();
 
-  // When a version alias (e.g. "stable", "alpha") was used, always
-  // re-download because the actual artifact behind the alias may have changed.
-  if (config.isAlias) {
-    purgeInstalledVersion(config);
-  }
-
   if (isC8RunInstalled(config)) {
-    logger.info(`c8run ${config.version} is already installed.`);
-    return;
+    if (config.isAlias) {
+      // No explicit version on command line — check if a newer release is available
+      const hasUpdate = await hasNewerVersionAvailable(config);
+      if (!hasUpdate) {
+        logger.info(`c8run ${config.version} is already installed and up to date.`);
+        return;
+      }
+      purgeInstalledVersion(config);
+    } else {
+      // Exact version pinned by the user — never re-download
+      logger.info(`c8run ${config.version} is already installed.`);
+      return;
+    }
   }
 
   logger.info('No local installation found. Setting up...');
 
-  const archivePath = await downloadC8Run(config);
+  const { archivePath, etag } = await downloadC8Run(config);
 
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   await extractArchive(archivePath, installDir);
@@ -463,6 +537,11 @@ export async function ensureC8RunInstalled(config) {
 
   const binaryPath = getC8RunBinaryPath(config);
   await chmod(binaryPath, 0o755);
+
+  // Store the ETag so future alias-based starts can detect new releases
+  if (config.isAlias && etag) {
+    storeETag(config, etag);
+  }
 
   logger.info(`c8run ${config.version} installed successfully.`);
 }
