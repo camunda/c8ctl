@@ -138,15 +138,17 @@ export function _resetDynamicAliasCache() {
 
 export const metadata = {
   name: 'cluster',
-  description: 'Download, start, and stop a local Camunda 8 cluster',
+  description: 'Download, start, stop, and inspect a local Camunda 8 cluster',
   commands: {
     'cluster': {
       description:
-        'Manage local Camunda 8 cluster — use "c8ctl cluster start [version]" or "c8ctl cluster stop"',
+        'Manage local Camunda 8 cluster — start, stop, status, or list cached versions',
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest alpha)' },
         { command: 'c8ctl cluster start 8.9.0-alpha5', description: 'Start a specific version' },
         { command: 'c8ctl cluster stop', description: 'Stop the running cluster' },
+        { command: 'c8ctl cluster status', description: 'Show whether a cluster is running and how to connect' },
+        { command: 'c8ctl cluster list', description: 'List locally cached versions and available aliases' },
       ],
     },
   },
@@ -810,6 +812,122 @@ async function stopC8Run(config) {
 }
 
 // ---------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------
+
+const CLUSTER_URLS = {
+  operate: 'http://localhost:8080/operate',
+  tasklist: 'http://localhost:8080/tasklist',
+  zeebeGrpc: 'localhost:26500',
+  zeebeRest: 'http://localhost:8080/v2/',
+  health: 'http://localhost:9600/actuator/health',
+};
+
+export async function clusterStatus(cacheDir) {
+  const logger = getLogger();
+  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
+
+  const markerExists = existsSync(markerFile);
+  const version = markerExists && existsSync(versionFile)
+    ? readFileSync(versionFile, 'utf-8').trim() || null
+    : null;
+
+  // Check live health endpoint regardless of marker
+  let isHealthy = false;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3_000);
+    const response = await fetch(CLUSTER_URLS.health, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (response.ok) {
+      const data = await response.json();
+      isHealthy = data.status === 'UP';
+    }
+  } catch {
+    // Health endpoint not reachable
+  }
+
+  const status = isHealthy ? 'running' : markerExists ? 'starting or unresponsive' : 'stopped';
+
+  if (globalThis.c8ctl?.getLogger().mode === 'json') {
+    logger.json({ status, version, urls: isHealthy ? CLUSTER_URLS : undefined });
+    return;
+  }
+
+  if (!markerExists && !isHealthy) {
+    console.log('Cluster status: stopped');
+    console.log('');
+    console.log('  Start with: c8ctl cluster start');
+    return;
+  }
+
+  console.log(`Cluster status: ${status}`);
+  if (version) {
+    console.log(`  Version:    ${version}`);
+  }
+
+  if (isHealthy) {
+    console.log('');
+    console.log('  - Operate:    ' + CLUSTER_URLS.operate);
+    console.log('  - Tasklist:   ' + CLUSTER_URLS.tasklist);
+    console.log('  - Zeebe GRPC: ' + CLUSTER_URLS.zeebeGrpc);
+    console.log('  - Zeebe REST: ' + CLUSTER_URLS.zeebeRest);
+    console.log('  - Health:     ' + CLUSTER_URLS.health);
+    console.log('');
+    console.log('  Default credentials: demo / demo');
+  } else {
+    console.log('');
+    console.log('  The cluster appears to have been started but is not yet responding.');
+    console.log('  Run "c8ctl cluster status" again in a moment, or check the logs.');
+  }
+  console.log('');
+}
+
+// ---------------------------------------------------------------------------
+// List cached versions
+// ---------------------------------------------------------------------------
+
+export async function listInstalledVersions(cacheDir) {
+  const logger = getLogger();
+
+  const installedVersions = existsSync(cacheDir)
+    ? readdirSync(cacheDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
+        .map((entry) => entry.name.slice('c8run-'.length))
+        .sort()
+    : [];
+
+  const aliasEntries = await getVersionAliasEntries();
+
+  if (globalThis.c8ctl?.getLogger().mode === 'json') {
+    logger.json({
+      installed: installedVersions,
+      aliases: Object.fromEntries(aliasEntries),
+    });
+    return;
+  }
+
+  if (installedVersions.length === 0) {
+    console.log('No versions installed locally.');
+    console.log('');
+    console.log('  Install one with: c8ctl cluster start [version]');
+  } else {
+    console.log('Installed versions:');
+    for (const v of installedVersions) {
+      console.log(`  ${v}`);
+    }
+  }
+
+  console.log('');
+  console.log('Version aliases (dynamically resolved):');
+  for (const [alias, resolved] of aliasEntries) {
+    console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+  }
+  console.log('');
+}
+
+// ---------------------------------------------------------------------------
 // Argument parsing helper
 // ---------------------------------------------------------------------------
 
@@ -866,14 +984,18 @@ export const commands = {
     const logger = getLogger();
     const parsed = parsePluginArgs(args);
 
-    if (!parsed.subcommand || !['start', 'stop'].includes(parsed.subcommand)) {
+    if (!parsed.subcommand || !['start', 'stop', 'status', 'list'].includes(parsed.subcommand)) {
       console.log('Usage:');
       console.log('  c8ctl cluster start [<version>] [--debug]');
-      console.log('  c8ctl cluster stop  [<version>]');
+      console.log('  c8ctl cluster stop');
+      console.log('  c8ctl cluster status');
+      console.log('  c8ctl cluster list');
       console.log('');
       console.log('Subcommands:');
       console.log('  start   Download (if needed) and start a local Camunda 8 cluster');
       console.log('  stop    Stop the running local Camunda 8 cluster');
+      console.log('  status  Show whether a cluster is running and connection details');
+      console.log('  list    List locally cached versions and available version aliases');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version or alias (default: alpha)');
@@ -890,6 +1012,28 @@ export const commands = {
       console.log('  c8ctl cluster start stable       # Start latest stable release');
       console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
       console.log('  c8ctl cluster stop');
+      console.log('  c8ctl cluster status');
+      console.log('  c8ctl cluster list');
+      return;
+    }
+
+    if (parsed.subcommand === 'status') {
+      try {
+        await clusterStatus(getCacheDir());
+      } catch (error) {
+        logger.error(`Failed to get cluster status: ${error}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (parsed.subcommand === 'list') {
+      try {
+        await listInstalledVersions(getCacheDir());
+      } catch (error) {
+        logger.error(`Failed to list versions: ${error}`);
+        process.exit(1);
+      }
       return;
     }
 

@@ -49,11 +49,13 @@ describe('Cluster Plugin – metadata', () => {
     }
   });
 
-  test('examples include start and stop commands', () => {
+  test('examples include start, stop, status, and list commands', () => {
     const examples = plugin.metadata.commands['cluster'].examples;
     const cmds = examples.map((e: { command: string }) => e.command);
     assert.ok(cmds.some((c: string) => c.includes('start')), 'Should have a start example');
     assert.ok(cmds.some((c: string) => c.includes('stop')), 'Should have a stop example');
+    assert.ok(cmds.some((c: string) => c.includes('status')), 'Should have a status example');
+    assert.ok(cmds.some((c: string) => c.includes('list')), 'Should have a list example');
   });
 });
 
@@ -670,5 +672,218 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
     assert.ok(result);
     assert.strictEqual(result.stable, '8.8');
     assert.strictEqual(result.alpha, '8.9');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clusterStatus
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – clusterStatus', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+    originalFetch = globalThis.fetch;
+    // Default stub: health endpoint not reachable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Connection refused'); },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('reports stopped when no marker file and health unreachable', async () => {
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('stopped'), 'Should report stopped status');
+  });
+
+  test('includes start hint when stopped', async () => {
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('c8ctl cluster start'), 'Should hint at start command');
+  });
+
+  test('reports running when health endpoint is UP', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('running'), 'Should report running status');
+  });
+
+  test('includes connection URLs when cluster is running', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('Operate'), 'Should list Operate URL');
+    assert.ok(output.includes('Tasklist'), 'Should list Tasklist URL');
+    assert.ok(output.includes('Zeebe'), 'Should list Zeebe endpoints');
+    assert.ok(output.includes('demo / demo'), 'Should mention default credentials');
+  });
+
+  test('reports version from marker file when available', async () => {
+    // Write marker files
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+    writeFileSync(join(tempDir, 'cluster.version'), '8.9.0-alpha5');
+
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('8.9.0-alpha5'), 'Should display the running version');
+  });
+
+  test('reports "starting or unresponsive" when marker exists but health unreachable', async () => {
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('starting or unresponsive'), 'Should report starting/unresponsive status');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listInstalledVersions
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – listInstalledVersions', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+  });
+
+  test('reports no versions when cache dir is empty', async () => {
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No versions installed'), 'Should report no versions');
+  });
+
+  test('reports no versions when cache dir does not exist', async () => {
+    await plugin.listInstalledVersions(join(tempDir, 'nonexistent'));
+    const output = captured.join('\n');
+    assert.ok(output.includes('No versions installed'), 'Should report no versions for missing dir');
+  });
+
+  test('lists installed version directories', async () => {
+    mkdirSync(join(tempDir, 'c8run-8.8'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.9'), { recursive: true });
+
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('8.8'), 'Should list installed version 8.8');
+    assert.ok(output.includes('8.9'), 'Should list installed version 8.9');
+  });
+
+  test('always shows version aliases section', async () => {
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('Version aliases'), 'Should show version aliases section');
+    assert.ok(/alpha\s+→/.test(output), 'Should show alpha alias');
+    assert.ok(/stable\s+→/.test(output), 'Should show stable alias');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cluster command – status and list subcommands via commands export
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – status and list subcommands', () => {
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+    originalFetch = globalThis.fetch;
+    // Default: health not reachable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Connection refused'); },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('status subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['status']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'status subcommand should not print usage');
+  });
+
+  test('list subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['list']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'list subcommand should not print usage');
+  });
+
+  test('usage mentions status subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('status'), 'Usage should mention "status" subcommand');
+  });
+
+  test('usage mentions list subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('list'), 'Usage should mention "list" subcommand');
+  });
+
+  test('stop usage does not show a [<version>] argument', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    // The stop line should just be 'c8ctl cluster stop' with no version arg
+    const stopLine = output.split('\n').find((l) => l.includes('cluster stop'));
+    assert.ok(stopLine, 'Should have a stop usage line');
+    assert.ok(!stopLine!.includes('[<version>]'), 'stop usage should not show [<version>]');
   });
 });

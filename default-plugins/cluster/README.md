@@ -1,6 +1,6 @@
 # c8ctl-plugin-cluster
 
-A default [c8ctl](https://github.com/camunda/c8ctl) plugin that provides an opinionated way to download, start, and stop a local Camunda 8 cluster using [c8run](https://docs.camunda.io/docs/self-managed/setup/deploy/local/c8run/).
+A default [c8ctl](https://github.com/camunda/c8ctl) plugin that provides an opinionated way to download, start, stop, and inspect a local Camunda 8 cluster using [c8run](https://docs.camunda.io/docs/self-managed/setup/deploy/local/c8run/).
 
 ## Usage
 
@@ -20,6 +20,12 @@ c8ctl cluster start --debug
 
 # Stop the running cluster
 c8ctl cluster stop
+
+# Check whether a cluster is running and see connection details
+c8ctl cluster status
+
+# List locally cached versions and available aliases
+c8ctl cluster list
 ```
 
 ## Version aliases
@@ -43,6 +49,8 @@ shipped in the plugin's `package.json`.
 2. **Cache**: Stores downloaded binaries in a platform-specific cache directory
 3. **Start**: Launches c8run in the background and waits for the cluster to become healthy
 4. **Stop**: Gracefully shuts down the running cluster
+5. **Status**: Reports whether a cluster is running by checking the active marker file and the live health endpoint
+6. **List**: Shows all locally cached versions and the current resolved values of available version aliases
 
 ### Cache locations
 
