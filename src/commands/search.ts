@@ -6,6 +6,7 @@ import { getLogger, Logger, sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages, DEFAULT_PAGE_SIZE } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
+import { handleCommandError } from '../errors.ts';
 
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
@@ -299,8 +300,7 @@ export async function searchProcessDefinitions(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search process definitions', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search process definitions', error);
   }
 }
 
@@ -430,8 +430,7 @@ export async function searchProcessInstances(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search process instances', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search process instances', error);
   }
 }
 
@@ -554,8 +553,7 @@ export async function searchUserTasks(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search user tasks', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search user tasks', error);
   }
 }
 
@@ -691,8 +689,7 @@ export async function searchIncidents(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search incidents', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search incidents', error);
   }
 }
 
@@ -807,8 +804,7 @@ export async function searchJobs(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search jobs', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search jobs', error);
   }
 }
 
@@ -940,7 +936,6 @@ export async function searchVariables(options: {
 
     return result as SearchResult;
   } catch (error) {
-    logger.error('Failed to search variables', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search variables', error);
   }
 }

@@ -409,6 +409,10 @@ export async function deploy(paths: string[], options: {
  * Format and display deployment errors with actionable guidance
  */
 function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): void {
+  if (c8ctl.verbose) {
+    throw error;
+  }
+
   const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
 
   // Try to interpret common transport/network issues first for actionable guidance
@@ -472,6 +476,7 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
   // Provide actionable hints based on error type
   logMessage('');
   printDeploymentHints(title, detail, status, resources);
+  logMessage('For more details on the error, run with the --verbose flag');
 
   if (continueOnError) {
     return;

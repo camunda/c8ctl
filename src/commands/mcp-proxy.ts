@@ -13,6 +13,7 @@ import { type CamundaClient } from '@camunda8/orchestration-cluster-api';
 import { createClient } from '../client.ts';
 import { getVersion } from './help.ts';
 import { Logger, type LogWriter } from '../logger.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * Creates a custom fetch function that injects Camunda authentication headers
@@ -350,11 +351,10 @@ async function runProxy(
     // Keep process alive
     await new Promise(() => {});
   } catch (error) {
-    logger.error(`Failed to run MCP proxy. Shutting down...`);
     if (proxy) {
-      await proxy.stop();
+      await proxy.stop().catch(() => {});
     }
-    process.exit(1);
+    handleCommandError(logger, 'Failed to run MCP proxy. Shutting down...', error);
   }
 }
 

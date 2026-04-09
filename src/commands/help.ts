@@ -71,6 +71,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--dateField', type: 'string', description: 'Date field to filter on with --between (default depends on resource)' },
       { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
       { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
+      { flag: '--verbose', type: 'boolean', description: 'Enable SDK trace logging and show full error details' },
       { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
       { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
     ],
@@ -213,6 +214,7 @@ Flags:
   --limit <n>           Maximum number of items to fetch (default: 1000000)
   --between <from>..<to>  Filter by date range (use with 'list' or 'search'; short dates YYYY-MM-DD or ISO 8601; omit either end for open-ended range)
   --dateField <field>   Date field to filter on with --between (default depends on resource)
+  --verbose             Enable SDK trace logging and show full error details
   --version, -v         Show version
   --help, -h            Show help
 

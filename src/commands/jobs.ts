@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List jobs
@@ -75,8 +76,7 @@ export async function listJobs(options: {
       logger.info('No jobs found');
     }
   } catch (error) {
-    logger.error('Failed to list jobs', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list jobs', error);
   }
 }
 
@@ -138,8 +138,7 @@ export async function activateJobs(type: string, options: {
       logger.info(`No jobs of type '${type}' available to activate`);
     }
   } catch (error) {
-    logger.error(`Failed to activate jobs of type '${type}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to activate jobs of type '${type}'`, error);
   }
 }
 
@@ -178,16 +177,14 @@ export async function completeJob(key: string, options: {
       try {
         request.variables = JSON.parse(options.variables);
       } catch (error) {
-        logger.error('Invalid JSON for variables', error as Error);
-        process.exit(1);
+        handleCommandError(logger, 'Invalid JSON for variables', error);
       }
     }
 
     await client.completeJob(request);
     logger.success(`Job ${key} completed`);
   } catch (error) {
-    logger.error(`Failed to complete job ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to complete job ${key}`, error);
   }
 }
 
@@ -229,7 +226,6 @@ export async function failJob(key: string, options: {
     await client.failJob(request);
     logger.success(`Job ${key} failed`);
   } catch (error) {
-    logger.error(`Failed to fail job ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to fail job ${key}`, error);
   }
 }

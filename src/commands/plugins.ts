@@ -16,6 +16,7 @@ import {
   isPluginRegistered,
   getPluginEntry
 } from '../plugin-registry.ts';
+import { handleCommandError } from '../errors.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,9 +115,9 @@ export async function loadPlugin(packageName?: string, fromUrl?: string): Promis
     // We don't reload in the same process to avoid module cache issues
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
-    logger.error('Failed to load plugin', error as Error);
-    logger.info('Check that the plugin name/URL is correct and you have network access if loading from a remote source');
-    process.exit(1);
+    handleCommandError(logger, 'Failed to load plugin', error, [
+      'Check that the plugin name/URL is correct and you have network access if loading from a remote source',
+    ]);
   }
 }
 
@@ -319,11 +320,9 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
       rmSync(join(pluginsDir, 'node_modules', packageName), { recursive: true, force: true });
       logger.debug(`Manually removed plugin directory for "${packageName}" from plugins directory`);
     } catch (fsError) {
-      logger.error(`Failed to remove plugin "${packageName}" from the global plugins directory.`);
-      logger.debug(`npm uninstall error: ${(uninstallError as Error).message ?? String(uninstallError)}`);
-      logger.debug(`Filesystem removal error: ${(fsError as Error).message ?? String(fsError)}`);
-      logger.info('Please verify file permissions for the plugins directory and try again with appropriate rights.');
-      process.exit(1);
+      handleCommandError(logger, `Failed to remove plugin "${packageName}" from the global plugins directory.`, fsError, [
+        'Please verify file permissions for the plugins directory and try again with appropriate rights.',
+      ]);
     }
   }
 
@@ -510,8 +509,7 @@ export function listPlugins(): void {
       logger.info('Some plugins are out of sync. Run "c8ctl sync plugins" to synchronize your plugins');
     }
   } catch (error) {
-    logger.error('Failed to list plugins', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list plugins', error);
   }
 }
 
@@ -610,6 +608,7 @@ export async function syncPlugins(): Promise<void> {
     }
     logger.info('');
     logger.info('Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"');
+    logger.info('For more details on the error, run with the --verbose flag');
     process.exit(1);
   }
   
@@ -670,9 +669,9 @@ export async function upgradePlugin(packageName: string, version?: string): Prom
     logger.success('Plugin upgraded successfully', packageName);
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
-    logger.error('Failed to upgrade plugin', error as Error);
-    logger.info('Check network connectivity and verify the package/version exists');
-    process.exit(1);
+    handleCommandError(logger, 'Failed to upgrade plugin', error, [
+      'Check network connectivity and verify the package/version exists',
+    ]);
   }
 }
 
@@ -728,9 +727,9 @@ export async function downgradePlugin(packageName: string, version: string): Pro
     logger.success('Plugin downgraded successfully', packageName);
     logger.info('Plugin will be available on next command execution');
   } catch (error) {
-    logger.error('Failed to downgrade plugin', error as Error);
-    logger.info('Check network connectivity and verify the version exists');
-    process.exit(1);
+    handleCommandError(logger, 'Failed to downgrade plugin', error, [
+      'Check network connectivity and verify the version exists',
+    ]);
   }
 }
 
@@ -812,7 +811,6 @@ export async function initPlugin(positionalName?: string): Promise<void> {
       logger.info(line);
     }
   } catch (error) {
-    logger.error('Failed to create plugin', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create plugin', error);
   }
 }

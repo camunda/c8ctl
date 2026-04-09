@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List user tasks
@@ -79,8 +80,7 @@ export async function listUserTasks(options: {
       logger.info('No user tasks found');
     }
   } catch (error) {
-    logger.error('Failed to list user tasks', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list user tasks', error);
   }
 }
 
@@ -119,15 +119,13 @@ export async function completeUserTask(key: string, options: {
       try {
         request.variables = JSON.parse(options.variables);
       } catch (error) {
-        logger.error('Invalid JSON for variables', error as Error);
-        process.exit(1);
+        handleCommandError(logger, 'Invalid JSON for variables', error);
       }
     }
 
     await client.completeUserTask(request);
     logger.success(`User task ${key} completed`);
   } catch (error) {
-    logger.error(`Failed to complete user task ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to complete user task ${key}`, error);
   }
 }

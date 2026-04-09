@@ -6,6 +6,7 @@ import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * Publish message
@@ -53,8 +54,7 @@ export async function publishMessage(name: string, options: {
       try {
         request.variables = JSON.parse(options.variables);
       } catch (error) {
-        logger.error('Invalid JSON for variables', error as Error);
-        process.exit(1);
+        handleCommandError(logger, 'Invalid JSON for variables', error);
       }
     }
 
@@ -65,8 +65,7 @@ export async function publishMessage(name: string, options: {
     await client.publishMessage(request);
     logger.success(`Message '${name}' published`);
   } catch (error) {
-    logger.error(`Failed to publish message '${name}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to publish message '${name}'`, error);
   }
 }
 
