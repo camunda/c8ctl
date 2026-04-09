@@ -58,14 +58,16 @@ export const DEFAULT_MAX_ITEMS = 1_000_000;
 
 /**
  * Paginated API response shape (the page metadata lives alongside items).
+ * Matches the SDK 8.9+ SearchQueryResponse structure where page fields are
+ * required but cursors are nullable.
  */
 type PagedResponse<T> = {
-  items?: T[];
-  page?: {
-    totalItems?: bigint | number;
-    endCursor?: string;
-    startCursor?: string;
-    hasMoreTotalItems?: boolean;
+  items: T[];
+  page: {
+    totalItems: number;
+    endCursor: string | null;
+    startCursor: string | null;
+    hasMoreTotalItems: boolean;
   };
 };
 
@@ -102,7 +104,7 @@ export async function fetchAllPages<T>(
 
     const result = await searchFn(pageFilter, consistencyOpts);
 
-    if (result.items?.length) {
+    if (result.items.length) {
       allItems.push(...result.items);
     }
 
@@ -111,13 +113,12 @@ export async function fetchAllPages<T>(
       break;
     }
 
-    const endCursor = result.page?.endCursor;
-    // totalItems is BigInt from the SDK's Zod schema (z.coerce.bigint()); convert to number
-    const totalItems = result.page?.totalItems !== undefined ? Number(result.page.totalItems) : undefined;
+    const endCursor = result.page.endCursor;
+    const totalItems = result.page.totalItems;
 
     if (!endCursor || seenCursors.has(endCursor)) break;
-    if (totalItems !== undefined && allItems.length >= totalItems) break;
-    if (!result.items?.length) break;
+    if (allItems.length >= totalItems) break;
+    if (!result.items.length) break;
 
     seenCursors.add(endCursor);
     cursor = endCursor;

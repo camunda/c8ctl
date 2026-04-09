@@ -84,7 +84,7 @@ export async function listProcessInstances(options: {
       logger.info('No process instances found');
     }
     
-    return { items: allItems, total: allItems.length };
+    return { items: allItems as Array<Record<string, unknown>>, total: allItems.length };
   } catch (error) {
     logger.error('Failed to list process instances', error as Error);
     process.exit(1);

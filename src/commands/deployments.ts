@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
+import { TenantId } from '@camunda8/orchestration-cluster-api';
 import { c8ctl } from '../runtime.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, dirname, extname, basename, relative } from 'node:path';
@@ -322,7 +323,7 @@ export async function deploy(paths: string[], options: {
 
     // Create deployment request - convert buffers to File objects with proper MIME types
     const result = await client.createDeployment({
-      tenantId,
+      tenantId: TenantId.assumeExists(tenantId),
       resources: resources.map(r => {
         // Determine MIME type based on extension
         const ext = r.name.split('.').pop()?.toLowerCase();
