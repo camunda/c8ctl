@@ -133,6 +133,13 @@ describe('Cluster Plugin – command usage output', () => {
     assert.ok(/^\s+alpha\s+→/m.test(output), 'Should list the alpha alias with arrow separator');
     assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
   });
+
+  test('usage indicates aliases are dynamically resolved', async () => {
+    await plugin.commands['cluster']([]);
+
+    const output = captured.join('\n');
+    assert.ok(output.includes('dynamically resolved'), 'Should indicate dynamic resolution');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -405,5 +412,77 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 
     assert.strictEqual(existsSync(installDir), false, 'install dir should be purged');
     assert.strictEqual(plugin.isC8RunInstalled(config), false, 'should not be installed after purge');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseVersionsFromHtml – dynamic version discovery
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – parseVersionsFromHtml', () => {
+  test('extracts stable and alpha from a realistic listing', () => {
+    // Real-world pattern: 8.8 went GA (but still has old alpha dirs), 8.9 is current alpha
+    // Stable = highest minor below the highest alpha train (8.9 has alphas → stable is 8.8)
+    const html = `
+      <a href="8.6/">8.6</a>
+      <a href="8.6.11/">8.6.11</a>
+      <a href="8.7/">8.7</a>
+      <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
+      <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
+      <a href="8.8.0-alpha3/">8.8.0-alpha3</a>
+      <a href="8.8/">8.8</a>
+      <a href="8.8.1/">8.8.1</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0-alpha5/">8.9.0-alpha5</a>
+      <a href="8.9/">8.9</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.8', 'stable should be highest minor below the alpha train');
+    assert.strictEqual(result.alpha, '8.9', 'alpha should be highest minor overall');
+  });
+
+  test('when no alphas exist, stable and alpha are the same', () => {
+    const html = `
+      <a href="8.6/">8.6</a>
+      <a href="8.7/">8.7</a>
+      <a href="8.8/">8.8</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.8');
+    assert.strictEqual(result.alpha, '8.8');
+  });
+
+  test('handles future major versions correctly', () => {
+    const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.9/">8.9</a>
+      <a href="9.0.0-alpha1/">9.0.0-alpha1</a>
+      <a href="9.0/">9.0</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.9', 'stable is highest without alpha dirs');
+    assert.strictEqual(result.alpha, '9.0', 'alpha is highest overall');
+  });
+
+  test('returns null for empty or no-match HTML', () => {
+    assert.strictEqual(plugin.parseVersionsFromHtml(''), null);
+    assert.strictEqual(plugin.parseVersionsFromHtml('<html>no versions</html>'), null);
+  });
+
+  test('deduplicates minor versions', () => {
+    const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8/">8.8</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0-alpha2/">8.9.0-alpha2</a>
+      <a href="8.9/">8.9</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result);
+    assert.strictEqual(result.stable, '8.8');
+    assert.strictEqual(result.alpha, '8.9');
   });
 });
