@@ -52,7 +52,7 @@ export function isIgnored(ig: Ignore, filePath: string, baseDir: string): boolea
     rel = rel.split(sep).join('/');
   }
   // Paths outside baseDir can't be ignored
-  if (rel.startsWith('..') || rel === '') {
+  if (rel === '' || rel === '..' || rel.startsWith('../')) {
     return false;
   }
   return ig.ignores(rel);

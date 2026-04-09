@@ -13,8 +13,8 @@ const CLI_ENTRY = join(process.cwd(), 'src', 'index.ts');
 
 /**
  * Run the CLI and return parsed JSON from combined stderr+stdout.
- * Uses --dry-run --output json so no server is needed and the output lists
- * the resources that would be deployed.
+ * Uses --dry-run so no server is needed and the output lists
+ * the resources that would be deployed (dry-run always emits JSON).
  */
 function dryRunDeploy(cwd: string, paths: string[] = ['.']): { body: { resources: { name: string }[] } } {
   const result = spawnSync('node', [
@@ -22,7 +22,6 @@ function dryRunDeploy(cwd: string, paths: string[] = ['.']): { body: { resources
     CLI_ENTRY,
     'deploy', ...paths,
     '--dry-run',
-    '--output', 'json',
   ], {
     cwd,
     encoding: 'utf-8',
@@ -316,6 +315,58 @@ describe('.c8ignore', () => {
     test('isIgnored returns false for paths outside baseDir', () => {
       const ig = loadIgnoreRules(testDir);
       assert.strictEqual(isIgnored(ig, '/some/other/path/file.bpmn', testDir), false);
+    });
+  });
+
+  // ── Watch mode filtering ─────────────────────────────────────────
+
+  describe('watch mode respects .c8ignore', () => {
+    test('ignored file change does not trigger deploy', () => {
+      // Set up directory with .c8ignore and an ignored subfolder
+      writeFileSync(join(testDir, '.c8ignore'), 'ignored/\n');
+      mkdirSync(join(testDir, 'ignored'), { recursive: true });
+      writeFileSync(join(testDir, 'ignored', 'hidden.bpmn'), '<bpmn/>');
+      writeFileSync(join(testDir, 'visible.bpmn'), '<bpmn/>');
+
+      // Use a helper script that starts watch, modifies an ignored file,
+      // then collects output. The helper runs in testDir so .c8ignore is found.
+      const helperScript = `
+        const { spawn, execSync } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const { join } = require('node:path');
+
+        const proc = spawn('node', [
+          '--experimental-strip-types',
+          ${JSON.stringify(CLI_ENTRY)},
+          'watch', '.',
+        ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
+
+        let output = '';
+        proc.stdout.on('data', d => output += d);
+        proc.stderr.on('data', d => output += d);
+
+        setTimeout(() => {
+          writeFileSync(join(${JSON.stringify(testDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+          setTimeout(() => {
+            proc.kill('SIGTERM');
+            process.stdout.write(output);
+            process.exit(0);
+          }, 1500);
+        }, 500);
+      `;
+
+      const result = spawnSync('node', ['-e', helperScript], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        cwd: testDir,
+        env: { ...process.env, XDG_DATA_HOME: join(tmpdir(), `c8ctl-watch-ign-${Date.now()}`) },
+      });
+
+      const output = (result.stdout ?? '') + (result.stderr ?? '');
+
+      // "Change detected" should NOT appear for the ignored file
+      assert.ok(!output.includes('Change detected'),
+        `Watch should not detect changes in ignored directories, but got:\n${output}`);
     });
   });
 });

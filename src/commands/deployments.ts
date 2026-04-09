@@ -110,7 +110,7 @@ function findGroupRoot(filePath: string, basePath: string): { type: 'bb', root: 
 /**
  * Recursively collect resource files from a directory
  */
-function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string, ig?: Ignore): ResourceFile[] {
+function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string, ig?: Ignore, ignoreBaseDir?: string): ResourceFile[] {
   if (!existsSync(dirPath)) {
     return collected;
   }
@@ -123,7 +123,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
   const stat = statSync(dirPath);
   
   if (stat.isFile()) {
-    if (ig && isIgnored(ig, dirPath, basePath)) {
+    if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
       return collected;
     }
     const ext = extname(dirPath);
@@ -143,7 +143,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
 
   if (stat.isDirectory()) {
     // Skip entire directory if it matches an ignore rule
-    if (ig && isIgnored(ig, dirPath + '/', basePath)) {
+    if (ig && ignoreBaseDir && isIgnored(ig, dirPath + '/', ignoreBaseDir)) {
       return collected;
     }
 
@@ -160,7 +160,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
       
       if (entryStat.isDirectory()) {
         // Skip ignored directories early to avoid descending into them
-        if (ig && isIgnored(ig, fullPath + '/', basePath!)) {
+        if (ig && ignoreBaseDir && isIgnored(ig, fullPath + '/', ignoreBaseDir)) {
           return;
         }
         if (isBuildingBlockFolder(entry)) {
@@ -170,7 +170,7 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
         }
       } else if (entryStat.isFile()) {
         // Skip ignored files
-        if (ig && isIgnored(ig, fullPath, basePath!)) {
+        if (ig && ignoreBaseDir && isIgnored(ig, fullPath, ignoreBaseDir)) {
           return;
         }
         files.push(fullPath);
@@ -195,12 +195,12 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
 
     // Process building block folders first (prioritized)
     bbFolders.forEach(bbFolder => {
-      collectResourceFiles(bbFolder, collected, basePath, ig);
+      collectResourceFiles(bbFolder, collected, basePath, ig, ignoreBaseDir);
     });
 
     // Then process regular folders
     regularFolders.forEach(regularFolder => {
-      collectResourceFiles(regularFolder, collected, basePath, ig);
+      collectResourceFiles(regularFolder, collected, basePath, ig, ignoreBaseDir);
     });
   }
 
@@ -244,11 +244,12 @@ export async function deploy(paths: string[], options: {
     }
 
     // Load .c8ignore rules from the working directory
-    const ig = loadIgnoreRules(resolve(process.cwd()));
+    const ignoreBaseDir = resolve(process.cwd());
+    const ig = loadIgnoreRules(ignoreBaseDir);
 
     // Collect all resource files (respecting .c8ignore)
     paths.forEach(path => {
-      collectResourceFiles(path, resources, undefined, ig);
+      collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir);
     });
 
     if (resources.length === 0) {

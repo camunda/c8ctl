@@ -38,7 +38,8 @@ export async function watchFiles(paths: string[], options: {
   }
 
   // Load .c8ignore rules from the working directory
-  const ig = loadIgnoreRules(resolve(process.cwd()));
+  const ignoreBaseDir = resolve(process.cwd());
+  const ig = loadIgnoreRules(ignoreBaseDir);
 
   logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(', ')}`);
   logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(', ')}`);
@@ -68,7 +69,7 @@ export async function watchFiles(paths: string[], options: {
       const fullPath = isDirectory ? resolve(path, filename) : path;
 
       // Skip files matching .c8ignore rules
-      if (isIgnored(ig, fullPath, resolve(process.cwd()))) {
+      if (isIgnored(ig, fullPath, ignoreBaseDir)) {
         return;
       }
 
