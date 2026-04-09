@@ -101,7 +101,8 @@ describe('Form Integration Tests', () => {
     // Retrieve the form via CLI
     const formResult = await cli('get', 'form', userTaskKey!, '--ut');
     assert.strictEqual(formResult.status, 0, `get form should exit 0. stderr: ${formResult.stderr}`);
-    t.diagnostic('*************', formResult.stdout) // @DEBUG
+    t.diagnostic('*************') // @DEBUG
+    t.diagnostic(formResult.stdout) // @DEBUG
     const form = parseJson<Record<string, unknown>>(formResult.stdout);
 
     assert.ok(form, 'Form should be retrieved');
@@ -199,7 +200,8 @@ describe('Form Integration Tests', () => {
     let userTaskKey: string | undefined;
     const userTaskFound = await pollUntil(async () => {
       const result = await cli('search', 'ut', `--processInstanceKey=${piKey}`);
-      t.diagnostic('****UserTaskRow', result.stdout)
+      t.diagnostic('****UserTaskRow') // @DEBUG
+      t.diagnostic(result.stdout) // @DEBUG
       const items = parseJson<UserTaskRow[]>(result.stdout);
       if (items.length > 0) {
         userTaskKey = String(items[0].Key);
