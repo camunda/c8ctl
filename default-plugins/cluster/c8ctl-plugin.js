@@ -27,16 +27,10 @@ import { fileURLToPath } from 'node:url';
 // Version aliases (loaded from package.json c8ctl.versionAliases)
 // ---------------------------------------------------------------------------
 
-let _versionAliases = {};
-try {
-  const _pluginPackageJson = JSON.parse(
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
-  );
-  _versionAliases = _pluginPackageJson.c8ctl?.versionAliases ?? {};
-} catch (err) {
-  // Fall back to empty aliases if package.json is missing or malformed; plugin continues without alias support
-  console.error(`[cluster plugin] Warning: Failed to load version aliases from package.json, using defaults: ${err}`);
-}
+const _pluginPackageJson = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
+);
+const _versionAliases = _pluginPackageJson.c8ctl.versionAliases;
 const VERSION_ALIASES = new Set(Object.keys(_versionAliases));
 
 function isVersionAlias(versionSpec) {
@@ -45,6 +39,10 @@ function isVersionAlias(versionSpec) {
 
 function resolveVersion(versionSpec) {
   return _versionAliases[versionSpec] ?? versionSpec;
+}
+
+function getVersionAliasEntries() {
+  return Object.entries(_versionAliases);
 }
 
 // ---------------------------------------------------------------------------
@@ -712,18 +710,27 @@ export const commands = {
       console.log('  stop    Stop the running local Camunda 8 cluster');
       console.log('');
       console.log('Options:');
-      console.log('  <version>              Camunda version to use (default: alpha / 8.9)');
+      console.log('  <version>              Camunda version or alias (default: alpha)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
+      console.log('Version aliases:');
+      for (const [alias, resolved] of getVersionAliasEntries()) {
+        console.log(`  ${alias.padEnd(22)} → ${resolved}`);
+      }
+      console.log('');
       console.log('Examples:');
-      console.log('  c8ctl cluster start              # Start latest alpha (8.9)');
+      console.log('  c8ctl cluster start              # Start using default alias (alpha)');
+      console.log('  c8ctl cluster start stable       # Start latest stable release');
       console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
       console.log('  c8ctl cluster stop');
       return;
     }
 
     const versionSpec = parsed.version || 'alpha';
+    if (!parsed.version && parsed.subcommand === 'start') {
+      logger.info(`No version specified, using default: "${versionSpec}"`);
+    }
     try {
       validateVersionSpec(versionSpec);
     } catch (error) {

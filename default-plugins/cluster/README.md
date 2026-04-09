@@ -5,11 +5,15 @@ A default [c8ctl](https://github.com/camunda/c8ctl) plugin that provides an opin
 ## Usage
 
 ```bash
-# Start a local Camunda 8 cluster (downloads c8run automatically if needed)
-c8ctl cluster start
-
 # Start with a specific version
 c8ctl cluster start 8.9.0-alpha5
+
+# Start using a version alias
+c8ctl cluster start stable
+c8ctl cluster start alpha
+
+# Starting without specifying a version defaults to alpha
+c8ctl cluster start
 
 # Start with debug output (streams raw c8run logs)
 c8ctl cluster start --debug
