@@ -8,7 +8,9 @@ import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { TenantId } from '@camunda8/orchestration-cluster-api';
 import { c8ctl } from '../runtime.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, extname, basename, relative } from 'node:path';
+import { join, dirname, extname, basename, relative, resolve } from 'node:path';
+import { type Ignore } from 'ignore';
+import { loadIgnoreRules, isIgnored } from '../ignore.ts';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
 const PROCESS_APPLICATION_FILE = '.process-application';
@@ -108,7 +110,7 @@ function findGroupRoot(filePath: string, basePath: string): { type: 'bb', root: 
 /**
  * Recursively collect resource files from a directory
  */
-function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string): ResourceFile[] {
+function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], basePath?: string, ig?: Ignore): ResourceFile[] {
   if (!existsSync(dirPath)) {
     return collected;
   }
@@ -121,6 +123,9 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
   const stat = statSync(dirPath);
   
   if (stat.isFile()) {
+    if (ig && isIgnored(ig, dirPath, basePath)) {
+      return collected;
+    }
     const ext = extname(dirPath);
     if (RESOURCE_EXTENSIONS.includes(ext)) {
       const groupInfo = findGroupRoot(dirPath, basePath);
@@ -137,6 +142,11 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
   }
 
   if (stat.isDirectory()) {
+    // Skip entire directory if it matches an ignore rule
+    if (ig && isIgnored(ig, dirPath + '/', basePath)) {
+      return collected;
+    }
+
     const entries = readdirSync(dirPath);
     
     // Separate building block folders from regular ones
@@ -149,12 +159,20 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
       const entryStat = statSync(fullPath);
       
       if (entryStat.isDirectory()) {
+        // Skip ignored directories early to avoid descending into them
+        if (ig && isIgnored(ig, fullPath + '/', basePath!)) {
+          return;
+        }
         if (isBuildingBlockFolder(entry)) {
           bbFolders.push(fullPath);
         } else {
           regularFolders.push(fullPath);
         }
       } else if (entryStat.isFile()) {
+        // Skip ignored files
+        if (ig && isIgnored(ig, fullPath, basePath!)) {
+          return;
+        }
         files.push(fullPath);
       }
     });
@@ -177,12 +195,12 @@ function collectResourceFiles(dirPath: string, collected: ResourceFile[] = [], b
 
     // Process building block folders first (prioritized)
     bbFolders.forEach(bbFolder => {
-      collectResourceFiles(bbFolder, collected, basePath);
+      collectResourceFiles(bbFolder, collected, basePath, ig);
     });
 
     // Then process regular folders
     regularFolders.forEach(regularFolder => {
-      collectResourceFiles(regularFolder, collected, basePath);
+      collectResourceFiles(regularFolder, collected, basePath, ig);
     });
   }
 
@@ -225,9 +243,12 @@ export async function deploy(paths: string[], options: {
       process.exit(1);
     }
 
-    // Collect all resource files
+    // Load .c8ignore rules from the working directory
+    const ig = loadIgnoreRules(resolve(process.cwd()));
+
+    // Collect all resource files (respecting .c8ignore)
     paths.forEach(path => {
-      collectResourceFiles(path, resources);
+      collectResourceFiles(path, resources, undefined, ig);
     });
 
     if (resources.length === 0) {

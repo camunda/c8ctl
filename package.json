@@ -59,7 +59,8 @@
   },
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "8.9.0-alpha.33",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ignore": "^7.0.5"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",

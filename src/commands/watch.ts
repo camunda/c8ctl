@@ -7,6 +7,7 @@ import { resolve, extname, basename } from 'node:path';
 import { existsSync, statSync } from 'node:fs';
 import { getLogger } from '../logger.ts';
 import { deploy } from './deployments.ts';
+import { loadIgnoreRules, isIgnored } from '../ignore.ts';
 
 const WATCHED_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
@@ -36,6 +37,9 @@ export async function watchFiles(paths: string[], options: {
     }
   }
 
+  // Load .c8ignore rules from the working directory
+  const ig = loadIgnoreRules(resolve(process.cwd()));
+
   logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(', ')}`);
   logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(', ')}`);
   if (options.force) {
@@ -62,6 +66,11 @@ export async function watchFiles(paths: string[], options: {
       }
 
       const fullPath = isDirectory ? resolve(path, filename) : path;
+
+      // Skip files matching .c8ignore rules
+      if (isIgnored(ig, fullPath, resolve(process.cwd()))) {
+        return;
+      }
 
       // Clear any pending debounce for this file and restart the timer.
       // This ensures we wait until the file system is quiet before reading.

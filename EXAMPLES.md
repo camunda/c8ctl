@@ -604,6 +604,32 @@ c8 deploy process-v2.bpmn
 
 The CLI will detect duplicate IDs and provide a helpful error message showing which files conflict.
 
+### Ignoring Files (`.c8ignore`)
+
+When deploying or watching a directory, c8ctl ignores `node_modules/`, `target/`, and `.git/` by default. Add a `.c8ignore` file to your project root for custom patterns (uses `.gitignore` syntax):
+
+```gitignore
+# .c8ignore — filter directories for deploy and watch
+
+# Ignore build output
+dist/
+build/
+
+# Ignore draft processes
+**/draft-*.bpmn
+
+# But keep this approved draft
+!draft-approved.bpmn
+```
+
+```bash
+# Deploy respects .c8ignore automatically
+c8 deploy
+
+# Watch mode also respects .c8ignore
+c8 watch
+```
+
 ### Run (Deploy + Start)
 
 ```bash
