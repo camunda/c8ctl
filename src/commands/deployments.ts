@@ -410,7 +410,12 @@ export async function deploy(paths: string[], options: {
  */
 function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): void {
   if (c8ctl.verbose) {
-    throw error;
+    if (continueOnError) {
+      throw error;
+    }
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    console.error(normalizedError);
+    process.exit(1);
   }
 
   const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};

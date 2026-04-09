@@ -834,6 +834,9 @@ async function main() {
 try {
   if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
     main().catch((error) => {
+      if (c8ctl.verbose) {
+        throw error;
+      }
       console.error('Unexpected error:', error);
       process.exit(1);
     });

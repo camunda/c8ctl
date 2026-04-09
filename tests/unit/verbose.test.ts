@@ -119,13 +119,13 @@ describe('handleCommandError', () => {
       assert.ok(!allOutput.includes('--verbose'), 'Should not print --verbose hint in verbose mode');
     });
 
-    test('re-throws non-Error objects as-is', () => {
+    test('re-throws non-Error objects normalized as Error', () => {
       c8ctl.verbose = true;
       const originalError = { code: 'ECONNREFUSED', message: 'connection refused' };
 
       assert.throws(
         () => handleCommandError(logger, 'Failed to connect', originalError),
-        (thrown) => thrown === originalError,
+        (thrown) => thrown instanceof Error && thrown.message === String(originalError),
       );
     });
   });

@@ -24,11 +24,13 @@ export function handleCommandError(
   error: unknown,
   additionalHints?: string[],
 ): never {
+  const normalizedError = error instanceof Error ? error : new Error(String(error));
+
   if (c8ctl.verbose) {
-    throw error;
+    throw normalizedError;
   }
 
-  logger.error(message, error as Error);
+  logger.error(message, normalizedError);
   if (additionalHints) {
     for (const hint of additionalHints) {
       logger.info(hint);

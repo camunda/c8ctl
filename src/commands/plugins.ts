@@ -320,7 +320,13 @@ export async function unloadPlugin(packageName: string, { force = false }: { for
       rmSync(join(pluginsDir, 'node_modules', packageName), { recursive: true, force: true });
       logger.debug(`Manually removed plugin directory for "${packageName}" from plugins directory`);
     } catch (fsError) {
-      handleCommandError(logger, `Failed to remove plugin "${packageName}" from the global plugins directory.`, fsError, [
+      const uninstallErrorDetails =
+        uninstallError instanceof Error ? uninstallError.message : String(uninstallError);
+      const combinedError = new Error(
+        `Manual removal failed after npm uninstall failed for plugin "${packageName}". npm uninstall error: ${uninstallErrorDetails}`,
+        { cause: fsError },
+      );
+      handleCommandError(logger, `Failed to remove plugin "${packageName}" from the global plugins directory.`, combinedError, [
         'Please verify file permissions for the plugins directory and try again with appropriate rights.',
       ]);
     }
