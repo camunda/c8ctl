@@ -386,28 +386,34 @@ export function storeETag(config, etag) {
 
 export async function hasNewerVersionAvailable(config) {
   const storedETag = readStoredETag(config);
-  if (!storedETag) {
-    // No ETag stored yet — treat as update available so we record one after install
-    return true;
-  }
 
   const downloadUrl = getDownloadUrl(config.version);
+  let remoteETag;
   try {
     const response = await fetch(downloadUrl, { method: 'HEAD' });
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
     }
-    const remoteETag = response.headers.get('etag') || response.headers.get('last-modified');
+    remoteETag = response.headers.get('etag') || response.headers.get('last-modified');
     if (!remoteETag) {
       // Server provides no version signal — keep the current installation
       return false;
     }
-    return remoteETag !== storedETag;
   } catch {
     // Network error — keep the current installation (allows offline use)
     return false;
   }
+
+  if (!storedETag) {
+    // No ETag stored yet (e.g. first run after upgrade to this version).
+    // Record the current remote ETag so future checks can compare, but
+    // do NOT treat this as "update available" — the existing install is fine.
+    storeETag(config, remoteETag);
+    return false;
+  }
+
+  return remoteETag !== storedETag;
 }
 
 export async function ensureC8RunInstalled(config) {

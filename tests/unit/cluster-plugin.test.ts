@@ -431,10 +431,18 @@ describe('Cluster Plugin – hasNewerVersionAvailable', () => {
     Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
   });
 
-  test('returns true when no ETag is stored (first install)', async () => {
+  test('returns false and records ETag when no ETag is stored (upgrade scenario)', async () => {
     const config = { cacheDir: tempDir, version: '8.8' };
+    assert.strictEqual(plugin.readStoredETag(config), null, 'no ETag stored initially');
+
+    stubFetch(async () => ({
+      ok: true,
+      headers: { get: (h: string) => h === 'etag' ? '"etag-initial"' : null },
+    }));
+
     const result = await plugin.hasNewerVersionAvailable(config);
-    assert.strictEqual(result, true);
+    assert.strictEqual(result, false, 'should not trigger re-download on first check');
+    assert.strictEqual(plugin.readStoredETag(config), '"etag-initial"', 'should record the remote ETag for future checks');
   });
 
   test('returns false when stored ETag matches remote ETag', async () => {
@@ -559,7 +567,7 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
     }
   });
 
-  test('purges alias install when remote ETag differs (newer version available)', async () => {
+  test('purgeInstalledVersion removes install dir and ETag file', async () => {
     const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
     const installDir = join(tempDir, 'c8run-8.8');
     const binaryDir = join(installDir, 'c8run-8.8.1');
@@ -569,10 +577,10 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 
     assert.strictEqual(plugin.isC8RunInstalled(config), true, 'should be installed before test');
 
-    // Simulate purge that ensureC8RunInstalled would call when ETag differs
     plugin.purgeInstalledVersion(config);
 
-    assert.strictEqual(existsSync(installDir), false, 'install dir should be purged when newer version available');
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+    assert.strictEqual(plugin.readStoredETag(config), null, 'ETag file should be removed');
     assert.strictEqual(plugin.isC8RunInstalled(config), false, 'should not be installed after purge');
   });
 });
