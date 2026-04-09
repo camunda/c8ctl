@@ -93,6 +93,9 @@ describe('Help Module', () => {
     // Check for date range filter flags
     assert.ok(output.includes('--between'));
     assert.ok(output.includes('--dateField'));
+
+    // Check for verbose flag
+    assert.ok(output.includes('--verbose'));
   });
 
   test('showVerbResources shows resources for list', () => {

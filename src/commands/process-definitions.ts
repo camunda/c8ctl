@@ -6,6 +6,7 @@ import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List process definitions
@@ -48,8 +49,7 @@ export async function listProcessDefinitions(options: {
       logger.info('No process definitions found');
     }
   } catch (error) {
-    logger.error('Failed to list process definitions', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list process definitions', error);
   }
 }
 
@@ -78,7 +78,6 @@ export async function getProcessDefinition(key: string, options: {
       logger.json(result);
     }
   } catch (error) {
-    logger.error(`Failed to get process definition ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get process definition ${key}`, error);
   }
 }

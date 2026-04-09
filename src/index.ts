@@ -138,6 +138,7 @@ function parseCliArgs() {
         dateField: { type: 'string' },
         fields: { type: 'string' },
         'dry-run': { type: 'boolean' },
+        verbose: { type: 'boolean' },
         force: { type: 'boolean' },
       },
       allowPositionals: true,
@@ -203,6 +204,11 @@ async function main() {
   // Resolve --dry-run flag (agent feature: emit API request without executing)
   if (values['dry-run']) {
     c8ctl.dryRun = true;
+  }
+
+  // Resolve --verbose flag (enable SDK trace logging and surface raw errors)
+  if (values.verbose) {
+    c8ctl.verbose = true;
   }
 
   // Load installed plugins
@@ -828,6 +834,9 @@ async function main() {
 try {
   if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
     main().catch((error) => {
+      if (c8ctl.verbose) {
+        throw error;
+      }
       console.error('Unexpected error:', error);
       process.exit(1);
     });

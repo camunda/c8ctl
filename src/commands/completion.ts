@@ -52,7 +52,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --force"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force"
 
   case \${cword} in
     1)
@@ -265,6 +265,7 @@ _c8ctl() {
     '--ivalue[Case-insensitive variable value filter]:pattern:'
     '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
+    '--verbose[Enable SDK trace logging and show full error details]'
     '--force[Continue watching after deployment errors (watch command) or force-remove a limbo plugin (unload plugin)]'
   )
 
@@ -639,6 +640,8 @@ complete -c c8ctl -l fields -d 'Agent: comma-separated output fields to include'
 complete -c c8 -l fields -d 'Agent: comma-separated output fields to include' -r
 complete -c c8ctl -l dry-run -d 'Agent: preview API request without executing'
 complete -c c8 -l dry-run -d 'Agent: preview API request without executing'
+complete -c c8ctl -l verbose -d 'Enable SDK trace logging and show full error details'
+complete -c c8 -l verbose -d 'Enable SDK trace logging and show full error details'
 complete -c c8ctl -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
 complete -c c8 -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
 

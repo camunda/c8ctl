@@ -4,6 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * Get cluster topology
@@ -18,7 +19,6 @@ export async function getTopology(options: {
     const result = await client.getTopology();
     logger.json(result);
   } catch (error) {
-    logger.error('Failed to get topology', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to get topology', error);
   }
 }

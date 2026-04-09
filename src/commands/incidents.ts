@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List incidents
@@ -73,8 +74,7 @@ export async function listIncidents(options: {
       logger.info('No incidents found');
     }
   } catch (error) {
-    logger.error('Failed to list incidents', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list incidents', error);
   }
 }
 
@@ -91,8 +91,7 @@ export async function getIncident(key: string, options: {
     const result = await client.getIncident({ incidentKey: key as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get incident ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get incident ${key}`, error);
   }
 }
 
@@ -123,7 +122,6 @@ export async function resolveIncident(key: string, options: {
     await client.resolveIncident({ incidentKey: key as any });
     logger.success(`Incident ${key} resolved`);
   } catch (error) {
-    logger.error(`Failed to resolve incident ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to resolve incident ${key}`, error);
   }
 }

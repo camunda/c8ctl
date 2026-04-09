@@ -4,6 +4,7 @@
 
 import { createCamundaClient, type CamundaClient, type CamundaOptions } from '@camunda8/orchestration-cluster-api';
 import { resolveClusterConfig } from './config.ts';
+import { c8ctl } from './runtime.ts';
 
 /**
  * Create a Camunda 8 cluster client with resolved configuration
@@ -40,6 +41,11 @@ export function createClient(
   // No authentication
   else {
     sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
+  }
+
+  // Add verbose/trace logging when --verbose flag is set
+  if (c8ctl.verbose) {
+    sdkConfig.CAMUNDA_SDK_LOG_LEVEL = 'trace';
   }
 
   return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });

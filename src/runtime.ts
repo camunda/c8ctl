@@ -34,6 +34,8 @@ export interface C8ctlPluginRuntime {
   fields?: string[];
   /** Agent flag: when true, mutating commands emit the would-be API request as JSON without executing it */
   dryRun?: boolean;
+  /** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
+  verbose?: boolean;
   createClient(profileFlag?: string, additionalSdkConfig?: Partial<CamundaOptions>): CamundaClient;
   resolveTenantId(profileFlag?: string): string;
   getLogger(mode?: OutputMode): Logger;
@@ -67,6 +69,7 @@ class C8ctl {
   private _outputMode: OutputMode = 'text';
   private _fields?: string[];
   private _dryRun?: boolean;
+  private _verbose?: boolean;
 
   readonly env: C8ctlEnv = {
     version: getVersion(),
@@ -136,6 +139,14 @@ class C8ctl {
 
   set dryRun(value: boolean | undefined) {
     this._dryRun = value;
+  }
+
+  get verbose(): boolean | undefined {
+    return this._verbose;
+  }
+
+  set verbose(value: boolean | undefined) {
+    this._verbose = value;
   }
 }
 

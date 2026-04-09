@@ -9,6 +9,7 @@ import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
 import type { ProcessInstanceCreationInstructionById, ProcessInstanceResult } from '@camunda8/orchestration-cluster-api';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List process instances
@@ -86,8 +87,7 @@ export async function listProcessInstances(options: {
     
     return { items: allItems, total: allItems.length };
   } catch (error) {
-    logger.error('Failed to list process instances', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list process instances', error);
   }
 }
 
@@ -125,15 +125,13 @@ export async function getProcessInstance(key: string, options: {
         };
         logger.json(resultWithVariables);
       } catch (varError) {
-        logger.error(`Failed to fetch variables for process instance ${key}. The process instance was found, but variables could not be retrieved.`, varError as Error);
-        process.exit(1);
+        handleCommandError(logger, `Failed to fetch variables for process instance ${key}. The process instance was found, but variables could not be retrieved.`, varError);
       }
     } else {
       logger.json(result);
     }
   } catch (error) {
-    logger.error(`Failed to get process instance ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get process instance ${key}`, error);
   }
 }
 
@@ -220,8 +218,7 @@ export async function createProcessInstance(options: {
       try {
         request.variables = JSON.parse(options.variables);
       } catch (error) {
-        logger.error('Invalid JSON for variables', error as Error);
-        process.exit(1);
+        handleCommandError(logger, 'Invalid JSON for variables', error);
       }
     }
 
@@ -253,8 +250,7 @@ export async function createProcessInstance(options: {
       [key: string]: unknown;
     };
   } catch (error) {
-    logger.error('Failed to create process instance', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create process instance', error);
   }
 }
 
@@ -285,7 +281,6 @@ export async function cancelProcessInstance(key: string, options: {
     await client.cancelProcessInstance({ processInstanceKey: key as any });
     logger.success(`Process instance ${key} cancelled`);
   } catch (error) {
-    logger.error(`Failed to cancel process instance ${key}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to cancel process instance ${key}`, error);
   }
 }

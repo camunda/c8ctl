@@ -7,6 +7,7 @@ import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { TenantId } from '@camunda8/orchestration-cluster-api';
 import { readFileSync } from 'node:fs';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * Extract process ID from BPMN file
@@ -59,15 +60,13 @@ export async function run(path: string, options: {
       try {
         createRequest.variables = JSON.parse(options.variables);
       } catch (error) {
-        logger.error('Invalid JSON for variables', error as Error);
-        process.exit(1);
+        handleCommandError(logger, 'Invalid JSON for variables', error);
       }
     }
 
     const createResult = await client.createProcessInstance(createRequest);
     logger.success('Process instance created', createResult.processInstanceKey);
   } catch (error) {
-    logger.error('Failed to run process', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to run process', error);
   }
 }
