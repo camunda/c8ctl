@@ -30,9 +30,9 @@
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "prepublishOnly": "npm run build",
-    "test": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts tests/integration/*.test.ts",
-    "test:unit": "node --experimental-strip-types --test tests/unit/setup.test.ts tests/unit/*.test.ts",
-    "test:integration": "node --experimental-strip-types --test tests/integration/*.test.ts",
+    "test": "node --experimental-strip-types --test --experimental-test-isolation=none tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --experimental-strip-types --test --experimental-test-isolation=none tests/unit/*.test.ts",
+    "test:integration": "node --experimental-strip-types --test --experimental-test-isolation=none tests/integration/*.test.ts",
     "dev": "node src/index.ts",
     "cli": "node src/index.ts"
   },
