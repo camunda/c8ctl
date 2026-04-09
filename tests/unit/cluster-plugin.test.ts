@@ -49,11 +49,17 @@ describe('Cluster Plugin – metadata', () => {
     }
   });
 
-  test('examples include start and stop commands', () => {
+  test('examples include start, stop, status, list, logs, list-remote, install, and delete commands', () => {
     const examples = plugin.metadata.commands['cluster'].examples;
     const cmds = examples.map((e: { command: string }) => e.command);
     assert.ok(cmds.some((c: string) => c.includes('start')), 'Should have a start example');
     assert.ok(cmds.some((c: string) => c.includes('stop')), 'Should have a stop example');
+    assert.ok(cmds.some((c: string) => c.includes('status')), 'Should have a status example');
+    assert.ok(cmds.some((c: string) => c.includes(' list') && !c.includes('list-remote')), 'Should have a list example');
+    assert.ok(cmds.some((c: string) => c.includes('logs')), 'Should have a logs example');
+    assert.ok(cmds.some((c: string) => c.includes('list-remote')), 'Should have a list-remote example');
+    assert.ok(cmds.some((c: string) => c.includes('install')), 'Should have an install example');
+    assert.ok(cmds.some((c: string) => c.includes('delete')), 'Should have a delete example');
   });
 });
 
@@ -378,6 +384,16 @@ describe('Cluster Plugin – purgeInstalledVersion', () => {
 
     assert.strictEqual(existsSync(etagFile), false, 'ETag file should be removed by purge');
   });
+
+  test('accepts a custom reason for the log message', () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    const installDir = join(tempDir, 'c8run-8.8');
+    mkdirSync(installDir, { recursive: true });
+
+    // Should not throw when called with reason
+    assert.doesNotThrow(() => plugin.purgeInstalledVersion(config, { reason: 'as requested' }));
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -537,7 +553,7 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
   });
 
   test('returns without error when exact version is already installed', async () => {
-    const config = { cacheDir: tempDir, version: '8.8.1', isAlias: false };
+    const config = { cacheDir: tempDir, version: '8.8.1', isRolling: false, checkForUpdates: false };
     const binaryDir = join(tempDir, 'c8run-8.8.1', 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
     writeFileSync(join(binaryDir, 'c8run'), '');
@@ -546,7 +562,7 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
   });
 
   test('does not purge exact version when already installed (never re-download)', async () => {
-    const config = { cacheDir: tempDir, version: '8.8.1', isAlias: false };
+    const config = { cacheDir: tempDir, version: '8.8.1', isRolling: false, checkForUpdates: false };
     const installDir = join(tempDir, 'c8run-8.8.1');
     const binaryDir = join(installDir, 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
@@ -558,7 +574,7 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
   });
 
   test('does not purge alias install when remote ETag matches stored ETag', async () => {
-    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    const config = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: true };
     const installDir = join(tempDir, 'c8run-8.8');
     const binaryDir = join(installDir, 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
@@ -584,7 +600,7 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
   });
 
   test('purgeInstalledVersion removes install dir and ETag file', async () => {
-    const config = { cacheDir: tempDir, version: '8.8', isAlias: true };
+    const config = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: true };
     const installDir = join(tempDir, 'c8run-8.8');
     const binaryDir = join(installDir, 'c8run-8.8.1');
     mkdirSync(binaryDir, { recursive: true });
@@ -670,5 +686,709 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
     assert.ok(result);
     assert.strictEqual(result.stable, '8.8');
     assert.strictEqual(result.alpha, '8.9');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clusterStatus
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – clusterStatus', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+    originalFetch = globalThis.fetch;
+    // Default stub: health endpoint not reachable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Connection refused'); },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('reports stopped when no marker file and health unreachable', async () => {
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('stopped'), 'Should report stopped status');
+  });
+
+  test('includes start hint when stopped', async () => {
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('c8ctl cluster start'), 'Should hint at start command');
+  });
+
+  test('reports running when health endpoint is UP', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('running'), 'Should report running status');
+  });
+
+  test('includes connection URLs when cluster is running', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('Operate'), 'Should list Operate URL');
+    assert.ok(output.includes('Tasklist'), 'Should list Tasklist URL');
+    assert.ok(output.includes('Zeebe'), 'Should list Zeebe endpoints');
+    assert.ok(output.includes('demo / demo'), 'Should mention default credentials');
+  });
+
+  test('reports version from marker file when available', async () => {
+    // Write marker files
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+    writeFileSync(join(tempDir, 'cluster.version'), '8.9.0-alpha5');
+
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({ ok: true, json: async () => ({ status: 'UP' }) }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('8.9.0-alpha5'), 'Should display the running version');
+  });
+
+  test('reports "starting or unresponsive" when marker exists but health unreachable', async () => {
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+
+    await plugin.clusterStatus(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('starting or unresponsive'), 'Should report starting/unresponsive status');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listInstalledVersions
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – listInstalledVersions', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+  });
+
+  test('reports no versions when cache dir is empty', async () => {
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No versions installed'), 'Should report no versions');
+  });
+
+  test('reports no versions when cache dir does not exist', async () => {
+    await plugin.listInstalledVersions(join(tempDir, 'nonexistent'));
+    const output = captured.join('\n');
+    assert.ok(output.includes('No versions installed'), 'Should report no versions for missing dir');
+  });
+
+  test('lists installed version directories', async () => {
+    mkdirSync(join(tempDir, 'c8run-8.8'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.9'), { recursive: true });
+
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('8.8'), 'Should list installed version 8.8');
+    assert.ok(output.includes('8.9'), 'Should list installed version 8.9');
+  });
+
+  test('sorts versions numerically (8.9 before 8.10)', async () => {
+    mkdirSync(join(tempDir, 'c8run-8.10'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.9'), { recursive: true });
+    mkdirSync(join(tempDir, 'c8run-8.6'), { recursive: true });
+
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    const idx6 = output.indexOf('8.6');
+    const idx9 = output.indexOf('8.9');
+    const idx10 = output.indexOf('8.10');
+    assert.ok(idx6 < idx9, '8.6 should appear before 8.9');
+    assert.ok(idx9 < idx10, '8.9 should appear before 8.10');
+  });
+
+  test('always shows version aliases section', async () => {
+    await plugin.listInstalledVersions(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('Version aliases'), 'Should show version aliases section');
+    assert.ok(/alpha\s+→/.test(output), 'Should show alpha alias');
+    assert.ok(/stable\s+→/.test(output), 'Should show stable alias');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cluster command – status and list subcommands via commands export
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – status and list subcommands', () => {
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
+    originalFetch = globalThis.fetch;
+    // Default: health not reachable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Connection refused'); },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('status subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['status']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'status subcommand should not print usage');
+  });
+
+  test('list subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['list']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'list subcommand should not print usage');
+  });
+
+  test('usage mentions status subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('status'), 'Usage should mention "status" subcommand');
+  });
+
+  test('usage mentions list subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('list'), 'Usage should mention "list" subcommand');
+  });
+
+  test('usage mentions logs subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('logs'), 'Usage should mention "logs" subcommand');
+  });
+
+  test('usage mentions list-remote subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('list-remote'), 'Usage should mention "list-remote" subcommand');
+  });
+
+  test('usage mentions install subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('install'), 'Usage should mention "install" subcommand');
+  });
+
+  test('usage mentions delete subcommand', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('delete'), 'Usage should mention "delete" subcommand');
+  });
+
+  test('usage shows stable as default alias', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    assert.ok(output.includes('default: stable'), 'Usage should show stable as the default');
+  });
+
+  test('stop usage does not show a [<version>] argument', async () => {
+    await plugin.commands['cluster']([]);
+    const output = captured.join('\n');
+    // The stop line should just be 'c8ctl cluster stop' with no version arg
+    const stopLine = output.split('\n').find((l) => l.includes('cluster stop'));
+    assert.ok(stopLine, 'Should have a stop usage line');
+    assert.ok(!stopLine!.includes('[<version>]'), 'stop usage should not show [<version>]');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteVersion
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – deleteVersion', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+  let originalExit: typeof process.exit;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    originalWarn = console.warn;
+    originalExit = process.exit;
+    console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.warn = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+    console.warn = originalWarn;
+    process.exit = originalExit;
+  });
+
+  test('removes an installed version', async () => {
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    await plugin.deleteVersion(tempDir, '8.8');
+    assert.strictEqual(existsSync(installDir), false, 'install dir should be removed');
+  });
+
+  test('warns when version is not installed', async () => {
+    await plugin.deleteVersion(tempDir, '9.9');
+    const output = captured.join('\n');
+    assert.ok(output.includes('not installed'), 'Should warn that version is not installed');
+  });
+
+  test('prevents deleting a currently running version', async () => {
+    const installDir = join(tempDir, 'c8run-8.8');
+    const binaryDir = join(installDir, 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+    writeFileSync(join(tempDir, 'cluster.version'), '8.8');
+
+    let exitCalled = false;
+    process.exit = (() => { exitCalled = true; throw new Error('exit'); }) as never;
+
+    await assert.rejects(
+      () => plugin.deleteVersion(tempDir, '8.8'),
+      /exit/,
+    );
+    assert.ok(exitCalled, 'Should call process.exit when trying to delete running version');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listRemoteVersions
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – listRemoteVersions', () => {
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('lists versions from remote HTML listing', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.6/">8.6</a>
+          <a href="8.7/">8.7</a>
+          <a href="8.8/">8.8</a>
+          <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+          <a href="8.9/">8.9</a>
+        `,
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.listRemoteVersions();
+    const output = captured.join('\n');
+    assert.ok(output.includes('8.6'), 'Should list version 8.6');
+    assert.ok(output.includes('8.8'), 'Should list version 8.8');
+    assert.ok(output.includes('8.9.0-alpha1'), 'Should list alpha version');
+    assert.ok(output.includes('Available versions'), 'Should have a header');
+  });
+
+  test('sorts versions numerically (8.9 before 8.10, alpha2 before alpha10)', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.10/">8.10</a>
+          <a href="8.9/">8.9</a>
+          <a href="8.9.0-alpha10/">8.9.0-alpha10</a>
+          <a href="8.9.0-alpha2/">8.9.0-alpha2</a>
+        `,
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.listRemoteVersions();
+    const output = captured.join('\n');
+    const alpha2Idx = output.indexOf('8.9.0-alpha2');
+    const alpha10Idx = output.indexOf('8.9.0-alpha10');
+    const v9Idx = output.indexOf('8.9\n') >= 0 ? output.indexOf('8.9\n') : output.indexOf('  8.9');
+    const v10Idx = output.indexOf('8.10');
+    assert.ok(alpha2Idx < alpha10Idx, 'alpha2 should appear before alpha10');
+    assert.ok(v9Idx < v10Idx, '8.9 should appear before 8.10');
+  });
+
+  test('exits with error when network fails', async () => {
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Network error'); },
+      writable: true,
+      configurable: true,
+    });
+
+    const originalExit = process.exit;
+    let exitCalled = false;
+    process.exit = (() => { exitCalled = true; throw new Error('exit'); }) as never;
+
+    try {
+      await assert.rejects(() => plugin.listRemoteVersions(), /exit/);
+      assert.ok(exitCalled, 'Should exit on network error');
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streamLogs
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – streamLogs', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    originalWarn = console.warn;
+    console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.warn = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  test('warns when no cluster is running', async () => {
+    await plugin.streamLogs(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No cluster is currently running'), 'Should warn no cluster running');
+  });
+
+  test('warns when no log files found', async () => {
+    writeFileSync(join(tempDir, 'cluster.active'), 'running');
+    writeFileSync(join(tempDir, 'cluster.version'), '8.8');
+
+    // Create an install dir with a binary but no log dir
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    await plugin.streamLogs(tempDir);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No log files found'), 'Should warn about missing log files');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// new subcommands via commands export
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – logs, list-remote, install, delete subcommands', () => {
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+  let originalError: typeof console.error;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    captured = [];
+    originalLog = console.log;
+    originalWarn = console.warn;
+    originalError = console.error;
+    console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.warn = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    originalFetch = globalThis.fetch;
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Connection refused'); },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('log subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['log']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'log subcommand should not print usage');
+  });
+
+  test('logs subcommand does not print usage', async () => {
+    await plugin.commands['cluster'](['logs']);
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'logs subcommand should not print usage');
+  });
+
+  test('list-remote subcommand does not print usage', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['list-remote']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    // If we got here without "Usage:" in output, the subcommand was recognized
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'list-remote subcommand should not print usage');
+  });
+
+  test('delete subcommand does not print usage', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['delete', '8.8']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'delete subcommand should not print usage');
+  });
+
+  test('install subcommand does not print usage', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['install', '8.8']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(!output.includes('Usage:'), 'install subcommand should not print usage');
+  });
+
+  test('install without version exits with error', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['install']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(output.includes('specify a version'), 'install without version should prompt for one');
+  });
+
+  test('delete without version exits with error', async () => {
+    const originalExit = process.exit;
+    process.exit = (() => { throw new Error('exit'); }) as never;
+
+    try {
+      await plugin.commands['cluster'](['delete']).catch(() => {});
+    } finally {
+      process.exit = originalExit;
+    }
+    const output = captured.join('\n');
+    assert.ok(output.includes('specify a version'), 'delete without version should prompt for one');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isMinorVersionPattern / isRollingVersion
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – isMinorVersionPattern', () => {
+  test('recognizes major.minor patterns', () => {
+    assert.strictEqual(plugin.isMinorVersionPattern('8.8'), true);
+    assert.strictEqual(plugin.isMinorVersionPattern('8.9'), true);
+    assert.strictEqual(plugin.isMinorVersionPattern('9.0'), true);
+    assert.strictEqual(plugin.isMinorVersionPattern('10.1'), true);
+  });
+
+  test('rejects non major.minor patterns', () => {
+    assert.strictEqual(plugin.isMinorVersionPattern('stable'), false);
+    assert.strictEqual(plugin.isMinorVersionPattern('alpha'), false);
+    assert.strictEqual(plugin.isMinorVersionPattern('8.9.0-alpha5'), false);
+    assert.strictEqual(plugin.isMinorVersionPattern('8.8.1'), false);
+    assert.strictEqual(plugin.isMinorVersionPattern('8'), false);
+    assert.strictEqual(plugin.isMinorVersionPattern('latest'), false);
+  });
+});
+
+describe('Cluster Plugin – isRollingVersion', () => {
+  test('returns true for named aliases', () => {
+    assert.strictEqual(plugin.isRollingVersion('stable'), true);
+    assert.strictEqual(plugin.isRollingVersion('alpha'), true);
+  });
+
+  test('returns true for major.minor patterns', () => {
+    assert.strictEqual(plugin.isRollingVersion('8.8'), true);
+    assert.strictEqual(plugin.isRollingVersion('8.9'), true);
+  });
+
+  test('returns false for pinned versions', () => {
+    assert.strictEqual(plugin.isRollingVersion('8.9.0-alpha5'), false);
+    assert.strictEqual(plugin.isRollingVersion('8.8.1'), false);
+    assert.strictEqual(plugin.isRollingVersion('latest'), false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureC8RunInstalled – start vs install update behavior
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', () => {
+  let tempDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+  });
+
+  test('start (checkForUpdateHint=true) does not block or re-download, but checks remote for hint', async () => {
+    // Simulate: 8.8 is installed locally with an old ETag, remote has a new ETag
+    const config: any = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeETag(config, '"etag-old"');
+
+    let fetchCalled = false;
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { fetchCalled = true; return { ok: true, headers: { get: () => '"etag-new"' } }; },
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.ensureC8RunInstalled(config);
+
+    // Await the hint promise (stored on config by ensureC8RunInstalled)
+    await config._hintPromise;
+
+    // start DOES fire a remote check for the hint
+    assert.strictEqual(fetchCalled, true, 'start should check remote for update hint');
+    // But it should NOT purge or re-download — install dir stays
+    assert.ok(existsSync(join(tempDir, 'c8run-8.8')), 'should not purge the install');
+  });
+
+  test('install (checkForUpdates=true) checks remote ETag for rolling versions', async () => {
+    // Simulate: 8.8 is installed locally, remote ETag matches
+    const config = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: true };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeETag(config, '"etag-current"');
+
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        headers: { get: (h: string) => h === 'etag' ? '"etag-current"' : null },
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.ensureC8RunInstalled(config);
+
+    // Should still be installed (ETag matches, no update needed)
+    assert.ok(existsSync(join(tempDir, 'c8run-8.8')), 'should keep install when ETag matches');
+  });
+
+  test('start with minor version succeeds offline (hint check swallows error)', async () => {
+    const config: any = { cacheDir: tempDir, version: '8.8', isRolling: true, checkForUpdates: false, checkForUpdateHint: true };
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('Network unreachable'); },
+      writable: true,
+      configurable: true,
+    });
+
+    await assert.doesNotReject(
+      () => plugin.ensureC8RunInstalled(config),
+      'start with local minor version should succeed even when network fails',
+    );
+
+    // Await the hint promise — it should resolve (swallowing the error) without throwing
+    await assert.doesNotReject(
+      () => config._hintPromise,
+      'hint check should swallow network errors',
+    );
+
+    // Install should still be there
+    assert.ok(existsSync(join(tempDir, 'c8run-8.8')), 'should not purge the install');
   });
 });

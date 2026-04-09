@@ -48,7 +48,7 @@ _c8ctl_completions() {
   local which_resources="profile"
   local output_resources="json text"
   local completion_resources="bash zsh fish"
-  local cluster_resources="start stop"
+  local cluster_resources="start stop status list list-remote install delete log logs"
   local help_resources="list get create complete await search deploy run watch cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
 
   # Global flags

@@ -75,7 +75,7 @@ describe('Completion Module', () => {
 
     // Check for plugin commands
     assert.ok(output.includes('cluster'), 'Should include cluster verb');
-    assert.ok(output.includes('"start stop"'), 'Should include cluster start/stop subcommands');
+    assert.ok(output.includes('"start stop status list list-remote install delete log logs"'), 'Should include cluster subcommands');
   });
 
   test('generates zsh completion script', () => {
