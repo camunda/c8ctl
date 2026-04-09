@@ -8,7 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
-import type { ProcessInstanceCreationInstructionById } from '@camunda8/orchestration-cluster-api';
+import type { ProcessInstanceCreationInstructionById, ProcessInstanceResult } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List process instances
@@ -24,7 +24,7 @@ export async function listProcessInstances(options: {
   limit?: number;
   between?: string;
   dateField?: string;
-}): Promise<{ items: Array<Record<string, unknown>>; total?: number } | undefined> {
+}): Promise<{ items: ProcessInstanceResult[]; total?: number } | undefined> {
   const logger = getLogger();
   const client = createClient(options.profile);
   const tenantId = resolveTenantId(options.profile);
@@ -84,7 +84,7 @@ export async function listProcessInstances(options: {
       logger.info('No process instances found');
     }
     
-    return { items: allItems as Array<Record<string, unknown>>, total: allItems.length };
+    return { items: allItems, total: allItems.length };
   } catch (error) {
     logger.error('Failed to list process instances', error as Error);
     process.exit(1);

@@ -64,7 +64,7 @@ export const DEFAULT_MAX_ITEMS = 1_000_000;
 type PagedResponse<T> = {
   items: T[];
   page: {
-    totalItems: number;
+    totalItems: number | bigint;
     endCursor: string | null;
     startCursor: string | null;
     hasMoreTotalItems: boolean;
@@ -114,7 +114,7 @@ export async function fetchAllPages<T>(
     }
 
     const endCursor = result.page.endCursor;
-    const totalItems = result.page.totalItems;
+    const totalItems = Number(result.page.totalItems);
 
     if (!endCursor || seenCursors.has(endCursor)) break;
     if (allItems.length >= totalItems) break;
