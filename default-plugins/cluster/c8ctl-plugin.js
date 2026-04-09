@@ -390,7 +390,10 @@ export async function hasNewerVersionAvailable(config) {
   const downloadUrl = getDownloadUrl(config.version);
   let remoteETag;
   try {
-    const response = await fetch(downloadUrl, { method: 'HEAD' });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeout);
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
