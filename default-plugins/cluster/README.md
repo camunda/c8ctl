@@ -8,7 +8,7 @@ A default [c8ctl](https://github.com/camunda/c8ctl) plugin that provides an opin
 # Start with a specific version
 c8ctl cluster start 8.9.0-alpha5
 
-# Start using a version alias
+# Start using a version alias (dynamically resolved)
 c8ctl cluster start stable
 c8ctl cluster start alpha
 
@@ -21,6 +21,21 @@ c8ctl cluster start --debug
 # Stop the running cluster
 c8ctl cluster stop
 ```
+
+## Version aliases
+
+The `stable` and `alpha` aliases are resolved dynamically by querying the
+[Camunda Download Center](https://downloads.camunda.cloud/release/camunda/c8run/).
+This means you always get the latest available version without waiting for a
+plugin update.
+
+| Alias    | Resolves to |
+|----------|-------------|
+| `stable` | Highest minor release that is GA (e.g. `8.8`) |
+| `alpha`  | Highest minor release overall (e.g. `8.9`) |
+
+If the download server is unreachable, the aliases fall back to the values
+shipped in the plugin's `package.json`.
 
 ## How it works
 
