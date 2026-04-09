@@ -12,7 +12,10 @@ c8ctl cluster start 8.9.0-alpha5
 c8ctl cluster start stable
 c8ctl cluster start alpha
 
-# Starting without specifying a version defaults to alpha
+# Start with a major.minor version (rolling release)
+c8ctl cluster start 8.8
+
+# Starting without specifying a version defaults to stable
 c8ctl cluster start
 
 # Start with debug output (streams raw c8run logs)
@@ -24,8 +27,20 @@ c8ctl cluster stop
 # Check whether a cluster is running and see connection details
 c8ctl cluster status
 
+# Stream log output from the running cluster
+c8ctl cluster logs
+
 # List locally cached versions and available aliases
 c8ctl cluster list
+
+# List all versions available on the remote download server
+c8ctl cluster list-remote
+
+# Download a version without starting it
+c8ctl cluster install 8.8
+
+# Remove a locally cached version to reclaim disk space
+c8ctl cluster delete 8.8
 ```
 
 ## Version aliases
@@ -40,6 +55,15 @@ plugin update.
 | `stable` | Highest minor release that is GA (e.g. `8.8`) |
 | `alpha`  | Highest minor release overall (e.g. `8.9`) |
 
+A `<major>.<minor>` version like `8.8` or `8.9` is also treated as a rolling
+release — the download server's `8.8/` directory is updated in-place with new
+patch releases.
+
+### `start` vs `install` update behavior
+
+- **`start`** uses the local version if available. A non-blocking remote check runs in the background — if a newer rolling release exists, a hint is printed (e.g. *"A newer server version is available. Install it with: c8ctl cluster install 8.8"*). If the network is unreachable, the hint is silently skipped.
+- **`install`** always checks the remote for a newer rolling release (via ETag comparison) and re-downloads if one is available.
+
 If the download server is unreachable, the aliases fall back to the values
 shipped in the plugin's `package.json`.
 
@@ -50,7 +74,11 @@ shipped in the plugin's `package.json`.
 3. **Start**: Launches c8run in the background and waits for the cluster to become healthy
 4. **Stop**: Gracefully shuts down the running cluster
 5. **Status**: Reports whether a cluster is running by checking the active marker file and the live health endpoint
-6. **List**: Shows all locally cached versions and the current resolved values of available version aliases
+6. **Logs**: Streams log output (camunda.log, connectors.log) from the running cluster using `tail -f`
+7. **List**: Shows all locally cached versions and the current resolved values of available version aliases
+8. **List-remote**: Queries the Camunda Download Center and displays all available versions
+9. **Install**: Downloads a specific version without starting it, useful for pre-caching
+10. **Delete**: Removes a locally cached version to reclaim disk space
 
 ### Cache locations
 

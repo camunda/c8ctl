@@ -831,6 +831,9 @@ c8 cluster start
 # Start a specific version
 c8 cluster start 8.9.0-alpha5
 
+# Start the latest cached release for a major.minor version
+c8 cluster start 8.8
+
 # Start with debug output (streams raw c8run logs)
 c8 cluster start --debug
 ```
@@ -839,6 +842,49 @@ c8 cluster start --debug
 
 ```bash
 c8 cluster stop
+```
+
+### Cluster Status
+
+```bash
+# Check if a cluster is running and see connection details
+c8 cluster status
+```
+
+### Stream Logs
+
+```bash
+# Stream log output from the running cluster (Ctrl+C to stop)
+c8 cluster logs
+```
+
+### List Installed Versions
+
+```bash
+# Show locally cached versions and version aliases
+c8 cluster list
+```
+
+### List Available Remote Versions
+
+```bash
+# Query the Camunda Download Center for all available versions
+c8 cluster list-remote
+```
+
+### Install a Version Without Starting
+
+```bash
+# Pre-download a version for later use
+c8 cluster install 8.8
+c8 cluster install alpha
+```
+
+### Delete a Cached Version
+
+```bash
+# Remove a locally cached version to reclaim disk space
+c8 cluster delete 8.8
 ```
 
 ### Typical Local Development Workflow
