@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
+import { TenantId } from '@camunda8/orchestration-cluster-api';
 import { readFileSync } from 'node:fs';
 
 /**
@@ -41,7 +42,7 @@ export async function run(path: string, options: {
     // Deploy the BPMN file - convert to File object with proper MIME type
     const fileName = path.split('/').pop() || 'process.bpmn';
     const deployResult = await client.createDeployment({
-      tenantId,
+      tenantId: TenantId.assumeExists(tenantId),
       resources: [new File([Buffer.from(content)], fileName, { type: 'application/xml' })],
     });
     logger.success('Deployment successful', deployResult.deploymentKey.toString());
