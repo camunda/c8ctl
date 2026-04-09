@@ -58,8 +58,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^8.8.4",
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "@camunda8/orchestration-cluster-api": "^8.9.0-alpha.30",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {
     "@semantic-release/exec": "^7.1.0",
