@@ -9,13 +9,13 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
-- always make sure that cli commands, resources and options are reflected in
+- always make sure that CLI commands, resources and options are reflected in
   - the `help` tests
   - README.md, EXAMPLES.md and other documentation
   - shell completion
 - for every implementation, make sure to add or update tests that cover the new functionality. This includes unit tests for individual functions and integration tests for end-to-end scenarios. Tests should be comprehensive and cover edge cases to ensure the robustness of the codebase.
 
-- in any test, only use the implemented cli commands to interact with the system. Avoid using internal functions or direct API calls in tests, as this can lead to brittle tests that are tightly coupled to the implementation. By using the cli commands, you ensure that your tests are more resilient to changes in the underlying code and better reflect real-world usage.
+- in any test, only use the implemented CLI commands to interact with the system. Avoid using internal functions or direct API calls in tests, as this can lead to brittle tests that are tightly coupled to the implementation. By using the cli commands, you ensure that your tests are more resilient to changes in the underlying code and better reflect real-world usage.
 
 - don't use Promises in tests to wait for the overall system status to settle. Instead, use the polling helper from tests/utils/polling.ts to wait for specific conditions to be met.
   
@@ -48,7 +48,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - there is no build step for development. Only compile for test purposes or release.
 - on changes, make sure all tests pass and a build via `npm run build` works without errors
 
-- pay attention on cross-platform compatibility (Linux, MacOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
+- pay attention to cross-platform compatibility (Linux, macOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
 - prefer functional programming over OOP where reasonable
 - prefer concise expressions over verbose control structures
 - when outputting errors, provide clear, concise and actionable hints to the user
