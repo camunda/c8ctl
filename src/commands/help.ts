@@ -1135,7 +1135,7 @@ Connection resolution order (highest to lowest priority):
   4. Default 'local' profile from profiles.json
 
 Default profile: "local"
-  c8ctl ships with a built-in 'local' profile (http://localhost:8080, demo/demo).
+  c8ctl ships with a built-in 'local' profile (http://localhost:8080/v2, demo/demo).
   It is created automatically in profiles.json on first use.
   Override it: c8ctl add profile local --baseUrl <url>
 
@@ -1162,7 +1162,7 @@ Flags for add profile:
 Examples:
   c8ctl list profiles
   c8ctl which profile
-  c8ctl add profile local --baseUrl=http://localhost:8080
+  c8ctl add profile local --baseUrl=http://localhost:8080/v2
   c8ctl add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
   c8ctl add profile staging --from-file .env.staging
   c8ctl add profile ci --from-env

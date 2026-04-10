@@ -690,7 +690,7 @@ export function hasCamundaEnvVars(): boolean {
 }
 
 /**
- * The env var → profile field mapping used by --env-file and --from-env.
+ * The env var → profile field mapping used by --from-file and --from-env.
  */
 export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
   CAMUNDA_BASE_URL: 'baseUrl',

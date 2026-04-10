@@ -15,6 +15,7 @@ import {
   removeProfile as removeProfileConfig,
   parseEnvFile,
   envVarsToProfile,
+  hasCamundaEnvVars,
   DEFAULT_PROFILE,
   MODELER_PREFIX,
   type Profile,
@@ -219,7 +220,11 @@ export function whichProfile(): void {
   const logger = getLogger();
   const active = c8ctl.activeProfile;
   if (!active) {
-    logger.info(`${DEFAULT_PROFILE} (default)`);
+    if (hasCamundaEnvVars()) {
+      logger.info('(none — CAMUNDA_* env vars will be used)');
+    } else {
+      logger.info(`${DEFAULT_PROFILE} (default)`);
+    }
     return;
   }
   logger.info(active);

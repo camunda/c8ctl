@@ -213,7 +213,7 @@ Credentials are resolved in the following order:
 1. `--profile` flag (one-off override)
 2. Active profile from session state (⚠ warns if `CAMUNDA_*` env vars are also present)
 3. Environment variables (`CAMUNDA_*`)
-4. Default `local` profile (`http://localhost:8080`)
+4. Default `local` profile (`http://localhost:8080/v2`)
 
 **Note**: Credential configuration via environment variables follows the same conventions as the `@camunda8/orchestration-cluster-api` module.
 
