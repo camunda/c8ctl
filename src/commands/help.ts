@@ -35,6 +35,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'deploy',    resource: '[path...]',        resources: [], description: 'Deploy BPMN/DMN/forms', mutating: true },
       { verb: 'run',       resource: '<path>',           resources: [], description: 'Deploy and start process', mutating: true },
       { verb: 'watch',     resource: '[path...]',        resources: [], description: 'Watch files for changes and auto-deploy', mutating: false },
+      { verb: 'open',      resource: '<app>',            resources: ['operate','tasklist','modeler','optimize'], description: 'Open Camunda web application in browser', mutating: false },
       { verb: 'add',       resource: 'profile <name>',   resources: ['profile'], description: 'Add a profile', mutating: false },
       { verb: 'remove',    resource: 'profile <name>',   resources: ['profile'], description: 'Remove a profile (alias: rm)', mutating: false },
       { verb: 'load',      resource: 'plugin <name>',    resources: ['plugin'], description: 'Load a c8ctl plugin', mutating: false },
@@ -182,6 +183,7 @@ Commands:
   deploy    [path...]        Deploy BPMN/DMN/forms
   run       <path>           Deploy and start process
   watch     [path...]        Watch files for changes and auto-deploy
+  open      <app>            Open Camunda web app in browser (operate, tasklist, modeler, optimize)
   add       profile <name>   Add a profile
   remove    profile <name>   Remove a profile (alias: rm)
   load      plugin <name>    Load a c8ctl plugin from npm registry
@@ -303,6 +305,9 @@ Examples:
   c8ctl deploy ./my-process.bpmn     Deploy a BPMN file
   c8ctl run ./my-process.bpmn        Deploy and start process
   c8ctl watch ./src                  Watch directory for changes
+  c8ctl open operate                 Open Camunda Operate in browser
+  c8ctl open tasklist                Open Camunda Tasklist in browser
+  c8ctl open operate --profile=prod  Open Operate using a specific profile
   c8ctl use profile prod             Set active profile
   c8ctl which profile                Show currently active profile
   c8ctl output json                  Switch to JSON output
@@ -325,6 +330,7 @@ For detailed help on specific commands with all available flags:
   c8ctl help deploy                  Show deploy command with all flags
   c8ctl help run                     Show run command with all flags
   c8ctl help watch                   Show watch command with all flags
+  c8ctl help open                    Show open command with all apps
   c8ctl help cancel                  Show cancel command with all flags
   c8ctl help resolve                 Show resolve command with all flags
   c8ctl help fail                    Show fail command with all flags
@@ -366,8 +372,9 @@ export function showVerbResources(verb: string): void {
     use: 'profile, tenant',
     which: 'profile',
     output: 'json, text',
+    open: 'operate, tasklist, modeler, optimize',
     completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
+    help: 'list, get, create, complete, await, search, deploy, run, watch, open, cancel, resolve, fail, activate, publish, correlate, upgrade, downgrade, init, profiles, profile, plugin, plugins',
   };
 
   const available = resources[verb];
@@ -900,6 +907,44 @@ Examples:
 }
 
 /**
+ * Show detailed help for open command
+ */
+export function showOpenHelp(): void {
+  console.log(`
+c8ctl open - Open a Camunda web application in the browser
+
+Usage: c8ctl open <app> [flags]
+
+Applications:
+  operate           Camunda Operate  – monitor process instances and incidents
+  tasklist          Camunda Tasklist – manage user tasks
+  modeler           Camunda Web Modeler – design BPMN/DMN processes
+  optimize          Camunda Optimize – process analytics
+
+Description:
+  Derives the application URL from the active profile's base URL by stripping
+  the API path suffix (e.g. /v2) and appending the application path.
+
+  Example: baseUrl=http://localhost:8080/v2  →  http://localhost:8080/operate
+
+  For this command, --dry-run resolves and prints the application URL instead
+  of launching the browser.
+
+Flags:
+  --profile <name>         Use specific profile
+  --dry-run                Resolve and print the URL without opening the browser
+
+Examples:
+  c8ctl open operate
+  c8ctl open tasklist
+  c8ctl open modeler
+  c8ctl open optimize
+  c8ctl open operate --profile=prod
+  c8ctl open operate --dry-run
+`.trim());
+}
+
+/**
  * Show detailed help for cancel command
  */
 export function showCancelHelp(): void {
@@ -1225,6 +1270,9 @@ export function showCommandHelp(command: string): void {
     case 'watch':
     case 'w':
       showWatchHelp();
+      break;
+    case 'open':
+      showOpenHelp();
       break;
     case 'cancel':
       showCancelHelp();

@@ -350,6 +350,37 @@ describe('Help Module', () => {
     assert.ok(output.includes('--force'));
   });
 
+  test('showCommandHelp shows open help', () => {
+    showCommandHelp('open');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl open'));
+    assert.ok(output.includes('operate'));
+    assert.ok(output.includes('tasklist'));
+    assert.ok(output.includes('modeler'));
+    assert.ok(output.includes('optimize'));
+    assert.ok(output.includes('--profile'));
+  });
+
+  test('showVerbResources shows resources for open', () => {
+    showVerbResources('open');
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('c8ctl open'));
+    assert.ok(output.includes('operate'));
+    assert.ok(output.includes('tasklist'));
+    assert.ok(output.includes('modeler'));
+    assert.ok(output.includes('optimize'));
+  });
+
+  test('showHelp includes open command', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('open'), 'help should include open command');
+    assert.ok(output.includes('c8ctl help open'), 'help should include c8ctl help open link');
+  });
+
   test('showCommandHelp shows cancel help', () => {
     showCommandHelp('cancel');
     
@@ -424,6 +455,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl help deploy'));
     assert.ok(output.includes('c8ctl help run'));
     assert.ok(output.includes('c8ctl help watch'));
+    assert.ok(output.includes('c8ctl help open'));
     assert.ok(output.includes('c8ctl help cancel'));
     assert.ok(output.includes('c8ctl help resolve'));
     assert.ok(output.includes('c8ctl help fail'));
@@ -449,6 +481,7 @@ describe('Help Module', () => {
     assert.ok(output.includes('deploy'));
     assert.ok(output.includes('run'));
     assert.ok(output.includes('watch'));
+    assert.ok(output.includes('open'));
     assert.ok(output.includes('cancel'));
     assert.ok(output.includes('resolve'));
     assert.ok(output.includes('fail'));

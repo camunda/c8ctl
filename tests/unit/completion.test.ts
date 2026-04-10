@@ -76,6 +76,10 @@ describe('Completion Module', () => {
     // Check for plugin commands
     assert.ok(output.includes('cluster'), 'Should include cluster verb');
     assert.ok(output.includes('"start stop status list list-remote install delete log logs"'), 'Should include cluster subcommands');
+
+    // Check for open command
+    assert.ok(output.includes('open'), 'Should include open verb');
+    assert.ok(output.includes('"operate tasklist modeler optimize"'), 'Should include open resources');
   });
 
   test('generates zsh completion script', () => {
@@ -105,6 +109,13 @@ describe('Completion Module', () => {
     assert.ok(output.includes("'cluster:Manage local Camunda 8 cluster'"), 'Should include cluster verb');
     assert.ok(output.includes("'start:Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
     assert.ok(output.includes("'stop:Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
+
+    // Check for open command
+    assert.ok(output.includes("'open:Open Camunda web application in browser'"), 'Should include open verb');
+    assert.ok(output.includes("'operate:Open Camunda Operate'"), 'Should include operate resource');
+    assert.ok(output.includes("'tasklist:Open Camunda Tasklist'"), 'Should include tasklist resource');
+    assert.ok(output.includes("'modeler:Open Camunda Web Modeler'"), 'Should include modeler resource');
+    assert.ok(output.includes("'optimize:Open Camunda Optimize'"), 'Should include optimize resource');
   });
 
   test('generates fish completion script', () => {
@@ -131,6 +142,11 @@ describe('Completion Module', () => {
     assert.ok(output.includes("'cluster' -d 'Manage local Camunda 8 cluster'"), 'Should include cluster verb');
     assert.ok(output.includes("'start' -d 'Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
     assert.ok(output.includes("'stop' -d 'Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
+
+    // Check for open command
+    assert.ok(output.includes("'open' -d 'Open Camunda web application in browser'"), 'Should include open verb');
+    assert.ok(output.includes("'operate' -d 'Open Camunda Operate'"), 'Should include operate resource');
+    assert.ok(output.includes("'tasklist' -d 'Open Camunda Tasklist'"), 'Should include tasklist resource');
   });
 
   test('handles missing shell argument', () => {

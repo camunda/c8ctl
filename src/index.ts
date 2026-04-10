@@ -48,6 +48,7 @@ import {
   executePluginCommand
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
+import { openApp } from './commands/open.ts';
 
 /**
  * Normalize resource aliases
@@ -682,6 +683,15 @@ async function main() {
     await watchFiles(paths, {
       profile: values.profile as string | undefined,
       force: values.force as boolean | undefined,
+    });
+    return;
+  }
+
+  // Handle open command
+  if (verb === 'open') {
+    await openApp(resource, {
+      profile: values.profile as string | undefined,
+      dryRun: values['dry-run'] as boolean | undefined,
     });
     return;
   }
