@@ -250,10 +250,15 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
       // Step 3: correct the file — watch should still be alive and detect the fix
       const cooldownStart = Date.now();
-      await pollUntil(
+      const cooldownElapsed = await pollUntil(
         async () => Date.now() - cooldownStart >= DEPLOY_COOLDOWN + WATCH_COOLDOWN_BUFFER_MS,
         POLL_TIMEOUT_MS,
         POLL_INTERVAL_MS,
+      );
+
+      assert.ok(
+        cooldownElapsed,
+        `Timed out waiting for deployment cooldown before correcting the file.\nActual output:\n${watch.getOutput()}`,
       );
       const tmpValid = bpmnFile + '.tmp';
       writeFileSync(tmpValid, validBpmn());

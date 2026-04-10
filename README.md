@@ -127,7 +127,7 @@ c8ctl deploy ./my-process.bpmn         # Deploy a single file
 c8ctl deploy                           # Deploy current directory
 c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl watch                            # Watch for changes and auto-deploy
-c8ctl watch --force                    # Keep watching after all errors
+c8ctl watch --force                    # Keep watching after all deployment errors
 
 # Open Camunda web applications
 c8ctl open operate                     # Open Camunda Operate in browser

@@ -906,7 +906,7 @@ Examples:
   c8ctl watch ./src ./forms             Watch multiple directories
   c8ctl w ./src                         Use short alias
   c8ctl watch --profile=dev             Watch using specific profile
-  c8ctl watch --force                   Keep watching after all errors
+  c8ctl watch --force                   Keep watching after all deployment errors
 `.trim());
 }
 
