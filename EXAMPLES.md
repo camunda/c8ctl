@@ -1259,3 +1259,12 @@ c8 help          # → structured JSON command reference
 c8 help list     # → JSON for list command
 c8 help search   # → JSON for search command
 ```
+
+---
+
+## Feedback
+
+```bash
+# Open the issue tracker to report bugs or request features
+c8 feedback
+```

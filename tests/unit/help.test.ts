@@ -381,6 +381,15 @@ describe('Help Module', () => {
     assert.ok(output.includes('c8ctl help open'), 'help should include c8ctl help open link');
   });
 
+  test('showHelp includes feedback command and URL', () => {
+    showHelp();
+
+    const output = consoleLogSpy.join('\n');
+    assert.ok(output.includes('feedback'), 'help should include feedback command');
+    assert.ok(output.includes('https://github.com/camunda/c8ctl/issues'), 'help should include feedback URL');
+    assert.ok(output.includes('c8ctl feedback'), 'help should include c8ctl feedback hint');
+  });
+
   test('showCommandHelp shows cancel help', () => {
     showCommandHelp('cancel');
     

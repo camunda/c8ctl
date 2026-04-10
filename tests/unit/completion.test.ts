@@ -80,6 +80,9 @@ describe('Completion Module', () => {
     // Check for open command
     assert.ok(output.includes('open'), 'Should include open verb');
     assert.ok(output.includes('"operate tasklist modeler optimize"'), 'Should include open resources');
+
+    // Check for feedback command
+    assert.ok(output.includes('feedback'), 'Should include feedback verb');
   });
 
   test('generates zsh completion script', () => {
@@ -116,6 +119,9 @@ describe('Completion Module', () => {
     assert.ok(output.includes("'tasklist:Open Camunda Tasklist'"), 'Should include tasklist resource');
     assert.ok(output.includes("'modeler:Open Camunda Web Modeler'"), 'Should include modeler resource');
     assert.ok(output.includes("'optimize:Open Camunda Optimize'"), 'Should include optimize resource');
+
+    // Check for feedback command
+    assert.ok(output.includes("'feedback:Open the feedback page to report issues or request features'"), 'Should include feedback verb');
   });
 
   test('generates fish completion script', () => {
@@ -147,6 +153,9 @@ describe('Completion Module', () => {
     assert.ok(output.includes("'open' -d 'Open Camunda web application in browser'"), 'Should include open verb');
     assert.ok(output.includes("'operate' -d 'Open Camunda Operate'"), 'Should include operate resource');
     assert.ok(output.includes("'tasklist' -d 'Open Camunda Tasklist'"), 'Should include tasklist resource');
+
+    // Check for feedback command
+    assert.ok(output.includes("'feedback' -d 'Open the feedback page to report issues or request features'"), 'Should include feedback verb');
   });
 
   test('handles missing shell argument', () => {

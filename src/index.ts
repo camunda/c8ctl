@@ -48,7 +48,7 @@ import {
   executePluginCommand
 } from './plugin-loader.ts';
 import { mcpProxy } from './commands/mcp-proxy.ts';
-import { openApp } from './commands/open.ts';
+import { openApp, openUrl } from './commands/open.ts';
 
 /**
  * Normalize resource aliases
@@ -704,6 +704,15 @@ async function main() {
       profile: values.profile as string | undefined,
       dryRun: values['dry-run'] as boolean | undefined,
     });
+    return;
+  }
+
+  // Handle feedback command
+  if (verb === 'feedback') {
+    const logger = getLogger();
+    const url = 'https://github.com/camunda/c8ctl/issues';
+    logger.info(`Opening feedback page: ${url}`);
+    openUrl(url);
     return;
   }
 

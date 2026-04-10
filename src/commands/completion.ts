@@ -21,7 +21,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster feedback"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -50,7 +50,7 @@ _c8ctl_completions() {
   local completion_resources="bash zsh fish"
   local cluster_resources="start stop status list list-remote install delete log logs"
   local open_resources="operate tasklist modeler optimize"
-  local help_resources="list get create complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
+  local help_resources="list get create complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster feedback"
 
   # Global flags
   local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env"
@@ -209,6 +209,7 @@ _c8ctl() {
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
     'cluster:Manage local Camunda 8 cluster'
+    'feedback:Open the feedback page to report issues or request features'
   )
 
   flags=(
@@ -501,6 +502,7 @@ _c8ctl() {
             'plugin:Show plugin management help'
             'plugins:Alias for plugin management help'
             'cluster:No detailed help; use c8ctl help for general usage'
+            'feedback:Show feedback command help'
           )
           _describe 'resource' resources
           ;;
@@ -732,6 +734,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell 
 complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
 complete -c c8 -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
+complete -c c8 -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
 
 # Resources for 'list' command
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'
@@ -976,6 +980,8 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias f
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'feedback' -d 'Show feedback command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'feedback' -d 'Show feedback command help'
 
 # Resources for 'cluster' command
 complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
