@@ -691,6 +691,7 @@ async function main() {
   if (verb === 'open') {
     await openApp(resource, {
       profile: values.profile as string | undefined,
+      dryRun: values['dry-run'] as boolean | undefined,
     });
     return;
   }

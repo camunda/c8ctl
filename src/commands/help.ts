@@ -929,6 +929,7 @@ Description:
 
 Flags:
   --profile <name>         Use specific profile
+  --dry-run                Print the URL without opening the browser
 
 Examples:
   c8ctl open operate
@@ -936,6 +937,7 @@ Examples:
   c8ctl open modeler
   c8ctl open optimize
   c8ctl open operate --profile=prod
+  c8ctl open operate --dry-run
 `.trim());
 }
 

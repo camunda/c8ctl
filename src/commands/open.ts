@@ -25,10 +25,9 @@ export function deriveAppUrl(baseUrl: string, app: AppName): string {
 
 /**
  * Determine the platform-appropriate command and arguments to open a URL.
- * Exported for testing.
+ * Accepts an optional `plat` override for testing; defaults to `os.platform()`.
  */
-export function getBrowserCommand(url: string): { command: string; args: string[] } {
-  const plat = platform();
+export function getBrowserCommand(url: string, plat: NodeJS.Platform = platform()): { command: string; args: string[] } {
   if (plat === 'darwin') {
     return { command: 'open', args: [url] };
   }
@@ -51,7 +50,7 @@ export function openUrl(url: string): void {
 /**
  * Open a Camunda web application in the default browser.
  */
-export async function openApp(app: string | undefined, options: { profile?: string }): Promise<void> {
+export async function openApp(app: string | undefined, options: { profile?: string; dryRun?: boolean }): Promise<void> {
   const logger = getLogger();
 
   if (!app || !(OPEN_APPS as readonly string[]).includes(app)) {
@@ -64,5 +63,7 @@ export async function openApp(app: string | undefined, options: { profile?: stri
   const url = deriveAppUrl(config.baseUrl, app as AppName);
 
   logger.info(`Opening ${app} at: ${url}`);
-  openUrl(url);
+  if (!options.dryRun) {
+    openUrl(url);
+  }
 }
