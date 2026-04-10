@@ -141,6 +141,9 @@ function parseCliArgs() {
         'dry-run': { type: 'boolean' },
         verbose: { type: 'boolean' },
         force: { type: 'boolean' },
+        none: { type: 'boolean' },
+        'from-file': { type: 'string' },
+        'from-env': { type: 'boolean' },
       },
       allowPositionals: true,
       strict: false,
@@ -257,6 +260,10 @@ async function main() {
   // Handle session commands
   if (verb === 'use') {
     if (normalizedResource === 'profile') {
+      if (values.none) {
+        useProfile('--none');
+        return;
+      }
       if (!args[0]) {
         logger.error('Profile name required. Usage: c8 use profile <name>');
         process.exit(1);
@@ -296,6 +303,8 @@ async function main() {
       logger.error('Profile name required. Usage: c8 add profile <name> --baseUrl=<url>');
       process.exit(1);
     }
+    const envFile = typeof values['from-file'] === 'string' ? values['from-file'] : undefined;
+    const fromEnv = values['from-env'] === true;
     addProfile(args[0], {
       url: typeof values.baseUrl === 'string' ? values.baseUrl : undefined,
       clientId: typeof values.clientId === 'string' ? values.clientId : undefined,
@@ -303,6 +312,8 @@ async function main() {
       audience: typeof values.audience === 'string' ? values.audience : undefined,
       oauthUrl: typeof values.oAuthUrl === 'string' ? values.oAuthUrl : undefined,
       tenantId: typeof values.defaultTenantId === 'string' ? values.defaultTenantId : undefined,
+      envFile,
+      fromEnv,
     });
     return;
   }

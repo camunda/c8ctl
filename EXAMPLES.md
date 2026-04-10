@@ -720,6 +720,7 @@ c8 help profiles
   - `--baseUrl` (default: `http://localhost:8080/v2`)
   - `--defaultTenantId` (runtime default tenant: `<default>`)
 - **Optional without c8ctl defaults**: `--audience`, `--oAuthUrl`
+- **Import shortcuts**: `--from-file <path>`, `--from-env`
 
 ```bash
 # Minimal local profile (uses default --baseUrl)
@@ -748,6 +749,13 @@ c8 add profile dev \
   --clientId=dev-client \
   --clientSecret=dev-secret \
   --defaultTenantId=dev-tenant
+
+# Create a profile from a .env file
+c8 add profile staging --from-file .env.staging
+
+# Create a profile from current environment variables
+source .env.prod
+c8 add profile prod --from-env
 ```
 
 ### List All Profiles
@@ -805,6 +813,9 @@ c8 use profile prod
 
 # Set modeler profile to use for all subsequent commands
 c8 use profile modeler:Local Dev
+
+# Clear the active profile (so env vars or default 'local' take effect)
+c8 use profile --none
 
 # All commands now use the active profile automatically
 c8 list pi

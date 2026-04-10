@@ -53,7 +53,7 @@ _c8ctl_completions() {
   local help_resources="list get create complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env"
 
   case \${cword} in
     1)
@@ -272,6 +272,9 @@ _c8ctl() {
     '--dry-run[Agent: preview API request without executing (for mutating commands)]'
     '--verbose[Enable SDK trace logging and show full error details]'
     '--force[Continue watching after deployment errors (watch command) or force-remove a limbo plugin (unload plugin)]'
+    '--none[Clear the active session profile (use profile --none)]'
+    '--from-file[Create profile from a .env file]:file:_files'
+    '--from-env[Create profile from current CAMUNDA_* environment variables]'
   )
 
   case \$CURRENT in
@@ -659,6 +662,12 @@ complete -c c8ctl -l verbose -d 'Enable SDK trace logging and show full error de
 complete -c c8 -l verbose -d 'Enable SDK trace logging and show full error details'
 complete -c c8ctl -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
 complete -c c8 -l force -d 'Continue watching after deployment errors or force-remove a limbo plugin'
+complete -c c8ctl -l none -d 'Clear the active session profile'
+complete -c c8 -l none -d 'Clear the active session profile'
+complete -c c8ctl -l from-file -r -d 'Create profile from a .env file'
+complete -c c8 -l from-file -r -d 'Create profile from a .env file'
+complete -c c8ctl -l from-env -d 'Create profile from current environment variables'
+complete -c c8 -l from-env -d 'Create profile from current environment variables'
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'

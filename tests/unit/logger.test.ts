@@ -29,11 +29,14 @@ describe('Logger Module', () => {
     
     // Reset c8ctl runtime state
     c8ctl.outputMode = 'text';
+    c8ctl.activeProfile = undefined;
   });
 
   afterEach(() => {
     console.log = originalLog;
     console.error = originalError;
+    c8ctl.activeProfile = undefined;
+    c8ctl.resolvedBaseUrl = undefined;
   });
 
   describe('Text Mode', () => {
@@ -97,6 +100,67 @@ describe('Logger Module', () => {
       assert.ok(consoleErrorSpy[0].includes('✗'));
       assert.ok(consoleErrorSpy[0].includes('Operation failed'));
       assert.ok(consoleErrorSpy[1].includes('Something went wrong'));
+    });
+
+    test('error appends local cluster hint for "fetch failed" when profile is local', () => {
+      c8ctl.outputMode = 'text';
+      c8ctl.activeProfile = 'local';
+      c8ctl.resolvedBaseUrl = 'http://localhost:8080/v2';
+      const logger = new Logger();
+      const error = new Error('fetch failed');
+      logger.error('Failed to list processes', error);
+
+      // Should have: ✗ message, error message with URL, hint
+      assert.strictEqual(consoleErrorSpy.length, 3);
+      assert.ok(consoleErrorSpy[1].includes('http://localhost:8080/v2'), 'Error should include the resolved URL');
+      assert.ok(consoleErrorSpy[2].includes('c8ctl start c8-cluster'));
+    });
+
+    test('error appends local cluster hint for ECONNREFUSED when profile is local', () => {
+      c8ctl.outputMode = 'text';
+      c8ctl.activeProfile = 'local';
+      const logger = new Logger();
+      const error = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8080'), { code: 'ECONNREFUSED' });
+      logger.error('Failed', error);
+
+      const hint = consoleErrorSpy.find(line => line.includes('c8ctl start c8-cluster'));
+      assert.ok(hint, 'Expected a hint about starting the local cluster');
+    });
+
+    test('error does not append hint for non-connection errors', () => {
+      c8ctl.outputMode = 'text';
+      c8ctl.activeProfile = 'local';
+      const logger = new Logger();
+      logger.error('Validation failed', new Error('Bad request'));
+
+      // No hint for non-connection errors
+      const hint = consoleErrorSpy.find(line => line.includes('c8ctl start c8-cluster'));
+      assert.strictEqual(hint, undefined);
+    });
+
+    test('error does not append hint when profile is not local', () => {
+      c8ctl.outputMode = 'text';
+      c8ctl.activeProfile = 'prod';
+      const logger = new Logger();
+      const error = new Error('fetch failed');
+      logger.error('Failed', error);
+
+      const hint = consoleErrorSpy.find(line => line.includes('c8ctl start c8-cluster'));
+      assert.strictEqual(hint, undefined, 'Hint should not appear for non-local profiles');
+    });
+
+    test('error includes hint field in JSON mode for local cluster connection errors', () => {
+      c8ctl.outputMode = 'json';
+      c8ctl.activeProfile = 'local';
+      c8ctl.resolvedBaseUrl = 'http://localhost:8080/v2';
+      const logger = new Logger();
+      const error = new Error('fetch failed');
+      logger.error('Failed', error);
+
+      const output = JSON.parse(consoleErrorSpy[0]);
+      assert.ok(output.hint, 'Expected hint field in JSON error output');
+      assert.ok(output.hint.includes('c8ctl start c8-cluster'));
+      assert.strictEqual(output.url, 'http://localhost:8080/v2', 'Expected url field in JSON error output');
     });
 
     test('table formats data as table in text mode', () => {

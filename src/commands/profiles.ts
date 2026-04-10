@@ -6,12 +6,17 @@
 
 import { getLogger } from '../logger.ts';
 import { c8ctl } from '../runtime.ts';
+import { readFileSync, existsSync } from 'node:fs';
 import {
   getAllProfiles,
   getProfile,
   getProfileOrModeler,
   addProfile as addProfileConfig,
   removeProfile as removeProfileConfig,
+  parseEnvFile,
+  envVarsToProfile,
+  hasCamundaEnvVars,
+  DEFAULT_PROFILE,
   MODELER_PREFIX,
   type Profile,
 } from '../config.ts';
@@ -110,6 +115,17 @@ export interface AddProfileOptions {
   username?: string;
   password?: string;
   tenantId?: string;
+  envFile?: string;
+  fromEnv?: boolean;
+}
+
+/**
+ * Describe the auth type of a profile for user feedback.
+ */
+function describeAuth(profile: Profile): string {
+  if (profile.clientId && profile.clientSecret) return 'OAuth (client credentials)';
+  if (profile.username && profile.password) return 'Basic auth';
+  return 'None';
 }
 
 /**
@@ -125,20 +141,59 @@ export function addProfile(name: string, options: AddProfileOptions): void {
     process.exit(1);
   }
 
-  const profile: Profile = {
-    name,
-    baseUrl: options.url || 'http://localhost:8080/v2',
-    clientId: options.clientId,
-    clientSecret: options.clientSecret,
-    audience: options.audience,
-    oAuthUrl: options.oauthUrl,
-    username: options.username,
-    password: options.password,
-    defaultTenantId: options.tenantId,
-  };
+  let profile: Profile;
 
-  addProfileConfig(profile);
-  logger.success(`Profile '${name}' added`);
+  if (options.envFile && options.fromEnv) {
+    logger.error('Cannot use --from-file and --from-env together. Choose one.');
+    process.exit(1);
+  }
+
+  if (options.envFile) {
+    // --from-file: read a .env file and map CAMUNDA_* vars to profile fields
+    if (!existsSync(options.envFile)) {
+      logger.error(`File not found: ${options.envFile}`);
+      process.exit(1);
+    }
+    const content = readFileSync(options.envFile, 'utf-8');
+    const vars = parseEnvFile(content);
+    profile = envVarsToProfile(name, vars);
+    if (!profile.baseUrl) {
+      logger.error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
+      logger.info('The .env file must contain at least CAMUNDA_BASE_URL.');
+      process.exit(1);
+    }
+    addProfileConfig(profile);
+    logger.success(`Profile '${name}' added (from ${options.envFile})`);
+    logger.info(`  Base URL: ${profile.baseUrl}`);
+    logger.info(`  Auth: ${describeAuth(profile)}`);
+  } else if (options.fromEnv) {
+    // --from-env: read from current process environment
+    profile = envVarsToProfile(name, process.env);
+    if (!profile.baseUrl) {
+      logger.error('CAMUNDA_BASE_URL not set in environment');
+      logger.info('Set CAMUNDA_BASE_URL before using --from-env.');
+      process.exit(1);
+    }
+    addProfileConfig(profile);
+    logger.success(`Profile '${name}' added (from environment)`);
+    logger.info(`  Base URL: ${profile.baseUrl}`);
+    logger.info(`  Auth: ${describeAuth(profile)}`);
+  } else {
+    // Manual flags
+    profile = {
+      name,
+      baseUrl: options.url || 'http://localhost:8080/v2',
+      clientId: options.clientId,
+      clientSecret: options.clientSecret,
+      audience: options.audience,
+      oAuthUrl: options.oauthUrl,
+      username: options.username,
+      password: options.password,
+      defaultTenantId: options.tenantId,
+    };
+    addProfileConfig(profile);
+    logger.success(`Profile '${name}' added`);
+  }
 }
 
 /**
@@ -170,7 +225,14 @@ export function whichProfile(): void {
   const logger = getLogger();
   const active = c8ctl.activeProfile;
   if (!active) {
-    logger.info('No active profile set (using environment / fallback configuration)');
+    const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
+    if (hasBaseUrl) {
+      logger.info('(none — CAMUNDA_* env vars will be used)');
+    } else if (hasCamundaEnvVars()) {
+      logger.info(`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`);
+    } else {
+      logger.info(`${DEFAULT_PROFILE} (default)`);
+    }
     return;
   }
   logger.info(active);

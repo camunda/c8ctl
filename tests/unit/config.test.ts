@@ -31,6 +31,9 @@ import {
   setOutputMode,
   resolveClusterConfig,
   resolveTenantId,
+  DEFAULT_PROFILE,
+  DEFAULT_PROFILE_CONFIG,
+  ensureDefaultProfile,
   TARGET_TYPES,
   AUTH_TYPES,
   type Profile,
@@ -285,6 +288,120 @@ describe('Config Module', () => {
       });
 
       assert.strictEqual(config.audience, 'zeebe.camunda.io');
+    });
+  });
+
+  describe('Default profile', () => {
+    let testDataDir: string;
+    let originalEnv: NodeJS.ProcessEnv;
+
+    beforeEach(() => {
+      testDataDir = join(tmpdir(), `c8ctl-data-default-${Date.now()}`);
+      mkdirSync(testDataDir, { recursive: true });
+      originalEnv = { ...process.env };
+      process.env.C8CTL_DATA_DIR = testDataDir;
+      c8ctl.activeProfile = undefined;
+    });
+
+    afterEach(() => {
+      if (existsSync(testDataDir)) {
+        rmSync(testDataDir, { recursive: true, force: true });
+      }
+      process.env = originalEnv;
+      c8ctl.activeProfile = undefined;
+    });
+
+    test('DEFAULT_PROFILE constant is "local"', () => {
+      assert.strictEqual(DEFAULT_PROFILE, 'local');
+    });
+
+    test('DEFAULT_PROFILE_CONFIG has localhost defaults', () => {
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.name, 'local');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.username, 'demo');
+      assert.strictEqual(DEFAULT_PROFILE_CONFIG.password, 'demo');
+    });
+
+    test('ensureDefaultProfile creates the local profile when it does not exist', () => {
+      assert.strictEqual(getProfile('local'), undefined);
+      ensureDefaultProfile();
+      const profile = getProfile('local');
+      assert.ok(profile);
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(profile.username, 'demo');
+    });
+
+    test('ensureDefaultProfile does not overwrite a user-configured local profile', () => {
+      addProfile({ name: 'local', baseUrl: 'http://custom:9090/v2', username: 'admin', password: 'admin' });
+      ensureDefaultProfile();
+      const profile = getProfile('local');
+      assert.ok(profile);
+      assert.strictEqual(profile.baseUrl, 'http://custom:9090/v2');
+      assert.strictEqual(profile.username, 'admin');
+    });
+
+    test('loadSessionState does not set activeProfile when no session file exists', () => {
+      const state = loadSessionState();
+      assert.strictEqual(state.activeProfile, undefined);
+      assert.strictEqual(c8ctl.activeProfile, undefined);
+    });
+
+    test('loadSessionState creates local profile in profiles.json', () => {
+      assert.strictEqual(getProfile('local'), undefined);
+      loadSessionState();
+      const profile = getProfile('local');
+      assert.ok(profile, 'local profile should be created by loadSessionState');
+      assert.strictEqual(profile.baseUrl, 'http://localhost:8080/v2');
+    });
+
+    test('loadSessionState leaves activeProfile undefined when session file has null activeProfile', () => {
+      const sessionPath = join(testDataDir, 'session.json');
+      writeFileSync(sessionPath, JSON.stringify({ activeProfile: null, outputMode: 'text' }), 'utf-8');
+
+      const state = loadSessionState();
+      assert.strictEqual(state.activeProfile, undefined);
+      assert.strictEqual(c8ctl.activeProfile, undefined);
+    });
+
+    test('loadSessionState preserves an explicitly-set profile', () => {
+      const sessionPath = join(testDataDir, 'session.json');
+      writeFileSync(sessionPath, JSON.stringify({ activeProfile: 'prod', outputMode: 'text' }), 'utf-8');
+
+      const state = loadSessionState();
+      assert.strictEqual(state.activeProfile, 'prod');
+      assert.strictEqual(c8ctl.activeProfile, 'prod');
+    });
+
+    test('resolveClusterConfig falls back to manifested local profile when no env vars set', () => {
+      // After loadSessionState, the local profile exists but activeProfile is undefined
+      loadSessionState();
+      delete process.env.CAMUNDA_BASE_URL;
+      delete process.env.CAMUNDA_CLIENT_ID;
+      delete process.env.CAMUNDA_USERNAME;
+
+      const config = resolveClusterConfig();
+      assert.strictEqual(config.baseUrl, 'http://localhost:8080/v2');
+      assert.strictEqual(config.username, 'demo');
+    });
+
+    test('resolveClusterConfig prefers env vars over default local profile', () => {
+      // activeProfile is undefined → env vars should win over the default 'local' profile
+      loadSessionState();
+      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
+
+      const config = resolveClusterConfig();
+      assert.strictEqual(config.baseUrl, 'https://env-cluster.example.com');
+    });
+
+    test('resolveClusterConfig prefers explicitly-selected profile over env vars', () => {
+      // When user explicitly does `c8ctl use profile local`, env vars should NOT win
+      addProfile({ name: 'local', baseUrl: 'http://localhost:9000/v2', username: 'admin', password: 'admin' });
+      c8ctl.activeProfile = 'local';
+      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
+
+      const config = resolveClusterConfig();
+      assert.strictEqual(config.baseUrl, 'http://localhost:9000/v2');
+      assert.strictEqual(config.username, 'admin');
     });
   });
 });

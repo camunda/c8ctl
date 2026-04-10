@@ -666,7 +666,9 @@ export const commands = {
       // Verify that either profiles are listed OR we get the expected built-in response
       const isBuiltInResponse = listOutput.includes('No profiles found') || 
                                  listOutput.includes('Profile') ||
-                                 listOutput.includes('profiles');
+                                 listOutput.includes('profiles') ||
+                                 listOutput.includes('Name') ||
+                                 listOutput.includes('local');
       assert.ok(isBuiltInResponse, 
         `Built-in list command should work normally. Output: ${listOutput}`);
       

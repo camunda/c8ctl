@@ -503,6 +503,9 @@ describe('Help Module', () => {
     assert.ok(output.includes('add profile <name>'));
     assert.ok(output.includes('remove profile <name>'));
     assert.ok(output.includes('use profile <name>'));
+    assert.ok(output.includes('use profile --none'));
+    assert.ok(output.includes('--from-file'));
+    assert.ok(output.includes('--from-env'));
     assert.ok(output.includes('modeler:'));
   });
 
