@@ -98,7 +98,7 @@ export async function watchFiles(paths: string[], options: {
         recentlyDeployed.set(fullPath, Date.now());
 
         try {
-          await deploy([fullPath], { profile: options.profile, continueOnError: options.force });
+          await deploy([fullPath], { profile: options.profile, continueOnError: options.force, continueOnUserError: true });
         } catch (error) {
           logger.error(`Failed to deploy ${basename(filename!)}`, error as Error);
         }

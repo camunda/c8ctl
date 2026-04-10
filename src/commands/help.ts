@@ -887,9 +887,13 @@ Description:
   Useful during development for rapid iteration.
   If no path is provided, watches the current directory.
 
+  Validation errors (INVALID_ARGUMENT) are reported but do not stop the watcher,
+  so you can fix the file and save again. Use --force to also continue on other
+  errors such as network or authentication failures.
+
 Flags:
   --profile <name>         Use specific profile
-  --force                  Continue watching after deployment errors
+  --force                  Continue watching after all deployment errors
 
 Supported File Types:
   - BPMN files (.bpmn)
@@ -902,7 +906,7 @@ Examples:
   c8ctl watch ./src ./forms             Watch multiple directories
   c8ctl w ./src                         Use short alias
   c8ctl watch --profile=dev             Watch using specific profile
-  c8ctl watch --force                   Keep watching after failed deploys
+  c8ctl watch --force                   Keep watching after all deployment errors
 `.trim());
 }
 

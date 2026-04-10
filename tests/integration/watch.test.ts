@@ -202,4 +202,79 @@ describe('Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
       rmSync(testWatchDir, { recursive: true, force: true });
     }
   });
+
+  test('watch without --force continues watching after INVALID_ARGUMENT', async () => {
+    const testWatchDir = mkdtempSync(join(tmpdir(), 'c8ctl-watch-userok-'));
+    const bpmnFile = join(testWatchDir, 'process.bpmn');
+    // No --force flag: watch should still survive INVALID_ARGUMENT errors
+    const watch = startWatch(testWatchDir, dataDir);
+
+    try {
+      // Wait for the watcher to initialize (should NOT show force mode message)
+      await pollUntil(
+        async () => watch.getOutput().includes('Watching for changes'),
+        5000,
+        POLL_INTERVAL_MS,
+      );
+
+      // Step 1: write an invalid BPMN to trigger an INVALID_ARGUMENT deployment error
+      const tmpInvalid = bpmnFile + '.tmp';
+      writeFileSync(tmpInvalid, invalidBpmn());
+      renameSync(tmpInvalid, bpmnFile);
+
+      let changeDetected = await pollUntil(
+        async () => watch.getOutput().includes('Change detected: process.bpmn'),
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+
+      if (!changeDetected) {
+        writeFileSync(bpmnFile, `${invalidBpmn()}\n<!-- retrigger -->`);
+        changeDetected = await pollUntil(
+          async () => watch.getOutput().includes('Change detected: process.bpmn'),
+          POLL_TIMEOUT_MS,
+          POLL_INTERVAL_MS,
+        );
+      }
+
+      assert.ok(changeDetected, `Expected watch to detect BPMN change.\nActual output:\n${watch.getOutput()}`);
+
+      // Step 2: watch should report the error but keep running
+      const errorSeen = await pollUntil(
+        async () => watch.getOutput().includes('Deployment failed'),
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+
+      assert.ok(errorSeen, `Expected deployment error in watch output.\nActual output:\n${watch.getOutput()}`);
+
+      // Step 3: correct the file — watch should still be alive and detect the fix
+      const cooldownStart = Date.now();
+      const cooldownElapsed = await pollUntil(
+        async () => Date.now() - cooldownStart >= DEPLOY_COOLDOWN + WATCH_COOLDOWN_BUFFER_MS,
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+
+      assert.ok(
+        cooldownElapsed,
+        `Timed out waiting for deployment cooldown before correcting the file.\nActual output:\n${watch.getOutput()}`,
+      );
+      const tmpValid = bpmnFile + '.tmp';
+      writeFileSync(tmpValid, validBpmn());
+      renameSync(tmpValid, bpmnFile);
+
+      // Step 4: watch deploys successfully — proving it survived the INVALID_ARGUMENT
+      const deployed = await pollUntil(
+        async () => watch.getOutput().includes('Deployment successful'),
+        POLL_TIMEOUT_MS,
+        POLL_INTERVAL_MS,
+      );
+
+      assert.ok(deployed, `Expected successful deployment after correcting the file (watch should survive INVALID_ARGUMENT).\nActual output:\n${watch.getOutput()}`);
+    } finally {
+      await watch.kill();
+      rmSync(testWatchDir, { recursive: true, force: true });
+    }
+  });
 });
