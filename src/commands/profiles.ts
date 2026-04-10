@@ -225,8 +225,11 @@ export function whichProfile(): void {
   const logger = getLogger();
   const active = c8ctl.activeProfile;
   if (!active) {
-    if (hasCamundaEnvVars()) {
+    const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
+    if (hasBaseUrl) {
       logger.info('(none — CAMUNDA_* env vars will be used)');
+    } else if (hasCamundaEnvVars()) {
+      logger.info(`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`);
     } else {
       logger.info(`${DEFAULT_PROFILE} (default)`);
     }

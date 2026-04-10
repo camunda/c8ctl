@@ -775,7 +775,9 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
     const profile = getProfileOrModeler(c8ctl.activeProfile);
     if (profile) {
       // Warn when env vars are also present — avoids silent surprise
-      if (hasCamundaEnvVars()) {
+      // Only warn when CAMUNDA_BASE_URL is set, since resolveClusterConfig
+      // only uses env vars when CAMUNDA_BASE_URL is present
+      if (process.env.CAMUNDA_BASE_URL?.trim()) {
         const logger = getLogger();
         logger.warn(`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`);
         logger.info('  To use env vars instead, run: c8 use profile --none');
