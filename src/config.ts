@@ -756,6 +756,12 @@ export function clearActiveProfile(): void {
  * Priority: profileFlag → session profile → env vars → default 'local' profile
  */
 export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
+  const config = _resolveClusterConfig(profileFlag);
+  c8ctl.resolvedBaseUrl = config.baseUrl;
+  return config;
+}
+
+function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
   // 1. Try profile flag (profile name, including modeler: prefix)
   if (profileFlag) {
     const profile = getProfileOrModeler(profileFlag);

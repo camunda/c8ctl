@@ -36,6 +36,7 @@ describe('Logger Module', () => {
     console.log = originalLog;
     console.error = originalError;
     c8ctl.activeProfile = undefined;
+    c8ctl.resolvedBaseUrl = undefined;
   });
 
   describe('Text Mode', () => {
@@ -104,12 +105,14 @@ describe('Logger Module', () => {
     test('error appends local cluster hint for "fetch failed" when profile is local', () => {
       c8ctl.outputMode = 'text';
       c8ctl.activeProfile = 'local';
+      c8ctl.resolvedBaseUrl = 'http://localhost:8080/v2';
       const logger = new Logger();
       const error = new Error('fetch failed');
       logger.error('Failed to list processes', error);
 
-      // Should have: ✗ message, error message, hint
+      // Should have: ✗ message, error message with URL, hint
       assert.strictEqual(consoleErrorSpy.length, 3);
+      assert.ok(consoleErrorSpy[1].includes('http://localhost:8080/v2'), 'Error should include the resolved URL');
       assert.ok(consoleErrorSpy[2].includes('c8ctl start c8-cluster'));
     });
 
@@ -149,6 +152,7 @@ describe('Logger Module', () => {
     test('error includes hint field in JSON mode for local cluster connection errors', () => {
       c8ctl.outputMode = 'json';
       c8ctl.activeProfile = 'local';
+      c8ctl.resolvedBaseUrl = 'http://localhost:8080/v2';
       const logger = new Logger();
       const error = new Error('fetch failed');
       logger.error('Failed', error);
@@ -156,6 +160,7 @@ describe('Logger Module', () => {
       const output = JSON.parse(consoleErrorSpy[0]);
       assert.ok(output.hint, 'Expected hint field in JSON error output');
       assert.ok(output.hint.includes('c8ctl start c8-cluster'));
+      assert.strictEqual(output.url, 'http://localhost:8080/v2', 'Expected url field in JSON error output');
     });
 
     test('table formats data as table in text mode', () => {

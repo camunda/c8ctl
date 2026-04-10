@@ -181,7 +181,10 @@ export class Logger {
     if (this.mode === 'text') {
       this._writeError(`✗ ${message}`);
       if (error) {
-        this._writeError(`  ${error.message}`);
+        const urlInfo = isNetworkError(error) && c8ctl.resolvedBaseUrl
+          ? ` (${c8ctl.resolvedBaseUrl})`
+          : '';
+        this._writeError(`  ${error.message}${urlInfo}`);
       }
       const hint = getLocalClusterHint(error);
       if (hint) {
@@ -191,6 +194,9 @@ export class Logger {
       const output: any = { status: 'error', message };
       if (error) {
         output.error = error.message;
+        if (isNetworkError(error) && c8ctl.resolvedBaseUrl) {
+          output.url = c8ctl.resolvedBaseUrl;
+        }
         if (error.stack) {
           output.stack = error.stack;
         }

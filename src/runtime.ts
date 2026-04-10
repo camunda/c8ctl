@@ -70,6 +70,7 @@ class C8ctl {
   private _fields?: string[];
   private _dryRun?: boolean;
   private _verbose?: boolean;
+  private _resolvedBaseUrl?: string;
 
   readonly env: C8ctlEnv = {
     version: getVersion(),
@@ -147,6 +148,14 @@ class C8ctl {
 
   set verbose(value: boolean | undefined) {
     this._verbose = value;
+  }
+
+  get resolvedBaseUrl(): string | undefined {
+    return this._resolvedBaseUrl;
+  }
+
+  set resolvedBaseUrl(value: string | undefined) {
+    this._resolvedBaseUrl = value;
   }
 }
 
