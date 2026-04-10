@@ -592,6 +592,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `use` - Set active profile or tenant
 - `output` - Set output format
 - `completion` - Generate shell completion script
+- `feedback` - Open the feedback page to report issues or request features
 
 **Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables (vars), message (msg), topology, profile, tenant, plugin
 

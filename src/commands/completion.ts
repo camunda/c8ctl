@@ -21,7 +21,7 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster"
+  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster feedback"
   
   # Resources by verb
   local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
@@ -209,6 +209,7 @@ _c8ctl() {
     'completion:Generate shell completion script'
     'help:Show help or detailed help for a command'
     'cluster:Manage local Camunda 8 cluster'
+    'feedback:Open the feedback page to report issues or request features'
   )
 
   flags=(
@@ -732,6 +733,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell 
 complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
 complete -c c8 -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
+complete -c c8 -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
 
 # Resources for 'list' command
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'

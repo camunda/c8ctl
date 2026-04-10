@@ -48,6 +48,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
       { verb: 'mcp-proxy', resource: '[mcp-path]',       resources: [], description: 'Start a STDIO to remote HTTP MCP proxy server', mutating: false },
+      { verb: 'feedback', resource: '',                resources: [], description: 'Open the feedback page to report issues or request features', mutating: false },
       { verb: 'help',      resource: '[command]',        resources: [], description: 'Show help', mutating: false },
       ...pluginCommandsInfo.map(cmd => ({
         verb: cmd.commandName, resource: '', resources: [], description: cmd.description || '', mutating: false,
@@ -197,6 +198,7 @@ Commands:
   output    json|text        Set output format
   completion bash|zsh|fish   Generate shell completion script
   mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
+  feedback                   Open the feedback page to report issues or request features
   help      [command]        Show help (detailed help for list, get, create, complete, await)${pluginSection}
 
 Flags:
@@ -340,6 +342,10 @@ For detailed help on specific commands with all available flags:
   c8ctl help profiles                Show profile management help
   c8ctl help plugin                  Show plugin management help
   c8ctl help plugins                 Alias for plugin management help
+
+Feedback & Issues:
+  https://github.com/camunda/c8ctl/issues
+  Or run: c8ctl feedback
 `.trim());
 }
 
