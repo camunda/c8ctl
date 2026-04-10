@@ -9,7 +9,6 @@
       "Bash(npm run cli:*)",
       "Bash(npx bpmnlint:*)",
       "Bash(npx dmnlint:*)",
-      "Bash(node --experimental-strip-types:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",
