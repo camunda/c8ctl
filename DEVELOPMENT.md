@@ -39,7 +39,8 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 ### Terminal Commands
 
 - avoid heredocs (`<< EOF`) in terminal commands as they don't work reliably in zsh on macOS when executed via tools
-- for multi-line content, use `printf` or the tool's native file editing capabilities
+- prefer the tool's native file editing capabilities for creating or modifying files
+- for appending single lines from the shell, `echo` or `printf` is fine: `echo "content" >> file.txt`
 
 ### Development
 
