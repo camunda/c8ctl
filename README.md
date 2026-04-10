@@ -13,6 +13,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys
+- **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 
@@ -126,6 +127,30 @@ c8ctl run ./my-process.bpmn            # Deploy and start process
 c8ctl watch                            # Watch for changes and auto-deploy
 c8ctl watch --force                    # Keep watching after failed deploys
 ```
+
+### Ignoring Files (`.c8ignore`)
+
+When scanning directories for deployment artifacts, c8ctl automatically ignores:
+
+- `node_modules/`
+- `target/`
+- `.git/`
+
+Create a `.c8ignore` file in your project root to add custom patterns (`.gitignore` syntax):
+
+```gitignore
+# Ignore build output
+dist/
+build/
+
+# Ignore draft processes
+**/draft-*.bpmn
+
+# But keep this specific one
+!draft-approved.bpmn
+```
+
+`.c8ignore` rules apply to both `deploy` (directory scan) and `watch` (file monitoring).
 
 For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EXAMPLES.md).
 
