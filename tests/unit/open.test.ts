@@ -151,7 +151,7 @@ describe('open command', () => {
         assert.strictEqual(exitCode, 1);
       }
       const errorOutput = consoleErrorSpy.join('\n');
-      assert.ok(errorOutput.includes('Application required'));
+      assert.ok(errorOutput.includes("Unknown application 'console'"));
     });
 
     test('shows usage hint on invalid app', async () => {
@@ -193,7 +193,7 @@ describe('open command', () => {
       });
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
-      assert.ok(output.includes('Application required'), `Expected error message, got: ${output}`);
+      assert.ok(output.includes("Unknown application 'console'"), `Expected error message, got: ${output}`);
       assert.notStrictEqual(result.status, 0);
     });
 

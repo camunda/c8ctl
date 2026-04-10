@@ -81,8 +81,14 @@ export function openUrl(url: string): void {
 export async function openApp(app: string | undefined, options: { profile?: string; dryRun?: boolean }): Promise<void> {
   const logger = getLogger();
 
-  if (!app || !(OPEN_APPS as readonly string[]).includes(app)) {
+  if (!app) {
     logger.error(`Application required. Available: ${OPEN_APPS.join(', ')}`);
+    logger.info('Usage: c8 open <app> [--profile <name>]');
+    process.exit(1);
+  }
+
+  if (!(OPEN_APPS as readonly string[]).includes(app)) {
+    logger.error(`Unknown application '${app}'. Available: ${OPEN_APPS.join(', ')}`);
     logger.info('Usage: c8 open <app> [--profile <name>]');
     process.exit(1);
   }

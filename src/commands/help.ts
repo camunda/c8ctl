@@ -927,9 +927,12 @@ Description:
 
   Example: baseUrl=http://localhost:8080/v2  →  http://localhost:8080/operate
 
+  For this command, --dry-run resolves and prints the application URL instead
+  of launching the browser.
+
 Flags:
   --profile <name>         Use specific profile
-  --dry-run                Print the URL without opening the browser
+  --dry-run                Resolve and print the URL without opening the browser
 
 Examples:
   c8ctl open operate
