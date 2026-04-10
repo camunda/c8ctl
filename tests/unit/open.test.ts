@@ -25,12 +25,20 @@ describe('open command', () => {
       assert.strictEqual(deriveAppUrl('http://localhost:8080/v1', 'tasklist'), 'http://localhost:8080/tasklist');
     });
 
-    test('works without a version path suffix', () => {
-      assert.strictEqual(deriveAppUrl('http://localhost:8080', 'modeler'), 'http://localhost:8080/modeler');
+    test('returns null for URL without version suffix', () => {
+      assert.strictEqual(deriveAppUrl('http://localhost:8080', 'modeler'), null);
     });
 
-    test('works with trailing slash and no version suffix', () => {
-      assert.strictEqual(deriveAppUrl('http://localhost:8080/', 'optimize'), 'http://localhost:8080/optimize');
+    test('returns null for URL with trailing slash but no version suffix', () => {
+      assert.strictEqual(deriveAppUrl('http://localhost:8080/', 'optimize'), null);
+    });
+
+    test('returns null for Cloud-style URLs', () => {
+      assert.strictEqual(
+        deriveAppUrl('https://bru-2.zeebe.camunda.io/abc-123', 'operate'),
+        null,
+        'Cloud URLs should not be supported',
+      );
     });
 
     test('works with https and custom port', () => {
@@ -49,7 +57,7 @@ describe('open command', () => {
     const url = 'http://localhost:8080/operate';
 
     test('returns xdg-open on Linux', () => {
-      const { command, args } = getBrowserCommand(url, 'linux');
+      const { command, args } = getBrowserCommand(url, 'linux', {});
       assert.strictEqual(command, 'xdg-open');
       assert.deepStrictEqual(args, [url]);
     });
@@ -66,8 +74,20 @@ describe('open command', () => {
       assert.deepStrictEqual(args, ['/c', 'start', '', url]);
     });
 
+    test('returns cmd.exe on WSL (WSL_DISTRO_NAME)', () => {
+      const { command, args } = getBrowserCommand(url, 'linux', { WSL_DISTRO_NAME: 'Ubuntu' });
+      assert.strictEqual(command, 'cmd.exe');
+      assert.deepStrictEqual(args, ['/c', 'start', '', url]);
+    });
+
+    test('returns cmd.exe on WSL (WSL_INTEROP)', () => {
+      const { command, args } = getBrowserCommand(url, 'linux', { WSL_INTEROP: '/run/WSL/1_interop' });
+      assert.strictEqual(command, 'cmd.exe');
+      assert.deepStrictEqual(args, ['/c', 'start', '', url]);
+    });
+
     test('defaults to xdg-open for unknown platforms', () => {
-      const { command, args } = getBrowserCommand(url, 'freebsd' as NodeJS.Platform);
+      const { command, args } = getBrowserCommand(url, 'freebsd' as NodeJS.Platform, {});
       assert.strictEqual(command, 'xdg-open');
       assert.deepStrictEqual(args, [url]);
     });
@@ -153,7 +173,7 @@ describe('open command', () => {
       ], {
         encoding: 'utf-8',
         timeout: 5000,
-        env: { ...process.env, XDG_DATA_HOME: join(tmpdir(), `c8ctl-open-${Date.now()}`) },
+        env: { ...process.env, C8CTL_DATA_DIR: join(tmpdir(), `c8ctl-open-${Date.now()}`) },
       });
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
@@ -169,11 +189,32 @@ describe('open command', () => {
       ], {
         encoding: 'utf-8',
         timeout: 5000,
-        env: { ...process.env, XDG_DATA_HOME: join(tmpdir(), `c8ctl-open-${Date.now()}`) },
+        env: { ...process.env, C8CTL_DATA_DIR: join(tmpdir(), `c8ctl-open-${Date.now()}`) },
       });
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
       assert.ok(output.includes('Application required'), `Expected error message, got: ${output}`);
+      assert.notStrictEqual(result.status, 0);
+    });
+
+    test('c8 open fails with clear message for Cloud-style base URLs', () => {
+      const result = spawnSync('node', [
+        '--experimental-strip-types',
+        CLI_ENTRY,
+        'open', 'operate', '--dry-run',
+      ], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        env: {
+          ...process.env,
+          C8CTL_DATA_DIR: join(tmpdir(), `c8ctl-open-${Date.now()}`),
+          CAMUNDA_BASE_URL: 'https://bru-2.zeebe.camunda.io/abc-123',
+        },
+      });
+
+      const output = (result.stdout ?? '') + (result.stderr ?? '');
+      assert.ok(output.includes('Cannot derive'), `Expected Cloud URL error, got: ${output}`);
+      assert.ok(output.includes('self-managed'), `Expected self-managed hint, got: ${output}`);
       assert.notStrictEqual(result.status, 0);
     });
 
@@ -188,7 +229,7 @@ describe('open command', () => {
           timeout: 5000,
           env: {
             ...process.env,
-            XDG_DATA_HOME: join(tmpdir(), `c8ctl-open-${Date.now()}`),
+            C8CTL_DATA_DIR: join(tmpdir(), `c8ctl-open-${Date.now()}`),
             CAMUNDA_BASE_URL: 'http://test-host:8080/v2',
           },
         });
