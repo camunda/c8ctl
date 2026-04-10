@@ -19,7 +19,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 - don't use Promises in tests to wait for the overall system status to settle. Instead, use the polling helper from tests/utils/polling.ts to wait for specific conditions to be met.
   
-- as a final Quality Gate before running tests, make sure to run `npm run build` to catch any compilation errors that might be missed by the test suite. This is especially important for catching type errors and ensuring that the codebase remains robust and maintainable.
+- run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped. It also catches compilation and type errors early.
 
 ### Work Environment
 
@@ -29,6 +29,8 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 - always consult the GitHub repository camunda/orchestration-cluster-api-js for API details and usage examples. It is the main source of truth for how to interact with the Camunda 8 Orchestration Cluster API. As a backup, a copy of the REST API documentation is available in OpenAPI format in the `assets/c8/rest-api` folder. As a last resort, you should refer to the npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api.
 
 - always consult `.github/SDK_GAPS.md` for known SDK limitations before implementing features that interact with the Camunda SDK. When a newer SDK version is available, check whether gaps listed there have been resolved and update the file accordingly (mark resolved items, remove workarounds).
+
+- consult CONTEXT.md for CLI structure, resource aliases, and agent flags
 
 ### BPMN and DMN Validation
 
