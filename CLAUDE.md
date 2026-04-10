@@ -4,7 +4,7 @@ Read and follow the conventions in DEVELOPMENT.md.
 
 ## Claude-specific notes
 
-- use Edit/Write tools for file modifications instead of heredocs or shell redirects
+- prefer Edit/Write tools for file modifications; avoid heredocs and multi-line shell redirects (simple `echo >> file` is fine)
 - run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped
 - check `.github/SDK_GAPS.md` before implementing SDK-dependent features
 - consult CONTEXT.md for CLI structure, resource aliases, and agent flags

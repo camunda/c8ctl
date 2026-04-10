@@ -9,11 +9,10 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ## Implementation Details
 
-- always make sure that cli commands, resources and options are reflected in 
+- always make sure that cli commands, resources and options are reflected in
   - the `help` tests
   - README.md, EXAMPLES.md and other documentation
   - shell completion
-  
 - for every implementation, make sure to add or update tests that cover the new functionality. This includes unit tests for individual functions and integration tests for end-to-end scenarios. Tests should be comprehensive and cover edge cases to ensure the robustness of the codebase.
 
 - in any test, only use the implemented cli commands to interact with the system. Avoid using internal functions or direct API calls in tests, as this can lead to brittle tests that are tightly coupled to the implementation. By using the cli commands, you ensure that your tests are more resilient to changes in the underlying code and better reflect real-world usage.
@@ -59,7 +58,7 @@ Follow conventions in COMMIT-MESSAGE-GUIDELINE.md.
 
 ```typescript
 class MyClass {
-  private _myProp: string;  
+  private _myProp: string;
   get myProp(): string {
     return this._myProp;
   }
