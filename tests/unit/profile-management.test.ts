@@ -283,7 +283,7 @@ describe('Profile management', () => {
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
       assert.ok(output.includes("Profile 'staging-test' added"), `Expected success, got: ${output}`);
-      assert.ok(output.includes('https://staging.example.com/v2'), `Expected base URL in output, got: ${output}`);
+      assert.match(output, /Base URL: https:\/\/staging\.example\.com\/v2/, `Expected base URL in output, got: ${output}`);
       assert.ok(output.includes('OAuth'), `Expected auth type in output, got: ${output}`);
       assert.strictEqual(result.status, 0);
 
@@ -361,7 +361,7 @@ describe('Profile management', () => {
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
       assert.ok(output.includes("Profile 'env-test' added"), `Expected success, got: ${output}`);
-      assert.ok(output.includes('https://from-env.example.com/v2'), `Expected base URL, got: ${output}`);
+      assert.match(output, /Base URL: https:\/\/from-env\.example\.com\/v2/, `Expected base URL, got: ${output}`);
       assert.ok(output.includes('Basic'), `Expected Basic auth type, got: ${output}`);
       assert.strictEqual(result.status, 0);
 
