@@ -67,6 +67,7 @@ c8ctl help publish    # Shows publish command with all flags
 c8ctl help correlate  # Shows correlate command with all flags
 c8ctl help profiles   # Shows profile management help
 c8ctl help plugin     # Shows plugin management help
+c8ctl help cluster    # Shows local cluster management help
 
 # Show version
 c8ctl --version
@@ -591,6 +592,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `sync` - Synchronize plugins
 - `use` - Set active profile or tenant
 - `output` - Set output format
+- `cluster` - Manage a local Camunda 8 cluster (start, stop, status, logs, list, install, delete)
 - `completion` - Generate shell completion script
 - `feedback` - Open the feedback page to report issues or request features
 
