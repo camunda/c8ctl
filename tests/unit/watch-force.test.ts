@@ -36,7 +36,7 @@ describe('Watch Force Mode', () => {
     });
 
     assert.ok(result.stdout.includes('--force'), 'help output should include --force flag');
-    assert.ok(result.stdout.includes('Continue watching after deployment errors'),
+    assert.ok(result.stdout.includes('Continue watching after all deployment errors'),
       'help output should describe --force purpose');
   });
 

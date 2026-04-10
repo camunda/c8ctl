@@ -229,6 +229,7 @@ function findDuplicateDefinitionIds(resources: ResourceFile[]): Map<string, stri
 export async function deploy(paths: string[], options: {
   profile?: string;
   continueOnError?: boolean;
+  continueOnUserError?: boolean;
 }): Promise<void> {
   const logger = getLogger();
   const tenantId = resolveTenantId(options.profile);
@@ -423,24 +424,28 @@ export async function deploy(paths: string[], options: {
       logger.table(displayData);
     }
   } catch (error) {
-    handleDeploymentError(error, resources, logger, options.continueOnError);
+    handleDeploymentError(error, resources, logger, options.continueOnError, options.continueOnUserError);
   }
 }
 
 /**
  * Format and display deployment errors with actionable guidance
  */
-function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean): void {
+function handleDeploymentError(error: unknown, resources: ResourceFile[], logger: ReturnType<typeof getLogger>, continueOnError?: boolean, continueOnUserError?: boolean): void {
+  // Extract problem title early to determine whether this is a user-fixable error
+  const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
+  const problemTitle = typeof raw.title === 'string' ? (raw.title as string) : undefined;
+  const isUserFixable = problemTitle === 'INVALID_ARGUMENT';
+  const shouldContinue = continueOnError || (continueOnUserError && isUserFixable);
+
   if (c8ctl.verbose) {
-    if (continueOnError) {
+    if (shouldContinue) {
       throw error;
     }
     const normalizedError = error instanceof Error ? error : new Error(String(error));
     console.error(normalizedError);
     process.exit(1);
   }
-
-  const raw = (error && typeof error === 'object') ? (error as Record<string, unknown>) : {};
 
   // Try to interpret common transport/network issues first for actionable guidance
   const deriveNetworkErrorTitle = (err: unknown): string | undefined => {
@@ -475,7 +480,6 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
   };
 
   // Extract RFC 9457 Problem Detail fields and other useful signals
-  const problemTitle = typeof raw.title === 'string' ? (raw.title as string) : undefined;
   const networkTitle = deriveNetworkErrorTitle(error);
   const errorInstanceTitle =
     error instanceof Error && typeof error.message === 'string' && error.message
@@ -505,7 +509,7 @@ function handleDeploymentError(error: unknown, resources: ResourceFile[], logger
   printDeploymentHints(title, detail, status, resources);
   logMessage('For more details on the error, run with the --verbose flag');
 
-  if (continueOnError) {
+  if (shouldContinue) {
     return;
   }
   process.exit(1);
