@@ -21,6 +21,8 @@ set -euo pipefail
 # Isolate test config from the user's real environment
 TEST_TMPDIR=$(mktemp -d)
 export XDG_CONFIG_HOME="$TEST_TMPDIR"
+export C8CTL_DATA_DIR="$TEST_TMPDIR/c8ctl-data"
+export C8CTL_MODELER_DIR="$TEST_TMPDIR/c8ctl-modeler"
 trap 'rm -rf "$TEST_TMPDIR"' EXIT
 
 # Parse arguments
@@ -29,6 +31,11 @@ while (( $# )); do
     case $1 in
         -v|--verbose)
             VERBOSE=true
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--verbose|-v]" >&2
+            exit 1
             ;;
     esac
     shift
@@ -45,8 +52,10 @@ TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# CLI command
-C8="node src/index.ts"
+# CLI command — resolve repo root from this script's location
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+C8="node $REPO_ROOT/src/index.ts"
 
 # Max seconds to poll for state to propagate
 C8_TIMEOUT=${C8_TIMEOUT:-30}
@@ -126,8 +135,8 @@ debug_output() {
 }
 
 cleanup_session() {
-    # Clean session state between tests
-    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/c8ctl"
+    # Clean session state between tests (uses C8CTL_DATA_DIR for cross-platform isolation)
+    local config_dir="${C8CTL_DATA_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/c8ctl}"
     if [ -f "$config_dir/session.json" ]; then
         rm -f "$config_dir/session.json"
     fi
@@ -149,11 +158,11 @@ fi
 # Test 2: Deploy a process
 test_start "deploy process"
 cleanup_session
-if OUTPUT=$($C8 deploy tests/fixtures/simple.bpmn 2>&1); then
+if OUTPUT=$($C8 deploy "$REPO_ROOT/tests/fixtures/simple.bpmn" 2>&1); then
     debug_output "$OUTPUT"
     if echo "$OUTPUT" | grep -q "Deployment successful"; then
         # Extract process definition key from the output table (last column before the end)
-        PROCESS_KEY=$(echo "$OUTPUT" | grep "simple-process" | awk '{print $NF}')
+        PROCESS_KEY=$(echo "$OUTPUT" | awk '/simple-process/ {print $NF}')
         
         # Poll until process definition appears in list
         if LIST_PD=$(poll_until "$C8_TIMEOUT" "simple-process" $C8 list pd); then
@@ -191,7 +200,7 @@ fi
 # Test 4: Run command and list process instances
 test_start "run command and list process instances"
 cleanup_session
-if RUN_OUTPUT=$($C8 run tests/fixtures/simple-timer-event.bpmn 2>&1); then
+if RUN_OUTPUT=$($C8 run "$REPO_ROOT/tests/fixtures/simple-timer-event.bpmn" 2>&1); then
     debug_output "$RUN_OUTPUT"
     # Check for both deployment and instance creation messages
     if ! echo "$RUN_OUTPUT" | grep -q "✓ Deployment successful \[Key:"; then
@@ -200,7 +209,10 @@ if RUN_OUTPUT=$($C8 run tests/fixtures/simple-timer-event.bpmn 2>&1); then
         test_fail "output doesn't contain '✓ Process instance created [Key:'"
     else
         # Extract instance key to verify it appears in list pi
-        INSTANCE_KEY=$(echo "$RUN_OUTPUT" | grep "Process instance created" | grep -o '\[Key: [0-9]*\]' | grep -o '[0-9]*')
+        INSTANCE_KEY=""
+        if [[ "$RUN_OUTPUT" =~ \[Key:\ ([0-9]+)\] ]]; then
+            INSTANCE_KEY="${BASH_REMATCH[1]}"
+        fi
         
         if [ -z "$INSTANCE_KEY" ]; then
             test_fail "could not extract instance key from run output"
@@ -239,7 +251,7 @@ fi
 test_start "user task completion"
 cleanup_session
 # Run process with user task
-if RUN_OUTPUT=$($C8 run tests/fixtures/simple-user-task.bpmn 2>&1); then
+if RUN_OUTPUT=$($C8 run "$REPO_ROOT/tests/fixtures/simple-user-task.bpmn" 2>&1); then
     debug_output "$RUN_OUTPUT"
     if ! echo "$RUN_OUTPUT" | grep -q "Process instance created"; then
         test_fail "failed to create process instance with user task"
@@ -247,7 +259,12 @@ if RUN_OUTPUT=$($C8 run tests/fixtures/simple-user-task.bpmn 2>&1); then
         # Poll until a user task key (leading digits) appears in list ut
         if LIST_UT=$(poll_until "$C8_TIMEOUT" "^[0-9]" $C8 list ut); then
             debug_output "$LIST_UT"
-            UT_KEY=$(echo "$LIST_UT" | grep -v "^Key\|^---\|^No user" | awk 'NF {print $1}' | head -n1)
+            UT_KEY=$(
+                echo "$LIST_UT" \
+                | { grep -v "^Key\|^---\|^No user" || true; } \
+                | awk 'NF {print $1}' \
+                | head -n1
+            )
             
             if [ -z "$UT_KEY" ]; then
                 test_fail "no user task found after running process"
@@ -282,14 +299,17 @@ fi
 test_start "message correlation"
 cleanup_session
 # Deploy process for message correlation
-if ! $C8 deploy tests/fixtures/simple-message-correlation.bpmn > /dev/null 2>&1; then
+if ! $C8 deploy "$REPO_ROOT/tests/fixtures/simple-message-correlation.bpmn" > /dev/null 2>&1; then
     test_fail "failed to deploy message correlation process"
 else
     # Create instance with variables
     if CREATE_OUTPUT=$($C8 create pi --id=simple-message-correlation --variables='{"orderId":"1a"}' 2>&1); then
         debug_output "$CREATE_OUTPUT"
         # Extract instance key
-        INSTANCE_KEY=$(echo "$CREATE_OUTPUT" | grep "Process instance created" | grep -o '\[Key: [0-9]*\]' | grep -o '[0-9]*')
+        INSTANCE_KEY=""
+        if [[ "$CREATE_OUTPUT" =~ \[Key:\ ([0-9]+)\] ]]; then
+            INSTANCE_KEY="${BASH_REMATCH[1]}"
+        fi
 
         if [ -z "$INSTANCE_KEY" ]; then
             test_fail "could not extract instance key"

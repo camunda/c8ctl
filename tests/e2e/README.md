@@ -4,7 +4,8 @@ Quick validation script that tests basic CLI functionality.
 
 ## Prerequisites
 
-- **Camunda 8** running at `http://localhost:8080`
+- **Camunda 8** running at `http://localhost:8080` (self-managed default: `http://localhost:8080/v2`, basic auth `demo`/`demo`)
+- **Node.js 22 LTS**
 
 ## Usage
 
@@ -19,16 +20,14 @@ Run with verbose output to see command responses:
 ./tests/e2e/smoke-test.sh -v
 ```
 
-Adjust wait times for slower environments:
+Adjust the polling timeout for slower environments:
 ```bash
-C8_WAIT_TIME=2 ./tests/e2e/smoke-test.sh
+C8_TIMEOUT=60 ./tests/e2e/smoke-test.sh
 ```
 
-**Note**: The test uses a `c8_cmd` wrapper function for all CLI commands:
-- **State-changing commands** (deploy, create, run, publish, add, remove): Automatically waits after execution (default: 1 second) to ensure data is properly indexed
-- **Read-only commands** (list, get, search): Uses `c8_cmd 0` to skip wait time
-- **Custom wait**: Use `c8_cmd 2 publish msg` for longer waits
-- The default wait time can be configured via the `C8_WAIT_TIME` environment variable
+**Note**: The test automatically isolates its config from your real `~/.config/c8ctl` (or `~/Library/Application Support/c8ctl` on macOS) by setting `C8CTL_DATA_DIR` and `XDG_CONFIG_HOME` to a temporary directory that is cleaned up on exit.
+
+State-changing commands (deploy, create, run, publish) are followed by polling helpers (`poll_until` / `poll_until_absent`) that retry assertions until the expected condition appears or `C8_TIMEOUT` (default: 30 seconds) is reached.
 
 ## Scenarios Covered
 
