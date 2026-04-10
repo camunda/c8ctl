@@ -18,6 +18,11 @@
 
 set -euo pipefail
 
+# Isolate test config from the user's real environment
+TEST_TMPDIR=$(mktemp -d)
+export XDG_CONFIG_HOME="$TEST_TMPDIR"
+trap 'rm -rf "$TEST_TMPDIR"' EXIT
+
 # Parse arguments
 VERBOSE=false
 while (( $# )); do
