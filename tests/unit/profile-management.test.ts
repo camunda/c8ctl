@@ -21,7 +21,6 @@ import {
   addProfile,
   getProfile,
   clearActiveProfile,
-  DEFAULT_PROFILE,
 } from '../../src/config.ts';
 import { c8ctl } from '../../src/runtime.ts';
 

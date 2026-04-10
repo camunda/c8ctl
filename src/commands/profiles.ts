@@ -143,6 +143,11 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 
   let profile: Profile;
 
+  if (options.envFile && options.fromEnv) {
+    logger.error('Cannot use --from-file and --from-env together. Choose one.');
+    process.exit(1);
+  }
+
   if (options.envFile) {
     // --from-file: read a .env file and map CAMUNDA_* vars to profile fields
     if (!existsSync(options.envFile)) {

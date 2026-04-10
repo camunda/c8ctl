@@ -49,7 +49,9 @@ function getLocalClusterHint(error?: Error): string | undefined {
   if (!error) return undefined;
 
   // Only emit the hint when the active profile is 'local' (the default) or not set
+  // and no CAMUNDA_* env vars are configured (env vars point elsewhere)
   if (c8ctl.activeProfile !== undefined && c8ctl.activeProfile !== 'local') return undefined;
+  if (!c8ctl.activeProfile && process.env.CAMUNDA_BASE_URL) return undefined;
 
   const isConnectionError = isNetworkError(error);
   if (!isConnectionError) return undefined;
