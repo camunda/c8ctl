@@ -211,9 +211,9 @@ Fish will automatically load the completion on next shell start.
 Credentials are resolved in the following order:
 
 1. `--profile` flag (one-off override)
-2. Active profile from session state
+2. Active profile from session state (⚠ warns if `CAMUNDA_*` env vars are also present)
 3. Environment variables (`CAMUNDA_*`)
-4. Localhost fallback (`http://localhost:8080`)
+4. Default `local` profile (`http://localhost:8080`)
 
 **Note**: Credential configuration via environment variables follows the same conventions as the `@camunda8/orchestration-cluster-api` module.
 
@@ -223,6 +223,16 @@ export CAMUNDA_BASE_URL=https://camunda.example.com
 export CAMUNDA_CLIENT_ID=your-client-id
 export CAMUNDA_CLIENT_SECRET=your-client-secret
 c8ctl list process-instances
+
+# Create a profile from a .env file
+c8ctl add profile staging --from-file .env.staging
+
+# Create a profile from current environment variables
+source .env.prod
+c8ctl add profile prod --from-env
+
+# Clear the active session profile (so env vars take effect)
+c8ctl use profile --none
 
 # Using profile override
 c8ctl list process-instances --profile prod

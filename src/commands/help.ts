@@ -1124,9 +1124,13 @@ Profile commands:
   use profile <name>
     Set active profile for the current session.
 
+  use profile --none
+    Clear the active session profile so env vars take effect.
+
 Connection resolution order (highest to lowest priority):
   1. --profile <name> flag on the current command
   2. Active session profile (set with: c8ctl use profile <name>)
+     ⚠ Warns if CAMUNDA_* env vars are also present
   3. Environment variables (CAMUNDA_BASE_URL, CAMUNDA_CLIENT_ID, …)
   4. Default 'local' profile from profiles.json
 
@@ -1151,13 +1155,20 @@ Flags for add profile:
     --audience <audience>    OAuth audience
     --oAuthUrl <url>         OAuth token endpoint
 
+  Import from file or environment:
+    --from-file <path>       Create profile from a .env file containing CAMUNDA_* vars
+    --from-env               Create profile from current CAMUNDA_* environment variables
+
 Examples:
   c8ctl list profiles
   c8ctl which profile
   c8ctl add profile local --baseUrl=http://localhost:8080
   c8ctl add profile prod --baseUrl=https://camunda.example.com --clientId=xxx --clientSecret=yyy
+  c8ctl add profile staging --from-file .env.staging
+  c8ctl add profile ci --from-env
   c8ctl use profile prod
   c8ctl use profile "modeler:Local Dev"
+  c8ctl use profile --none
   c8ctl remove profile local
 `.trim());
 }

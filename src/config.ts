@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { OutputMode } from './logger.ts';
+import { getLogger } from './logger.ts';
 import { c8ctl } from './runtime.ts';
 
 // ============================================================================
@@ -676,6 +677,81 @@ export function setOutputMode(mode: OutputMode): void {
 // ============================================================================
 
 /**
+ * Check whether CAMUNDA_* credential env vars are set in the current environment.
+ */
+export function hasCamundaEnvVars(): boolean {
+  return !!(
+    process.env.CAMUNDA_BASE_URL ||
+    process.env.CAMUNDA_CLIENT_ID ||
+    process.env.CAMUNDA_CLIENT_SECRET ||
+    process.env.CAMUNDA_USERNAME ||
+    process.env.CAMUNDA_PASSWORD
+  );
+}
+
+/**
+ * The env var → profile field mapping used by --env-file and --from-env.
+ */
+export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
+  CAMUNDA_BASE_URL: 'baseUrl',
+  CAMUNDA_CLIENT_ID: 'clientId',
+  CAMUNDA_CLIENT_SECRET: 'clientSecret',
+  CAMUNDA_OAUTH_URL: 'oAuthUrl',
+  CAMUNDA_TOKEN_AUDIENCE: 'audience',
+  CAMUNDA_USERNAME: 'username',
+  CAMUNDA_PASSWORD: 'password',
+  CAMUNDA_DEFAULT_TENANT_ID: 'defaultTenantId',
+};
+
+/**
+ * Parse a .env file into a key-value map.
+ * Handles # comments, blank lines, optional `export` prefix, single/double quotes.
+ */
+export function parseEnvFile(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const raw of content.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    // Strip optional `export ` prefix
+    const stripped = line.startsWith('export ') ? line.slice(7) : line;
+    const eqIdx = stripped.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = stripped.slice(0, eqIdx).trim();
+    let value = stripped.slice(eqIdx + 1).trim();
+    // Strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
+/**
+ * Build a partial Profile from an env-var map (either from a .env file or process.env).
+ * Only keys present in ENV_VAR_PROFILE_MAP are considered.
+ */
+export function envVarsToProfile(name: string, vars: Record<string, string | undefined>): Profile {
+  const profile: Profile = { name, baseUrl: '' };
+  for (const [envKey, profileField] of Object.entries(ENV_VAR_PROFILE_MAP)) {
+    const value = vars[envKey];
+    if (value) {
+      (profile as any)[profileField] = value;
+    }
+  }
+  return profile;
+}
+
+/**
+ * Clear the active session profile and persist to disk.
+ */
+export function clearActiveProfile(): void {
+  c8ctl.activeProfile = undefined;
+  saveSessionState();
+}
+
+/**
  * Resolve cluster configuration from session, flags, env vars, or defaults
  * Priority: profileFlag → session profile → env vars → default 'local' profile
  */
@@ -692,6 +768,13 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
   if (c8ctl.activeProfile) {
     const profile = getProfileOrModeler(c8ctl.activeProfile);
     if (profile) {
+      // Warn when env vars are also present — avoids silent surprise
+      if (hasCamundaEnvVars()) {
+        const logger = getLogger();
+        logger.warn(`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`);
+        logger.info('  To use env vars instead, run: c8 use profile --none');
+        logger.info('  To create a profile from env vars: c8 add profile <name> --from-env');
+      }
       return profileToClusterConfig(profile);
     }
   }

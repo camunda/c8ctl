@@ -8,6 +8,7 @@ import {
   setActiveTenant,
   setOutputMode,
   getProfileOrModeler,
+  clearActiveProfile,
   DEFAULT_PROFILE,
 } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
@@ -19,6 +20,13 @@ import type { OutputMode } from '../logger.ts';
 export function useProfile(name: string): void {
   const logger = getLogger();
   
+  // Handle --none to clear profile
+  if (name === '--none') {
+    clearActiveProfile();
+    logger.success('Session profile cleared');
+    return;
+  }
+
   // Verify profile exists (checks both c8ctl and Modeler profiles)
   const profile = getProfileOrModeler(name);
   if (!profile) {
