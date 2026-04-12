@@ -7,6 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 import { toStringFilter } from './search.ts';
 
 /**
@@ -42,8 +43,7 @@ export async function listUsers(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list users', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list users', error);
   }
 }
 
@@ -90,8 +90,7 @@ export async function searchIdentityUsers(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search users', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search users', error);
   }
 }
 
@@ -108,8 +107,7 @@ export async function getIdentityUser(username: string, options: {
     const result = await client.getUser({ username: username as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get user '${username}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get user '${username}'`, error);
   }
 }
 
@@ -159,8 +157,7 @@ export async function createIdentityUser(options: {
     await client.createUser(body as any, { consistency: { waitUpToMs: 0 } });
     logger.success(`User '${options.username}' created`);
   } catch (error) {
-    logger.error('Failed to create user', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create user', error);
   }
 }
 
@@ -189,7 +186,6 @@ export async function deleteIdentityUser(username: string, options: {
     await client.deleteUser({ username: username as any }, { consistency: { waitUpToMs: 0 } });
     logger.success(`User '${username}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete user '${username}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete user '${username}'`, error);
   }
 }

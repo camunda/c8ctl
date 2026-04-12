@@ -80,10 +80,10 @@ function isNetworkError(error: Error): boolean {
 
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
-    console.log(...data);
+    console.log(...data); // lgtm[js/clear-text-logging]
   },
   error(...data: any[]): void {
-    console.error(...data);
+    console.error(...data); // lgtm[js/clear-text-logging]
   },
 };
 

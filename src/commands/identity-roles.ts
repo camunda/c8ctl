@@ -7,7 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
-import { toStringFilter } from './search.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List all roles
@@ -42,8 +42,7 @@ export async function listRoles(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list roles', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list roles', error);
   }
 }
 
@@ -63,8 +62,8 @@ export async function searchIdentityRoles(options: {
 
   try {
     const filter: any = {};
-    if (options.roleId) filter.roleId = toStringFilter(options.roleId);
-    if (options.name) filter.name = toStringFilter(options.name);
+    if (options.roleId) filter.roleId = options.roleId;
+    if (options.name) filter.name = options.name;
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
@@ -88,8 +87,7 @@ export async function searchIdentityRoles(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search roles', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search roles', error);
   }
 }
 
@@ -106,8 +104,7 @@ export async function getIdentityRole(roleId: string, options: {
     const result = await client.getRole({ roleId: roleId as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get role '${roleId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get role '${roleId}'`, error);
   }
 }
 
@@ -145,8 +142,7 @@ export async function createIdentityRole(options: {
     await client.createRole(body as any);
     logger.success(`Role '${options.name}' created`);
   } catch (error) {
-    logger.error('Failed to create role', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create role', error);
   }
 }
 
@@ -175,7 +171,6 @@ export async function deleteIdentityRole(roleId: string, options: {
     await client.deleteRole({ roleId: roleId as any });
     logger.success(`Role '${roleId}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete role '${roleId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete role '${roleId}'`, error);
   }
 }

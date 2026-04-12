@@ -7,7 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
-import { toStringFilter } from './search.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List all tenants
@@ -42,8 +42,7 @@ export async function listTenants(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list tenants', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list tenants', error);
   }
 }
 
@@ -63,8 +62,8 @@ export async function searchIdentityTenants(options: {
 
   try {
     const filter: any = {};
-    if (options.tenantId) filter.tenantId = toStringFilter(options.tenantId);
-    if (options.name) filter.name = toStringFilter(options.name);
+    if (options.tenantId) filter.tenantId = options.tenantId;
+    if (options.name) filter.name = options.name;
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
@@ -88,8 +87,7 @@ export async function searchIdentityTenants(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search tenants', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search tenants', error);
   }
 }
 
@@ -106,8 +104,7 @@ export async function getIdentityTenant(tenantId: string, options: {
     const result = await client.getTenant({ tenantId: tenantId as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get tenant '${tenantId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get tenant '${tenantId}'`, error);
   }
 }
 
@@ -153,8 +150,7 @@ export async function createIdentityTenant(options: {
     await client.createTenant(body as any);
     logger.success(`Tenant '${options.tenantId}' created`);
   } catch (error) {
-    logger.error('Failed to create tenant', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create tenant', error);
   }
 }
 
@@ -183,7 +179,6 @@ export async function deleteIdentityTenant(tenantId: string, options: {
     await client.deleteTenant({ tenantId: tenantId as any });
     logger.success(`Tenant '${tenantId}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete tenant '${tenantId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete tenant '${tenantId}'`, error);
   }
 }

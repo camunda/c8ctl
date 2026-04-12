@@ -67,7 +67,6 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       vars: 'variable(s)',
       auth: 'authorization(s)',
       mr: 'mapping-rule(s)',
-      al: 'audit-log(s)',
     },
     globalFlags: [
       { flag: '--profile', type: 'string', description: 'Use specific profile for this command' },
@@ -109,8 +108,10 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--ownerId',                 type: 'string',  description: 'Filter by owner ID (authorizations)' },
       { flag: '--ownerType',               type: 'string',  description: 'Filter by owner type (authorizations)' },
       { flag: '--resourceType',            type: 'string',  description: 'Filter by resource type (authorizations)' },
+      { flag: '--resourceId',              type: 'string',  description: 'Filter by resource ID (authorizations)' },
       { flag: '--claimName',               type: 'string',  description: 'Filter by claim name (mapping rules)' },
       { flag: '--claimValue',              type: 'string',  description: 'Filter by claim value (mapping rules)' },
+      { flag: '--mappingRuleId',           type: 'string',  description: 'Filter by mapping rule ID (mapping rules)' },
     ],
     agentFlags: [
       {
@@ -677,6 +678,7 @@ Resources and their available flags:
     --profile <name>         Use specific profile
 
   mapping-rule (mr)
+    --mappingRuleId <id>     Mapping rule ID (required)
     --name <name>            Mapping rule name (required)
     --claimName <name>       Claim name (required)
     --claimValue <value>     Claim value (required)
@@ -693,7 +695,7 @@ Examples:
   c8ctl create group --name=developers
   c8ctl create tenant --tenantId=prod --name='Production'
   c8ctl create auth --ownerId=john --ownerType=USER --resourceType=process-definition --resourceId='*' --permissions=READ,CREATE
-  c8ctl create mapping-rule --name=my-rule --claimName=department --claimValue=engineering
+  c8ctl create mapping-rule --mappingRuleId=my-rule --name=my-rule --claimName=department --claimValue=engineering
 `.trim());
 }
 
@@ -958,6 +960,7 @@ Resources and their available flags:
     --profile <name>                  Use specific profile
 
   mapping-rules (mr)
+    --mappingRuleId <id>              Filter by mapping rule ID
     --name <name>                     Filter by name
     --claimName <name>                Filter by claim name
     --claimValue <value>              Filter by claim value
@@ -1011,9 +1014,11 @@ Examples:
   c8ctl search users --name=John
   c8ctl search roles --name=admin
   c8ctl search groups --name=developers
-  c8ctl search tenants --name='*prod*'
+  c8ctl search tenants --name=Production
   c8ctl search auth --ownerId=john --resourceType=process-definition
+  c8ctl search auth --ownerId=john --resourceId='*'
   c8ctl search mapping-rules --claimName=department
+  c8ctl search mapping-rules --mappingRuleId=my-rule
 `.trim());
 }
 

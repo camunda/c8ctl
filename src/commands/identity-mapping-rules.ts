@@ -7,7 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
-import { toStringFilter } from './search.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List all mapping rules
@@ -43,8 +43,7 @@ export async function listMappingRules(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list mapping rules', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list mapping rules', error);
   }
 }
 
@@ -66,10 +65,10 @@ export async function searchIdentityMappingRules(options: {
 
   try {
     const filter: any = {};
-    if (options.mappingRuleId) filter.mappingRuleId = toStringFilter(options.mappingRuleId);
-    if (options.name) filter.name = toStringFilter(options.name);
-    if (options.claimName) filter.claimName = toStringFilter(options.claimName);
-    if (options.claimValue) filter.claimValue = toStringFilter(options.claimValue);
+    if (options.mappingRuleId) filter.mappingRuleId = options.mappingRuleId;
+    if (options.name) filter.name = options.name;
+    if (options.claimName) filter.claimName = options.claimName;
+    if (options.claimValue) filter.claimValue = options.claimValue;
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
@@ -94,8 +93,7 @@ export async function searchIdentityMappingRules(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search mapping rules', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search mapping rules', error);
   }
 }
 
@@ -112,8 +110,7 @@ export async function getIdentityMappingRule(mappingRuleId: string, options: {
     const result = await client.getMappingRule({ mappingRuleId: mappingRuleId as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get mapping rule '${mappingRuleId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get mapping rule '${mappingRuleId}'`, error);
   }
 }
 
@@ -122,12 +119,21 @@ export async function getIdentityMappingRule(mappingRuleId: string, options: {
  */
 export async function createIdentityMappingRule(options: {
   profile?: string;
+  mappingRuleId?: string;
   name?: string;
   claimName?: string;
   claimValue?: string;
 }): Promise<void> {
   const logger = getLogger();
 
+  if (!options.mappingRuleId) {
+    logger.error('--mappingRuleId is required');
+    process.exit(1);
+  }
+  if (!options.name) {
+    logger.error('--name is required');
+    process.exit(1);
+  }
   if (!options.claimName) {
     logger.error('--claimName is required');
     process.exit(1);
@@ -138,10 +144,11 @@ export async function createIdentityMappingRule(options: {
   }
 
   const body: Record<string, unknown> = {
+    mappingRuleId: options.mappingRuleId,
+    name: options.name,
     claimName: options.claimName,
     claimValue: options.claimValue,
   };
-  if (options.name) body.name = options.name;
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -159,10 +166,9 @@ export async function createIdentityMappingRule(options: {
 
   try {
     await client.createMappingRule(body as any);
-    logger.success(`Mapping rule '${options.name || options.claimName}' created`);
+    logger.success(`Mapping rule '${options.name}' created`);
   } catch (error) {
-    logger.error('Failed to create mapping rule', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create mapping rule', error);
   }
 }
 
@@ -191,7 +197,6 @@ export async function deleteIdentityMappingRule(mappingRuleId: string, options: 
     await client.deleteMappingRule({ mappingRuleId: mappingRuleId as any });
     logger.success(`Mapping rule '${mappingRuleId}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete mapping rule '${mappingRuleId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete mapping rule '${mappingRuleId}'`, error);
   }
 }

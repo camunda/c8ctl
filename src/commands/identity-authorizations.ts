@@ -7,7 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
-import { toStringFilter } from './search.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List all authorizations
@@ -45,8 +45,7 @@ export async function listAuthorizations(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list authorizations', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list authorizations', error);
   }
 }
 
@@ -68,7 +67,7 @@ export async function searchIdentityAuthorizations(options: {
 
   try {
     const filter: any = {};
-    if (options.ownerId) filter.ownerId = toStringFilter(options.ownerId);
+    if (options.ownerId) filter.ownerId = options.ownerId;
     if (options.ownerType) filter.ownerType = options.ownerType;
     if (options.resourceType) filter.resourceType = options.resourceType;
     if (options.resourceId) filter.resourceIds = [options.resourceId];
@@ -98,8 +97,7 @@ export async function searchIdentityAuthorizations(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search authorizations', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search authorizations', error);
   }
 }
 
@@ -116,8 +114,7 @@ export async function getIdentityAuthorization(authorizationKey: string, options
     const result = await client.getAuthorization({ authorizationKey: authorizationKey as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get authorization '${authorizationKey}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get authorization '${authorizationKey}'`, error);
   }
 }
 
@@ -146,16 +143,22 @@ export async function createIdentityAuthorization(options: {
     logger.error('--resourceType is required');
     process.exit(1);
   }
+  if (!options.resourceId) {
+    logger.error('--resourceId is required');
+    process.exit(1);
+  }
+  if (!options.permissions) {
+    logger.error('--permissions is required');
+    process.exit(1);
+  }
 
   const body: Record<string, unknown> = {
     ownerId: options.ownerId,
     ownerType: options.ownerType,
     resourceType: options.resourceType,
+    resourceId: options.resourceId,
+    permissionTypes: options.permissions.split(',').map(p => p.trim()),
   };
-  if (options.resourceId) body.resourceId = options.resourceId;
-  if (options.permissions) {
-    body.permissions = options.permissions.split(',').map(p => p.trim());
-  }
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -175,8 +178,7 @@ export async function createIdentityAuthorization(options: {
     await client.createAuthorization(body as any);
     logger.success('Authorization created');
   } catch (error) {
-    logger.error('Failed to create authorization', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create authorization', error);
   }
 }
 
@@ -205,7 +207,6 @@ export async function deleteIdentityAuthorization(authorizationKey: string, opti
     await client.deleteAuthorization({ authorizationKey: authorizationKey as any });
     logger.success(`Authorization '${authorizationKey}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete authorization '${authorizationKey}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete authorization '${authorizationKey}'`, error);
   }
 }

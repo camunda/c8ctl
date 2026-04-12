@@ -78,7 +78,6 @@ function normalizeResource(resource: string): string {
     authorizations: 'authorization',
     mr: 'mapping-rule',
     'mapping-rules': 'mapping-rule',
-    al: 'audit-log',
     users: 'user',
     roles: 'role',
     groups: 'group',
@@ -928,6 +927,7 @@ async function main() {
         ownerId: values.ownerId as string | undefined,
         ownerType: values.ownerType as string | undefined,
         resourceType: values.resourceType as string | undefined,
+        resourceId: values.resourceId as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
         limit,
@@ -938,6 +938,7 @@ async function main() {
     if (normalizedSearchResource === 'mapping-rule' || normalizedSearchResource === 'mapping-rules') {
       await searchIdentityMappingRules({
         profile: values.profile as string | undefined,
+        mappingRuleId: values.mappingRuleId as string | undefined,
         name: values.name as string | undefined,
         claimName: values.claimName as string | undefined,
         claimValue: values.claimValue as string | undefined,
