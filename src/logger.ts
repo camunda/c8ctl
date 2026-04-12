@@ -114,10 +114,10 @@ function isNetworkError(error: Error): boolean {
 
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
-    console.log(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
+    console.log(...data);
   },
   error(...data: any[]): void {
-    console.error(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
+    console.error(...data);
   },
 };
 
@@ -181,15 +181,16 @@ export class Logger {
 
   debug(message: string, ...args: any[]): void {
     if (this._debugEnabled) {
+      const sanitizedArgs = args.map(a => sanitizeForLogging(a));
       if (this.mode === 'text') {
         const timestamp = new Date().toISOString();
-        this._writeError(`[DEBUG ${timestamp}] ${message}`, ...args);
+        this._writeError(`[DEBUG ${timestamp}] ${message}`, ...sanitizedArgs);
       } else {
         this._writeError(JSON.stringify({
           level: 'debug',
           message,
           timestamp: new Date().toISOString(),
-          args
+          args: sanitizedArgs
         }));
       }
     }

@@ -102,7 +102,7 @@ export function createCamundaFetch(
       // Walk the cause chain to handle both Node 22 (shallow) and Node 24 (deeper nesting)
       let cause: unknown = error instanceof Error ? error.cause : undefined;
       while (cause != null) {
-        if (typeof cause === 'object' && 'code' in cause && cause.code === 'ECONNREFUSED') {
+        if (typeof cause === 'object' && cause !== null && 'code' in cause && (cause as { code?: string }).code === 'ECONNREFUSED') {
           const url = typeof input === 'string' ? input : input.toString();
           throw new Error(
             `Connection refused: Unable to connect to ${url}. Please verify the server is running and accessible.`,
