@@ -8,6 +8,40 @@ import { c8ctl } from './runtime.ts';
 export type OutputMode = 'text' | 'json';
 
 /**
+ * Fields that contain genuine credentials and must be redacted before logging.
+ *
+ * Fields that happen to have "auth" or "key" in their name but are NOT credentials
+ * (e.g. oAuthUrl — a token endpoint URL, authorizationKey — a resource identifier)
+ * are intentionally excluded from this set.
+ */
+const SENSITIVE_LOG_FIELDS = new Set([
+  'password',
+  'passwd',
+  'clientSecret',
+  'basicAuthPassword',
+  'camundaCloudClientSecret',
+  'secret',
+]);
+
+/**
+ * Recursively redact credential fields from an object before it is logged.
+ * Only fields in SENSITIVE_LOG_FIELDS are redacted; all others pass through.
+ */
+export function sanitizeForLogging(data: unknown): unknown {
+  if (Array.isArray(data)) {
+    return data.map(sanitizeForLogging);
+  }
+  if (data !== null && typeof data === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      result[key] = SENSITIVE_LOG_FIELDS.has(key) ? '[REDACTED]' : sanitizeForLogging(value);
+    }
+    return result;
+  }
+  return data;
+}
+
+/**
  * Filter a single object to only include the specified fields.
  * Field matching is case-insensitive.
  */
@@ -80,10 +114,10 @@ function isNetworkError(error: Error): boolean {
 
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
-    console.log(...data); // lgtm[js/clear-text-logging]
+    console.log(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
   },
   error(...data: any[]): void {
-    console.error(...data); // lgtm[js/clear-text-logging]
+    console.error(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
   },
 };
 
@@ -212,19 +246,21 @@ export class Logger {
   table(data: any[]): void {
     const fields = c8ctl.fields;
     // Apply --fields filtering when set (only for object elements)
-    const filteredData = fields && fields.length > 0
+    const filtered = fields && fields.length > 0
       ? data.map(obj => (obj && typeof obj === 'object' ? filterObjectFields(obj as Record<string, unknown>, fields) : obj))
       : data;
+    // Redact credentials before rendering
+    const filteredData = sanitizeForLogging(filtered) as Record<string, unknown>[];
 
     if (this.mode === 'text') {
       if (filteredData.length === 0) {
         this._writeLog('No data to display');
         return;
       }
-      
+
       // Get all unique keys from all objects
       const keys = Array.from(new Set(filteredData.flatMap(obj => Object.keys(obj))));
-      
+
       // Calculate column widths
       const widths: Record<string, number> = {};
       keys.forEach(key => {
@@ -252,7 +288,9 @@ export class Logger {
   json(data: any): void {
     const fields = c8ctl.fields;
     // Apply --fields filtering when set
-    const filteredData = fields && fields.length > 0 ? filterFields(data, fields) : data;
+    const filtered = fields && fields.length > 0 ? filterFields(data, fields) : data;
+    // Redact credentials before serialisation
+    const filteredData = sanitizeForLogging(filtered);
 
     if (this.mode === 'text') {
       this._writeLog(JSON.stringify(filteredData, null, 2));
