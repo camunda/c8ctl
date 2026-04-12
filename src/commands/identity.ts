@@ -4,6 +4,8 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
+import { c8ctl } from '../runtime.ts';
+import { handleCommandError } from '../errors.ts';
 
 // Re-exports
 export { listUsers, searchIdentityUsers, getIdentityUser, createIdentityUser, deleteIdentityUser } from './identity-users.ts';
@@ -18,6 +20,16 @@ export { listMappingRules, searchIdentityMappingRules, getIdentityMappingRule, c
  */
 export async function handleAssign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
+
+  if (c8ctl.dryRun) {
+    const targets: Record<string, unknown> = {};
+    for (const key of ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule']) {
+      if (values[key]) targets[key] = values[key];
+    }
+    logger.json({ dryRun: true, command: 'assign', resource, id, targets });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {
@@ -82,8 +94,7 @@ export async function handleAssign(resource: string, id: string, values: Record<
         process.exit(1);
     }
   } catch (error) {
-    logger.error(`Failed to assign ${resource}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to assign ${resource}`, error);
   }
 }
 
@@ -92,6 +103,16 @@ export async function handleAssign(resource: string, id: string, values: Record<
  */
 export async function handleUnassign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
+
+  if (c8ctl.dryRun) {
+    const targets: Record<string, unknown> = {};
+    for (const key of ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule']) {
+      if (values[key]) targets[key] = values[key];
+    }
+    logger.json({ dryRun: true, command: 'unassign', resource, id, targets });
+    return;
+  }
+
   const client = createClient(options.profile);
 
   try {
@@ -156,7 +177,6 @@ export async function handleUnassign(resource: string, id: string, values: Recor
         process.exit(1);
     }
   } catch (error) {
-    logger.error(`Failed to unassign ${resource}`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to unassign ${resource}`, error);
   }
 }

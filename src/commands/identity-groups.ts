@@ -7,7 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
-import { toStringFilter } from './search.ts';
+import { handleCommandError } from '../errors.ts';
 
 /**
  * List all groups
@@ -42,8 +42,7 @@ export async function listGroups(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to list groups', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to list groups', error);
   }
 }
 
@@ -63,8 +62,8 @@ export async function searchIdentityGroups(options: {
 
   try {
     const filter: any = {};
-    if (options.groupId) filter.groupId = toStringFilter(options.groupId);
-    if (options.name) filter.name = toStringFilter(options.name);
+    if (options.groupId) filter.groupId = options.groupId;
+    if (options.name) filter.name = options.name;
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
@@ -88,8 +87,7 @@ export async function searchIdentityGroups(options: {
     tableData = sortTableData(tableData, options.sortBy, logger, options.sortOrder);
     logger.table(tableData);
   } catch (error) {
-    logger.error('Failed to search groups', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to search groups', error);
   }
 }
 
@@ -106,8 +104,7 @@ export async function getIdentityGroup(groupId: string, options: {
     const result = await client.getGroup({ groupId: groupId as any }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
-    logger.error(`Failed to get group '${groupId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to get group '${groupId}'`, error);
   }
 }
 
@@ -145,8 +142,7 @@ export async function createIdentityGroup(options: {
     await client.createGroup(body as any);
     logger.success(`Group '${options.name}' created`);
   } catch (error) {
-    logger.error('Failed to create group', error as Error);
-    process.exit(1);
+    handleCommandError(logger, 'Failed to create group', error);
   }
 }
 
@@ -175,7 +171,6 @@ export async function deleteIdentityGroup(groupId: string, options: {
     await client.deleteGroup({ groupId: groupId as any });
     logger.success(`Group '${groupId}' deleted`);
   } catch (error) {
-    logger.error(`Failed to delete group '${groupId}'`, error as Error);
-    process.exit(1);
+    handleCommandError(logger, `Failed to delete group '${groupId}'`, error);
   }
 }
