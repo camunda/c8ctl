@@ -11,7 +11,7 @@ export type OutputMode = 'text' | 'json';
  * Fields that contain genuine credentials and must be redacted before logging.
  *
  * Fields that happen to have "auth" or "key" in their name but are NOT credentials
- * (e.g. tokenEndpoint — a token endpoint URL, authorizationKey — a resource identifier)
+ * (e.g. oAuthUrl — a token endpoint URL, authorizationKey — a resource identifier)
  * are intentionally excluded from this set.
  */
 const SENSITIVE_LOG_FIELDS = new Set([
@@ -114,10 +114,10 @@ function isNetworkError(error: Error): boolean {
 
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
-    console.log(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. tokenEndpoint, authorizationKey) are false positives — not credentials
+    console.log(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
   },
   error(...data: any[]): void {
-    console.error(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. tokenEndpoint, authorizationKey) are false positives — not credentials
+    console.error(...data); // codeql[js/clear-text-logging] - structured data is sanitized by sanitizeForLogging before reaching here; remaining paths (e.g. oAuthUrl, authorizationKey) are false positives — not credentials
   },
 };
 
