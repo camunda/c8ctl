@@ -167,8 +167,8 @@ describe('GLOBAL_FLAGS', () => {
     assert.ok(GLOBAL_FLAGS.has('dateField'));
   });
 
-  test('does not contain limit (limit is only valid for variable search)', () => {
-    assert.ok(!GLOBAL_FLAGS.has('limit'));
+  test('contains limit (limit applies to all search commands)', () => {
+    assert.ok(GLOBAL_FLAGS.has('limit'));
   });
 
   test('--between is not flagged as unknown for any search resource', () => {
@@ -254,7 +254,6 @@ describe('SEARCH_RESOURCE_FLAGS', () => {
     assert.ok(flags.has('fullValue'));
     assert.ok(flags.has('iname'));
     assert.ok(flags.has('ivalue'));
-    assert.ok(flags.has('limit'));
   });
 
   test('all resources have entries', () => {
