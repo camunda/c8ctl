@@ -42,9 +42,9 @@ Follow conventions in [COMMIT-MESSAGE-GUIDELINE.md](COMMIT-MESSAGE-GUIDELINE.md)
 
 ### Terminal Commands
 
-- avoid heredocs (`<< EOF`) in terminal commands as they don't work reliably in zsh on macOS when executed via tools
-- prefer the tool's native file editing capabilities for creating or modifying files
-- for appending single lines from the shell, `echo` or `printf` is fine: `echo "content" >> file.txt`
+- when running terminal commands through an AI agent or other automation tool, avoid heredocs (`<< EOF`) because they don't work reliably in zsh on macOS
+- when using an AI agent or automation tooling, prefer its native file-editing capabilities for creating or modifying files
+- for appending single lines from the shell in those workflows, `echo` or `printf` is fine: `echo "content" >> file.txt`
 
 ### Development
 
