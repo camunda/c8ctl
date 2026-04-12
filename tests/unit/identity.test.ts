@@ -286,16 +286,16 @@ describe('handleAssign — dry-run and flag validation', () => {
   beforeEach(setup);
   afterEach(teardown);
 
-  test('dry-run emits targets object and returns without making API call', async () => {
+  test('dry-run emits method/url/body and returns without making API call', async () => {
     c8ctl.dryRun = true;
     await handleAssign('role', 'admin-role', { 'to-user': 'alice' }, {});
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
     assert.strictEqual(out.command, 'assign');
-    assert.strictEqual(out.resource, 'role');
-    assert.strictEqual(out.id, 'admin-role');
-    assert.deepStrictEqual(out.targets, { 'to-user': 'alice' });
+    assert.strictEqual(out.method, 'POST');
+    assert.ok((out.url as string).includes('/roles/admin-role/users/alice'));
+    assert.strictEqual(out.body, null);
   });
 
   test('errors when multiple --to-* flags are provided', async () => {
@@ -316,15 +316,23 @@ describe('handleAssign — dry-run and flag validation', () => {
     assert.ok(errorSpy.some(l => l.includes('Target required')));
   });
 
-  test('dry-run captures multiple targets', async () => {
+  test('dry-run with multiple --to-* flags errors before emitting', async () => {
     c8ctl.dryRun = true;
-    await handleAssign('role', 'admin', { 'to-user': 'alice', 'to-group': 'ops', 'to-tenant': 't1' }, {});
+    await assert.rejects(
+      () => handleAssign('role', 'admin', { 'to-user': 'alice', 'to-group': 'ops', 'to-tenant': 't1' }, {}),
+      /process\.exit\(1\)/,
+    );
+    // No JSON should have been emitted
+    assert.strictEqual(logSpy.length, 0);
+  });
+
+  test('dry-run encodes special characters in path', async () => {
+    c8ctl.dryRun = true;
+    await handleAssign('user', 'alice@example.com', { 'to-group': 'my group' }, {});
 
     const out = capturedJson();
-    const targets = out.targets as Record<string, unknown>;
-    assert.strictEqual(targets['to-user'], 'alice');
-    assert.strictEqual(targets['to-group'], 'ops');
-    assert.strictEqual(targets['to-tenant'], 't1');
+    assert.ok((out.url as string).includes(encodeURIComponent('alice@example.com')));
+    assert.ok((out.url as string).includes(encodeURIComponent('my group')));
   });
 });
 
@@ -332,16 +340,16 @@ describe('handleUnassign — dry-run and flag validation', () => {
   beforeEach(setup);
   afterEach(teardown);
 
-  test('dry-run emits targets object and returns without making API call', async () => {
+  test('dry-run emits method/url/body and returns without making API call', async () => {
     c8ctl.dryRun = true;
     await handleUnassign('user', 'alice', { 'from-group': 'ops' }, {});
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
     assert.strictEqual(out.command, 'unassign');
-    assert.strictEqual(out.resource, 'user');
-    assert.strictEqual(out.id, 'alice');
-    assert.deepStrictEqual(out.targets, { 'from-group': 'ops' });
+    assert.strictEqual(out.method, 'DELETE');
+    assert.ok((out.url as string).includes('/users/alice/groups/ops'));
+    assert.strictEqual(out.body, null);
   });
 
   test('errors when multiple --from-* flags are provided', async () => {
@@ -359,7 +367,7 @@ describe('handleUnassign — dry-run and flag validation', () => {
       () => handleUnassign('user', 'alice', {}, {}),
       /process\.exit\(1\)/,
     );
-    assert.ok(errorSpy.some(l => l.includes('Target required')));
+    assert.ok(errorSpy.some(l => l.includes('Source required')));
   });
 });
 
@@ -381,11 +389,11 @@ describe('sanitizeForLogging — credential redaction', () => {
     assert.strictEqual(result.config.clientSecret, '[REDACTED]');
   });
 
-  test('does NOT redact tokenEndpoint (it is a URL, not a credential)', async () => {
+  test('does NOT redact oAuthUrl (it is a URL, not a credential)', async () => {
     const { sanitizeForLogging } = await import('../../src/logger.ts');
     const url = 'https://auth.example.com/oauth/token';
-    const result = sanitizeForLogging({ tokenEndpoint: url }) as Record<string, unknown>;
-    assert.strictEqual(result.tokenEndpoint, url);
+    const result = sanitizeForLogging({ oAuthUrl: url }) as Record<string, unknown>;
+    assert.strictEqual(result.oAuthUrl, url);
   });
 
   test('does NOT redact authorizationKey (false positive — it is a resource identifier)', async () => {

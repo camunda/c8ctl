@@ -4,6 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
+import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 
@@ -21,20 +22,31 @@ export { listMappingRules, searchIdentityMappingRules, getIdentityMappingRule, c
 export async function handleAssign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
 
-  if (c8ctl.dryRun) {
-    const targets: Record<string, unknown> = {};
-    for (const key of ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule']) {
-      if (values[key]) targets[key] = values[key];
-    }
-    logger.json({ dryRun: true, command: 'assign', resource, id, targets });
-    return;
-  }
-
-  // Validate exactly one --to-* flag is provided
-  const toFlags = ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'].filter(f => values[f]);
+  // Validate exactly one --to-* flag is provided (before dry-run check)
+  const targetFlags = ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'] as const;
+  const toFlags = targetFlags.filter(f => values[f]);
   if (toFlags.length > 1) {
     logger.error(`Exactly one target flag is required. Conflicting flags: ${toFlags.map(f => `--${f}`).join(', ')}`);
     process.exit(1);
+  }
+  if (toFlags.length === 0) {
+    logger.error('Target required. Use --to-user, --to-group, --to-tenant, or --to-mapping-rule.');
+    process.exit(1);
+  }
+
+  const targetFlag = toFlags[0];
+  const targetValue = values[targetFlag];
+
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'assign',
+      method: 'POST',
+      url: `${config.baseUrl}/${resource}s/${encodeURIComponent(String(id))}/${targetFlag.replace(/^to-/, '')}s/${encodeURIComponent(String(targetValue))}`,
+      body: null,
+    });
+    return;
   }
 
   const client = createClient(options.profile);
@@ -111,20 +123,31 @@ export async function handleAssign(resource: string, id: string, values: Record<
 export async function handleUnassign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
 
-  if (c8ctl.dryRun) {
-    const targets: Record<string, unknown> = {};
-    for (const key of ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule']) {
-      if (values[key]) targets[key] = values[key];
-    }
-    logger.json({ dryRun: true, command: 'unassign', resource, id, targets });
-    return;
-  }
-
-  // Validate exactly one --from-* flag is provided
-  const fromFlags = ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'].filter(f => values[f]);
+  // Validate exactly one --from-* flag is provided (before dry-run check)
+  const sourceFlags = ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'] as const;
+  const fromFlags = sourceFlags.filter(f => values[f]);
   if (fromFlags.length > 1) {
     logger.error(`Exactly one source flag is required. Conflicting flags: ${fromFlags.map(f => `--${f}`).join(', ')}`);
     process.exit(1);
+  }
+  if (fromFlags.length === 0) {
+    logger.error('Source required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.');
+    process.exit(1);
+  }
+
+  const sourceFlag = fromFlags[0];
+  const sourceValue = values[sourceFlag];
+
+  if (c8ctl.dryRun) {
+    const config = resolveClusterConfig(options.profile);
+    logger.json({
+      dryRun: true,
+      command: 'unassign',
+      method: 'DELETE',
+      url: `${config.baseUrl}/${resource}s/${encodeURIComponent(String(id))}/${sourceFlag.replace(/^from-/, '')}s/${encodeURIComponent(String(sourceValue))}`,
+      body: null,
+    });
+    return;
   }
 
   const client = createClient(options.profile);

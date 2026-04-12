@@ -168,7 +168,7 @@ export async function deleteIdentityTenant(tenantId: string, options: {
       dryRun: true,
       command: 'delete tenant',
       method: 'DELETE',
-      url: `${config.baseUrl}/tenants/${tenantId}`,
+      url: `${config.baseUrl}/tenants/${encodeURIComponent(tenantId)}`,
     });
     return;
   }

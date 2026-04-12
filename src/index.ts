@@ -169,6 +169,8 @@ function parseCliArgs() {
         resourceType: { type: 'string' },
         resourceId: { type: 'string' },
         permissions: { type: 'string' },
+        roleId: { type: 'string' },
+        groupId: { type: 'string' },
         tenantId: { type: 'string' },
         claimName: { type: 'string' },
         claimValue: { type: 'string' },
@@ -874,7 +876,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'user' || normalizedSearchResource === 'users') {
+    if (normalizedSearchResource === 'user') {
       await searchIdentityUsers({
         profile: values.profile as string | undefined,
         username: values.username as string | undefined,
@@ -887,7 +889,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'role' || normalizedSearchResource === 'roles') {
+    if (normalizedSearchResource === 'role') {
       await searchIdentityRoles({
         profile: values.profile as string | undefined,
         roleId: values.roleId as string | undefined,
@@ -899,7 +901,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'group' || normalizedSearchResource === 'groups') {
+    if (normalizedSearchResource === 'group') {
       await searchIdentityGroups({
         profile: values.profile as string | undefined,
         groupId: values.groupId as string | undefined,
@@ -911,7 +913,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'tenant' || normalizedSearchResource === 'tenants') {
+    if (normalizedSearchResource === 'tenant') {
       await searchIdentityTenants({
         profile: values.profile as string | undefined,
         name: values.name as string | undefined,
@@ -923,7 +925,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'authorization' || normalizedSearchResource === 'authorizations') {
+    if (normalizedSearchResource === 'authorization') {
       await searchIdentityAuthorizations({
         profile: values.profile as string | undefined,
         ownerId: values.ownerId as string | undefined,
@@ -937,7 +939,7 @@ async function main() {
       return;
     }
 
-    if (normalizedSearchResource === 'mapping-rule' || normalizedSearchResource === 'mapping-rules') {
+    if (normalizedSearchResource === 'mapping-rule') {
       await searchIdentityMappingRules({
         profile: values.profile as string | undefined,
         mappingRuleId: values.mappingRuleId as string | undefined,
@@ -957,27 +959,27 @@ async function main() {
   }
 
   // Handle identity list commands
-  if (verb === 'list' && (normalizedResource === 'user' || normalizedResource === 'users')) {
+  if (verb === 'list' && normalizedResource === 'user') {
     await listUsers({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }
-  if (verb === 'list' && (normalizedResource === 'role' || normalizedResource === 'roles')) {
+  if (verb === 'list' && normalizedResource === 'role') {
     await listRoles({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }
-  if (verb === 'list' && (normalizedResource === 'group' || normalizedResource === 'groups')) {
+  if (verb === 'list' && normalizedResource === 'group') {
     await listGroups({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }
-  if (verb === 'list' && (normalizedResource === 'tenant' || normalizedResource === 'tenants')) {
+  if (verb === 'list' && normalizedResource === 'tenant') {
     await listTenants({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }
-  if (verb === 'list' && (normalizedResource === 'authorization' || normalizedResource === 'authorizations')) {
+  if (verb === 'list' && normalizedResource === 'authorization') {
     await listAuthorizations({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }
-  if (verb === 'list' && (normalizedResource === 'mapping-rule' || normalizedResource === 'mapping-rules')) {
+  if (verb === 'list' && normalizedResource === 'mapping-rule') {
     await listMappingRules({ profile: values.profile as string | undefined, sortBy: values.sortBy as string | undefined, sortOrder, limit });
     return;
   }

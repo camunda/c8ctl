@@ -161,7 +161,7 @@ export async function deleteIdentityGroup(groupId: string, options: {
       dryRun: true,
       command: 'delete group',
       method: 'DELETE',
-      url: `${config.baseUrl}/groups/${groupId}`,
+      url: `${config.baseUrl}/groups/${encodeURIComponent(groupId)}`,
     });
     return;
   }
