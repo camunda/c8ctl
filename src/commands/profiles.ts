@@ -97,8 +97,8 @@ export function showProfile(name: string): void {
     logger.info(`  Audience: ${profile.audience}`);
   }
   
-  if (profile.oAuthUrl) {
-    logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
+  if (profile.tokenEndpoint) {
+    logger.info(`  OAuth URL: ${profile.tokenEndpoint}`);
   }
   
   if (profile.defaultTenantId) {
@@ -186,7 +186,7 @@ export function addProfile(name: string, options: AddProfileOptions): void {
       clientId: options.clientId,
       clientSecret: options.clientSecret,
       audience: options.audience,
-      oAuthUrl: options.oauthUrl,
+      tokenEndpoint: options.oauthUrl,
       username: options.username,
       password: options.password,
       defaultTenantId: options.tenantId,

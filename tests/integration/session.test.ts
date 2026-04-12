@@ -134,7 +134,7 @@ describe('Session Management Integration Tests', () => {
       baseUrl: 'https://custom.example.com',
       clientId: 'custom-client',
       clientSecret: 'custom-secret',
-      oAuthUrl: 'https://auth.example.com/token',
+      tokenEndpoint: 'https://auth.example.com/token',
       audience: 'custom-audience',
     });
 

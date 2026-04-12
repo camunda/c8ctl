@@ -88,7 +88,7 @@ export interface Profile {
   clientId?: string;
   clientSecret?: string;
   audience?: string;
-  oAuthUrl?: string;
+  tokenEndpoint?: string;
   username?: string;
   password?: string;
   defaultTenantId?: string;
@@ -105,7 +105,7 @@ export interface ClusterConfig {
   clientId?: string;
   clientSecret?: string;
   audience?: string;
-  oAuthUrl?: string;
+  tokenEndpoint?: string;
   username?: string;
   password?: string;
 }
@@ -454,7 +454,7 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
       clientId: conn.camundaCloudClientId,
       clientSecret: conn.camundaCloudClientSecret,
       audience: audience || undefined,
-      oAuthUrl: oAuthUrl || 'https://login.cloud.camunda.io/oauth/token',
+      tokenEndpoint: oAuthUrl || 'https://login.cloud.camunda.io/oauth/token',
     };
   }
 
@@ -469,7 +469,7 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
   } else if (conn.authType === AUTH_TYPES.OAUTH) {
     config.clientId = conn.clientId;
     config.clientSecret = conn.clientSecret;
-    config.oAuthUrl = conn.oauthURL;
+    config.tokenEndpoint = conn.oauthURL;
     config.audience = conn.audience;
   }
 
@@ -489,7 +489,7 @@ export function connectionToProfile(conn: Connection): Profile {
     clientId: config.clientId,
     clientSecret: config.clientSecret,
     audience: config.audience,
-    oAuthUrl: config.oAuthUrl,
+    tokenEndpoint: config.tokenEndpoint,
     username: config.username,
     password: config.password,
     defaultTenantId: conn.tenantId,
@@ -505,7 +505,7 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
     clientId: profile.clientId,
     clientSecret: profile.clientSecret,
     audience: profile.audience,
-    oAuthUrl: profile.oAuthUrl,
+    tokenEndpoint: profile.tokenEndpoint,
     username: profile.username,
     password: profile.password,
   };
@@ -696,7 +696,7 @@ export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
   CAMUNDA_BASE_URL: 'baseUrl',
   CAMUNDA_CLIENT_ID: 'clientId',
   CAMUNDA_CLIENT_SECRET: 'clientSecret',
-  CAMUNDA_OAUTH_URL: 'oAuthUrl',
+  CAMUNDA_OAUTH_URL: 'tokenEndpoint',
   CAMUNDA_TOKEN_AUDIENCE: 'audience',
   CAMUNDA_USERNAME: 'username',
   CAMUNDA_PASSWORD: 'password',
@@ -792,7 +792,7 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
   const clientId = process.env.CAMUNDA_CLIENT_ID;
   const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
   const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
-  const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
+  const tokenEndpoint = process.env.CAMUNDA_OAUTH_URL;
   const username = process.env.CAMUNDA_USERNAME;
   const password = process.env.CAMUNDA_PASSWORD;
 
@@ -802,7 +802,7 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
       clientId,
       clientSecret,
       audience,
-      oAuthUrl,
+      tokenEndpoint,
       username,
       password,
     };

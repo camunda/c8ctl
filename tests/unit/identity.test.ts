@@ -381,11 +381,11 @@ describe('sanitizeForLogging — credential redaction', () => {
     assert.strictEqual(result.config.clientSecret, '[REDACTED]');
   });
 
-  test('does NOT redact oAuthUrl (false positive — it is a URL, not a credential)', async () => {
+  test('does NOT redact tokenEndpoint (it is a URL, not a credential)', async () => {
     const { sanitizeForLogging } = await import('../../src/logger.ts');
     const url = 'https://auth.example.com/oauth/token';
-    const result = sanitizeForLogging({ oAuthUrl: url }) as any;
-    assert.strictEqual(result.oAuthUrl, url);
+    const result = sanitizeForLogging({ tokenEndpoint: url }) as Record<string, unknown>;
+    assert.strictEqual(result.tokenEndpoint, url);
   });
 
   test('does NOT redact authorizationKey (false positive — it is a resource identifier)', async () => {
