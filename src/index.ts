@@ -765,6 +765,10 @@ async function main() {
 
   // Handle search commands
   if (verb === 'search') {
+    if (!resource) {
+      showVerbResources('search');
+      return;
+    }
     const normalizedSearchResource = normalizeResource(resource);
     const unknownFlags = detectUnknownSearchFlags(values as Record<string, unknown>, normalizedSearchResource);
     warnUnknownSearchFlags(logger, unknownFlags, resource);
