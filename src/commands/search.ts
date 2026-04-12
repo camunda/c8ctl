@@ -29,6 +29,12 @@ export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
   'incident': new Set(['state', 'processInstanceKey', 'processDefinitionKey', 'bpmnProcessId', 'id', 'processDefinitionId', 'errorType', 'errorMessage', 'ierrorMessage', 'iid']),
   'jobs': new Set(['state', 'type', 'processInstanceKey', 'processDefinitionKey', 'itype']),
   'variable': new Set(['name', 'value', 'processInstanceKey', 'scopeKey', 'fullValue', 'iname', 'ivalue', 'limit']),
+  'user': new Set(['username', 'name', 'email']),
+  'role': new Set(['roleId', 'name']),
+  'group': new Set(['groupId', 'name']),
+  'tenant': new Set(['tenantId', 'name']),
+  'authorization': new Set(['ownerId', 'ownerType', 'resourceType', 'resourceId']),
+  'mapping-rule': new Set(['mappingRuleId', 'name', 'claimName', 'claimValue']),
 };
 
 /**

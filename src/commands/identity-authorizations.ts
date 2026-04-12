@@ -157,7 +157,7 @@ export async function createIdentityAuthorization(options: {
     ownerType: options.ownerType,
     resourceType: options.resourceType,
     resourceId: options.resourceId,
-    permissionTypes: options.permissions.split(',').map(p => p.trim()),
+    permissionTypes: options.permissions.split(',').map(p => p.trim()).filter(p => p.length > 0),
   };
 
   if (c8ctl.dryRun) {
