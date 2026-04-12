@@ -105,6 +105,8 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { flag: '--ivalue',                  type: 'string',  description: 'Case-insensitive --value filter' },
       { flag: '--username',                type: 'string',  description: 'Filter by username (users)' },
       { flag: '--email',                   type: 'string',  description: 'Filter by email (users)' },
+      { flag: '--roleId',                  type: 'string',  description: 'Filter by role ID (roles)' },
+      { flag: '--groupId',                 type: 'string',  description: 'Filter by group ID (groups)' },
       { flag: '--ownerId',                 type: 'string',  description: 'Filter by owner ID (authorizations)' },
       { flag: '--ownerType',               type: 'string',  description: 'Filter by owner type (authorizations)' },
       { flag: '--resourceType',            type: 'string',  description: 'Filter by resource type (authorizations)' },
@@ -925,6 +927,7 @@ Resources and their available flags:
     --profile <name>                  Use specific profile
 
   roles
+    --roleId <id>                     Filter by role ID
     --name <name>                     Filter by name
     --sortBy <column>                 Sort by column (Role ID, Name, Description)
     --asc                             Sort in ascending order (default)
@@ -933,6 +936,7 @@ Resources and their available flags:
     --profile <name>                  Use specific profile
 
   groups
+    --groupId <id>                    Filter by group ID
     --name <name>                     Filter by name
     --sortBy <column>                 Sort by column (Group ID, Name, Description)
     --asc                             Sort in ascending order (default)
@@ -953,6 +957,7 @@ Resources and their available flags:
     --ownerId <id>                    Filter by owner ID
     --ownerType <type>                Filter by owner type
     --resourceType <type>             Filter by resource type
+    --resourceId <id>                 Filter by resource ID
     --sortBy <column>                 Sort by column (Key, Owner ID, Owner Type, Resource Type, Resource ID, Permissions)
     --asc                             Sort in ascending order (default)
     --desc                            Sort in descending order
