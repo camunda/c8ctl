@@ -28,8 +28,8 @@ export function createClient(
     if (config.audience) {
       sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
     }
-    if (config.tokenEndpoint) {
-      sdkConfig.CAMUNDA_OAUTH_URL = config.tokenEndpoint;
+    if (config.oAuthUrl) {
+      sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
     }
   }
   // Add Basic auth configuration if present

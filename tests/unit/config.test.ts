@@ -229,7 +229,7 @@ describe('Config Module', () => {
       assert.strictEqual(config.clientId, 'test-client-id');
       assert.strictEqual(config.clientSecret, 'test-secret');
       assert.strictEqual(config.audience, 'test-audience');
-      assert.strictEqual(config.tokenEndpoint, 'https://oauth.example.com/token');
+      assert.strictEqual(config.oAuthUrl, 'https://oauth.example.com/token');
     });
 
     test('resolveClusterConfig reads basic auth config from environment variables', () => {
@@ -274,7 +274,7 @@ describe('Config Module', () => {
       assert.strictEqual(config.clientId, 'client-id');
       assert.strictEqual(config.clientSecret, 'client-secret');
       assert.strictEqual(config.audience, undefined);
-      assert.strictEqual(config.tokenEndpoint, 'https://login.cloud.camunda.io/oauth/token');
+      assert.strictEqual(config.oAuthUrl, 'https://login.cloud.camunda.io/oauth/token');
     });
 
     test('connectionToClusterConfig preserves explicit cloud audience', () => {

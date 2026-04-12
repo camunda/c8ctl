@@ -79,7 +79,7 @@ describe('Profile management', () => {
       assert.strictEqual(profile.baseUrl, 'https://example.com/v2');
       assert.strictEqual(profile.clientId, 'my-client');
       assert.strictEqual(profile.clientSecret, 'secret');
-      assert.strictEqual(profile.tokenEndpoint, 'https://auth.example.com/token');
+      assert.strictEqual(profile.oAuthUrl, 'https://auth.example.com/token');
       assert.strictEqual(profile.audience, 'zeebe.example.com');
     });
 
