@@ -11,11 +11,28 @@ import { handleCommandError } from '../errors.ts';
 export type SearchResult = { items: Array<Record<string, unknown>>; total?: number };
 
 /**
- * Flags that are valid globally (not specific to any search resource).
+ * CLI infrastructure flags — valid for every command, never passed to search APIs.
  */
-export const GLOBAL_FLAGS = new Set([
-  'profile', 'sortBy', 'asc', 'desc', 'help', 'version', 'between', 'dateField',
+const CLI_FLAGS = new Set([
+  'profile', 'help', 'version',
 ]);
+
+/**
+ * Search behavior flags consumed by shared infrastructure (fetchAllPages / buildDateFilter / sort)
+ * for ALL search resources. A flag belongs here only if every search handler consumes it
+ * via shared code paths — never for flags consumed by a subset of handlers.
+ *
+ * If a flag is only relevant to some resources, put it in SEARCH_RESOURCE_FLAGS instead.
+ */
+const SHARED_SEARCH_FLAGS = new Set([
+  'sortBy', 'asc', 'desc', 'between', 'dateField',
+]);
+
+/**
+ * Union of CLI_FLAGS and SHARED_SEARCH_FLAGS — exported for use in detectUnknownSearchFlags.
+ * Do NOT add resource-specific flags here; add them to SEARCH_RESOURCE_FLAGS instead.
+ */
+export const GLOBAL_FLAGS = new Set([...CLI_FLAGS, ...SHARED_SEARCH_FLAGS]);
 
 /**
  * Valid search filter flags per resource (values keys that are consumed by the search handler).
@@ -29,6 +46,12 @@ export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
   'incident': new Set(['state', 'processInstanceKey', 'processDefinitionKey', 'bpmnProcessId', 'id', 'processDefinitionId', 'errorType', 'errorMessage', 'ierrorMessage', 'iid']),
   'jobs': new Set(['state', 'type', 'processInstanceKey', 'processDefinitionKey', 'itype']),
   'variable': new Set(['name', 'value', 'processInstanceKey', 'scopeKey', 'fullValue', 'iname', 'ivalue', 'limit']),
+  'user': new Set(['username', 'name', 'email', 'limit']),
+  'role': new Set(['roleId', 'name', 'limit']),
+  'group': new Set(['groupId', 'name', 'limit']),
+  'tenant': new Set(['tenantId', 'name', 'limit']),
+  'authorization': new Set(['ownerId', 'ownerType', 'resourceType', 'resourceId', 'limit']),
+  'mapping-rule': new Set(['mappingRuleId', 'name', 'claimName', 'claimValue', 'limit']),
 };
 
 /**

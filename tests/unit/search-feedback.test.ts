@@ -167,7 +167,7 @@ describe('GLOBAL_FLAGS', () => {
     assert.ok(GLOBAL_FLAGS.has('dateField'));
   });
 
-  test('does not contain limit (limit is only valid for variable search)', () => {
+  test('does not contain limit (limit is resource-scoped, not consumed by all handlers)', () => {
     assert.ok(!GLOBAL_FLAGS.has('limit'));
   });
 
@@ -262,6 +262,55 @@ describe('SEARCH_RESOURCE_FLAGS', () => {
     for (const resource of resources) {
       assert.ok(SEARCH_RESOURCE_FLAGS[resource], `Missing entry for ${resource}`);
       assert.ok(SEARCH_RESOURCE_FLAGS[resource].size > 0, `Empty flags for ${resource}`);
+    }
+  });
+
+  test('identity resources have limit in their per-resource sets', () => {
+    const identityResources = ['user', 'role', 'group', 'tenant', 'authorization', 'mapping-rule'];
+    for (const resource of identityResources) {
+      assert.ok(
+        SEARCH_RESOURCE_FLAGS[resource]?.has('limit'),
+        `Identity resource '${resource}' should have 'limit' in its SEARCH_RESOURCE_FLAGS`,
+      );
+    }
+  });
+});
+
+// ─── Structural invariant: GLOBAL_FLAGS ↔ shared search infrastructure ─────────────
+// GLOBAL_FLAGS must only contain flags consumed by ALL search handlers.
+// Resource-specific flags belong in SEARCH_RESOURCE_FLAGS instead.
+// This test guards against adding a flag to GLOBAL_FLAGS that is then
+// silently ignored by handlers that don't consume it.
+
+describe('GLOBAL_FLAGS — structural invariant', () => {
+  // Flags that are CLI infrastructure (not search-API-related) and are
+  // unconditionally valid regardless of which handler runs.
+  const CLI_INFRA_FLAGS = new Set(['profile', 'help', 'version']);
+
+  // Flags consumed by shared search infrastructure (fetchAllPages sort,
+  // buildDateFilter) so they genuinely apply to every search resource.
+  const SHARED_INFRA_FLAGS = new Set(['sortBy', 'asc', 'desc', 'between', 'dateField']);
+
+  test('every flag in GLOBAL_FLAGS is either CLI infrastructure or shared search infrastructure', () => {
+    const allowed = new Set([...CLI_INFRA_FLAGS, ...SHARED_INFRA_FLAGS]);
+    for (const flag of GLOBAL_FLAGS) {
+      assert.ok(
+        allowed.has(flag),
+        `'${flag}' is in GLOBAL_FLAGS but is not in CLI_INFRA_FLAGS or SHARED_INFRA_FLAGS. ` +
+        `If this flag is only consumed by some search handlers, move it to SEARCH_RESOURCE_FLAGS instead.`,
+      );
+    }
+  });
+
+  test('GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS do not overlap (no redundant entries)', () => {
+    for (const [resource, flags] of Object.entries(SEARCH_RESOURCE_FLAGS)) {
+      for (const flag of flags) {
+        assert.ok(
+          !GLOBAL_FLAGS.has(flag),
+          `'${flag}' appears in both GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS['${resource}']. ` +
+          `It should be in one place only: GLOBAL_FLAGS if consumed by all handlers, SEARCH_RESOURCE_FLAGS otherwise.`,
+        );
+      }
     }
   });
 });

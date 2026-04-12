@@ -21,13 +21,13 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade init use which output completion help cluster feedback"
+  local verbs="list search get create delete cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade assign unassign init use which output completion help cluster feedback"
   
   # Resources by verb
-  local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin"
-  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable vars"
-  local get_resources="process-instance pi process-definition pd incident inc topology form"
-  local create_resources="process-instance pi"
+  local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin users user roles role groups group tenants tenant authorizations authorization auth mapping-rules mapping-rule mr"
+  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable vars users user roles role groups group tenants tenant authorizations authorization auth mapping-rules mapping-rule mr"
+  local get_resources="process-instance pi process-definition pd incident inc topology form user role group tenant authorization auth mapping-rule mr"
+  local create_resources="process-instance pi user role group tenant authorization auth mapping-rule mr"
   local cancel_resources="process-instance pi"
   local await_resources="process-instance pi"
   local complete_resources="user-task ut job"
@@ -50,10 +50,13 @@ _c8ctl_completions() {
   local completion_resources="bash zsh fish"
   local cluster_resources="start stop status list list-remote install delete log logs"
   local open_resources="operate tasklist modeler optimize"
-  local help_resources="list get create complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init profiles profile plugin plugins cluster feedback"
+  local delete_resources="user role group tenant authorization auth mapping-rule mr"
+  local assign_resources="role user group mapping-rule mr"
+  local unassign_resources="role user group mapping-rule mr"
+  local help_resources="list get create delete complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init assign unassign profiles profile plugin plugins cluster feedback"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env --username --email --password --ownerId --ownerType --roleId --groupId --resourceType --resourceId --permissions --tenantId --claimName --claimValue --mappingRuleId --to-user --to-group --to-tenant --to-mapping-rule --from-user --from-group --from-tenant --from-mapping-rule"
 
   case \${cword} in
     1)
@@ -99,6 +102,15 @@ _c8ctl_completions() {
           ;;
         correlate)
           COMPREPLY=( \$(compgen -W "\${correlate_resources}" -- "\${cur}") )
+          ;;
+        delete)
+          COMPREPLY=( \$(compgen -W "\${delete_resources}" -- "\${cur}") )
+          ;;
+        assign)
+          COMPREPLY=( \$(compgen -W "\${assign_resources}" -- "\${cur}") )
+          ;;
+        unassign)
+          COMPREPLY=( \$(compgen -W "\${unassign_resources}" -- "\${cur}") )
           ;;
         add)
           COMPREPLY=( \$(compgen -W "\${add_resources}" -- "\${cur}") )
@@ -190,6 +202,7 @@ _c8ctl() {
     'resolve:Resolve incident'
     'publish:Publish message'
     'correlate:Correlate message'
+    'delete:Delete resource'
     'deploy:Deploy BPMN/DMN/forms'
     'run:Deploy and start process'
     'watch:Watch files for changes and auto-deploy'
@@ -202,6 +215,8 @@ _c8ctl() {
     'upgrade:Upgrade a plugin'
     'downgrade:Downgrade a plugin'
     'init:Create a new plugin from template'
+    'assign:Assign a resource to another'
+    'unassign:Unassign a resource from another'
     'use:Set active profile or tenant'
     'which:Show active profile or tenant'
     'output:Set output format'
@@ -276,6 +291,28 @@ _c8ctl() {
     '--none[Clear the active session profile (use profile --none)]'
     '--from-file[Create profile from a .env file]:file:_files'
     '--from-env[Create profile from current CAMUNDA_* environment variables]'
+    '--username[Username for identity operations]:username:'
+    '--email[Email for identity operations]:email:'
+    '--password[Password for identity operations]:password:'
+    '--ownerId[Owner ID for authorization]:ownerId:'
+    '--ownerType[Owner type for authorization]:ownerType:'
+    '--resourceType[Resource type for authorization]:resourceType:'
+    '--resourceId[Resource ID for authorization]:resourceId:'
+    '--permissions[Permissions for authorization]:permissions:'
+    '--tenantId[Tenant ID]:tenantId:'
+    '--claimName[Claim name for mapping rule]:claimName:'
+    '--claimValue[Claim value for mapping rule]:claimValue:'
+    '--roleId[Role ID for search]:roleId:'
+    '--groupId[Group ID for search]:groupId:'
+    '--mappingRuleId[Mapping rule ID]:mappingRuleId:'
+    '--to-user[Target user for assignment]:user:'
+    '--to-group[Target group for assignment]:group:'
+    '--to-tenant[Target tenant for assignment]:tenant:'
+    '--to-mapping-rule[Target mapping rule for assignment]:mappingRule:'
+    '--from-user[Source user for unassignment]:user:'
+    '--from-group[Source group for unassignment]:group:'
+    '--from-tenant[Source tenant for unassignment]:tenant:'
+    '--from-mapping-rule[Source mapping rule for unassignment]:mappingRule:'
   )
 
   case \$CURRENT in
@@ -300,6 +337,20 @@ _c8ctl() {
             'profile:List profiles'
             'plugins:List plugins'
             'plugin:List plugins'
+            'users:List users'
+            'user:List users'
+            'roles:List roles'
+            'role:List roles'
+            'groups:List groups'
+            'group:List groups'
+            'tenants:List tenants'
+            'tenant:List tenants'
+            'authorizations:List authorizations'
+            'authorization:List authorizations'
+            'auth:List authorizations'
+            'mapping-rules:List mapping rules'
+            'mapping-rule:List mapping rules'
+            'mr:List mapping rules'
           )
           _describe 'resource' resources
           ;;
@@ -321,6 +372,20 @@ _c8ctl() {
             'variables:Search variables'
             'variable:Search variables'
             'vars:Search variables'
+            'users:Search users'
+            'user:Search users'
+            'roles:Search roles'
+            'role:Search roles'
+            'groups:Search groups'
+            'group:Search groups'
+            'tenants:Search tenants'
+            'tenant:Search tenants'
+            'authorizations:Search authorizations'
+            'authorization:Search authorizations'
+            'auth:Search authorizations'
+            'mapping-rules:Search mapping rules'
+            'mapping-rule:Search mapping rules'
+            'mr:Search mapping rules'
           )
           _describe 'resource' resources
           ;;
@@ -334,6 +399,14 @@ _c8ctl() {
             'inc:Get incident'
             'topology:Get cluster topology'
             'form:Get form for user task or process definition'
+            'user:Get user'
+            'role:Get role'
+            'group:Get group'
+            'tenant:Get tenant'
+            'authorization:Get authorization'
+            'auth:Get authorization'
+            'mapping-rule:Get mapping rule'
+            'mr:Get mapping rule'
           )
           _describe 'resource' resources
           ;;
@@ -341,6 +414,14 @@ _c8ctl() {
           resources=(
             'process-instance:Create process instance'
             'pi:Create process instance'
+            'user:Create user'
+            'role:Create role'
+            'group:Create group'
+            'tenant:Create tenant'
+            'authorization:Create authorization'
+            'auth:Create authorization'
+            'mapping-rule:Create mapping rule'
+            'mr:Create mapping rule'
           )
           _describe 'resource' resources
           ;;
@@ -396,6 +477,39 @@ _c8ctl() {
           resources=(
             'message:Correlate message'
             'msg:Correlate message'
+          )
+          _describe 'resource' resources
+          ;;
+        delete)
+          resources=(
+            'user:Delete user'
+            'role:Delete role'
+            'group:Delete group'
+            'tenant:Delete tenant'
+            'authorization:Delete authorization'
+            'auth:Delete authorization'
+            'mapping-rule:Delete mapping rule'
+            'mr:Delete mapping rule'
+          )
+          _describe 'resource' resources
+          ;;
+        assign)
+          resources=(
+            'role:Assign role'
+            'user:Assign user'
+            'group:Assign group'
+            'mapping-rule:Assign mapping rule'
+            'mr:Assign mapping rule'
+          )
+          _describe 'resource' resources
+          ;;
+        unassign)
+          resources=(
+            'role:Unassign role'
+            'user:Unassign user'
+            'group:Unassign group'
+            'mapping-rule:Unassign mapping rule'
+            'mr:Unassign mapping rule'
           )
           _describe 'resource' resources
           ;;
@@ -494,6 +608,9 @@ _c8ctl() {
             'activate:Show activate command help'
             'publish:Show publish command help'
             'correlate:Show correlate command help'
+            'delete:Show delete command help'
+            'assign:Show assign command help'
+            'unassign:Show unassign command help'
             'upgrade:Show upgrade command help'
             'downgrade:Show downgrade command help'
             'init:Show init command help'
@@ -670,6 +787,50 @@ complete -c c8ctl -l from-file -r -d 'Create profile from a .env file'
 complete -c c8 -l from-file -r -d 'Create profile from a .env file'
 complete -c c8ctl -l from-env -d 'Create profile from current environment variables'
 complete -c c8 -l from-env -d 'Create profile from current environment variables'
+complete -c c8ctl -l username -d 'Username for identity operations' -r
+complete -c c8 -l username -d 'Username for identity operations' -r
+complete -c c8ctl -l email -d 'Email for identity operations' -r
+complete -c c8 -l email -d 'Email for identity operations' -r
+complete -c c8ctl -l password -d 'Password for identity operations' -r
+complete -c c8 -l password -d 'Password for identity operations' -r
+complete -c c8ctl -l ownerId -d 'Owner ID for authorization' -r
+complete -c c8 -l ownerId -d 'Owner ID for authorization' -r
+complete -c c8ctl -l ownerType -d 'Owner type for authorization' -r
+complete -c c8 -l ownerType -d 'Owner type for authorization' -r
+complete -c c8ctl -l resourceType -d 'Resource type for authorization' -r
+complete -c c8 -l resourceType -d 'Resource type for authorization' -r
+complete -c c8ctl -l resourceId -d 'Resource ID for authorization' -r
+complete -c c8 -l resourceId -d 'Resource ID for authorization' -r
+complete -c c8ctl -l permissions -d 'Permissions for authorization' -r
+complete -c c8 -l permissions -d 'Permissions for authorization' -r
+complete -c c8ctl -l tenantId -d 'Tenant ID' -r
+complete -c c8 -l tenantId -d 'Tenant ID' -r
+complete -c c8ctl -l claimName -d 'Claim name for mapping rule' -r
+complete -c c8 -l claimName -d 'Claim name for mapping rule' -r
+complete -c c8ctl -l claimValue -d 'Claim value for mapping rule' -r
+complete -c c8 -l claimValue -d 'Claim value for mapping rule' -r
+complete -c c8ctl -l roleId -d 'Role ID for search' -r
+complete -c c8 -l roleId -d 'Role ID for search' -r
+complete -c c8ctl -l groupId -d 'Group ID for search' -r
+complete -c c8 -l groupId -d 'Group ID for search' -r
+complete -c c8ctl -l mappingRuleId -d 'Mapping rule ID' -r
+complete -c c8 -l mappingRuleId -d 'Mapping rule ID' -r
+complete -c c8ctl -l to-user -d 'Target user for assignment' -r
+complete -c c8 -l to-user -d 'Target user for assignment' -r
+complete -c c8ctl -l to-group -d 'Target group for assignment' -r
+complete -c c8 -l to-group -d 'Target group for assignment' -r
+complete -c c8ctl -l to-tenant -d 'Target tenant for assignment' -r
+complete -c c8 -l to-tenant -d 'Target tenant for assignment' -r
+complete -c c8ctl -l to-mapping-rule -d 'Target mapping rule for assignment' -r
+complete -c c8 -l to-mapping-rule -d 'Target mapping rule for assignment' -r
+complete -c c8ctl -l from-user -d 'Source user for unassignment' -r
+complete -c c8 -l from-user -d 'Source user for unassignment' -r
+complete -c c8ctl -l from-group -d 'Source group for unassignment' -r
+complete -c c8 -l from-group -d 'Source group for unassignment' -r
+complete -c c8ctl -l from-tenant -d 'Source tenant for unassignment' -r
+complete -c c8 -l from-tenant -d 'Source tenant for unassignment' -r
+complete -c c8ctl -l from-mapping-rule -d 'Source mapping rule for unassignment' -r
+complete -c c8 -l from-mapping-rule -d 'Source mapping rule for unassignment' -r
 
 # Commands (verbs) - only suggest when no command is given yet
 complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
@@ -680,6 +841,8 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
 complete -c c8 -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
 complete -c c8 -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'delete' -d 'Delete resource'
+complete -c c8 -n '__fish_use_subcommand' -a 'delete' -d 'Delete resource'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
 complete -c c8 -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'await' -d 'Await resource completion'
@@ -722,6 +885,10 @@ complete -c c8ctl -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plug
 complete -c c8 -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plugin'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
 complete -c c8 -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'assign' -d 'Assign a resource to another'
+complete -c c8 -n '__fish_use_subcommand' -a 'assign' -d 'Assign a resource to another'
+complete -c c8ctl -n '__fish_use_subcommand' -a 'unassign' -d 'Unassign a resource from another'
+complete -c c8 -n '__fish_use_subcommand' -a 'unassign' -d 'Unassign a resource from another'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
 complete -c c8ctl -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
@@ -766,6 +933,34 @@ complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List pl
 complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List plugins'
 complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
 complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'users' -d 'List users'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'users' -d 'List users'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'user' -d 'List users'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'user' -d 'List users'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'roles' -d 'List roles'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'roles' -d 'List roles'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'role' -d 'List roles'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'role' -d 'List roles'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'groups' -d 'List groups'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'groups' -d 'List groups'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'group' -d 'List groups'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'group' -d 'List groups'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'tenants' -d 'List tenants'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'tenants' -d 'List tenants'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'tenant' -d 'List tenants'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'tenant' -d 'List tenants'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'authorizations' -d 'List authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'authorizations' -d 'List authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'authorization' -d 'List authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'authorization' -d 'List authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'auth' -d 'List authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'auth' -d 'List authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mapping-rules' -d 'List mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mapping-rules' -d 'List mapping rules'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mapping-rule' -d 'List mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mapping-rule' -d 'List mapping rules'
+complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mr' -d 'List mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mr' -d 'List mapping rules'
 
 # Resources for 'search' command
 complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-instances' -d 'Search process instances'
@@ -800,6 +995,34 @@ complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Sear
 complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
 complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
 complete -c c8 -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'users' -d 'Search users'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'users' -d 'Search users'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user' -d 'Search users'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user' -d 'Search users'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'roles' -d 'Search roles'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'roles' -d 'Search roles'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'role' -d 'Search roles'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'role' -d 'Search roles'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'groups' -d 'Search groups'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'groups' -d 'Search groups'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'group' -d 'Search groups'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'group' -d 'Search groups'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'tenants' -d 'Search tenants'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'tenants' -d 'Search tenants'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'tenant' -d 'Search tenants'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'tenant' -d 'Search tenants'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'authorizations' -d 'Search authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'authorizations' -d 'Search authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'authorization' -d 'Search authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'authorization' -d 'Search authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'auth' -d 'Search authorizations'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'auth' -d 'Search authorizations'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mapping-rules' -d 'Search mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mapping-rules' -d 'Search mapping rules'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mapping-rule' -d 'Search mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mapping-rule' -d 'Search mapping rules'
+complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mr' -d 'Search mapping rules'
+complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mr' -d 'Search mapping rules'
 
 # Resources for 'get' command
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
@@ -818,12 +1041,44 @@ complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get clu
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
 complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
 complete -c c8 -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'user' -d 'Get user'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'user' -d 'Get user'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'role' -d 'Get role'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'role' -d 'Get role'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'group' -d 'Get group'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'group' -d 'Get group'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'tenant' -d 'Get tenant'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'tenant' -d 'Get tenant'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'authorization' -d 'Get authorization'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'authorization' -d 'Get authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'auth' -d 'Get authorization'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'auth' -d 'Get authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'mapping-rule' -d 'Get mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'mapping-rule' -d 'Get mapping rule'
+complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'mr' -d 'Get mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from get' -a 'mr' -d 'Get mapping rule'
 
 # Resources for 'create' command
 complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'process-instance' -d 'Create process instance'
 complete -c c8 -n '__fish_seen_subcommand_from create' -a 'process-instance' -d 'Create process instance'
 complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'pi' -d 'Create process instance'
 complete -c c8 -n '__fish_seen_subcommand_from create' -a 'pi' -d 'Create process instance'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'user' -d 'Create user'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'user' -d 'Create user'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'role' -d 'Create role'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'role' -d 'Create role'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'group' -d 'Create group'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'group' -d 'Create group'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'tenant' -d 'Create tenant'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'tenant' -d 'Create tenant'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'authorization' -d 'Create authorization'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'authorization' -d 'Create authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'auth' -d 'Create authorization'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'auth' -d 'Create authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'mapping-rule' -d 'Create mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'mapping-rule' -d 'Create mapping rule'
+complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'mr' -d 'Create mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from create' -a 'mr' -d 'Create mapping rule'
 
 # Resources for 'cancel' command
 complete -c c8ctl -n '__fish_seen_subcommand_from cancel' -a 'process-instance' -d 'Cancel process instance'
@@ -870,6 +1125,48 @@ complete -c c8ctl -n '__fish_seen_subcommand_from correlate' -a 'message' -d 'Co
 complete -c c8 -n '__fish_seen_subcommand_from correlate' -a 'message' -d 'Correlate message'
 complete -c c8ctl -n '__fish_seen_subcommand_from correlate' -a 'msg' -d 'Correlate message'
 complete -c c8 -n '__fish_seen_subcommand_from correlate' -a 'msg' -d 'Correlate message'
+
+# Resources for 'delete' command
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'user' -d 'Delete user'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'user' -d 'Delete user'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'role' -d 'Delete role'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'role' -d 'Delete role'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'group' -d 'Delete group'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'group' -d 'Delete group'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'tenant' -d 'Delete tenant'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'tenant' -d 'Delete tenant'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'authorization' -d 'Delete authorization'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'authorization' -d 'Delete authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'auth' -d 'Delete authorization'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'auth' -d 'Delete authorization'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'mapping-rule' -d 'Delete mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'mapping-rule' -d 'Delete mapping rule'
+complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'mr' -d 'Delete mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'mr' -d 'Delete mapping rule'
+
+# Resources for 'assign' command
+complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'role' -d 'Assign role'
+complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'role' -d 'Assign role'
+complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'user' -d 'Assign user'
+complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'user' -d 'Assign user'
+complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'group' -d 'Assign group'
+complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'group' -d 'Assign group'
+complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'mapping-rule' -d 'Assign mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'mapping-rule' -d 'Assign mapping rule'
+complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'mr' -d 'Assign mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'mr' -d 'Assign mapping rule'
+
+# Resources for 'unassign' command
+complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'role' -d 'Unassign role'
+complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'role' -d 'Unassign role'
+complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'user' -d 'Unassign user'
+complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'user' -d 'Unassign user'
+complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'group' -d 'Unassign group'
+complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'group' -d 'Unassign group'
+complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'mapping-rule' -d 'Unassign mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'mapping-rule' -d 'Unassign mapping rule'
+complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'mr' -d 'Unassign mapping rule'
+complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'mr' -d 'Unassign mapping rule'
 
 # Resources for 'add' command
 complete -c c8ctl -n '__fish_seen_subcommand_from add' -a 'profile' -d 'Add profile'
@@ -964,6 +1261,12 @@ complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show pu
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'delete' -d 'Show delete command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'delete' -d 'Show delete command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'assign' -d 'Show assign command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'assign' -d 'Show assign command help'
+complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'unassign' -d 'Show unassign command help'
+complete -c c8 -n '__fish_seen_subcommand_from help' -a 'unassign' -d 'Show unassign command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
 complete -c c8 -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
 complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
