@@ -99,12 +99,16 @@ export function createCamundaFetch(
         throw new Error(`Request timeout after ${timeout}ms`);
       }
 
-      const cause = (error as any)?.cause;
-      if (cause?.code === 'ECONNREFUSED') {
-        const url = typeof input === 'string' ? input : input.toString();
-        throw new Error(
-          `Connection refused: Unable to connect to ${url}. Please verify the server is running and accessible.`,
-        );
+      // Walk the cause chain to handle both Node 22 (shallow) and Node 24 (deeper nesting)
+      let cause: unknown = error instanceof Error ? error.cause : undefined;
+      while (cause != null) {
+        if (typeof cause === 'object' && 'code' in cause && cause.code === 'ECONNREFUSED') {
+          const url = typeof input === 'string' ? input : input.toString();
+          throw new Error(
+            `Connection refused: Unable to connect to ${url}. Please verify the server is running and accessible.`,
+          );
+        }
+        cause = typeof cause === 'object' && cause !== null && 'cause' in cause ? (cause as { cause: unknown }).cause : undefined;
       }
 
       throw error;
