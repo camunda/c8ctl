@@ -16,26 +16,75 @@ export { listTenants, searchIdentityTenants, getIdentityTenant, createIdentityTe
 export { listAuthorizations, searchIdentityAuthorizations, getIdentityAuthorization, createIdentityAuthorization, deleteIdentityAuthorization } from './identity-authorizations.ts';
 export { listMappingRules, searchIdentityMappingRules, getIdentityMappingRule, createIdentityMappingRule, deleteIdentityMappingRule } from './identity-mapping-rules.ts';
 
+type AssignTargetFlag = 'to-user' | 'to-group' | 'to-tenant' | 'to-mapping-rule';
+type UnassignSourceFlag = 'from-user' | 'from-group' | 'from-tenant' | 'from-mapping-rule';
+
+const ASSIGN_TARGET_FLAGS: readonly AssignTargetFlag[] = ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'];
+const UNASSIGN_SOURCE_FLAGS: readonly UnassignSourceFlag[] = ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'];
+
+/** Allowed --to-* flags per resource for assign */
+const ALLOWED_ASSIGN_TARGETS: Record<string, readonly AssignTargetFlag[]> = {
+  role: ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'],
+  user: ['to-group', 'to-tenant'],
+  group: ['to-tenant'],
+  'mapping-rule': ['to-group', 'to-tenant'],
+  authorization: ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'],
+};
+
+/** Allowed --from-* flags per resource for unassign */
+const ALLOWED_UNASSIGN_SOURCES: Record<string, readonly UnassignSourceFlag[]> = {
+  role: ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'],
+  user: ['from-group', 'from-tenant'],
+  group: ['from-tenant'],
+  'mapping-rule': ['from-group', 'from-tenant'],
+};
+
+/** Plural path segment for each resource */
+const RESOURCE_PATHS: Record<string, string> = {
+  user: 'users',
+  role: 'roles',
+  group: 'groups',
+  tenant: 'tenants',
+  authorization: 'authorizations',
+  'mapping-rule': 'mapping-rules',
+};
+
+function formatFlags(flags: readonly string[]): string {
+  return flags.map(f => `--${f}`).join(', ');
+}
+
 /**
  * Handle assign command: c8 assign <resource> <id> --to-<target>=<targetId>
  */
 export async function handleAssign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
 
-  // Validate exactly one --to-* flag is provided (before dry-run check)
-  const targetFlags = ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'] as const;
-  const toFlags = targetFlags.filter(f => values[f]);
-  if (toFlags.length > 1) {
-    logger.error(`Exactly one target flag is required. Conflicting flags: ${toFlags.map(f => `--${f}`).join(', ')}`);
-    process.exit(1);
-  }
-  if (toFlags.length === 0) {
-    logger.error('Target required. Use --to-user, --to-group, --to-tenant, or --to-mapping-rule.');
+  const allowedTargets = ALLOWED_ASSIGN_TARGETS[resource];
+  if (!allowedTargets) {
+    logger.error(`Cannot assign resource type: ${resource}. Supported: ${Object.keys(ALLOWED_ASSIGN_TARGETS).join(', ')}.`);
     process.exit(1);
   }
 
-  const targetFlag = toFlags[0];
+  // Validate exactly one --to-* flag is provided
+  const provided = ASSIGN_TARGET_FLAGS.filter(f => values[f]);
+  if (provided.length > 1) {
+    logger.error(`Exactly one target flag is required. Conflicting flags: ${formatFlags(provided)}`);
+    process.exit(1);
+  }
+  if (provided.length === 0) {
+    logger.error(`Target required. Use ${formatFlags(allowedTargets)}.`);
+    process.exit(1);
+  }
+
+  const targetFlag = provided[0];
+  if (!allowedTargets.includes(targetFlag)) {
+    logger.error(`Unsupported target flag --${targetFlag} for resource '${resource}'. Use ${formatFlags(allowedTargets)}.`);
+    process.exit(1);
+  }
+
   const targetValue = values[targetFlag];
+  const resourcePath = RESOURCE_PATHS[resource];
+  const targetPath = targetFlag.replace(/^to-/, '') + 's';
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -43,7 +92,7 @@ export async function handleAssign(resource: string, id: string, values: Record<
       dryRun: true,
       command: 'assign',
       method: 'POST',
-      url: `${config.baseUrl}/${resource}s/${encodeURIComponent(String(id))}/${targetFlag.replace(/^to-/, '')}s/${encodeURIComponent(String(targetValue))}`,
+      url: `${config.baseUrl}/${resourcePath}/${encodeURIComponent(String(id))}/${targetPath}/${encodeURIComponent(String(targetValue))}`,
       body: null,
     });
     return;
@@ -123,20 +172,32 @@ export async function handleAssign(resource: string, id: string, values: Record<
 export async function handleUnassign(resource: string, id: string, values: Record<string, unknown>, options: { profile?: string }): Promise<void> {
   const logger = getLogger();
 
-  // Validate exactly one --from-* flag is provided (before dry-run check)
-  const sourceFlags = ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'] as const;
-  const fromFlags = sourceFlags.filter(f => values[f]);
-  if (fromFlags.length > 1) {
-    logger.error(`Exactly one source flag is required. Conflicting flags: ${fromFlags.map(f => `--${f}`).join(', ')}`);
-    process.exit(1);
-  }
-  if (fromFlags.length === 0) {
-    logger.error('Source required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.');
+  const allowedSources = ALLOWED_UNASSIGN_SOURCES[resource];
+  if (!allowedSources) {
+    logger.error(`Cannot unassign resource type: ${resource}. Supported: ${Object.keys(ALLOWED_UNASSIGN_SOURCES).join(', ')}.`);
     process.exit(1);
   }
 
-  const sourceFlag = fromFlags[0];
+  // Validate exactly one --from-* flag is provided
+  const provided = UNASSIGN_SOURCE_FLAGS.filter(f => values[f]);
+  if (provided.length > 1) {
+    logger.error(`Exactly one source flag is required. Conflicting flags: ${formatFlags(provided)}`);
+    process.exit(1);
+  }
+  if (provided.length === 0) {
+    logger.error(`Source required. Use ${formatFlags(allowedSources)}.`);
+    process.exit(1);
+  }
+
+  const sourceFlag = provided[0];
+  if (!allowedSources.includes(sourceFlag)) {
+    logger.error(`Unsupported source flag --${sourceFlag} for resource '${resource}'. Use ${formatFlags(allowedSources)}.`);
+    process.exit(1);
+  }
+
   const sourceValue = values[sourceFlag];
+  const resourcePath = RESOURCE_PATHS[resource];
+  const sourcePath = sourceFlag.replace(/^from-/, '') + 's';
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -144,7 +205,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
       dryRun: true,
       command: 'unassign',
       method: 'DELETE',
-      url: `${config.baseUrl}/${resource}s/${encodeURIComponent(String(id))}/${sourceFlag.replace(/^from-/, '')}s/${encodeURIComponent(String(sourceValue))}`,
+      url: `${config.baseUrl}/${resourcePath}/${encodeURIComponent(String(id))}/${sourcePath}/${encodeURIComponent(String(sourceValue))}`,
       body: null,
     });
     return;

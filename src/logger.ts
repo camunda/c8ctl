@@ -31,6 +31,18 @@ export function sanitizeForLogging(data: unknown): unknown {
   if (Array.isArray(data)) {
     return data.map(sanitizeForLogging);
   }
+  if (data instanceof Error) {
+    const sanitized: Record<string, unknown> = {
+      name: data.name,
+      message: data.message,
+      stack: data.stack,
+    };
+    // Preserve enumerable fields (e.g. code, cause) with sanitization
+    for (const [key, value] of Object.entries(data)) {
+      sanitized[key] = SENSITIVE_LOG_FIELDS.has(key) ? '[REDACTED]' : sanitizeForLogging(value);
+    }
+    return sanitized;
+  }
   if (data !== null && typeof data === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data as Record<string, unknown>)) {

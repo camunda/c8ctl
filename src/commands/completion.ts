@@ -56,7 +56,7 @@ _c8ctl_completions() {
   local help_resources="list get create delete complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init assign unassign profiles profile plugin plugins cluster feedback"
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env --username --email --password --ownerId --ownerType --resourceType --resourceId --permissions --tenantId --claimName --claimValue --mappingRuleId --to-user --to-group --to-tenant --to-mapping-rule --from-user --from-group --from-tenant --from-mapping-rule"
+  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env --username --email --password --ownerId --ownerType --roleId --groupId --resourceType --resourceId --permissions --tenantId --claimName --claimValue --mappingRuleId --to-user --to-group --to-tenant --to-mapping-rule --from-user --from-group --from-tenant --from-mapping-rule"
 
   case \${cword} in
     1)
@@ -302,6 +302,8 @@ _c8ctl() {
     '--tenantId[Tenant ID]:tenantId:'
     '--claimName[Claim name for mapping rule]:claimName:'
     '--claimValue[Claim value for mapping rule]:claimValue:'
+    '--roleId[Role ID for search]:roleId:'
+    '--groupId[Group ID for search]:groupId:'
     '--mappingRuleId[Mapping rule ID]:mappingRuleId:'
     '--to-user[Target user for assignment]:user:'
     '--to-group[Target group for assignment]:group:'
@@ -807,6 +809,10 @@ complete -c c8ctl -l claimName -d 'Claim name for mapping rule' -r
 complete -c c8 -l claimName -d 'Claim name for mapping rule' -r
 complete -c c8ctl -l claimValue -d 'Claim value for mapping rule' -r
 complete -c c8 -l claimValue -d 'Claim value for mapping rule' -r
+complete -c c8ctl -l roleId -d 'Role ID for search' -r
+complete -c c8 -l roleId -d 'Role ID for search' -r
+complete -c c8ctl -l groupId -d 'Group ID for search' -r
+complete -c c8 -l groupId -d 'Group ID for search' -r
 complete -c c8ctl -l mappingRuleId -d 'Mapping rule ID' -r
 complete -c c8 -l mappingRuleId -d 'Mapping rule ID' -r
 complete -c c8ctl -l to-user -d 'Target user for assignment' -r
