@@ -1059,6 +1059,7 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'mapping-rule') {
     await createIdentityMappingRule({
       profile: values.profile as string | undefined,
+      mappingRuleId: values.mappingRuleId as string | undefined,
       name: values.name as string | undefined,
       claimName: values.claimName as string | undefined,
       claimValue: values.claimValue as string | undefined,
