@@ -8,6 +8,8 @@ import assert from 'node:assert';
 import { c8ctl } from '../../src/runtime.ts';
 import { createIdentityUser, deleteIdentityUser } from '../../src/commands/identity-users.ts';
 import { createIdentityRole, deleteIdentityRole } from '../../src/commands/identity-roles.ts';
+import { createIdentityGroup, deleteIdentityGroup } from '../../src/commands/identity-groups.ts';
+import { createIdentityTenant, deleteIdentityTenant } from '../../src/commands/identity-tenants.ts';
 import { createIdentityMappingRule, deleteIdentityMappingRule } from '../../src/commands/identity-mapping-rules.ts';
 import { createIdentityAuthorization, deleteIdentityAuthorization } from '../../src/commands/identity-authorizations.ts';
 import { handleAssign, handleUnassign } from '../../src/commands/identity.ts';
@@ -418,5 +420,188 @@ describe('sanitizeForLogging — credential redaction', () => {
     assert.strictEqual(sanitizeForLogging('hello'), 'hello');
     assert.strictEqual(sanitizeForLogging(42), 42);
     assert.strictEqual(sanitizeForLogging(null), null);
+  });
+});
+
+// ─── Defect class: dry-run schema consistency ────────────────────────────────
+// Every mutating identity command's dry-run output must include { dryRun, command, method, url, body }.
+// The body field must be present (null for DELETE, an object for POST/PUT).
+
+describe('Dry-run schema — all mutating identity commands include body field', () => {
+  beforeEach(() => {
+    setup();
+    c8ctl.dryRun = true;
+  });
+  afterEach(teardown);
+
+  const REQUIRED_DRY_RUN_KEYS = ['dryRun', 'command', 'method', 'url', 'body'];
+
+  function assertDryRunSchema(out: Record<string, unknown>, label: string) {
+    for (const key of REQUIRED_DRY_RUN_KEYS) {
+      assert.ok(key in out, `${label}: dry-run output missing required key '${key}'. Got keys: ${Object.keys(out).join(', ')}`);
+    }
+  }
+
+  // DELETE commands — body should be null
+  test('deleteIdentityUser dry-run includes body: null', async () => {
+    await deleteIdentityUser('alice', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityUser');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  test('deleteIdentityRole dry-run includes body: null', async () => {
+    await deleteIdentityRole('admin', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityRole');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  test('deleteIdentityGroup dry-run includes body: null', async () => {
+    await deleteIdentityGroup('ops', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityGroup');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  test('deleteIdentityTenant dry-run includes body: null', async () => {
+    await deleteIdentityTenant('t1', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityTenant');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  test('deleteIdentityMappingRule dry-run includes body: null', async () => {
+    await deleteIdentityMappingRule('rule-1', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityMappingRule');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  test('deleteIdentityAuthorization dry-run includes body: null', async () => {
+    await deleteIdentityAuthorization('auth-42', {});
+    assertDryRunSchema(capturedJson(), 'deleteIdentityAuthorization');
+    assert.strictEqual(capturedJson().body, null);
+  });
+
+  // CREATE commands — body must be present and an object
+  test('createIdentityUser dry-run includes body object', async () => {
+    await createIdentityUser({ username: 'alice', password: 'pw' });
+    assertDryRunSchema(capturedJson(), 'createIdentityUser');
+    assert.ok(typeof capturedJson().body === 'object' && capturedJson().body !== null);
+  });
+
+  test('createIdentityRole dry-run includes body object', async () => {
+    await createIdentityRole({ name: 'admin' });
+    assertDryRunSchema(capturedJson(), 'createIdentityRole');
+    assert.ok(typeof capturedJson().body === 'object' && capturedJson().body !== null);
+  });
+});
+
+// ─── Defect class: assign/unassign target map ↔ switch consistency ───────────
+// Every resource in the allowed-targets/sources map must succeed in dry-run mode.
+// If a resource appears in the map but has no switch case, dry-run will pass
+// but non-dry-run would fail — the dry-run test catches the *map* side;
+// the non-dry-run test catches the *switch* side.
+
+describe('handleAssign — every allowed resource/target pair works in dry-run', () => {
+  beforeEach(() => {
+    setup();
+    c8ctl.dryRun = true;
+  });
+  afterEach(teardown);
+
+  // These are ALL the valid resource+target combos that the code claims to support.
+  // If any entry here is in the allowed map but missing from the switch, the
+  // non-dry-run test below will catch it (dry-run checks the map path only).
+  const VALID_ASSIGN_COMBOS: Array<{ resource: string; flag: string; value: string }> = [
+    { resource: 'role', flag: 'to-user', value: 'alice' },
+    { resource: 'role', flag: 'to-group', value: 'ops' },
+    { resource: 'role', flag: 'to-tenant', value: 't1' },
+    { resource: 'role', flag: 'to-mapping-rule', value: 'mr1' },
+    { resource: 'user', flag: 'to-group', value: 'ops' },
+    { resource: 'user', flag: 'to-tenant', value: 't1' },
+    { resource: 'group', flag: 'to-tenant', value: 't1' },
+    { resource: 'mapping-rule', flag: 'to-group', value: 'ops' },
+    { resource: 'mapping-rule', flag: 'to-tenant', value: 't1' },
+  ];
+
+  for (const { resource, flag, value } of VALID_ASSIGN_COMBOS) {
+    test(`assign ${resource} --${flag}=${value} produces valid dry-run output`, async () => {
+      await handleAssign(resource, 'test-id', { [flag]: value }, {});
+      const out = capturedJson();
+      assert.strictEqual(out.dryRun, true);
+      assert.strictEqual(out.command, 'assign');
+      assert.strictEqual(out.method, 'POST');
+      assert.ok(typeof out.url === 'string' && (out.url as string).length > 0);
+    });
+  }
+
+  test('assign rejects unsupported resource', async () => {
+    await assert.rejects(
+      () => handleAssign('bogus', 'id', { 'to-user': 'a' }, {}),
+      /process\.exit\(1\)/,
+    );
+  });
+
+  test('assign rejects unsupported target flag for resource', async () => {
+    // user does not support --to-user (you can\'t assign a user to another user)
+    await assert.rejects(
+      () => handleAssign('user', 'alice', { 'to-user': 'bob' }, {}),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Unsupported target flag')));
+  });
+});
+
+// ─── Defect class: sanitizeForLogging must preserve built-in types ────────────
+// sanitizeForLogging should not destroy Error, Date, URL, RegExp, or other
+// common built-in instances by treating them as plain objects (which drops
+// non-enumerable properties like Error.message or returns {} for Date).
+
+describe('sanitizeForLogging — built-in type preservation', () => {
+  test('preserves Error name, message, and stack', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const err = new Error('something broke');
+    const result = sanitizeForLogging(err) as Record<string, unknown>;
+    assert.strictEqual(result.name, 'Error');
+    assert.strictEqual(result.message, 'something broke');
+    assert.ok(typeof result.stack === 'string' && result.stack.length > 0, 'stack should be preserved');
+  });
+
+  test('preserves nested Error in cause chain', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const inner = new Error('root cause');
+    const outer = new Error('wrapper', { cause: inner });
+    const result = sanitizeForLogging(outer) as Record<string, unknown>;
+    assert.strictEqual(result.message, 'wrapper');
+    const causeResult = result.cause as Record<string, unknown>;
+    assert.strictEqual(causeResult.message, 'root cause');
+  });
+
+  test('redacts sensitive fields on Error with enumerable credentials', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const err = new Error('auth failed');
+    (err as any).password = 'secret123';
+    const result = sanitizeForLogging(err) as Record<string, unknown>;
+    assert.strictEqual(result.message, 'auth failed');
+    assert.strictEqual(result.password, '[REDACTED]');
+  });
+
+  test('preserves Date instances (does not return empty object)', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const date = new Date('2025-01-15T10:30:00Z');
+    const result = sanitizeForLogging(date);
+    // Should either return the Date as-is or a string representation — not {}
+    assert.notDeepStrictEqual(result, {}, 'Date should not be serialized as empty object');
+  });
+
+  test('preserves URL instances (does not return empty object)', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const url = new URL('https://example.com/path');
+    const result = sanitizeForLogging(url);
+    assert.notDeepStrictEqual(result, {}, 'URL should not be serialized as empty object');
+  });
+
+  test('preserves RegExp instances', async () => {
+    const { sanitizeForLogging } = await import('../../src/logger.ts');
+    const re = /test-pattern/gi;
+    const result = sanitizeForLogging(re);
+    assert.notDeepStrictEqual(result, {}, 'RegExp should not be serialized as empty object');
   });
 });

@@ -162,6 +162,7 @@ export async function deleteIdentityGroup(groupId: string, options: {
       command: 'delete group',
       method: 'DELETE',
       url: `${config.baseUrl}/groups/${encodeURIComponent(groupId)}`,
+      body: null,
     });
     return;
   }

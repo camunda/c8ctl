@@ -37,11 +37,18 @@ export function sanitizeForLogging(data: unknown): unknown {
       message: data.message,
       stack: data.stack,
     };
-    // Preserve enumerable fields (e.g. code, cause) with sanitization
+    if (data.cause !== undefined) {
+      sanitized.cause = sanitizeForLogging(data.cause);
+    }
+    // Preserve enumerable fields (e.g. code) with sanitization
     for (const [key, value] of Object.entries(data)) {
       sanitized[key] = SENSITIVE_LOG_FIELDS.has(key) ? '[REDACTED]' : sanitizeForLogging(value);
     }
     return sanitized;
+  }
+  // Preserve common built-in types that have no useful enumerable properties
+  if (data instanceof Date || data instanceof RegExp || data instanceof URL) {
+    return data;
   }
   if (data !== null && typeof data === 'object') {
     const result: Record<string, unknown> = {};

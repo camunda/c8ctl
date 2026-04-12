@@ -176,6 +176,7 @@ export async function deleteIdentityUser(username: string, options: {
       command: 'delete user',
       method: 'DELETE',
       url: `${config.baseUrl}/users/${encodeURIComponent(username)}`,
+      body: null,
     });
     return;
   }

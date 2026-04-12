@@ -161,6 +161,7 @@ export async function deleteIdentityRole(roleId: string, options: {
       command: 'delete role',
       method: 'DELETE',
       url: `${config.baseUrl}/roles/${encodeURIComponent(roleId)}`,
+      body: null,
     });
     return;
   }

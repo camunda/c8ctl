@@ -187,6 +187,7 @@ export async function deleteIdentityMappingRule(mappingRuleId: string, options: 
       command: 'delete mapping-rule',
       method: 'DELETE',
       url: `${config.baseUrl}/mapping-rules/${encodeURIComponent(mappingRuleId)}`,
+      body: null,
     });
     return;
   }

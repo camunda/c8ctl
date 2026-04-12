@@ -28,7 +28,6 @@ const ALLOWED_ASSIGN_TARGETS: Record<string, readonly AssignTargetFlag[]> = {
   user: ['to-group', 'to-tenant'],
   group: ['to-tenant'],
   'mapping-rule': ['to-group', 'to-tenant'],
-  authorization: ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'],
 };
 
 /** Allowed --from-* flags per resource for unassign */

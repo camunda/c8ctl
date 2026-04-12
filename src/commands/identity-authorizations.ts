@@ -197,6 +197,7 @@ export async function deleteIdentityAuthorization(authorizationKey: string, opti
       command: 'delete authorization',
       method: 'DELETE',
       url: `${config.baseUrl}/authorizations/${encodeURIComponent(String(authorizationKey))}`,
+      body: null,
     });
     return;
   }
