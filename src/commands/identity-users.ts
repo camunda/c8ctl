@@ -154,7 +154,7 @@ export async function createIdentityUser(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createUser(body as any, { consistency: { waitUpToMs: 0 } });
+    await client.createUser(body as any);
     logger.success(`User '${options.username}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create user', error);
@@ -183,7 +183,7 @@ export async function deleteIdentityUser(username: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.deleteUser({ username: username as any }, { consistency: { waitUpToMs: 0 } });
+    await client.deleteUser({ username: username as any });
     logger.success(`User '${username}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete user '${username}'`, error);
