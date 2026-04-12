@@ -114,10 +114,10 @@ function isNetworkError(error: Error): boolean {
 
 const defaultLogWriter: LogWriter = {
   log(...data: any[]): void {
-    console.log(...data);
+    console.log(...data); // codeql[js/clear-text-logging] - oAuthUrl is a token-endpoint URL, not a credential; structured data is sanitized via sanitizeForLogging at call sites (json/table/debug)
   },
   error(...data: any[]): void {
-    console.error(...data);
+    console.error(...data); // codeql[js/clear-text-logging] - oAuthUrl is a token-endpoint URL, not a credential; structured data is sanitized via sanitizeForLogging at call sites (json/table/debug)
   },
 };
 
