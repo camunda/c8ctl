@@ -228,7 +228,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
           await client.unassignRoleFromMappingRule({ roleId: id as any, mappingRuleId: values['from-mapping-rule'] as any });
           logger.success(`Role '${id}' unassigned from mapping rule '${values['from-mapping-rule']}'`);
         } else {
-          logger.error('Target required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.');
+          logger.error('Source required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.');
           process.exit(1);
         }
         break;
@@ -241,7 +241,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
           await client.unassignUserFromTenant({ tenantId: values['from-tenant'] as any, username: id as any });
           logger.success(`User '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
-          logger.error('Target required. Use --from-group or --from-tenant.');
+          logger.error('Source required. Use --from-group or --from-tenant.');
           process.exit(1);
         }
         break;
@@ -251,7 +251,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
           await client.unassignGroupFromTenant({ tenantId: values['from-tenant'] as any, groupId: id as any });
           logger.success(`Group '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
-          logger.error('Target required. Use --from-tenant.');
+          logger.error('Source required. Use --from-tenant.');
           process.exit(1);
         }
         break;
@@ -264,7 +264,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
           await client.unassignMappingRuleFromTenant({ tenantId: values['from-tenant'] as any, mappingRuleId: id as any });
           logger.success(`Mapping rule '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
-          logger.error('Target required. Use --from-group or --from-tenant.');
+          logger.error('Source required. Use --from-group or --from-tenant.');
           process.exit(1);
         }
         break;
