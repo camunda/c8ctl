@@ -30,6 +30,13 @@ export async function handleAssign(resource: string, id: string, values: Record<
     return;
   }
 
+  // Validate exactly one --to-* flag is provided
+  const toFlags = ['to-user', 'to-group', 'to-tenant', 'to-mapping-rule'].filter(f => values[f]);
+  if (toFlags.length > 1) {
+    logger.error(`Exactly one target flag is required. Conflicting flags: ${toFlags.map(f => `--${f}`).join(', ')}`);
+    process.exit(1);
+  }
+
   const client = createClient(options.profile);
 
   try {
@@ -111,6 +118,13 @@ export async function handleUnassign(resource: string, id: string, values: Recor
     }
     logger.json({ dryRun: true, command: 'unassign', resource, id, targets });
     return;
+  }
+
+  // Validate exactly one --from-* flag is provided
+  const fromFlags = ['from-user', 'from-group', 'from-tenant', 'from-mapping-rule'].filter(f => values[f]);
+  if (fromFlags.length > 1) {
+    logger.error(`Exactly one source flag is required. Conflicting flags: ${fromFlags.map(f => `--${f}`).join(', ')}`);
+    process.exit(1);
   }
 
   const client = createClient(options.profile);
