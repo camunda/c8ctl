@@ -5,6 +5,7 @@
 import { getLogger } from '../logger.ts';
 import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
+import { toStringFilter } from './search.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
@@ -62,7 +63,7 @@ export async function searchIdentityGroups(options: {
 
   try {
     const filter: any = {};
-    if (options.groupId) filter.groupId = options.groupId;
+    if (options.groupId) filter.groupId = toStringFilter(options.groupId);
     if (options.name) filter.name = options.name;
 
     const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};

@@ -890,6 +890,7 @@ async function main() {
     if (normalizedSearchResource === 'role' || normalizedSearchResource === 'roles') {
       await searchIdentityRoles({
         profile: values.profile as string | undefined,
+        roleId: values.roleId as string | undefined,
         name: values.name as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,
@@ -901,6 +902,7 @@ async function main() {
     if (normalizedSearchResource === 'group' || normalizedSearchResource === 'groups') {
       await searchIdentityGroups({
         profile: values.profile as string | undefined,
+        groupId: values.groupId as string | undefined,
         name: values.name as string | undefined,
         sortBy: values.sortBy as string | undefined,
         sortOrder,

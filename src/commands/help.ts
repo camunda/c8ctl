@@ -982,7 +982,10 @@ Date Range Filter:
   Example: --between=2024-01-01.. (everything from start of 2024)
 
 Wildcard Search:
-  String filters support wildcards: * (any chars) and ? (single char).
+  Some string filters support wildcards: * (any chars) and ? (single char).
+  Supported: process definitions (name, bpmnProcessId), process instances (bpmnProcessId),
+             jobs (type), variables (name, value), users (username, name, email), groups (groupId).
+  Not supported (exact match only): roles, tenants, mapping-rules, authorizations.
   Example: --name='*main*' matches all names containing "main".
 
 Case-Insensitive Search:
@@ -1016,7 +1019,7 @@ Examples:
   c8ctl search groups --name=developers
   c8ctl search tenants --name=Production
   c8ctl search auth --ownerId=john --resourceType=process-definition
-  c8ctl search auth --ownerId=john --resourceId='*'
+  c8ctl search auth --ownerId=john --resourceId=my-resource
   c8ctl search mapping-rules --claimName=department
   c8ctl search mapping-rules --mappingRuleId=my-rule
 `.trim());
