@@ -8,27 +8,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { asyncSpawn, type SpawnResult } from '../utils/spawn.ts';
-
-const CLI = 'src/index.ts';
-
-async function c8(...args: string[]): Promise<SpawnResult> {
-  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
-    env: {
-      ...process.env,
-      CAMUNDA_BASE_URL: 'http://test-cluster/v2',
-      HOME: '/tmp/c8ctl-test-nonexistent-home',
-    },
-  });
-}
-
-function parseJson(result: SpawnResult): Record<string, unknown> {
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`Failed to parse JSON from stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  }
-}
+import { c8, parseJson } from '../utils/cli.ts';
 
 // ─── complete user-task ──────────────────────────────────────────────────────
 
