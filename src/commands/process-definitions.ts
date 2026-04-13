@@ -3,7 +3,7 @@
  */
 
 import { ProcessDefinitionKey } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveTenantId } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -27,6 +27,17 @@ export async function listProcessDefinitions(options: {
 				tenantId,
 			},
 		};
+
+		if (
+			emitDryRun({
+				command: "list process-definitions",
+				method: "POST",
+				endpoint: "/process-definitions/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchProcessDefinitions(f, opts),
@@ -70,6 +81,28 @@ export async function getProcessDefinition(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (options.xml) {
+		if (
+			emitDryRun({
+				command: "get process-definition xml",
+				method: "GET",
+				endpoint: `/process-definitions/${key}/xml`,
+				profile: options.profile,
+			})
+		)
+			return;
+	} else {
+		if (
+			emitDryRun({
+				command: "get process-definition",
+				method: "GET",
+				endpoint: `/process-definitions/${key}`,
+				profile: options.profile,
+			})
+		)
+			return;
+	}
 
 	try {
 		if (options.xml) {

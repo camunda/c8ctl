@@ -2,7 +2,12 @@
  * Search commands
  */
 
-import { createClient, DEFAULT_PAGE_SIZE, fetchAllPages } from "../client.ts";
+import {
+	createClient,
+	DEFAULT_PAGE_SIZE,
+	emitDryRun,
+	fetchAllPages,
+} from "../client.ts";
 import { resolveTenantId } from "../config.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
 import { handleCommandError } from "../errors.ts";
@@ -376,8 +381,6 @@ export async function searchProcessDefinitions(options: {
 	if (options.iName) {
 		criteria.push(formatCriterion("name", options.iName, true));
 	}
-	logSearchCriteria(logger, "Process Definitions", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -402,6 +405,19 @@ export async function searchProcessDefinitions(options: {
 		if (options.key) {
 			filter.filter.processDefinitionKey = options.key;
 		}
+
+		if (
+			emitDryRun({
+				command: "search process-definitions",
+				method: "POST",
+				endpoint: "/process-definitions/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "Process Definitions", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchProcessDefinitions(f, opts),
@@ -541,8 +557,6 @@ export async function searchProcessInstances(options: {
 		const field = options.dateField ?? "startDate";
 		criteria.push(`'${field}' between "${options.between}"`);
 	}
-	logSearchCriteria(logger, "Process Instances", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -588,6 +602,19 @@ export async function searchProcessInstances(options: {
 				process.exit(1);
 			}
 		}
+
+		if (
+			emitDryRun({
+				command: "search process-instances",
+				method: "POST",
+				endpoint: "/process-instances/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "Process Instances", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchProcessInstances(f, opts),
@@ -697,8 +724,6 @@ export async function searchUserTasks(options: {
 		const field = options.dateField ?? "creationDate";
 		criteria.push(`'${field}' between "${options.between}"`);
 	}
-	logSearchCriteria(logger, "User Tasks", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -738,6 +763,19 @@ export async function searchUserTasks(options: {
 				process.exit(1);
 			}
 		}
+
+		if (
+			emitDryRun({
+				command: "search user-tasks",
+				method: "POST",
+				endpoint: "/user-tasks/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "User Tasks", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchUserTasks(f, opts),
@@ -869,8 +907,6 @@ export async function searchIncidents(options: {
 	if (options.between) {
 		criteria.push(`'creationTime' between "${options.between}"`);
 	}
-	logSearchCriteria(logger, "Incidents", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -915,6 +951,19 @@ export async function searchIncidents(options: {
 				process.exit(1);
 			}
 		}
+
+		if (
+			emitDryRun({
+				command: "search incidents",
+				method: "POST",
+				endpoint: "/incidents/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "Incidents", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchIncidents(f, opts),
@@ -1035,8 +1084,6 @@ export async function searchJobs(options: {
 		const field = options.dateField ?? "creationTime";
 		criteria.push(`'${field}' between "${options.between}"`);
 	}
-	logSearchCriteria(logger, "Jobs", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -1072,6 +1119,19 @@ export async function searchJobs(options: {
 				process.exit(1);
 			}
 		}
+
+		if (
+			emitDryRun({
+				command: "search jobs",
+				method: "POST",
+				endpoint: "/jobs/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "Jobs", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchJobs(f, opts),
@@ -1168,8 +1228,6 @@ export async function searchVariables(options: {
 	if (options.fullValue) {
 		criteria.push(formatCriterion("fullValue", true));
 	}
-	logSearchCriteria(logger, "Variables", criteria);
-
 	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -1195,6 +1253,19 @@ export async function searchVariables(options: {
 
 		// By default, truncate values unless --fullValue is specified
 		const truncateValues = !options.fullValue;
+
+		if (
+			emitDryRun({
+				command: "search variables",
+				method: "POST",
+				endpoint: "/variables/search",
+				profile: options.profile,
+				body: { ...filter, truncateValues },
+			})
+		)
+			return;
+
+		logSearchCriteria(logger, "Variables", criteria);
 
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			(f, opts) => client.searchVariables({ ...f, truncateValues }, opts),

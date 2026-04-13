@@ -11,28 +11,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { asyncSpawn, type SpawnResult } from '../utils/spawn.ts';
-
-const CLI = 'src/index.ts';
-
-async function c8(...args: string[]): Promise<SpawnResult> {
-  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
-    env: {
-      ...process.env,
-      CAMUNDA_BASE_URL: 'http://test-cluster/v2',
-      // Suppress any profile file lookup
-      HOME: '/tmp/c8ctl-test-nonexistent-home',
-    },
-  });
-}
-
-function parseJson(result: SpawnResult): Record<string, unknown> {
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`Failed to parse JSON from stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-  }
-}
+import { c8, parseJson } from '../utils/cli.ts';
 
 // ─── create authorization ────────────────────────────────────────────────────
 
@@ -91,7 +70,8 @@ describe('CLI behavioral: create authorization', () => {
     );
 
     assert.strictEqual(result.status, 1);
-    assert.ok(result.stderr.includes('Invalid --ownerType "BOGUS"'), `stderr: ${result.stderr}`);
+    assert.ok(result.stderr.includes('Invalid --ownerType'), `stderr: ${result.stderr}`);
+    assert.ok(result.stderr.includes('BOGUS'), `stderr: ${result.stderr}`);
     assert.ok(result.stderr.includes('Valid values:'), `stderr: ${result.stderr}`);
   });
 
@@ -106,7 +86,8 @@ describe('CLI behavioral: create authorization', () => {
     );
 
     assert.strictEqual(result.status, 1);
-    assert.ok(result.stderr.includes('Invalid --resourceType "NOPE"'), `stderr: ${result.stderr}`);
+    assert.ok(result.stderr.includes('Invalid --resourceType'), `stderr: ${result.stderr}`);
+    assert.ok(result.stderr.includes('NOPE'), `stderr: ${result.stderr}`);
   });
 
   test('rejects invalid --permissions with exit code 1', async () => {

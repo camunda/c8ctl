@@ -50,7 +50,7 @@ export interface C8ctlPluginRuntime {
 	outputMode: OutputMode;
 	/** Agent flag: comma-separated list of fields to include in output (applied at logger level) */
 	fields?: string[];
-	/** Agent flag: when true, mutating commands emit the would-be API request as JSON without executing it */
+	/** Agent flag: when true, commands emit the would-be API request as JSON without executing it */
 	dryRun?: boolean;
 	/** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
 	verbose?: boolean;

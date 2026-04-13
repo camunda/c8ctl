@@ -3,7 +3,7 @@
  */
 
 import { Username } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -21,6 +21,17 @@ export async function listUsers(options: {
 }): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "list users",
+			method: "POST",
+			endpoint: "/users/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -75,6 +86,17 @@ export async function searchIdentityUsers(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
+		if (
+			emitDryRun({
+				command: "search users",
+				method: "POST",
+				endpoint: "/users/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
+
 		const items = await fetchAllPages(
 			(f, opts) => client.searchUsers(f, opts),
 			searchFilter,
@@ -115,6 +137,16 @@ export async function getIdentityUser(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "get user",
+			method: "GET",
+			endpoint: `/users/${username}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getUser(

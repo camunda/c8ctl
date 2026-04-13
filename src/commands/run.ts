@@ -8,7 +8,7 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient } from "../client.ts";
+import { createClient, emitDryRun } from "../client.ts";
 import { resolveTenantId } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger } from "../logger.ts";
@@ -31,6 +31,16 @@ export async function run(
 		variables?: string;
 	},
 ): Promise<void> {
+	if (
+		emitDryRun({
+			command: "run",
+			method: "POST",
+			endpoint: "/deployments + /process-instances",
+			profile: options.profile,
+			body: { path, variables: options.variables },
+		})
+	)
+		return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 	const tenantId = resolveTenantId(options.profile);

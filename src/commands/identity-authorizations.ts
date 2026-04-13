@@ -11,7 +11,7 @@ import {
 	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import {
 	requireCsvEnum,
 	requireEnum,
@@ -33,6 +33,17 @@ export async function listAuthorizations(options: {
 }): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "list authorizations",
+			method: "POST",
+			endpoint: "/authorizations/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -94,6 +105,17 @@ export async function searchIdentityAuthorizations(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
+		if (
+			emitDryRun({
+				command: "search authorizations",
+				method: "POST",
+				endpoint: "/authorizations/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
+
 		const items = await fetchAllPages(
 			(f, opts) => client.searchAuthorizations(f, opts),
 			searchFilter,
@@ -139,6 +161,16 @@ export async function getIdentityAuthorization(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "get authorization",
+			method: "GET",
+			endpoint: `/authorizations/${authorizationKey}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getAuthorization(

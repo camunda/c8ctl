@@ -11,7 +11,7 @@ import {
 	ProcessInstanceKey,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig, resolveTenantId } from "../config.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
 import { handleCommandError } from "../errors.ts";
@@ -72,6 +72,17 @@ export async function listProcessInstances(options: {
 			}
 		}
 
+		if (
+			emitDryRun({
+				command: "list process-instances",
+				method: "POST",
+				endpoint: "/process-instances/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
+
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchProcessInstances(f, opts),
 			filter,
@@ -118,6 +129,16 @@ export async function getProcessInstance(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 	const consistencyOptions = { consistency: { waitUpToMs: 0 } };
+
+	if (
+		emitDryRun({
+			command: "get process-instance",
+			method: "GET",
+			endpoint: `/process-instances/${key}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getProcessInstance(

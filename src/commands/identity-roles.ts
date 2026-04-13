@@ -2,7 +2,7 @@
  * Identity role commands
  */
 
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -19,6 +19,17 @@ export async function listRoles(options: {
 }): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "list roles",
+			method: "POST",
+			endpoint: "/roles/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -71,6 +82,17 @@ export async function searchIdentityRoles(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
+		if (
+			emitDryRun({
+				command: "search roles",
+				method: "POST",
+				endpoint: "/roles/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
+
 		const items = await fetchAllPages(
 			(f, opts) => client.searchRoles(f, opts),
 			searchFilter,
@@ -111,6 +133,16 @@ export async function getIdentityRole(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (
+		emitDryRun({
+			command: "get role",
+			method: "GET",
+			endpoint: `/roles/${roleId}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getRole(
