@@ -170,6 +170,14 @@ describe('Identity Commands — required-flag validation', () => {
     assert.ok(errorSpy.some(l => l.includes('--resourceId is required')));
   });
 
+  test('createIdentityAuthorization: errors when --resourceType is missing', async () => {
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceId: 'r', permissions: 'READ' }),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('--resourceType is required')));
+  });
+
   test('createIdentityAuthorization: errors when --permissions is missing', async () => {
     assert.throws(
       () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r' }),
