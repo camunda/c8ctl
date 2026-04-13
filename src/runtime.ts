@@ -26,7 +26,8 @@ export interface C8ctlEnv {
 /**
  * Functions injected into the runtime via init() to break circular imports.
  * client.ts, config.ts, and logger.ts all import c8ctl from this module,
- * so this module cannot import from them at the top level.
+ * so this module cannot import runtime values from them at the top level
+ * (type-only imports are OK).
  */
 export interface C8ctlDeps {
 	createClient(
@@ -109,6 +110,9 @@ class C8ctl implements C8ctlPluginRuntime {
 	 * before any plugin or command accesses createClient/resolveTenantId/getLogger.
 	 */
 	init(deps: C8ctlDeps): void {
+		if (this._deps) {
+			throw new Error("c8ctl.init() must only be called once");
+		}
 		this._deps = deps;
 	}
 
