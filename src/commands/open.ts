@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
+import { requireOneOf, requirePositional } from "../command-validation.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { getLogger } from "../logger.ts";
 
@@ -89,40 +90,57 @@ export function openUrl(url: string): void {
 }
 
 /**
- * Open a Camunda web application in the default browser.
+ * Validated inputs for the open command.
  */
-export async function openApp(
+export interface OpenAppInput {
+	app: AppName;
+	profile?: string;
+	dryRun?: boolean;
+}
+
+const OPEN_USAGE = "Usage: c8 open <app> [--profile <name>]";
+
+/**
+ * Validate raw CLI positional + options for the open command.
+ * Returns a fully validated and type-narrowed input object.
+ * Exits with code 1 on invalid input.
+ */
+export function validateOpenAppOptions(
 	app: string | undefined,
 	options: { profile?: string; dryRun?: boolean },
-): Promise<void> {
+): OpenAppInput {
+	return {
+		app: requireOneOf(
+			requirePositional(app, "Application", OPEN_USAGE),
+			OPEN_APPS,
+			"application",
+			OPEN_USAGE,
+		),
+		profile: options.profile,
+		dryRun: options.dryRun,
+	};
+}
+
+/**
+ * Open a Camunda web application in the default browser.
+ */
+export async function openApp(options: OpenAppInput): Promise<void> {
 	const logger = getLogger();
 
-	if (!app) {
-		logger.error(`Application required. Available: ${OPEN_APPS.join(", ")}`);
-		logger.info("Usage: c8 open <app> [--profile <name>]");
-		process.exit(1);
-	}
-
-	if (!isAppName(app)) {
-		logger.error(
-			`Unknown application '${app}'. Available: ${OPEN_APPS.join(", ")}`,
-		);
-		logger.info("Usage: c8 open <app> [--profile <name>]");
-		process.exit(1);
-	}
-
 	const config = resolveClusterConfig(options.profile);
-	const url = deriveAppUrl(config.baseUrl, app);
+	const url = deriveAppUrl(config.baseUrl, options.app);
 
 	if (!url) {
-		logger.error(`Cannot derive ${app} URL from base URL: ${config.baseUrl}`);
+		logger.error(
+			`Cannot derive ${options.app} URL from base URL: ${config.baseUrl}`,
+		);
 		logger.info(
 			"The open command is only supported for self-managed clusters whose base URL ends with /v<n> (e.g. http://localhost:8080/v2).",
 		);
 		process.exit(1);
 	}
 
-	logger.info(`Opening ${app} at: ${url}`);
+	logger.info(`Opening ${options.app} at: ${url}`);
 	if (!options.dryRun) {
 		openUrl(url);
 	}

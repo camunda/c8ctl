@@ -50,6 +50,7 @@ import {
 	searchIdentityRoles,
 	searchIdentityTenants,
 	searchIdentityUsers,
+	validateCreateAuthorizationOptions,
 } from "./commands/identity.ts";
 import {
 	getIncident,
@@ -64,7 +65,7 @@ import {
 } from "./commands/jobs.ts";
 import { mcpProxy } from "./commands/mcp-proxy.ts";
 import { correlateMessage, publishMessage } from "./commands/messages.ts";
-import { openApp, openUrl } from "./commands/open.ts";
+import { openApp, openUrl, validateOpenAppOptions } from "./commands/open.ts";
 import {
 	downgradePlugin,
 	initPlugin,
@@ -915,10 +916,11 @@ async function main() {
 
 	// Handle open command
 	if (verb === "open") {
-		await openApp(resource, {
+		const validated = validateOpenAppOptions(resource, {
 			profile: str(values.profile),
 			dryRun: bool(values["dry-run"]),
 		});
+		await openApp(validated);
 		return;
 	}
 
@@ -1298,7 +1300,7 @@ async function main() {
 		return;
 	}
 	if (verb === "create" && normalizedResource === "authorization") {
-		await createIdentityAuthorization({
+		const validated = validateCreateAuthorizationOptions({
 			profile: str(values.profile),
 			ownerId: str(values.ownerId),
 			ownerType: str(values.ownerType),
@@ -1306,6 +1308,7 @@ async function main() {
 			resourceId: str(values.resourceId),
 			permissions: str(values.permissions),
 		});
+		await createIdentityAuthorization(validated);
 		return;
 	}
 	if (verb === "create" && normalizedResource === "mapping-rule") {

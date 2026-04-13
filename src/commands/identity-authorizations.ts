@@ -2,13 +2,21 @@
  * Identity authorization commands
  */
 
-import type {
-	OwnerTypeEnum,
-	PermissionTypeEnum,
-	ResourceTypeEnum,
+import {
+	AuthorizationKey,
+	type OwnerTypeEnum,
+	OwnerTypeEnum as OwnerTypeValues,
+	type PermissionTypeEnum,
+	PermissionTypeEnum as PermissionTypeValues,
+	type ResourceTypeEnum,
+	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { AuthorizationKey } from "@camunda8/orchestration-cluster-api";
 import { createClient, fetchAllPages } from "../client.ts";
+import {
+	requireCsvEnum,
+	requireEnum,
+	requireOption,
+} from "../command-validation.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -148,51 +156,68 @@ export async function getIdentityAuthorization(
 }
 
 /**
- * Create a new authorization
+ * Validated inputs for creating an authorization.
+ * All fields are guaranteed present and type-narrowed by
+ * validateCreateAuthorizationOptions() before reaching the handler.
  */
-export async function createIdentityAuthorization(options: {
+export interface CreateAuthorizationInput {
+	profile?: string;
+	ownerId: string;
+	ownerType: OwnerTypeEnum;
+	resourceType: ResourceTypeEnum;
+	resourceId: string;
+	permissionTypes: PermissionTypeEnum[];
+}
+
+/**
+ * Validate raw CLI options for the create authorization command.
+ * Returns a fully validated and type-narrowed input object.
+ * Exits with code 1 on invalid input.
+ */
+export function validateCreateAuthorizationOptions(options: {
 	profile?: string;
 	ownerId?: string;
 	ownerType?: string;
 	resourceType?: string;
 	resourceId?: string;
 	permissions?: string;
-}): Promise<void> {
-	const logger = getLogger();
+}): CreateAuthorizationInput {
+	return {
+		profile: options.profile,
+		ownerId: requireOption(options.ownerId, "ownerId"),
+		ownerType: requireEnum(
+			requireOption(options.ownerType, "ownerType"),
+			OwnerTypeValues,
+			"ownerType",
+		),
+		resourceType: requireEnum(
+			requireOption(options.resourceType, "resourceType"),
+			ResourceTypeValues,
+			"resourceType",
+		),
+		resourceId: requireOption(options.resourceId, "resourceId"),
+		permissionTypes: requireCsvEnum(
+			requireOption(options.permissions, "permissions"),
+			PermissionTypeValues,
+			"permissions",
+		),
+	};
+}
 
-	if (!options.ownerId) {
-		logger.error("--ownerId is required");
-		process.exit(1);
-	}
-	if (!options.ownerType) {
-		logger.error("--ownerType is required");
-		process.exit(1);
-	}
-	if (!options.resourceType) {
-		logger.error("--resourceType is required");
-		process.exit(1);
-	}
-	if (!options.resourceId) {
-		logger.error("--resourceId is required");
-		process.exit(1);
-	}
-	if (!options.permissions) {
-		logger.error("--permissions is required");
-		process.exit(1);
-	}
+/**
+ * Create a new authorization
+ */
+export async function createIdentityAuthorization(
+	options: CreateAuthorizationInput,
+): Promise<void> {
+	const logger = getLogger();
 
 	const body = {
 		ownerId: options.ownerId,
-		// biome-ignore lint/plugin: CLI string → SDK enum, validated by API at runtime (#218)
-		ownerType: options.ownerType as OwnerTypeEnum,
-		// biome-ignore lint/plugin: CLI string → SDK enum, validated by API at runtime (#218)
-		resourceType: options.resourceType as ResourceTypeEnum,
+		ownerType: options.ownerType,
+		resourceType: options.resourceType,
 		resourceId: options.resourceId,
-		// biome-ignore lint/plugin: CLI strings → SDK enum, validated by API at runtime (#218)
-		permissionTypes: options.permissions
-			.split(",")
-			.map((p) => p.trim())
-			.filter((p) => p.length > 0) as PermissionTypeEnum[],
+		permissionTypes: options.permissionTypes,
 	};
 
 	if (c8ctl.dryRun) {
