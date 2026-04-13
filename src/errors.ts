@@ -6,8 +6,8 @@
  * the process exits with a non-zero code, with a hint about using --verbose.
  */
 
-import { c8ctl } from './runtime.ts';
-import type { Logger } from './logger.ts';
+import type { Logger } from "./logger.ts";
+import { c8ctl } from "./runtime.ts";
 
 /**
  * Handle a command error in a consistent way across the codebase.
@@ -19,23 +19,24 @@ import type { Logger } from './logger.ts';
  *   The process exits with code 1.
  */
 export function handleCommandError(
-  logger: Logger,
-  message: string,
-  error: unknown,
-  additionalHints?: string[],
+	logger: Logger,
+	message: string,
+	error: unknown,
+	additionalHints?: string[],
 ): never {
-  const normalizedError = error instanceof Error ? error : new Error(String(error));
+	const normalizedError =
+		error instanceof Error ? error : new Error(String(error));
 
-  if (c8ctl.verbose) {
-    throw normalizedError;
-  }
+	if (c8ctl.verbose) {
+		throw normalizedError;
+	}
 
-  logger.error(message, normalizedError);
-  if (additionalHints) {
-    for (const hint of additionalHints) {
-      logger.info(hint);
-    }
-  }
-  logger.info('For more details on the error, run with the --verbose flag');
-  process.exit(1);
+	logger.error(message, normalizedError);
+	if (additionalHints) {
+		for (const hint of additionalHints) {
+			logger.info(hint);
+		}
+	}
+	logger.info("For more details on the error, run with the --verbose flag");
+	process.exit(1);
 }

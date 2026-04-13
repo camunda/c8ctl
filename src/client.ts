@@ -2,53 +2,57 @@
  * SDK client factory using resolved configuration
  */
 
-import { createCamundaClient, type CamundaClient, type CamundaOptions } from '@camunda8/orchestration-cluster-api';
-import { resolveClusterConfig } from './config.ts';
-import { c8ctl } from './runtime.ts';
+import {
+	type CamundaClient,
+	type CamundaOptions,
+	createCamundaClient,
+} from "@camunda8/orchestration-cluster-api";
+import { resolveClusterConfig } from "./config.ts";
+import { c8ctl } from "./runtime.ts";
 
 /**
  * Create a Camunda 8 cluster client with resolved configuration
  */
 export function createClient(
-  profileFlag?: string,
-  additionalSdkConfig: Partial<CamundaOptions> = {},
+	profileFlag?: string,
+	additionalSdkConfig: Partial<CamundaOptions> = {},
 ): CamundaClient {
-  const config = resolveClusterConfig(profileFlag);
+	const config = resolveClusterConfig(profileFlag);
 
-  // Build config object for the SDK
-  const sdkConfig: Partial<CamundaOptions["config"]> = {
-    CAMUNDA_REST_ADDRESS: config.baseUrl,
-  };
+	// Build config object for the SDK
+	const sdkConfig: Partial<CamundaOptions["config"]> = {
+		CAMUNDA_REST_ADDRESS: config.baseUrl,
+	};
 
-  // Add OAuth configuration if present
-  if (config.clientId && config.clientSecret) {
-    sdkConfig.CAMUNDA_AUTH_STRATEGY = 'OAUTH';
-    sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
-    sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
-    if (config.audience) {
-      sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
-    }
-    if (config.oAuthUrl) {
-      sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
-    }
-  }
-  // Add Basic auth configuration if present
-  else if (config.username && config.password) {
-    sdkConfig.CAMUNDA_AUTH_STRATEGY = 'BASIC';
-    sdkConfig.CAMUNDA_BASIC_AUTH_USERNAME = config.username;
-    sdkConfig.CAMUNDA_BASIC_AUTH_PASSWORD = config.password;
-  }
-  // No authentication
-  else {
-    sdkConfig.CAMUNDA_AUTH_STRATEGY = 'NONE';
-  }
+	// Add OAuth configuration if present
+	if (config.clientId && config.clientSecret) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "OAUTH";
+		sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
+		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
+		if (config.audience) {
+			sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
+		}
+		if (config.oAuthUrl) {
+			sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
+		}
+	}
+	// Add Basic auth configuration if present
+	else if (config.username && config.password) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "BASIC";
+		sdkConfig.CAMUNDA_BASIC_AUTH_USERNAME = config.username;
+		sdkConfig.CAMUNDA_BASIC_AUTH_PASSWORD = config.password;
+	}
+	// No authentication
+	else {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
+	}
 
-  // Add verbose/trace logging when --verbose flag is set
-  if (c8ctl.verbose) {
-    sdkConfig.CAMUNDA_SDK_LOG_LEVEL = 'trace';
-  }
+	// Add verbose/trace logging when --verbose flag is set
+	if (c8ctl.verbose) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "trace";
+	}
 
-  return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });
+	return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });
 }
 
 /**
@@ -68,13 +72,13 @@ export const DEFAULT_MAX_ITEMS = 1_000_000;
  * required but cursors are nullable.
  */
 type PagedResponse<T> = {
-  items: T[];
-  page: {
-    totalItems: number | bigint;
-    endCursor: string | null;
-    startCursor: string | null;
-    hasMoreTotalItems: boolean;
-  };
+	items: T[];
+	page: {
+		totalItems: number | bigint;
+		endCursor: string | null;
+		startCursor: string | null;
+		hasMoreTotalItems: boolean;
+	};
 };
 
 /**
@@ -88,47 +92,57 @@ type PagedResponse<T> = {
  * @param maxItems  – stop after collecting this many items (default 1 000 000)
  * @returns all collected items across every page (up to maxItems)
  */
-export async function fetchAllPages<T>(
-  searchFn: (filter: any, opts?: any) => Promise<PagedResponse<T>>,
-  filter: Record<string, unknown> = {},
-  pageSize = DEFAULT_PAGE_SIZE,
-  maxItems = DEFAULT_MAX_ITEMS,
+/** Consistency options passed to every search call in fetchAllPages */
+type SearchConsistencyOpts = { consistency: { waitUpToMs: number } };
+
+export async function fetchAllPages<
+	T,
+	F extends Record<string, unknown> = Record<string, unknown>,
+>(
+	searchFn: (
+		filter: F & { page?: Record<string, unknown> },
+		opts: SearchConsistencyOpts,
+	) => Promise<PagedResponse<T>>,
+	filter: F,
+	pageSize = DEFAULT_PAGE_SIZE,
+	maxItems = DEFAULT_MAX_ITEMS,
 ): Promise<T[]> {
-  const allItems: T[] = [];
-  let cursor: string | undefined;
-  const seenCursors = new Set<string>();
-  const consistencyOpts = { consistency: { waitUpToMs: 0 } };
+	const allItems: T[] = [];
+	let cursor: string | undefined;
+	const seenCursors = new Set<string>();
+	const consistencyOpts = { consistency: { waitUpToMs: 0 } };
 
-  do {
-    const pageFilter = {
-      ...filter,
-      page: {
-        limit: pageSize,
-        ...(cursor ? { after: cursor } : {}),
-      },
-    };
+	do {
+		const pageFilter = {
+			...filter,
+			page: {
+				limit: pageSize,
+				...(cursor ? { after: cursor } : {}),
+			},
+		};
 
-    const result = await searchFn(pageFilter, consistencyOpts);
+		const result = await searchFn(pageFilter, consistencyOpts);
 
-    if (result.items.length) {
-      allItems.push(...result.items);
-    }
+		if (result.items.length) {
+			allItems.push(...result.items);
+		}
 
-    if (allItems.length >= maxItems) {
-      allItems.length = maxItems;
-      break;
-    }
+		if (allItems.length >= maxItems) {
+			allItems.length = maxItems;
+			break;
+		}
 
-    const endCursor = result.page.endCursor;
-    const totalItems = Number(result.page.totalItems);
+		const endCursor = result.page.endCursor;
+		const totalItems = Number(result.page.totalItems);
 
-    if (!endCursor || seenCursors.has(endCursor)) break;
-    if (allItems.length >= totalItems) break;
-    if (!result.items.length) break;
+		if (!endCursor || seenCursors.has(endCursor)) break;
+		if (allItems.length >= totalItems) break;
+		if (!result.items.length) break;
 
-    seenCursors.add(endCursor);
-    cursor = endCursor;
-  } while (true);
+		seenCursors.add(endCursor);
+		cursor = endCursor;
+		// biome-ignore lint/correctness/noConstantCondition: intentional infinite loop with multiple break conditions
+	} while (true);
 
-  return allItems;
+	return allItems;
 }

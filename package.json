@@ -25,7 +25,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm run clean && tsc && npm run copy-plugins && npm run copy-templates",
+    "build": "npm run lint && npm run clean && tsc && npm run copy-plugins && npm run copy-templates",
+    "lint": "biome check src/",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "copy-plugins": "node -e \"const fs=require('fs');const path=require('path');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",
@@ -63,6 +64,7 @@
     "ignore": "^7.0.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.11",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/github": "^12.0.6",
     "@semantic-release/npm": "^13.1.5",
