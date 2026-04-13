@@ -7,7 +7,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { requireOption, requireEnum, requireCsvEnum } from '../../src/command-validation.ts';
+import { requireOption, requireEnum, requireCsvEnum, requirePositional, requireOneOf } from '../../src/command-validation.ts';
 
 // A minimal enum-like object matching the SDK pattern
 const ColorEnum = { RED: 'RED', GREEN: 'GREEN', BLUE: 'BLUE' } as const;
@@ -144,5 +144,87 @@ describe('requireCsvEnum', () => {
     );
     assert.ok(errorSpy.some(l => l.includes('PURPLE')));
     assert.ok(errorSpy.some(l => l.includes('YELLOW')));
+  });
+});
+
+// ─── requirePositional ──────────────────────────────────────────────────────
+
+describe('requirePositional', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test('returns the value when present', () => {
+    assert.strictEqual(requirePositional('operate', 'Application'), 'operate');
+  });
+
+  test('exits when value is undefined', () => {
+    assert.throws(
+      () => requirePositional(undefined, 'Application'),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Application is required')));
+  });
+
+  test('exits when value is empty string', () => {
+    assert.throws(
+      () => requirePositional('', 'Application'),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Application is required')));
+  });
+
+  test('prints hint when provided', () => {
+    const logSpy: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: any[]) => { logSpy.push(args.join(' ')); };
+    try {
+      requirePositional(undefined, 'Application', 'Usage: c8 open <app>');
+    } catch { /* expected */ }
+    console.log = origLog;
+    assert.ok(logSpy.some(l => l.includes('Usage: c8 open <app>')));
+  });
+});
+
+// ─── requireOneOf ────────────────────────────────────────────────────────────
+
+const FRUITS = ['apple', 'banana', 'cherry'] as const;
+
+describe('requireOneOf', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test('returns matched value for a valid item', () => {
+    assert.strictEqual(requireOneOf('apple', FRUITS, 'fruit'), 'apple');
+    assert.strictEqual(requireOneOf('banana', FRUITS, 'fruit'), 'banana');
+    assert.strictEqual(requireOneOf('cherry', FRUITS, 'fruit'), 'cherry');
+  });
+
+  test('exits on invalid value listing valid options', () => {
+    assert.throws(
+      () => requireOneOf('mango', FRUITS, 'fruit'),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes("Unknown fruit 'mango'")));
+    assert.ok(errorSpy.some(l => l.includes('apple')));
+    assert.ok(errorSpy.some(l => l.includes('banana')));
+    assert.ok(errorSpy.some(l => l.includes('cherry')));
+  });
+
+  test('is case-sensitive', () => {
+    assert.throws(
+      () => requireOneOf('Apple', FRUITS, 'fruit'),
+      /process\.exit\(1\)/,
+    );
+  });
+
+  test('prints hint when provided', () => {
+    const logSpy: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: any[]) => { logSpy.push(args.join(' ')); };
+    try {
+      requireOneOf('mango', FRUITS, 'fruit', 'Usage: pick a fruit');
+    } catch { /* expected */ }
+    console.log = origLog;
+    assert.ok(logSpy.some(l => l.includes('Usage: pick a fruit')));
   });
 });
