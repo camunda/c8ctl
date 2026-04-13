@@ -9,7 +9,6 @@ import { toStringFilter } from './search.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
-import type { createGroupInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all groups
@@ -124,7 +123,7 @@ export async function createIdentityGroup(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = { name: options.name };
+  const body = { name: options.name };
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -141,7 +140,7 @@ export async function createIdentityGroup(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createGroup(body as createGroupInput);
+    await client.createGroup(body);
     logger.success(`Group '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create group', error);

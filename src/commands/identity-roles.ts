@@ -9,7 +9,6 @@ import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 import type { createRoleInput } from '@camunda8/orchestration-cluster-api';
-import type { createRoleInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all roles
@@ -124,7 +123,7 @@ export async function createIdentityRole(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = { name: options.name };
+  const body = { name: options.name };
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -141,7 +140,7 @@ export async function createIdentityRole(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createRole(body as createRoleInput);
+    await client.createRole(body);
     logger.success(`Role '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create role', error);

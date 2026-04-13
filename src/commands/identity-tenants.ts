@@ -9,7 +9,6 @@ import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 import { TenantId } from '@camunda8/orchestration-cluster-api';
-import type { createTenantInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all tenants
@@ -129,7 +128,7 @@ export async function createIdentityTenant(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = {
+  const body = {
     tenantId: options.tenantId,
     name: options.name,
   };
@@ -149,7 +148,7 @@ export async function createIdentityTenant(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createTenant(body as createTenantInput);
+    await client.createTenant(body);
     logger.success(`Tenant '${options.tenantId}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create tenant', error);

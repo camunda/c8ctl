@@ -8,7 +8,6 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
-import type { createMappingRuleInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all mapping rules
@@ -144,7 +143,7 @@ export async function createIdentityMappingRule(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = {
+  const body = {
     mappingRuleId: options.mappingRuleId,
     name: options.name,
     claimName: options.claimName,
@@ -166,7 +165,7 @@ export async function createIdentityMappingRule(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createMappingRule(body as createMappingRuleInput);
+    await client.createMappingRule(body);
     logger.success(`Mapping rule '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create mapping rule', error);
