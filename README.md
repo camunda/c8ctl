@@ -320,6 +320,9 @@ c8 list pi --profile=modeler:Cloud Cluster
 ### Session Management
 
 ```bash
+# Show current output mode
+c8ctl output
+
 # Switch to JSON output
 c8ctl output json
 
@@ -590,7 +593,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `unload` - Unload a plugin
 - `sync` - Synchronize plugins
 - `use` - Set active profile or tenant
-- `output` - Set output format
+- `output` - Show or set output format
 - `completion` - Generate shell completion script
 - `feedback` - Open the feedback page to report issues or request features
 
