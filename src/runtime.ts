@@ -2,164 +2,171 @@
  * c8ctl runtime object with environment information and session state
  */
 
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type { CamundaClient, CamundaOptions } from '@camunda8/orchestration-cluster-api';
-import type { Logger, OutputMode } from './logger.ts';
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+	CamundaClient,
+	CamundaOptions,
+} from "@camunda8/orchestration-cluster-api";
+import type { Logger, OutputMode } from "./logger.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export interface C8ctlEnv {
-  version: string;
-  nodeVersion: string;
-  platform: string;
-  arch: string;
-  cwd: string;
-  rootDir: string;
+	version: string;
+	nodeVersion: string;
+	platform: string;
+	arch: string;
+	cwd: string;
+	rootDir: string;
 }
 
 export interface C8ctlPluginRuntime {
-  readonly env: C8ctlEnv;
-  readonly version: string;
-  readonly nodeVersion: string;
-  readonly platform: string;
-  readonly arch: string;
-  readonly cwd: string;
-  activeProfile?: string;
-  activeTenant?: string;
-  outputMode: OutputMode;
-  /** Agent flag: comma-separated list of fields to include in output (applied at logger level) */
-  fields?: string[];
-  /** Agent flag: when true, mutating commands emit the would-be API request as JSON without executing it */
-  dryRun?: boolean;
-  /** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
-  verbose?: boolean;
-  createClient(profileFlag?: string, additionalSdkConfig?: Partial<CamundaOptions>): CamundaClient;
-  resolveTenantId(profileFlag?: string): string;
-  getLogger(mode?: OutputMode): Logger;
+	readonly env: C8ctlEnv;
+	readonly version: string;
+	readonly nodeVersion: string;
+	readonly platform: string;
+	readonly arch: string;
+	readonly cwd: string;
+	activeProfile?: string;
+	activeTenant?: string;
+	outputMode: OutputMode;
+	/** Agent flag: comma-separated list of fields to include in output (applied at logger level) */
+	fields?: string[];
+	/** Agent flag: when true, mutating commands emit the would-be API request as JSON without executing it */
+	dryRun?: boolean;
+	/** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
+	verbose?: boolean;
+	createClient(
+		profileFlag?: string,
+		additionalSdkConfig?: Partial<CamundaOptions>,
+	): CamundaClient;
+	resolveTenantId(profileFlag?: string): string;
+	getLogger(mode?: OutputMode): Logger;
 }
 
 declare global {
-  // c8ctl runtime exposed to plugins via globalThis
-  // eslint-disable-next-line no-var
-  var c8ctl: C8ctlPluginRuntime | undefined;
+	// c8ctl runtime exposed to plugins via globalThis
+	// eslint-disable-next-line no-var
+	var c8ctl: C8ctlPluginRuntime | undefined;
 }
 
 /**
  * Get c8ctl version from package.json
  */
 function getVersion(): string {
-  try {
-    const packageJsonPath = join(__dirname, '..', 'package.json');
-    const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    return packageJson.version || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
+	try {
+		const packageJsonPath = join(__dirname, "..", "package.json");
+		const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+		return packageJson.version || "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
 }
 
 /**
  * c8ctl runtime class with session state management
  */
 class C8ctl {
-  private _activeProfile?: string;
-  private _activeTenant?: string;
-  private _outputMode: OutputMode = 'text';
-  private _fields?: string[];
-  private _dryRun?: boolean;
-  private _verbose?: boolean;
-  private _resolvedBaseUrl?: string;
+	private _activeProfile?: string;
+	private _activeTenant?: string;
+	private _outputMode: OutputMode = "text";
+	private _fields?: string[];
+	private _dryRun?: boolean;
+	private _verbose?: boolean;
+	private _resolvedBaseUrl?: string;
 
-  readonly env: C8ctlEnv = {
-    version: getVersion(),
-    nodeVersion: process.version,
-    platform: process.platform,
-    arch: process.arch,
-    cwd: process.cwd(),
-    rootDir: join(__dirname, '..'),
-  };
+	readonly env: C8ctlEnv = {
+		version: getVersion(),
+		nodeVersion: process.version,
+		platform: process.platform,
+		arch: process.arch,
+		cwd: process.cwd(),
+		rootDir: join(__dirname, ".."),
+	};
 
-  // Expose env properties directly for plugin compatibility
-  get version(): string {
-    return this.env.version;
-  }
+	// Expose env properties directly for plugin compatibility
+	get version(): string {
+		return this.env.version;
+	}
 
-  get nodeVersion(): string {
-    return this.env.nodeVersion;
-  }
+	get nodeVersion(): string {
+		return this.env.nodeVersion;
+	}
 
-  get platform(): string {
-    return this.env.platform;
-  }
+	get platform(): string {
+		return this.env.platform;
+	}
 
-  get arch(): string {
-    return this.env.arch;
-  }
+	get arch(): string {
+		return this.env.arch;
+	}
 
-  get cwd(): string {
-    return this.env.cwd;
-  }
+	get cwd(): string {
+		return this.env.cwd;
+	}
 
-  get activeProfile(): string | undefined {
-    return this._activeProfile;
-  }
+	get activeProfile(): string | undefined {
+		return this._activeProfile;
+	}
 
-  set activeProfile(value: string | undefined) {
-    this._activeProfile = value;
-  }
+	set activeProfile(value: string | undefined) {
+		this._activeProfile = value;
+	}
 
-  get activeTenant(): string | undefined {
-    return this._activeTenant;
-  }
+	get activeTenant(): string | undefined {
+		return this._activeTenant;
+	}
 
-  set activeTenant(value: string | undefined) {
-    this._activeTenant = value;
-  }
+	set activeTenant(value: string | undefined) {
+		this._activeTenant = value;
+	}
 
-  get outputMode(): OutputMode {
-    return this._outputMode;
-  }
+	get outputMode(): OutputMode {
+		return this._outputMode;
+	}
 
-  set outputMode(value: OutputMode) {
-    this._outputMode = value;
-  }
+	set outputMode(value: OutputMode) {
+		this._outputMode = value;
+	}
 
-  get fields(): string[] | undefined {
-    return this._fields;
-  }
+	get fields(): string[] | undefined {
+		return this._fields;
+	}
 
-  set fields(value: string[] | undefined) {
-    this._fields = value;
-  }
+	set fields(value: string[] | undefined) {
+		this._fields = value;
+	}
 
-  get dryRun(): boolean | undefined {
-    return this._dryRun;
-  }
+	get dryRun(): boolean | undefined {
+		return this._dryRun;
+	}
 
-  set dryRun(value: boolean | undefined) {
-    this._dryRun = value;
-  }
+	set dryRun(value: boolean | undefined) {
+		this._dryRun = value;
+	}
 
-  get verbose(): boolean | undefined {
-    return this._verbose;
-  }
+	get verbose(): boolean | undefined {
+		return this._verbose;
+	}
 
-  set verbose(value: boolean | undefined) {
-    this._verbose = value;
-  }
+	set verbose(value: boolean | undefined) {
+		this._verbose = value;
+	}
 
-  get resolvedBaseUrl(): string | undefined {
-    return this._resolvedBaseUrl;
-  }
+	get resolvedBaseUrl(): string | undefined {
+		return this._resolvedBaseUrl;
+	}
 
-  set resolvedBaseUrl(value: string | undefined) {
-    this._resolvedBaseUrl = value;
-  }
+	set resolvedBaseUrl(value: string | undefined) {
+		this._resolvedBaseUrl = value;
+	}
 }
 
 /**
  * Global c8ctl runtime instance
  */
+// biome-ignore lint/suspicious/noRedeclare: intentional — module export shadows the globalThis declaration (#219)
 export const c8ctl = new C8ctl();

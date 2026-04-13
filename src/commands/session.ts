@@ -2,78 +2,77 @@
  * Session management commands (use profile, use tenant, output mode)
  */
 
-import { getLogger } from '../logger.ts';
 import {
-  setActiveProfile,
-  setActiveTenant,
-  setOutputMode,
-  getProfileOrModeler,
-  clearActiveProfile,
-} from '../config.ts';
-import { c8ctl } from '../runtime.ts';
-import type { OutputMode } from '../logger.ts';
+	clearActiveProfile,
+	getProfileOrModeler,
+	setActiveProfile,
+	setActiveTenant,
+	setOutputMode,
+} from "../config.ts";
+import { getLogger } from "../logger.ts";
+import { c8ctl } from "../runtime.ts";
 
 /**
  * Set active profile
  */
 export function useProfile(name: string): void {
-  const logger = getLogger();
-  
-  // Handle --none to clear profile
-  if (name === '--none') {
-    clearActiveProfile();
-    logger.success('Session profile cleared');
-    return;
-  }
+	const logger = getLogger();
 
-  // Verify profile exists (checks both c8ctl and Modeler profiles)
-  const profile = getProfileOrModeler(name);
-  if (!profile) {
-    logger.error(`Profile '${name}' not found`);
-    process.exit(1);
-  }
+	// Handle --none to clear profile
+	if (name === "--none") {
+		clearActiveProfile();
+		logger.success("Session profile cleared");
+		return;
+	}
 
-  setActiveProfile(name);
-  logger.success(`Now using profile: ${name}`);
+	// Verify profile exists (checks both c8ctl and Modeler profiles)
+	const profile = getProfileOrModeler(name);
+	if (!profile) {
+		logger.error(`Profile '${name}' not found`);
+		process.exit(1);
+	}
+
+	setActiveProfile(name);
+	logger.success(`Now using profile: ${name}`);
 }
 
 /**
  * Set active tenant
  */
 export function useTenant(tenantId: string): void {
-  const logger = getLogger();
-  setActiveTenant(tenantId);
-  logger.success(`Now using tenant: ${tenantId}`);
+	const logger = getLogger();
+	setActiveTenant(tenantId);
+	logger.success(`Now using tenant: ${tenantId}`);
 }
 
 /**
  * Set output mode
  */
 export function setOutputFormat(mode: string): void {
-  const logger = getLogger();
-  
-  if (mode !== 'json' && mode !== 'text') {
-    logger.error(`Invalid output mode: ${mode}. Must be 'json' or 'text'`);
-    process.exit(1);
-  }
+	const logger = getLogger();
 
-  setOutputMode(mode as OutputMode);
-  
-  // Update logger immediately
-  logger.mode = mode as OutputMode;
-  
-  logger.success(`Output mode set to: ${mode}`);
+	if (mode !== "json" && mode !== "text") {
+		logger.error(`Invalid output mode: ${mode}. Must be 'json' or 'text'`);
+		process.exit(1);
+	}
+
+	setOutputMode(mode);
+
+	// Update logger immediately
+	logger.mode = mode;
+
+	logger.success(`Output mode set to: ${mode}`);
 }
 
 /**
  * Show current session state
  */
 export function showSessionState(): void {
-  const logger = getLogger();
-  
-  logger.info('\nCurrent Session State:');
-  logger.info(`  Active Profile: ${c8ctl.activeProfile || '(none)'}`);
-  logger.info(`  Active Tenant: ${c8ctl.activeTenant || '(none)'}`);
-  logger.info(`  Output Mode: ${c8ctl.outputMode}`);
-  logger.info('');
+	const logger = getLogger();
+
+	logger.info("\nCurrent Session State:");
+	logger.info(`  Active Profile: ${c8ctl.activeProfile || "(none)"}`);
+	logger.info(`  Active Tenant: ${c8ctl.activeTenant || "(none)"}`);
+	logger.info(`  Output Mode: ${c8ctl.outputMode}`);
+	logger.info("");
 }

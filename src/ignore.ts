@@ -9,32 +9,28 @@
  * Users can override or extend via a `.c8ignore` file in the working directory.
  */
 
-import ignore, { type Ignore } from 'ignore';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import ignore, { type Ignore } from "ignore";
 
-const DEFAULT_PATTERNS = [
-  'node_modules/',
-  'target/',
-  '.git/',
-];
+const DEFAULT_PATTERNS = ["node_modules/", "target/", ".git/"];
 
-const C8IGNORE_FILENAME = '.c8ignore';
+const C8IGNORE_FILENAME = ".c8ignore";
 
 /**
  * Load ignore rules from the `.c8ignore` file in `baseDir` (if present)
  * merged with built-in default patterns.
  */
 export function loadIgnoreRules(baseDir: string): Ignore {
-  const ig = ignore().add(DEFAULT_PATTERNS);
+	const ig = ignore().add(DEFAULT_PATTERNS);
 
-  const ignoreFilePath = join(baseDir, C8IGNORE_FILENAME);
-  if (existsSync(ignoreFilePath)) {
-    const content = readFileSync(ignoreFilePath, 'utf-8');
-    ig.add(content);
-  }
+	const ignoreFilePath = join(baseDir, C8IGNORE_FILENAME);
+	if (existsSync(ignoreFilePath)) {
+		const content = readFileSync(ignoreFilePath, "utf-8");
+		ig.add(content);
+	}
 
-  return ig;
+	return ig;
 }
 
 /**
@@ -45,15 +41,19 @@ export function loadIgnoreRules(baseDir: string): Ignore {
  *
  * Returns `true` when the path matches an ignore rule.
  */
-export function isIgnored(ig: Ignore, filePath: string, baseDir: string): boolean {
-  let rel = relative(baseDir, filePath);
-  // `ignore` expects forward-slash separators
-  if (sep !== '/') {
-    rel = rel.split(sep).join('/');
-  }
-  // Paths outside baseDir can't be ignored
-  if (rel === '' || rel === '..' || rel.startsWith('../')) {
-    return false;
-  }
-  return ig.ignores(rel);
+export function isIgnored(
+	ig: Ignore,
+	filePath: string,
+	baseDir: string,
+): boolean {
+	let rel = relative(baseDir, filePath);
+	// `ignore` expects forward-slash separators
+	if (sep !== "/") {
+		rel = rel.split(sep).join("/");
+	}
+	// Paths outside baseDir can't be ignored
+	if (rel === "" || rel === ".." || rel.startsWith("../")) {
+		return false;
+	}
+	return ig.ignores(rel);
 }
