@@ -734,10 +734,11 @@ export function parseEnvFile(content: string): Record<string, string> {
  */
 export function envVarsToProfile(name: string, vars: Record<string, string | undefined>): Profile {
   const profile: Profile = { name, baseUrl: '' };
-  for (const [envKey, profileField] of Object.entries(ENV_VAR_PROFILE_MAP)) {
+  for (const envKey of Object.keys(ENV_VAR_PROFILE_MAP)) {
+    const profileField = ENV_VAR_PROFILE_MAP[envKey];
     const value = vars[envKey];
     if (value) {
-      (profile as Record<string, string>)[profileField] = value;
+      profile[profileField] = value;
     }
   }
   return profile;

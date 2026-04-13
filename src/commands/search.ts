@@ -278,12 +278,12 @@ export async function searchProcessDefinitions(options: {
       filter.filter.processDefinitionKey = options.key;
     }
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchProcessDefinitions(f, opts),
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    const result: SearchResult = { items: allItems };
 
     if (result.items?.length) {
       result.items = [...result.items].sort((left: any, right: any) => {
@@ -321,7 +321,7 @@ export async function searchProcessDefinitions(options: {
       logNoResults(logger, 'process definitions', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search process definitions', error);
   }
@@ -421,12 +421,12 @@ export async function searchProcessInstances(options: {
       }
     }
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchProcessInstances(f, opts),
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    const result: SearchResult = { items: allItems };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((pi: any) => {
@@ -451,7 +451,7 @@ export async function searchProcessInstances(options: {
       logNoResults(logger, 'process instances', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search process instances', error);
   }
@@ -543,12 +543,12 @@ export async function searchUserTasks(options: {
       }
     }
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchUserTasks(f, opts),
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    const result: SearchResult = { items: allItems };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((task: any) => {
@@ -574,7 +574,7 @@ export async function searchUserTasks(options: {
       logNoResults(logger, 'user tasks', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search user tasks', error);
   }
@@ -677,12 +677,12 @@ export async function searchIncidents(options: {
       }
     }
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchIncidents(f, opts),
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    const result: SearchResult = { items: allItems };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((incident: any) => {
@@ -710,7 +710,7 @@ export async function searchIncidents(options: {
       logNoResults(logger, 'incidents', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search incidents', error);
   }
@@ -794,12 +794,12 @@ export async function searchJobs(options: {
       }
     }
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchJobs(f, opts),
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    const result: SearchResult = { items: allItems };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((job: any) => {
@@ -825,7 +825,7 @@ export async function searchJobs(options: {
       logNoResults(logger, 'jobs', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search jobs', error);
   }
@@ -904,14 +904,14 @@ export async function searchVariables(options: {
     // By default, truncate values unless --fullValue is specified
     const truncateValues = !options.fullValue;
 
-    const allItems = await fetchAllPages(
+    const allItems = await fetchAllPages<Record<string, unknown>>(
       (f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
       filter,
       hasCiFilter ? CI_PAGE_SIZE : DEFAULT_PAGE_SIZE,
       options.limit,
     );
 
-    let result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
+    let result: SearchResult = { items: allItems };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((variable: any) => {
@@ -957,7 +957,7 @@ export async function searchVariables(options: {
       logNoResults(logger, 'variables', criteria.length > 0, options._unknownFlags);
     }
 
-    return result as SearchResult;
+    return result;
   } catch (error) {
     handleCommandError(logger, 'Failed to search variables', error);
   }
