@@ -15,7 +15,35 @@ const __dirname = dirname(__filename);
  * Build structured JSON help data for machine/agent consumption.
  * Returned by showHelp() and showCommandHelp() in JSON output mode.
  */
-function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[]): object {
+
+interface HelpFlag {
+  flag: string;
+  type: string;
+  description: string;
+  short?: string;
+  appliesTo?: string;
+}
+
+interface HelpCommand {
+  verb: string;
+  resource: string;
+  resources: string[];
+  description: string;
+  mutating: boolean;
+  examples?: string[];
+}
+
+interface HelpJson {
+  version: string;
+  usage: string;
+  commands: HelpCommand[];
+  resourceAliases: Record<string, string>;
+  globalFlags: HelpFlag[];
+  searchFlags: HelpFlag[];
+  agentFlags: HelpFlag[];
+}
+
+function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[]): HelpJson {
   return {
     version,
     usage: 'c8ctl <command> [resource] [options]',
@@ -1593,9 +1621,8 @@ export function showCommandHelp(command: string): void {
   if (logger.mode === 'json') {
     const version = getVersion();
     const pluginCommandsInfo = getPluginCommandsInfo();
-    const allHelp = buildHelpJson(version, pluginCommandsInfo) as Record<string, unknown>;
-    const commands = allHelp.commands as Array<Record<string, unknown>> | undefined;
-    const commandEntry = commands?.find((c) => c.verb === command);
+    const allHelp = buildHelpJson(version, pluginCommandsInfo);
+    const commandEntry = allHelp.commands.find((c) => c.verb === command);
     logger.json({
       command,
       ...(commandEntry ?? { verb: command, description: `No detailed help available for: ${command}` }),
