@@ -42,11 +42,19 @@ export function loadPluginRegistry(): PluginRegistry {
 
 	try {
 		const content = readFileSync(registryPath, "utf-8");
-		registryCache = JSON.parse(content);
-		if (registryCache === null) {
-			console.warn("⚠ Warning: Plugin registry file was unparseable.");
-			return { plugins: [] };
+		const parsed: unknown = JSON.parse(content);
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			!Array.isArray(parsed) &&
+			"plugins" in parsed &&
+			Array.isArray(parsed.plugins)
+		) {
+			registryCache = { plugins: parsed.plugins };
+			return registryCache;
 		}
+		console.warn("⚠ Warning: Plugin registry file was unparseable.");
+		registryCache = { plugins: [] };
 		return registryCache;
 	} catch (_error) {
 		// If registry is corrupted, start fresh and warn user

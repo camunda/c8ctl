@@ -2,7 +2,7 @@
  * Plugin management commands
  */
 
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,7 +102,7 @@ export async function loadPlugin(
 
 			// Install from URL (file://, https://, git://, etc.)
 			logger.info(`Loading plugin from: ${fromUrl}...`);
-			execSync(`npm install ${fromUrl} --prefix "${pluginsDir}"`, {
+			execFileSync("npm", ["install", fromUrl, "--prefix", pluginsDir], {
 				stdio: "inherit",
 			});
 
@@ -131,7 +131,7 @@ export async function loadPlugin(
 			if (!packageName) throw new Error("unreachable: packageName is required");
 
 			logger.info(`Loading plugin: ${packageName}...`);
-			execSync(`npm install ${packageName} --prefix "${pluginsDir}"`, {
+			execFileSync("npm", ["install", packageName, "--prefix", pluginsDir], {
 				stdio: "inherit",
 			});
 
@@ -680,7 +680,7 @@ export async function syncPlugins(): Promise<void> {
 
 				// Try npm rebuild first
 				try {
-					execSync(`npm rebuild ${plugin.name} --prefix "${pluginsDir}"`, {
+					execFileSync("npm", ["rebuild", plugin.name, "--prefix", pluginsDir], {
 						stdio: "pipe",
 					});
 					logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
@@ -695,7 +695,7 @@ export async function syncPlugins(): Promise<void> {
 
 			// Fresh install
 			try {
-				execSync(`npm install ${plugin.source} --prefix "${pluginsDir}"`, {
+				execFileSync("npm", ["install", plugin.source, "--prefix", pluginsDir], {
 					stdio: "inherit",
 				});
 				logger.success(`  ✓ ${plugin.name} installed successfully`);
@@ -800,12 +800,12 @@ export async function upgradePlugin(
 		);
 
 		// Uninstall current version
-		execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, {
+		execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
 			stdio: "pipe",
 		});
 
 		// Install new version while respecting source type
-		execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, {
+		execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
 			stdio: "inherit",
 		});
 
@@ -873,12 +873,12 @@ export async function downgradePlugin(
 		logger.info(`Downgrading plugin: ${packageName} to version ${version}...`);
 
 		// Uninstall current version
-		execSync(`npm uninstall ${packageName} --prefix "${pluginsDir}"`, {
+		execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
 			stdio: "pipe",
 		});
 
 		// Install specific version while respecting source type
-		execSync(`npm install ${installTarget} --prefix "${pluginsDir}"`, {
+		execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
 			stdio: "inherit",
 		});
 
