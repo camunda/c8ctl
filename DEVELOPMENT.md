@@ -62,6 +62,7 @@ Follow conventions in [COMMIT-MESSAGE-GUIDELINE.md](COMMIT-MESSAGE-GUIDELINE.md)
 - **never use `any`** — use `unknown` and narrow with type guards. Enforced by Biome (`noExplicitAny`, `noImplicitAnyLet`, `noEvolvingTypes` — all set to `error`)
 - **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`). Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
 - run `npx biome check src/` to verify — this runs as part of `npm run build` and CI. Zero diagnostics required
+- run `npx biome check --fix src/` before committing to auto-fix formatting and lint issues
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript
