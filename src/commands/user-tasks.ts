@@ -3,7 +3,7 @@
  */
 
 import { UserTaskKey } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig, resolveTenantId } from "../config.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
 import { handleCommandError } from "../errors.ts";
@@ -58,6 +58,8 @@ export async function listUserTasks(options: {
 				process.exit(1);
 			}
 		}
+
+		if (emitDryRun({ command: "list user-tasks", method: "POST", endpoint: "/user-tasks/search", profile: options.profile, body: filter })) return;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchUserTasks(f, opts),

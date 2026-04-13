@@ -3,7 +3,7 @@
  */
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -20,6 +20,8 @@ export async function listTenants(options: {
 }): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (emitDryRun({ command: "list tenants", method: "POST", endpoint: "/tenants/search", profile: options.profile, body: {} })) return;
 
 	try {
 		const items = await fetchAllPages(
@@ -72,6 +74,8 @@ export async function searchIdentityTenants(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
+		if (emitDryRun({ command: "search tenants", method: "POST", endpoint: "/tenants/search", profile: options.profile, body: searchFilter })) return;
+
 		const items = await fetchAllPages(
 			(f, opts) => client.searchTenants(f, opts),
 			searchFilter,
@@ -112,6 +116,8 @@ export async function getIdentityTenant(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (emitDryRun({ command: "get tenant", method: "GET", endpoint: `/tenants/${tenantId}`, profile: options.profile })) return;
 
 	try {
 		const result = await client.getTenant(

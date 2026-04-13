@@ -515,8 +515,9 @@ c8ctl list pi --fields Key,State,processDefinitionId | jq .
 ### `--dry-run`
 
 Previews the API request that **would** be sent without executing it.
-Applies to all mutating commands: `create`, `cancel`, `deploy`, `complete`,
-`fail`, `activate`, `resolve`, `publish`, `correlate`.
+Works on **all commands**: queries (`list`, `search`, `get`) and mutations
+(`create`, `cancel`, `deploy`, `complete`, `fail`, `activate`, `resolve`,
+`publish`, `correlate`).
 
 Emits a JSON object to stdout and exits 0:
 ```json
@@ -543,6 +544,15 @@ c8ctl deploy ./my-process.bpmn --dry-run
 
 # Preview cancelling a process instance
 c8ctl cancel pi 2251799813685249 --dry-run
+
+# Debug a search query — see the filter body that would be sent
+c8ctl search pi --state ACTIVE --between 2024-01-01..2024-12-31 --dry-run
+
+# Inspect a list operation
+c8ctl list pd --dry-run
+
+# Preview a get request
+c8ctl get pi 12345 --dry-run
 ```
 
 ### Machine-Readable Help (JSON Mode)

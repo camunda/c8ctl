@@ -3,7 +3,7 @@
  */
 
 import { IncidentKey } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
+import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig, resolveTenantId } from "../config.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
 import { handleCommandError } from "../errors.ts";
@@ -53,6 +53,8 @@ export async function listIncidents(options: {
 			}
 		}
 
+		if (emitDryRun({ command: "list incidents", method: "POST", endpoint: "/incidents/search", profile: options.profile, body: filter })) return;
+
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchIncidents(f, opts),
 			filter,
@@ -96,6 +98,8 @@ export async function getIncident(
 ): Promise<void> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
+
+	if (emitDryRun({ command: "get incident", method: "GET", endpoint: `/incidents/${key}`, profile: options.profile })) return;
 
 	try {
 		const result = await client.getIncident(
