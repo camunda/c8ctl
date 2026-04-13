@@ -1038,6 +1038,7 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'role') {
     await createIdentityRole({
       profile: values.profile as string | undefined,
+      roleId: values.roleId as string | undefined,
       name: values.name as string | undefined,
     });
     return;
@@ -1045,6 +1046,7 @@ async function main() {
   if (verb === 'create' && normalizedResource === 'group') {
     await createIdentityGroup({
       profile: values.profile as string | undefined,
+      groupId: values.groupId as string | undefined,
       name: values.name as string | undefined,
     });
     return;

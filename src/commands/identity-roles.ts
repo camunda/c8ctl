@@ -8,7 +8,6 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
-import type { RoleCreateRequest } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all roles
@@ -114,16 +113,21 @@ export async function getIdentityRole(roleId: string, options: {
  */
 export async function createIdentityRole(options: {
   profile?: string;
+  roleId?: string;
   name?: string;
 }): Promise<void> {
   const logger = getLogger();
 
+  if (!options.roleId) {
+    logger.error('--roleId is required');
+    process.exit(1);
+  }
   if (!options.name) {
     logger.error('--name is required');
     process.exit(1);
   }
 
-  const body = { name: options.name };
+  const body = { roleId: options.roleId, name: options.name };
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -140,7 +144,7 @@ export async function createIdentityRole(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createRole(body as RoleCreateRequest);
+    await client.createRole(body);
     logger.success(`Role '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create role', error);

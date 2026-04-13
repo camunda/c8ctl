@@ -96,9 +96,17 @@ describe('Identity Commands — required-flag validation', () => {
   });
 
   // createIdentityRole
+  test('createIdentityRole: errors when --roleId is missing', async () => {
+    await assert.rejects(
+      () => createIdentityRole({ name: 'admin' }),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('--roleId is required')));
+  });
+
   test('createIdentityRole: errors when --name is missing', async () => {
     await assert.rejects(
-      () => createIdentityRole({}),
+      () => createIdentityRole({ roleId: 'admin-role' }),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--name is required')));
@@ -204,13 +212,13 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('createIdentityRole: emits POST to /roles with name in body', async () => {
-    await createIdentityRole({ name: 'admin' });
+    await createIdentityRole({ roleId: 'admin-role', name: 'admin' });
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
     assert.strictEqual(out.method, 'POST');
     assert.ok((out.url as string).endsWith('/roles'), `expected URL to end with /roles, got: ${out.url}`);
-    assert.deepStrictEqual(out.body, { name: 'admin' });
+    assert.deepStrictEqual(out.body, { roleId: 'admin-role', name: 'admin' });
   });
 
   test('deleteIdentityRole: emits DELETE to /roles/:roleId', async () => {
@@ -487,7 +495,7 @@ describe('Dry-run schema — all mutating identity commands include body field',
   });
 
   test('createIdentityRole dry-run includes body object', async () => {
-    await createIdentityRole({ name: 'admin' });
+    await createIdentityRole({ roleId: 'admin-role', name: 'admin' });
     assertDryRunSchema(capturedJson(), 'createIdentityRole');
     assert.ok(typeof capturedJson().body === 'object' && capturedJson().body !== null);
   });
