@@ -9,7 +9,6 @@ import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 import { Username } from '@camunda8/orchestration-cluster-api';
-import type { createUserInput } from '@camunda8/orchestration-cluster-api';
 import { toStringFilter } from './search.ts';
 
 /**
@@ -134,12 +133,12 @@ export async function createIdentityUser(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = {
+  const body = {
     username: options.username,
     password: options.password,
+    ...(options.name ? { name: options.name } : {}),
+    ...(options.email ? { email: options.email } : {}),
   };
-  if (options.name) body.name = options.name;
-  if (options.email) body.email = options.email;
 
   if (c8ctl.dryRun) {
     const config = resolveClusterConfig(options.profile);
@@ -156,7 +155,7 @@ export async function createIdentityUser(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createUser(body as createUserInput);
+    await client.createUser(body);
     logger.success(`User '${options.username}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create user', error);

@@ -9,7 +9,6 @@ import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 import { AuthorizationKey } from '@camunda8/orchestration-cluster-api';
-import type { createAuthorizationInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all authorizations
@@ -154,7 +153,7 @@ export async function createIdentityAuthorization(options: {
     process.exit(1);
   }
 
-  const body: Record<string, unknown> = {
+  const body = {
     ownerId: options.ownerId,
     ownerType: options.ownerType,
     resourceType: options.resourceType,
@@ -177,7 +176,7 @@ export async function createIdentityAuthorization(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createAuthorization(body as createAuthorizationInput);
+    await client.createAuthorization(body);
     logger.success('Authorization created');
   } catch (error) {
     handleCommandError(logger, 'Failed to create authorization', error);
