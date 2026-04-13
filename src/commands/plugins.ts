@@ -680,9 +680,13 @@ export async function syncPlugins(): Promise<void> {
 
 				// Try npm rebuild first
 				try {
-					execFileSync("npm", ["rebuild", plugin.name, "--prefix", pluginsDir], {
-						stdio: "pipe",
-					});
+					execFileSync(
+						"npm",
+						["rebuild", plugin.name, "--prefix", pluginsDir],
+						{
+							stdio: "pipe",
+						},
+					);
 					logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
 					syncedCount++;
 					continue;
@@ -695,9 +699,13 @@ export async function syncPlugins(): Promise<void> {
 
 			// Fresh install
 			try {
-				execFileSync("npm", ["install", plugin.source, "--prefix", pluginsDir], {
-					stdio: "inherit",
-				});
+				execFileSync(
+					"npm",
+					["install", plugin.source, "--prefix", pluginsDir],
+					{
+						stdio: "inherit",
+					},
+				);
 				logger.success(`  ✓ ${plugin.name} installed successfully`);
 				syncedCount++;
 			} catch (installError) {
