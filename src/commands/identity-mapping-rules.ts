@@ -20,7 +20,16 @@ export async function listMappingRules(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list mapping-rules", method: "POST", endpoint: "/mapping-rules/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list mapping-rules",
+			method: "POST",
+			endpoint: "/mapping-rules/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -78,7 +87,16 @@ export async function searchIdentityMappingRules(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search mapping-rules", method: "POST", endpoint: "/mapping-rules/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search mapping-rules",
+				method: "POST",
+				endpoint: "/mapping-rules/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchMappingRule(f, opts),
@@ -122,7 +140,15 @@ export async function getIdentityMappingRule(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get mapping-rule", method: "GET", endpoint: `/mapping-rules/${mappingRuleId}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get mapping-rule",
+			method: "GET",
+			endpoint: `/mapping-rules/${mappingRuleId}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getMappingRule(

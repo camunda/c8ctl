@@ -59,7 +59,16 @@ export async function listUserTasks(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "list user-tasks", method: "POST", endpoint: "/user-tasks/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "list user-tasks",
+				method: "POST",
+				endpoint: "/user-tasks/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchUserTasks(f, opts),

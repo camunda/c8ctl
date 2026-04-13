@@ -72,7 +72,16 @@ export async function listProcessInstances(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "list process-instances", method: "POST", endpoint: "/process-instances/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "list process-instances",
+				method: "POST",
+				endpoint: "/process-instances/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchProcessInstances(f, opts),
@@ -121,7 +130,15 @@ export async function getProcessInstance(
 	const client = createClient(options.profile);
 	const consistencyOptions = { consistency: { waitUpToMs: 0 } };
 
-	if (emitDryRun({ command: "get process-instance", method: "GET", endpoint: `/process-instances/${key}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get process-instance",
+			method: "GET",
+			endpoint: `/process-instances/${key}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getProcessInstance(

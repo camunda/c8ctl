@@ -31,7 +31,16 @@ export async function run(
 		variables?: string;
 	},
 ): Promise<void> {
-	if (emitDryRun({ command: "run", method: "POST", endpoint: "/deployments + /process-instances", profile: options.profile, body: { path, variables: options.variables } })) return;
+	if (
+		emitDryRun({
+			command: "run",
+			method: "POST",
+			endpoint: "/deployments + /process-instances",
+			profile: options.profile,
+			body: { path, variables: options.variables },
+		})
+	)
+		return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 	const tenantId = resolveTenantId(options.profile);
