@@ -8,6 +8,8 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import { TenantId } from '@camunda8/orchestration-cluster-api';
+import type { createTenantInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all tenants
@@ -101,7 +103,7 @@ export async function getIdentityTenant(tenantId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getTenant({ tenantId: tenantId as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getTenant({ tenantId: TenantId.assumeExists(tenantId) }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get tenant '${tenantId}'`, error);
@@ -147,7 +149,7 @@ export async function createIdentityTenant(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createTenant(body as any);
+    await client.createTenant(body as createTenantInput);
     logger.success(`Tenant '${options.tenantId}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create tenant', error);
@@ -177,7 +179,7 @@ export async function deleteIdentityTenant(tenantId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.deleteTenant({ tenantId: tenantId as any });
+    await client.deleteTenant({ tenantId: TenantId.assumeExists(tenantId) });
     logger.success(`Tenant '${tenantId}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete tenant '${tenantId}'`, error);

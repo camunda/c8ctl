@@ -1593,8 +1593,9 @@ export function showCommandHelp(command: string): void {
   if (logger.mode === 'json') {
     const version = getVersion();
     const pluginCommandsInfo = getPluginCommandsInfo();
-    const allHelp = buildHelpJson(version, pluginCommandsInfo) as any;
-    const commandEntry = allHelp.commands?.find((c: any) => c.verb === command);
+    const allHelp = buildHelpJson(version, pluginCommandsInfo) as Record<string, unknown>;
+    const commands = allHelp.commands as Array<Record<string, unknown>> | undefined;
+    const commandEntry = commands?.find((c) => c.verb === command);
     logger.json({
       command,
       ...(commandEntry ?? { verb: command, description: `No detailed help available for: ${command}` }),

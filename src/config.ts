@@ -737,7 +737,7 @@ export function envVarsToProfile(name: string, vars: Record<string, string | und
   for (const [envKey, profileField] of Object.entries(ENV_VAR_PROFILE_MAP)) {
     const value = vars[envKey];
     if (value) {
-      (profile as any)[profileField] = value;
+      (profile as Record<string, string>)[profileField] = value;
     }
   }
   return profile;

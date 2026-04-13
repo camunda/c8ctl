@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
+import { IncidentKey } from '@camunda8/orchestration-cluster-api';
 import { handleCommandError } from '../errors.ts';
 
 /**
@@ -119,7 +120,7 @@ export async function resolveIncident(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.resolveIncident({ incidentKey: key as any });
+    await client.resolveIncident({ incidentKey: IncidentKey.assumeExists(key) });
     logger.success(`Incident ${key} resolved`);
   } catch (error) {
     handleCommandError(logger, `Failed to resolve incident ${key}`, error);

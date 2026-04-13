@@ -7,6 +7,7 @@ import { createClient } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import { TenantId, Username } from '@camunda8/orchestration-cluster-api';
 
 // Re-exports
 export { listUsers, searchIdentityUsers, getIdentityUser, createIdentityUser, deleteIdentityUser } from './identity-users.ts';
@@ -103,16 +104,16 @@ export async function handleAssign(resource: string, id: string, values: Record<
     switch (resource) {
       case 'role': {
         if (values['to-user']) {
-          await client.assignRoleToUser({ roleId: id as any, username: values['to-user'] as any });
+          await client.assignRoleToUser({ roleId: id, username: Username.assumeExists(String(values['to-user'])) });
           logger.success(`Role '${id}' assigned to user '${values['to-user']}'`);
         } else if (values['to-group']) {
-          await client.assignRoleToGroup({ roleId: id as any, groupId: values['to-group'] as any });
+          await client.assignRoleToGroup({ roleId: id, groupId: String(values['to-group']) });
           logger.success(`Role '${id}' assigned to group '${values['to-group']}'`);
         } else if (values['to-tenant']) {
-          await client.assignRoleToTenant({ tenantId: values['to-tenant'] as any, roleId: id as any });
+          await client.assignRoleToTenant({ tenantId: TenantId.assumeExists(String(values['to-tenant'])), roleId: id });
           logger.success(`Role '${id}' assigned to tenant '${values['to-tenant']}'`);
         } else if (values['to-mapping-rule']) {
-          await client.assignRoleToMappingRule({ roleId: id as any, mappingRuleId: values['to-mapping-rule'] as any });
+          await client.assignRoleToMappingRule({ roleId: id, mappingRuleId: String(values['to-mapping-rule']) });
           logger.success(`Role '${id}' assigned to mapping rule '${values['to-mapping-rule']}'`);
         } else {
           logger.error('Target required. Use --to-user, --to-group, --to-tenant, or --to-mapping-rule.');
@@ -122,10 +123,10 @@ export async function handleAssign(resource: string, id: string, values: Record<
       }
       case 'user': {
         if (values['to-group']) {
-          await client.assignUserToGroup({ groupId: values['to-group'] as any, username: id as any });
+          await client.assignUserToGroup({ groupId: String(values['to-group']), username: Username.assumeExists(id) });
           logger.success(`User '${id}' assigned to group '${values['to-group']}'`);
         } else if (values['to-tenant']) {
-          await client.assignUserToTenant({ tenantId: values['to-tenant'] as any, username: id as any });
+          await client.assignUserToTenant({ tenantId: TenantId.assumeExists(String(values['to-tenant'])), username: Username.assumeExists(id) });
           logger.success(`User '${id}' assigned to tenant '${values['to-tenant']}'`);
         } else {
           logger.error('Target required. Use --to-group or --to-tenant.');
@@ -135,7 +136,7 @@ export async function handleAssign(resource: string, id: string, values: Record<
       }
       case 'group': {
         if (values['to-tenant']) {
-          await client.assignGroupToTenant({ tenantId: values['to-tenant'] as any, groupId: id as any });
+          await client.assignGroupToTenant({ tenantId: TenantId.assumeExists(String(values['to-tenant'])), groupId: id });
           logger.success(`Group '${id}' assigned to tenant '${values['to-tenant']}'`);
         } else {
           logger.error('Target required. Use --to-tenant.');
@@ -145,10 +146,10 @@ export async function handleAssign(resource: string, id: string, values: Record<
       }
       case 'mapping-rule': {
         if (values['to-group']) {
-          await client.assignMappingRuleToGroup({ groupId: values['to-group'] as any, mappingRuleId: id as any });
+          await client.assignMappingRuleToGroup({ groupId: String(values['to-group']), mappingRuleId: id });
           logger.success(`Mapping rule '${id}' assigned to group '${values['to-group']}'`);
         } else if (values['to-tenant']) {
-          await client.assignMappingRuleToTenant({ tenantId: values['to-tenant'] as any, mappingRuleId: id as any });
+          await client.assignMappingRuleToTenant({ tenantId: TenantId.assumeExists(String(values['to-tenant'])), mappingRuleId: id });
           logger.success(`Mapping rule '${id}' assigned to tenant '${values['to-tenant']}'`);
         } else {
           logger.error('Target required. Use --to-group or --to-tenant.');
@@ -216,16 +217,16 @@ export async function handleUnassign(resource: string, id: string, values: Recor
     switch (resource) {
       case 'role': {
         if (values['from-user']) {
-          await client.unassignRoleFromUser({ roleId: id as any, username: values['from-user'] as any });
+          await client.unassignRoleFromUser({ roleId: id, username: Username.assumeExists(String(values['from-user'])) });
           logger.success(`Role '${id}' unassigned from user '${values['from-user']}'`);
         } else if (values['from-group']) {
-          await client.unassignRoleFromGroup({ roleId: id as any, groupId: values['from-group'] as any });
+          await client.unassignRoleFromGroup({ roleId: id, groupId: String(values['from-group']) });
           logger.success(`Role '${id}' unassigned from group '${values['from-group']}'`);
         } else if (values['from-tenant']) {
-          await client.unassignRoleFromTenant({ tenantId: values['from-tenant'] as any, roleId: id as any });
+          await client.unassignRoleFromTenant({ tenantId: TenantId.assumeExists(String(values['from-tenant'])), roleId: id });
           logger.success(`Role '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else if (values['from-mapping-rule']) {
-          await client.unassignRoleFromMappingRule({ roleId: id as any, mappingRuleId: values['from-mapping-rule'] as any });
+          await client.unassignRoleFromMappingRule({ roleId: id, mappingRuleId: String(values['from-mapping-rule']) });
           logger.success(`Role '${id}' unassigned from mapping rule '${values['from-mapping-rule']}'`);
         } else {
           logger.error('Source required. Use --from-user, --from-group, --from-tenant, or --from-mapping-rule.');
@@ -235,10 +236,10 @@ export async function handleUnassign(resource: string, id: string, values: Recor
       }
       case 'user': {
         if (values['from-group']) {
-          await client.unassignUserFromGroup({ groupId: values['from-group'] as any, username: id as any });
+          await client.unassignUserFromGroup({ groupId: String(values['from-group']), username: Username.assumeExists(id) });
           logger.success(`User '${id}' unassigned from group '${values['from-group']}'`);
         } else if (values['from-tenant']) {
-          await client.unassignUserFromTenant({ tenantId: values['from-tenant'] as any, username: id as any });
+          await client.unassignUserFromTenant({ tenantId: TenantId.assumeExists(String(values['from-tenant'])), username: Username.assumeExists(id) });
           logger.success(`User '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
           logger.error('Source required. Use --from-group or --from-tenant.');
@@ -248,7 +249,7 @@ export async function handleUnassign(resource: string, id: string, values: Recor
       }
       case 'group': {
         if (values['from-tenant']) {
-          await client.unassignGroupFromTenant({ tenantId: values['from-tenant'] as any, groupId: id as any });
+          await client.unassignGroupFromTenant({ tenantId: TenantId.assumeExists(String(values['from-tenant'])), groupId: id });
           logger.success(`Group '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
           logger.error('Source required. Use --from-tenant.');
@@ -258,10 +259,10 @@ export async function handleUnassign(resource: string, id: string, values: Recor
       }
       case 'mapping-rule': {
         if (values['from-group']) {
-          await client.unassignMappingRuleFromGroup({ groupId: values['from-group'] as any, mappingRuleId: id as any });
+          await client.unassignMappingRuleFromGroup({ groupId: String(values['from-group']), mappingRuleId: id });
           logger.success(`Mapping rule '${id}' unassigned from group '${values['from-group']}'`);
         } else if (values['from-tenant']) {
-          await client.unassignMappingRuleFromTenant({ tenantId: values['from-tenant'] as any, mappingRuleId: id as any });
+          await client.unassignMappingRuleFromTenant({ tenantId: TenantId.assumeExists(String(values['from-tenant'])), mappingRuleId: id });
           logger.success(`Mapping rule '${id}' unassigned from tenant '${values['from-tenant']}'`);
         } else {
           logger.error('Source required. Use --from-group or --from-tenant.');

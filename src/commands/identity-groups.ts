@@ -9,6 +9,7 @@ import { toStringFilter } from './search.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import type { createGroupInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all groups
@@ -102,7 +103,7 @@ export async function getIdentityGroup(groupId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getGroup({ groupId: groupId as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getGroup({ groupId: groupId }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get group '${groupId}'`, error);
@@ -140,7 +141,7 @@ export async function createIdentityGroup(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createGroup(body as any);
+    await client.createGroup(body as createGroupInput);
     logger.success(`Group '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create group', error);
@@ -170,7 +171,7 @@ export async function deleteIdentityGroup(groupId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.deleteGroup({ groupId: groupId as any });
+    await client.deleteGroup({ groupId: groupId });
     logger.success(`Group '${groupId}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete group '${groupId}'`, error);
