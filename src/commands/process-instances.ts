@@ -8,8 +8,8 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
-import { ProcessInstanceKey } from '@camunda8/orchestration-cluster-api';
-import type { ProcessInstanceCreationInstructionById, ProcessInstanceResult } from '@camunda8/orchestration-cluster-api';
+import { ProcessInstanceKey, ProcessDefinitionId, TenantId } from '@camunda8/orchestration-cluster-api';
+import type { ProcessInstanceResult } from '@camunda8/orchestration-cluster-api';
 import { handleCommandError } from '../errors.ts';
 
 /**
@@ -198,17 +198,17 @@ export async function createProcessInstance(options: {
   }
 
   try {
-    // Build the request matching ProcessInstanceCreationInstructionById type
+    // Build the request with properly branded types
     const request: {
-      processDefinitionId: string;
-      tenantId: string;
+      processDefinitionId: ReturnType<typeof ProcessDefinitionId.assumeExists>;
+      tenantId: ReturnType<typeof TenantId.assumeExists>;
       processDefinitionVersion?: number;
       variables?: Record<string, unknown>;
       awaitCompletion?: boolean;
       requestTimeout?: number;
     } = {
-      processDefinitionId: options.processDefinitionId,
-      tenantId,
+      processDefinitionId: ProcessDefinitionId.assumeExists(options.processDefinitionId),
+      tenantId: TenantId.assumeExists(tenantId),
     };
 
     if (options.version !== undefined) {
@@ -234,7 +234,7 @@ export async function createProcessInstance(options: {
       request.requestTimeout = options.requestTimeout;
     }
 
-    const result = await client.createProcessInstance(request as unknown as ProcessInstanceCreationInstructionById);
+    const result = await client.createProcessInstance(request);
     
     if (options.awaitCompletion) {
       // When awaitCompletion is true, the API returns the completed process instance with variables
