@@ -2,12 +2,31 @@
  * Identity authorization commands
  */
 
-import type {
-	OwnerTypeEnum,
-	PermissionTypeEnum,
-	ResourceTypeEnum,
+import {
+	AuthorizationKey,
+	type OwnerTypeEnum,
+	OwnerTypeEnum as OwnerTypeValues,
+	type PermissionTypeEnum,
+	PermissionTypeEnum as PermissionTypeValues,
+	type ResourceTypeEnum,
+	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { AuthorizationKey } from "@camunda8/orchestration-cluster-api";
+
+function isOwnerType(value: string): value is OwnerTypeEnum {
+	const values: readonly string[] = Object.values(OwnerTypeValues);
+	return values.includes(value);
+}
+
+function isResourceType(value: string): value is ResourceTypeEnum {
+	const values: readonly string[] = Object.values(ResourceTypeValues);
+	return values.includes(value);
+}
+
+function isPermissionType(value: string): value is PermissionTypeEnum {
+	const values: readonly string[] = Object.values(PermissionTypeValues);
+	return values.includes(value);
+}
+
 import { createClient, fetchAllPages } from "../client.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
@@ -168,10 +187,27 @@ export async function createIdentityAuthorization(options: {
 		logger.error("--ownerType is required");
 		process.exit(1);
 	}
+	const ownerTypeValues: readonly string[] = Object.values(OwnerTypeValues);
+	if (!isOwnerType(options.ownerType)) {
+		logger.error(
+			`Invalid --ownerType "${options.ownerType}". Valid values: ${ownerTypeValues.join(", ")}`,
+		);
+		process.exit(1);
+	}
+
 	if (!options.resourceType) {
 		logger.error("--resourceType is required");
 		process.exit(1);
 	}
+	const resourceTypeValues: readonly string[] =
+		Object.values(ResourceTypeValues);
+	if (!isResourceType(options.resourceType)) {
+		logger.error(
+			`Invalid --resourceType "${options.resourceType}". Valid values: ${resourceTypeValues.join(", ")}`,
+		);
+		process.exit(1);
+	}
+
 	if (!options.resourceId) {
 		logger.error("--resourceId is required");
 		process.exit(1);
@@ -181,18 +217,27 @@ export async function createIdentityAuthorization(options: {
 		process.exit(1);
 	}
 
+	const permissionTypeValues: readonly string[] =
+		Object.values(PermissionTypeValues);
+	const rawPermissions = options.permissions
+		.split(",")
+		.map((p) => p.trim())
+		.filter((p) => p.length > 0);
+	const invalidPermissions = rawPermissions.filter((p) => !isPermissionType(p));
+	if (invalidPermissions.length > 0) {
+		logger.error(
+			`Invalid --permissions: ${invalidPermissions.join(", ")}. Valid values: ${permissionTypeValues.join(", ")}`,
+		);
+		process.exit(1);
+	}
+	const permissionTypes = rawPermissions.filter(isPermissionType);
+
 	const body = {
 		ownerId: options.ownerId,
-		// biome-ignore lint/plugin: CLI string → SDK enum, validated by API at runtime (#218)
-		ownerType: options.ownerType as OwnerTypeEnum,
-		// biome-ignore lint/plugin: CLI string → SDK enum, validated by API at runtime (#218)
-		resourceType: options.resourceType as ResourceTypeEnum,
+		ownerType: options.ownerType,
+		resourceType: options.resourceType,
 		resourceId: options.resourceId,
-		// biome-ignore lint/plugin: CLI strings → SDK enum, validated by API at runtime (#218)
-		permissionTypes: options.permissions
-			.split(",")
-			.map((p) => p.trim())
-			.filter((p) => p.length > 0) as PermissionTypeEnum[],
+		permissionTypes,
 	};
 
 	if (c8ctl.dryRun) {
