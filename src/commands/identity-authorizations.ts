@@ -11,23 +11,12 @@ import {
 	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-
-function isOwnerType(value: string): value is OwnerTypeEnum {
-	const values: readonly string[] = Object.values(OwnerTypeValues);
-	return values.includes(value);
-}
-
-function isResourceType(value: string): value is ResourceTypeEnum {
-	const values: readonly string[] = Object.values(ResourceTypeValues);
-	return values.includes(value);
-}
-
-function isPermissionType(value: string): value is PermissionTypeEnum {
-	const values: readonly string[] = Object.values(PermissionTypeValues);
-	return values.includes(value);
-}
-
 import { createClient, fetchAllPages } from "../client.ts";
+import {
+	requireCsvEnum,
+	requireEnum,
+	requireOption,
+} from "../command-validation.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
@@ -167,77 +156,68 @@ export async function getIdentityAuthorization(
 }
 
 /**
- * Create a new authorization
+ * Validated inputs for creating an authorization.
+ * All fields are guaranteed present and type-narrowed by
+ * validateCreateAuthorizationOptions() before reaching the handler.
  */
-export async function createIdentityAuthorization(options: {
+export interface CreateAuthorizationInput {
+	profile?: string;
+	ownerId: string;
+	ownerType: OwnerTypeEnum;
+	resourceType: ResourceTypeEnum;
+	resourceId: string;
+	permissionTypes: PermissionTypeEnum[];
+}
+
+/**
+ * Validate raw CLI options for the create authorization command.
+ * Returns a fully validated and type-narrowed input object.
+ * Exits with code 1 on invalid input.
+ */
+export function validateCreateAuthorizationOptions(options: {
 	profile?: string;
 	ownerId?: string;
 	ownerType?: string;
 	resourceType?: string;
 	resourceId?: string;
 	permissions?: string;
-}): Promise<void> {
+}): CreateAuthorizationInput {
+	return {
+		profile: options.profile,
+		ownerId: requireOption(options.ownerId, "ownerId"),
+		ownerType: requireEnum(
+			requireOption(options.ownerType, "ownerType"),
+			OwnerTypeValues,
+			"ownerType",
+		),
+		resourceType: requireEnum(
+			requireOption(options.resourceType, "resourceType"),
+			ResourceTypeValues,
+			"resourceType",
+		),
+		resourceId: requireOption(options.resourceId, "resourceId"),
+		permissionTypes: requireCsvEnum(
+			requireOption(options.permissions, "permissions"),
+			PermissionTypeValues,
+			"permissions",
+		),
+	};
+}
+
+/**
+ * Create a new authorization
+ */
+export async function createIdentityAuthorization(
+	options: CreateAuthorizationInput,
+): Promise<void> {
 	const logger = getLogger();
-
-	if (!options.ownerId) {
-		logger.error("--ownerId is required");
-		process.exit(1);
-	}
-	if (!options.ownerType) {
-		logger.error("--ownerType is required");
-		process.exit(1);
-	}
-	const ownerTypeValues: readonly string[] = Object.values(OwnerTypeValues);
-	if (!isOwnerType(options.ownerType)) {
-		logger.error(
-			`Invalid --ownerType "${options.ownerType}". Valid values: ${ownerTypeValues.join(", ")}`,
-		);
-		process.exit(1);
-	}
-
-	if (!options.resourceType) {
-		logger.error("--resourceType is required");
-		process.exit(1);
-	}
-	const resourceTypeValues: readonly string[] =
-		Object.values(ResourceTypeValues);
-	if (!isResourceType(options.resourceType)) {
-		logger.error(
-			`Invalid --resourceType "${options.resourceType}". Valid values: ${resourceTypeValues.join(", ")}`,
-		);
-		process.exit(1);
-	}
-
-	if (!options.resourceId) {
-		logger.error("--resourceId is required");
-		process.exit(1);
-	}
-	if (!options.permissions) {
-		logger.error("--permissions is required");
-		process.exit(1);
-	}
-
-	const permissionTypeValues: readonly string[] =
-		Object.values(PermissionTypeValues);
-	const rawPermissions = options.permissions
-		.split(",")
-		.map((p) => p.trim())
-		.filter((p) => p.length > 0);
-	const invalidPermissions = rawPermissions.filter((p) => !isPermissionType(p));
-	if (invalidPermissions.length > 0) {
-		logger.error(
-			`Invalid --permissions: ${invalidPermissions.join(", ")}. Valid values: ${permissionTypeValues.join(", ")}`,
-		);
-		process.exit(1);
-	}
-	const permissionTypes = rawPermissions.filter(isPermissionType);
 
 	const body = {
 		ownerId: options.ownerId,
 		ownerType: options.ownerType,
 		resourceType: options.resourceType,
 		resourceId: options.resourceId,
-		permissionTypes,
+		permissionTypes: options.permissionTypes,
 	};
 
 	if (c8ctl.dryRun) {

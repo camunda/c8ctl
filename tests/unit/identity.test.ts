@@ -11,7 +11,7 @@ import { createIdentityRole, deleteIdentityRole } from '../../src/commands/ident
 import { createIdentityGroup, deleteIdentityGroup } from '../../src/commands/identity-groups.ts';
 import { createIdentityTenant, deleteIdentityTenant } from '../../src/commands/identity-tenants.ts';
 import { createIdentityMappingRule, deleteIdentityMappingRule } from '../../src/commands/identity-mapping-rules.ts';
-import { createIdentityAuthorization, deleteIdentityAuthorization } from '../../src/commands/identity-authorizations.ts';
+import { createIdentityAuthorization, deleteIdentityAuthorization, validateCreateAuthorizationOptions } from '../../src/commands/identity-authorizations.ts';
 import { handleAssign, handleUnassign } from '../../src/commands/identity.ts';
 
 const TEST_BASE_URL = 'http://test-cluster/v2';
@@ -145,37 +145,78 @@ describe('Identity Commands — required-flag validation', () => {
     assert.ok(errorSpy.some(l => l.includes('--claimValue is required')));
   });
 
-  // createIdentityAuthorization
+  // createIdentityAuthorization — validation now lives in validateCreateAuthorizationOptions
   test('createIdentityAuthorization: errors when --ownerId is missing', async () => {
-    await assert.rejects(
-      () => createIdentityAuthorization({ ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ' }),
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ' }),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--ownerId is required')));
   });
 
   test('createIdentityAuthorization: errors when --ownerType is missing', async () => {
-    await assert.rejects(
-      () => createIdentityAuthorization({ ownerId: 'alice', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ' }),
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ' }),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--ownerType is required')));
   });
 
   test('createIdentityAuthorization: errors when --resourceId is missing', async () => {
-    await assert.rejects(
-      () => createIdentityAuthorization({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', permissions: 'READ' }),
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', permissions: 'READ' }),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--resourceId is required')));
   });
 
   test('createIdentityAuthorization: errors when --permissions is missing', async () => {
-    await assert.rejects(
-      () => createIdentityAuthorization({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r' }),
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r' }),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--permissions is required')));
+  });
+
+  // Enum validation — invalid values rejected with valid-values listing
+  test('createIdentityAuthorization: errors on invalid --ownerType', async () => {
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'BOGUS', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ' }),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Invalid --ownerType "BOGUS"')));
+    assert.ok(errorSpy.some(l => l.includes('Valid values:')));
+  });
+
+  test('createIdentityAuthorization: errors on invalid --resourceType', async () => {
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceType: 'NOPE', resourceId: 'r', permissions: 'READ' }),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Invalid --resourceType "NOPE"')));
+  });
+
+  test('createIdentityAuthorization: errors on invalid --permissions', async () => {
+    assert.throws(
+      () => validateCreateAuthorizationOptions({ ownerId: 'alice', ownerType: 'USER', resourceType: 'PROCESS_DEFINITION', resourceId: 'r', permissions: 'READ,BOGUS' }),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('Invalid --permissions: BOGUS')));
+  });
+
+  test('createIdentityAuthorization: accepts valid enum values', () => {
+    const result = validateCreateAuthorizationOptions({
+      ownerId: 'alice',
+      ownerType: 'USER',
+      resourceType: 'PROCESS_DEFINITION',
+      resourceId: 'my-process',
+      permissions: 'READ,UPDATE',
+    });
+    assert.strictEqual(result.ownerId, 'alice');
+    assert.strictEqual(result.ownerType, 'USER');
+    assert.strictEqual(result.resourceType, 'PROCESS_DEFINITION');
+    assert.strictEqual(result.resourceId, 'my-process');
+    assert.deepStrictEqual(result.permissionTypes, ['READ', 'UPDATE']);
   });
 });
 
@@ -260,13 +301,14 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('createIdentityAuthorization: emits POST to /authorizations with permissionTypes array', async () => {
-    await createIdentityAuthorization({
+    const validated = validateCreateAuthorizationOptions({
       ownerId: 'alice',
       ownerType: 'USER',
       resourceType: 'PROCESS_DEFINITION',
       resourceId: 'my-process',
       permissions: 'READ,UPDATE',
     });
+    await createIdentityAuthorization(validated);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
