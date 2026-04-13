@@ -128,6 +128,14 @@ describe('requireCsvEnum', () => {
     assert.deepStrictEqual(result, ['RED', 'GREEN']);
   });
 
+  test('exits when input is only commas and whitespace', () => {
+    assert.throws(
+      () => requireCsvEnum(' , , ', ColorEnum, 'colors'),
+      /process\.exit\(1\)/,
+    );
+    assert.ok(errorSpy.some(l => l.includes('--colors is required')));
+  });
+
   test('exits on invalid value listing all invalid items', () => {
     assert.throws(
       () => requireCsvEnum('RED,PURPLE,YELLOW', ColorEnum, 'colors'),

@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { deriveAppUrl, getBrowserCommand, openApp, validateOpenAppOptions, OPEN_APPS } from '../../src/commands/open.ts';
+import { deriveAppUrl, getBrowserCommand, validateOpenAppOptions, OPEN_APPS } from '../../src/commands/open.ts';
 
 const CLI_ENTRY = join(process.cwd(), 'src', 'index.ts');
 

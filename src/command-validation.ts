@@ -68,6 +68,11 @@ export function requireCsvEnum<T extends string>(
 		.map((p) => p.trim())
 		.filter((p) => p.length > 0);
 
+	if (items.length === 0) {
+		getLogger().error(`--${flagName} is required`);
+		process.exit(1);
+	}
+
 	const result: T[] = [];
 	const invalid: string[] = [];
 	for (const item of items) {
