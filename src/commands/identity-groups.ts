@@ -21,7 +21,16 @@ export async function listGroups(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list groups", method: "POST", endpoint: "/groups/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list groups",
+			method: "POST",
+			endpoint: "/groups/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -74,7 +83,16 @@ export async function searchIdentityGroups(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search groups", method: "POST", endpoint: "/groups/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search groups",
+				method: "POST",
+				endpoint: "/groups/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchGroups(f, opts),
@@ -117,7 +135,15 @@ export async function getIdentityGroup(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get group", method: "GET", endpoint: `/groups/${groupId}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get group",
+			method: "GET",
+			endpoint: `/groups/${groupId}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getGroup(

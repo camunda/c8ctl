@@ -21,7 +21,16 @@ export async function listTenants(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list tenants", method: "POST", endpoint: "/tenants/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list tenants",
+			method: "POST",
+			endpoint: "/tenants/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -74,7 +83,16 @@ export async function searchIdentityTenants(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search tenants", method: "POST", endpoint: "/tenants/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search tenants",
+				method: "POST",
+				endpoint: "/tenants/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchTenants(f, opts),
@@ -117,7 +135,15 @@ export async function getIdentityTenant(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get tenant", method: "GET", endpoint: `/tenants/${tenantId}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get tenant",
+			method: "GET",
+			endpoint: `/tenants/${tenantId}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getTenant(

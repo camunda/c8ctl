@@ -53,7 +53,16 @@ export async function listIncidents(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "list incidents", method: "POST", endpoint: "/incidents/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "list incidents",
+				method: "POST",
+				endpoint: "/incidents/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchIncidents(f, opts),
@@ -99,7 +108,15 @@ export async function getIncident(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get incident", method: "GET", endpoint: `/incidents/${key}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get incident",
+			method: "GET",
+			endpoint: `/incidents/${key}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getIncident(

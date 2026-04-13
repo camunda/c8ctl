@@ -406,7 +406,16 @@ export async function searchProcessDefinitions(options: {
 			filter.filter.processDefinitionKey = options.key;
 		}
 
-		if (emitDryRun({ command: "search process-definitions", method: "POST", endpoint: "/process-definitions/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "search process-definitions",
+				method: "POST",
+				endpoint: "/process-definitions/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "Process Definitions", criteria);
 
@@ -594,7 +603,16 @@ export async function searchProcessInstances(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "search process-instances", method: "POST", endpoint: "/process-instances/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "search process-instances",
+				method: "POST",
+				endpoint: "/process-instances/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "Process Instances", criteria);
 
@@ -746,7 +764,16 @@ export async function searchUserTasks(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "search user-tasks", method: "POST", endpoint: "/user-tasks/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "search user-tasks",
+				method: "POST",
+				endpoint: "/user-tasks/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "User Tasks", criteria);
 
@@ -925,7 +952,16 @@ export async function searchIncidents(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "search incidents", method: "POST", endpoint: "/incidents/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "search incidents",
+				method: "POST",
+				endpoint: "/incidents/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "Incidents", criteria);
 
@@ -1084,7 +1120,16 @@ export async function searchJobs(options: {
 			}
 		}
 
-		if (emitDryRun({ command: "search jobs", method: "POST", endpoint: "/jobs/search", profile: options.profile, body: filter })) return;
+		if (
+			emitDryRun({
+				command: "search jobs",
+				method: "POST",
+				endpoint: "/jobs/search",
+				profile: options.profile,
+				body: filter,
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "Jobs", criteria);
 
@@ -1209,7 +1254,16 @@ export async function searchVariables(options: {
 		// By default, truncate values unless --fullValue is specified
 		const truncateValues = !options.fullValue;
 
-		if (emitDryRun({ command: "search variables", method: "POST", endpoint: "/variables/search", profile: options.profile, body: { ...filter, truncateValues } })) return;
+		if (
+			emitDryRun({
+				command: "search variables",
+				method: "POST",
+				endpoint: "/variables/search",
+				profile: options.profile,
+				body: { ...filter, truncateValues },
+			})
+		)
+			return;
 
 		logSearchCriteria(logger, "Variables", criteria);
 

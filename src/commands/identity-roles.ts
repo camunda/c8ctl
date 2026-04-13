@@ -20,7 +20,16 @@ export async function listRoles(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list roles", method: "POST", endpoint: "/roles/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list roles",
+			method: "POST",
+			endpoint: "/roles/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -73,7 +82,16 @@ export async function searchIdentityRoles(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search roles", method: "POST", endpoint: "/roles/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search roles",
+				method: "POST",
+				endpoint: "/roles/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchRoles(f, opts),
@@ -116,7 +134,15 @@ export async function getIdentityRole(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get role", method: "GET", endpoint: `/roles/${roleId}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get role",
+			method: "GET",
+			endpoint: `/roles/${roleId}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getRole(

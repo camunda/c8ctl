@@ -34,7 +34,16 @@ export async function listAuthorizations(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list authorizations", method: "POST", endpoint: "/authorizations/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list authorizations",
+			method: "POST",
+			endpoint: "/authorizations/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -96,7 +105,16 @@ export async function searchIdentityAuthorizations(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search authorizations", method: "POST", endpoint: "/authorizations/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search authorizations",
+				method: "POST",
+				endpoint: "/authorizations/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchAuthorizations(f, opts),
@@ -144,7 +162,15 @@ export async function getIdentityAuthorization(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get authorization", method: "GET", endpoint: `/authorizations/${authorizationKey}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get authorization",
+			method: "GET",
+			endpoint: `/authorizations/${authorizationKey}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getAuthorization(

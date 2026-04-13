@@ -22,7 +22,16 @@ export async function listUsers(options: {
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "list users", method: "POST", endpoint: "/users/search", profile: options.profile, body: {} })) return;
+	if (
+		emitDryRun({
+			command: "list users",
+			method: "POST",
+			endpoint: "/users/search",
+			profile: options.profile,
+			body: {},
+		})
+	)
+		return;
 
 	try {
 		const items = await fetchAllPages(
@@ -77,7 +86,16 @@ export async function searchIdentityUsers(options: {
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (emitDryRun({ command: "search users", method: "POST", endpoint: "/users/search", profile: options.profile, body: searchFilter })) return;
+		if (
+			emitDryRun({
+				command: "search users",
+				method: "POST",
+				endpoint: "/users/search",
+				profile: options.profile,
+				body: searchFilter,
+			})
+		)
+			return;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchUsers(f, opts),
@@ -120,7 +138,15 @@ export async function getIdentityUser(
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
-	if (emitDryRun({ command: "get user", method: "GET", endpoint: `/users/${username}`, profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get user",
+			method: "GET",
+			endpoint: `/users/${username}`,
+			profile: options.profile,
+		})
+	)
+		return;
 
 	try {
 		const result = await client.getUser(

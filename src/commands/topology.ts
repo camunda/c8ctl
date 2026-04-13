@@ -12,7 +12,15 @@ import { getLogger } from "../logger.ts";
 export async function getTopology(options: {
 	profile?: string;
 }): Promise<void> {
-	if (emitDryRun({ command: "get topology", method: "GET", endpoint: "/topology", profile: options.profile })) return;
+	if (
+		emitDryRun({
+			command: "get topology",
+			method: "GET",
+			endpoint: "/topology",
+			profile: options.profile,
+		})
+	)
+		return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
