@@ -4,10 +4,9 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createClient } from "./client.ts";
-import { ensurePluginsDir, resolveTenantId } from "./config.ts";
+import { ensurePluginsDir } from "./config.ts";
 import { getLogger } from "./logger.ts";
-import { type C8ctlPluginRuntime, c8ctl } from "./runtime.ts";
+import { c8ctl } from "./runtime.ts";
 
 interface PluginCommands {
 	[commandName: string]: (args: string[]) => Promise<void>;
@@ -128,11 +127,9 @@ async function loadDefaultPlugins(): Promise<void> {
 export async function loadInstalledPlugins(): Promise<void> {
 	const logger = getLogger();
 
-	// Make c8ctl runtime available globally for plugins
-	// biome-ignore lint/plugin: C8ctl uses prototype getters — Object.assign mutates in-place to preserve them (#219)
-	const pluginRuntime = c8ctl as unknown as C8ctlPluginRuntime;
-	Object.assign(pluginRuntime, { createClient, resolveTenantId, getLogger });
-	globalThis.c8ctl = pluginRuntime;
+	// Expose the runtime to plugins via globalThis.
+	// C8ctl implements C8ctlPluginRuntime directly — no monkey-patching needed.
+	globalThis.c8ctl = c8ctl;
 
 	// Load default plugins first
 	await loadDefaultPlugins();

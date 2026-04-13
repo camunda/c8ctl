@@ -23,6 +23,20 @@ export interface C8ctlEnv {
 	rootDir: string;
 }
 
+/**
+ * Functions injected into the runtime via init() to break circular imports.
+ * client.ts, config.ts, and logger.ts all import c8ctl from this module,
+ * so this module cannot import from them at the top level.
+ */
+export interface C8ctlDeps {
+	createClient(
+		profileFlag?: string,
+		additionalSdkConfig?: Partial<CamundaOptions>,
+	): CamundaClient;
+	resolveTenantId(profileFlag?: string): string;
+	getLogger(mode?: OutputMode): Logger;
+}
+
 export interface C8ctlPluginRuntime {
 	readonly env: C8ctlEnv;
 	readonly version: string;
@@ -67,9 +81,10 @@ function getVersion(): string {
 }
 
 /**
- * c8ctl runtime class with session state management
+ * c8ctl runtime class with session state management.
+ * Implements C8ctlPluginRuntime directly — no monkey-patching required.
  */
-class C8ctl {
+class C8ctl implements C8ctlPluginRuntime {
 	private _activeProfile?: string;
 	private _activeTenant?: string;
 	private _outputMode: OutputMode = "text";
@@ -77,6 +92,7 @@ class C8ctl {
 	private _dryRun?: boolean;
 	private _verbose?: boolean;
 	private _resolvedBaseUrl?: string;
+	private _deps?: C8ctlDeps;
 
 	readonly env: C8ctlEnv = {
 		version: getVersion(),
@@ -86,6 +102,39 @@ class C8ctl {
 		cwd: process.cwd(),
 		rootDir: join(__dirname, ".."),
 	};
+
+	/**
+	 * Inject dependencies that cannot be imported at module level
+	 * due to circular imports. Must be called once during startup,
+	 * before any plugin or command accesses createClient/resolveTenantId/getLogger.
+	 */
+	init(deps: C8ctlDeps): void {
+		this._deps = deps;
+	}
+
+	createClient(
+		profileFlag?: string,
+		additionalSdkConfig?: Partial<CamundaOptions>,
+	): CamundaClient {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before createClient()");
+		}
+		return this._deps.createClient(profileFlag, additionalSdkConfig);
+	}
+
+	resolveTenantId(profileFlag?: string): string {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before resolveTenantId()");
+		}
+		return this._deps.resolveTenantId(profileFlag);
+	}
+
+	getLogger(mode?: OutputMode): Logger {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before getLogger()");
+		}
+		return this._deps.getLogger(mode);
+	}
 
 	// Expose env properties directly for plugin compatibility
 	get version(): string {
@@ -168,5 +217,5 @@ class C8ctl {
 /**
  * Global c8ctl runtime instance
  */
-// biome-ignore lint/suspicious/noRedeclare: intentional — module export shadows the globalThis declaration (#219)
+// biome-ignore lint/suspicious/noRedeclare: intentional — module export shadows the globalThis declaration
 export const c8ctl = new C8ctl();
