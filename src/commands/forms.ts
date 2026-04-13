@@ -6,7 +6,7 @@ import {
 	ProcessDefinitionKey,
 	UserTaskKey,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient } from "../client.ts";
+import { createClient, emitDryRun } from "../client.ts";
 import { isRecord } from "../index.ts";
 import { getLogger } from "../logger.ts";
 
@@ -28,6 +28,7 @@ export async function getUserTaskForm(
 		profile?: string;
 	},
 ): Promise<Record<string, unknown> | undefined> {
+	if (emitDryRun({ command: "get form --userTask", method: "GET", endpoint: `/user-tasks/${userTaskKey}/form`, profile: options.profile })) return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
@@ -67,6 +68,7 @@ export async function getStartForm(
 		profile?: string;
 	},
 ): Promise<Record<string, unknown> | undefined> {
+	if (emitDryRun({ command: "get form --processDefinition", method: "GET", endpoint: `/process-definitions/${processDefinitionKey}/form`, profile: options.profile })) return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 
@@ -111,6 +113,7 @@ export async function getForm(
 ): Promise<
 	{ type: string; key: string; form: Record<string, unknown> } | undefined
 > {
+	if (emitDryRun({ command: "get form", method: "GET", endpoint: `/user-tasks/${key}/form (then /process-definitions/${key}/form)`, profile: options.profile })) return;
 	const logger = getLogger();
 	const client = createClient(options.profile);
 

@@ -8,6 +8,7 @@ import {
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
 import { resolveClusterConfig } from "./config.ts";
+import { getLogger } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 /**
@@ -145,4 +146,29 @@ export async function fetchAllPages<
 	} while (true);
 
 	return allItems;
+}
+
+/**
+ * Emit a dry-run preview of an API request if dry-run mode is active.
+ * Returns true when the preview was emitted (caller should return early),
+ * false when normal execution should continue.
+ */
+export function emitDryRun(opts: {
+	command: string;
+	method: string;
+	endpoint: string;
+	profile?: string;
+	body?: unknown;
+}): boolean {
+	if (!c8ctl.dryRun) return false;
+	const config = resolveClusterConfig(opts.profile);
+	const logger = getLogger();
+	logger.json({
+		dryRun: true,
+		command: opts.command,
+		method: opts.method,
+		url: `${config.baseUrl}${opts.endpoint}`,
+		...(opts.body !== undefined && { body: opts.body }),
+	});
+	return true;
 }

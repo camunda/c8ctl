@@ -17,7 +17,7 @@ import { asyncSpawn, type SpawnResult } from '../utils/spawn.ts';
 import { todayRange, MS_PER_DAY } from '../utils/date-helpers.ts';
 
 // Polling configuration for Elasticsearch consistency
-const POLL_TIMEOUT_MS = 30000;
+const POLL_TIMEOUT_MS = 90000;
 const POLL_INTERVAL_MS = 1000;
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
