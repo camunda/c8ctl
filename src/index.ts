@@ -7,6 +7,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { createClient } from "./client.ts";
 import { showCompletion } from "./commands/completion.ts";
 import { deploy } from "./commands/deployments.ts";
 import { getForm, getStartForm, getUserTaskForm } from "./commands/forms.ts";
@@ -103,7 +104,7 @@ import { setOutputFormat, useProfile, useTenant } from "./commands/session.ts";
 import { getTopology } from "./commands/topology.ts";
 import { completeUserTask, listUserTasks } from "./commands/user-tasks.ts";
 import { watchFiles } from "./commands/watch.ts";
-import { loadSessionState } from "./config.ts";
+import { loadSessionState, resolveTenantId } from "./config.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
 import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
@@ -342,6 +343,9 @@ async function main() {
 	if (values.verbose) {
 		c8ctl.verbose = true;
 	}
+
+	// Inject dependencies into the runtime (breaks circular imports)
+	c8ctl.init({ createClient, resolveTenantId, getLogger });
 
 	// Load installed plugins
 	await loadInstalledPlugins();
