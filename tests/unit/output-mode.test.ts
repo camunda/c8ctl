@@ -4,21 +4,33 @@
  * Exercises the CLI as a subprocess to match DEVELOPMENT.md conventions.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { asyncSpawn } from '../utils/spawn.ts';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
 const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
 
+let dataDir = '';
+
 function cli(...args: string[]) {
   return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
     cwd: PROJECT_ROOT,
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
   });
 }
 
 describe('c8 output', () => {
+  before(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-output-mode-test-'));
+  });
+
+  after(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
   test('shows current output mode when invoked with no arguments', async () => {
     const result = await cli('output');
     const output = result.stdout + result.stderr;
