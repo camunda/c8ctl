@@ -42,7 +42,7 @@ export async function getUserTaskForm(
 			return undefined;
 		}
 		logger.json(result);
-		
+
 		return;
 	} catch (error: unknown) {
 		// Handle 204 No Content (user task exists but has no form)
