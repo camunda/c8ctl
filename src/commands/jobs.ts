@@ -184,9 +184,15 @@ export async function completeJob(
 	const client = createClient(options.profile);
 
 	try {
-		const variables = options.variables
-			? JSON.parse(options.variables)
-			: undefined;
+		let variables: Record<string, unknown> | undefined;
+		if (options.variables) {
+			try {
+				variables = JSON.parse(options.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+				return;
+			}
+		}
 		await client.completeJob({
 			jobKey: JobKey.assumeExists(key),
 			...(variables !== undefined && { variables }),

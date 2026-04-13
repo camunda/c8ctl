@@ -2,7 +2,10 @@
  * Process instance commands
  */
 
-import type { ProcessInstanceResult } from "@camunda8/orchestration-cluster-api";
+import type {
+	ProcessInstanceResult,
+	createProcessInstanceInput,
+} from "@camunda8/orchestration-cluster-api";
 import {
 	ProcessDefinitionId,
 	ProcessInstanceKey,
@@ -227,43 +230,36 @@ export async function createProcessInstance(options: {
 	}
 
 	try {
-		// Build the request with properly branded types
-		const request: {
-			processDefinitionId: ReturnType<typeof ProcessDefinitionId.assumeExists>;
-			tenantId: ReturnType<typeof TenantId.assumeExists>;
-			processDefinitionVersion?: number;
-			variables?: Record<string, unknown>;
-			awaitCompletion?: boolean;
-			requestTimeout?: number;
-		} = {
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (options.variables) {
+			try {
+				variables = JSON.parse(options.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+				return;
+			}
+		}
+
+		if (options.awaitCompletion) {
+			logger.info("Waiting for process instance to complete...");
+		}
+
+		// Build the request with SDK types as single source of truth
+		const request = {
 			processDefinitionId: ProcessDefinitionId.assumeExists(
 				options.processDefinitionId,
 			),
 			tenantId: TenantId.assumeExists(tenantId),
-		};
-
-		if (options.version !== undefined) {
-			request.processDefinitionVersion = options.version;
-		}
-
-		if (options.variables) {
-			try {
-				request.variables = JSON.parse(options.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-			}
-		}
-
-		// Use the API's built-in awaitCompletion parameter
-		if (options.awaitCompletion) {
-			request.awaitCompletion = true;
-			logger.info("Waiting for process instance to complete...");
-		}
-
-		// Set requestTimeout if provided
-		if (options.requestTimeout !== undefined) {
-			request.requestTimeout = options.requestTimeout;
-		}
+			...(options.version !== undefined && {
+				processDefinitionVersion: options.version,
+			}),
+			...(variables !== undefined && { variables }),
+			...(options.awaitCompletion && { awaitCompletion: true }),
+			...(options.requestTimeout !== undefined && {
+				requestTimeout: options.requestTimeout,
+			}),
+		} satisfies createProcessInstanceInput;
 
 		const result = await client.createProcessInstance(request);
 
