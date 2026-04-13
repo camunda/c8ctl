@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import type { createMappingRuleInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all mapping rules
@@ -107,7 +108,7 @@ export async function getIdentityMappingRule(mappingRuleId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getMappingRule({ mappingRuleId: mappingRuleId as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getMappingRule({ mappingRuleId: mappingRuleId }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get mapping rule '${mappingRuleId}'`, error);
@@ -165,7 +166,7 @@ export async function createIdentityMappingRule(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createMappingRule(body as any);
+    await client.createMappingRule(body as createMappingRuleInput);
     logger.success(`Mapping rule '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create mapping rule', error);
@@ -195,7 +196,7 @@ export async function deleteIdentityMappingRule(mappingRuleId: string, options: 
   const client = createClient(options.profile);
 
   try {
-    await client.deleteMappingRule({ mappingRuleId: mappingRuleId as any });
+    await client.deleteMappingRule({ mappingRuleId: mappingRuleId });
     logger.success(`Mapping rule '${mappingRuleId}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete mapping rule '${mappingRuleId}'`, error);

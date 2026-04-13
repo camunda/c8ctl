@@ -8,6 +8,8 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import { AuthorizationKey } from '@camunda8/orchestration-cluster-api';
+import type { createAuthorizationInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all authorizations
@@ -111,7 +113,7 @@ export async function getIdentityAuthorization(authorizationKey: string, options
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getAuthorization({ authorizationKey: authorizationKey as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getAuthorization({ authorizationKey: AuthorizationKey.assumeExists(authorizationKey) }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get authorization '${authorizationKey}'`, error);
@@ -175,7 +177,7 @@ export async function createIdentityAuthorization(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createAuthorization(body as any);
+    await client.createAuthorization(body as createAuthorizationInput);
     logger.success('Authorization created');
   } catch (error) {
     handleCommandError(logger, 'Failed to create authorization', error);
@@ -205,7 +207,7 @@ export async function deleteIdentityAuthorization(authorizationKey: string, opti
   const client = createClient(options.profile);
 
   try {
-    await client.deleteAuthorization({ authorizationKey: authorizationKey as any });
+    await client.deleteAuthorization({ authorizationKey: AuthorizationKey.assumeExists(authorizationKey) });
     logger.success(`Authorization '${authorizationKey}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete authorization '${authorizationKey}'`, error);

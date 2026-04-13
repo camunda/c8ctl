@@ -8,6 +8,8 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import { Username } from '@camunda8/orchestration-cluster-api';
+import type { createUserInput } from '@camunda8/orchestration-cluster-api';
 import { toStringFilter } from './search.ts';
 
 /**
@@ -104,7 +106,7 @@ export async function getIdentityUser(username: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getUser({ username: username as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getUser({ username: Username.assumeExists(username) }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get user '${username}'`, error);
@@ -154,7 +156,7 @@ export async function createIdentityUser(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createUser(body as any);
+    await client.createUser(body as createUserInput);
     logger.success(`User '${options.username}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create user', error);
@@ -184,7 +186,7 @@ export async function deleteIdentityUser(username: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.deleteUser({ username: username as any });
+    await client.deleteUser({ username: Username.assumeExists(username) });
     logger.success(`User '${username}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete user '${username}'`, error);

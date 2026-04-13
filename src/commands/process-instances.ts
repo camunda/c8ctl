@@ -8,6 +8,7 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { parseBetween, buildDateFilter } from '../date-filter.ts';
 import { c8ctl } from '../runtime.ts';
+import { ProcessInstanceKey } from '@camunda8/orchestration-cluster-api';
 import type { ProcessInstanceCreationInstructionById, ProcessInstanceResult } from '@camunda8/orchestration-cluster-api';
 import { handleCommandError } from '../errors.ts';
 
@@ -103,7 +104,7 @@ export async function getProcessInstance(key: string, options: {
   const consistencyOptions = { consistency: { waitUpToMs: 0 } };
 
   try {
-    const result = await client.getProcessInstance({ processInstanceKey: key as any }, consistencyOptions);
+    const result = await client.getProcessInstance({ processInstanceKey: ProcessInstanceKey.assumeExists(key) }, consistencyOptions);
     
     // Fetch variables if requested
     if (options.variables) {
@@ -111,7 +112,7 @@ export async function getProcessInstance(key: string, options: {
         const variablesResult = await client.searchVariables(
           {
             filter: {
-              processInstanceKey: key as any,
+              processInstanceKey: ProcessInstanceKey.assumeExists(key),
             },
             truncateValues: false,  // Get full variable values
           },
@@ -278,7 +279,7 @@ export async function cancelProcessInstance(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.cancelProcessInstance({ processInstanceKey: key as any });
+    await client.cancelProcessInstance({ processInstanceKey: ProcessInstanceKey.assumeExists(key) });
     logger.success(`Process instance ${key} cancelled`);
   } catch (error) {
     handleCommandError(logger, `Failed to cancel process instance ${key}`, error);

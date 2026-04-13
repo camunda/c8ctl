@@ -4,6 +4,7 @@
 
 import { getLogger } from '../logger.ts';
 import { createClient } from '../client.ts';
+import { UserTaskKey, ProcessDefinitionKey } from '@camunda8/orchestration-cluster-api';
 
 /**
  * Get form for a user task
@@ -16,7 +17,7 @@ export async function getUserTaskForm(userTaskKey: string, options: {
 
   try {
     const result = await client.getUserTaskForm(
-      { userTaskKey: userTaskKey as any },
+      { userTaskKey: UserTaskKey.assumeExists(userTaskKey) },
       { consistency: { waitUpToMs: 0 } }
     );
     // API returns null when user task exists but has no form
@@ -48,7 +49,7 @@ export async function getStartForm(processDefinitionKey: string, options: {
 
   try {
     const result = await client.getStartProcessForm(
-      { processDefinitionKey: processDefinitionKey as any },
+      { processDefinitionKey: ProcessDefinitionKey.assumeExists(processDefinitionKey) },
       { consistency: { waitUpToMs: 0 } }
     );
     // API returns null when process definition exists but has no start form
@@ -84,7 +85,7 @@ export async function getForm(key: string, options: {
   // Try user task form
   try {
     const result = await client.getUserTaskForm(
-      { userTaskKey: key as any },
+      { userTaskKey: UserTaskKey.assumeExists(key) },
       { consistency: { waitUpToMs: 0 } }
     );
     if (result !== null && result !== undefined) {
@@ -100,7 +101,7 @@ export async function getForm(key: string, options: {
   // Try process definition form
   try {
     const result = await client.getStartProcessForm(
-      { processDefinitionKey: key as any },
+      { processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
       { consistency: { waitUpToMs: 0 } }
     );
     if (result !== null && result !== undefined) {

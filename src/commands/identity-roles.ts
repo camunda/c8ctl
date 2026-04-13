@@ -8,6 +8,8 @@ import { createClient, fetchAllPages } from '../client.ts';
 import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
+import type { createRoleInput } from '@camunda8/orchestration-cluster-api';
+import type { createRoleInput } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all roles
@@ -101,7 +103,7 @@ export async function getIdentityRole(roleId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getRole({ roleId: roleId as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getRole({ roleId: roleId }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get role '${roleId}'`, error);
@@ -139,7 +141,7 @@ export async function createIdentityRole(options: {
   const client = createClient(options.profile);
 
   try {
-    await client.createRole(body as any);
+    await client.createRole(body as createRoleInput);
     logger.success(`Role '${options.name}' created`);
   } catch (error) {
     handleCommandError(logger, 'Failed to create role', error);
@@ -169,7 +171,7 @@ export async function deleteIdentityRole(roleId: string, options: {
   const client = createClient(options.profile);
 
   try {
-    await client.deleteRole({ roleId: roleId as any });
+    await client.deleteRole({ roleId: roleId });
     logger.success(`Role '${roleId}' deleted`);
   } catch (error) {
     handleCommandError(logger, `Failed to delete role '${roleId}'`, error);

@@ -283,7 +283,7 @@ export async function searchProcessDefinitions(options: {
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result = { items: allItems } as any;
+    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (result.items?.length) {
       result.items = [...result.items].sort((left: any, right: any) => {
@@ -426,7 +426,7 @@ export async function searchProcessInstances(options: {
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result = { items: allItems } as any;
+    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((pi: any) => {
@@ -548,7 +548,7 @@ export async function searchUserTasks(options: {
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result = { items: allItems } as any;
+    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((task: any) => {
@@ -682,7 +682,7 @@ export async function searchIncidents(options: {
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result = { items: allItems } as any;
+    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((incident: any) => {
@@ -799,7 +799,7 @@ export async function searchJobs(options: {
       filter,
       ...(hasCiFilter ? [CI_PAGE_SIZE] as const : []),
     );
-    const result = { items: allItems } as any;
+    const result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((job: any) => {
@@ -911,7 +911,7 @@ export async function searchVariables(options: {
       options.limit,
     );
 
-    let result = { items: allItems } as any;
+    let result: { items: Record<string, unknown>[] } = { items: allItems as Record<string, unknown>[] };
 
     if (hasCiFilter && result.items) {
       result.items = result.items.filter((variable: any) => {

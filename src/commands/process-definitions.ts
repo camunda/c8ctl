@@ -7,6 +7,7 @@ import { sortTableData, type SortOrder } from '../logger.ts';
 import { createClient, fetchAllPages } from '../client.ts';
 import { resolveTenantId } from '../config.ts';
 import { handleCommandError } from '../errors.ts';
+import { ProcessDefinitionKey } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List process definitions
@@ -66,13 +67,13 @@ export async function getProcessDefinition(key: string, options: {
   try {
     if (options.xml) {
       const result = await client.getProcessDefinitionXml(
-        { processDefinitionKey: key as any },
+        { processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
         { consistency: { waitUpToMs: 0 } }
       );
       logger.output(result);
     } else {
       const result = await client.getProcessDefinition(
-        { processDefinitionKey: key as any },
+        { processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
         { consistency: { waitUpToMs: 0 } }
       );
       logger.json(result);
