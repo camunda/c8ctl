@@ -325,7 +325,9 @@ async function main() {
   if (verb === 'output') {
     if (!resource) {
       logger.info(`Current output mode: ${c8ctl.outputMode}`);
-      logger.info('');
+      if (c8ctl.outputMode === 'text') {
+        logger.info('');
+      }
       logger.info('Available modes: json|text');
       return;
     }

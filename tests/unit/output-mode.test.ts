@@ -4,7 +4,7 @@
  * Exercises the CLI as a subprocess to match DEVELOPMENT.md conventions.
  */
 
-import { test, describe, before, after } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,11 +24,11 @@ function cli(...args: string[]) {
 }
 
 describe('c8 output', () => {
-  before(() => {
+  beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-output-mode-test-'));
   });
 
-  after(() => {
+  afterEach(() => {
     rmSync(dataDir, { recursive: true, force: true });
   });
   test('shows current output mode when invoked with no arguments', async () => {
@@ -47,9 +47,6 @@ describe('c8 output', () => {
     // In json mode, success goes to stderr per unix convention
     const output = result.stdout + result.stderr;
     assert.ok(output.includes('Output mode set to: json'), `Expected confirmation, got stdout: ${result.stdout}, stderr: ${result.stderr}`);
-
-    // Reset to text mode
-    await cli('output', 'text');
   });
 
   test('sets output mode to text', async () => {
