@@ -324,8 +324,12 @@ async function main() {
 
   if (verb === 'output') {
     if (!resource) {
-      logger.error('Output mode required. Usage: c8 output json|text');
-      process.exit(1);
+      logger.info(`Current output mode: ${c8ctl.outputMode}`);
+      if (c8ctl.outputMode === 'text') {
+        logger.info('');
+      }
+      logger.info('Available modes: json|text');
+      return;
     }
     setOutputFormat(resource);
     return;

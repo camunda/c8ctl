@@ -48,7 +48,7 @@ function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[])
       { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
       { verb: 'init',      resource: 'plugin [name]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
       { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
-      { verb: 'output',    resource: 'json|text',        resources: ['json','text'], description: 'Set output format', mutating: false },
+      { verb: 'output',    resource: '[json|text]',      resources: ['json','text'], description: 'Show or set output format', mutating: false },
       { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
       { verb: 'mcp-proxy', resource: '[mcp-path]',       resources: [], description: 'Start a STDIO to remote HTTP MCP proxy server', mutating: false },
       { verb: 'feedback', resource: '',                resources: [], description: 'Open the feedback page to report issues or request features', mutating: false },
@@ -214,7 +214,7 @@ Commands:
   sync      plugin           Synchronize plugins from registry (rebuild/reinstall)
   init      plugin [name]    Create a new plugin from TypeScript template
   use       profile|tenant   Set active profile or tenant
-  output    json|text        Set output format
+  output    [json|text]      Show or set output format
   completion bash|zsh|fish   Generate shell completion script
   mcp-proxy [mcp-path]       Start a STDIO to remote HTTP MCP proxy server
   feedback                   Open the feedback page to report issues or request features
