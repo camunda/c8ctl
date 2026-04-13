@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" id="Definitions_pa_main" targetNamespace="http://bpmn.io/schema/bpmn" exporter="c8ctl-test">
+  <bpmn:process id="pa-main-process" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" />
+    <bpmn:endEvent id="EndEvent_1" />
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="StartEvent_1" targetRef="EndEvent_1" />
+  </bpmn:process>
+</bpmn:definitions>

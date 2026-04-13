@@ -817,6 +817,14 @@ Description:
   Automatically discovers all deployable files in the specified paths.
   If no path is provided, deploys from the current directory.
 
+Process Applications:
+  When deploying from within a directory that contains a .process-application
+  file (or any subdirectory of such a project), c8ctl automatically detects
+  the process application root and deploys all resources under it — matching
+  the behavior of Desktop Modeler's "Deploy process application" feature.
+  This means you can run 'c8ctl deploy' from anywhere inside a process
+  application tree and have all BPMN, DMN, and form files deployed together.
+
 Flags:
   --profile <name>         Use specific profile
 
@@ -834,7 +842,8 @@ Examples:
   c8ctl deploy ./src                    Deploy all files in ./src directory
   c8ctl deploy ./process.bpmn           Deploy a specific BPMN file
   c8ctl deploy ./src ./forms            Deploy from multiple directories
-  c8ctl deploy --profile=prod          Deploy using specific profile
+  c8ctl deploy --profile=prod           Deploy using specific profile
+  c8ctl deploy --path ./my-app          Deploy a process application by path
 `.trim());
 }
 

@@ -7,10 +7,32 @@ import { createClient } from '../client.ts';
 import { resolveTenantId, resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, extname, basename, relative } from 'node:path';
+import { join, dirname, extname, basename, relative, resolve } from 'node:path';
 
 const RESOURCE_EXTENSIONS = ['.bpmn', '.dmn', '.form'];
 const PROCESS_APPLICATION_FILE = '.process-application';
+
+/**
+ * Search upward from a starting directory for a .process-application file.
+ * Returns the directory containing the marker file, or null if none found.
+ * This mirrors Desktop Modeler's behavior of recognizing process application roots.
+ */
+export function findProcessApplicationRoot(startDir: string): string | null {
+  let currentDir = resolve(startDir);
+
+  while (true) {
+    if (hasProcessApplicationFile(currentDir)) {
+      return currentDir;
+    }
+
+    const parentDir = dirname(currentDir);
+    if (parentDir === currentDir) {
+      // Reached filesystem root without finding the marker
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
 
 /**
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
@@ -216,16 +238,43 @@ export async function deploy(paths: string[], options: {
   const resources: ResourceFile[] = [];
 
   try {
-    // Store the base paths for relative path calculation
-    const basePaths = paths.length === 0 ? [process.cwd()] : paths;
-
     if (paths.length === 0) {
       logger.error('No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)');
       process.exit(1);
     }
 
+    // Resolve effective paths: for each path, check if it (or its parents)
+    // contain a .process-application file. If so, use the process application
+    // root as the deployment path so the entire application is deployed.
+    const effectivePaths: string[] = [];
+    let processApplicationDetected = false;
+
+    for (const p of paths) {
+      const resolvedPath = resolve(p);
+      const stat = existsSync(resolvedPath) ? statSync(resolvedPath) : null;
+      const startDir = stat?.isFile() ? dirname(resolvedPath) : resolvedPath;
+
+      const paRoot = findProcessApplicationRoot(startDir);
+      if (paRoot) {
+        // Avoid duplicates when multiple paths resolve to the same PA root
+        if (!effectivePaths.includes(paRoot)) {
+          effectivePaths.push(paRoot);
+          processApplicationDetected = true;
+        }
+      } else {
+        effectivePaths.push(resolvedPath);
+      }
+    }
+
+    if (processApplicationDetected) {
+      logger.info('Detected process application — deploying all resources from application root');
+    }
+
+    // Store the base paths for relative path calculation
+    const basePaths = effectivePaths;
+
     // Collect all resource files
-    paths.forEach(path => {
+    effectivePaths.forEach(path => {
       collectResourceFiles(path, resources);
     });
 
