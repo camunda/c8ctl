@@ -2,14 +2,13 @@
  * Shell completion commands
  */
 
-import { getLogger } from '../logger.ts';
+import { getLogger } from "../logger.ts";
 
 /**
  * Generate bash completion script
  */
 function generateBashCompletion(): string {
-
-  return `# c8ctl bash completion
+	return `# c8ctl bash completion
 _c8ctl_completions() {
   local cur prev words cword
   
@@ -61,114 +60,114 @@ _c8ctl_completions() {
   case \${cword} in
     1)
       # Complete verbs
-      COMPREPLY=( \$(compgen -W "\${verbs}" -- "\${cur}") )
+      COMPREPLY=( $(compgen -W "\${verbs}" -- "\${cur}") )
       ;;
     2)
       # Complete resources based on verb
       local verb="\${words[1]}"
       case "\${verb}" in
         list)
-          COMPREPLY=( \$(compgen -W "\${list_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${list_resources}" -- "\${cur}") )
           ;;
         search)
-          COMPREPLY=( \$(compgen -W "\${search_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${search_resources}" -- "\${cur}") )
           ;;
         get)
-          COMPREPLY=( \$(compgen -W "\${get_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${get_resources}" -- "\${cur}") )
           ;;
         create)
-          COMPREPLY=( \$(compgen -W "\${create_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${create_resources}" -- "\${cur}") )
           ;;
         cancel)
-          COMPREPLY=( \$(compgen -W "\${cancel_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${cancel_resources}" -- "\${cur}") )
           ;;
         await)
-          COMPREPLY=( \$(compgen -W "\${await_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${await_resources}" -- "\${cur}") )
           ;;
         complete)
-          COMPREPLY=( \$(compgen -W "\${complete_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${complete_resources}" -- "\${cur}") )
           ;;
         fail)
-          COMPREPLY=( \$(compgen -W "\${fail_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${fail_resources}" -- "\${cur}") )
           ;;
         activate)
-          COMPREPLY=( \$(compgen -W "\${activate_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${activate_resources}" -- "\${cur}") )
           ;;
         resolve)
-          COMPREPLY=( \$(compgen -W "\${resolve_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${resolve_resources}" -- "\${cur}") )
           ;;
         publish)
-          COMPREPLY=( \$(compgen -W "\${publish_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${publish_resources}" -- "\${cur}") )
           ;;
         correlate)
-          COMPREPLY=( \$(compgen -W "\${correlate_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${correlate_resources}" -- "\${cur}") )
           ;;
         delete)
-          COMPREPLY=( \$(compgen -W "\${delete_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${delete_resources}" -- "\${cur}") )
           ;;
         assign)
-          COMPREPLY=( \$(compgen -W "\${assign_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${assign_resources}" -- "\${cur}") )
           ;;
         unassign)
-          COMPREPLY=( \$(compgen -W "\${unassign_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${unassign_resources}" -- "\${cur}") )
           ;;
         add)
-          COMPREPLY=( \$(compgen -W "\${add_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${add_resources}" -- "\${cur}") )
           ;;
         remove|rm)
-          COMPREPLY=( \$(compgen -W "\${remove_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${remove_resources}" -- "\${cur}") )
           ;;
         load)
-          COMPREPLY=( \$(compgen -W "\${load_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${load_resources}" -- "\${cur}") )
           ;;
         unload)
-          COMPREPLY=( \$(compgen -W "\${unload_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${unload_resources}" -- "\${cur}") )
           ;;
         sync)
-          COMPREPLY=( \$(compgen -W "\${sync_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${sync_resources}" -- "\${cur}") )
           ;;
         upgrade)
-          COMPREPLY=( \$(compgen -W "\${upgrade_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${upgrade_resources}" -- "\${cur}") )
           ;;
         downgrade)
-          COMPREPLY=( \$(compgen -W "\${downgrade_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${downgrade_resources}" -- "\${cur}") )
           ;;
         init)
-          COMPREPLY=( \$(compgen -W "\${init_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${init_resources}" -- "\${cur}") )
           ;;
         use)
-          COMPREPLY=( \$(compgen -W "\${use_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${use_resources}" -- "\${cur}") )
           ;;
         which)
-          COMPREPLY=( \$(compgen -W "\${which_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${which_resources}" -- "\${cur}") )
           ;;
         output)
-          COMPREPLY=( \$(compgen -W "\${output_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${output_resources}" -- "\${cur}") )
           ;;
         completion)
-          COMPREPLY=( \$(compgen -W "\${completion_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${completion_resources}" -- "\${cur}") )
           ;;
         help)
-          COMPREPLY=( \$(compgen -W "\${help_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${help_resources}" -- "\${cur}") )
           ;;
         cluster)
-          COMPREPLY=( \$(compgen -W "\${cluster_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${cluster_resources}" -- "\${cur}") )
           ;;
         open)
-          COMPREPLY=( \$(compgen -W "\${open_resources}" -- "\${cur}") )
+          COMPREPLY=( $(compgen -W "\${open_resources}" -- "\${cur}") )
           ;;
         deploy|run|watch)
           # Complete with files
-          COMPREPLY=( \$(compgen -f -- "\${cur}") )
+          COMPREPLY=( $(compgen -f -- "\${cur}") )
           ;;
       esac
       ;;
     *)
       # Complete flags or files
       if [[ \${cur} == -* ]]; then
-        COMPREPLY=( \$(compgen -W "\${flags}" -- "\${cur}") )
+        COMPREPLY=( $(compgen -W "\${flags}" -- "\${cur}") )
       else
-        COMPREPLY=( \$(compgen -f -- "\${cur}") )
+        COMPREPLY=( $(compgen -f -- "\${cur}") )
       fi
       ;;
   esac
@@ -183,8 +182,7 @@ complete -F _c8ctl_completions c8
  * Generate zsh completion script
  */
 function generateZshCompletion(): string {
-
-  return `#compdef c8ctl c8
+	return `#compdef c8ctl c8
 
 _c8ctl() {
   local -a verbs resources flags
@@ -315,7 +313,7 @@ _c8ctl() {
     '--from-mapping-rule[Source mapping rule for unassignment]:mappingRule:'
   )
 
-  case \$CURRENT in
+  case $CURRENT in
     2)
       _describe 'command' verbs
       ;;
@@ -658,7 +656,7 @@ _c8ctl() {
  * Generate fish completion script
  */
 function generateFishCompletion(): string {
-  return `# c8ctl fish completion
+	return `# c8ctl fish completion
 
 # Remove all existing completions for c8ctl and c8
 complete -c c8ctl -e
@@ -1308,29 +1306,29 @@ complete -c c8 -n '__fish_seen_subcommand_from open' -a 'optimize' -d 'Open Camu
  * Show completion command
  */
 export function showCompletion(shell?: string): void {
-  const logger = getLogger();
+	const logger = getLogger();
 
-  if (!shell) {
-    logger.error('Shell type required. Usage: c8 completion <bash|zsh|fish>');
-    process.exit(1);
-  }
+	if (!shell) {
+		logger.error("Shell type required. Usage: c8 completion <bash|zsh|fish>");
+		process.exit(1);
+	}
 
-  const normalizedShell = shell.toLowerCase();
+	const normalizedShell = shell.toLowerCase();
 
-  switch (normalizedShell) {
-    case 'bash':
-      console.log(generateBashCompletion());
-      break;
-    case 'zsh':
-      console.log(generateZshCompletion());
-      break;
-    case 'fish':
-      console.log(generateFishCompletion());
-      break;
-    default:
-      logger.error(`Unknown shell: ${shell}`);
-      logger.info('Supported shells: bash, zsh, fish');
-      logger.info('Usage: c8 completion <bash|zsh|fish>');
-      process.exit(1);
-  }
+	switch (normalizedShell) {
+		case "bash":
+			console.log(generateBashCompletion());
+			break;
+		case "zsh":
+			console.log(generateZshCompletion());
+			break;
+		case "fish":
+			console.log(generateFishCompletion());
+			break;
+		default:
+			logger.error(`Unknown shell: ${shell}`);
+			logger.info("Supported shells: bash, zsh, fish");
+			logger.info("Usage: c8 completion <bash|zsh|fish>");
+			process.exit(1);
+	}
 }

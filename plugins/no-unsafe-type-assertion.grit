@@ -1,0 +1,12 @@
+engine biome(1.0)
+language js(typescript)
+
+`$expr as $type` as $assertion where {
+    $type <: not r"const",
+    $assertion <: not within JsImport(),
+    register_diagnostic(
+        span = $assertion,
+        message = "Type assertions (`as T`) bypass the type system. Use a type guard, `.assumeExists()`, or `satisfies` instead. If unavoidable, add `// biome-ignore lint/plugin: <reason>` above.",
+        severity = "error"
+    )
+}

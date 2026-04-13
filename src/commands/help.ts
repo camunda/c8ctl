@@ -2,11 +2,14 @@
  * Help and version commands
  */
 
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { getLogger } from '../logger.ts';
-import { getPluginCommandsInfo, type PluginCommandInfo } from '../plugin-loader.ts';
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { getLogger } from "../logger.ts";
+import {
+	getPluginCommandsInfo,
+	type PluginCommandInfo,
+} from "../plugin-loader.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,171 +18,630 @@ const __dirname = dirname(__filename);
  * Build structured JSON help data for machine/agent consumption.
  * Returned by showHelp() and showCommandHelp() in JSON output mode.
  */
-function buildHelpJson(version: string, pluginCommandsInfo: PluginCommandInfo[]): object {
-  return {
-    version,
-    usage: 'c8ctl <command> [resource] [options]',
-    commands: [
-      { verb: 'list',      resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','profiles','plugins','users','roles','groups','tenants','auth','mapping-rules'], description: 'List resources (process, identity)', mutating: false },
-      { verb: 'search',    resource: '<resource>',       resources: ['pi','pd','ut','inc','jobs','vars','users','roles','groups','tenants','auth','mapping-rules'], description: 'Search resources with filters', mutating: false },
-      { verb: 'get',       resource: '<resource> <key>', resources: ['pi','pd','inc','topology','form','user','role','group','tenant','auth','mapping-rule'],  description: 'Get resource by key', mutating: false },
-      { verb: 'create',    resource: '<resource>',       resources: ['pi','user','role','group','tenant','auth','mapping-rule'], description: 'Create resource', mutating: true },
-      { verb: 'delete',    resource: '<resource> <key>', resources: ['user','role','group','tenant','auth','mapping-rule'], description: 'Delete resource', mutating: true },
-      { verb: 'assign',    resource: '<resource> <id> --to-<target>=<id>', resources: ['role','user','group','mapping-rule'], description: 'Assign resource to target', mutating: true },
-      { verb: 'unassign',  resource: '<resource> <id> --from-<target>=<id>', resources: ['role','user','group','mapping-rule'], description: 'Unassign resource from target', mutating: true },
-      { verb: 'cancel',    resource: '<resource> <key>', resources: ['pi'], description: 'Cancel resource', mutating: true },
-      { verb: 'await',     resource: '<resource>',       resources: ['pi'], description: 'Create and await completion (alias for create --awaitCompletion)', mutating: true },
-      { verb: 'complete',  resource: '<resource> <key>', resources: ['ut','job'], description: 'Complete resource', mutating: true },
-      { verb: 'fail',      resource: 'job <key>',        resources: ['job'], description: 'Fail a job', mutating: true },
-      { verb: 'activate',  resource: 'jobs <type>',      resources: ['jobs'], description: 'Activate jobs by type', mutating: true },
-      { verb: 'resolve',   resource: 'inc <key>',        resources: ['inc'], description: 'Resolve incident', mutating: true },
-      { verb: 'publish',   resource: 'msg <name>',       resources: ['msg'], description: 'Publish message', mutating: true },
-      { verb: 'correlate', resource: 'msg <name>',       resources: ['msg'], description: 'Correlate message', mutating: true },
-      { verb: 'deploy',    resource: '[path...]',        resources: [], description: 'Deploy BPMN/DMN/forms', mutating: true },
-      { verb: 'run',       resource: '<path>',           resources: [], description: 'Deploy and start process', mutating: true },
-      { verb: 'watch',     resource: '[path...]',        resources: [], description: 'Watch files for changes and auto-deploy', mutating: false },
-      { verb: 'open',      resource: '<app>',            resources: ['operate','tasklist','modeler','optimize'], description: 'Open Camunda web application in browser', mutating: false },
-      { verb: 'add',       resource: 'profile <name>',   resources: ['profile'], description: 'Add a profile', mutating: false },
-      { verb: 'remove',    resource: 'profile <name>',   resources: ['profile'], description: 'Remove a profile (alias: rm)', mutating: false },
-      { verb: 'load',      resource: 'plugin <name>',    resources: ['plugin'], description: 'Load a c8ctl plugin', mutating: false },
-      { verb: 'unload',    resource: 'plugin <name>',    resources: ['plugin'], description: 'Unload a c8ctl plugin', mutating: false },
-      { verb: 'upgrade',   resource: 'plugin <name>',    resources: ['plugin'], description: 'Upgrade a plugin', mutating: false },
-      { verb: 'downgrade', resource: 'plugin <name> <version>', resources: ['plugin'], description: 'Downgrade a plugin to a specific version', mutating: false },
-      { verb: 'sync',      resource: 'plugin',           resources: ['plugin'], description: 'Synchronize plugins', mutating: false },
-      { verb: 'init',      resource: 'plugin [name]', resources: ['plugin'], description: 'Create a new plugin from TypeScript template', mutating: false },
-      { verb: 'use',       resource: 'profile|tenant',   resources: ['profile','tenant'], description: 'Set active profile or tenant', mutating: false },
-      { verb: 'output',    resource: '[json|text]',      resources: ['json','text'], description: 'Show or set output format', mutating: false },
-      { verb: 'completion',resource: 'bash|zsh|fish',    resources: ['bash','zsh','fish'], description: 'Generate shell completion script', mutating: false },
-      { verb: 'mcp-proxy', resource: '[mcp-path]',       resources: [], description: 'Start a STDIO to remote HTTP MCP proxy server', mutating: false },
-      { verb: 'feedback', resource: '',                resources: [], description: 'Open the feedback page to report issues or request features', mutating: false },
-      { verb: 'help',      resource: '[command]',        resources: [], description: 'Show help', mutating: false },
-      ...pluginCommandsInfo.map(cmd => ({
-        verb: cmd.commandName, resource: '', resources: [], description: cmd.description || '', mutating: false,
-        examples: cmd.examples || [],
-      })),
-    ],
-    resourceAliases: {
-      pi: 'process-instance(s)',
-      pd: 'process-definition(s)',
-      ut: 'user-task(s)',
-      inc: 'incident(s)',
-      msg: 'message',
-      vars: 'variable(s)',
-      auth: 'authorization(s)',
-      mr: 'mapping-rule(s)',
-    },
-    globalFlags: [
-      { flag: '--profile', type: 'string', description: 'Use specific profile for this command' },
-      { flag: '--sortBy',  type: 'string', description: 'Sort list/search output by column name' },
-      { flag: '--asc',     type: 'boolean', description: 'Sort in ascending order (default)' },
-      { flag: '--desc',    type: 'boolean', description: 'Sort in descending order' },
-      { flag: '--limit',   type: 'string', description: 'Maximum number of items to fetch (default: 1000000)' },
-      { flag: '--between', type: 'string', description: 'Filter by date range: <from>..<to> (YYYY-MM-DD or ISO 8601; open-ended: ..to or from..)' },
-      { flag: '--dateField', type: 'string', description: 'Date field to filter on with --between (default depends on resource)' },
-      { flag: '--state',   type: 'string', description: 'Filter by state (ACTIVE, COMPLETED, etc.)' },
-      { flag: '--id',      type: 'string', description: 'Process definition ID (alias for --bpmnProcessId)' },
-      { flag: '--verbose', type: 'boolean', description: 'Enable SDK trace logging and show full error details' },
-      { flag: '--version', type: 'string', short: '-v', description: 'Show version' },
-      { flag: '--help',    type: 'boolean', short: '-h', description: 'Show help' },
-    ],
-    searchFlags: [
-      { flag: '--bpmnProcessId',           type: 'string',  description: 'Filter by process definition ID' },
-      { flag: '--processDefinitionKey',    type: 'string',  description: 'Filter by process definition key' },
-      { flag: '--processInstanceKey',      type: 'string',  description: 'Filter by process instance key' },
-      { flag: '--parentProcessInstanceKey',type: 'string',  description: 'Filter by parent process instance key' },
-      { flag: '--name',                    type: 'string',  description: 'Filter by name (variables, process definitions); supports wildcards * and ?' },
-      { flag: '--key',                     type: 'string',  description: 'Filter by key' },
-      { flag: '--assignee',                type: 'string',  description: 'Filter by assignee (user tasks)' },
-      { flag: '--elementId',               type: 'string',  description: 'Filter by element ID (user tasks)' },
-      { flag: '--errorType',               type: 'string',  description: 'Filter by error type (incidents)' },
-      { flag: '--errorMessage',            type: 'string',  description: 'Filter by error message (incidents); supports wildcards' },
-      { flag: '--type',                    type: 'string',  description: 'Filter by type (jobs); supports wildcards' },
-      { flag: '--value',                   type: 'string',  description: 'Filter by variable value' },
-      { flag: '--scopeKey',                type: 'string',  description: 'Filter by scope key (variables)' },
-      { flag: '--fullValue',               type: 'boolean', description: 'Return full variable values (default: truncated)' },
-      { flag: '--iname',                   type: 'string',  description: 'Case-insensitive --name filter (supports wildcards)' },
-      { flag: '--iid',                     type: 'string',  description: 'Case-insensitive --bpmnProcessId filter' },
-      { flag: '--iassignee',               type: 'string',  description: 'Case-insensitive --assignee filter' },
-      { flag: '--ierrorMessage',           type: 'string',  description: 'Case-insensitive --errorMessage filter' },
-      { flag: '--itype',                   type: 'string',  description: 'Case-insensitive --type filter' },
-      { flag: '--ivalue',                  type: 'string',  description: 'Case-insensitive --value filter' },
-      { flag: '--username',                type: 'string',  description: 'Filter by username (users)' },
-      { flag: '--email',                   type: 'string',  description: 'Filter by email (users)' },
-      { flag: '--roleId',                  type: 'string',  description: 'Filter by role ID (roles)' },
-      { flag: '--groupId',                 type: 'string',  description: 'Filter by group ID (groups)' },
-      { flag: '--ownerId',                 type: 'string',  description: 'Filter by owner ID (authorizations)' },
-      { flag: '--ownerType',               type: 'string',  description: 'Filter by owner type (authorizations)' },
-      { flag: '--resourceType',            type: 'string',  description: 'Filter by resource type (authorizations)' },
-      { flag: '--resourceId',              type: 'string',  description: 'Filter by resource ID (authorizations)' },
-      { flag: '--claimName',               type: 'string',  description: 'Filter by claim name (mapping rules)' },
-      { flag: '--claimValue',              type: 'string',  description: 'Filter by claim value (mapping rules)' },
-      { flag: '--mappingRuleId',           type: 'string',  description: 'Filter by mapping rule ID (mapping rules)' },
-    ],
-    agentFlags: [
-      {
-        flag: '--fields',
-        type: 'string',
-        description: 'Comma-separated list of output fields to include. Reduces context window size. Case-insensitive. Example: --fields Key,State,processDefinitionId',
-        appliesTo: 'all list/search/get commands',
-      },
-      {
-        flag: '--dry-run',
-        type: 'boolean',
-        description: 'Preview the API request that would be sent without executing it. Emits { dryRun, command, method, url, body } as JSON. Always exits 0.',
-        appliesTo: 'mutating commands: create, cancel, deploy, complete, fail, activate, resolve, publish, correlate, delete, assign, unassign',
-      },
-    ],
-  };
+
+interface HelpFlag {
+	flag: string;
+	type: string;
+	description: string;
+	short?: string;
+	appliesTo?: string;
+}
+
+interface HelpCommand {
+	verb: string;
+	resource: string;
+	resources: string[];
+	description: string;
+	mutating: boolean;
+	examples?: Array<{ command: string; description: string }> | string[];
+}
+
+interface HelpJson {
+	version: string;
+	usage: string;
+	commands: HelpCommand[];
+	resourceAliases: Record<string, string>;
+	globalFlags: HelpFlag[];
+	searchFlags: HelpFlag[];
+	agentFlags: HelpFlag[];
+}
+
+function buildHelpJson(
+	version: string,
+	pluginCommandsInfo: PluginCommandInfo[],
+): HelpJson {
+	return {
+		version,
+		usage: "c8ctl <command> [resource] [options]",
+		commands: [
+			{
+				verb: "list",
+				resource: "<resource>",
+				resources: [
+					"pi",
+					"pd",
+					"ut",
+					"inc",
+					"jobs",
+					"profiles",
+					"plugins",
+					"users",
+					"roles",
+					"groups",
+					"tenants",
+					"auth",
+					"mapping-rules",
+				],
+				description: "List resources (process, identity)",
+				mutating: false,
+			},
+			{
+				verb: "search",
+				resource: "<resource>",
+				resources: [
+					"pi",
+					"pd",
+					"ut",
+					"inc",
+					"jobs",
+					"vars",
+					"users",
+					"roles",
+					"groups",
+					"tenants",
+					"auth",
+					"mapping-rules",
+				],
+				description: "Search resources with filters",
+				mutating: false,
+			},
+			{
+				verb: "get",
+				resource: "<resource> <key>",
+				resources: [
+					"pi",
+					"pd",
+					"inc",
+					"topology",
+					"form",
+					"user",
+					"role",
+					"group",
+					"tenant",
+					"auth",
+					"mapping-rule",
+				],
+				description: "Get resource by key",
+				mutating: false,
+			},
+			{
+				verb: "create",
+				resource: "<resource>",
+				resources: [
+					"pi",
+					"user",
+					"role",
+					"group",
+					"tenant",
+					"auth",
+					"mapping-rule",
+				],
+				description: "Create resource",
+				mutating: true,
+			},
+			{
+				verb: "delete",
+				resource: "<resource> <key>",
+				resources: ["user", "role", "group", "tenant", "auth", "mapping-rule"],
+				description: "Delete resource",
+				mutating: true,
+			},
+			{
+				verb: "assign",
+				resource: "<resource> <id> --to-<target>=<id>",
+				resources: ["role", "user", "group", "mapping-rule"],
+				description: "Assign resource to target",
+				mutating: true,
+			},
+			{
+				verb: "unassign",
+				resource: "<resource> <id> --from-<target>=<id>",
+				resources: ["role", "user", "group", "mapping-rule"],
+				description: "Unassign resource from target",
+				mutating: true,
+			},
+			{
+				verb: "cancel",
+				resource: "<resource> <key>",
+				resources: ["pi"],
+				description: "Cancel resource",
+				mutating: true,
+			},
+			{
+				verb: "await",
+				resource: "<resource>",
+				resources: ["pi"],
+				description:
+					"Create and await completion (alias for create --awaitCompletion)",
+				mutating: true,
+			},
+			{
+				verb: "complete",
+				resource: "<resource> <key>",
+				resources: ["ut", "job"],
+				description: "Complete resource",
+				mutating: true,
+			},
+			{
+				verb: "fail",
+				resource: "job <key>",
+				resources: ["job"],
+				description: "Fail a job",
+				mutating: true,
+			},
+			{
+				verb: "activate",
+				resource: "jobs <type>",
+				resources: ["jobs"],
+				description: "Activate jobs by type",
+				mutating: true,
+			},
+			{
+				verb: "resolve",
+				resource: "inc <key>",
+				resources: ["inc"],
+				description: "Resolve incident",
+				mutating: true,
+			},
+			{
+				verb: "publish",
+				resource: "msg <name>",
+				resources: ["msg"],
+				description: "Publish message",
+				mutating: true,
+			},
+			{
+				verb: "correlate",
+				resource: "msg <name>",
+				resources: ["msg"],
+				description: "Correlate message",
+				mutating: true,
+			},
+			{
+				verb: "deploy",
+				resource: "[path...]",
+				resources: [],
+				description: "Deploy BPMN/DMN/forms",
+				mutating: true,
+			},
+			{
+				verb: "run",
+				resource: "<path>",
+				resources: [],
+				description: "Deploy and start process",
+				mutating: true,
+			},
+			{
+				verb: "watch",
+				resource: "[path...]",
+				resources: [],
+				description: "Watch files for changes and auto-deploy",
+				mutating: false,
+			},
+			{
+				verb: "open",
+				resource: "<app>",
+				resources: ["operate", "tasklist", "modeler", "optimize"],
+				description: "Open Camunda web application in browser",
+				mutating: false,
+			},
+			{
+				verb: "add",
+				resource: "profile <name>",
+				resources: ["profile"],
+				description: "Add a profile",
+				mutating: false,
+			},
+			{
+				verb: "remove",
+				resource: "profile <name>",
+				resources: ["profile"],
+				description: "Remove a profile (alias: rm)",
+				mutating: false,
+			},
+			{
+				verb: "load",
+				resource: "plugin <name>",
+				resources: ["plugin"],
+				description: "Load a c8ctl plugin",
+				mutating: false,
+			},
+			{
+				verb: "unload",
+				resource: "plugin <name>",
+				resources: ["plugin"],
+				description: "Unload a c8ctl plugin",
+				mutating: false,
+			},
+			{
+				verb: "upgrade",
+				resource: "plugin <name>",
+				resources: ["plugin"],
+				description: "Upgrade a plugin",
+				mutating: false,
+			},
+			{
+				verb: "downgrade",
+				resource: "plugin <name> <version>",
+				resources: ["plugin"],
+				description: "Downgrade a plugin to a specific version",
+				mutating: false,
+			},
+			{
+				verb: "sync",
+				resource: "plugin",
+				resources: ["plugin"],
+				description: "Synchronize plugins",
+				mutating: false,
+			},
+			{
+				verb: "init",
+				resource: "plugin [name]",
+				resources: ["plugin"],
+				description: "Create a new plugin from TypeScript template",
+				mutating: false,
+			},
+			{
+				verb: "use",
+				resource: "profile|tenant",
+				resources: ["profile", "tenant"],
+				description: "Set active profile or tenant",
+				mutating: false,
+			},
+			{
+				verb: "output",
+				resource: "[json|text]",
+				resources: ["json", "text"],
+				description: "Show or set output format",
+				mutating: false,
+			},
+			{
+				verb: "completion",
+				resource: "bash|zsh|fish",
+				resources: ["bash", "zsh", "fish"],
+				description: "Generate shell completion script",
+				mutating: false,
+			},
+			{
+				verb: "mcp-proxy",
+				resource: "[mcp-path]",
+				resources: [],
+				description: "Start a STDIO to remote HTTP MCP proxy server",
+				mutating: false,
+			},
+			{
+				verb: "feedback",
+				resource: "",
+				resources: [],
+				description:
+					"Open the feedback page to report issues or request features",
+				mutating: false,
+			},
+			{
+				verb: "help",
+				resource: "[command]",
+				resources: [],
+				description: "Show help",
+				mutating: false,
+			},
+			...pluginCommandsInfo.map((cmd) => ({
+				verb: cmd.commandName,
+				resource: "",
+				resources: [],
+				description: cmd.description || "",
+				mutating: false,
+				examples: cmd.examples || [],
+			})),
+		],
+		resourceAliases: {
+			pi: "process-instance(s)",
+			pd: "process-definition(s)",
+			ut: "user-task(s)",
+			inc: "incident(s)",
+			msg: "message",
+			vars: "variable(s)",
+			auth: "authorization(s)",
+			mr: "mapping-rule(s)",
+		},
+		globalFlags: [
+			{
+				flag: "--profile",
+				type: "string",
+				description: "Use specific profile for this command",
+			},
+			{
+				flag: "--sortBy",
+				type: "string",
+				description: "Sort list/search output by column name",
+			},
+			{
+				flag: "--asc",
+				type: "boolean",
+				description: "Sort in ascending order (default)",
+			},
+			{
+				flag: "--desc",
+				type: "boolean",
+				description: "Sort in descending order",
+			},
+			{
+				flag: "--limit",
+				type: "string",
+				description: "Maximum number of items to fetch (default: 1000000)",
+			},
+			{
+				flag: "--between",
+				type: "string",
+				description:
+					"Filter by date range: <from>..<to> (YYYY-MM-DD or ISO 8601; open-ended: ..to or from..)",
+			},
+			{
+				flag: "--dateField",
+				type: "string",
+				description:
+					"Date field to filter on with --between (default depends on resource)",
+			},
+			{
+				flag: "--state",
+				type: "string",
+				description: "Filter by state (ACTIVE, COMPLETED, etc.)",
+			},
+			{
+				flag: "--id",
+				type: "string",
+				description: "Process definition ID (alias for --bpmnProcessId)",
+			},
+			{
+				flag: "--verbose",
+				type: "boolean",
+				description: "Enable SDK trace logging and show full error details",
+			},
+			{
+				flag: "--version",
+				type: "string",
+				short: "-v",
+				description: "Show version",
+			},
+			{
+				flag: "--help",
+				type: "boolean",
+				short: "-h",
+				description: "Show help",
+			},
+		],
+		searchFlags: [
+			{
+				flag: "--bpmnProcessId",
+				type: "string",
+				description: "Filter by process definition ID",
+			},
+			{
+				flag: "--processDefinitionKey",
+				type: "string",
+				description: "Filter by process definition key",
+			},
+			{
+				flag: "--processInstanceKey",
+				type: "string",
+				description: "Filter by process instance key",
+			},
+			{
+				flag: "--parentProcessInstanceKey",
+				type: "string",
+				description: "Filter by parent process instance key",
+			},
+			{
+				flag: "--name",
+				type: "string",
+				description:
+					"Filter by name (variables, process definitions); supports wildcards * and ?",
+			},
+			{ flag: "--key", type: "string", description: "Filter by key" },
+			{
+				flag: "--assignee",
+				type: "string",
+				description: "Filter by assignee (user tasks)",
+			},
+			{
+				flag: "--elementId",
+				type: "string",
+				description: "Filter by element ID (user tasks)",
+			},
+			{
+				flag: "--errorType",
+				type: "string",
+				description: "Filter by error type (incidents)",
+			},
+			{
+				flag: "--errorMessage",
+				type: "string",
+				description: "Filter by error message (incidents); supports wildcards",
+			},
+			{
+				flag: "--type",
+				type: "string",
+				description: "Filter by type (jobs); supports wildcards",
+			},
+			{
+				flag: "--value",
+				type: "string",
+				description: "Filter by variable value",
+			},
+			{
+				flag: "--scopeKey",
+				type: "string",
+				description: "Filter by scope key (variables)",
+			},
+			{
+				flag: "--fullValue",
+				type: "boolean",
+				description: "Return full variable values (default: truncated)",
+			},
+			{
+				flag: "--iname",
+				type: "string",
+				description: "Case-insensitive --name filter (supports wildcards)",
+			},
+			{
+				flag: "--iid",
+				type: "string",
+				description: "Case-insensitive --bpmnProcessId filter",
+			},
+			{
+				flag: "--iassignee",
+				type: "string",
+				description: "Case-insensitive --assignee filter",
+			},
+			{
+				flag: "--ierrorMessage",
+				type: "string",
+				description: "Case-insensitive --errorMessage filter",
+			},
+			{
+				flag: "--itype",
+				type: "string",
+				description: "Case-insensitive --type filter",
+			},
+			{
+				flag: "--ivalue",
+				type: "string",
+				description: "Case-insensitive --value filter",
+			},
+			{
+				flag: "--username",
+				type: "string",
+				description: "Filter by username (users)",
+			},
+			{
+				flag: "--email",
+				type: "string",
+				description: "Filter by email (users)",
+			},
+			{
+				flag: "--roleId",
+				type: "string",
+				description: "Filter by role ID (roles)",
+			},
+			{
+				flag: "--groupId",
+				type: "string",
+				description: "Filter by group ID (groups)",
+			},
+			{
+				flag: "--ownerId",
+				type: "string",
+				description: "Filter by owner ID (authorizations)",
+			},
+			{
+				flag: "--ownerType",
+				type: "string",
+				description: "Filter by owner type (authorizations)",
+			},
+			{
+				flag: "--resourceType",
+				type: "string",
+				description: "Filter by resource type (authorizations)",
+			},
+			{
+				flag: "--resourceId",
+				type: "string",
+				description: "Filter by resource ID (authorizations)",
+			},
+			{
+				flag: "--claimName",
+				type: "string",
+				description: "Filter by claim name (mapping rules)",
+			},
+			{
+				flag: "--claimValue",
+				type: "string",
+				description: "Filter by claim value (mapping rules)",
+			},
+			{
+				flag: "--mappingRuleId",
+				type: "string",
+				description: "Filter by mapping rule ID (mapping rules)",
+			},
+		],
+		agentFlags: [
+			{
+				flag: "--fields",
+				type: "string",
+				description:
+					"Comma-separated list of output fields to include. Reduces context window size. Case-insensitive. Example: --fields Key,State,processDefinitionId",
+				appliesTo: "all list/search/get commands",
+			},
+			{
+				flag: "--dry-run",
+				type: "boolean",
+				description:
+					"Preview the API request that would be sent without executing it. Emits { dryRun, command, method, url, body } as JSON. Always exits 0.",
+				appliesTo:
+					"mutating commands: create, cancel, deploy, complete, fail, activate, resolve, publish, correlate, delete, assign, unassign",
+			},
+		],
+	};
 }
 
 /**
  * Get package version
  */
 export function getVersion(): string {
-  const packagePath = join(__dirname, '../../package.json');
-  const packageJson = JSON.parse(readFileSync(packagePath, 'utf-8'));
-  return packageJson.version;
+	const packagePath = join(__dirname, "../../package.json");
+	const packageJson = JSON.parse(readFileSync(packagePath, "utf-8"));
+	return packageJson.version;
 }
 
 /**
  * Display version
  */
 export function showVersion(): void {
-  const logger = getLogger();
-  logger.info(`c8ctl v${getVersion()}`);
+	const logger = getLogger();
+	logger.info(`c8ctl v${getVersion()}`);
 }
 
 /**
  * Display full help
  */
 export function showHelp(): void {
-  const logger = getLogger();
-  const version = getVersion();
-  const pluginCommandsInfo = getPluginCommandsInfo();
+	const logger = getLogger();
+	const version = getVersion();
+	const pluginCommandsInfo = getPluginCommandsInfo();
 
-  // JSON mode: emit structured command tree for machine consumption
-  if (logger.mode === 'json') {
-    logger.json(buildHelpJson(version, pluginCommandsInfo));
-    return;
-  }
-  
-  let pluginSection = '';
-  if (pluginCommandsInfo.length > 0) {
-    pluginSection = '\n\nPlugin Commands:';
-    for (const cmd of pluginCommandsInfo) {
-      const desc = cmd.description ? `  ${cmd.description}` : '';
-      pluginSection += `\n  ${cmd.commandName.padEnd(20)}${desc}`;
-    }
-  }
+	// JSON mode: emit structured command tree for machine consumption
+	if (logger.mode === "json") {
+		logger.json(buildHelpJson(version, pluginCommandsInfo));
+		return;
+	}
 
-  let pluginExamples = '';
-  for (const cmd of pluginCommandsInfo) {
-    for (const ex of cmd.examples ?? []) {
-      pluginExamples += `\n  ${ex.command.padEnd(35)}${ex.description}`;
-    }
-  }
-  
-  console.log(`
+	let pluginSection = "";
+	if (pluginCommandsInfo.length > 0) {
+		pluginSection = "\n\nPlugin Commands:";
+		for (const cmd of pluginCommandsInfo) {
+			const desc = cmd.description ? `  ${cmd.description}` : "";
+			pluginSection += `\n  ${cmd.commandName.padEnd(20)}${desc}`;
+		}
+	}
+
+	let pluginExamples = "";
+	for (const cmd of pluginCommandsInfo) {
+		for (const ex of cmd.examples ?? []) {
+			pluginExamples += `\n  ${ex.command.padEnd(35)}${ex.description}`;
+		}
+	}
+
+	console.log(
+		`
 c8ctl - Camunda 8 CLI v${version}
 
 Usage: c8ctl <command> [resource] [options]
@@ -376,61 +838,66 @@ For detailed help on specific commands with all available flags:
 Feedback & Issues:
   https://github.com/camunda/c8ctl/issues
   Or run: c8ctl feedback
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show available resources for a verb
  */
 export function showVerbResources(verb: string): void {
-  const resources: Record<string, string> = {
-    list: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins, users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)',
-    search: 'process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables (vars), users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)',
-    get: 'process-instance (pi), process-definition (pd), incident (inc), topology, form, user, role, group, tenant, authorization (auth), mapping-rule (mr)',
-    create: 'process-instance (pi), user, role, group, tenant, authorization (auth), mapping-rule (mr)',
-    delete: 'user, role, group, tenant, authorization (auth), mapping-rule (mr)',
-    assign: 'role, user, group, mapping-rule',
-    unassign: 'role, user, group, mapping-rule',
-    complete: 'user-task (ut), job',
-    cancel: 'process-instance (pi)',
-    await: 'process-instance (pi)',
-    resolve: 'incident (inc)',
-    activate: 'jobs',
-    fail: 'job',
-    publish: 'message (msg)',
-    correlate: 'message (msg)',
-    add: 'profile',
-    remove: 'profile',
-    rm: 'profile',
-    load: 'plugin',
-    unload: 'plugin',
-    sync: 'plugin',
-    upgrade: 'plugin',
-    downgrade: 'plugin',
-    init: 'plugin',
-    use: 'profile, tenant',
-    which: 'profile',
-    output: 'json, text',
-    open: 'operate, tasklist, modeler, optimize',
-    completion: 'bash, zsh, fish',
-    help: 'list, get, create, complete, await, search, deploy, run, watch, open, cancel, resolve, fail, activate, publish, correlate, delete, assign, unassign, upgrade, downgrade, init, profiles, profile, plugin, plugins',
-  };
+	const resources: Record<string, string> = {
+		list: "process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, profiles, plugins, users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)",
+		search:
+			"process-instances (pi), process-definitions (pd), user-tasks (ut), incidents (inc), jobs, variables (vars), users, roles, groups, tenants, authorizations (auth), mapping-rules (mr)",
+		get: "process-instance (pi), process-definition (pd), incident (inc), topology, form, user, role, group, tenant, authorization (auth), mapping-rule (mr)",
+		create:
+			"process-instance (pi), user, role, group, tenant, authorization (auth), mapping-rule (mr)",
+		delete:
+			"user, role, group, tenant, authorization (auth), mapping-rule (mr)",
+		assign: "role, user, group, mapping-rule",
+		unassign: "role, user, group, mapping-rule",
+		complete: "user-task (ut), job",
+		cancel: "process-instance (pi)",
+		await: "process-instance (pi)",
+		resolve: "incident (inc)",
+		activate: "jobs",
+		fail: "job",
+		publish: "message (msg)",
+		correlate: "message (msg)",
+		add: "profile",
+		remove: "profile",
+		rm: "profile",
+		load: "plugin",
+		unload: "plugin",
+		sync: "plugin",
+		upgrade: "plugin",
+		downgrade: "plugin",
+		init: "plugin",
+		use: "profile, tenant",
+		which: "profile",
+		output: "json, text",
+		open: "operate, tasklist, modeler, optimize",
+		completion: "bash, zsh, fish",
+		help: "list, get, create, complete, await, search, deploy, run, watch, open, cancel, resolve, fail, activate, publish, correlate, delete, assign, unassign, upgrade, downgrade, init, profiles, profile, plugin, plugins",
+	};
 
-  const available = resources[verb];
-  if (available) {
-    console.log(`\nUsage: c8ctl ${verb} <resource>\n`);
-    console.log(`Available resources:\n  ${available}`);
-  } else {
-    console.log(`\nUnknown command: ${verb}`);
-    console.log('Run "c8ctl help" for usage information.');
-  }
+	const available = resources[verb];
+	if (available) {
+		console.log(`\nUsage: c8ctl ${verb} <resource>\n`);
+		console.log(`Available resources:\n  ${available}`);
+	} else {
+		console.log(`\nUnknown command: ${verb}`);
+		console.log('Run "c8ctl help" for usage information.');
+	}
 }
 
 /**
  * Show detailed help for list command with all resources and their flags
  */
 export function showListHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl list - List resources
 
 Usage: c8ctl list <resource> [flags]
@@ -563,10 +1030,12 @@ Examples:
   c8ctl list tenants
   c8ctl list auth
   c8ctl list mapping-rules
-`.trim());
+`.trim(),
+	);
 }
 export function showGetHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl get - Get resource by key
 
 Usage: c8ctl get <resource> <key> [flags]
@@ -628,14 +1097,16 @@ Examples:
   c8ctl get tenant prod
   c8ctl get auth 123456
   c8ctl get mapping-rule abc123
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for create command
  */
 export function showCreateHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl create - Create a resource
 
 Usage: c8ctl create <resource> [flags]
@@ -698,14 +1169,16 @@ Examples:
   c8ctl create tenant --tenantId=prod --name='Production'
   c8ctl create auth --ownerId=john --ownerType=USER --resourceType=process-definition --resourceId='*' --permissions=READ,CREATE
   c8ctl create mapping-rule --mappingRuleId=my-rule --name=my-rule --claimName=department --claimValue=engineering
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for complete command
  */
 export function showCompleteHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl complete - Complete a resource
 
 Usage: c8ctl complete <resource> <key> [flags]
@@ -724,14 +1197,16 @@ Examples:
   c8ctl complete ut 2251799813685250
   c8ctl complete ut 2251799813685250 --variables='{"approved":true}'
   c8ctl complete job 2251799813685252 --variables='{"result":"success"}'
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for await command
  */
 export function showAwaitHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl await - Create and await process instance completion
 
 Usage: c8ctl await <resource> [flags]
@@ -760,14 +1235,16 @@ Examples:
   
   # Equivalent to:
   c8ctl create pi --id=order-process --awaitCompletion
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for mcp-proxy command
  */
 export function showMcpProxyHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl mcp-proxy - Start MCP proxy server
 
 Usage: c8ctl mcp-proxy [mcp-path] [flags]
@@ -819,14 +1296,16 @@ Examples:
 Note:
   The mcp-proxy command runs in the foreground and communicates via STDIO.
   It's designed to be launched by MCP clients, not run directly in a terminal.
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for search command
  */
 export function showSearchHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl search - Search resources with filters
 
 Usage: c8ctl search <resource> [flags]
@@ -1027,14 +1506,16 @@ Examples:
   c8ctl search auth --ownerId=john --resourceId=my-resource
   c8ctl search mapping-rules --claimName=department
   c8ctl search mapping-rules --mappingRuleId=my-rule
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for deploy command
  */
 export function showDeployHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl deploy - Deploy BPMN, DMN, and form files
 
 Usage: c8ctl deploy [path...] [flags]
@@ -1062,14 +1543,16 @@ Examples:
   c8ctl deploy ./process.bpmn           Deploy a specific BPMN file
   c8ctl deploy ./src ./forms            Deploy from multiple directories
   c8ctl deploy --profile=prod          Deploy using specific profile
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for run command
  */
 export function showRunHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl run - Deploy and start a process
 
 Usage: c8ctl run <path> [flags]
@@ -1086,14 +1569,16 @@ Examples:
   c8ctl run ./my-process.bpmn
   c8ctl run ./my-process.bpmn --variables='{"orderId":"12345"}'
   c8ctl run ./my-process.bpmn --profile=prod
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for watch command
  */
 export function showWatchHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl watch - Watch files for changes and auto-deploy
 
 Usage: c8ctl watch [path...] [flags]
@@ -1125,14 +1610,16 @@ Examples:
   c8ctl w ./src                         Use short alias
   c8ctl watch --profile=dev             Watch using specific profile
   c8ctl watch --force                   Keep watching after all deployment errors
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for open command
  */
 export function showOpenHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl open - Open a Camunda web application in the browser
 
 Usage: c8ctl open <app> [flags]
@@ -1163,14 +1650,16 @@ Examples:
   c8ctl open optimize
   c8ctl open operate --profile=prod
   c8ctl open operate --dry-run
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for cancel command
  */
 export function showCancelHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl cancel - Cancel a resource
 
 Usage: c8ctl cancel <resource> <key> [flags]
@@ -1183,14 +1672,16 @@ Resources and their available flags:
 Examples:
   c8ctl cancel pi 2251799813685249
   c8ctl cancel pi 2251799813685249 --profile=prod
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for resolve command
  */
 export function showResolveHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl resolve - Resolve an incident
 
 Usage: c8ctl resolve incident <key> [flags]
@@ -1208,14 +1699,16 @@ Examples:
   c8ctl resolve inc 2251799813685251
   c8ctl resolve incident 2251799813685251
   c8ctl resolve inc 2251799813685251 --profile=prod
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for fail command
  */
 export function showFailHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl fail - Fail a job
 
 Usage: c8ctl fail job <key> [flags]
@@ -1233,14 +1726,16 @@ Examples:
   c8ctl fail job 2251799813685252 --retries=3
   c8ctl fail job 2251799813685252 --errorMessage="Connection timeout"
   c8ctl fail job 2251799813685252 --retries=2 --errorMessage="Temporary failure"
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for activate command
  */
 export function showActivateHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl activate - Activate jobs by type
 
 Usage: c8ctl activate jobs <type> [flags]
@@ -1259,14 +1754,16 @@ Examples:
   c8ctl activate jobs payment-processor --maxJobsToActivate=5
   c8ctl activate jobs data-sync --timeout=120000 --worker=my-worker
   c8ctl activate jobs batch-job --maxJobsToActivate=100 --profile=prod
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for publish command
  */
 export function showPublishHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl publish - Publish a message
 
 Usage: c8ctl publish message <name> [flags]
@@ -1287,14 +1784,16 @@ Examples:
   c8ctl publish message order-confirmed --correlationKey=order-123
   c8ctl publish msg invoice-paid --variables='{"amount":1000}'
   c8ctl publish msg notification --correlationKey=user-456 --timeToLive=30000
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for correlate command
  */
 export function showCorrelateHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl correlate - Correlate a message
 
 Usage: c8ctl correlate message <name> [flags]
@@ -1314,14 +1813,16 @@ Examples:
   c8ctl correlate msg payment-received --correlationKey=order-123
   c8ctl correlate message order-confirmed --correlationKey=order-456 --variables='{"status":"confirmed"}'
   c8ctl correlate msg invoice-paid --correlationKey=inv-789 --timeToLive=60000
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for profile management
  */
 export function showProfilesHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl profiles - Profile management
 
 Usage: c8ctl <command> profile[s] [args] [flags]
@@ -1392,14 +1893,16 @@ Examples:
   c8ctl use profile "modeler:Local Dev"
   c8ctl use profile --none
   c8ctl remove profile local
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for plugin management
  */
 export function showPluginHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl plugin - Plugin management
 
 Usage: c8ctl <command> plugin [args] [flags]
@@ -1458,14 +1961,16 @@ Examples:
   c8ctl upgrade plugin my-plugin 1.2.3
   c8ctl downgrade plugin my-plugin 1.0.0
   c8ctl init plugin my-plugin
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for delete command
  */
 export function showDeleteHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl delete - Delete a resource
 
 Usage: c8ctl delete <resource> <id> [flags]
@@ -1497,14 +2002,16 @@ Examples:
   c8ctl delete tenant prod
   c8ctl delete auth 123456
   c8ctl delete mapping-rule abc123
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for assign command
  */
 export function showAssignHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl assign - Assign a resource to a target
 
 Usage: c8ctl assign <resource> <id> --to-<target>=<targetId> [flags]
@@ -1539,14 +2046,16 @@ Examples:
   c8ctl assign user john --to-tenant=prod
   c8ctl assign group developers --to-tenant=prod
   c8ctl assign mapping-rule my-rule --to-group=developers
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for unassign command
  */
 export function showUnassignHelp(): void {
-  console.log(`
+	console.log(
+		`
 c8ctl unassign - Unassign a resource from a target
 
 Usage: c8ctl unassign <resource> <id> --from-<target>=<targetId> [flags]
@@ -1580,103 +2089,107 @@ Examples:
   c8ctl unassign user john --from-group=developers
   c8ctl unassign group developers --from-tenant=prod
   c8ctl unassign mapping-rule my-rule --from-group=developers
-`.trim());
+`.trim(),
+	);
 }
 
 /**
  * Show detailed help for specific commands
  */
 export function showCommandHelp(command: string): void {
-  const logger = getLogger();
+	const logger = getLogger();
 
-  // JSON mode: emit structured help for machine/agent consumption
-  if (logger.mode === 'json') {
-    const version = getVersion();
-    const pluginCommandsInfo = getPluginCommandsInfo();
-    const allHelp = buildHelpJson(version, pluginCommandsInfo) as any;
-    const commandEntry = allHelp.commands?.find((c: any) => c.verb === command);
-    logger.json({
-      command,
-      ...(commandEntry ?? { verb: command, description: `No detailed help available for: ${command}` }),
-      globalFlags: allHelp.globalFlags,
-      searchFlags: allHelp.searchFlags,
-      agentFlags: allHelp.agentFlags,
-    });
-    return;
-  }
+	// JSON mode: emit structured help for machine/agent consumption
+	if (logger.mode === "json") {
+		const version = getVersion();
+		const pluginCommandsInfo = getPluginCommandsInfo();
+		const allHelp = buildHelpJson(version, pluginCommandsInfo);
+		const commandEntry = allHelp.commands.find((c) => c.verb === command);
+		logger.json({
+			command,
+			...(commandEntry ?? {
+				verb: command,
+				description: `No detailed help available for: ${command}`,
+			}),
+			globalFlags: allHelp.globalFlags,
+			searchFlags: allHelp.searchFlags,
+			agentFlags: allHelp.agentFlags,
+		});
+		return;
+	}
 
-  switch (command) {
-    case 'list':
-      showListHelp();
-      break;
-    case 'get':
-      showGetHelp();
-      break;
-    case 'create':
-      showCreateHelp();
-      break;
-    case 'complete':
-      showCompleteHelp();
-      break;
-    case 'await':
-      showAwaitHelp();
-      break;
-    case 'mcp-proxy':
-      showMcpProxyHelp();
-      break;
-    case 'search':
-      showSearchHelp();
-      break;
-    case 'deploy':
-      showDeployHelp();
-      break;
-    case 'run':
-      showRunHelp();
-      break;
-    case 'watch':
-    case 'w':
-      showWatchHelp();
-      break;
-    case 'open':
-      showOpenHelp();
-      break;
-    case 'cancel':
-      showCancelHelp();
-      break;
-    case 'resolve':
-      showResolveHelp();
-      break;
-    case 'fail':
-      showFailHelp();
-      break;
-    case 'activate':
-      showActivateHelp();
-      break;
-    case 'publish':
-      showPublishHelp();
-      break;
-    case 'correlate':
-      showCorrelateHelp();
-      break;
-    case 'delete':
-      showDeleteHelp();
-      break;
-    case 'assign':
-      showAssignHelp();
-      break;
-    case 'unassign':
-      showUnassignHelp();
-      break;
-    case 'profiles':
-    case 'profile':
-      showProfilesHelp();
-      break;
-    case 'plugin':
-    case 'plugins':
-      showPluginHelp();
-      break;
-    default:
-      console.log(`\nNo detailed help available for: ${command}`);
-      console.log('Run "c8ctl help" for general usage information.');
-  }
+	switch (command) {
+		case "list":
+			showListHelp();
+			break;
+		case "get":
+			showGetHelp();
+			break;
+		case "create":
+			showCreateHelp();
+			break;
+		case "complete":
+			showCompleteHelp();
+			break;
+		case "await":
+			showAwaitHelp();
+			break;
+		case "mcp-proxy":
+			showMcpProxyHelp();
+			break;
+		case "search":
+			showSearchHelp();
+			break;
+		case "deploy":
+			showDeployHelp();
+			break;
+		case "run":
+			showRunHelp();
+			break;
+		case "watch":
+		case "w":
+			showWatchHelp();
+			break;
+		case "open":
+			showOpenHelp();
+			break;
+		case "cancel":
+			showCancelHelp();
+			break;
+		case "resolve":
+			showResolveHelp();
+			break;
+		case "fail":
+			showFailHelp();
+			break;
+		case "activate":
+			showActivateHelp();
+			break;
+		case "publish":
+			showPublishHelp();
+			break;
+		case "correlate":
+			showCorrelateHelp();
+			break;
+		case "delete":
+			showDeleteHelp();
+			break;
+		case "assign":
+			showAssignHelp();
+			break;
+		case "unassign":
+			showUnassignHelp();
+			break;
+		case "profiles":
+		case "profile":
+			showProfilesHelp();
+			break;
+		case "plugin":
+		case "plugins":
+			showPluginHelp();
+			break;
+		default:
+			console.log(`\nNo detailed help available for: ${command}`);
+			console.log('Run "c8ctl help" for general usage information.');
+	}
 }
