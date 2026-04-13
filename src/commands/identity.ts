@@ -15,6 +15,7 @@ export {
 	getIdentityAuthorization,
 	listAuthorizations,
 	searchIdentityAuthorizations,
+	validateCreateAuthorizationOptions,
 } from "./identity-authorizations.ts";
 export {
 	createIdentityGroup,

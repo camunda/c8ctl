@@ -50,6 +50,7 @@ import {
 	searchIdentityRoles,
 	searchIdentityTenants,
 	searchIdentityUsers,
+	validateCreateAuthorizationOptions,
 } from "./commands/identity.ts";
 import {
 	getIncident,
@@ -1298,7 +1299,7 @@ async function main() {
 		return;
 	}
 	if (verb === "create" && normalizedResource === "authorization") {
-		await createIdentityAuthorization({
+		const validated = validateCreateAuthorizationOptions({
 			profile: str(values.profile),
 			ownerId: str(values.ownerId),
 			ownerType: str(values.ownerType),
@@ -1306,6 +1307,7 @@ async function main() {
 			resourceId: str(values.resourceId),
 			permissions: str(values.permissions),
 		});
+		await createIdentityAuthorization(validated);
 		return;
 	}
 	if (verb === "create" && normalizedResource === "mapping-rule") {
