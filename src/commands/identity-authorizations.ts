@@ -9,6 +9,7 @@ import { resolveClusterConfig } from '../config.ts';
 import { c8ctl } from '../runtime.ts';
 import { handleCommandError } from '../errors.ts';
 import { AuthorizationKey } from '@camunda8/orchestration-cluster-api';
+import type { OwnerTypeEnum, ResourceTypeEnum, PermissionTypeEnum } from '@camunda8/orchestration-cluster-api';
 
 /**
  * List all authorizations
@@ -155,10 +156,10 @@ export async function createIdentityAuthorization(options: {
 
   const body = {
     ownerId: options.ownerId,
-    ownerType: options.ownerType,
-    resourceType: options.resourceType,
+    ownerType: options.ownerType as OwnerTypeEnum,
+    resourceType: options.resourceType as ResourceTypeEnum,
     resourceId: options.resourceId,
-    permissionTypes: options.permissions.split(',').map(p => p.trim()).filter(p => p.length > 0),
+    permissionTypes: options.permissions.split(',').map(p => p.trim()).filter(p => p.length > 0) as PermissionTypeEnum[],
   };
 
   if (c8ctl.dryRun) {
