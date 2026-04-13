@@ -94,22 +94,29 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
   });
 
   test('list process instances filters by version', async () => {
+    // Use a unique process ID so version numbering starts at 1 regardless of server state
+    const uniqueId = `version-test-${Date.now()}`;
+    const baseBpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
+      .replace('id="simple-process"', `id="${uniqueId}"`);
+
     // Deploy v1
-    await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    const v1Path = join(testDir, 'v1.bpmn');
+    writeFileSync(v1Path, baseBpmn);
+    await deploy([v1Path], {});
+    await createProcessInstance({ processDefinitionId: uniqueId });
 
     // Deploy v2 with a minimal change (different task name)
-    const v2Bpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
+    const v2Bpmn = baseBpmn
       .replace('name="Do Something"', 'name="Do Something v2"');
-    const v2Path = join(testDir, 'simple-v2.bpmn');
+    const v2Path = join(testDir, 'v2.bpmn');
     writeFileSync(v2Path, v2Bpmn);
     await deploy([v2Path], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await createProcessInstance({ processDefinitionId: uniqueId });
 
     // Wait for both versions to be indexed
     const v1Indexed = await pollUntil(async () => {
       const result = await listProcessInstances({
-        processDefinitionId: 'simple-process',
+        processDefinitionId: uniqueId,
         version: 1,
         all: true,
       });
@@ -119,7 +126,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
     const v2Indexed = await pollUntil(async () => {
       const result = await listProcessInstances({
-        processDefinitionId: 'simple-process',
+        processDefinitionId: uniqueId,
         version: 2,
         all: true,
       });
@@ -129,7 +136,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
     // Verify version filtering is exclusive
     const v1Result = await listProcessInstances({
-      processDefinitionId: 'simple-process',
+      processDefinitionId: uniqueId,
       version: 1,
       all: true,
     });
@@ -141,7 +148,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     );
 
     const v2Result = await listProcessInstances({
-      processDefinitionId: 'simple-process',
+      processDefinitionId: uniqueId,
       version: 2,
       all: true,
     });
