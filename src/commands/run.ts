@@ -3,6 +3,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import {
 	ProcessDefinitionId,
 	TenantId,
@@ -47,7 +48,7 @@ export async function run(
 		logger.info(`Deploying ${path}...`);
 
 		// Deploy the BPMN file - convert to File object with proper MIME type
-		const fileName = path.split("/").pop() || "process.bpmn";
+		const fileName = basename(path) || "process.bpmn";
 		const deployResult = await client.createDeployment({
 			tenantId: TenantId.assumeExists(tenantId),
 			resources: [
