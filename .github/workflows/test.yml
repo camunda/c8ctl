@@ -11,12 +11,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref }}
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v6
@@ -27,13 +25,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint fix
-        run: npx biome check src/ --fix
-
-      - name: Commit lint fixes
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "fix: auto-fix lint issues"
+      - name: Lint
+        run: npm run lint
 
   unit-test:
     name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
