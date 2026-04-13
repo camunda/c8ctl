@@ -7,7 +7,7 @@ import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { deriveAppUrl, getBrowserCommand, openApp, OPEN_APPS } from '../../src/commands/open.ts';
+import { deriveAppUrl, getBrowserCommand, openApp, validateOpenAppOptions, OPEN_APPS } from '../../src/commands/open.ts';
 
 const CLI_ENTRY = join(process.cwd(), 'src', 'index.ts');
 
@@ -131,20 +131,20 @@ describe('open command', () => {
 
     test('exits with error when app is undefined', async () => {
       try {
-        await openApp(undefined, {});
+        validateOpenAppOptions(undefined, {});
         assert.fail('Should have thrown');
       } catch (e: any) {
         assert.ok(e.message.includes('process.exit(1)'));
         assert.strictEqual(exitCode, 1);
       }
       const errorOutput = consoleErrorSpy.join('\n');
-      assert.ok(errorOutput.includes('Application required'));
-      assert.ok(errorOutput.includes('operate'));
+      assert.ok(errorOutput.includes('Application'));
+      assert.ok(errorOutput.includes('required'));
     });
 
     test('exits with error for invalid app name', async () => {
       try {
-        await openApp('console', {});
+        validateOpenAppOptions('console', {});
         assert.fail('Should have thrown');
       } catch (e: any) {
         assert.ok(e.message.includes('process.exit(1)'));
@@ -156,11 +156,19 @@ describe('open command', () => {
 
     test('shows usage hint on invalid app', async () => {
       try {
-        await openApp('invalid', {});
+        validateOpenAppOptions('invalid', {});
       } catch { /* expected */ }
       const allOutput = consoleLogSpy.join('\n') + consoleErrorSpy.join('\n');
       assert.ok(allOutput.includes('Usage: c8 open <app>') || allOutput.includes('c8 open <app>'),
         `Expected usage hint, got:\nstdout: ${consoleLogSpy.join('\n')}\nstderr: ${consoleErrorSpy.join('\n')}`);
+    });
+
+    test('accepts valid app names', () => {
+      for (const app of OPEN_APPS) {
+        const result = validateOpenAppOptions(app, { profile: 'test' });
+        assert.strictEqual(result.app, app);
+        assert.strictEqual(result.profile, 'test');
+      }
     });
   });
 
@@ -177,7 +185,7 @@ describe('open command', () => {
       });
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
-      assert.ok(output.includes('Application required'), `Expected error message, got: ${output}`);
+      assert.ok(output.includes('Application is required'), `Expected error message, got: ${output}`);
       assert.notStrictEqual(result.status, 0, 'Should exit with non-zero status');
     });
 

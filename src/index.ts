@@ -65,7 +65,7 @@ import {
 } from "./commands/jobs.ts";
 import { mcpProxy } from "./commands/mcp-proxy.ts";
 import { correlateMessage, publishMessage } from "./commands/messages.ts";
-import { openApp, openUrl } from "./commands/open.ts";
+import { openApp, openUrl, validateOpenAppOptions } from "./commands/open.ts";
 import {
 	downgradePlugin,
 	initPlugin,
@@ -916,10 +916,11 @@ async function main() {
 
 	// Handle open command
 	if (verb === "open") {
-		await openApp(resource, {
+		const validated = validateOpenAppOptions(resource, {
 			profile: str(values.profile),
 			dryRun: bool(values["dry-run"]),
 		});
+		await openApp(validated);
 		return;
 	}
 
