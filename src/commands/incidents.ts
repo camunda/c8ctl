@@ -89,7 +89,7 @@ export async function getIncident(key: string, options: {
   const client = createClient(options.profile);
 
   try {
-    const result = await client.getIncident({ incidentKey: key as any }, { consistency: { waitUpToMs: 0 } });
+    const result = await client.getIncident({ incidentKey: IncidentKey.assumeExists(key) }, { consistency: { waitUpToMs: 0 } });
     logger.json(result);
   } catch (error) {
     handleCommandError(logger, `Failed to get incident ${key}`, error);

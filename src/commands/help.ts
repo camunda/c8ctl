@@ -30,7 +30,7 @@ interface HelpCommand {
   resources: string[];
   description: string;
   mutating: boolean;
-  examples?: string[];
+  examples?: Array<{ command: string; description: string }> | string[];
 }
 
 interface HelpJson {
