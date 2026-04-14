@@ -753,7 +753,9 @@ async function startC8Run(config, debug = false) {
   if (typeof proc.pid !== 'number') {
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat ${logDir}/*.log`);
+    logger.info(
+      `Print logs with: cat "${join(logDir, 'camunda.log')}" "${join(logDir, 'connectors.log')}"`
+    );
     process.exit(1);
   }
 
