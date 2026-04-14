@@ -89,3 +89,192 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 
 - behaviour tests are the regression guard — **do not modify behaviour tests** during refactoring. If a test fails, the production code is wrong, not the test
 - between refactors, always run `npx tsc --noEmit`, `npx biome check src`, and `npx vitest run` to verify correctness
+
+## Adding a New Command
+
+Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
+
+### Architecture overview
+
+```
+COMMAND_REGISTRY   →  metadata (flags, resources, help, validation)
+defineCommand()    →  handler (receives typed flags + positionals)
+COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
+```
+
+### Step-by-step
+
+#### 1. Declare the command in `COMMAND_REGISTRY`
+
+Add or extend a verb entry in `src/command-registry.ts`:
+
+```typescript
+// In COMMAND_REGISTRY:
+myverb: {
+  description: "Short description shown in help",
+  helpDescription: "Longer description for `c8ctl help` (optional, falls back to description)",
+  mutating: true,              // true = write operation, false = read-only
+  requiresResource: true,      // true = `c8ctl myverb <resource>`, false = `c8ctl myverb`
+  resources: ["my-resource"],  // canonical resource names this verb accepts
+  flags: {
+    ...SEARCH_FLAGS,           // spread shared flag sets
+    myFlag: {
+      type: "string",
+      description: "A custom flag",
+      short: "m",              // optional single-letter alias
+    },
+  },
+  // Optional: per-resource flag overrides
+  resourceFlags: {
+    "my-resource": MY_RESOURCE_SEARCH_FLAGS,
+  },
+  // Optional: positional arguments
+  resourcePositionals: {
+    "my-resource": MY_RESOURCE_POSITIONALS,
+  },
+  // Optional: help metadata
+  hasDetailedHelp: true,
+  helpFooterLabel: "Show myverb usage",
+  helpExamples: [
+    { command: "c8ctl myverb my-resource", description: "Do the thing" },
+  ],
+},
+```
+
+#### 2. Define flag sets with `as const satisfies`
+
+Flag sets must use `as const satisfies` to preserve concrete validator return types for `InferFlags`:
+
+```typescript
+const MY_RESOURCE_SEARCH_FLAGS = {
+  myKey: {
+    type: "string",
+    description: "Filter by key",
+    validate: MyBrandedKey.assumeExists,  // branded type validator
+  },
+} as const satisfies Record<string, FlagDef>;
+```
+
+The `validate` function narrows the handler parameter type automatically — if it returns `MyBrandedKey`, the handler receives `MyBrandedKey | undefined` (no cast needed).
+
+Positional arguments work the same way:
+
+```typescript
+const MY_RESOURCE_POSITIONALS = [
+  { name: "key", required: true, validate: MyBrandedKey.assumeExists },
+] as const satisfies readonly PositionalDef[];
+```
+
+#### 3. Add resource aliases (if new resource)
+
+If introducing a new resource, add aliases in `RESOURCE_ALIASES`:
+
+```typescript
+export const RESOURCE_ALIASES: Record<string, string> = {
+  // ... existing aliases
+  mr: "my-resource",
+  "my-resources": "my-resource",  // plural form
+};
+```
+
+#### 4. Write the handler with `defineCommand()`
+
+Create a handler file in `src/commands/`:
+
+```typescript
+// src/commands/my-resource.ts
+import { defineCommand, dryRun } from "../command-framework.ts";
+
+export const myverbMyResourceCommand = defineCommand(
+  "myverb",
+  "my-resource",
+  async (ctx, flags, args) => {
+    const { client, profile } = ctx;
+
+    // flags.myFlag → string | undefined (inferred from FlagDef)
+    // flags.myKey  → MyBrandedKey | undefined (inferred from validator)
+    // args.key     → MyBrandedKey (required positional, branded)
+
+    // Dry-run support (required for all commands)
+    const dr = dryRun({
+      command: "myverb my-resource",
+      method: "POST",
+      endpoint: "/my-resources",
+      profile,
+    });
+    if (dr) return dr;
+
+    const result = await client.doSomething({ key: args.key });
+
+    // Return a CommandResult — the framework handles rendering
+    return { kind: "get", data: result };
+  },
+);
+```
+
+**`CommandResult` kinds:**
+
+| Kind | Use case | Data |
+|------|----------|------|
+| `list` | Search/list results with items array | `{ items, page?, sorting? }` |
+| `get` | Single resource fetch | `{ data }` |
+| `raw` | Raw text output (XML, YAML, etc.) | `{ content }` |
+| `dry-run` | Dry-run preview | `{ command, method, url, body? }` |
+| `info` | Informational messages | `{ message }` |
+| `success` | Mutation confirmation | `{ message }` |
+| `no-result` | Nothing to display | — |
+
+The `dryRun()` helper checks the `--dry-run` flag and returns a `DryRunResult` if set, or `undefined` to continue.
+
+#### 5. Register in `COMMAND_DISPATCH`
+
+Add the handler to the dispatch map in `src/command-dispatch.ts`:
+
+```typescript
+import { myverbMyResourceCommand } from "./commands/my-resource.ts";
+
+export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map([
+  // ... existing entries
+  ["myverb:my-resource", myverbMyResourceCommand],
+]);
+```
+
+The key format is `"verb:resource"`. For resourceless verbs (like `deploy`), use `"verb:"`.
+
+#### 6. Add tests
+
+- **Unit tests** in `tests/unit/` — test the handler via the CLI subprocess helper `c8()`
+- **Behaviour tests** — `c8('myverb', 'my-resource', '--dry-run')` proves end-to-end dispatch
+- **Help tests** — verify the command appears in help output
+- **Completion tests** — the new command is automatically included in shell completions (derived from registry)
+
+### What you get for free
+
+By adding the registry entry and dispatch wiring, these features are automatically derived:
+
+- `c8ctl help` includes the command with description, flags, and examples
+- `c8ctl help myverb` shows detailed help (if `hasDetailedHelp: true`)
+- `c8ctl completion bash/zsh/fish` includes the verb, resource, and all flags
+- `parseArgs` accepts the declared flags with correct types
+- Flag validation runs at the boundary (branded types enforced)
+- `--dry-run` support (via `dryRun()` helper)
+- Output rendering (JSON, table, fields filtering) handled by the framework
+- Resource alias resolution (`mr` → `my-resource`) works everywhere
+
+### Resourceless commands
+
+Some verbs don't take a resource (e.g. `deploy`, `run`, `watch`). Set `requiresResource: false` and `resources: []`, then register with an empty resource key:
+
+```typescript
+// Registry
+deploy: {
+  description: "Deploy resources",
+  mutating: true,
+  requiresResource: false,
+  resources: [],
+  flags: { ...DEPLOY_FLAGS },
+},
+
+// Dispatch
+["deploy:", deployCommand]
+```
