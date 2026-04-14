@@ -750,7 +750,10 @@ async function startC8Run(config, debug = false) {
   });
 
   if (typeof proc.pid !== 'number') {
-    logger.error('Failed to start cluster process: no PID received from c8run. Check logs for details.');
+    const logDir = join(dirname(binaryPath), 'log');
+    logger.error('Failed to start cluster process: no PID received from c8run.');
+    logger.error(`Check logs in: ${logDir}`);
+    logger.info('Or run: c8ctl cluster log');
     process.exit(1);
   }
 
@@ -806,9 +809,12 @@ async function startC8Run(config, debug = false) {
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
   } else {
+    const logDir = join(dirname(binaryPath), 'log');
     logger.error(
-      'Cluster failed to start within timeout. Check logs for details.',
+      'Cluster failed to start within timeout.',
     );
+    logger.error(`Check logs in: ${logDir}`);
+    logger.info('Or run: c8ctl cluster log');
     process.exit(1);
   }
 }
