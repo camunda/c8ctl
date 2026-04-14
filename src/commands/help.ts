@@ -875,6 +875,7 @@ export function showVerbResources(verb: string): void {
 		downgrade: "plugin",
 		init: "plugin",
 		use: "profile, tenant",
+		run: "<bpmn-file-path>",
 		which: "profile",
 		output: "json, text",
 		open: "operate, tasklist, modeler, optimize",
@@ -884,8 +885,14 @@ export function showVerbResources(verb: string): void {
 
 	const available = resources[verb];
 	if (available) {
-		console.log(`\nUsage: c8ctl ${verb} <resource>\n`);
-		console.log(`Available resources:\n  ${available}`);
+		// Verbs that take a positional argument other than a resource name
+		const positionalLabel: Record<string, string> = {
+			run: "<bpmn-file-path>",
+		};
+		const placeholder = positionalLabel[verb] ?? "<resource>";
+		const label = positionalLabel[verb] ? "Argument" : "Available resources";
+		console.log(`\nUsage: c8ctl ${verb} ${placeholder}\n`);
+		console.log(`${label}:\n  ${available}`);
 	} else {
 		console.log(`\nUnknown command: ${verb}`);
 		console.log('Run "c8ctl help" for usage information.');

@@ -8,6 +8,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createClient } from "./client.ts";
+import { COMMAND_REGISTRY, resolveAlias } from "./command-registry.ts";
 import { showCompletion } from "./commands/completion.ts";
 import { deploy } from "./commands/deployments.ts";
 import { getForm, getStartForm, getUserTaskForm } from "./commands/forms.ts";
@@ -109,33 +110,6 @@ import { loadSessionState, resolveTenantId } from "./config.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
 import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
-
-/**
- * Normalize resource aliases
- */
-function normalizeResource(resource: string): string {
-	const aliases: Record<string, string> = {
-		pi: "process-instance",
-		pd: "process-definition",
-		ut: "user-task",
-		inc: "incident",
-		msg: "message",
-		vars: "variable",
-		profile: "profile",
-		profiles: "profile",
-		plugin: "plugin",
-		plugins: "plugin",
-		auth: "authorization",
-		authorizations: "authorization",
-		mr: "mapping-rule",
-		"mapping-rules": "mapping-rule",
-		users: "user",
-		roles: "role",
-		groups: "group",
-		tenants: "tenant",
-	};
-	return aliases[resource] || resource;
-}
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.
@@ -300,6 +274,13 @@ function warnUnknownSearchFlags(
 	);
 }
 
+/** Verbs that require a resource argument — derived from COMMAND_REGISTRY (includes aliases). */
+const VERB_REQUIRES_RESOURCE = new Set(
+	Object.entries(COMMAND_REGISTRY)
+		.filter(([, def]) => def.requiresResource)
+		.flatMap(([verb, def]) => [verb, ...(def.aliases ?? [])]),
+);
+
 /**
  * Main CLI handler
  */
@@ -393,7 +374,15 @@ async function main() {
 	}
 
 	// Normalize resource
-	const normalizedResource = resource ? normalizeResource(resource) : "";
+	const normalizedResource = resource ? resolveAlias(resource) : "";
+
+	// Resource validation guard — single chokepoint for all verbs that require a resource.
+	// Derived from COMMAND_REGISTRY.requiresResource.
+	// help/completion are dispatched before this point.
+	if (!resource && VERB_REQUIRES_RESOURCE.has(verb)) {
+		showVerbResources(verb);
+		return;
+	}
 
 	// Handle session commands
 	if (verb === "use") {
@@ -889,10 +878,6 @@ async function main() {
 
 	// Handle run command
 	if (verb === "run") {
-		if (!resource) {
-			logger.error("BPMN file path required. Usage: c8 run <path>");
-			process.exit(1);
-		}
 		await run(resource, {
 			profile: str(values.profile),
 			variables: str(values.variables),
@@ -943,11 +928,7 @@ async function main() {
 
 	// Handle search commands
 	if (verb === "search") {
-		if (!resource) {
-			showVerbResources("search");
-			return;
-		}
-		const normalizedSearchResource = normalizeResource(resource);
+		const normalizedSearchResource = resolveAlias(resource);
 		const unknownFlags = detectUnknownSearchFlags(
 			values,
 			normalizedSearchResource,
@@ -1378,10 +1359,6 @@ async function main() {
 
 	// Handle assign/unassign commands
 	if (verb === "assign") {
-		if (!normalizedResource) {
-			showVerbResources("assign");
-			return;
-		}
 		if (!args[0]) {
 			logger.error(
 				`ID required. Usage: c8 assign ${normalizedResource} <id> --to-<target>=<targetId>`,
@@ -1395,10 +1372,6 @@ async function main() {
 	}
 
 	if (verb === "unassign") {
-		if (!normalizedResource) {
-			showVerbResources("unassign");
-			return;
-		}
 		if (!args[0]) {
 			logger.error(
 				`ID required. Usage: c8 unassign ${normalizedResource} <id> --from-<target>=<targetId>`,
@@ -1416,14 +1389,8 @@ async function main() {
 		return;
 	}
 
-	// Handle verb-only invocations (show available resources)
-	if (!resource) {
-		showVerbResources(verb);
-		return;
-	}
-
 	// Unknown command
-	logger.error(`Unknown command: ${verb} ${resource}`);
+	logger.error(`Unknown command: ${verb}${resource ? ` ${resource}` : ""}`);
 	logger.info('Run "c8 help" for usage information');
 	process.exit(1);
 }
