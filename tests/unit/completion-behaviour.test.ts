@@ -65,3 +65,47 @@ describe('CLI behavioural: completion errors', () => {
     assert.strictEqual(result.status, 1);
   });
 });
+
+// ─── cluster plugin completions ──────────────────────────────────────────────
+
+describe('CLI behavioural: cluster plugin completions', () => {
+
+  test('bash completion includes cluster verb', async () => {
+    const result = await c8('completion', 'bash');
+    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+    assert.ok(result.stdout.includes('cluster'), 'Expected cluster verb in bash completions');
+  });
+
+  test('bash completion includes cluster subcommands', async () => {
+    const result = await c8('completion', 'bash');
+    for (const sub of ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'log', 'logs']) {
+      assert.ok(result.stdout.includes(sub), `Expected cluster subcommand "${sub}" in bash completions`);
+    }
+  });
+
+  test('zsh completion includes cluster verb with description', async () => {
+    const result = await c8('completion', 'zsh');
+    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+    assert.ok(result.stdout.includes('cluster'), 'Expected cluster verb in zsh completions');
+  });
+
+  test('zsh completion includes cluster subcommands', async () => {
+    const result = await c8('completion', 'zsh');
+    for (const sub of ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'log', 'logs']) {
+      assert.ok(result.stdout.includes(sub), `Expected cluster subcommand "${sub}" in zsh completions`);
+    }
+  });
+
+  test('fish completion includes cluster verb', async () => {
+    const result = await c8('completion', 'fish');
+    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+    assert.ok(result.stdout.includes('cluster'), 'Expected cluster verb in fish completions');
+  });
+
+  test('fish completion includes cluster subcommands', async () => {
+    const result = await c8('completion', 'fish');
+    for (const sub of ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'log', 'logs']) {
+      assert.ok(result.stdout.includes(sub), `Expected cluster subcommand "${sub}" in fish completions`);
+    }
+  });
+});

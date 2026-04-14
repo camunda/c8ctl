@@ -1,13 +1,297 @@
 /**
- * Shell completion commands
+ * Shell completion commands — derived from COMMAND_REGISTRY + plugins.
  */
 
+import {
+	COMMAND_REGISTRY,
+	type CommandDef,
+	type FlagDef,
+	GLOBAL_FLAGS,
+	RESOURCE_ALIASES,
+} from "../command-registry.ts";
 import { getLogger } from "../logger.ts";
+import {
+	getPluginCommandsInfo,
+	type PluginCommandInfo,
+} from "../plugin-loader.ts";
 
-/**
- * Generate bash completion script
- */
+// ─── Typed helpers (same pattern as help.ts) ─────────────────────────────────
+
+/** Typed entries for COMMAND_REGISTRY — avoids per-loop casts. */
+function registryEntries(): [string, CommandDef][] {
+	return Object.entries(COMMAND_REGISTRY);
+}
+
+/** Typed entries for a flag record — avoids per-loop casts. */
+function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
+	return Object.entries(flags);
+}
+
+// ─── Derived completion data ─────────────────────────────────────────────────
+
+/** Reverse map: canonical resource → all names that resolve to it (including itself). */
+function buildCanonicalToAliases(): Map<string, string[]> {
+	const map = new Map<string, string[]>();
+
+	// Seed with every known canonical name from the registry
+	for (const [, def] of registryEntries()) {
+		for (const r of def.resources) {
+			const canonical = RESOURCE_ALIASES[r] ?? r;
+			if (!map.has(canonical)) {
+				map.set(canonical, [canonical]);
+			}
+		}
+	}
+
+	// Add every alias
+	for (const [alias, canonical] of Object.entries(RESOURCE_ALIASES)) {
+		if (!map.has(canonical)) {
+			map.set(canonical, [canonical]);
+		}
+		const arr = map.get(canonical) ?? [];
+		if (!arr.includes(alias)) {
+			arr.push(alias);
+		}
+	}
+
+	return map;
+}
+
+/** All accepted forms for a verb's resources (canonical + all aliases). */
+function resourceFormsForVerb(
+	def: CommandDef,
+	canonicalToAliases: Map<string, string[]>,
+): string[] {
+	const seen = new Set<string>();
+	for (const r of def.resources) {
+		const canonical = RESOURCE_ALIASES[r] ?? r;
+		for (const form of canonicalToAliases.get(canonical) ?? [canonical]) {
+			seen.add(form);
+		}
+	}
+	return [...seen];
+}
+
+interface VerbInfo {
+	verb: string;
+	description: string;
+	resources: string[];
+	/** Verb aliases (e.g. "rm" → remove). */
+	aliases: string[];
+	/** File-path argument instead of resources (deploy/run/watch). */
+	fileComplete: boolean;
+}
+
+function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
+	const canonicalToAliases = buildCanonicalToAliases();
+	const infos: VerbInfo[] = [];
+
+	for (const [verb, def] of registryEntries()) {
+		// Skip mcp-proxy — not a user-facing verb
+		if (verb === "mcp-proxy") continue;
+
+		const resources = resourceFormsForVerb(def, canonicalToAliases);
+		const fileComplete =
+			!def.requiresResource &&
+			def.resources.length === 0 &&
+			["deploy", "run", "watch"].includes(verb);
+
+		infos.push({
+			verb,
+			description: def.description,
+			resources,
+			aliases: def.aliases ?? [],
+			fileComplete,
+		});
+	}
+
+	// Plugin-provided verbs (e.g. cluster)
+	for (const cmd of pluginCommandsInfo) {
+		// Skip if already in registry
+		if (cmd.commandName in COMMAND_REGISTRY) continue;
+
+		infos.push({
+			verb: cmd.commandName,
+			description: cmd.description ?? "",
+			resources: (cmd.subcommands ?? []).map((s) => s.name),
+			aliases: [],
+			fileComplete: false,
+		});
+	}
+
+	return infos;
+}
+
+/** Collect all unique flag names across all commands + global + search flags. */
+function deriveAllFlagNames(): string[] {
+	const names = new Set<string>();
+
+	for (const name of Object.keys(GLOBAL_FLAGS)) {
+		names.add(name);
+	}
+
+	for (const [, def] of registryEntries()) {
+		for (const [name] of flagEntries(def.flags)) {
+			names.add(name);
+		}
+		if (def.resourceFlags) {
+			for (const rf of Object.values(def.resourceFlags)) {
+				for (const name of Object.keys(rf)) {
+					names.add(name);
+				}
+			}
+		}
+	}
+
+	return [...names].map((n) => `--${n}`);
+}
+
+/** Collect all flags with descriptions and types for rich completions (zsh/fish). */
+function deriveAllFlags(): {
+	name: string;
+	description: string;
+	type: string;
+	short?: string;
+}[] {
+	const seen = new Map<
+		string,
+		{ description: string; type: string; short?: string }
+	>();
+
+	function addFlags(flags: Record<string, FlagDef>) {
+		for (const [name, def] of flagEntries(flags)) {
+			if (!seen.has(name)) {
+				seen.set(name, {
+					description: def.description,
+					type: def.type,
+					short: def.short,
+				});
+			}
+		}
+	}
+
+	addFlags(GLOBAL_FLAGS);
+
+	for (const [, def] of registryEntries()) {
+		addFlags(def.flags);
+		if (def.resourceFlags) {
+			for (const rf of Object.values(def.resourceFlags)) {
+				addFlags(rf);
+			}
+		}
+	}
+
+	return [...seen].map(([name, info]) => ({
+		name,
+		...info,
+	}));
+}
+
+/** Get resources for the `help` verb: verbs with hasDetailedHelp + special topics. */
+function deriveHelpResources(): { name: string; description: string }[] {
+	const items: { name: string; description: string }[] = [];
+
+	for (const [verb, def] of registryEntries()) {
+		if (def.hasDetailedHelp) {
+			items.push({ name: verb, description: `Show ${verb} command help` });
+		}
+	}
+
+	// Special topics that aren't verbs but have help pages
+	items.push(
+		{
+			name: "profiles",
+			description: "Show profile management help",
+		},
+		{
+			name: "profile",
+			description: "Alias for profile management help",
+		},
+		{
+			name: "plugin",
+			description: "Show plugin management help",
+		},
+		{
+			name: "plugins",
+			description: "Alias for plugin management help",
+		},
+	);
+
+	// Plugin verbs
+	const pluginCmds = getPluginCommandsInfo();
+	for (const cmd of pluginCmds) {
+		if (
+			!items.some((i) => i.name === cmd.commandName) &&
+			!(cmd.commandName in COMMAND_REGISTRY)
+		) {
+			items.push({
+				name: cmd.commandName,
+				description: cmd.description
+					? `Show ${cmd.commandName} command help`
+					: `No detailed help; use c8ctl help for general usage`,
+			});
+		}
+	}
+
+	return items;
+}
+
+// ─── Bash completion ─────────────────────────────────────────────────────────
+
 function generateBashCompletion(): string {
+	const pluginCmds = getPluginCommandsInfo();
+	const verbInfos = deriveVerbInfos(pluginCmds);
+	const allFlags = deriveAllFlagNames();
+	const helpResources = deriveHelpResources();
+
+	// All verb names (including aliases)
+	const allVerbs = new Set<string>();
+	for (const v of verbInfos) {
+		allVerbs.add(v.verb);
+		for (const a of v.aliases) allVerbs.add(a);
+	}
+
+	const verbsStr = [...allVerbs].join(" ");
+	const flagsStr = allFlags.join(" ");
+
+	// Build per-verb resource variables
+	const resourceVars: string[] = [];
+	const caseBranches: string[] = [];
+
+	for (const v of verbInfos) {
+		if (v.verb === "help") {
+			// Help completes to verbs/topics, not resources
+			resourceVars.push(
+				`  local help_resources="${helpResources.map((r) => r.name).join(" ")}"`,
+			);
+			caseBranches.push(
+				`        help)\n          COMPREPLY=( $(compgen -W "\${help_resources}" -- "\${cur}") )\n          ;;`,
+			);
+			continue;
+		}
+
+		if (v.fileComplete) {
+			// deploy/run/watch complete with files
+			caseBranches.push(
+				`        ${v.verb})\n          COMPREPLY=( $(compgen -f -- "\${cur}") )\n          ;;`,
+			);
+			continue;
+		}
+
+		if (v.resources.length === 0) continue;
+
+		const varName = `${v.verb.replace(/-/g, "_")}_resources`;
+		resourceVars.push(`  local ${varName}="${v.resources.join(" ")}"`);
+
+		// Include aliases in the case pattern
+		const casePattern =
+			v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
+
+		caseBranches.push(
+			`        ${casePattern})\n          COMPREPLY=( $(compgen -W "\${${varName}}" -- "\${cur}") )\n          ;;`,
+		);
+	}
+
 	return `# c8ctl bash completion
 _c8ctl_completions() {
   local cur prev words cword
@@ -20,42 +304,13 @@ _c8ctl_completions() {
   cword=\${COMP_CWORD}
 
   # Commands (verbs)
-  local verbs="list search get create delete cancel await complete fail activate resolve publish correlate deploy run watch open add remove rm load unload sync upgrade downgrade assign unassign init use which output completion help cluster feedback"
+  local verbs="${verbsStr}"
   
   # Resources by verb
-  local list_resources="process-instances process-instance pi user-tasks user-task ut incidents incident inc jobs profiles profile plugins plugin users user roles role groups group tenants tenant authorizations authorization auth mapping-rules mapping-rule mr"
-  local search_resources="process-instances process-instance pi process-definitions process-definition pd user-tasks user-task ut incidents incident inc jobs variables variable vars users user roles role groups group tenants tenant authorizations authorization auth mapping-rules mapping-rule mr"
-  local get_resources="process-instance pi process-definition pd incident inc topology form user role group tenant authorization auth mapping-rule mr"
-  local create_resources="process-instance pi user role group tenant authorization auth mapping-rule mr"
-  local cancel_resources="process-instance pi"
-  local await_resources="process-instance pi"
-  local complete_resources="user-task ut job"
-  local fail_resources="job"
-  local activate_resources="jobs"
-  local resolve_resources="incident inc"
-  local publish_resources="message msg"
-  local correlate_resources="message msg"
-  local add_resources="profile"
-  local remove_resources="profile"
-  local load_resources="plugin"
-  local unload_resources="plugin"
-  local sync_resources="plugin plugins"
-  local upgrade_resources="plugin"
-  local downgrade_resources="plugin"
-  local init_resources="plugin"
-  local use_resources="profile tenant"
-  local which_resources="profile"
-  local output_resources="json text"
-  local completion_resources="bash zsh fish"
-  local cluster_resources="start stop status list list-remote install delete log logs"
-  local open_resources="operate tasklist modeler optimize"
-  local delete_resources="user role group tenant authorization auth mapping-rule mr"
-  local assign_resources="role user group mapping-rule mr"
-  local unassign_resources="role user group mapping-rule mr"
-  local help_resources="list get create delete complete await search deploy run watch open cancel resolve fail activate publish correlate upgrade downgrade init assign unassign profiles profile plugin plugins cluster feedback"
+${resourceVars.join("\n")}
 
   # Global flags
-  local flags="--help --version --profile --from --all --bpmnProcessId --id --processInstanceKey --processDefinitionKey --parentProcessInstanceKey --variables --state --assignee --type --correlationKey --timeToLive --maxJobsToActivate --timeout --worker --retries --errorMessage --baseUrl --clientId --clientSecret --audience --oAuthUrl --defaultTenantId --awaitCompletion --fetchVariables --requestTimeout --sortBy --asc --desc --limit --between --dateField --name --key --elementId --errorType --value --scopeKey --fullValue --userTask --ut --processDefinition --pd --iname --iid --iassignee --ierrorMessage --itype --ivalue --fields --dry-run --verbose --force --none --from-file --from-env --username --email --password --ownerId --ownerType --roleId --groupId --resourceType --resourceId --permissions --tenantId --claimName --claimValue --mappingRuleId --to-user --to-group --to-tenant --to-mapping-rule --from-user --from-group --from-tenant --from-mapping-rule"
+  local flags="${flagsStr}"
 
   case \${cword} in
     1)
@@ -66,100 +321,7 @@ _c8ctl_completions() {
       # Complete resources based on verb
       local verb="\${words[1]}"
       case "\${verb}" in
-        list)
-          COMPREPLY=( $(compgen -W "\${list_resources}" -- "\${cur}") )
-          ;;
-        search)
-          COMPREPLY=( $(compgen -W "\${search_resources}" -- "\${cur}") )
-          ;;
-        get)
-          COMPREPLY=( $(compgen -W "\${get_resources}" -- "\${cur}") )
-          ;;
-        create)
-          COMPREPLY=( $(compgen -W "\${create_resources}" -- "\${cur}") )
-          ;;
-        cancel)
-          COMPREPLY=( $(compgen -W "\${cancel_resources}" -- "\${cur}") )
-          ;;
-        await)
-          COMPREPLY=( $(compgen -W "\${await_resources}" -- "\${cur}") )
-          ;;
-        complete)
-          COMPREPLY=( $(compgen -W "\${complete_resources}" -- "\${cur}") )
-          ;;
-        fail)
-          COMPREPLY=( $(compgen -W "\${fail_resources}" -- "\${cur}") )
-          ;;
-        activate)
-          COMPREPLY=( $(compgen -W "\${activate_resources}" -- "\${cur}") )
-          ;;
-        resolve)
-          COMPREPLY=( $(compgen -W "\${resolve_resources}" -- "\${cur}") )
-          ;;
-        publish)
-          COMPREPLY=( $(compgen -W "\${publish_resources}" -- "\${cur}") )
-          ;;
-        correlate)
-          COMPREPLY=( $(compgen -W "\${correlate_resources}" -- "\${cur}") )
-          ;;
-        delete)
-          COMPREPLY=( $(compgen -W "\${delete_resources}" -- "\${cur}") )
-          ;;
-        assign)
-          COMPREPLY=( $(compgen -W "\${assign_resources}" -- "\${cur}") )
-          ;;
-        unassign)
-          COMPREPLY=( $(compgen -W "\${unassign_resources}" -- "\${cur}") )
-          ;;
-        add)
-          COMPREPLY=( $(compgen -W "\${add_resources}" -- "\${cur}") )
-          ;;
-        remove|rm)
-          COMPREPLY=( $(compgen -W "\${remove_resources}" -- "\${cur}") )
-          ;;
-        load)
-          COMPREPLY=( $(compgen -W "\${load_resources}" -- "\${cur}") )
-          ;;
-        unload)
-          COMPREPLY=( $(compgen -W "\${unload_resources}" -- "\${cur}") )
-          ;;
-        sync)
-          COMPREPLY=( $(compgen -W "\${sync_resources}" -- "\${cur}") )
-          ;;
-        upgrade)
-          COMPREPLY=( $(compgen -W "\${upgrade_resources}" -- "\${cur}") )
-          ;;
-        downgrade)
-          COMPREPLY=( $(compgen -W "\${downgrade_resources}" -- "\${cur}") )
-          ;;
-        init)
-          COMPREPLY=( $(compgen -W "\${init_resources}" -- "\${cur}") )
-          ;;
-        use)
-          COMPREPLY=( $(compgen -W "\${use_resources}" -- "\${cur}") )
-          ;;
-        which)
-          COMPREPLY=( $(compgen -W "\${which_resources}" -- "\${cur}") )
-          ;;
-        output)
-          COMPREPLY=( $(compgen -W "\${output_resources}" -- "\${cur}") )
-          ;;
-        completion)
-          COMPREPLY=( $(compgen -W "\${completion_resources}" -- "\${cur}") )
-          ;;
-        help)
-          COMPREPLY=( $(compgen -W "\${help_resources}" -- "\${cur}") )
-          ;;
-        cluster)
-          COMPREPLY=( $(compgen -W "\${cluster_resources}" -- "\${cur}") )
-          ;;
-        open)
-          COMPREPLY=( $(compgen -W "\${open_resources}" -- "\${cur}") )
-          ;;
-        deploy|run|watch)
-          # Complete with files
-          COMPREPLY=( $(compgen -f -- "\${cur}") )
-          ;;
+${caseBranches.join("\n")}
       esac
       ;;
     *)
@@ -178,139 +340,78 @@ complete -F _c8ctl_completions c8
 `;
 }
 
-/**
- * Generate zsh completion script
- */
+// ─── Zsh completion ──────────────────────────────────────────────────────────
+
 function generateZshCompletion(): string {
+	const pluginCmds = getPluginCommandsInfo();
+	const verbInfos = deriveVerbInfos(pluginCmds);
+	const allFlags = deriveAllFlags();
+	const helpResources = deriveHelpResources();
+
+	// Verb entries: 'verb:description'
+	const verbEntries = verbInfos.map((v) => {
+		const items = [`    '${v.verb}:${escZsh(v.description)}'`];
+		for (const a of v.aliases) {
+			items.push(`    '${a}:${escZsh(v.description)}'`);
+		}
+		return items.join("\n");
+	});
+
+	// Flag entries: '--flag[description]:hint:' or '--flag[description]'
+	const flagEntryLines = allFlags.map((f) => {
+		const desc = escZsh(f.description);
+		if (f.short) {
+			return `    '-${f.short}[${desc}]'\n    '--${f.name}[${desc}]${f.type === "string" ? `:${f.name}:` : ""}'`;
+		}
+		return `    '--${f.name}[${desc}]${f.type === "string" ? `:${f.name}:` : ""}'`;
+	});
+
+	// Per-verb resource case branches
+	const resourceCases: string[] = [];
+	for (const v of verbInfos) {
+		if (v.verb === "help") {
+			const entries = helpResources.map(
+				(r) => `            '${r.name}:${escZsh(r.description)}'`,
+			);
+			resourceCases.push(
+				`        help)\n          resources=(\n${entries.join("\n")}\n          )\n          _describe 'resource' resources\n          ;;`,
+			);
+			continue;
+		}
+
+		if (v.fileComplete) {
+			const casePattern =
+				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
+			resourceCases.push(
+				`        ${casePattern})\n          _files\n          ;;`,
+			);
+			continue;
+		}
+
+		if (v.resources.length === 0) continue;
+
+		const entries = v.resources.map(
+			(r) =>
+				`            '${r}:${escZsh(capitalize(v.verb))} ${resourceDisplayName(r)}'`,
+		);
+		const casePattern =
+			v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
+		resourceCases.push(
+			`        ${casePattern})\n          resources=(\n${entries.join("\n")}\n          )\n          _describe 'resource' resources\n          ;;`,
+		);
+	}
+
 	return `#compdef c8ctl c8
 
 _c8ctl() {
   local -a verbs resources flags
 
   verbs=(
-    'list:List resources'
-    'search:Search resources with filters'
-    'get:Get resource by key'
-    'create:Create resource'
-    'cancel:Cancel resource'
-    'await:Await resource completion'
-    'complete:Complete resource'
-    'fail:Fail a job'
-    'activate:Activate jobs by type'
-    'resolve:Resolve incident'
-    'publish:Publish message'
-    'correlate:Correlate message'
-    'delete:Delete resource'
-    'deploy:Deploy BPMN/DMN/forms'
-    'run:Deploy and start process'
-    'watch:Watch files for changes and auto-deploy'
-    'add:Add a profile'
-    'remove:Remove a profile'
-    'rm:Remove a profile'
-    'load:Load a c8ctl plugin'
-    'unload:Unload a c8ctl plugin'
-    'sync:Synchronize plugins from registry'
-    'upgrade:Upgrade a plugin'
-    'downgrade:Downgrade a plugin'
-    'init:Create a new plugin from template'
-    'assign:Assign a resource to another'
-    'unassign:Unassign a resource from another'
-    'use:Set active profile or tenant'
-    'which:Show active profile or tenant'
-    'output:Set output format'
-    'open:Open Camunda web application in browser'
-    'completion:Generate shell completion script'
-    'help:Show help or detailed help for a command'
-    'cluster:Manage local Camunda 8 cluster'
-    'feedback:Open the feedback page to report issues or request features'
+${verbEntries.join("\n")}
   )
 
   flags=(
-    '--help[Show help]'
-    '-h[Show help]'
-    '--version[Show version]'
-    '-v[Show version]'
-    '--profile[Use specific profile]:profile:'
-    '--from[Load plugin from URL]:url:'
-    '--all[Show all results]'
-    '--bpmnProcessId[Process definition ID]:id:'
-    '--id[Process definition ID (alias for --bpmnProcessId)]:id:'
-    '--processInstanceKey[Process instance key]:key:'
-    '--processDefinitionKey[Process definition key]:key:'
-    '--parentProcessInstanceKey[Parent process instance key]:key:'
-    '--variables[JSON variables]:json:'
-    '--state[Filter by state]:state:'
-    '--assignee[Filter by assignee]:assignee:'
-    '--type[Job type]:type:'
-    '--correlationKey[Message correlation key]:key:'
-    '--timeToLive[Message TTL in ms]:ttl:'
-    '--maxJobsToActivate[Maximum jobs to activate]:count:'
-    '--timeout[Job timeout in ms]:timeout:'
-    '--worker[Worker name]:name:'
-    '--retries[Number of retries]:count:'
-    '--errorMessage[Error message]:message:'
-    '--baseUrl[Cluster base URL]:url:'
-    '--clientId[OAuth client ID]:id:'
-    '--clientSecret[OAuth client secret]:secret:'
-    '--audience[OAuth audience]:audience:'
-    '--oAuthUrl[OAuth token endpoint]:url:'
-    '--defaultTenantId[Default tenant ID]:id:'
-    '--version[Process definition version]:version:'
-    '--awaitCompletion[Wait for process instance to complete]'
-    '--fetchVariables[Comma-separated variable names]:variables:'
-    '--requestTimeout[Timeout in milliseconds for process completion]:milliseconds:'
-    '--sortBy[Sort list output by column name]:column:'
-    '--asc[Sort in ascending order (default)]'
-    '--desc[Sort in descending order]'
-    '--limit[Maximum number of items to fetch]:number:'
-    '--between[Filter by date range (from..to)]:range:'
-    '--dateField[Date field to filter on with --between]:field:'
-    '--name[Variable or resource name]:name:'
-    '--key[Resource key]:key:'
-    '--elementId[Element ID]:id:'
-    '--errorType[Error type]:type:'
-    '--value[Variable value]:value:'
-    '--scopeKey[Scope key]:key:'
-    '--fullValue[Return full variable values]'
-    '--userTask[Get form for a user task]'
-    '--ut[Get form for a user task (alias for --userTask)]'
-    '--processDefinition[Get start form for a process definition]'
-    '--pd[Get start form for a process definition (alias for --processDefinition)]'
-    '--iname[Case-insensitive name filter]:pattern:'
-    '--iid[Case-insensitive process definition ID filter]:pattern:'
-    '--iassignee[Case-insensitive assignee filter]:pattern:'
-    '--ierrorMessage[Case-insensitive error message filter]:pattern:'
-    '--itype[Case-insensitive job type filter]:pattern:'
-    '--ivalue[Case-insensitive variable value filter]:pattern:'
-    '--fields[Agent: comma-separated output fields to include (reduces context window)]:fields:'
-    '--dry-run[Agent: preview API request without executing (for mutating commands)]'
-    '--verbose[Enable SDK trace logging and show full error details]'
-    '--force[Continue watching after all deployment errors (watch command) or force-remove a limbo plugin (unload plugin)]'
-    '--none[Clear the active session profile (use profile --none)]'
-    '--from-file[Create profile from a .env file]:file:_files'
-    '--from-env[Create profile from current CAMUNDA_* environment variables]'
-    '--username[Username for identity operations]:username:'
-    '--email[Email for identity operations]:email:'
-    '--password[Password for identity operations]:password:'
-    '--ownerId[Owner ID for authorization]:ownerId:'
-    '--ownerType[Owner type for authorization]:ownerType:'
-    '--resourceType[Resource type for authorization]:resourceType:'
-    '--resourceId[Resource ID for authorization]:resourceId:'
-    '--permissions[Permissions for authorization]:permissions:'
-    '--tenantId[Tenant ID]:tenantId:'
-    '--claimName[Claim name for mapping rule]:claimName:'
-    '--claimValue[Claim value for mapping rule]:claimValue:'
-    '--roleId[Role ID for search]:roleId:'
-    '--groupId[Group ID for search]:groupId:'
-    '--mappingRuleId[Mapping rule ID]:mappingRuleId:'
-    '--to-user[Target user for assignment]:user:'
-    '--to-group[Target group for assignment]:group:'
-    '--to-tenant[Target tenant for assignment]:tenant:'
-    '--to-mapping-rule[Target mapping rule for assignment]:mappingRule:'
-    '--from-user[Source user for unassignment]:user:'
-    '--from-group[Source group for unassignment]:group:'
-    '--from-tenant[Source tenant for unassignment]:tenant:'
-    '--from-mapping-rule[Source mapping rule for unassignment]:mappingRule:'
+${flagEntryLines.join("\n")}
   )
 
   case $CURRENT in
@@ -319,327 +420,7 @@ _c8ctl() {
       ;;
     3)
       case "\${words[2]}" in
-        list)
-          resources=(
-            'process-instances:List process instances'
-            'process-instance:List process instances'
-            'pi:List process instances'
-            'user-tasks:List user tasks'
-            'user-task:List user tasks'
-            'ut:List user tasks'
-            'incidents:List incidents'
-            'incident:List incidents'
-            'inc:List incidents'
-            'jobs:List jobs'
-            'profiles:List profiles'
-            'profile:List profiles'
-            'plugins:List plugins'
-            'plugin:List plugins'
-            'users:List users'
-            'user:List users'
-            'roles:List roles'
-            'role:List roles'
-            'groups:List groups'
-            'group:List groups'
-            'tenants:List tenants'
-            'tenant:List tenants'
-            'authorizations:List authorizations'
-            'authorization:List authorizations'
-            'auth:List authorizations'
-            'mapping-rules:List mapping rules'
-            'mapping-rule:List mapping rules'
-            'mr:List mapping rules'
-          )
-          _describe 'resource' resources
-          ;;
-        search)
-          resources=(
-            'process-instances:Search process instances'
-            'process-instance:Search process instances'
-            'pi:Search process instances'
-            'process-definitions:Search process definitions'
-            'process-definition:Search process definitions'
-            'pd:Search process definitions'
-            'user-tasks:Search user tasks'
-            'user-task:Search user tasks'
-            'ut:Search user tasks'
-            'incidents:Search incidents'
-            'incident:Search incidents'
-            'inc:Search incidents'
-            'jobs:Search jobs'
-            'variables:Search variables'
-            'variable:Search variables'
-            'vars:Search variables'
-            'users:Search users'
-            'user:Search users'
-            'roles:Search roles'
-            'role:Search roles'
-            'groups:Search groups'
-            'group:Search groups'
-            'tenants:Search tenants'
-            'tenant:Search tenants'
-            'authorizations:Search authorizations'
-            'authorization:Search authorizations'
-            'auth:Search authorizations'
-            'mapping-rules:Search mapping rules'
-            'mapping-rule:Search mapping rules'
-            'mr:Search mapping rules'
-          )
-          _describe 'resource' resources
-          ;;
-        get)
-          resources=(
-            'process-instance:Get process instance'
-            'pi:Get process instance'
-            'process-definition:Get process definition'
-            'pd:Get process definition'
-            'incident:Get incident'
-            'inc:Get incident'
-            'topology:Get cluster topology'
-            'form:Get form for user task or process definition'
-            'user:Get user'
-            'role:Get role'
-            'group:Get group'
-            'tenant:Get tenant'
-            'authorization:Get authorization'
-            'auth:Get authorization'
-            'mapping-rule:Get mapping rule'
-            'mr:Get mapping rule'
-          )
-          _describe 'resource' resources
-          ;;
-        create)
-          resources=(
-            'process-instance:Create process instance'
-            'pi:Create process instance'
-            'user:Create user'
-            'role:Create role'
-            'group:Create group'
-            'tenant:Create tenant'
-            'authorization:Create authorization'
-            'auth:Create authorization'
-            'mapping-rule:Create mapping rule'
-            'mr:Create mapping rule'
-          )
-          _describe 'resource' resources
-          ;;
-        cancel)
-          resources=(
-            'process-instance:Cancel process instance'
-            'pi:Cancel process instance'
-          )
-          _describe 'resource' resources
-          ;;
-        await)
-          resources=(
-            'process-instance:Await process instance completion'
-            'pi:Await process instance completion'
-          )
-          _describe 'resource' resources
-          ;;
-        complete)
-          resources=(
-            'user-task:Complete user task'
-            'ut:Complete user task'
-            'job:Complete job'
-          )
-          _describe 'resource' resources
-          ;;
-        fail)
-          resources=(
-            'job:Fail job'
-          )
-          _describe 'resource' resources
-          ;;
-        activate)
-          resources=(
-            'jobs:Activate jobs'
-          )
-          _describe 'resource' resources
-          ;;
-        resolve)
-          resources=(
-            'incident:Resolve incident'
-            'inc:Resolve incident'
-          )
-          _describe 'resource' resources
-          ;;
-        publish)
-          resources=(
-            'message:Publish message'
-            'msg:Publish message'
-          )
-          _describe 'resource' resources
-          ;;
-        correlate)
-          resources=(
-            'message:Correlate message'
-            'msg:Correlate message'
-          )
-          _describe 'resource' resources
-          ;;
-        delete)
-          resources=(
-            'user:Delete user'
-            'role:Delete role'
-            'group:Delete group'
-            'tenant:Delete tenant'
-            'authorization:Delete authorization'
-            'auth:Delete authorization'
-            'mapping-rule:Delete mapping rule'
-            'mr:Delete mapping rule'
-          )
-          _describe 'resource' resources
-          ;;
-        assign)
-          resources=(
-            'role:Assign role'
-            'user:Assign user'
-            'group:Assign group'
-            'mapping-rule:Assign mapping rule'
-            'mr:Assign mapping rule'
-          )
-          _describe 'resource' resources
-          ;;
-        unassign)
-          resources=(
-            'role:Unassign role'
-            'user:Unassign user'
-            'group:Unassign group'
-            'mapping-rule:Unassign mapping rule'
-            'mr:Unassign mapping rule'
-          )
-          _describe 'resource' resources
-          ;;
-        add)
-          resources=(
-            'profile:Add profile'
-          )
-          _describe 'resource' resources
-          ;;
-        remove|rm)
-          resources=(
-            'profile:Remove profile'
-          )
-          _describe 'resource' resources
-          ;;
-        load)
-          resources=(
-            'plugin:Load plugin'
-          )
-          _describe 'resource' resources
-          ;;
-        unload)
-          resources=(
-            'plugin:Unload plugin'
-          )
-          _describe 'resource' resources
-          ;;
-        sync)
-          resources=(
-            'plugin:Synchronize plugin'
-            'plugins:Synchronize plugins'
-          )
-          _describe 'resource' resources
-          ;;
-        upgrade)
-          resources=(
-            'plugin:Upgrade plugin'
-          )
-          _describe 'resource' resources
-          ;;
-        downgrade)
-          resources=(
-            'plugin:Downgrade plugin'
-          )
-          _describe 'resource' resources
-          ;;
-        init)
-          resources=(
-            'plugin:Create new plugin from template'
-          )
-          _describe 'resource' resources
-          ;;
-        use)
-          resources=(
-            'profile:Set active profile'
-            'tenant:Set active tenant'
-          )
-          _describe 'resource' resources
-          ;;
-        which)
-          resources=(
-            'profile:Show active profile'
-          )
-          _describe 'resource' resources
-          ;;
-        output)
-          resources=(
-            'json:JSON output'
-            'text:Text output'
-          )
-          _describe 'resource' resources
-          ;;
-        completion)
-          resources=(
-            'bash:Generate bash completion'
-            'zsh:Generate zsh completion'
-            'fish:Generate fish completion'
-          )
-          _describe 'resource' resources
-          ;;
-        help)
-          resources=(
-            'list:Show list command help'
-            'get:Show get command help'
-            'create:Show create command help'
-            'complete:Show complete command help'
-            'await:Show await command help'
-            'search:Show search command help'
-            'deploy:Show deploy command help'
-            'run:Show run command help'
-            'watch:Show watch command help'
-            'open:Show open command help'
-            'cancel:Show cancel command help'
-            'resolve:Show resolve command help'
-            'fail:Show fail command help'
-            'activate:Show activate command help'
-            'publish:Show publish command help'
-            'correlate:Show correlate command help'
-            'delete:Show delete command help'
-            'assign:Show assign command help'
-            'unassign:Show unassign command help'
-            'upgrade:Show upgrade command help'
-            'downgrade:Show downgrade command help'
-            'init:Show init command help'
-            'profiles:Show profile management help'
-            'profile:Alias for profile management help'
-            'plugin:Show plugin management help'
-            'plugins:Alias for plugin management help'
-            'cluster:No detailed help; use c8ctl help for general usage'
-            'feedback:Show feedback command help'
-          )
-          _describe 'resource' resources
-          ;;
-        cluster)
-          resources=(
-            'start:Start local Camunda 8 cluster'
-            'stop:Stop local Camunda 8 cluster'
-          )
-          _describe 'resource' resources
-          ;;
-        open)
-          resources=(
-            'operate:Open Camunda Operate'
-            'tasklist:Open Camunda Tasklist'
-            'modeler:Open Camunda Web Modeler'
-            'optimize:Open Camunda Optimize'
-          )
-          _describe 'resource' resources
-          ;;
-        deploy|run|watch)
-          _files
-          ;;
+${resourceCases.join("\n")}
       esac
       ;;
     *)
@@ -652,655 +433,120 @@ _c8ctl() {
 `;
 }
 
-/**
- * Generate fish completion script
- */
+// ─── Fish completion ─────────────────────────────────────────────────────────
+
 function generateFishCompletion(): string {
-	return `# c8ctl fish completion
+	const pluginCmds = getPluginCommandsInfo();
+	const verbInfos = deriveVerbInfos(pluginCmds);
+	const allFlags = deriveAllFlags();
+	const helpResources = deriveHelpResources();
 
-# Remove all existing completions for c8ctl and c8
-complete -c c8ctl -e
-complete -c c8 -e
+	const lines: string[] = [
+		"# c8ctl fish completion",
+		"",
+		"# Remove all existing completions for c8ctl and c8",
+		"complete -c c8ctl -e",
+		"complete -c c8 -e",
+		"",
+	];
 
-# Global flags
-complete -c c8ctl -s h -l help -d 'Show help'
-complete -c c8 -s h -l help -d 'Show help'
-complete -c c8ctl -s v -l version -d 'Show version'
-complete -c c8 -s v -l version -d 'Show version'
-complete -c c8ctl -l profile -d 'Use specific profile' -r
-complete -c c8 -l profile -d 'Use specific profile' -r
-complete -c c8ctl -l from -d 'Load plugin from URL' -r
-complete -c c8 -l from -d 'Load plugin from URL' -r
-complete -c c8ctl -l all -d 'Show all results'
-complete -c c8 -l all -d 'Show all results'
-complete -c c8ctl -l bpmnProcessId -d 'Process definition ID' -r
-complete -c c8 -l bpmnProcessId -d 'Process definition ID' -r
-complete -c c8ctl -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
-complete -c c8 -l id -d 'Process definition ID (alias for --bpmnProcessId)' -r
-complete -c c8ctl -l processInstanceKey -d 'Process instance key' -r
-complete -c c8 -l processInstanceKey -d 'Process instance key' -r
-complete -c c8ctl -l processDefinitionKey -d 'Process definition key' -r
-complete -c c8 -l processDefinitionKey -d 'Process definition key' -r
-complete -c c8ctl -l parentProcessInstanceKey -d 'Parent process instance key' -r
-complete -c c8 -l parentProcessInstanceKey -d 'Parent process instance key' -r
-complete -c c8ctl -l variables -d 'JSON variables' -r
-complete -c c8 -l variables -d 'JSON variables' -r
-complete -c c8ctl -l state -d 'Filter by state' -r
-complete -c c8 -l state -d 'Filter by state' -r
-complete -c c8ctl -l assignee -d 'Filter by assignee' -r
-complete -c c8 -l assignee -d 'Filter by assignee' -r
-complete -c c8ctl -l type -d 'Job type' -r
-complete -c c8 -l type -d 'Job type' -r
-complete -c c8ctl -l correlationKey -d 'Message correlation key' -r
-complete -c c8 -l correlationKey -d 'Message correlation key' -r
-complete -c c8ctl -l timeToLive -d 'Message TTL in ms' -r
-complete -c c8 -l timeToLive -d 'Message TTL in ms' -r
-complete -c c8ctl -l maxJobsToActivate -d 'Maximum jobs to activate' -r
-complete -c c8 -l maxJobsToActivate -d 'Maximum jobs to activate' -r
-complete -c c8ctl -l timeout -d 'Job timeout in ms' -r
-complete -c c8 -l timeout -d 'Job timeout in ms' -r
-complete -c c8ctl -l worker -d 'Worker name' -r
-complete -c c8 -l worker -d 'Worker name' -r
-complete -c c8ctl -l retries -d 'Number of retries' -r
-complete -c c8 -l retries -d 'Number of retries' -r
-complete -c c8ctl -l errorMessage -d 'Error message' -r
-complete -c c8 -l errorMessage -d 'Error message' -r
-complete -c c8ctl -l baseUrl -d 'Cluster base URL' -r
-complete -c c8 -l baseUrl -d 'Cluster base URL' -r
-complete -c c8ctl -l clientId -d 'OAuth client ID' -r
-complete -c c8 -l clientId -d 'OAuth client ID' -r
-complete -c c8ctl -l clientSecret -d 'OAuth client secret' -r
-complete -c c8 -l clientSecret -d 'OAuth client secret' -r
-complete -c c8ctl -l audience -d 'OAuth audience' -r
-complete -c c8 -l audience -d 'OAuth audience' -r
-complete -c c8ctl -l oAuthUrl -d 'OAuth token endpoint' -r
-complete -c c8 -l oAuthUrl -d 'OAuth token endpoint' -r
-complete -c c8ctl -l defaultTenantId -d 'Default tenant ID' -r
-complete -c c8 -l defaultTenantId -d 'Default tenant ID' -r
-complete -c c8ctl -l version -d 'Process definition version' -r
-complete -c c8 -l version -d 'Process definition version' -r
-complete -c c8ctl -l awaitCompletion -d 'Wait for process instance to complete'
-complete -c c8 -l awaitCompletion -d 'Wait for process instance to complete'
-complete -c c8ctl -l fetchVariables -d 'Comma-separated variable names' -r
-complete -c c8 -l fetchVariables -d 'Comma-separated variable names' -r
-complete -c c8ctl -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
-complete -c c8 -l requestTimeout -d 'Timeout in milliseconds for process completion' -r
-complete -c c8ctl -l sortBy -d 'Sort list output by column name' -r
-complete -c c8 -l sortBy -d 'Sort list output by column name' -r
-complete -c c8ctl -l asc -d 'Sort in ascending order (default)'
-complete -c c8 -l asc -d 'Sort in ascending order (default)'
-complete -c c8ctl -l desc -d 'Sort in descending order'
-complete -c c8 -l desc -d 'Sort in descending order'
-complete -c c8ctl -l limit -d 'Maximum number of items to fetch' -r
-complete -c c8 -l limit -d 'Maximum number of items to fetch' -r
-complete -c c8ctl -l between -d 'Filter by date range (from..to)' -r
-complete -c c8 -l between -d 'Filter by date range (from..to)' -r
-complete -c c8ctl -l dateField -d 'Date field to filter on with --between' -r
-complete -c c8 -l dateField -d 'Date field to filter on with --between' -r
-complete -c c8ctl -l name -d 'Variable or resource name' -r
-complete -c c8 -l name -d 'Variable or resource name' -r
-complete -c c8ctl -l key -d 'Resource key' -r
-complete -c c8 -l key -d 'Resource key' -r
-complete -c c8ctl -l elementId -d 'Element ID' -r
-complete -c c8 -l elementId -d 'Element ID' -r
-complete -c c8ctl -l errorType -d 'Error type' -r
-complete -c c8 -l errorType -d 'Error type' -r
-complete -c c8ctl -l value -d 'Variable value' -r
-complete -c c8 -l value -d 'Variable value' -r
-complete -c c8ctl -l scopeKey -d 'Scope key' -r
-complete -c c8 -l scopeKey -d 'Scope key' -r
-complete -c c8ctl -l fullValue -d 'Return full variable values'
-complete -c c8 -l fullValue -d 'Return full variable values'
-complete -c c8ctl -l userTask -d 'Get form for a user task'
-complete -c c8 -l userTask -d 'Get form for a user task'
-complete -c c8ctl -l ut -d 'Get form for a user task (alias for --userTask)'
-complete -c c8 -l ut -d 'Get form for a user task (alias for --userTask)'
-complete -c c8ctl -l processDefinition -d 'Get start form for a process definition'
-complete -c c8 -l processDefinition -d 'Get start form for a process definition'
-complete -c c8ctl -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
-complete -c c8 -l pd -d 'Get start form for a process definition (alias for --processDefinition)'
-complete -c c8ctl -l iname -d 'Case-insensitive name filter' -r
-complete -c c8 -l iname -d 'Case-insensitive name filter' -r
-complete -c c8ctl -l iid -d 'Case-insensitive process definition ID filter' -r
-complete -c c8 -l iid -d 'Case-insensitive process definition ID filter' -r
-complete -c c8ctl -l iassignee -d 'Case-insensitive assignee filter' -r
-complete -c c8 -l iassignee -d 'Case-insensitive assignee filter' -r
-complete -c c8ctl -l ierrorMessage -d 'Case-insensitive error message filter' -r
-complete -c c8 -l ierrorMessage -d 'Case-insensitive error message filter' -r
-complete -c c8ctl -l itype -d 'Case-insensitive job type filter' -r
-complete -c c8 -l itype -d 'Case-insensitive job type filter' -r
-complete -c c8ctl -l ivalue -d 'Case-insensitive variable value filter' -r
-complete -c c8 -l ivalue -d 'Case-insensitive variable value filter' -r
-complete -c c8ctl -l fields -d 'Agent: comma-separated output fields to include' -r
-complete -c c8 -l fields -d 'Agent: comma-separated output fields to include' -r
-complete -c c8ctl -l dry-run -d 'Agent: preview API request without executing'
-complete -c c8 -l dry-run -d 'Agent: preview API request without executing'
-complete -c c8ctl -l verbose -d 'Enable SDK trace logging and show full error details'
-complete -c c8 -l verbose -d 'Enable SDK trace logging and show full error details'
-complete -c c8ctl -l force -d 'Continue watching after all deployment errors or force-remove a limbo plugin'
-complete -c c8 -l force -d 'Continue watching after all deployment errors or force-remove a limbo plugin'
-complete -c c8ctl -l none -d 'Clear the active session profile'
-complete -c c8 -l none -d 'Clear the active session profile'
-complete -c c8ctl -l from-file -r -d 'Create profile from a .env file'
-complete -c c8 -l from-file -r -d 'Create profile from a .env file'
-complete -c c8ctl -l from-env -d 'Create profile from current environment variables'
-complete -c c8 -l from-env -d 'Create profile from current environment variables'
-complete -c c8ctl -l username -d 'Username for identity operations' -r
-complete -c c8 -l username -d 'Username for identity operations' -r
-complete -c c8ctl -l email -d 'Email for identity operations' -r
-complete -c c8 -l email -d 'Email for identity operations' -r
-complete -c c8ctl -l password -d 'Password for identity operations' -r
-complete -c c8 -l password -d 'Password for identity operations' -r
-complete -c c8ctl -l ownerId -d 'Owner ID for authorization' -r
-complete -c c8 -l ownerId -d 'Owner ID for authorization' -r
-complete -c c8ctl -l ownerType -d 'Owner type for authorization' -r
-complete -c c8 -l ownerType -d 'Owner type for authorization' -r
-complete -c c8ctl -l resourceType -d 'Resource type for authorization' -r
-complete -c c8 -l resourceType -d 'Resource type for authorization' -r
-complete -c c8ctl -l resourceId -d 'Resource ID for authorization' -r
-complete -c c8 -l resourceId -d 'Resource ID for authorization' -r
-complete -c c8ctl -l permissions -d 'Permissions for authorization' -r
-complete -c c8 -l permissions -d 'Permissions for authorization' -r
-complete -c c8ctl -l tenantId -d 'Tenant ID' -r
-complete -c c8 -l tenantId -d 'Tenant ID' -r
-complete -c c8ctl -l claimName -d 'Claim name for mapping rule' -r
-complete -c c8 -l claimName -d 'Claim name for mapping rule' -r
-complete -c c8ctl -l claimValue -d 'Claim value for mapping rule' -r
-complete -c c8 -l claimValue -d 'Claim value for mapping rule' -r
-complete -c c8ctl -l roleId -d 'Role ID for search' -r
-complete -c c8 -l roleId -d 'Role ID for search' -r
-complete -c c8ctl -l groupId -d 'Group ID for search' -r
-complete -c c8 -l groupId -d 'Group ID for search' -r
-complete -c c8ctl -l mappingRuleId -d 'Mapping rule ID' -r
-complete -c c8 -l mappingRuleId -d 'Mapping rule ID' -r
-complete -c c8ctl -l to-user -d 'Target user for assignment' -r
-complete -c c8 -l to-user -d 'Target user for assignment' -r
-complete -c c8ctl -l to-group -d 'Target group for assignment' -r
-complete -c c8 -l to-group -d 'Target group for assignment' -r
-complete -c c8ctl -l to-tenant -d 'Target tenant for assignment' -r
-complete -c c8 -l to-tenant -d 'Target tenant for assignment' -r
-complete -c c8ctl -l to-mapping-rule -d 'Target mapping rule for assignment' -r
-complete -c c8 -l to-mapping-rule -d 'Target mapping rule for assignment' -r
-complete -c c8ctl -l from-user -d 'Source user for unassignment' -r
-complete -c c8 -l from-user -d 'Source user for unassignment' -r
-complete -c c8ctl -l from-group -d 'Source group for unassignment' -r
-complete -c c8 -l from-group -d 'Source group for unassignment' -r
-complete -c c8ctl -l from-tenant -d 'Source tenant for unassignment' -r
-complete -c c8 -l from-tenant -d 'Source tenant for unassignment' -r
-complete -c c8ctl -l from-mapping-rule -d 'Source mapping rule for unassignment' -r
-complete -c c8 -l from-mapping-rule -d 'Source mapping rule for unassignment' -r
+	// Global flags
+	lines.push("# Global flags");
+	for (const f of allFlags) {
+		const desc = escFish(f.description);
+		const req = f.type === "string" ? " -r" : "";
+		if (f.short) {
+			lines.push(
+				`complete -c c8ctl -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+			lines.push(
+				`complete -c c8 -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+		} else {
+			lines.push(`complete -c c8ctl -l ${f.name} -d '${desc}'${req}`);
+			lines.push(`complete -c c8 -l ${f.name} -d '${desc}'${req}`);
+		}
+	}
+	lines.push("");
 
-# Commands (verbs) - only suggest when no command is given yet
-complete -c c8ctl -n '__fish_use_subcommand' -a 'list' -d 'List resources'
-complete -c c8 -n '__fish_use_subcommand' -a 'list' -d 'List resources'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'search' -d 'Search resources with filters'
-complete -c c8 -n '__fish_use_subcommand' -a 'search' -d 'Search resources with filters'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
-complete -c c8 -n '__fish_use_subcommand' -a 'get' -d 'Get resource by key'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
-complete -c c8 -n '__fish_use_subcommand' -a 'create' -d 'Create resource'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'delete' -d 'Delete resource'
-complete -c c8 -n '__fish_use_subcommand' -a 'delete' -d 'Delete resource'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
-complete -c c8 -n '__fish_use_subcommand' -a 'cancel' -d 'Cancel resource'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'await' -d 'Await resource completion'
-complete -c c8 -n '__fish_use_subcommand' -a 'await' -d 'Await resource completion'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'complete' -d 'Complete resource'
-complete -c c8 -n '__fish_use_subcommand' -a 'complete' -d 'Complete resource'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'fail' -d 'Fail a job'
-complete -c c8 -n '__fish_use_subcommand' -a 'fail' -d 'Fail a job'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'activate' -d 'Activate jobs by type'
-complete -c c8 -n '__fish_use_subcommand' -a 'activate' -d 'Activate jobs by type'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'resolve' -d 'Resolve incident'
-complete -c c8 -n '__fish_use_subcommand' -a 'resolve' -d 'Resolve incident'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'publish' -d 'Publish message'
-complete -c c8 -n '__fish_use_subcommand' -a 'publish' -d 'Publish message'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'correlate' -d 'Correlate message'
-complete -c c8 -n '__fish_use_subcommand' -a 'correlate' -d 'Correlate message'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'deploy' -d 'Deploy BPMN/DMN/forms'
-complete -c c8 -n '__fish_use_subcommand' -a 'deploy' -d 'Deploy BPMN/DMN/forms'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'run' -d 'Deploy and start process'
-complete -c c8 -n '__fish_use_subcommand' -a 'run' -d 'Deploy and start process'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'watch' -d 'Watch files and auto-deploy'
-complete -c c8 -n '__fish_use_subcommand' -a 'watch' -d 'Watch files and auto-deploy'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'open' -d 'Open Camunda web application in browser'
-complete -c c8 -n '__fish_use_subcommand' -a 'open' -d 'Open Camunda web application in browser'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'add' -d 'Add a profile'
-complete -c c8 -n '__fish_use_subcommand' -a 'add' -d 'Add a profile'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'remove' -d 'Remove a profile'
-complete -c c8 -n '__fish_use_subcommand' -a 'remove' -d 'Remove a profile'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'rm' -d 'Remove a profile'
-complete -c c8 -n '__fish_use_subcommand' -a 'rm' -d 'Remove a profile'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'load' -d 'Load a c8ctl plugin'
-complete -c c8 -n '__fish_use_subcommand' -a 'load' -d 'Load a c8ctl plugin'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plugin'
-complete -c c8 -n '__fish_use_subcommand' -a 'unload' -d 'Unload a c8ctl plugin'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
-complete -c c8 -n '__fish_use_subcommand' -a 'sync' -d 'Synchronize plugins from registry'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade a plugin'
-complete -c c8 -n '__fish_use_subcommand' -a 'upgrade' -d 'Upgrade a plugin'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plugin'
-complete -c c8 -n '__fish_use_subcommand' -a 'downgrade' -d 'Downgrade a plugin'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
-complete -c c8 -n '__fish_use_subcommand' -a 'init' -d 'Create a new plugin from template'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'assign' -d 'Assign a resource to another'
-complete -c c8 -n '__fish_use_subcommand' -a 'assign' -d 'Assign a resource to another'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'unassign' -d 'Unassign a resource from another'
-complete -c c8 -n '__fish_use_subcommand' -a 'unassign' -d 'Unassign a resource from another'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
-complete -c c8 -n '__fish_use_subcommand' -a 'use' -d 'Set active profile or tenant'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
-complete -c c8 -n '__fish_use_subcommand' -a 'which' -d 'Show active profile'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
-complete -c c8 -n '__fish_use_subcommand' -a 'output' -d 'Set output format'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
-complete -c c8 -n '__fish_use_subcommand' -a 'help' -d 'Show help or detailed help for a command'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
-complete -c c8 -n '__fish_use_subcommand' -a 'completion' -d 'Generate shell completion script'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
-complete -c c8 -n '__fish_use_subcommand' -a 'cluster' -d 'Manage local Camunda 8 cluster'
-complete -c c8ctl -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
-complete -c c8 -n '__fish_use_subcommand' -a 'feedback' -d 'Open the feedback page to report issues or request features'
+	// Verb completions
+	lines.push("# Commands (verbs) - only suggest when no command is given yet");
+	for (const v of verbInfos) {
+		const desc = escFish(v.description);
+		lines.push(
+			`complete -c c8ctl -n '__fish_use_subcommand' -a '${v.verb}' -d '${desc}'`,
+		);
+		lines.push(
+			`complete -c c8 -n '__fish_use_subcommand' -a '${v.verb}' -d '${desc}'`,
+		);
+		for (const a of v.aliases) {
+			lines.push(
+				`complete -c c8ctl -n '__fish_use_subcommand' -a '${a}' -d '${desc}'`,
+			);
+			lines.push(
+				`complete -c c8 -n '__fish_use_subcommand' -a '${a}' -d '${desc}'`,
+			);
+		}
+	}
+	lines.push("");
 
-# Resources for 'list' command
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'process-instances' -d 'List process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'process-instance' -d 'List process instances'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'process-instance' -d 'List process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'pi' -d 'List process instances'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'pi' -d 'List process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'user-tasks' -d 'List user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'user-tasks' -d 'List user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'user-task' -d 'List user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'user-task' -d 'List user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'ut' -d 'List user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'ut' -d 'List user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'incidents' -d 'List incidents'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'incidents' -d 'List incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'incident' -d 'List incidents'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'incident' -d 'List incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'inc' -d 'List incidents'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'inc' -d 'List incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'jobs' -d 'List jobs'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'jobs' -d 'List jobs'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'profiles' -d 'List profiles'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'profiles' -d 'List profiles'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'profile' -d 'List profiles'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'profile' -d 'List profiles'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List plugins'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugins' -d 'List plugins'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'plugin' -d 'List plugins'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'users' -d 'List users'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'users' -d 'List users'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'user' -d 'List users'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'user' -d 'List users'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'roles' -d 'List roles'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'roles' -d 'List roles'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'role' -d 'List roles'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'role' -d 'List roles'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'groups' -d 'List groups'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'groups' -d 'List groups'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'group' -d 'List groups'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'group' -d 'List groups'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'tenants' -d 'List tenants'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'tenants' -d 'List tenants'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'tenant' -d 'List tenants'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'tenant' -d 'List tenants'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'authorizations' -d 'List authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'authorizations' -d 'List authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'authorization' -d 'List authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'authorization' -d 'List authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'auth' -d 'List authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'auth' -d 'List authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mapping-rules' -d 'List mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mapping-rules' -d 'List mapping rules'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mapping-rule' -d 'List mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mapping-rule' -d 'List mapping rules'
-complete -c c8ctl -n '__fish_seen_subcommand_from list' -a 'mr' -d 'List mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from list' -a 'mr' -d 'List mapping rules'
+	// Per-verb resource completions
+	for (const v of verbInfos) {
+		if (v.verb === "help") {
+			lines.push(`# Resources for 'help' command`);
+			for (const r of helpResources) {
+				const desc = escFish(r.description);
+				lines.push(
+					`complete -c c8ctl -n '__fish_seen_subcommand_from help' -a '${r.name}' -d '${desc}'`,
+				);
+				lines.push(
+					`complete -c c8 -n '__fish_seen_subcommand_from help' -a '${r.name}' -d '${desc}'`,
+				);
+			}
+			lines.push("");
+			continue;
+		}
 
-# Resources for 'search' command
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-instances' -d 'Search process instances'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-instances' -d 'Search process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-instance' -d 'Search process instances'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-instance' -d 'Search process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'pi' -d 'Search process instances'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'pi' -d 'Search process instances'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-definitions' -d 'Search process definitions'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-definitions' -d 'Search process definitions'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'process-definition' -d 'Search process definitions'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'process-definition' -d 'Search process definitions'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'pd' -d 'Search process definitions'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'pd' -d 'Search process definitions'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user-tasks' -d 'Search user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user-tasks' -d 'Search user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user-task' -d 'Search user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user-task' -d 'Search user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'ut' -d 'Search user tasks'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'ut' -d 'Search user tasks'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'incidents' -d 'Search incidents'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'incidents' -d 'Search incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'incident' -d 'Search incidents'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'incident' -d 'Search incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'inc' -d 'Search incidents'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'inc' -d 'Search incidents'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'jobs' -d 'Search jobs'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'jobs' -d 'Search jobs'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Search variables'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variables' -d 'Search variables'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'variable' -d 'Search variables'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'vars' -d 'Search variables'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'users' -d 'Search users'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'users' -d 'Search users'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'user' -d 'Search users'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'user' -d 'Search users'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'roles' -d 'Search roles'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'roles' -d 'Search roles'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'role' -d 'Search roles'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'role' -d 'Search roles'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'groups' -d 'Search groups'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'groups' -d 'Search groups'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'group' -d 'Search groups'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'group' -d 'Search groups'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'tenants' -d 'Search tenants'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'tenants' -d 'Search tenants'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'tenant' -d 'Search tenants'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'tenant' -d 'Search tenants'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'authorizations' -d 'Search authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'authorizations' -d 'Search authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'authorization' -d 'Search authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'authorization' -d 'Search authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'auth' -d 'Search authorizations'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'auth' -d 'Search authorizations'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mapping-rules' -d 'Search mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mapping-rules' -d 'Search mapping rules'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mapping-rule' -d 'Search mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mapping-rule' -d 'Search mapping rules'
-complete -c c8ctl -n '__fish_seen_subcommand_from search' -a 'mr' -d 'Search mapping rules'
-complete -c c8 -n '__fish_seen_subcommand_from search' -a 'mr' -d 'Search mapping rules'
+		if (v.fileComplete || v.resources.length === 0) continue;
 
-# Resources for 'get' command
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'process-instance' -d 'Get process instance'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'pi' -d 'Get process instance'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'pi' -d 'Get process instance'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'process-definition' -d 'Get process definition'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'process-definition' -d 'Get process definition'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'pd' -d 'Get process definition'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'incident' -d 'Get incident'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'incident' -d 'Get incident'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'inc' -d 'Get incident'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'inc' -d 'Get incident'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'topology' -d 'Get cluster topology'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'form' -d 'Get form for user task or process definition'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'user' -d 'Get user'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'user' -d 'Get user'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'role' -d 'Get role'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'role' -d 'Get role'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'group' -d 'Get group'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'group' -d 'Get group'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'tenant' -d 'Get tenant'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'tenant' -d 'Get tenant'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'authorization' -d 'Get authorization'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'authorization' -d 'Get authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'auth' -d 'Get authorization'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'auth' -d 'Get authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'mapping-rule' -d 'Get mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'mapping-rule' -d 'Get mapping rule'
-complete -c c8ctl -n '__fish_seen_subcommand_from get' -a 'mr' -d 'Get mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from get' -a 'mr' -d 'Get mapping rule'
+		const seenFrom = [v.verb, ...v.aliases].join(" ");
+		lines.push(`# Resources for '${v.verb}' command`);
+		for (const r of v.resources) {
+			const desc = escFish(`${capitalize(v.verb)} ${resourceDisplayName(r)}`);
+			lines.push(
+				`complete -c c8ctl -n '__fish_seen_subcommand_from ${seenFrom}' -a '${r}' -d '${desc}'`,
+			);
+			lines.push(
+				`complete -c c8 -n '__fish_seen_subcommand_from ${seenFrom}' -a '${r}' -d '${desc}'`,
+			);
+		}
+		lines.push("");
+	}
 
-# Resources for 'create' command
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'process-instance' -d 'Create process instance'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'process-instance' -d 'Create process instance'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'pi' -d 'Create process instance'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'pi' -d 'Create process instance'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'user' -d 'Create user'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'user' -d 'Create user'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'role' -d 'Create role'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'role' -d 'Create role'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'group' -d 'Create group'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'group' -d 'Create group'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'tenant' -d 'Create tenant'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'tenant' -d 'Create tenant'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'authorization' -d 'Create authorization'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'authorization' -d 'Create authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'auth' -d 'Create authorization'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'auth' -d 'Create authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'mapping-rule' -d 'Create mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'mapping-rule' -d 'Create mapping rule'
-complete -c c8ctl -n '__fish_seen_subcommand_from create' -a 'mr' -d 'Create mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from create' -a 'mr' -d 'Create mapping rule'
-
-# Resources for 'cancel' command
-complete -c c8ctl -n '__fish_seen_subcommand_from cancel' -a 'process-instance' -d 'Cancel process instance'
-complete -c c8 -n '__fish_seen_subcommand_from cancel' -a 'process-instance' -d 'Cancel process instance'
-complete -c c8ctl -n '__fish_seen_subcommand_from cancel' -a 'pi' -d 'Cancel process instance'
-complete -c c8 -n '__fish_seen_subcommand_from cancel' -a 'pi' -d 'Cancel process instance'
-
-# Resources for 'await' command
-complete -c c8ctl -n '__fish_seen_subcommand_from await' -a 'process-instance' -d 'Await process instance completion'
-complete -c c8 -n '__fish_seen_subcommand_from await' -a 'process-instance' -d 'Await process instance completion'
-complete -c c8ctl -n '__fish_seen_subcommand_from await' -a 'pi' -d 'Await process instance completion'
-complete -c c8 -n '__fish_seen_subcommand_from await' -a 'pi' -d 'Await process instance completion'
-
-# Resources for 'complete' command
-complete -c c8ctl -n '__fish_seen_subcommand_from complete' -a 'user-task' -d 'Complete user task'
-complete -c c8 -n '__fish_seen_subcommand_from complete' -a 'user-task' -d 'Complete user task'
-complete -c c8ctl -n '__fish_seen_subcommand_from complete' -a 'ut' -d 'Complete user task'
-complete -c c8 -n '__fish_seen_subcommand_from complete' -a 'ut' -d 'Complete user task'
-complete -c c8ctl -n '__fish_seen_subcommand_from complete' -a 'job' -d 'Complete job'
-complete -c c8 -n '__fish_seen_subcommand_from complete' -a 'job' -d 'Complete job'
-
-# Resources for 'fail' command
-complete -c c8ctl -n '__fish_seen_subcommand_from fail' -a 'job' -d 'Fail job'
-complete -c c8 -n '__fish_seen_subcommand_from fail' -a 'job' -d 'Fail job'
-
-# Resources for 'activate' command
-complete -c c8ctl -n '__fish_seen_subcommand_from activate' -a 'jobs' -d 'Activate jobs'
-complete -c c8 -n '__fish_seen_subcommand_from activate' -a 'jobs' -d 'Activate jobs'
-
-# Resources for 'resolve' command
-complete -c c8ctl -n '__fish_seen_subcommand_from resolve' -a 'incident' -d 'Resolve incident'
-complete -c c8 -n '__fish_seen_subcommand_from resolve' -a 'incident' -d 'Resolve incident'
-complete -c c8ctl -n '__fish_seen_subcommand_from resolve' -a 'inc' -d 'Resolve incident'
-complete -c c8 -n '__fish_seen_subcommand_from resolve' -a 'inc' -d 'Resolve incident'
-
-# Resources for 'publish' command
-complete -c c8ctl -n '__fish_seen_subcommand_from publish' -a 'message' -d 'Publish message'
-complete -c c8 -n '__fish_seen_subcommand_from publish' -a 'message' -d 'Publish message'
-complete -c c8ctl -n '__fish_seen_subcommand_from publish' -a 'msg' -d 'Publish message'
-complete -c c8 -n '__fish_seen_subcommand_from publish' -a 'msg' -d 'Publish message'
-
-# Resources for 'correlate' command
-complete -c c8ctl -n '__fish_seen_subcommand_from correlate' -a 'message' -d 'Correlate message'
-complete -c c8 -n '__fish_seen_subcommand_from correlate' -a 'message' -d 'Correlate message'
-complete -c c8ctl -n '__fish_seen_subcommand_from correlate' -a 'msg' -d 'Correlate message'
-complete -c c8 -n '__fish_seen_subcommand_from correlate' -a 'msg' -d 'Correlate message'
-
-# Resources for 'delete' command
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'user' -d 'Delete user'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'user' -d 'Delete user'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'role' -d 'Delete role'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'role' -d 'Delete role'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'group' -d 'Delete group'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'group' -d 'Delete group'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'tenant' -d 'Delete tenant'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'tenant' -d 'Delete tenant'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'authorization' -d 'Delete authorization'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'authorization' -d 'Delete authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'auth' -d 'Delete authorization'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'auth' -d 'Delete authorization'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'mapping-rule' -d 'Delete mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'mapping-rule' -d 'Delete mapping rule'
-complete -c c8ctl -n '__fish_seen_subcommand_from delete' -a 'mr' -d 'Delete mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from delete' -a 'mr' -d 'Delete mapping rule'
-
-# Resources for 'assign' command
-complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'role' -d 'Assign role'
-complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'role' -d 'Assign role'
-complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'user' -d 'Assign user'
-complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'user' -d 'Assign user'
-complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'group' -d 'Assign group'
-complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'group' -d 'Assign group'
-complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'mapping-rule' -d 'Assign mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'mapping-rule' -d 'Assign mapping rule'
-complete -c c8ctl -n '__fish_seen_subcommand_from assign' -a 'mr' -d 'Assign mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from assign' -a 'mr' -d 'Assign mapping rule'
-
-# Resources for 'unassign' command
-complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'role' -d 'Unassign role'
-complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'role' -d 'Unassign role'
-complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'user' -d 'Unassign user'
-complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'user' -d 'Unassign user'
-complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'group' -d 'Unassign group'
-complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'group' -d 'Unassign group'
-complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'mapping-rule' -d 'Unassign mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'mapping-rule' -d 'Unassign mapping rule'
-complete -c c8ctl -n '__fish_seen_subcommand_from unassign' -a 'mr' -d 'Unassign mapping rule'
-complete -c c8 -n '__fish_seen_subcommand_from unassign' -a 'mr' -d 'Unassign mapping rule'
-
-# Resources for 'add' command
-complete -c c8ctl -n '__fish_seen_subcommand_from add' -a 'profile' -d 'Add profile'
-complete -c c8 -n '__fish_seen_subcommand_from add' -a 'profile' -d 'Add profile'
-
-# Resources for 'remove' and 'rm' commands
-complete -c c8ctl -n '__fish_seen_subcommand_from remove' -a 'profile' -d 'Remove profile'
-complete -c c8 -n '__fish_seen_subcommand_from remove' -a 'profile' -d 'Remove profile'
-complete -c c8ctl -n '__fish_seen_subcommand_from rm' -a 'profile' -d 'Remove profile'
-complete -c c8 -n '__fish_seen_subcommand_from rm' -a 'profile' -d 'Remove profile'
-
-# Resources for 'load' command
-complete -c c8ctl -n '__fish_seen_subcommand_from load' -a 'plugin' -d 'Load plugin'
-complete -c c8 -n '__fish_seen_subcommand_from load' -a 'plugin' -d 'Load plugin'
-
-# Resources for 'unload' command
-complete -c c8ctl -n '__fish_seen_subcommand_from unload' -a 'plugin' -d 'Unload plugin'
-complete -c c8 -n '__fish_seen_subcommand_from unload' -a 'plugin' -d 'Unload plugin'
-
-# Resources for 'sync' command
-complete -c c8ctl -n '__fish_seen_subcommand_from sync' -a 'plugin' -d 'Synchronize plugin'
-complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugin' -d 'Synchronize plugin'
-complete -c c8ctl -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
-complete -c c8 -n '__fish_seen_subcommand_from sync' -a 'plugins' -d 'Synchronize plugins'
-
-# Resources for 'upgrade' command
-complete -c c8ctl -n '__fish_seen_subcommand_from upgrade' -a 'plugin' -d 'Upgrade plugin'
-complete -c c8 -n '__fish_seen_subcommand_from upgrade' -a 'plugin' -d 'Upgrade plugin'
-
-# Resources for 'downgrade' command
-complete -c c8ctl -n '__fish_seen_subcommand_from downgrade' -a 'plugin' -d 'Downgrade plugin'
-complete -c c8 -n '__fish_seen_subcommand_from downgrade' -a 'plugin' -d 'Downgrade plugin'
-
-# Resources for 'init' command
-complete -c c8ctl -n '__fish_seen_subcommand_from init' -a 'plugin' -d 'Create new plugin from template'
-complete -c c8 -n '__fish_seen_subcommand_from init' -a 'plugin' -d 'Create new plugin from template'
-
-# Resources for 'use' command
-complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
-complete -c c8 -n '__fish_seen_subcommand_from use' -a 'profile' -d 'Set active profile'
-complete -c c8ctl -n '__fish_seen_subcommand_from use' -a 'tenant' -d 'Set active tenant'
-complete -c c8 -n '__fish_seen_subcommand_from use' -a 'tenant' -d 'Set active tenant'
-
-# Resources for 'which' command
-complete -c c8ctl -n '__fish_seen_subcommand_from which' -a 'profile' -d 'Show active profile'
-complete -c c8 -n '__fish_seen_subcommand_from which' -a 'profile' -d 'Show active profile'
-
-# Resources for 'output' command
-complete -c c8ctl -n '__fish_seen_subcommand_from output' -a 'json' -d 'JSON output'
-complete -c c8 -n '__fish_seen_subcommand_from output' -a 'json' -d 'JSON output'
-complete -c c8ctl -n '__fish_seen_subcommand_from output' -a 'text' -d 'Text output'
-complete -c c8 -n '__fish_seen_subcommand_from output' -a 'text' -d 'Text output'
-
-# Resources for 'completion' command
-complete -c c8ctl -n '__fish_seen_subcommand_from completion' -a 'bash' -d 'Generate bash completion'
-complete -c c8 -n '__fish_seen_subcommand_from completion' -a 'bash' -d 'Generate bash completion'
-complete -c c8ctl -n '__fish_seen_subcommand_from completion' -a 'zsh' -d 'Generate zsh completion'
-complete -c c8 -n '__fish_seen_subcommand_from completion' -a 'zsh' -d 'Generate zsh completion'
-complete -c c8ctl -n '__fish_seen_subcommand_from completion' -a 'fish' -d 'Generate fish completion'
-complete -c c8 -n '__fish_seen_subcommand_from completion' -a 'fish' -d 'Generate fish completion'
-
-# Resources for 'help' command
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'list' -d 'Show list command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'list' -d 'Show list command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'get' -d 'Show get command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'get' -d 'Show get command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show create command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'create' -d 'Show create command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'complete' -d 'Show complete command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'await' -d 'Show await command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'await' -d 'Show await command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'search' -d 'Show search command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'search' -d 'Show search command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'deploy' -d 'Show deploy command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'deploy' -d 'Show deploy command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'run' -d 'Show run command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'watch' -d 'Show watch command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'open' -d 'Show open command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'open' -d 'Show open command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cancel' -d 'Show cancel command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'resolve' -d 'Show resolve command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'resolve' -d 'Show resolve command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'fail' -d 'Show fail command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'fail' -d 'Show fail command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'activate' -d 'Show activate command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'activate' -d 'Show activate command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'publish' -d 'Show publish command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'correlate' -d 'Show correlate command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'delete' -d 'Show delete command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'delete' -d 'Show delete command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'assign' -d 'Show assign command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'assign' -d 'Show assign command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'unassign' -d 'Show unassign command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'unassign' -d 'Show unassign command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'upgrade' -d 'Show upgrade command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'downgrade' -d 'Show downgrade command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'init' -d 'Show init command help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'profiles' -d 'Show profile management help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'profiles' -d 'Show profile management help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'profile' -d 'Alias for profile management help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'profile' -d 'Alias for profile management help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugin' -d 'Show plugin management help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'plugins' -d 'Alias for plugin management help'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'cluster' -d 'No detailed help; use c8ctl help for general usage'
-complete -c c8ctl -n '__fish_seen_subcommand_from help' -a 'feedback' -d 'Show feedback command help'
-complete -c c8 -n '__fish_seen_subcommand_from help' -a 'feedback' -d 'Show feedback command help'
-
-# Resources for 'cluster' command
-complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
-complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'start' -d 'Start local Camunda 8 cluster'
-complete -c c8ctl -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
-complete -c c8 -n '__fish_seen_subcommand_from cluster' -a 'stop' -d 'Stop local Camunda 8 cluster'
-
-# Resources for 'open' command
-complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'operate' -d 'Open Camunda Operate'
-complete -c c8 -n '__fish_seen_subcommand_from open' -a 'operate' -d 'Open Camunda Operate'
-complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'tasklist' -d 'Open Camunda Tasklist'
-complete -c c8 -n '__fish_seen_subcommand_from open' -a 'tasklist' -d 'Open Camunda Tasklist'
-complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'modeler' -d 'Open Camunda Web Modeler'
-complete -c c8 -n '__fish_seen_subcommand_from open' -a 'modeler' -d 'Open Camunda Web Modeler'
-complete -c c8ctl -n '__fish_seen_subcommand_from open' -a 'optimize' -d 'Open Camunda Optimize'
-complete -c c8 -n '__fish_seen_subcommand_from open' -a 'optimize' -d 'Open Camunda Optimize'
-`;
+	return `${lines.join("\n")}\n`;
 }
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function capitalize(s: string): string {
+	return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Human-readable name from resource alias. */
+function resourceDisplayName(resource: string): string {
+	const canonical = RESOURCE_ALIASES[resource] ?? resource;
+	return canonical.replace(/-/g, " ") + (resource !== canonical ? "s" : "");
+}
+
+function escZsh(s: string): string {
+	return s.replace(/'/g, "'\\''");
+}
+
+function escFish(s: string): string {
+	return s.replace(/'/g, "\\'");
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Show completion command

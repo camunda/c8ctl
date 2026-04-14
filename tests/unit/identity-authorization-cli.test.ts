@@ -139,13 +139,13 @@ describe('CLI behavioral: delete authorization', () => {
     const result = await c8(
       'delete', 'authorization',
       '--dry-run',
-      'auth-key-42',
+      '42',
     );
 
     assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
     const out = parseJson(result);
     assert.strictEqual(out.dryRun, true);
     assert.strictEqual(out.method, 'DELETE');
-    assert.ok((out.url as string).endsWith('/authorizations/auth-key-42'));
+    assert.ok((out.url as string).endsWith('/authorizations/42'));
   });
 });

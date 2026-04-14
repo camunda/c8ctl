@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { defineCommand } from "../command-framework.ts";
 import { ensurePluginsDir } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger } from "../logger.ts";
@@ -54,106 +55,108 @@ function renderTemplate(
  * Supports either package name or --from flag with URL
  * Installs to global plugins directory
  */
-export async function loadPlugin(
-	packageName?: string,
-	fromUrl?: string,
-): Promise<void> {
-	const logger = getLogger();
+export const loadPluginCommand = defineCommand(
+	"load",
+	"plugin",
+	async (ctx, flags, args) => {
+		const { logger } = ctx;
+		const packageName = args.package;
+		const fromUrl = flags.from;
 
-	// Validate input
-	if (fromUrl && packageName) {
-		logger.error(
-			'Cannot specify both a positional argument and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"',
-		);
-		process.exit(1);
-	}
-
-	if (!packageName && !fromUrl) {
-		logger.error(
-			"Package name or URL required. Usage: c8 load plugin <name> or c8 load plugin --from <url>",
-		);
-		process.exit(1);
-	}
-
-	if (fromUrl && !isAcceptedUrl(fromUrl)) {
-		logger.error(
-			"Invalid URL format. Accepted URL formats include file://, https://, git:// (see help for more)",
-		);
-		process.exit(1);
-	}
-
-	if (packageName && isAcceptedUrl(packageName)) {
-		logger.error(
-			"Package name cannot be a URL. If you want to load from a URL, use the --from flag. Usage: c8 load plugin --from <url>",
-		);
-		process.exit(1);
-	}
-
-	// Get global plugins directory
-	const pluginsDir = ensurePluginsDir();
-
-	try {
-		let pluginName: string;
-		let pluginSource: string;
-
-		if (fromUrl) {
-			// Snapshot existing plugins before installation so we can identify the new one
-			const existingPluginNames = getInstalledPluginNames(pluginsDir);
-
-			// Install from URL (file://, https://, git://, etc.)
-			logger.info(`Loading plugin from: ${fromUrl}...`);
-			execFileSync("npm", ["install", fromUrl, "--prefix", pluginsDir], {
-				stdio: "inherit",
-			});
-
-			// Extract package name from installed package
-			pluginName = extractPackageNameFromUrl(
-				fromUrl,
-				pluginsDir,
-				existingPluginNames,
+		// Validate input
+		if (fromUrl && packageName) {
+			logger.error(
+				'Cannot specify both a positional argument and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"',
 			);
-			pluginSource = fromUrl;
-
-			// Validate plugin name
-			if (!pluginName || pluginName.trim() === "") {
-				logger.error("Failed to extract plugin name from URL");
-				logger.info(
-					"Ensure the URL points to a valid npm package with a package.json file",
-				);
-				process.exit(1);
-			}
-
-			logger.success("Plugin loaded successfully from URL", fromUrl);
-		} else {
-			// Install from npm registry by package name
-			// packageName is guaranteed non-nullish here: the early exit on line 72
-			// rejects (!packageName && !fromUrl), and this branch means !fromUrl.
-			if (!packageName) throw new Error("unreachable: packageName is required");
-
-			logger.info(`Loading plugin: ${packageName}...`);
-			execFileSync("npm", ["install", packageName, "--prefix", pluginsDir], {
-				stdio: "inherit",
-			});
-
-			pluginName = packageName;
-			pluginSource = packageName;
-
-			logger.success("Plugin loaded successfully", packageName);
+			process.exit(1);
 		}
 
-		// Add to plugin registry
-		addPluginToRegistry(pluginName, pluginSource);
-		logger.debug(`Added ${pluginName} to plugin registry`);
+		if (!packageName && !fromUrl) {
+			logger.error(
+				"Package name or URL required. Usage: c8 load plugin <name> or c8 load plugin --from <url>",
+			);
+			process.exit(1);
+		}
 
-		// Note: Plugin will be available on next CLI invocation
-		// We don't reload in the same process to avoid module cache issues
-		logger.info("Plugin will be available on next command execution");
-	} catch (error) {
-		handleCommandError(logger, "Failed to load plugin", error, [
-			"Check that the plugin name/URL is correct and you have network access if loading from a remote source",
-		]);
-	}
-}
+		if (fromUrl && !isAcceptedUrl(fromUrl)) {
+			logger.error(
+				"Invalid URL format. Accepted URL formats include file://, https://, git:// (see help for more)",
+			);
+			process.exit(1);
+		}
+
+		if (packageName && isAcceptedUrl(packageName)) {
+			logger.error(
+				"Package name cannot be a URL. If you want to load from a URL, use the --from flag. Usage: c8 load plugin --from <url>",
+			);
+			process.exit(1);
+		}
+
+		// Get global plugins directory
+		const pluginsDir = ensurePluginsDir();
+
+		try {
+			let pluginName: string;
+			let pluginSource: string;
+
+			if (fromUrl) {
+				// Snapshot existing plugins before installation so we can identify the new one
+				const existingPluginNames = getInstalledPluginNames(pluginsDir);
+
+				// Install from URL (file://, https://, git://, etc.)
+				logger.info(`Loading plugin from: ${fromUrl}...`);
+				execFileSync("npm", ["install", fromUrl, "--prefix", pluginsDir], {
+					stdio: "inherit",
+				});
+
+				// Extract package name from installed package
+				pluginName = extractPackageNameFromUrl(
+					fromUrl,
+					pluginsDir,
+					existingPluginNames,
+				);
+				pluginSource = fromUrl;
+
+				// Validate plugin name
+				if (!pluginName || pluginName.trim() === "") {
+					logger.error("Failed to extract plugin name from URL");
+					logger.info(
+						"Ensure the URL points to a valid npm package with a package.json file",
+					);
+					process.exit(1);
+				}
+
+				logger.success("Plugin loaded successfully from URL", fromUrl);
+			} else {
+				// Install from npm registry by package name
+				if (!packageName)
+					throw new Error("unreachable: packageName is required");
+
+				logger.info(`Loading plugin: ${packageName}...`);
+				execFileSync("npm", ["install", packageName, "--prefix", pluginsDir], {
+					stdio: "inherit",
+				});
+
+				pluginName = packageName;
+				pluginSource = packageName;
+
+				logger.success("Plugin loaded successfully", packageName);
+			}
+
+			// Add to plugin registry
+			addPluginToRegistry(pluginName, pluginSource);
+			logger.debug(`Added ${pluginName} to plugin registry`);
+
+			// Note: Plugin will be available on next CLI invocation
+			// We don't reload in the same process to avoid module cache issues
+			logger.info("Plugin will be available on next command execution");
+		} catch (error) {
+			handleCommandError(logger, "Failed to load plugin", error, [
+				"Check that the plugin name/URL is correct and you have network access if loading from a remote source",
+			]);
+		}
+	},
+);
 
 /**
  * Check if a package has a c8ctl plugin file
@@ -336,101 +339,104 @@ function extractPackageNameFromUrl(
  * Unload a plugin (npm uninstall wrapper)
  * Uninstalls from global plugins directory
  */
-export async function unloadPlugin(
-	packageName: string,
-	{ force = false }: { force?: boolean } = {},
-): Promise<void> {
-	const logger = getLogger();
+export const unloadPluginCommand = defineCommand(
+	"unload",
+	"plugin",
+	async (ctx, flags, args) => {
+		const { logger } = ctx;
+		const packageName = args.package;
+		const force = flags.force;
 
-	if (!packageName) {
-		logger.error(
-			"Package name required. Usage: c8ctl unload plugin <package-name>",
-		);
-		process.exit(1);
-	}
+		if (!packageName) {
+			logger.error(
+				"Package name required. Usage: c8ctl unload plugin <package-name>",
+			);
+			process.exit(1);
+		}
 
-	const pluginsDir = ensurePluginsDir();
-	const isRegistered = isPluginRegistered(packageName);
-	const isPresent = existsSync(join(pluginsDir, "node_modules", packageName));
+		const pluginsDir = ensurePluginsDir();
+		const isRegistered = isPluginRegistered(packageName);
+		const isPresent = existsSync(join(pluginsDir, "node_modules", packageName));
 
-	if (!isRegistered && !isPresent) {
-		logger.error(
-			`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`,
-		);
-		logger.info('Run "c8ctl list plugins" to see installed plugins');
-		process.exit(1);
-	}
+		if (!isRegistered && !isPresent) {
+			logger.error(
+				`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`,
+			);
+			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			process.exit(1);
+		}
 
-	// Limbo state: present in node_modules but not in the registry — requires --force
-	if (!isRegistered && !force) {
-		logger.error(
-			`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`,
-		);
-		logger.info(
-			`Use --force to remove it: c8ctl unload plugin ${packageName} --force`,
-		);
-		process.exit(1);
-	}
+		// Limbo state: present in node_modules but not in the registry — requires --force
+		if (!isRegistered && !force) {
+			logger.error(
+				`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`,
+			);
+			logger.info(
+				`Use --force to remove it: c8ctl unload plugin ${packageName} --force`,
+			);
+			process.exit(1);
+		}
 
-	const action = isRegistered ? "Unloading" : "Force-removing";
-	logger.info(`${action} plugin: ${packageName}...`);
+		const action = isRegistered ? "Unloading" : "Force-removing";
+		logger.info(`${action} plugin: ${packageName}...`);
 
-	try {
-		execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
-			stdio: "inherit",
-		});
-	} catch (uninstallError) {
-		// npm uninstall may fail for untracked/extraneous packages; fall back to physical removal
-		logger.warn(
-			`npm uninstall failed for plugin "${packageName}", attempting manual removal from node_modules`,
-		);
 		try {
-			rmSync(join(pluginsDir, "node_modules", packageName), {
-				recursive: true,
-				force: true,
+			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+				stdio: "inherit",
 			});
-			logger.debug(
-				`Manually removed plugin directory for "${packageName}" from plugins directory`,
+		} catch (uninstallError) {
+			// npm uninstall may fail for untracked/extraneous packages; fall back to physical removal
+			logger.warn(
+				`npm uninstall failed for plugin "${packageName}", attempting manual removal from node_modules`,
 			);
-		} catch (fsError) {
-			const uninstallErrorDetails =
-				uninstallError instanceof Error
-					? uninstallError.message
-					: String(uninstallError);
-			const combinedError = new Error(
-				`Manual removal failed after npm uninstall failed for plugin "${packageName}". npm uninstall error: ${uninstallErrorDetails}`,
-				{ cause: fsError },
+			try {
+				rmSync(join(pluginsDir, "node_modules", packageName), {
+					recursive: true,
+					force: true,
+				});
+				logger.debug(
+					`Manually removed plugin directory for "${packageName}" from plugins directory`,
+				);
+			} catch (fsError) {
+				const uninstallErrorDetails =
+					uninstallError instanceof Error
+						? uninstallError.message
+						: String(uninstallError);
+				const combinedError = new Error(
+					`Manual removal failed after npm uninstall failed for plugin "${packageName}". npm uninstall error: ${uninstallErrorDetails}`,
+					{ cause: fsError },
+				);
+				handleCommandError(
+					logger,
+					`Failed to remove plugin "${packageName}" from the global plugins directory.`,
+					combinedError,
+					[
+						"Please verify file permissions for the plugins directory and try again with appropriate rights.",
+					],
+				);
+			}
+		}
+
+		if (isRegistered) {
+			removePluginFromRegistry(packageName);
+			logger.debug(`Removed ${packageName} from plugin registry`);
+		}
+
+		clearLoadedPlugins();
+		if (isRegistered) {
+			logger.success("Plugin unloaded successfully", packageName);
+			logger.info("Plugin commands are no longer available");
+		} else {
+			logger.success(
+				"Plugin installation removed from global plugins directory",
+				packageName,
 			);
-			handleCommandError(
-				logger,
-				`Failed to remove plugin "${packageName}" from the global plugins directory.`,
-				combinedError,
-				[
-					"Please verify file permissions for the plugins directory and try again with appropriate rights.",
-				],
+			logger.info(
+				"Plugin was not registered; no plugin commands were active to unload",
 			);
 		}
-	}
-
-	if (isRegistered) {
-		removePluginFromRegistry(packageName);
-		logger.debug(`Removed ${packageName} from plugin registry`);
-	}
-
-	clearLoadedPlugins();
-	if (isRegistered) {
-		logger.success("Plugin unloaded successfully", packageName);
-		logger.info("Plugin commands are no longer available");
-	} else {
-		logger.success(
-			"Plugin installation removed from global plugins directory",
-			packageName,
-		);
-		logger.info(
-			"Plugin was not registered; no plugin commands were active to unload",
-		);
-	}
-}
+	},
+);
 
 /**
  * Scan a directory entry for c8ctl plugins and add to the set
@@ -559,441 +565,462 @@ function resolveInstallTarget(
 /**
  * List installed plugins
  */
-export function listPlugins(): void {
-	const logger = getLogger();
+export const listPluginsCommand = defineCommand(
+	"list",
+	"plugin",
+	async (ctx, _flags, _args) => {
+		const { logger } = ctx;
 
-	try {
-		// Get plugins from registry (local source of truth)
-		const registeredPlugins = getRegisteredPlugins();
+		try {
+			// Get plugins from registry (local source of truth)
+			const registeredPlugins = getRegisteredPlugins();
 
-		// Check global plugins directory
-		const pluginsDir = ensurePluginsDir();
-		const nodeModulesPath = join(pluginsDir, "node_modules");
-		const installedPlugins = scanInstalledPlugins(nodeModulesPath);
+			// Check global plugins directory
+			const pluginsDir = ensurePluginsDir();
+			const nodeModulesPath = join(pluginsDir, "node_modules");
+			const installedPlugins = scanInstalledPlugins(nodeModulesPath);
 
-		// Build unified list with status
-		const plugins: Array<{
-			Name: string;
-			Version: string;
-			Status: string;
-			Source: string;
-			"Installed At": string;
-		}> = [];
+			// Build unified list with status
+			const plugins: Array<{
+				Name: string;
+				Version: string;
+				Status: string;
+				Source: string;
+				"Installed At": string;
+			}> = [];
 
-		// Add registered plugins
-		for (const plugin of registeredPlugins) {
-			const isInstalled = installedPlugins.has(plugin.name);
-			const installStatus = isInstalled ? "✓ Installed" : "⚠ Not installed";
-			const installedVersion = isInstalled
-				? getInstalledPluginVersion(nodeModulesPath, plugin.name)
-				: null;
-			const sourceVersion = getVersionFromSource(plugin.source, plugin.name);
+			// Add registered plugins
+			for (const plugin of registeredPlugins) {
+				const isInstalled = installedPlugins.has(plugin.name);
+				const installStatus = isInstalled ? "✓ Installed" : "⚠ Not installed";
+				const installedVersion = isInstalled
+					? getInstalledPluginVersion(nodeModulesPath, plugin.name)
+					: null;
+				const sourceVersion = getVersionFromSource(plugin.source, plugin.name);
 
-			plugins.push({
-				Name: plugin.name,
-				Version: installedVersion ?? sourceVersion ?? "Unknown",
-				Status: installStatus,
-				Source: plugin.source,
-				"Installed At": new Date(plugin.installedAt).toLocaleString(),
-			});
+				plugins.push({
+					Name: plugin.name,
+					Version: installedVersion ?? sourceVersion ?? "Unknown",
+					Status: installStatus,
+					Source: plugin.source,
+					"Installed At": new Date(plugin.installedAt).toLocaleString(),
+				});
 
-			installedPlugins.delete(plugin.name);
+				installedPlugins.delete(plugin.name);
+			}
+
+			// Add any plugins installed but not in registry
+			for (const name of installedPlugins) {
+				plugins.push({
+					Name: name,
+					Version:
+						getInstalledPluginVersion(nodeModulesPath, name) ?? "Unknown",
+					Status: "⚠ Not in registry",
+					Source: "Unknown",
+					"Installed At": "Unknown",
+				});
+			}
+
+			if (plugins.length === 0) {
+				logger.info("No c8ctl plugins installed");
+				return;
+			}
+
+			// Check if there are sync issues
+			const needsSync = plugins.some((p) => p.Status !== "✓ Installed");
+
+			logger.table(plugins);
+
+			if (needsSync) {
+				logger.info("");
+				logger.info(
+					'Some plugins are out of sync. Run "c8ctl sync plugins" to synchronize your plugins',
+				);
+			}
+		} catch (error) {
+			handleCommandError(logger, "Failed to list plugins", error);
 		}
-
-		// Add any plugins installed but not in registry
-		for (const name of installedPlugins) {
-			plugins.push({
-				Name: name,
-				Version: getInstalledPluginVersion(nodeModulesPath, name) ?? "Unknown",
-				Status: "⚠ Not in registry",
-				Source: "Unknown",
-				"Installed At": "Unknown",
-			});
-		}
-
-		if (plugins.length === 0) {
-			logger.info("No c8ctl plugins installed");
-			return;
-		}
-
-		// Check if there are sync issues
-		const needsSync = plugins.some((p) => p.Status !== "✓ Installed");
-
-		logger.table(plugins);
-
-		if (needsSync) {
-			logger.info("");
-			logger.info(
-				'Some plugins are out of sync. Run "c8ctl sync plugins" to synchronize your plugins',
-			);
-		}
-	} catch (error) {
-		handleCommandError(logger, "Failed to list plugins", error);
-	}
-}
+	},
+);
 
 /**
  * Sync plugins - synchronize registry with actual installations
  * Registry has precedence - plugins are installed to global directory
  */
-export async function syncPlugins(): Promise<void> {
-	const logger = getLogger();
+export const syncPluginsCommand = defineCommand(
+	"sync",
+	"plugin",
+	async (ctx, _flags, _args) => {
+		const { logger } = ctx;
 
-	// Get global plugins directory
-	const pluginsDir = ensurePluginsDir();
-	const nodeModulesPath = join(pluginsDir, "node_modules");
+		// Get global plugins directory
+		const pluginsDir = ensurePluginsDir();
+		const nodeModulesPath = join(pluginsDir, "node_modules");
 
-	logger.info("Starting plugin synchronization...");
-	logger.info("");
+		logger.info("Starting plugin synchronization...");
+		logger.info("");
 
-	// Get registered plugins (local source of truth)
-	const registeredPlugins = getRegisteredPlugins();
+		// Get registered plugins (local source of truth)
+		const registeredPlugins = getRegisteredPlugins();
 
-	if (registeredPlugins.length === 0) {
-		logger.info("No plugins registered. Nothing to sync.");
-		return;
-	}
+		if (registeredPlugins.length === 0) {
+			logger.info("No plugins registered. Nothing to sync.");
+			return;
+		}
 
-	logger.info(`Found ${registeredPlugins.length} registered plugin(s):`);
-	for (const plugin of registeredPlugins) {
-		logger.info(`  - ${plugin.name} (${plugin.source})`);
-	}
-	logger.info("");
+		logger.info(`Found ${registeredPlugins.length} registered plugin(s):`);
+		for (const plugin of registeredPlugins) {
+			logger.info(`  - ${plugin.name} (${plugin.source})`);
+		}
+		logger.info("");
 
-	let syncedCount = 0;
-	let failedCount = 0;
-	const failures: Array<{ plugin: string; error: string }> = [];
+		let syncedCount = 0;
+		let failedCount = 0;
+		const failures: Array<{ plugin: string; error: string }> = [];
 
-	// Process each registered plugin
-	for (const plugin of registeredPlugins) {
-		logger.info(`Syncing ${plugin.name}...`);
+		// Process each registered plugin
+		for (const plugin of registeredPlugins) {
+			logger.info(`Syncing ${plugin.name}...`);
 
-		try {
-			// Check if plugin is installed in global directory
-			const packageDir = join(nodeModulesPath, plugin.name);
-			const isInstalled = existsSync(packageDir);
+			try {
+				// Check if plugin is installed in global directory
+				const packageDir = join(nodeModulesPath, plugin.name);
+				const isInstalled = existsSync(packageDir);
 
-			if (isInstalled) {
-				logger.info(
-					`  ✓ ${plugin.name} is already installed, attempting rebuild...`,
-				);
+				if (isInstalled) {
+					logger.info(
+						`  ✓ ${plugin.name} is already installed, attempting rebuild...`,
+					);
 
-				// Try npm rebuild first
+					// Try npm rebuild first
+					try {
+						execFileSync(
+							"npm",
+							["rebuild", plugin.name, "--prefix", pluginsDir],
+							{
+								stdio: "pipe",
+							},
+						);
+						logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
+						syncedCount++;
+						continue;
+					} catch (_rebuildError) {
+						logger.info(`  ⚠ Rebuild failed, attempting fresh install...`);
+					}
+				} else {
+					logger.info(`  ⚠ ${plugin.name} not found, installing...`);
+				}
+
+				// Fresh install
 				try {
 					execFileSync(
 						"npm",
-						["rebuild", plugin.name, "--prefix", pluginsDir],
+						["install", plugin.source, "--prefix", pluginsDir],
 						{
-							stdio: "pipe",
+							stdio: "inherit",
 						},
 					);
-					logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
+					logger.success(`  ✓ ${plugin.name} installed successfully`);
 					syncedCount++;
-					continue;
-				} catch (_rebuildError) {
-					logger.info(`  ⚠ Rebuild failed, attempting fresh install...`);
+				} catch (installError) {
+					logger.error(`  ✗ Failed to install ${plugin.name}`);
+					failedCount++;
+					failures.push({
+						plugin: plugin.name,
+						error:
+							installError instanceof Error
+								? installError.message
+								: String(installError),
+					});
 				}
-			} else {
-				logger.info(`  ⚠ ${plugin.name} not found, installing...`);
-			}
-
-			// Fresh install
-			try {
-				execFileSync(
-					"npm",
-					["install", plugin.source, "--prefix", pluginsDir],
-					{
-						stdio: "inherit",
-					},
-				);
-				logger.success(`  ✓ ${plugin.name} installed successfully`);
-				syncedCount++;
-			} catch (installError) {
-				logger.error(`  ✗ Failed to install ${plugin.name}`);
+			} catch (error) {
+				logger.error(`  ✗ Failed to sync ${plugin.name}`);
 				failedCount++;
 				failures.push({
 					plugin: plugin.name,
-					error:
-						installError instanceof Error
-							? installError.message
-							: String(installError),
+					error: error instanceof Error ? error.message : String(error),
 				});
 			}
-		} catch (error) {
-			logger.error(`  ✗ Failed to sync ${plugin.name}`);
-			failedCount++;
-			failures.push({
-				plugin: plugin.name,
-				error: error instanceof Error ? error.message : String(error),
-			});
+
+			logger.info("");
 		}
 
-		logger.info("");
-	}
+		// Summary
+		logger.info("Synchronization complete:");
+		logger.info(`  ✓ Synced: ${syncedCount} plugin(s)`);
 
-	// Summary
-	logger.info("Synchronization complete:");
-	logger.info(`  ✓ Synced: ${syncedCount} plugin(s)`);
-
-	if (failedCount > 0) {
-		logger.info(`  ✗ Failed: ${failedCount} plugin(s)`);
-		logger.info("");
-		logger.info("Failed plugins:");
-		for (const failure of failures) {
-			logger.error(`  - ${failure.plugin}: ${failure.error}`);
+		if (failedCount > 0) {
+			logger.info(`  ✗ Failed: ${failedCount} plugin(s)`);
+			logger.info("");
+			logger.info("Failed plugins:");
+			for (const failure of failures) {
+				logger.error(`  - ${failure.plugin}: ${failure.error}`);
+			}
+			logger.info("");
+			const syncError = new Error(
+				failures.map((f) => `${f.plugin}: ${f.error}`).join("; "),
+			);
+			handleCommandError(
+				logger,
+				`Failed to sync ${failedCount} plugin(s)`,
+				syncError,
+				[
+					'Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"',
+				],
+			);
 		}
-		logger.info("");
-		const syncError = new Error(
-			failures.map((f) => `${f.plugin}: ${f.error}`).join("; "),
-		);
-		handleCommandError(
-			logger,
-			`Failed to sync ${failedCount} plugin(s)`,
-			syncError,
-			[
-				'Check network connectivity and verify plugin sources are accessible. You may need to remove failed plugins from the registry with "c8ctl unload plugin <name>"',
-			],
-		);
-	}
 
-	logger.success("All plugins synced successfully!");
-}
+		logger.success("All plugins synced successfully!");
+	},
+);
 
 /**
  * Upgrade a plugin to the latest version or a specific version
  */
-export async function upgradePlugin(
-	packageName: string,
-	version?: string,
-): Promise<void> {
-	const logger = getLogger();
+export const upgradePluginCommand = defineCommand(
+	"upgrade",
+	"plugin",
+	async (ctx, _flags, args) => {
+		const { logger } = ctx;
+		const packageName = args.package;
+		const version = args.version;
 
-	if (!packageName) {
-		logger.error(
-			"Package name required. Usage: c8ctl upgrade plugin <package-name> [version]",
-		);
-		process.exit(1);
-	}
-
-	// Check if plugin is registered
-	if (!isPluginRegistered(packageName)) {
-		logger.error(`Plugin "${packageName}" is not registered.`);
-		logger.info('Run "c8ctl list plugins" to see installed plugins');
-		process.exit(1);
-	}
-
-	const pluginEntry = getPluginEntry(packageName);
-	const pluginsDir = ensurePluginsDir();
-
-	const source = pluginEntry?.source ?? packageName;
-
-	// Versioned upgrade needs to respect source type
-	// File-based plugins do not have a version selector in npm install syntax
-	if (version && source.startsWith("file:")) {
-		logger.error(
-			`Cannot upgrade file-based plugin "${packageName}" to a specific version.`,
-		);
-		logger.info(`Plugin source is: ${source}`);
-		logger.info(
-			'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
-		);
-		process.exit(1);
-	}
-
-	const installTarget = resolveInstallTarget(source, packageName, version);
-
-	try {
-		logger.info(
-			`Upgrading plugin: ${packageName} to ${version || "latest"}...`,
-		);
-
-		// Uninstall current version
-		execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
-			stdio: "pipe",
-		});
-
-		// Install new version while respecting source type
-		execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
-			stdio: "inherit",
-		});
-
-		// Update registry with new source if version was specified
-		if (version) {
-			addPluginToRegistry(packageName, installTarget);
+		if (!packageName) {
+			logger.error(
+				"Package name required. Usage: c8ctl upgrade plugin <package-name> [version]",
+			);
+			process.exit(1);
 		}
 
-		// Clear plugin cache
-		clearLoadedPlugins();
+		// Check if plugin is registered
+		if (!isPluginRegistered(packageName)) {
+			logger.error(`Plugin "${packageName}" is not registered.`);
+			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			process.exit(1);
+		}
 
-		logger.success("Plugin upgraded successfully", packageName);
-		logger.info("Plugin will be available on next command execution");
-	} catch (error) {
-		handleCommandError(logger, "Failed to upgrade plugin", error, [
-			"Check network connectivity and verify the package/version exists",
-		]);
-	}
-}
+		const pluginEntry = getPluginEntry(packageName);
+		const pluginsDir = ensurePluginsDir();
+
+		const source = pluginEntry?.source ?? packageName;
+
+		// Versioned upgrade needs to respect source type
+		// File-based plugins do not have a version selector in npm install syntax
+		if (version && source.startsWith("file:")) {
+			logger.error(
+				`Cannot upgrade file-based plugin "${packageName}" to a specific version.`,
+			);
+			logger.info(`Plugin source is: ${source}`);
+			logger.info(
+				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
+			);
+			process.exit(1);
+		}
+
+		const installTarget = resolveInstallTarget(source, packageName, version);
+
+		try {
+			logger.info(
+				`Upgrading plugin: ${packageName} to ${version || "latest"}...`,
+			);
+
+			// Uninstall current version
+			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+				stdio: "pipe",
+			});
+
+			// Install new version while respecting source type
+			execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
+				stdio: "inherit",
+			});
+
+			// Update registry with new source if version was specified
+			if (version) {
+				addPluginToRegistry(packageName, installTarget);
+			}
+
+			// Clear plugin cache
+			clearLoadedPlugins();
+
+			logger.success("Plugin upgraded successfully", packageName);
+			logger.info("Plugin will be available on next command execution");
+		} catch (error) {
+			handleCommandError(logger, "Failed to upgrade plugin", error, [
+				"Check network connectivity and verify the package/version exists",
+			]);
+		}
+	},
+);
 
 /**
  * Downgrade a plugin to a specific version
  */
-export async function downgradePlugin(
-	packageName: string,
-	version: string,
-): Promise<void> {
-	const logger = getLogger();
+export const downgradePluginCommand = defineCommand(
+	"downgrade",
+	"plugin",
+	async (ctx, _flags, args) => {
+		const { logger } = ctx;
+		const packageName = args.package;
+		const version = args.version;
 
-	if (!packageName || !version) {
-		logger.error(
-			"Package name and version required. Usage: c8ctl downgrade plugin <package-name> <version>",
-		);
-		process.exit(1);
-	}
+		if (!packageName || !version) {
+			logger.error(
+				"Package name and version required. Usage: c8ctl downgrade plugin <package-name> <version>",
+			);
+			process.exit(1);
+		}
 
-	// Check if plugin is registered
-	if (!isPluginRegistered(packageName)) {
-		logger.error(`Plugin "${packageName}" is not registered.`);
-		logger.info('Run "c8ctl list plugins" to see installed plugins');
-		process.exit(1);
-	}
+		// Check if plugin is registered
+		if (!isPluginRegistered(packageName)) {
+			logger.error(`Plugin "${packageName}" is not registered.`);
+			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			process.exit(1);
+		}
 
-	const pluginEntry = getPluginEntry(packageName);
-	const pluginsDir = ensurePluginsDir();
+		const pluginEntry = getPluginEntry(packageName);
+		const pluginsDir = ensurePluginsDir();
 
-	const source = pluginEntry?.source ?? packageName;
+		const source = pluginEntry?.source ?? packageName;
 
-	// Downgrade needs to respect the plugin source
-	// File-based plugins do not have a version selector in npm install syntax
-	if (source.startsWith("file:")) {
-		logger.error(
-			`Cannot downgrade file-based plugin "${packageName}" by version.`,
-		);
-		logger.info(`Plugin source is: ${source}`);
-		logger.info(
-			'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
-		);
-		process.exit(1);
-	}
+		// Downgrade needs to respect the plugin source
+		// File-based plugins do not have a version selector in npm install syntax
+		if (source.startsWith("file:")) {
+			logger.error(
+				`Cannot downgrade file-based plugin "${packageName}" by version.`,
+			);
+			logger.info(`Plugin source is: ${source}`);
+			logger.info(
+				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
+			);
+			process.exit(1);
+		}
 
-	const installTarget = resolveInstallTarget(source, packageName, version);
+		const installTarget = resolveInstallTarget(source, packageName, version);
 
-	try {
-		logger.info(`Downgrading plugin: ${packageName} to version ${version}...`);
+		try {
+			logger.info(
+				`Downgrading plugin: ${packageName} to version ${version}...`,
+			);
 
-		// Uninstall current version
-		execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
-			stdio: "pipe",
-		});
+			// Uninstall current version
+			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+				stdio: "pipe",
+			});
 
-		// Install specific version while respecting source type
-		execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
-			stdio: "inherit",
-		});
+			// Install specific version while respecting source type
+			execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
+				stdio: "inherit",
+			});
 
-		// Update registry with new source
-		addPluginToRegistry(packageName, installTarget);
+			// Update registry with new source
+			addPluginToRegistry(packageName, installTarget);
 
-		// Clear plugin cache
-		clearLoadedPlugins();
+			// Clear plugin cache
+			clearLoadedPlugins();
 
-		logger.success("Plugin downgraded successfully", packageName);
-		logger.info("Plugin will be available on next command execution");
-	} catch (error) {
-		handleCommandError(logger, "Failed to downgrade plugin", error, [
-			"Check network connectivity and verify the version exists",
-		]);
-	}
-}
+			logger.success("Plugin downgraded successfully", packageName);
+			logger.info("Plugin will be available on next command execution");
+		} catch (error) {
+			handleCommandError(logger, "Failed to downgrade plugin", error, [
+				"Check network connectivity and verify the version exists",
+			]);
+		}
+	},
+);
 
 /**
  * Initialize a new plugin project with TypeScript template
  */
-export async function initPlugin(positionalName?: string): Promise<void> {
-	const logger = getLogger();
-	const { mkdirSync, writeFileSync } = await import("node:fs");
-	const { resolve } = await import("node:path");
+export const initPluginCommand = defineCommand(
+	"init",
+	"plugin",
+	async (ctx, _flags, args) => {
+		const { logger } = ctx;
+		const { mkdirSync, writeFileSync } = await import("node:fs");
+		const { resolve } = await import("node:path");
 
-	const rawName = positionalName || "myplugin";
-	// Convention over configuration: plugin name is the suffix after 'c8ctl-plugin-'
-	const pluginName = rawName.startsWith("c8ctl-plugin-")
-		? rawName.slice("c8ctl-plugin-".length)
-		: rawName;
+		const rawName = args.name || "myplugin";
+		// Convention over configuration: plugin name is the suffix after 'c8ctl-plugin-'
+		const pluginName = rawName.startsWith("c8ctl-plugin-")
+			? rawName.slice("c8ctl-plugin-".length)
+			: rawName;
 
-	if (!pluginName) {
-		logger.error(
-			'Plugin name cannot be empty. Provide a name suffix after "c8ctl-plugin-".',
-		);
-		logger.info("Example: c8ctl init plugin myplugin");
-		process.exit(1);
-	}
-
-	const dirName = `c8ctl-plugin-${pluginName}`;
-	const pluginDir = resolve(process.cwd(), dirName);
-
-	// Check if directory already exists
-	if (existsSync(pluginDir)) {
-		logger.error(`Directory "${dirName}" already exists.`);
-		logger.info("Choose a different name or remove the existing directory");
-		process.exit(1);
-	}
-
-	try {
-		logger.info(`Creating plugin: ${dirName}...`);
-
-		const templateVars = { PLUGIN_NAME: pluginName, PLUGIN_DIR: dirName };
-
-		// Create plugin directory
-		mkdirSync(pluginDir, { recursive: true });
-
-		// Create package.json
-		writeFileSync(
-			join(pluginDir, "package.json"),
-			renderTemplate("package.json", templateVars),
-		);
-
-		// Create tsconfig.json
-		writeFileSync(
-			join(pluginDir, "tsconfig.json"),
-			getTemplate("tsconfig.json.template"),
-		);
-
-		// Create src directory
-		mkdirSync(join(pluginDir, "src"), { recursive: true });
-
-		// Create root c8ctl-plugin.js entry point
-		writeFileSync(
-			join(pluginDir, "c8ctl-plugin.js"),
-			getTemplate("c8ctl-plugin.js"),
-		);
-
-		// Create c8ctl-plugin.ts
-		writeFileSync(
-			join(pluginDir, "src", "c8ctl-plugin.ts"),
-			renderTemplate("c8ctl-plugin.ts", templateVars),
-		);
-
-		// Create README.md
-		const readme = renderTemplate("README.md", templateVars);
-
-		writeFileSync(join(pluginDir, "README.md"), readme);
-
-		// Create AGENTS.md
-		const agents = getTemplate("AGENTS.md");
-
-		writeFileSync(join(pluginDir, "AGENTS.md"), agents);
-
-		// Create .gitignore (stored as 'gitignore' to survive npm publish)
-		writeFileSync(join(pluginDir, ".gitignore"), getTemplate("gitignore"));
-
-		logger.success("Plugin scaffolding created successfully!");
-		const nextSteps = renderTemplate(
-			"init-plugin-next-steps.txt",
-			templateVars,
-		);
-		for (const line of nextSteps.split("\n")) {
-			logger.info(line);
+		if (!pluginName) {
+			logger.error(
+				'Plugin name cannot be empty. Provide a name suffix after "c8ctl-plugin-".',
+			);
+			logger.info("Example: c8ctl init plugin myplugin");
+			process.exit(1);
 		}
-	} catch (error) {
-		handleCommandError(logger, "Failed to create plugin", error);
-	}
-}
+
+		const dirName = `c8ctl-plugin-${pluginName}`;
+		const pluginDir = resolve(process.cwd(), dirName);
+
+		// Check if directory already exists
+		if (existsSync(pluginDir)) {
+			logger.error(`Directory "${dirName}" already exists.`);
+			logger.info("Choose a different name or remove the existing directory");
+			process.exit(1);
+		}
+
+		try {
+			logger.info(`Creating plugin: ${dirName}...`);
+
+			const templateVars = { PLUGIN_NAME: pluginName, PLUGIN_DIR: dirName };
+
+			// Create plugin directory
+			mkdirSync(pluginDir, { recursive: true });
+
+			// Create package.json
+			writeFileSync(
+				join(pluginDir, "package.json"),
+				renderTemplate("package.json", templateVars),
+			);
+
+			// Create tsconfig.json
+			writeFileSync(
+				join(pluginDir, "tsconfig.json"),
+				getTemplate("tsconfig.json.template"),
+			);
+
+			// Create src directory
+			mkdirSync(join(pluginDir, "src"), { recursive: true });
+
+			// Create root c8ctl-plugin.js entry point
+			writeFileSync(
+				join(pluginDir, "c8ctl-plugin.js"),
+				getTemplate("c8ctl-plugin.js"),
+			);
+
+			// Create c8ctl-plugin.ts
+			writeFileSync(
+				join(pluginDir, "src", "c8ctl-plugin.ts"),
+				renderTemplate("c8ctl-plugin.ts", templateVars),
+			);
+
+			// Create README.md
+			const readme = renderTemplate("README.md", templateVars);
+
+			writeFileSync(join(pluginDir, "README.md"), readme);
+
+			// Create AGENTS.md
+			const agents = getTemplate("AGENTS.md");
+
+			writeFileSync(join(pluginDir, "AGENTS.md"), agents);
+
+			// Create .gitignore (stored as 'gitignore' to survive npm publish)
+			writeFileSync(join(pluginDir, ".gitignore"), getTemplate("gitignore"));
+
+			logger.success("Plugin scaffolding created successfully!");
+			const nextSteps = renderTemplate(
+				"init-plugin-next-steps.txt",
+				templateVars,
+			);
+			for (const line of nextSteps.split("\n")) {
+				logger.info(line);
+			}
+		} catch (error) {
+			handleCommandError(logger, "Failed to create plugin", error);
+		}
+	},
+);

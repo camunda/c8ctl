@@ -3,10 +3,16 @@
  * Handles output in multiple modes (text, json) based on session state
  */
 
-import { isRecord } from "./index.ts";
 import { c8ctl } from "./runtime.ts";
 
 export type OutputMode = "text" | "json";
+
+/**
+ * Type guard: narrow unknown to Record<string, unknown>.
+ */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object";
+}
 
 /**
  * Fields that contain genuine credentials and must be redacted before logging.

@@ -13,8 +13,6 @@ import {
 	type FlagDef,
 	GLOBAL_FLAGS,
 	getCommandDef,
-	SEARCH_FLAGS,
-	SEARCH_RESOURCE_FLAGS,
 } from "./command-registry.ts";
 import { getLogger } from "./logger.ts";
 
@@ -179,30 +177,16 @@ export function validateFlags(
 /** Flag names that are always valid regardless of verb or resource. */
 const GLOBAL_FLAG_NAMES = new Set(Object.keys(GLOBAL_FLAGS));
 
-/** Shared search/list flags valid for all resources of those verbs. */
-const SHARED_SEARCH_FLAG_NAMES = new Set(Object.keys(SEARCH_FLAGS));
-
-/**
- * Verbs whose flags are resource-scoped: the union of all resource flags
- * is declared on the verb, but only a subset applies per resource.
- * For these verbs, SEARCH_RESOURCE_FLAGS provides the per-resource breakdown.
- */
-const RESOURCE_SCOPED_VERBS = new Set(["search", "list"]);
-
-/**
- * Verb-level flags that apply to all resources of a resource-scoped verb
- * but are NOT in SEARCH_FLAGS. e.g. list has "all".
- */
-const EXTRA_VERB_FLAGS: Record<string, string[]> = {
-	list: ["all"],
-};
-
 /**
  * Detect flags the user provided that are not recognised for the given
- * verb (and, for resource-scoped verbs, the specific resource).
+ * verb (and, for verbs with resourceFlags, the specific resource).
  *
- * For resource-scoped verbs (search, list): valid flags are
- *   GLOBAL_FLAGS ∪ SEARCH_FLAGS ∪ extra verb flags ∪ resource-specific flags
+ * For verbs with resourceFlags (when a resource is provided): valid flags are
+ *   GLOBAL_FLAGS ∪ shared verb flags ∪ resourceFlags[resource]
+ *
+ * Shared verb flags are derived automatically: verb-level flags that do NOT
+ * appear in any resourceFlags entry (e.g. limit/sort for search, but not
+ * resource-specific filter flags).
  *
  * For all other verbs: valid flags are
  *   GLOBAL_FLAGS ∪ verb flags
@@ -220,17 +204,24 @@ export function detectUnknownFlags(
 
 	const validFlags = new Set(GLOBAL_FLAG_NAMES);
 
-	if (RESOURCE_SCOPED_VERBS.has(verb) && resource) {
-		// Shared flags valid for all resources of this verb
-		for (const f of SHARED_SEARCH_FLAG_NAMES) validFlags.add(f);
-		for (const f of EXTRA_VERB_FLAGS[verb] ?? []) validFlags.add(f);
+	if (commandDef.resourceFlags && resource) {
+		// Collect all resource-specific flag names
+		const allResourceFlagNames = new Set<string>();
+		for (const rFlags of Object.values(commandDef.resourceFlags)) {
+			for (const f of Object.keys(rFlags)) allResourceFlagNames.add(f);
+		}
 
-		// Resource-specific flags (e.g. processDefinitionKey for "process-instance")
-		const resourceFlags =
-			SEARCH_RESOURCE_FLAGS[resource] ||
-			SEARCH_RESOURCE_FLAGS[resource.replace(/s$/, "")];
-		if (resourceFlags) {
-			for (const f of resourceFlags) validFlags.add(f);
+		// Shared verb flags = verb-level flags NOT in any resource entry
+		for (const f of Object.keys(commandDef.flags)) {
+			if (!allResourceFlagNames.has(f)) validFlags.add(f);
+		}
+
+		// Resource-specific flags
+		const perResource =
+			commandDef.resourceFlags[resource] ||
+			commandDef.resourceFlags[resource.replace(/s$/, "")];
+		if (perResource) {
+			for (const f of Object.keys(perResource)) validFlags.add(f);
 		}
 	} else {
 		for (const f of Object.keys(commandDef.flags)) {

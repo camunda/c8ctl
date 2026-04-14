@@ -6,9 +6,20 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn } from '../utils/spawn.ts';
+
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+
+function cli(dataDir: string, ...args: string[]) {
+  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+  });
+}
 
 describe('Profile Switching Integration Tests', () => {
   let testDir: string;
@@ -18,36 +29,27 @@ describe('Profile Switching Integration Tests', () => {
     testDir = mkdtempSync(join(tmpdir(), 'c8ctl-profile-switch-test-'));
     originalEnv = { ...process.env };
     process.env.C8CTL_DATA_DIR = testDir;
-    
-    // Reset c8ctl runtime state before each test
-    const { c8ctl } = await import('../../src/runtime.ts');
-    c8ctl.activeProfile = undefined;
-    c8ctl.activeTenant = undefined;
-    c8ctl.outputMode = 'text';
-    
-    // Create test profiles
+
+    // Create test profiles in-process (CLI `add profile` doesn't wire --username/--password)
     const { addProfile } = await import('../../src/config.ts');
-    
-    // Profile "one" - valid localhost cluster
+
     addProfile({
       name: 'one',
       baseUrl: 'http://localhost:8080',
       username: 'demo',
       password: 'demo',
     });
-    
-    // Profile "two" - valid localhost cluster (same as one)
+
     addProfile({
       name: 'two',
       baseUrl: 'http://localhost:8080',
       username: 'demo',
       password: 'demo',
     });
-    
-    // Profile "invalid" - fake cluster with valid credentials format
+
     addProfile({
       name: 'invalid',
-      baseUrl: 'http://localhost:9999', // Non-existent port
+      baseUrl: 'http://localhost:9999',
       username: 'fake-user',
       password: 'fake-password',
     });
@@ -61,108 +63,50 @@ describe('Profile Switching Integration Tests', () => {
   });
 
   test('profile switching affects deployment and queries', async () => {
-    const { deploy } = await import('../../src/commands/deployments.ts');
-    const { useProfile } = await import('../../src/commands/session.ts');
-    const { listProcessInstances } = await import('../../src/commands/process-instances.ts');
-    const { createClient } = await import('../../src/client.ts');
-    const { c8ctl } = await import('../../src/runtime.ts');
-    
-    // Step 1: Use profile "one"
-    useProfile('one');
-    assert.strictEqual(c8ctl.activeProfile, 'one', 'Profile one should be active');
-    
-    // Step 2: Deploy using profile "one"
-    await deploy(['tests/fixtures/list-pis/min-usertask.bpmn'], {});
-    
-    // Create a process instance to ensure we have data
-    const client = createClient();
-    await client.createProcessInstance({
-      processDefinitionId: 'Process_0t60ay7',
-    });
-    
+    // Step 1: Use profile "one" and deploy
+    await cli(testDir, 'use', 'profile', 'one');
+    await cli(testDir, 'deploy', 'tests/fixtures/list-pis/min-usertask.bpmn');
+
+    // Create a process instance 
+    await cli(testDir, 'create', 'pi', '--id', 'Process_0t60ay7');
+
     // Poll for Elasticsearch indexing
-    const instanceFound = await pollUntil(
-      async () => {
-        try {
-          const result = await client.searchProcessInstances({
-            filter: { processDefinitionId: 'Process_0t60ay7' },
-          }, { consistency: { waitUpToMs: 5000 } });
-          return result.items && result.items.length > 0;
-        } catch (error) {
-          return false;
-        }
-      },
-      10000,  // max 10 seconds
-      200     // poll every 200ms
-    );
+    const instanceFound = await pollUntil(async () => {
+      const result = await cli(testDir, 'list', 'pi', '--id', 'Process_0t60ay7', '--all', '--output', 'json');
+      return result.status === 0 && result.stdout.trim().length > 2;
+    }, 10000, 200);
     assert.ok(instanceFound, 'Process instance should be indexed');
-    
-    // Step 3: Switch to profile "two"
-    useProfile('two');
-    assert.strictEqual(c8ctl.activeProfile, 'two', 'Profile two should be active');
-    
-    // Step 4: List process instances using profile "two"
-    // Capture stdout to verify the command works
-    const originalLog = console.log;
-    let capturedOutput: string[] = [];
-    
-    console.log = (...args: any[]) => {
-      capturedOutput.push(args.join(' '));
-    };
-    
-    try {
-      await listProcessInstances({
-        processDefinitionId: 'Process_0t60ay7',
-      });
-      
-      // Verify we got output (meaning the query succeeded)
-      const output = capturedOutput.join('\n');
-      assert.ok(output.length > 0, 'Should have output from list command');
-      
-      // Since both profiles point to the same cluster, we should see the process instance
-      assert.ok(
-        output.includes('Process_0t60ay7') || output.includes('No process instances found'),
-        'Should either show process instances or none found'
-      );
-      
-      // Step 5: Verify profile "two" is still active
-      assert.strictEqual(c8ctl.activeProfile, 'two', 'Profile two should still be active');
-      
-    } finally {
-      console.log = originalLog;
-    }
+
+    // Step 2: Switch to profile "two" and list
+    await cli(testDir, 'use', 'profile', 'two');
+
+    const result = await cli(testDir, 'list', 'pi', '--id', 'Process_0t60ay7', '--all');
+    assert.strictEqual(result.status, 0, `List should succeed with profile two. stderr: ${result.stderr}`);
+    const output = result.stdout.trim();
+    assert.ok(output.length > 0, 'Should have output from list command');
+
+    // Since both profiles point to the same cluster, we should see the process instance
+    assert.ok(
+      output.includes('Process_0t60ay7') || output.includes('No process instances found'),
+      'Should either show process instances or none found',
+    );
   });
 
   test('invalid profile causes connection error', async () => {
-    const { execSync } = await import('node:child_process');
+    const useResult = await cli(testDir, 'use', 'profile', 'invalid');
+    assert.strictEqual(useResult.status, 0, 'CLI should activate invalid profile');
+    assert.ok(useResult.stdout.includes('Now using profile: invalid') || useResult.stderr.includes('Now using profile: invalid'), 'CLI should confirm profile switch');
 
-    const useOutput = execSync('node src/index.ts use profile invalid', {
-      encoding: 'utf8',
-      cwd: process.cwd(),
-      env: { ...process.env, C8CTL_DATA_DIR: testDir },
-      stdio: 'pipe',
-    });
-    assert.ok(useOutput.includes('Now using profile: invalid'), 'CLI should activate invalid profile');
-
-    try {
-      execSync('node src/index.ts list pi --id Process_0t60ay7', {
-        encoding: 'utf8',
-        cwd: process.cwd(),
-        env: { ...process.env, C8CTL_DATA_DIR: testDir },
-        stdio: 'pipe',
-      });
-      assert.fail('CLI command should fail for invalid profile');
-    } catch (error: any) {
-      assert.notStrictEqual(error.status, 0, 'CLI should exit with non-zero status');
-      const stderr = error.stderr ?? '';
-      assert.ok(
-        stderr.includes('Failed to list process instances') ||
-        stderr.includes('ECONNREFUSED') ||
-        stderr.includes('connect') ||
-        stderr.includes('fetch failed'),
-        `Error should mention connection failure. Got: ${stderr}`
-      );
-    }
+    const listResult = await cli(testDir, 'list', 'pi', '--id', 'Process_0t60ay7');
+    assert.notStrictEqual(listResult.status, 0, 'CLI should exit with non-zero status for invalid profile');
+    const combinedOutput = `${listResult.stdout}\n${listResult.stderr}`;
+    assert.ok(
+      combinedOutput.includes('Failed to list process instances') ||
+      combinedOutput.includes('ECONNREFUSED') ||
+      combinedOutput.includes('connect') ||
+      combinedOutput.includes('fetch failed'),
+      `Error should mention connection failure. Got: ${combinedOutput}`,
+    );
   });
 
   test('switching profiles affects cluster resolution', async () => {

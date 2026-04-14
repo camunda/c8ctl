@@ -7,19 +7,27 @@
  */
 
 import {
+	AuthorizationKey,
+	IncidentKey,
+	JobKey,
 	ProcessDefinitionId,
 	ProcessDefinitionKey,
 	ProcessInstanceKey,
 	TenantId,
 	Username,
+	UserTaskKey,
 } from "@camunda8/orchestration-cluster-api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface FlagDef {
+	/** Value type: "string" expects an argument, "boolean" is a presence flag. */
 	type: "string" | "boolean";
+	/** One-line description shown in command-level help output. */
 	description: string;
+	/** Single-character alias (e.g. "k" → -k). */
 	short?: string;
+	/** When true, the flag must be supplied or the command exits with an error. */
 	required?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
@@ -34,6 +42,28 @@ export interface FlagDef {
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: validators return branded types that vary per flag
 	validate?: (value: string) => any;
+	/** When true, this flag appears in the top-level `c8ctl help` Flags section. */
+	showInTopLevelHelp?: boolean;
+	/** Context hint shown in the top-level help (e.g. "use with 'get pd'"). */
+	helpHint?: string;
+	/** Rich description for agent-facing help (AI/programmatic consumers). Shown in Agent Flags section. */
+	agentDescription?: string;
+	/** Scope hint for agent-facing help (e.g. "all commands", "all list/search/get commands"). */
+	agentAppliesTo?: string;
+}
+
+/**
+ * Schema for a single positional argument.
+ *
+ * - `name`: used as the key in the typed args record and in error messages
+ * - `required`: when true, missing value exits with an error
+ * - `validate`: optional branded-type constructor (e.g. ProcessDefinitionKey.assumeExists)
+ */
+export interface PositionalDef {
+	name: string;
+	required?: boolean;
+	// biome-ignore lint/suspicious/noExplicitAny: validators return branded types that vary per positional
+	validate?: (value: string) => any;
 }
 
 export interface CommandDef {
@@ -43,10 +73,39 @@ export interface CommandDef {
 	requiresResource: boolean;
 	/** Valid resource names (canonical short forms used in help). */
 	resources: string[];
-	/** Flags specific to this verb (beyond global flags). */
+	/** Flags specific to this verb (beyond global flags). Superset of all resource-specific flags. */
 	flags: Record<string, FlagDef>;
+	/** Per-resource flag scoping. Keys are canonical resource names. */
+	resourceFlags?: Record<string, Record<string, FlagDef>>;
+	/** Per-resource positional argument schemas. Keys are canonical resource names. */
+	resourcePositionals?: Record<string, readonly PositionalDef[]>;
 	/** Verb aliases that dispatch to this command (e.g. "rm" → remove, "w" → watch). */
 	aliases?: string[];
+	/**
+	 * Override the resource column in `c8ctl help` output.
+	 * Auto-derived from resources/positionals when omitted.
+	 */
+	helpResource?: string;
+	/**
+	 * Override the description shown in `c8ctl help` output.
+	 * Falls back to `description` when omitted.
+	 */
+	helpDescription?: string;
+	/**
+	 * When true, `c8ctl help <verb>` is listed in the footer of main help.
+	 * Derived: true for any verb with a showCommandHelp handler.
+	 */
+	hasDetailedHelp?: boolean;
+	/**
+	 * Short label for the `c8ctl help <verb>` footer entry.
+	 * Defaults to "Show <verb> command with all flags".
+	 */
+	helpFooterLabel?: string;
+	/**
+	 * Examples shown in the top-level `c8ctl help` Examples section.
+	 * Each entry: { command, description }. Rendered in declaration order.
+	 */
+	helpExamples?: readonly { command: string; description: string }[];
 }
 
 // ─── Resource Aliases ────────────────────────────────────────────────────────
@@ -57,11 +116,16 @@ export interface CommandDef {
  */
 export const RESOURCE_ALIASES: Record<string, string> = {
 	pi: "process-instance",
+	"process-instances": "process-instance",
 	pd: "process-definition",
+	"process-definitions": "process-definition",
 	ut: "user-task",
+	"user-tasks": "user-task",
 	inc: "incident",
+	incidents: "incident",
 	msg: "message",
 	vars: "variable",
+	variables: "variable",
 	profile: "profile",
 	profiles: "profile",
 	plugin: "plugin",
@@ -93,11 +157,17 @@ export const GLOBAL_FLAGS = {
 	"dry-run": {
 		type: "boolean",
 		description: "Preview the API request without executing",
+		agentDescription:
+			"Preview the API request that would be sent, without executing it.\nEmits JSON: { dryRun, command, method, url, body }\nAlways exits 0.",
+		agentAppliesTo: "all commands",
 	},
 	verbose: { type: "boolean", description: "Show verbose output" },
 	fields: {
 		type: "string",
 		description: "Comma-separated list of fields to display",
+		agentDescription:
+			"Comma-separated list of output fields to include.\nReduces context window size when parsing output.\nExample: c8ctl list pi --fields Key,State,processDefinitionId\nCase-insensitive.",
+		agentAppliesTo: "all list/search/get commands",
 	},
 } as const satisfies Record<string, FlagDef>;
 
@@ -137,7 +207,10 @@ const PI_SEARCH_FLAGS = {
 		description: "Filter by process definition key",
 		validate: ProcessDefinitionKey.assumeExists,
 	},
-	state: { type: "string", description: "Filter by state" },
+	state: {
+		type: "string",
+		description: "Filter by state (ACTIVE, COMPLETED, etc)",
+	},
 	key: { type: "string", description: "Filter by key" },
 	parentProcessInstanceKey: {
 		type: "string",
@@ -354,6 +427,107 @@ const PROFILE_CONNECTION_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+// ─── Per-resource get flags ──────────────────────────────────────────────────
+
+export const GET_PD_FLAGS = {
+	xml: {
+		type: "boolean",
+		description: "Get BPMN XML (process definitions)",
+		showInTopLevelHelp: true,
+		helpHint: "use with 'get pd'",
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const GET_FORM_FLAGS = {
+	userTask: {
+		type: "boolean",
+		description: "Get form for user task",
+		showInTopLevelHelp: true,
+		helpHint: "use with 'get form'",
+	},
+	processDefinition: {
+		type: "boolean",
+		description: "Get form for process definition",
+		showInTopLevelHelp: true,
+		helpHint: "use with 'get form'",
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const GET_PI_FLAGS = {
+	variables: {
+		type: "boolean",
+		description: "Include variables in output",
+		showInTopLevelHelp: true,
+		helpHint: "use with 'get pi'",
+	},
+} as const satisfies Record<string, FlagDef>;
+
+// ─── Per-resource get positionals ────────────────────────────────────────────
+
+export const GET_PD_POSITIONALS = [
+	{
+		name: "key",
+		required: true,
+		validate: ProcessDefinitionKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_PI_POSITIONALS = [
+	{
+		name: "key",
+		required: true,
+		validate: ProcessInstanceKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_INCIDENT_POSITIONALS = [
+	{
+		name: "key",
+		required: true,
+		validate: IncidentKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_USER_POSITIONALS = [
+	{
+		name: "username",
+		required: true,
+		validate: Username.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_ROLE_POSITIONALS = [
+	{ name: "roleId", required: true },
+] as const satisfies readonly PositionalDef[];
+
+const GET_GROUP_POSITIONALS = [
+	{ name: "groupId", required: true },
+] as const satisfies readonly PositionalDef[];
+
+const GET_TENANT_POSITIONALS = [
+	{
+		name: "tenantId",
+		required: true,
+		validate: TenantId.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_AUTHORIZATION_POSITIONALS = [
+	{
+		name: "authorizationKey",
+		required: true,
+		validate: AuthorizationKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
+const GET_MAPPING_RULE_POSITIONALS = [
+	{ name: "mappingRuleId", required: true },
+] as const satisfies readonly PositionalDef[];
+
+const GET_FORM_POSITIONALS = [
+	{ name: "key", required: true },
+] as const satisfies readonly PositionalDef[];
+
 // ─── Command Registry ────────────────────────────────────────────────────────
 
 export const COMMAND_REGISTRY = {
@@ -361,8 +535,16 @@ export const COMMAND_REGISTRY = {
 
 	list: {
 		description: "List resources (process, identity)",
+		helpDescription: "List resources",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show all list resources and their flags",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{ command: "c8ctl list pi", description: "List process instances" },
+			{ command: "c8ctl list pd", description: "List process definitions" },
+			{ command: "c8ctl list users", description: "List users" },
+		],
 		resources: [
 			"pi",
 			"pd",
@@ -384,8 +566,6 @@ export const COMMAND_REGISTRY = {
 				description: "List all (disable pagination limit)",
 			},
 			...SEARCH_FLAGS,
-			// List supports the same resource-specific filters as search;
-			// per-resource scoping is handled by SEARCH_RESOURCE_FLAGS.
 			...PI_SEARCH_FLAGS,
 			...PD_SEARCH_FLAGS,
 			...UT_SEARCH_FLAGS,
@@ -398,12 +578,79 @@ export const COMMAND_REGISTRY = {
 			...AUTH_SEARCH_FLAGS,
 			...MR_SEARCH_FLAGS,
 		},
+		resourceFlags: {
+			"process-definition": PD_SEARCH_FLAGS,
+			"process-instance": PI_SEARCH_FLAGS,
+			"user-task": UT_SEARCH_FLAGS,
+			incident: INC_SEARCH_FLAGS,
+			jobs: JOB_SEARCH_FLAGS,
+			user: USER_SEARCH_FLAGS,
+			role: ROLE_SEARCH_FLAGS,
+			group: GROUP_SEARCH_FLAGS,
+			tenant: TENANT_SEARCH_FLAGS,
+			authorization: AUTH_SEARCH_FLAGS,
+			"mapping-rule": MR_SEARCH_FLAGS,
+		},
 	},
 
 	search: {
 		description: "Search resources with filters",
+		helpDescription:
+			"Search resources with filters (wildcards, date ranges, case-insensitive)",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show all search resources and their flags",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl search pi --state=ACTIVE",
+				description: "Search for active process instances",
+			},
+			{
+				command: "c8ctl search pd --bpmnProcessId=myProcess",
+				description: "Search process definitions by ID",
+			},
+			{
+				command: "c8ctl search pd --name='*main*'",
+				description: "Search process definitions with wildcard",
+			},
+			{
+				command: "c8ctl search ut --assignee=john",
+				description: "Search user tasks assigned to john",
+			},
+			{
+				command: "c8ctl search inc --state=ACTIVE",
+				description: "Search for active incidents",
+			},
+			{
+				command: "c8ctl search jobs --type=myJobType",
+				description: "Search jobs by type",
+			},
+			{
+				command: "c8ctl search jobs --type='*service*'",
+				description: 'Search jobs with type containing "service"',
+			},
+			{
+				command: "c8ctl search variables --name=myVar",
+				description: "Search for variables by name",
+			},
+			{
+				command: "c8ctl search variables --value=foo",
+				description: "Search for variables by value",
+			},
+			{
+				command: "c8ctl search variables --processInstanceKey=123 --fullValue",
+				description: "Search variables with full values",
+			},
+			{
+				command: "c8ctl search pd --iname='*order*'",
+				description: "Case-insensitive search by name",
+			},
+			{
+				command: "c8ctl search ut --iassignee=John",
+				description: "Case-insensitive search by assignee",
+			},
+		],
 		resources: [
 			"pi",
 			"pd",
@@ -420,8 +667,6 @@ export const COMMAND_REGISTRY = {
 		],
 		flags: {
 			...SEARCH_FLAGS,
-			// Resource-specific flags are all accepted; per-resource scoping
-			// is handled by SEARCH_RESOURCE_FLAGS below.
 			...PI_SEARCH_FLAGS,
 			...PD_SEARCH_FLAGS,
 			...UT_SEARCH_FLAGS,
@@ -435,12 +680,61 @@ export const COMMAND_REGISTRY = {
 			...AUTH_SEARCH_FLAGS,
 			...MR_SEARCH_FLAGS,
 		},
+		resourceFlags: {
+			"process-definition": PD_SEARCH_FLAGS,
+			"process-instance": PI_SEARCH_FLAGS,
+			"user-task": UT_SEARCH_FLAGS,
+			incident: INC_SEARCH_FLAGS,
+			jobs: JOB_SEARCH_FLAGS,
+			variable: VAR_SEARCH_FLAGS,
+			user: USER_SEARCH_FLAGS,
+			role: ROLE_SEARCH_FLAGS,
+			group: GROUP_SEARCH_FLAGS,
+			tenant: TENANT_SEARCH_FLAGS,
+			authorization: AUTH_SEARCH_FLAGS,
+			"mapping-rule": MR_SEARCH_FLAGS,
+		},
 	},
 
 	get: {
 		description: "Get resource by key",
+		helpDescription: "Get a resource by key",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show all get resources and their flags",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl get pi 123456",
+				description: "Get process instance by key",
+			},
+			{
+				command: "c8ctl get pi 123456 --variables",
+				description: "Get process instance with variables",
+			},
+			{
+				command: "c8ctl get pd 123456",
+				description: "Get process definition by key",
+			},
+			{
+				command: "c8ctl get pd 123456 --xml",
+				description: "Get process definition XML",
+			},
+			{
+				command: "c8ctl get form 123456",
+				description:
+					"Get form (searches both user task and process definition)",
+			},
+			{
+				command: "c8ctl get form 123456 --ut",
+				description: "Get form for user task only",
+			},
+			{
+				command: "c8ctl get form 123456 --pd",
+				description: "Get start form for process definition only",
+			},
+			{ command: "c8ctl get user john", description: "Get user by username" },
+		],
 		resources: [
 			"pi",
 			"pd",
@@ -454,19 +748,23 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rule",
 		],
-		flags: {
-			xml: {
-				type: "boolean",
-				description: "Get BPMN XML (process definitions)",
-			},
-			userTask: {
-				type: "boolean",
-				description: "Get form for user task",
-			},
-			processDefinition: {
-				type: "boolean",
-				description: "Get form for process definition",
-			},
+		flags: { ...GET_PD_FLAGS, ...GET_FORM_FLAGS, ...GET_PI_FLAGS },
+		resourceFlags: {
+			"process-definition": GET_PD_FLAGS,
+			form: GET_FORM_FLAGS,
+			"process-instance": GET_PI_FLAGS,
+		},
+		resourcePositionals: {
+			"process-definition": GET_PD_POSITIONALS,
+			"process-instance": GET_PI_POSITIONALS,
+			incident: GET_INCIDENT_POSITIONALS,
+			user: GET_USER_POSITIONALS,
+			role: GET_ROLE_POSITIONALS,
+			group: GET_GROUP_POSITIONALS,
+			tenant: GET_TENANT_POSITIONALS,
+			authorization: GET_AUTHORIZATION_POSITIONALS,
+			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
+			form: GET_FORM_POSITIONALS,
 		},
 	},
 
@@ -474,8 +772,26 @@ export const COMMAND_REGISTRY = {
 
 	create: {
 		description: "Create resource",
+		helpDescription: "Create a resource (process instance, identity)",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show all create resources and their flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl create pi --id=myProcess",
+				description: "Create a process instance",
+			},
+			{
+				command: "c8ctl create pi --id=myProcess --awaitCompletion",
+				description: "Create and await completion",
+			},
+			{
+				command:
+					"c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret",
+				description: "Create a user",
+			},
+		],
 		resources: [
 			"pi",
 			"user",
@@ -495,6 +811,8 @@ export const COMMAND_REGISTRY = {
 			id: {
 				type: "string",
 				description: "Process definition ID (alias for --processDefinitionId)",
+				showInTopLevelHelp: true,
+				helpHint: "alias for --bpmnProcessId",
 			},
 			bpmnProcessId: {
 				type: "string",
@@ -504,14 +822,19 @@ export const COMMAND_REGISTRY = {
 			awaitCompletion: {
 				type: "boolean",
 				description: "Wait for process to complete",
+				showInTopLevelHelp: true,
+				helpHint: "use with 'create pi'",
 			},
 			fetchVariables: {
 				type: "boolean",
 				description: "Fetch result variables on completion",
+				showInTopLevelHelp: true,
 			},
 			requestTimeout: {
 				type: "string",
 				description: "Await timeout in milliseconds",
+				showInTopLevelHelp: true,
+				helpHint: "use with --awaitCompletion",
 			},
 			// Identity user
 			username: {
@@ -571,25 +894,58 @@ export const COMMAND_REGISTRY = {
 
 	delete: {
 		description: "Delete resource",
+		helpDescription: "Delete a resource by key",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show delete command with all flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{ command: "c8ctl delete user john", description: "Delete user" },
+		],
 		resources: ["user", "role", "group", "tenant", "auth", "mapping-rule"],
 		flags: {},
+		resourcePositionals: {
+			user: GET_USER_POSITIONALS,
+			role: GET_ROLE_POSITIONALS,
+			group: GET_GROUP_POSITIONALS,
+			tenant: GET_TENANT_POSITIONALS,
+			authorization: GET_AUTHORIZATION_POSITIONALS,
+			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
+		},
 	},
 
 	cancel: {
 		description: "Cancel resource",
+		helpDescription: "Cancel a process instance",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show cancel command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["pi"],
 		flags: {},
+		resourcePositionals: {
+			"process-instance": GET_PI_POSITIONALS,
+		},
 	},
 
 	await: {
 		description:
 			"Create and await completion (alias for create --awaitCompletion)",
+		helpDescription:
+			"Create and await process instance completion (server-side waiting)",
+		helpResource: "<resource>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show await command with all flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl await pi --id=myProcess",
+				description: "Create and wait for completion",
+			},
+		],
 		resources: ["pi"],
 		flags: {
 			processDefinitionId: {
@@ -619,16 +975,40 @@ export const COMMAND_REGISTRY = {
 
 	complete: {
 		description: "Complete resource",
+		helpDescription: "Complete a user task or job",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show all complete resources and their flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["ut", "job"],
 		flags: {
 			variables: { type: "string", description: "JSON variables" },
 		},
+		resourcePositionals: {
+			"user-task": [
+				{
+					name: "key",
+					required: true,
+					validate: UserTaskKey.assumeExists,
+				},
+			] as const satisfies readonly PositionalDef[],
+			job: [
+				{
+					name: "key",
+					required: true,
+					validate: JobKey.assumeExists,
+				},
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	fail: {
 		description: "Fail a job",
+		helpDescription:
+			"Mark a job as failed with optional error message and retry count",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show fail command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["job"],
@@ -642,10 +1022,22 @@ export const COMMAND_REGISTRY = {
 				description: "Error message",
 			},
 		},
+		resourcePositionals: {
+			job: [
+				{
+					name: "key",
+					required: true,
+					validate: JobKey.assumeExists,
+				},
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	activate: {
 		description: "Activate jobs by type",
+		helpDescription: "Activate jobs of a specific type for processing",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show activate command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["jobs"],
@@ -660,18 +1052,33 @@ export const COMMAND_REGISTRY = {
 			},
 			worker: { type: "string", description: "Worker name" },
 		},
+		resourcePositionals: {
+			jobs: [
+				{ name: "type", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	resolve: {
 		description: "Resolve incident",
+		helpDescription:
+			"Resolve an incident (marks resolved, allows process to continue)",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show resolve command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["inc"],
 		flags: {},
+		resourcePositionals: {
+			incident: GET_INCIDENT_POSITIONALS,
+		},
 	},
 
 	publish: {
 		description: "Publish message",
+		helpDescription: "Publish a message for message correlation",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show publish command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["msg"],
@@ -686,10 +1093,18 @@ export const COMMAND_REGISTRY = {
 				description: "Time to live in milliseconds",
 			},
 		},
+		resourcePositionals: {
+			message: [
+				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	correlate: {
 		description: "Correlate message",
+		helpDescription: "Correlate a message to a specific process instance",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show correlate command with all flags",
 		mutating: true,
 		requiresResource: true,
 		resources: ["msg"],
@@ -705,20 +1120,46 @@ export const COMMAND_REGISTRY = {
 				description: "Time to live in milliseconds",
 			},
 		},
+		resourcePositionals: {
+			message: [
+				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	deploy: {
 		description: "Deploy BPMN/DMN/forms",
+		helpDescription:
+			"Deploy BPMN, DMN, and form files (auto-discovers deployable files)",
+		helpResource: "[path...]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show deploy command with all flags",
 		mutating: true,
 		requiresResource: false,
+		helpExamples: [
+			{
+				command: "c8ctl deploy ./my-process.bpmn",
+				description: "Deploy a BPMN file",
+			},
+		],
 		resources: [],
 		flags: {},
 	},
 
 	run: {
 		description: "Deploy and start process",
+		helpDescription: "Deploy and start a process instance from a BPMN file",
+		helpResource: "<path>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show run command with all flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl run ./my-process.bpmn",
+				description: "Deploy and start process",
+			},
+		],
 		resources: [],
 		flags: {
 			variables: { type: "string", description: "JSON variables" },
@@ -729,31 +1170,76 @@ export const COMMAND_REGISTRY = {
 
 	assign: {
 		description: "Assign resource to target",
+		helpDescription:
+			"Assign a resource to a target (--to-user, --to-group, etc.)",
+		helpResource: "<resource> <id>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show assign command with all flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl assign role admin --to-user=john",
+				description: "Assign role to user",
+			},
+		],
 		resources: ["role", "user", "group", "mapping-rule"],
 		flags: { ...ASSIGN_FLAGS },
+		resourcePositionals: {
+			role: GET_ROLE_POSITIONALS,
+			user: GET_USER_POSITIONALS,
+			group: GET_GROUP_POSITIONALS,
+			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
+		},
 	},
 
 	unassign: {
 		description: "Unassign resource from target",
+		helpDescription:
+			"Unassign a resource from a target (--from-user, --from-group, etc.)",
+		helpResource: "<resource> <id>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show unassign command with all flags",
 		mutating: true,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl unassign role admin --from-user=john",
+				description: "Unassign role from user",
+			},
+		],
 		resources: ["role", "user", "group", "mapping-rule"],
 		flags: { ...UNASSIGN_FLAGS },
+		resourcePositionals: {
+			role: GET_ROLE_POSITIONALS,
+			user: GET_USER_POSITIONALS,
+			group: GET_GROUP_POSITIONALS,
+			"mapping-rule": GET_MAPPING_RULE_POSITIONALS,
+		},
 	},
 
 	// ── Operational commands ───────────────────────────────────────────────
 
 	watch: {
 		description: "Watch files for changes and auto-deploy",
+		helpDescription:
+			"Watch files for changes and auto-deploy (BPMN, DMN, forms)",
+		helpResource: "[path...]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show watch command with all flags",
 		mutating: false,
 		requiresResource: false,
+		helpExamples: [
+			{
+				command: "c8ctl watch ./src",
+				description: "Watch directory for changes",
+			},
+		],
 		resources: [],
 		flags: {
 			force: {
 				type: "boolean",
-				description: "Force re-deploy unchanged files",
+				description: "Continue watching after all deployment errors",
 			},
 		},
 		aliases: ["w"],
@@ -761,8 +1247,26 @@ export const COMMAND_REGISTRY = {
 
 	open: {
 		description: "Open Camunda web application in browser",
+		helpDescription: "Open Camunda web app in browser",
+		helpResource: "<app>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show open command with all apps",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl open operate",
+				description: "Open Camunda Operate in browser",
+			},
+			{
+				command: "c8ctl open tasklist",
+				description: "Open Camunda Tasklist in browser",
+			},
+			{
+				command: "c8ctl open operate --profile=prod",
+				description: "Open Operate using a specific profile",
+			},
+		],
 		resources: ["operate", "tasklist", "modeler", "optimize"],
 		flags: {},
 	},
@@ -775,13 +1279,20 @@ export const COMMAND_REGISTRY = {
 		requiresResource: true,
 		resources: ["profile"],
 		flags: { ...PROFILE_CONNECTION_FLAGS },
+		resourcePositionals: {
+			profile: [
+				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	remove: {
-		description: "Remove a profile",
+		description: "Remove a profile or plugin",
+		helpResource: "profile <name>",
+		helpDescription: "Remove a profile (alias: rm)",
 		mutating: false,
 		requiresResource: true,
-		resources: ["profile"],
+		resources: ["profile", "plugin"],
 		flags: {
 			none: {
 				type: "boolean",
@@ -789,23 +1300,52 @@ export const COMMAND_REGISTRY = {
 			},
 		},
 		aliases: ["rm"],
+		resourcePositionals: {
+			profile: [
+				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+			plugin: [
+				{ name: "package", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	load: {
 		description: "Load a c8ctl plugin",
+		helpResource: "plugin [name|--from url]",
+		helpDescription: "Load a c8ctl plugin (npm registry or URL)",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl load plugin my-plugin",
+				description: "Load plugin from npm registry",
+			},
+			{
+				command: "c8ctl load plugin --from https://github.com/org/plugin",
+				description: "Load plugin from URL",
+			},
+		],
 		resources: ["plugin"],
 		flags: {
 			from: {
 				type: "string",
 				description: "Load plugin from URL",
+				showInTopLevelHelp: true,
+				helpHint: "use with 'load plugin'",
 			},
+		},
+		resourcePositionals: {
+			plugin: [
+				{ name: "package", required: false },
+			] as const satisfies readonly PositionalDef[],
 		},
 	},
 
 	unload: {
 		description: "Unload a c8ctl plugin",
+		helpResource: "plugin <name>",
+		helpDescription: "Unload a c8ctl plugin (npm uninstall wrapper)",
 		mutating: false,
 		requiresResource: true,
 		resources: ["plugin"],
@@ -816,28 +1356,62 @@ export const COMMAND_REGISTRY = {
 			},
 		},
 		aliases: ["rm"],
+		resourcePositionals: {
+			plugin: [
+				{ name: "package", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	upgrade: {
 		description: "Upgrade a plugin",
+		helpResource: "plugin <name> [version]",
+		helpDescription: "Upgrade a plugin (respects source type)",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl upgrade plugin my-plugin",
+				description: "Upgrade plugin to latest version",
+			},
+			{
+				command: "c8ctl upgrade plugin my-plugin 1.2.3",
+				description: "Upgrade plugin to a specific version (source-aware)",
+			},
+		],
 		resources: ["plugin"],
 		flags: {},
+		resourcePositionals: {
+			plugin: [
+				{ name: "package", required: true },
+				{ name: "version", required: false },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	downgrade: {
 		description: "Downgrade a plugin to a specific version",
+		helpResource: "plugin <name> <version>",
 		mutating: false,
 		requiresResource: true,
 		resources: ["plugin"],
 		flags: {},
+		resourcePositionals: {
+			plugin: [
+				{ name: "package", required: true },
+				{ name: "version", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	sync: {
 		description: "Synchronize plugins",
+		helpDescription: "Synchronize plugins from registry (rebuild/reinstall)",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{ command: "c8ctl sync plugin", description: "Synchronize plugins" },
+		],
 		resources: ["plugin"],
 		flags: {},
 	},
@@ -846,16 +1420,31 @@ export const COMMAND_REGISTRY = {
 		description: "Create a new plugin from TypeScript template",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl init plugin my-plugin",
+				description: "Create new plugin from template (c8ctl-plugin-my-plugin)",
+			},
+		],
 		resources: ["plugin"],
 		flags: {},
+		resourcePositionals: {
+			plugin: [
+				{ name: "name", required: false },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	// ── Session commands ───────────────────────────────────────────────────
 
 	use: {
 		description: "Set active profile or tenant",
+		helpResource: "profile|tenant",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{ command: "c8ctl use profile prod", description: "Set active profile" },
+		],
 		resources: ["profile", "tenant"],
 		flags: {
 			none: {
@@ -863,12 +1452,24 @@ export const COMMAND_REGISTRY = {
 				description: "Clear active profile/tenant",
 			},
 		},
+		resourcePositionals: {
+			profile: [
+				{ name: "name", required: false },
+			] as const satisfies readonly PositionalDef[],
+			tenant: [
+				{ name: "tenantId", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
 	},
 
 	output: {
 		description: "Show or set output format",
+		helpResource: "[json|text]",
 		mutating: false,
 		requiresResource: false,
+		helpExamples: [
+			{ command: "c8ctl output json", description: "Switch to JSON output" },
+		],
 		resources: ["json", "text"],
 		flags: {},
 	},
@@ -877,14 +1478,26 @@ export const COMMAND_REGISTRY = {
 
 	completion: {
 		description: "Generate shell completion script",
+		helpResource: "bash|zsh|fish",
 		mutating: false,
 		requiresResource: false,
+		helpExamples: [
+			{
+				command: "c8ctl completion bash",
+				description: "Generate bash completion script",
+			},
+		],
 		resources: ["bash", "zsh", "fish"],
 		flags: {},
 	},
 
 	"mcp-proxy": {
 		description: "Start a STDIO to remote HTTP MCP proxy server",
+		helpDescription:
+			"Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)",
+		helpResource: "[mcp-path]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show mcp-proxy setup and usage",
 		mutating: false,
 		requiresResource: false,
 		resources: [],
@@ -901,16 +1514,25 @@ export const COMMAND_REGISTRY = {
 
 	help: {
 		description: "Show help",
+		helpResource: "[command]",
+		helpDescription: "Show help (run 'c8ctl help <command>' for details)",
 		mutating: false,
 		requiresResource: false,
 		resources: [],
 		flags: {},
+		aliases: ["menu"],
 	},
 
 	which: {
 		description: "Show active profile",
 		mutating: false,
 		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl which profile",
+				description: "Show currently active profile",
+			},
+		],
 		resources: ["profile"],
 		flags: {},
 	},
@@ -918,28 +1540,6 @@ export const COMMAND_REGISTRY = {
 
 /** Union of all known verb names, derived from COMMAND_REGISTRY keys. */
 export type Verb = keyof typeof COMMAND_REGISTRY;
-
-// ─── Per-resource search flag scoping ────────────────────────────────────────
-
-/**
- * Maps each searchable resource (canonical name) to the set of flag names
- * that are valid for that resource's search command. Used for unknown-flag
- * detection in search commands.
- */
-export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
-	"process-definition": new Set(Object.keys(PD_SEARCH_FLAGS)),
-	"process-instance": new Set(Object.keys(PI_SEARCH_FLAGS)),
-	"user-task": new Set(Object.keys(UT_SEARCH_FLAGS)),
-	incident: new Set(Object.keys(INC_SEARCH_FLAGS)),
-	jobs: new Set(Object.keys(JOB_SEARCH_FLAGS)),
-	variable: new Set(Object.keys(VAR_SEARCH_FLAGS)),
-	user: new Set(Object.keys(USER_SEARCH_FLAGS)),
-	role: new Set(Object.keys(ROLE_SEARCH_FLAGS)),
-	group: new Set(Object.keys(GROUP_SEARCH_FLAGS)),
-	tenant: new Set(Object.keys(TENANT_SEARCH_FLAGS)),
-	authorization: new Set(Object.keys(AUTH_SEARCH_FLAGS)),
-	"mapping-rule": new Set(Object.keys(MR_SEARCH_FLAGS)),
-};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1001,15 +1601,6 @@ export function getAcceptedFlags(
 }
 
 /**
- * Get the set of resource-specific search flags for a given canonical resource.
- */
-export function getSearchFlagsForResource(
-	resource: string,
-): Set<string> | undefined {
-	return SEARCH_RESOURCE_FLAGS[resource];
-}
-
-/**
  * Check whether a verb×resource combination is valid.
  * Accepts both raw aliases and canonical resource names.
  */
@@ -1030,6 +1621,11 @@ export function isValidCommand(verb: string, resource: string): boolean {
  * Derive parseArgs options from the registry. This produces the flat
  * options object that node:util parseArgs expects, covering all flags
  * from all commands plus global flags.
+ *
+ * When the same flag name appears with different types across commands
+ * (e.g. `--variables` is boolean for `get pi` but string for `create pi`),
+ * "string" wins because parseArgs with `type: "string"` can accept any
+ * value, whereas `type: "boolean"` would discard the string payload.
  */
 export function deriveParseArgsOptions(): Record<
 	string,
@@ -1042,11 +1638,16 @@ export function deriveParseArgsOptions(): Record<
 
 	function addFlags(flags: Record<string, FlagDef>): void {
 		for (const [name, def] of Object.entries(flags)) {
-			if (!options[name]) {
+			const existing = options[name];
+			if (!existing) {
 				options[name] = {
 					type: def.type,
 					...(def.short && { short: def.short }),
 				};
+			} else {
+				// String is more permissive — upgrade when any usage is string
+				if (def.type === "string") existing.type = "string";
+				if (def.short && !existing.short) existing.short = def.short;
 			}
 		}
 	}

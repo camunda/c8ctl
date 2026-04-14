@@ -14,7 +14,6 @@ import {
 	RESOURCE_ALIASES,
 	GLOBAL_FLAGS,
 	SEARCH_FLAGS,
-	SEARCH_RESOURCE_FLAGS,
 	VERB_ALIASES,
 	resolveAlias,
 	getCommandDef,
@@ -197,7 +196,8 @@ describe("RESOURCE_ALIASES consistency", () => {
 
 // ─── Search resource flags ───────────────────────────────────────────────────
 
-describe("SEARCH_RESOURCE_FLAGS consistency", () => {
+describe("search resourceFlags consistency", () => {
+	const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
 	const EXPECTED_SEARCH_RESOURCES = [
 		"process-definition",
 		"process-instance",
@@ -216,16 +216,18 @@ describe("SEARCH_RESOURCE_FLAGS consistency", () => {
 	test("every searchable resource has a flag set", () => {
 		for (const resource of EXPECTED_SEARCH_RESOURCES) {
 			assert.ok(
-				SEARCH_RESOURCE_FLAGS[resource],
-				`Missing SEARCH_RESOURCE_FLAGS entry for "${resource}"`,
+				resourceFlags[resource],
+				`Missing resourceFlags entry for "${resource}"`,
 			);
 		}
 	});
 
-	test("every flag set is a non-empty Set", () => {
-		for (const [resource, flags] of Object.entries(SEARCH_RESOURCE_FLAGS)) {
-			assert.ok(flags instanceof Set, `${resource}: flags should be a Set`);
-			assert.ok(flags.size > 0, `${resource}: flags should not be empty`);
+	test("every flag set is a non-empty object", () => {
+		for (const [resource, flags] of Object.entries(resourceFlags)) {
+			assert.ok(
+				Object.keys(flags).length > 0,
+				`${resource}: flags should not be empty`,
+			);
 		}
 	});
 
@@ -233,15 +235,15 @@ describe("SEARCH_RESOURCE_FLAGS consistency", () => {
 		const searchDef = COMMAND_REGISTRY.search;
 		assert.ok(searchDef, "search command must exist");
 
-		// Every SEARCH_RESOURCE_FLAGS key should be reachable from the
+		// Every resourceFlags key should be reachable from the
 		// search command's resources list (after alias resolution).
-		for (const resource of Object.keys(SEARCH_RESOURCE_FLAGS)) {
+		for (const resource of Object.keys(resourceFlags)) {
 			const reachable = searchDef.resources.some(
 				(r) => resolveAlias(r) === resource || r === resource,
 			);
 			assert.ok(
 				reachable,
-				`SEARCH_RESOURCE_FLAGS has "${resource}" but it's not reachable from search.resources`,
+				`resourceFlags has "${resource}" but it's not reachable from search.resources`,
 			);
 		}
 	});

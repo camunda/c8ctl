@@ -3,17 +3,25 @@
  *
  * Tests the command definition framework:
  * - deserializeFlags: runtime deserialization of raw CLI values
- * - InferFlags: type-level inference (compile-time, verified by assignment tests)
- * - defineCommand: builder preserves type inference
+ * - deserializePositionals: runtime deserialization of positional args
+ * - InferFlags / InferPositionals: type-level inference (compile-time)
+ * - ResolvedFlags / ResolvedPositionals: registry-derived type resolution
+ * - defineCommand: registry-derived type inference
  */
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
   deserializeFlags,
+  deserializePositionals,
   defineCommand,
   type InferFlags,
+  type InferPositionals,
+  type ResolvedFlags,
+  type ResolvedPositionals,
   type CommandContext,
+  type CommandResult,
+  type PositionalDef,
 } from '../../src/command-framework.ts';
 import type { FlagDef } from '../../src/command-registry.ts';
 import {
@@ -207,62 +215,144 @@ describe('InferFlags — type inference (compile-time)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  defineCommand — builder type inference
+//  defineCommand — registry-derived type inference
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('defineCommand', () => {
 
-  test('returns the definition unchanged', () => {
-    const def = defineCommand({
-      verb: 'test',
-      resources: ['res'],
-      flags: STRING_FLAGS,
-      handler: async (_ctx, _flags) => {},
-    });
-    assert.strictEqual(def.verb, 'test');
-    assert.deepStrictEqual(def.resources, ['res']);
-    assert.strictEqual(def.flags, STRING_FLAGS);
+  test('returns verb and resource', () => {
+    const cmd = defineCommand('get', 'process-definition', async () => ({ kind: 'get', data: {} }) as CommandResult);
+    assert.strictEqual(cmd.verb, 'get');
+    assert.strictEqual(cmd.resource, 'process-definition');
   });
 
-  test('handler receives inferred flag types (compile-time check)', () => {
-    // This test verifies that the handler parameter type is correctly
-    // inferred from the flags schema. If wrong, this won't compile.
-    defineCommand({
-      verb: 'search',
-      resources: ['pi'],
-      flags: MIXED_FLAGS,
-      handler: async (_ctx, flags) => {
-        // These assignments verify the inferred types at compile time
-        const _name: string | undefined = flags.name;
-        const _verbose: boolean | undefined = flags.verbose;
-        const _pdKey: ReturnType<typeof ProcessDefinitionKey.assumeExists> | undefined =
-          flags.processDefinitionKey;
-        // Suppress unused warnings
-        void _name;
-        void _verbose;
-        void _pdKey;
-      },
+  test('handler receives typed flags from registry (compile-time)', () => {
+    // get pd has resourceFlags including xml (boolean)
+    defineCommand('get', 'process-definition', async (_ctx, flags) => {
+      const _xml: boolean | undefined = flags.xml;
+      void _xml;
+      return { kind: 'get', data: {} } as CommandResult;
     });
-    assert.ok(true, 'compiles with correct types');
+    assert.ok(true, 'compiles — flags.xml is boolean | undefined');
+  });
+
+  test('handler receives typed positionals from registry (compile-time)', () => {
+    // get pd has resourcePositionals with key (required, ProcessDefinitionKey)
+    defineCommand('get', 'process-definition', async (_ctx, _flags, args) => {
+      const _key: ReturnType<typeof ProcessDefinitionKey.assumeExists> = args.key;
+      void _key;
+      return { kind: 'get', data: {} } as CommandResult;
+    });
+    assert.ok(true, 'compiles — args.key is ProcessDefinitionKey');
+  });
+
+  test('verb without resourceFlags gets verb-level flags (compile-time)', () => {
+    // delete has no resourceFlags — uses verb-level flags (empty object)
+    defineCommand('delete', 'user', async (_ctx, flags) => {
+      // flags should be an empty record — no keys
+      void flags;
+      return { kind: 'get', data: {} } as CommandResult;
+    });
+    assert.ok(true, 'compiles — verb-level flags used as fallback');
+  });
+
+  test('verb without resourcePositionals gets empty args (compile-time)', () => {
+    // search has no resourcePositionals
+    defineCommand('search', 'process-instance', async (_ctx, _flags, args) => {
+      // args should be Record<string, never> — empty
+      void args;
+      return { kind: 'get', data: {} } as CommandResult;
+    });
+    assert.ok(true, 'compiles — no positionals');
+  });
+
+  test('execute deserializes and calls handler', async () => {
+    let receivedKey: unknown;
+    let receivedXml: unknown;
+
+    const cmd = defineCommand('get', 'process-definition', async (_ctx, flags, args) => {
+      receivedXml = flags.xml;
+      receivedKey = args.key;
+      return { kind: 'get', data: {} } as CommandResult;
+    });
+
+    // Simulate dispatch
+    const mockLogger = { json: () => {}, table: () => {}, output: () => {}, info: () => {} } as unknown as CommandContext['logger'];
+    const mockCtx = {
+      client: {} as CommandContext['client'],
+      logger: mockLogger,
+      tenantId: undefined,
+      resource: 'process-definition',
+      positionals: ['12345'],
+      sortOrder: 'asc' as CommandContext['sortOrder'],
+      sortBy: undefined,
+      limit: undefined,
+      all: undefined,
+      between: undefined,
+      dateField: undefined,
+      dryRun: undefined,
+      profile: undefined,
+    };
+
+    await cmd.execute(mockCtx, { xml: true }, ['12345']);
+    assert.strictEqual(receivedXml, true);
+    assert.strictEqual(receivedKey, '12345');
   });
 
   test('handler receives CommandContext', () => {
-    defineCommand({
-      verb: 'get',
-      resources: ['pd'],
-      flags: STRING_FLAGS,
-      handler: async (ctx, _flags) => {
-        // Verify context shape at compile time
-        const _logger = ctx.logger;
-        const _resource: string = ctx.resource;
-        const _positionals: string[] = ctx.positionals;
-        const _dryRun: boolean = ctx.dryRun;
-        void _logger;
-        void _resource;
-        void _positionals;
-        void _dryRun;
-      },
+    defineCommand('get', 'process-definition', async (ctx) => {
+      const _logger = ctx.logger;
+      const _resource: string = ctx.resource;
+      const _positionals: string[] = ctx.positionals;
+      void _logger;
+      void _resource;
+      void _positionals;
+      return { kind: 'get', data: {} } as CommandResult;
     });
     assert.ok(true, 'compiles with CommandContext');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ResolvedFlags / ResolvedPositionals — compile-time type resolution
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('ResolvedFlags / ResolvedPositionals (compile-time)', () => {
+
+  test('ResolvedFlags for get pd is resource-scoped', () => {
+    type Flags = ResolvedFlags<'get', 'process-definition'>;
+    // Should have xml (from GET_PD_FLAGS), not userTask (from GET_FORM_FLAGS)
+    const _check: InferFlags<Flags> = { xml: true };
+    assert.ok(true, 'compiles — scoped to pd flags');
+  });
+
+  test('ResolvedFlags for get form is resource-scoped', () => {
+    type Flags = ResolvedFlags<'get', 'form'>;
+    // Should have userTask and processDefinition (from GET_FORM_FLAGS)
+    const _check: InferFlags<Flags> = { userTask: true, processDefinition: undefined };
+    assert.ok(true, 'compiles — scoped to form flags');
+  });
+
+  test('ResolvedFlags for verb without resourceFlags falls back to verb-level', () => {
+    type Flags = ResolvedFlags<'delete', 'user'>;
+    // delete has flags: {} — so InferFlags should be empty record
+    const _check: InferFlags<Flags> = {};
+    assert.ok(true, 'compiles — falls back to verb-level flags');
+  });
+
+  test('ResolvedPositionals for get pd has key', () => {
+    type Pos = ResolvedPositionals<'get', 'process-definition'>;
+    type Args = InferPositionals<Pos>;
+    const pdKey = ProcessDefinitionKey.assumeExists('123');
+    const _check: Args = { key: pdKey };
+    assert.ok(true, 'compiles — key is ProcessDefinitionKey');
+  });
+
+  test('ResolvedPositionals for verb without resourcePositionals is empty', () => {
+    type Pos = ResolvedPositionals<'search', 'process-instance'>;
+    type Args = InferPositionals<Pos>;
+    const _check: Args = {};
+    void _check;
+    assert.ok(true, 'compiles — empty positionals');
   });
 });

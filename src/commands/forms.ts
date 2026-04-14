@@ -3,12 +3,16 @@
  */
 
 import {
+	type CamundaClient,
 	ProcessDefinitionKey,
 	UserTaskKey,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun } from "../client.ts";
-import { isRecord } from "../index.ts";
-import { getLogger } from "../logger.ts";
+import {
+	type CommandResult,
+	defineCommand,
+	dryRun,
+} from "../command-framework.ts";
+import { isRecord } from "../logger.ts";
 
 /** Extract HTTP status code from an unknown error (SDK errors expose statusCode or status). */
 function getErrorStatus(error: unknown): number | undefined {
@@ -20,73 +24,88 @@ function getErrorStatus(error: unknown): number | undefined {
 }
 
 /**
- * Get form for a user task
+ * Get form by key, optionally scoped to user task or process definition
  */
-export async function getUserTaskForm(
-	userTaskKey: string,
-	options: {
-		profile?: string;
+export const getFormCommand = defineCommand(
+	"get",
+	"form",
+	async (ctx, _flags, args) => {
+		const { client, logger, profile } = ctx;
+		const key = args.key;
+
+		// Check for flags and their aliases
+		const isUserTask =
+			process.argv.includes("--userTask") || process.argv.includes("--ut");
+		const isProcessDefinition =
+			process.argv.includes("--processDefinition") ||
+			process.argv.includes("--pd");
+
+		// If both flags specified, error
+		if (isUserTask && isProcessDefinition) {
+			logger.error(
+				"Cannot specify both --userTask|--ut and --processDefinition|--pd. Use one or the other, or omit both to search both types.",
+			);
+			process.exit(1);
+		}
+
+		if (isUserTask) {
+			return handleUserTaskForm(key, profile, client);
+		}
+		if (isProcessDefinition) {
+			return handleStartForm(key, profile, client);
+		}
+		return handleFormBoth(key, profile, client);
 	},
-): Promise<Record<string, unknown> | undefined> {
-	if (
-		emitDryRun({
-			command: "get form --userTask",
-			method: "GET",
-			endpoint: `/user-tasks/${userTaskKey}/form`,
-			profile: options.profile,
-		})
-	)
-		return;
-	const logger = getLogger();
-	const client = createClient(options.profile);
+);
+
+async function handleUserTaskForm(
+	userTaskKey: string,
+	profile: string | undefined,
+	client: CamundaClient,
+): Promise<CommandResult> {
+	const dr = dryRun({
+		command: "get form --userTask",
+		method: "GET",
+		endpoint: `/user-tasks/${userTaskKey}/form`,
+		profile,
+	});
+	if (dr) return dr;
 
 	try {
 		const result = await client.getUserTaskForm(
 			{ userTaskKey: UserTaskKey.assumeExists(userTaskKey) },
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		// API returns null when user task exists but has no form
 		if (result === null || result === undefined) {
-			logger.info("User task found but has no associated form");
-			return undefined;
+			return {
+				kind: "info",
+				message: "User task found but has no associated form",
+			};
 		}
-		logger.json(result);
-
-		return;
+		return { kind: "get", data: result };
 	} catch (error: unknown) {
-		// Handle 204 No Content (user task exists but has no form)
 		if (getErrorStatus(error) === 204) {
-			logger.info("User task found but has no associated form");
-			return undefined;
+			return {
+				kind: "info",
+				message: "User task found but has no associated form",
+			};
 		}
-		logger.error(
-			`Failed to get form for user task ${userTaskKey}`,
-			error instanceof Error ? error : new Error(String(error)),
-		);
-		process.exit(1);
+		throw error;
 	}
 }
 
-/**
- * Get start form for a process definition
- */
-export async function getStartForm(
+async function handleStartForm(
 	processDefinitionKey: string,
-	options: {
-		profile?: string;
-	},
-): Promise<Record<string, unknown> | undefined> {
-	if (
-		emitDryRun({
-			command: "get form --processDefinition",
-			method: "GET",
-			endpoint: `/process-definitions/${processDefinitionKey}/form`,
-			profile: options.profile,
-		})
-	)
-		return;
-	const logger = getLogger();
-	const client = createClient(options.profile);
+	profile: string | undefined,
+	client: CamundaClient,
+): Promise<CommandResult> {
+	const dr = dryRun({
+		command: "get form --processDefinition",
+		method: "GET",
+		endpoint: `/process-definitions/${processDefinitionKey}/form`,
+		profile,
+	});
+	if (dr) return dr;
 
 	try {
 		const result = await client.getStartProcessForm(
@@ -96,50 +115,36 @@ export async function getStartForm(
 			},
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		// API returns null when process definition exists but has no start form
 		if (result === null || result === undefined) {
-			logger.info("Process definition found but has no associated start form");
-			return undefined;
+			return {
+				kind: "info",
+				message: "Process definition found but has no associated start form",
+			};
 		}
-		logger.json(result);
-		// biome-ignore lint/plugin: safe widening — SDK result to generic Record return type
-		return result as Record<string, unknown>;
+		return { kind: "get", data: result };
 	} catch (error: unknown) {
-		// Handle 204 No Content (process definition exists but has no form)
 		if (getErrorStatus(error) === 204) {
-			logger.info("Process definition found but has no associated start form");
-			return undefined;
+			return {
+				kind: "info",
+				message: "Process definition found but has no associated start form",
+			};
 		}
-		logger.error(
-			`Failed to get start form for process definition ${processDefinitionKey}`,
-			error instanceof Error ? error : new Error(String(error)),
-		);
-		process.exit(1);
+		throw error;
 	}
 }
 
-/**
- * Get form by trying both user task and process definition APIs
- */
-export async function getForm(
+async function handleFormBoth(
 	key: string,
-	options: {
-		profile?: string;
-	},
-): Promise<
-	{ type: string; key: string; form: Record<string, unknown> } | undefined
-> {
-	if (
-		emitDryRun({
-			command: "get form",
-			method: "GET",
-			endpoint: `/user-tasks/${key}/form (then /process-definitions/${key}/form)`,
-			profile: options.profile,
-		})
-	)
-		return;
-	const logger = getLogger();
-	const client = createClient(options.profile);
+	profile: string | undefined,
+	client: CamundaClient,
+): Promise<CommandResult> {
+	const dr = dryRun({
+		command: "get form",
+		method: "GET",
+		endpoint: `/user-tasks/${key}/form (then /process-definitions/${key}/form)`,
+		profile,
+	});
+	if (dr) return dr;
 
 	const results: {
 		type: string;
@@ -158,7 +163,6 @@ export async function getForm(
 			results.push({ type: "user task", key, form: result });
 		}
 	} catch (error: unknown) {
-		// 204 means resource exists but no form - not an error
 		if (getErrorStatus(error) !== 204) {
 			errors.push({ type: "user task", error });
 		}
@@ -174,7 +178,6 @@ export async function getForm(
 			results.push({ type: "process definition", key, form: result });
 		}
 	} catch (error: unknown) {
-		// 204 means resource exists but no form - not an error
 		if (getErrorStatus(error) !== 204) {
 			errors.push({ type: "process definition", error });
 		}
@@ -183,46 +186,37 @@ export async function getForm(
 	// Report results
 	if (results.length === 0) {
 		if (errors.length === 0) {
-			logger.info("No form found for user task or process definition");
-			return undefined;
-		} else if (errors.length === 1) {
-			logger.error(
-				`Failed to get form: not found as ${errors[0].type}`,
-				errors[0].error instanceof Error
-					? errors[0].error
-					: new Error(String(errors[0].error)),
-			);
-			process.exit(1);
-		} else {
-			logger.error(
-				"Failed to get form: not found as user task or process definition",
-			);
-			process.exit(1);
+			return {
+				kind: "info",
+				message: "No form found for user task or process definition",
+			};
 		}
-	} else if (results.length === 1) {
+		if (errors.length === 1) {
+			throw errors[0].error instanceof Error
+				? errors[0].error
+				: new Error(`not found as ${errors[0].type}`);
+		}
+		throw new Error("not found as user task or process definition");
+	}
+
+	if (results.length === 1) {
 		const keyType =
 			results[0].type === "user task" ? "userTaskKey" : "processDefinitionKey";
-		logger.info(`Form found for ${results[0].type} (${keyType}: ${key}):`);
-		logger.json(results[0].form);
 		return {
-			type: results[0].type,
-			key,
-			// biome-ignore lint/plugin: safe widening — SDK result to generic Record return type
-			form: results[0].form as Record<string, unknown>,
+			kind: "get",
+			data: results[0].form,
+			message: `Form found for ${results[0].type} (${keyType}: ${key}):`,
 		};
-	} else {
-		logger.info(
-			`Form found in both user task and process definition (key: ${key}):`,
-		);
-		const combined = {
+	}
+
+	return {
+		kind: "get",
+		data: {
 			userTaskKey: key,
 			userTask: results.find((r) => r.type === "user task")?.form,
 			processDefinitionKey: key,
 			processDefinition: results.find((r) => r.type === "process definition")
 				?.form,
-		};
-		logger.json(combined);
-		// biome-ignore lint/plugin: safe widening — combined object to generic Record return type
-		return { type: "both", key, form: combined as Record<string, unknown> };
-	}
+		},
+	};
 }

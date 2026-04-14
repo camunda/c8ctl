@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
+import { defineCommand } from "../command-framework.ts";
 import { requireOneOf, requirePositional } from "../command-validation.ts";
 import { resolveClusterConfig } from "../config.ts";
 import { getLogger } from "../logger.ts";
@@ -145,3 +146,23 @@ export async function openApp(options: OpenAppInput): Promise<void> {
 		openUrl(url);
 	}
 }
+
+// ─── defineCommand wrapper ───────────────────────────────────────────────────
+
+/** Side-effectful: validates app name, derives URL, and opens browser. */
+export const openAppCommand = defineCommand("open", "", async (ctx) => {
+	const validated = validateOpenAppOptions(ctx.resource, {
+		profile: ctx.profile,
+		dryRun: ctx.dryRun,
+	});
+	await openApp(validated);
+	return { kind: "none" };
+});
+
+/** Open the GitHub issues page for c8ctl feedback. */
+export const feedbackCommand = defineCommand("feedback", "", async (ctx) => {
+	const url = "https://github.com/camunda/c8ctl/issues";
+	ctx.logger.info(`Opening feedback page: ${url}`);
+	openUrl(url);
+	return { kind: "none" };
+});

@@ -513,22 +513,35 @@ describe('detectUnknownFlags — structural coverage', () => {
   });
 
   test('every verb accepts its own registered flags without flagging them', () => {
-    // Resource-scoped verbs (search, list) use per-resource flag sets,
-    // not the full verb union. Test non-scoped verbs here.
-    const RESOURCE_SCOPED = new Set(['search', 'list']);
+    // Verbs with resourceFlags scope flags per-resource — test each resource separately.
+    // Verbs without resourceFlags use the full verb-level flag set.
     for (const verb of Object.keys(COMMAND_REGISTRY)) {
-      if (RESOURCE_SCOPED.has(verb)) continue;
       const def = COMMAND_REGISTRY[verb];
-      const resource = def.resources?.[0] ?? 'any';
-      const verbValues = Object.fromEntries(
-        Object.keys(def.flags).map(k => [k, 'test-value']),
-      );
-      const unknown = detectUnknownFlags(verb, resource, verbValues);
-      assert.deepStrictEqual(
-        unknown,
-        [],
-        `detectUnknownFlags('${verb}', '${resource}', ...) incorrectly flagged verb flags: ${unknown.join(', ')}`,
-      );
+      if (def.resourceFlags) {
+        // Test each resource entry in resourceFlags
+        for (const [resource, resFlags] of Object.entries(def.resourceFlags)) {
+          const verbValues = Object.fromEntries(
+            Object.keys(resFlags).map(k => [k, 'test-value']),
+          );
+          const unknown = detectUnknownFlags(verb, resource, verbValues);
+          assert.deepStrictEqual(
+            unknown,
+            [],
+            `detectUnknownFlags('${verb}', '${resource}', ...) incorrectly flagged resource flags: ${unknown.join(', ')}`,
+          );
+        }
+      } else {
+        const resource = def.resources?.[0] ?? 'any';
+        const verbValues = Object.fromEntries(
+          Object.keys(def.flags).map(k => [k, 'test-value']),
+        );
+        const unknown = detectUnknownFlags(verb, resource, verbValues);
+        assert.deepStrictEqual(
+          unknown,
+          [],
+          `detectUnknownFlags('${verb}', '${resource}', ...) incorrectly flagged verb flags: ${unknown.join(', ')}`,
+        );
+      }
     }
   });
 });

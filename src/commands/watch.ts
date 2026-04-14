@@ -4,6 +4,7 @@
 
 import { existsSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
+import { defineCommand } from "../command-framework.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger } from "../logger.ts";
 import { deploy } from "./deployments.ts";
@@ -137,3 +138,19 @@ export async function watchFiles(
 		process.exit(0);
 	});
 }
+
+// ─── defineCommand wrapper ───────────────────────────────────────────────────
+
+export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
+	// watch treats resource + positionals as path varargs
+	const paths = ctx.resource
+		? [ctx.resource, ...ctx.positionals]
+		: ctx.positionals.length > 0
+			? ctx.positionals
+			: ["."];
+	await watchFiles(paths, {
+		profile: ctx.profile,
+		force: flags.force,
+	});
+	return { kind: "never" };
+});

@@ -200,6 +200,17 @@ export const metadata = {
     'cluster': {
       description:
         'Manage local Camunda 8 cluster — start, stop, status, logs, install, delete, or list versions',
+      subcommands: [
+        { name: 'start', description: 'Start local Camunda 8 cluster' },
+        { name: 'stop', description: 'Stop local Camunda 8 cluster' },
+        { name: 'status', description: 'Show cluster status' },
+        { name: 'list', description: 'List locally cached versions' },
+        { name: 'list-remote', description: 'List remote versions' },
+        { name: 'install', description: 'Download a version' },
+        { name: 'delete', description: 'Remove a cached version' },
+        { name: 'log', description: 'Stream cluster logs' },
+        { name: 'logs', description: 'Stream cluster logs' },
+      ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
         { command: 'c8ctl cluster start 8.8', description: 'Start the latest cached 8.8.x release' },

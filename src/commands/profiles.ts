@@ -5,6 +5,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { defineCommand } from "../command-framework.ts";
 import {
 	addProfile as addProfileConfig,
 	DEFAULT_PROFILE,
@@ -255,3 +256,48 @@ export function whichProfile(): void {
 	}
 	logger.info(active);
 }
+
+// ─── defineCommand wrappers ──────────────────────────────────────────────────
+
+export const whichProfileCommand = defineCommand(
+	"which",
+	"profile",
+	async () => {
+		whichProfile();
+		return { kind: "none" };
+	},
+);
+
+export const removeProfileCommand = defineCommand(
+	"remove",
+	"profile",
+	async (_ctx, _flags, args) => {
+		removeProfile(args.name);
+		return { kind: "none" };
+	},
+);
+
+export const addProfileCommand = defineCommand(
+	"add",
+	"profile",
+	async (_ctx, flags, args) => {
+		addProfile(args.name, {
+			url: flags.baseUrl,
+			clientId: flags.clientId,
+			clientSecret: flags.clientSecret,
+			audience: flags.audience,
+			oauthUrl: flags.oAuthUrl,
+			tenantId: flags.defaultTenantId,
+			username: flags.username,
+			password: flags.password,
+			envFile: flags["from-file"],
+			fromEnv: flags["from-env"],
+		});
+		return { kind: "none" };
+	},
+);
+
+export const listProfileCommand = defineCommand("list", "profile", async () => {
+	listProfiles();
+	return { kind: "none" };
+});

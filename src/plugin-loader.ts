@@ -19,6 +19,8 @@ interface PluginMetadata {
 		[commandName: string]: {
 			description?: string;
 			examples?: { command: string; description: string }[];
+			/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
+			subcommands?: { name: string; description: string }[];
 		};
 	};
 }
@@ -302,6 +304,8 @@ export interface PluginCommandInfo {
 	pluginName: string;
 	description?: string;
 	examples?: { command: string; description: string }[];
+	/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
+	subcommands?: { name: string; description: string }[];
 }
 
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
@@ -314,6 +318,7 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 				pluginName: plugin.name,
 				description: plugin.metadata?.commands?.[commandName]?.description,
 				examples: plugin.metadata?.commands?.[commandName]?.examples,
+				subcommands: plugin.metadata?.commands?.[commandName]?.subcommands,
 			});
 		}
 	}

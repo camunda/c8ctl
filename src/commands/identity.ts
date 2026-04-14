@@ -10,48 +10,47 @@ import { getLogger } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
 
 export {
-	createIdentityAuthorization,
-	deleteIdentityAuthorization,
-	getIdentityAuthorization,
-	listAuthorizations,
-	searchIdentityAuthorizations,
+	createIdentityAuthorizationCommand,
+	deleteIdentityAuthorizationCommand,
+	getIdentityAuthorizationCommand,
+	listAuthorizationsCommand,
+	searchIdentityAuthorizationsCommand,
 	validateCreateAuthorizationOptions,
 } from "./identity-authorizations.ts";
 export {
-	createIdentityGroup,
-	deleteIdentityGroup,
-	getIdentityGroup,
-	listGroups,
-	searchIdentityGroups,
+	createIdentityGroupCommand,
+	deleteIdentityGroupCommand,
+	getIdentityGroupCommand,
+	listGroupsCommand,
+	searchIdentityGroupsCommand,
 } from "./identity-groups.ts";
 export {
-	createIdentityMappingRule,
-	deleteIdentityMappingRule,
-	getIdentityMappingRule,
-	listMappingRules,
-	searchIdentityMappingRules,
+	createIdentityMappingRuleCommand,
+	deleteIdentityMappingRuleCommand,
+	getIdentityMappingRuleCommand,
+	listMappingRulesCommand,
+	searchIdentityMappingRulesCommand,
 } from "./identity-mapping-rules.ts";
 export {
-	createIdentityRole,
-	deleteIdentityRole,
-	getIdentityRole,
-	listRoles,
-	searchIdentityRoles,
+	createIdentityRoleCommand,
+	deleteIdentityRoleCommand,
+	getIdentityRoleCommand,
+	listRolesCommand,
+	searchIdentityRolesCommand,
 } from "./identity-roles.ts";
 export {
-	createIdentityTenant,
-	deleteIdentityTenant,
-	getIdentityTenant,
-	listTenants,
-	searchIdentityTenants,
+	createIdentityTenantCommand,
+	deleteIdentityTenantCommand,
+	getIdentityTenantCommand,
+	listTenantsCommand,
+	searchIdentityTenantsCommand,
 } from "./identity-tenants.ts";
-// Re-exports
 export {
-	createIdentityUser,
-	deleteIdentityUser,
-	getIdentityUser,
-	listUsers,
-	searchIdentityUsers,
+	createIdentityUserCommand,
+	deleteIdentityUserCommand,
+	getIdentityUserCommand,
+	listUsersCommand,
+	searchIdentityUsersCommand,
 } from "./identity-users.ts";
 
 type AssignTargetFlag =

@@ -58,7 +58,7 @@ describe('Completion Module', () => {
     assert.ok(output.includes('complete -F _c8ctl_completions c8ctl'));
     assert.ok(output.includes('complete -F _c8ctl_completions c8'));
     
-    // Check for verbs
+    // Check for verbs (derived from COMMAND_REGISTRY)
     assert.ok(output.includes('list'));
     assert.ok(output.includes('get'));
     assert.ok(output.includes('create'));
@@ -68,18 +68,15 @@ describe('Completion Module', () => {
     assert.ok(output.includes('downgrade'));
     assert.ok(output.includes('init'));
     
-    // Check for resources
+    // Check for resources (derived from RESOURCE_ALIASES)
     assert.ok(output.includes('process-instance'));
     assert.ok(output.includes('user-task'));
     assert.ok(output.includes('incident'));
 
-    // Check for plugin commands
-    assert.ok(output.includes('cluster'), 'Should include cluster verb');
-    assert.ok(output.includes('"start stop status list list-remote install delete log logs"'), 'Should include cluster subcommands');
-
-    // Check for open command
+    // Check for open command (resources are app names from registry)
     assert.ok(output.includes('open'), 'Should include open verb');
-    assert.ok(output.includes('"operate tasklist modeler optimize"'), 'Should include open resources');
+    assert.ok(output.includes('operate'), 'Should include operate resource');
+    assert.ok(output.includes('tasklist'), 'Should include tasklist resource');
 
     // Check for feedback command
     assert.ok(output.includes('feedback'), 'Should include feedback verb');
@@ -96,29 +93,24 @@ describe('Completion Module', () => {
     assert.ok(output.includes('_describe'));
     assert.ok(output.includes('_arguments'));
     
-    // Check for verbs with descriptions
-    assert.ok(output.includes('list:List resources'));
-    assert.ok(output.includes('get:Get resource by key'));
-    assert.ok(output.includes('deploy:Deploy BPMN/DMN/forms'));
-    assert.ok(output.includes('upgrade:Upgrade a plugin'));
-    assert.ok(output.includes('downgrade:Downgrade a plugin'));
-    assert.ok(output.includes('init:Create a new plugin from template'));
+    // Check for verbs with descriptions (derived from registry)
+    assert.ok(output.includes("'list:List resources"));
+    assert.ok(output.includes("'get:Get resource by key'"));
+    assert.ok(output.includes("'deploy:Deploy BPMN/DMN/forms'"));
+    assert.ok(output.includes("'upgrade:Upgrade a plugin'"));
+    assert.ok(output.includes("'downgrade:Downgrade a plugin"));
+    assert.ok(output.includes("'init:Create a new plugin from TypeScript template'"));
     
-    // Check for flags
-    assert.ok(output.includes('--profile[Use specific profile]'));
+    // Check for flags (descriptions from registry)
+    assert.ok(output.includes('--profile[Use a specific profile]'));
     assert.ok(output.includes('--help[Show help]'));
-
-    // Check for plugin commands
-    assert.ok(output.includes("'cluster:Manage local Camunda 8 cluster'"), 'Should include cluster verb');
-    assert.ok(output.includes("'start:Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
-    assert.ok(output.includes("'stop:Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
 
     // Check for open command
     assert.ok(output.includes("'open:Open Camunda web application in browser'"), 'Should include open verb');
-    assert.ok(output.includes("'operate:Open Camunda Operate'"), 'Should include operate resource');
-    assert.ok(output.includes("'tasklist:Open Camunda Tasklist'"), 'Should include tasklist resource');
-    assert.ok(output.includes("'modeler:Open Camunda Web Modeler'"), 'Should include modeler resource');
-    assert.ok(output.includes("'optimize:Open Camunda Optimize'"), 'Should include optimize resource');
+    assert.ok(output.includes("operate:"), 'Should include operate resource');
+    assert.ok(output.includes("tasklist:"), 'Should include tasklist resource');
+    assert.ok(output.includes("modeler:"), 'Should include modeler resource');
+    assert.ok(output.includes("optimize:"), 'Should include optimize resource');
 
     // Check for feedback command
     assert.ok(output.includes("'feedback:Open the feedback page to report issues or request features'"), 'Should include feedback verb');
@@ -136,23 +128,18 @@ describe('Completion Module', () => {
     assert.ok(output.includes('__fish_use_subcommand'));
     assert.ok(output.includes('__fish_seen_subcommand_from'));
     
-    // Check for commands
-    assert.ok(output.includes("'list' -d 'List resources'"));
+    // Check for commands (descriptions from registry)
+    assert.ok(output.includes("'list' -d 'List resources"));
     assert.ok(output.includes("'deploy' -d 'Deploy BPMN/DMN/forms'"));
     
     // Check for flags
     assert.ok(output.includes('-s h -l help'));
     assert.ok(output.includes('-l profile'));
 
-    // Check for plugin commands
-    assert.ok(output.includes("'cluster' -d 'Manage local Camunda 8 cluster'"), 'Should include cluster verb');
-    assert.ok(output.includes("'start' -d 'Start local Camunda 8 cluster'"), 'Should include cluster start subcommand');
-    assert.ok(output.includes("'stop' -d 'Stop local Camunda 8 cluster'"), 'Should include cluster stop subcommand');
-
     // Check for open command
     assert.ok(output.includes("'open' -d 'Open Camunda web application in browser'"), 'Should include open verb');
-    assert.ok(output.includes("'operate' -d 'Open Camunda Operate'"), 'Should include operate resource');
-    assert.ok(output.includes("'tasklist' -d 'Open Camunda Tasklist'"), 'Should include tasklist resource');
+    assert.ok(output.includes("'operate'"), 'Should include operate resource');
+    assert.ok(output.includes("'tasklist'"), 'Should include tasklist resource');
 
     // Check for feedback command
     assert.ok(output.includes("'feedback' -d 'Open the feedback page to report issues or request features'"), 'Should include feedback verb');

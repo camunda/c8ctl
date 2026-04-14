@@ -2,50 +2,39 @@
  * Job commands
  */
 
-import { JobKey, TenantId } from "@camunda8/orchestration-cluster-api";
-import { createClient, fetchAllPages } from "../client.ts";
-import { resolveClusterConfig, resolveTenantId } from "../config.ts";
+import { TenantId } from "@camunda8/orchestration-cluster-api";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
 
 /**
  * List jobs
  */
-export async function listJobs(options: {
-	profile?: string;
-	state?: string;
-	type?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-	between?: string;
-	dateField?: string;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
+export const listJobsCommand = defineCommand(
+	"list",
+	"jobs",
+	async (ctx, flags) => {
+		const { client, logger, tenantId, profile, limit, between, dateField } =
+			ctx;
 
-	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.type) {
-			filter.filter.type = options.type;
+		if (flags.type) {
+			filter.filter.type = flags.type;
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (between) {
+			const parsed = parseBetween(between);
 			if (parsed) {
-				const field = options.dateField ?? "creationTime";
+				const field = dateField ?? "creationTime";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
 				logger.error(
@@ -55,15 +44,25 @@ export async function listJobs(options: {
 			}
 		}
 
+		const dr = dryRun({
+			command: "list jobs",
+			method: "POST",
+			endpoint: "/jobs/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
+
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchJobs(f, opts),
 			filter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (allItems.length > 0) {
-			let tableData = allItems.map((job) => ({
+		return {
+			kind: "list",
+			items: allItems.map((job) => ({
 				Key: job.jobKey,
 				Type: job.type,
 				State: job.state,
@@ -71,177 +70,129 @@ export async function listJobs(options: {
 				Created: job.creationTime || "-",
 				"Process Instance": job.processInstanceKey,
 				"Tenant ID": job.tenantId,
-			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
-			logger.table(tableData);
-		} else {
-			logger.info("No jobs found");
-		}
-	} catch (error) {
-		handleCommandError(logger, "Failed to list jobs", error);
-	}
-}
+			})),
+			emptyMessage: "No jobs found",
+		};
+	},
+);
 
 /**
  * Activate jobs
  */
-export async function activateJobs(
-	type: string,
-	options: {
-		profile?: string;
-		maxJobsToActivate?: number;
-		timeout?: number;
-		worker?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const activateJobsCommand = defineCommand(
+	"activate",
+	"jobs",
+	async (ctx, flags, args) => {
+		const { client, tenantId, profile } = ctx;
+		const type = args.type;
+		const maxJobsToActivate = flags.maxJobsToActivate
+			? parseInt(flags.maxJobsToActivate, 10)
+			: 10;
+		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
+		const worker = flags.worker || "c8ctl";
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		const tenantId = resolveTenantId(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "activate jobs",
 			method: "POST",
-			url: `${config.baseUrl}/jobs/activation`,
+			endpoint: "/jobs/activation",
+			profile,
 			body: {
 				type,
 				tenantIds: [tenantId],
-				maxJobsToActivate: options.maxJobsToActivate || 10,
-				timeout: options.timeout || 60000,
-				worker: options.worker || "c8ctl",
+				maxJobsToActivate,
+				timeout,
+				worker,
 			},
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-
-	try {
 		const result = await client.activateJobs({
 			type,
-			tenantIds: [TenantId.assumeExists(tenantId)],
-			maxJobsToActivate: options.maxJobsToActivate || 10,
-			timeout: options.timeout || 60000,
-			worker: options.worker || "c8ctl",
+			tenantIds: [TenantId.assumeExists(tenantId ?? "<default>")],
+			maxJobsToActivate,
+			timeout,
+			worker,
 		});
 
 		if (result.jobs && result.jobs.length > 0) {
-			logger.success(`Activated ${result.jobs.length} jobs of type '${type}'`);
-			const tableData = result.jobs.map((job) => ({
-				Key: job.jobKey,
-				Type: job.type,
-				Retries: job.retries,
-				"Process Instance": job.processInstanceKey,
-			}));
-			logger.table(tableData);
-		} else {
-			logger.info(`No jobs of type '${type}' available to activate`);
+			return {
+				kind: "list",
+				items: result.jobs.map((job) => ({
+					Key: job.jobKey,
+					Type: job.type,
+					Retries: job.retries,
+					"Process Instance": job.processInstanceKey,
+				})),
+				emptyMessage: "",
+			};
 		}
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to activate jobs of type '${type}'`,
-			error,
-		);
-	}
-}
+		return {
+			kind: "info",
+			message: `No jobs of type '${type}' available to activate`,
+		};
+	},
+);
 
 /**
  * Complete job
  */
-export async function completeJob(
-	key: string,
-	options: {
-		profile?: string;
-		variables?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const completeJobCommand = defineCommand(
+	"complete",
+	"job",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
 		const body: Record<string, unknown> = {};
-		if (options.variables) body.variables = JSON.parse(options.variables);
-		logger.json({
-			dryRun: true,
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			variables = JSON.parse(flags.variables);
+			body.variables = variables;
+		}
+
+		const dr = dryRun({
 			command: "complete job",
 			method: "POST",
-			url: `${config.baseUrl}/jobs/${key}/completion`,
+			endpoint: `/jobs/${key}/completion`,
+			profile,
 			body,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		let variables: Record<string, unknown> | undefined;
-		if (options.variables) {
-			try {
-				variables = JSON.parse(options.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-				return;
-			}
-		}
 		await client.completeJob({
-			jobKey: JobKey.assumeExists(key),
+			jobKey: key,
 			...(variables !== undefined && { variables }),
 		});
-		logger.success(`Job ${key} completed`);
-	} catch (error) {
-		handleCommandError(logger, `Failed to complete job ${key}`, error);
-	}
-}
+		return { kind: "success", message: `Job ${key} completed` };
+	},
+);
 
 /**
  * Fail job
  */
-export async function failJob(
-	key: string,
-	options: {
-		profile?: string;
-		retries?: number;
-		errorMessage?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const failJobCommand = defineCommand(
+	"fail",
+	"job",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+		const retries = flags.retries ? parseInt(flags.retries, 10) : 0;
+		const errorMessage = flags.errorMessage || "Job failed via c8ctl";
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "fail job",
 			method: "POST",
-			url: `${config.baseUrl}/jobs/${key}/failure`,
-			body: {
-				retries: options.retries !== undefined ? options.retries : 0,
-				errorMessage: options.errorMessage || "Job failed via c8ctl",
-			},
+			endpoint: `/jobs/${key}/failure`,
+			profile,
+			body: { retries, errorMessage },
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
 		await client.failJob({
-			jobKey: JobKey.assumeExists(key),
-			retries: options.retries !== undefined ? options.retries : 0,
-			errorMessage: options.errorMessage || "Job failed via c8ctl",
+			jobKey: key,
+			retries,
+			errorMessage,
 		});
-		logger.success(`Job ${key} failed`);
-	} catch (error) {
-		handleCommandError(logger, `Failed to fail job ${key}`, error);
-	}
-}
+		return { kind: "success", message: `Job ${key} failed` };
+	},
+);

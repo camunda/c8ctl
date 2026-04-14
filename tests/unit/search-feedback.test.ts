@@ -4,7 +4,7 @@
  * - Empty result messaging with 🕳️ (logNoResults)
  * - Truncation / page-size warnings (logResultCount)
  * - No-filter hints
- * - GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS validation
+ * - GLOBAL_FLAGS and resourceFlags validation
  */
 
 import { test, describe } from 'node:test';
@@ -14,9 +14,9 @@ import {
   logResultCount,
 } from '../../src/commands/search.ts';
 import {
+  COMMAND_REGISTRY,
   GLOBAL_FLAGS,
   SEARCH_FLAGS,
-  SEARCH_RESOURCE_FLAGS,
 } from '../../src/command-registry.ts';
 import { detectUnknownFlags } from '../../src/command-validation.ts';
 import { Logger, type LogWriter } from '../../src/logger.ts';
@@ -199,90 +199,92 @@ describe('GLOBAL_FLAGS', () => {
   });
 });
 
-describe('SEARCH_RESOURCE_FLAGS (from registry)', () => {
+describe('search resourceFlags (from registry)', () => {
+  const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
+
   test('process-definition includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['process-definition'];
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('name'));
-    assert.ok(flags.has('key'));
-    assert.ok(flags.has('iid'));
-    assert.ok(flags.has('iname'));
+    const flags = resourceFlags['process-definition'];
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('name' in flags);
+    assert.ok('key' in flags);
+    assert.ok('iid' in flags);
+    assert.ok('iname' in flags);
   });
 
   test('process-instance includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['process-instance'];
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('key'));
-    assert.ok(flags.has('parentProcessInstanceKey'));
-    assert.ok(flags.has('iid'));
+    const flags = resourceFlags['process-instance'];
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('state' in flags);
+    assert.ok('key' in flags);
+    assert.ok('parentProcessInstanceKey' in flags);
+    assert.ok('iid' in flags);
   });
 
   test('user-task includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['user-task'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('assignee'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('elementId'));
-    assert.ok(flags.has('iassignee'));
+    const flags = resourceFlags['user-task'];
+    assert.ok('state' in flags);
+    assert.ok('assignee' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('elementId' in flags);
+    assert.ok('iassignee' in flags);
   });
 
   test('incident includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['incident'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('errorType'));
-    assert.ok(flags.has('errorMessage'));
-    assert.ok(flags.has('ierrorMessage'));
-    assert.ok(flags.has('iid'));
+    const flags = resourceFlags['incident'];
+    assert.ok('state' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('errorType' in flags);
+    assert.ok('errorMessage' in flags);
+    assert.ok('ierrorMessage' in flags);
+    assert.ok('iid' in flags);
   });
 
   test('jobs includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['jobs'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('type'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('itype'));
+    const flags = resourceFlags['jobs'];
+    assert.ok('state' in flags);
+    assert.ok('type' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('itype' in flags);
   });
 
   test('variable includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['variable'];
-    assert.ok(flags.has('name'));
-    assert.ok(flags.has('value'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('scopeKey'));
-    assert.ok(flags.has('fullValue'));
-    assert.ok(flags.has('iname'));
-    assert.ok(flags.has('ivalue'));
+    const flags = resourceFlags['variable'];
+    assert.ok('name' in flags);
+    assert.ok('value' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('scopeKey' in flags);
+    assert.ok('fullValue' in flags);
+    assert.ok('iname' in flags);
+    assert.ok('ivalue' in flags);
     // limit is in shared SEARCH_FLAGS, not per-resource
   });
 
   test('all resources have entries', () => {
     const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
     for (const resource of resources) {
-      assert.ok(SEARCH_RESOURCE_FLAGS[resource], `Missing entry for ${resource}`);
-      assert.ok(SEARCH_RESOURCE_FLAGS[resource].size > 0, `Empty flags for ${resource}`);
+      assert.ok(resourceFlags[resource], `Missing entry for ${resource}`);
+      assert.ok(Object.keys(resourceFlags[resource]).length > 0, `Empty flags for ${resource}`);
     }
   });
 
   test('limit is in shared SEARCH_FLAGS (valid for all search/list resources)', () => {
     assert.ok('limit' in SEARCH_FLAGS, 'limit should be in shared SEARCH_FLAGS');
     // Verify limit is NOT redundantly in per-resource sets
-    for (const [resource, flags] of Object.entries(SEARCH_RESOURCE_FLAGS)) {
+    for (const [resource, flags] of Object.entries(resourceFlags)) {
       assert.ok(
-        !flags.has('limit'),
-        `'limit' should not be in SEARCH_RESOURCE_FLAGS['${resource}'] — it's in shared SEARCH_FLAGS`,
+        !('limit' in flags),
+        `'limit' should not be in resourceFlags['${resource}'] — it's in shared SEARCH_FLAGS`,
       );
     }
   });
@@ -299,12 +301,13 @@ describe('Flag scoping — structural invariant', () => {
     ...Object.keys(SEARCH_FLAGS),
   ]);
 
-  test('GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS do not overlap', () => {
-    for (const [resource, flags] of Object.entries(SEARCH_RESOURCE_FLAGS)) {
-      for (const flag of flags) {
+  test('GLOBAL_FLAGS and search resourceFlags do not overlap', () => {
+    const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
+    for (const [resource, flags] of Object.entries(resourceFlags)) {
+      for (const flag of Object.keys(flags)) {
         assert.ok(
           !globalAndShared.has(flag),
-          `'${flag}' appears in both global/shared flags and SEARCH_RESOURCE_FLAGS['${resource}']. ` +
+          `'${flag}' appears in both global/shared flags and resourceFlags['${resource}']. ` +
           `It should be in one place only.`,
         );
       }

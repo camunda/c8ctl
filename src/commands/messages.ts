@@ -3,112 +3,98 @@
  */
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { createClient } from "../client.ts";
-import { resolveClusterConfig, resolveTenantId } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
+import { resolveTenantId } from "../config.ts";
 
 /**
  * Publish message
  */
-export async function publishMessage(
-	name: string,
-	options: {
-		profile?: string;
-		correlationKey?: string;
-		variables?: string;
-		timeToLive?: number;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const publishMessageCommand = defineCommand(
+	"publish",
+	"message",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const name = args.name;
+		const tenantId = resolveTenantId(profile);
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		const tenantId = resolveTenantId(options.profile);
 		const body: Record<string, unknown> = {
 			name,
 			tenantId,
-			correlationKey: options.correlationKey || "",
+			correlationKey: flags.correlationKey || "",
 		};
-		if (options.variables) body.variables = JSON.parse(options.variables);
-		if (options.timeToLive !== undefined) body.timeToLive = options.timeToLive;
-		logger.json({
-			dryRun: true,
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			variables = JSON.parse(flags.variables);
+			body.variables = variables;
+		}
+		const timeToLive = flags.timeToLive
+			? parseInt(flags.timeToLive, 10)
+			: undefined;
+		if (timeToLive !== undefined) body.timeToLive = timeToLive;
+
+		const dr = dryRun({
 			command: "publish message",
 			method: "POST",
-			url: `${config.baseUrl}/messages/publication`,
+			endpoint: "/messages/publication",
+			profile,
 			body,
 		});
-		return;
-	}
-
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-
-	try {
-		let variables: Record<string, unknown> | undefined;
-		if (options.variables) {
-			try {
-				variables = JSON.parse(options.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-			}
-		}
+		if (dr) return dr;
 
 		await client.publishMessage({
 			name,
 			tenantId: TenantId.assumeExists(tenantId),
-			correlationKey: options.correlationKey || "",
+			correlationKey: flags.correlationKey || "",
 			...(variables !== undefined && { variables }),
-			...(options.timeToLive !== undefined && {
-				timeToLive: options.timeToLive,
-			}),
+			...(timeToLive !== undefined && { timeToLive }),
 		});
-		logger.success(`Message '${name}' published`);
-	} catch (error) {
-		handleCommandError(logger, `Failed to publish message '${name}'`, error);
-	}
-}
+		return { kind: "success", message: `Message '${name}' published` };
+	},
+);
 
 /**
  * Correlate message
  */
-export async function correlateMessage(
-	name: string,
-	options: {
-		profile?: string;
-		correlationKey?: string;
-		variables?: string;
-		timeToLive?: number;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const correlateMessageCommand = defineCommand(
+	"correlate",
+	"message",
+	async (ctx, flags, args) => {
+		const { profile } = ctx;
+		const name = args.name;
+		const tenantId = resolveTenantId(profile);
 
-	// Dry-run: emit the would-be API request without executing (uses correlation endpoint)
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		const tenantId = resolveTenantId(options.profile);
 		const body: Record<string, unknown> = {
 			name,
 			tenantId,
-			correlationKey: options.correlationKey || "",
+			correlationKey: flags.correlationKey || "",
 		};
-		if (options.variables) body.variables = JSON.parse(options.variables);
-		if (options.timeToLive !== undefined) body.timeToLive = options.timeToLive;
-		logger.json({
-			dryRun: true,
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			variables = JSON.parse(flags.variables);
+			body.variables = variables;
+		}
+		const timeToLive = flags.timeToLive
+			? parseInt(flags.timeToLive, 10)
+			: undefined;
+		if (timeToLive !== undefined) body.timeToLive = timeToLive;
+
+		const dr = dryRun({
 			command: "correlate message",
 			method: "POST",
-			url: `${config.baseUrl}/messages/correlation`,
+			endpoint: "/messages/correlation",
+			profile,
 			body,
-			note: "SDK limitation: actual execution currently uses /messages/publication endpoint",
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	// For now, correlate is the same as publish in most cases
-	// In the SDK, both use the same underlying method
-	await publishMessage(name, options);
-}
+		// For now, correlate is the same as publish in the SDK
+		await ctx.client.publishMessage({
+			name,
+			tenantId: TenantId.assumeExists(tenantId),
+			correlationKey: flags.correlationKey || "",
+			...(variables !== undefined && { variables }),
+			...(timeToLive !== undefined && { timeToLive }),
+		});
+		return { kind: "success", message: `Message '${name}' published` };
+	},
+);

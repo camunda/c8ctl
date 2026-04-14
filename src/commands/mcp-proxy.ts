@@ -11,9 +11,9 @@ import {
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createClient } from "../client.ts";
+import { defineCommand } from "../command-framework.ts";
 import { handleCommandError } from "../errors.ts";
-import { isRecord } from "../index.ts";
-import { Logger, type LogWriter } from "../logger.ts";
+import { isRecord, Logger, type LogWriter } from "../logger.ts";
 import { getVersion } from "./help.ts";
 
 /**
@@ -407,3 +407,13 @@ export async function mcpProxy(
 	const mcpServerPath = args[0] ?? "/mcp/cluster";
 	await runProxy(camundaClient, logger, mcpServerPath);
 }
+
+// ─── defineCommand wrapper ───────────────────────────────────────────────────
+
+export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
+	const allPositionals = ctx.resource
+		? [ctx.resource, ...ctx.positionals]
+		: ctx.positionals;
+	await mcpProxy(allPositionals, { profile: ctx.profile });
+	return { kind: "never" };
+});

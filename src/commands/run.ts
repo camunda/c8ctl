@@ -9,6 +9,7 @@ import {
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
 import { createClient, emitDryRun } from "../client.ts";
+import { defineCommand } from "../command-framework.ts";
 import { resolveTenantId } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger } from "../logger.ts";
@@ -92,3 +93,14 @@ export async function run(
 		handleCommandError(logger, "Failed to run process", error);
 	}
 }
+
+// ─── defineCommand wrapper ───────────────────────────────────────────────────
+
+/** Side-effectful: deploys a BPMN file and creates a process instance, logging progress inline. */
+export const runCommand = defineCommand("run", "", async (ctx, flags) => {
+	await run(ctx.resource, {
+		profile: ctx.profile,
+		variables: flags.variables,
+	});
+	return { kind: "none" };
+});

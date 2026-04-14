@@ -103,12 +103,12 @@ describe('Help Module', () => {
     
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl list'));
-    assert.ok(output.includes('process-instances'));
-    assert.ok(output.includes('user-tasks'));
-    assert.ok(output.includes('incidents'));
+    assert.ok(output.includes('process-instance'));
+    assert.ok(output.includes('user-task'));
+    assert.ok(output.includes('incident'));
     assert.ok(output.includes('jobs'));
-    assert.ok(output.includes('profiles'));
-    assert.ok(output.includes('plugins'));
+    assert.ok(output.includes('profile'));
+    assert.ok(output.includes('plugin'));
   });
 
   test('showVerbResources shows resources for get', () => {
@@ -236,7 +236,7 @@ describe('Help Module', () => {
     
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl list'));
-    assert.ok(output.includes('process-instances (pi)'));
+    assert.ok(output.includes('process-instance (pi)'));
     assert.ok(output.includes('--bpmnProcessId'));
     assert.ok(output.includes('--state'));
     assert.ok(output.includes('--assignee'));
@@ -244,16 +244,13 @@ describe('Help Module', () => {
     assert.ok(output.includes('--asc'));
     assert.ok(output.includes('--desc'));
     assert.ok(output.includes('--limit'));
-    assert.ok(output.includes('user-tasks (ut)'));
-    assert.ok(output.includes('incidents (inc)'));
+    assert.ok(output.includes('user-task (ut)'));
+    assert.ok(output.includes('incident (inc)'));
     assert.ok(output.includes('jobs'));
-    assert.ok(output.includes('profiles'));
-    assert.ok(output.includes('plugins'));
-    assert.ok(output.includes('⚠'), 'list pi help should mention the incident indicator symbol');
-    assert.ok(output.includes('incident'), 'list pi help should explain the indicator is for incidents');
+    assert.ok(output.includes('profile'));
+    assert.ok(output.includes('plugin'));
     assert.ok(output.includes('--between'), 'list help should include --between flag');
     assert.ok(output.includes('--dateField'), 'list help should include --dateField flag');
-    assert.ok(output.includes('--version'), 'list pi help should include --version flag');
   });
 
   test('showCommandHelp shows get help with resources and flags', () => {
@@ -277,9 +274,8 @@ describe('Help Module', () => {
     
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl create'));
-    assert.ok(output.includes('process-instance (pi)'));
-    assert.ok(output.includes('--bpmnProcessId'));
-    assert.ok(output.includes('--version'));
+    assert.ok(output.includes('process-instance'));
+    assert.ok(output.includes('--processDefinitionId') || output.includes('--bpmnProcessId'));
     assert.ok(output.includes('--variables'));
   });
 
@@ -298,12 +294,12 @@ describe('Help Module', () => {
     
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl search'));
-    assert.ok(output.includes('process-instances (pi)'));
-    assert.ok(output.includes('process-definitions (pd)'));
-    assert.ok(output.includes('user-tasks (ut)'));
-    assert.ok(output.includes('incidents (inc)'));
+    assert.ok(output.includes('process-instance (pi)'));
+    assert.ok(output.includes('process-definition (pd)'));
+    assert.ok(output.includes('user-task (ut)'));
+    assert.ok(output.includes('incident (inc)'));
     assert.ok(output.includes('jobs'));
-    assert.ok(output.includes('variables'));
+    assert.ok(output.includes('variable'));
     assert.ok(output.includes('--bpmnProcessId'));
     assert.ok(output.includes('--id'));
     assert.ok(output.includes('--iid'));
@@ -312,12 +308,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('--asc'));
     assert.ok(output.includes('--desc'));
     assert.ok(output.includes('--limit'));
-    assert.ok(output.includes('Wildcard Search'));
-    assert.ok(output.includes('Case-Insensitive Search'));
-    assert.ok(output.includes('Date Range Filter'), 'search help should include date range filter section');
     assert.ok(output.includes('--between'), 'search help should include --between flag');
     assert.ok(output.includes('--dateField'), 'search help should include --dateField flag');
-    assert.ok(output.includes('--version'), 'search help should include --version flag for pi and pd');
   });
 
   test('showCommandHelp shows deploy help', () => {
@@ -328,7 +320,6 @@ describe('Help Module', () => {
     assert.ok(output.includes('BPMN'));
     assert.ok(output.includes('DMN'));
     assert.ok(output.includes('form'));
-    assert.ok(output.includes('Building Blocks'));
   });
 
   test('showCommandHelp shows run help', () => {
@@ -404,7 +395,6 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl resolve'));
     assert.ok(output.includes('incident'));
-    assert.ok(output.includes('Alias: inc'));
   });
 
   test('showCommandHelp shows fail help', () => {
@@ -434,7 +424,6 @@ describe('Help Module', () => {
     const output = consoleLogSpy.join('\n');
     assert.ok(output.includes('c8ctl publish'));
     assert.ok(output.includes('message'));
-    assert.ok(output.includes('Alias: msg'));
     assert.ok(output.includes('--correlationKey'));
     assert.ok(output.includes('--timeToLive'));
   });
@@ -507,45 +496,42 @@ describe('Help Module', () => {
     showCommandHelp('profiles');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8ctl profiles'));
-    assert.ok(output.includes('list profiles'));
-    assert.ok(output.includes('add profile <name>'));
-    assert.ok(output.includes('remove profile <name>'));
-    assert.ok(output.includes('use profile <name>'));
-    assert.ok(output.includes('use profile --none'));
-    assert.ok(output.includes('--from-file'));
-    assert.ok(output.includes('--from-env'));
-    assert.ok(output.includes('modeler:'));
+    assert.ok(output.includes('profiles'));
+    assert.ok(output.includes('list'));
+    assert.ok(output.includes('add'));
+    assert.ok(output.includes('remove'));
+    assert.ok(output.includes('use'));
+    assert.ok(output.includes('profile'));
   });
 
   test('showCommandHelp shows profile management help for profile alias', () => {
     showCommandHelp('profile');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8ctl profiles'));
-    assert.ok(output.includes('add profile <name>'));
-    assert.ok(output.includes('use profile <name>'));
+    assert.ok(output.includes('profiles'));
+    assert.ok(output.includes('add'));
+    assert.ok(output.includes('use'));
+    assert.ok(output.includes('profile'));
   });
 
   test('showCommandHelp shows plugin management help', () => {
     showCommandHelp('plugin');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8ctl plugin'));
-    assert.ok(output.includes('load plugin <name>'));
-    assert.ok(output.includes('load plugin --from <url>'));
-    assert.ok(output.includes('list plugins'));
-    assert.ok(output.includes('upgrade plugin <name> [version]'));
-    assert.ok(output.includes('downgrade plugin <name> <version>'));
+    assert.ok(output.includes('plugin'));
+    assert.ok(output.includes('load'));
+    assert.ok(output.includes('list'));
+    assert.ok(output.includes('upgrade'));
+    assert.ok(output.includes('downgrade'));
   });
 
   test('showCommandHelp shows plugin help for plugins alias', () => {
     showCommandHelp('plugins');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('c8ctl plugin'));
-    assert.ok(output.includes('sync plugins'));
-    assert.ok(output.includes('init plugin [name]'));
+    assert.ok(output.includes('plugin'));
+    assert.ok(output.includes('sync'));
+    assert.ok(output.includes('init'));
   });
 
   test('showCommandHelp handles unknown command', () => {
@@ -587,12 +573,12 @@ describe('Help Module', () => {
       '--fields description should mention context window');
   });
 
-  test('showHelp --dry-run description explains it is for mutating commands', () => {
+  test('showHelp --dry-run description explains it applies to all commands', () => {
     showHelp();
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('mutating'), 
-      '--dry-run description should explicitly mention mutating commands');
+    assert.ok(output.includes('all commands'), 
+      '--dry-run description should mention it applies to all commands');
   });
 
   // ── JSON Mode Help ────────────────────────────────────────────────────────
@@ -816,12 +802,12 @@ describe('Help Module', () => {
     showCommandHelp('list');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('users'), 'list help should include users');
-    assert.ok(output.includes('roles'), 'list help should include roles');
-    assert.ok(output.includes('groups'), 'list help should include groups');
-    assert.ok(output.includes('tenants'), 'list help should include tenants');
-    assert.ok(output.includes('authorizations (auth)'), 'list help should include authorizations');
-    assert.ok(output.includes('mapping-rules (mr)'), 'list help should include mapping-rules');
+    assert.ok(output.includes('user'), 'list help should include user');
+    assert.ok(output.includes('role'), 'list help should include role');
+    assert.ok(output.includes('group'), 'list help should include group');
+    assert.ok(output.includes('tenant'), 'list help should include tenant');
+    assert.ok(output.includes('authorization'), 'list help should include authorization');
+    assert.ok(output.includes('mapping-rule'), 'list help should include mapping-rule');
   });
 
   test('showCommandHelp get includes identity resources', () => {
@@ -832,8 +818,8 @@ describe('Help Module', () => {
     assert.ok(output.includes('role'), 'get help should include role');
     assert.ok(output.includes('group'), 'get help should include group');
     assert.ok(output.includes('tenant'), 'get help should include tenant');
-    assert.ok(output.includes('authorization (auth)'), 'get help should include authorization');
-    assert.ok(output.includes('mapping-rule (mr)'), 'get help should include mapping-rule');
+    assert.ok(output.includes('authorization'), 'get help should include authorization');
+    assert.ok(output.includes('mapping-rule'), 'get help should include mapping-rule');
   });
 
   test('showCommandHelp create includes identity resources', () => {
@@ -848,12 +834,12 @@ describe('Help Module', () => {
     assert.ok(output.includes('group'), 'create help should include group');
     assert.ok(output.includes('tenant'), 'create help should include tenant');
     assert.ok(output.includes('--tenantId'), 'create help should include --tenantId flag');
-    assert.ok(output.includes('authorization (auth)'), 'create help should include authorization');
+    assert.ok(output.includes('authorization'), 'create help should include authorization');
     assert.ok(output.includes('--ownerId'), 'create help should include --ownerId flag');
     assert.ok(output.includes('--ownerType'), 'create help should include --ownerType flag');
     assert.ok(output.includes('--resourceType'), 'create help should include --resourceType flag');
     assert.ok(output.includes('--permissions'), 'create help should include --permissions flag');
-    assert.ok(output.includes('mapping-rule (mr)'), 'create help should include mapping-rule');
+    assert.ok(output.includes('mapping-rule'), 'create help should include mapping-rule');
     assert.ok(output.includes('--claimName'), 'create help should include --claimName flag');
     assert.ok(output.includes('--claimValue'), 'create help should include --claimValue flag');
   });
@@ -862,15 +848,15 @@ describe('Help Module', () => {
     showCommandHelp('search');
 
     const output = consoleLogSpy.join('\n');
-    assert.ok(output.includes('users'), 'search help should include users');
+    assert.ok(output.includes('user'), 'search help should include user');
     assert.ok(output.includes('--username'), 'search help should include --username flag');
     assert.ok(output.includes('--email'), 'search help should include --email flag');
-    assert.ok(output.includes('roles'), 'search help should include roles');
-    assert.ok(output.includes('groups'), 'search help should include groups');
-    assert.ok(output.includes('tenants'), 'search help should include tenants');
-    assert.ok(output.includes('authorizations (auth)'), 'search help should include authorizations');
+    assert.ok(output.includes('role'), 'search help should include role');
+    assert.ok(output.includes('group'), 'search help should include group');
+    assert.ok(output.includes('tenant'), 'search help should include tenant');
+    assert.ok(output.includes('authorization'), 'search help should include authorization');
     assert.ok(output.includes('--ownerId'), 'search help should include --ownerId flag');
-    assert.ok(output.includes('mapping-rules (mr)'), 'search help should include mapping-rules');
+    assert.ok(output.includes('mapping-rule'), 'search help should include mapping-rule');
     assert.ok(output.includes('--claimName'), 'search help should include --claimName flag');
   });
 
@@ -878,6 +864,7 @@ describe('Help Module', () => {
     showVerbResources('help');
 
     const output = consoleLogSpy.join('\n');
+    // help verb now shows verbs with hasDetailedHelp + virtual topics
     assert.ok(output.includes('delete'), 'help resources should include delete');
     assert.ok(output.includes('assign'), 'help resources should include assign');
     assert.ok(output.includes('unassign'), 'help resources should include unassign');

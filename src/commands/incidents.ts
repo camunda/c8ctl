@@ -2,47 +2,35 @@
  * Incident commands
  */
 
-import { IncidentKey } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
-import { resolveClusterConfig, resolveTenantId } from "../config.ts";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
 
 /**
  * List incidents
  */
-export async function listIncidents(options: {
-	profile?: string;
-	state?: string;
-	processInstanceKey?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-	between?: string;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
+export const listIncidentsCommand = defineCommand(
+	"list",
+	"incident",
+	async (ctx, flags) => {
+		const { client, logger, tenantId, profile, limit, between } = ctx;
 
-	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.processInstanceKey) {
-			filter.filter.processInstanceKey = options.processInstanceKey;
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (between) {
+			const parsed = parseBetween(between);
 			if (parsed) {
 				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
 			} else {
@@ -53,26 +41,25 @@ export async function listIncidents(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "list incidents",
-				method: "POST",
-				endpoint: "/incidents/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "list incidents",
+			method: "POST",
+			endpoint: "/incidents/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchIncidents(f, opts),
 			filter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (allItems.length > 0) {
-			let tableData = allItems.map((incident) => ({
+		return {
+			kind: "list",
+			items: allItems.map((incident) => ({
 				Key: incident.incidentKey,
 				Type: incident.errorType,
 				Message: incident.errorMessage?.substring(0, 50) || "",
@@ -80,87 +67,58 @@ export async function listIncidents(options: {
 				Created: incident.creationTime || "-",
 				"Process Instance": incident.processInstanceKey,
 				"Tenant ID": incident.tenantId,
-			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
-			logger.table(tableData);
-		} else {
-			logger.info("No incidents found");
-		}
-	} catch (error) {
-		handleCommandError(logger, "Failed to list incidents", error);
-	}
-}
+			})),
+			emptyMessage: "No incidents found",
+		};
+	},
+);
 
 /**
  * Get incident by key
  */
-export async function getIncident(
-	key: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const getIncidentCommand = defineCommand(
+	"get",
+	"incident",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "get incident",
 			method: "GET",
 			endpoint: `/incidents/${key}`,
-			profile: options.profile,
-		})
-	)
-		return;
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getIncident(
-			{ incidentKey: IncidentKey.assumeExists(key) },
+			{ incidentKey: key },
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		logger.json(result);
-	} catch (error) {
-		handleCommandError(logger, `Failed to get incident ${key}`, error);
-	}
-}
+		return { kind: "get", data: result };
+	},
+);
 
 /**
  * Resolve incident
  */
-export async function resolveIncident(
-	key: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const resolveIncidentCommand = defineCommand(
+	"resolve",
+	"incident",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "resolve incident",
 			method: "POST",
-			url: `${config.baseUrl}/incidents/${key}/resolution`,
+			endpoint: `/incidents/${key}/resolution`,
+			profile,
 			body: {},
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		await client.resolveIncident({
-			incidentKey: IncidentKey.assumeExists(key),
-		});
-		logger.success(`Incident ${key} resolved`);
-	} catch (error) {
-		handleCommandError(logger, `Failed to resolve incident ${key}`, error);
-	}
-}
+		await client.resolveIncident({ incidentKey: key });
+		return { kind: "success", message: `Incident ${key} resolved` };
+	},
+);

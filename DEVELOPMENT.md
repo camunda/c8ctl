@@ -84,3 +84,8 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
   // function body
 }
 ```
+
+### Refactoring Discipline
+
+- behaviour tests are the regression guard — **do not modify behaviour tests** during refactoring. If a test fails, the production code is wrong, not the test
+- between refactors, always run `npx tsc --noEmit`, `npx biome check src`, and `npx vitest run` to verify correctness
