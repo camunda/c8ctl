@@ -213,9 +213,14 @@ async function main() {
 	// Resource validation guard — single chokepoint for all verbs that require a resource.
 	// Derived from COMMAND_REGISTRY.requiresResource.
 	// help/completion are dispatched before this point.
+	// If --help is passed, show verb help instead of the resource error.
 	if (!resource && VERB_REQUIRES_RESOURCE.has(verb)) {
+		if (values.help) {
+			showVerbResources(verb);
+			return;
+		}
 		showVerbResources(verb);
-		return;
+		process.exit(1);
 	}
 
 	// Flag validation — run all registered validators before dispatch.

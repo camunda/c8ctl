@@ -118,7 +118,7 @@ describe('CLI behavioural: run', () => {
 
   test('shows usage when path is missing', async () => {
     const result = await c8('run');
-    assert.strictEqual(result.status, 0);
+    assert.strictEqual(result.status, 1);
     assert.ok(result.stdout.includes('Usage: c8ctl run'));
   });
 });

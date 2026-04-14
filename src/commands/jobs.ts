@@ -91,6 +91,15 @@ export const activateJobsCommand = defineCommand(
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
 
+		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
+			ctx.logger.error("--maxJobsToActivate must be a positive integer");
+			process.exit(1);
+		}
+		if (Number.isNaN(timeout) || timeout < 1) {
+			ctx.logger.error("--timeout must be a positive integer (milliseconds)");
+			process.exit(1);
+		}
+
 		const dr = dryRun({
 			command: "activate jobs",
 			method: "POST",
@@ -98,7 +107,7 @@ export const activateJobsCommand = defineCommand(
 			profile,
 			body: {
 				type,
-				tenantIds: [tenantId],
+				...(tenantId !== undefined && { tenantIds: [tenantId] }),
 				maxJobsToActivate,
 				timeout,
 				worker,
@@ -108,7 +117,9 @@ export const activateJobsCommand = defineCommand(
 
 		const result = await client.activateJobs({
 			type,
-			tenantIds: [TenantId.assumeExists(tenantId ?? "<default>")],
+			...(tenantId !== undefined && {
+				tenantIds: [TenantId.assumeExists(tenantId)],
+			}),
 			maxJobsToActivate,
 			timeout,
 			worker,
@@ -178,6 +189,11 @@ export const failJobCommand = defineCommand(
 		const key = args.key;
 		const retries = flags.retries ? parseInt(flags.retries, 10) : 0;
 		const errorMessage = flags.errorMessage || "Job failed via c8ctl";
+
+		if (Number.isNaN(retries) || retries < 0) {
+			ctx.logger.error("--retries must be a non-negative integer");
+			process.exit(1);
+		}
 
 		const dr = dryRun({
 			command: "fail job",

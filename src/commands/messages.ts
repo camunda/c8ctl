@@ -30,7 +30,15 @@ export const publishMessageCommand = defineCommand(
 		const timeToLive = flags.timeToLive
 			? parseInt(flags.timeToLive, 10)
 			: undefined;
-		if (timeToLive !== undefined) body.timeToLive = timeToLive;
+		if (timeToLive !== undefined) {
+			if (Number.isNaN(timeToLive) || timeToLive < 0) {
+				ctx.logger.error(
+					"--timeToLive must be a non-negative integer (milliseconds)",
+				);
+				process.exit(1);
+			}
+			body.timeToLive = timeToLive;
+		}
 
 		const dr = dryRun({
 			command: "publish message",
@@ -43,7 +51,9 @@ export const publishMessageCommand = defineCommand(
 
 		await client.publishMessage({
 			name,
-			tenantId: TenantId.assumeExists(tenantId),
+			...(tenantId !== undefined && {
+				tenantId: TenantId.assumeExists(tenantId),
+			}),
 			correlationKey: flags.correlationKey || "",
 			...(variables !== undefined && { variables }),
 			...(timeToLive !== undefined && { timeToLive }),
@@ -76,7 +86,15 @@ export const correlateMessageCommand = defineCommand(
 		const timeToLive = flags.timeToLive
 			? parseInt(flags.timeToLive, 10)
 			: undefined;
-		if (timeToLive !== undefined) body.timeToLive = timeToLive;
+		if (timeToLive !== undefined) {
+			if (Number.isNaN(timeToLive) || timeToLive < 0) {
+				ctx.logger.error(
+					"--timeToLive must be a non-negative integer (milliseconds)",
+				);
+				process.exit(1);
+			}
+			body.timeToLive = timeToLive;
+		}
 
 		const dr = dryRun({
 			command: "correlate message",
@@ -90,7 +108,9 @@ export const correlateMessageCommand = defineCommand(
 		// For now, correlate is the same as publish in the SDK
 		await ctx.client.publishMessage({
 			name,
-			tenantId: TenantId.assumeExists(tenantId),
+			...(tenantId !== undefined && {
+				tenantId: TenantId.assumeExists(tenantId),
+			}),
 			correlationKey: flags.correlationKey || "",
 			...(variables !== undefined && { variables }),
 			...(timeToLive !== undefined && { timeToLive }),

@@ -186,7 +186,7 @@ describe('open command', () => {
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
       assert.ok(output.includes('Usage: c8ctl open'), `Expected usage message, got: ${output}`);
-      assert.strictEqual(result.status, 0, 'Should exit with zero status');
+      assert.strictEqual(result.status, 1, 'Should exit with non-zero status for missing resource');
     });
 
     test('c8 open with invalid app shows error', () => {

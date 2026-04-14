@@ -31,9 +31,9 @@ describe('CLI behavioural: list profiles', () => {
 
 describe('CLI behavioural: use command', () => {
 
-  test('exits 0 and shows available resources when no resource given', async () => {
+  test('exits 1 and shows available resources when no resource given', async () => {
     const result = await c8('use');
-    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+    assert.strictEqual(result.status, 1, `stderr: ${result.stderr}`);
     assert.ok(
       result.stdout.includes('profile') || result.stderr.includes('profile'),
       'Expected "profile" in available resources',

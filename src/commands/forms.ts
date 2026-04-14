@@ -29,16 +29,13 @@ function getErrorStatus(error: unknown): number | undefined {
 export const getFormCommand = defineCommand(
 	"get",
 	"form",
-	async (ctx, _flags, args) => {
+	async (ctx, flags, args) => {
 		const { client, logger, profile } = ctx;
 		const key = args.key;
 
-		// Check for flags and their aliases
-		const isUserTask =
-			process.argv.includes("--userTask") || process.argv.includes("--ut");
+		const isUserTask = flags.userTask === true || flags.ut === true;
 		const isProcessDefinition =
-			process.argv.includes("--processDefinition") ||
-			process.argv.includes("--pd");
+			flags.processDefinition === true || flags.pd === true;
 
 		// If both flags specified, error
 		if (isUserTask && isProcessDefinition) {

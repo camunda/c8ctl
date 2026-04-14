@@ -445,11 +445,19 @@ const GET_FORM_FLAGS = {
 		showInTopLevelHelp: true,
 		helpHint: "use with 'get form'",
 	},
+	ut: {
+		type: "boolean",
+		description: "Alias for --userTask",
+	},
 	processDefinition: {
 		type: "boolean",
 		description: "Get form for process definition",
 		showInTopLevelHelp: true,
 		helpHint: "use with 'get form'",
+	},
+	pd: {
+		type: "boolean",
+		description: "Alias for --processDefinition",
 	},
 } as const satisfies Record<string, FlagDef>;
 
