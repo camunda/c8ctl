@@ -116,8 +116,9 @@ describe('CLI behavioural: run', () => {
     assert.strictEqual(body.variables, '{"x":1}');
   });
 
-  test('rejects missing path with exit code 1', async () => {
-    const result = await c8('run', '--dry-run');
-    assert.strictEqual(result.status, 1);
+  test('shows usage when path is missing', async () => {
+    const result = await c8('run');
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.stdout.includes('Usage: c8ctl run'));
   });
 });

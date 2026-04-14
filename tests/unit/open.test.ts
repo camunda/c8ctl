@@ -173,7 +173,7 @@ describe('open command', () => {
   });
 
   describe('CLI integration', () => {
-    test('c8 open with no app shows error', () => {
+    test('c8 open with no app shows available apps', () => {
       const result = spawnSync('node', [
         '--experimental-strip-types',
         CLI_ENTRY,
@@ -185,8 +185,8 @@ describe('open command', () => {
       });
 
       const output = (result.stdout ?? '') + (result.stderr ?? '');
-      assert.ok(output.includes('Application is required'), `Expected error message, got: ${output}`);
-      assert.notStrictEqual(result.status, 0, 'Should exit with non-zero status');
+      assert.ok(output.includes('Usage: c8ctl open'), `Expected usage message, got: ${output}`);
+      assert.strictEqual(result.status, 0, 'Should exit with zero status');
     });
 
     test('c8 open with invalid app shows error', () => {
