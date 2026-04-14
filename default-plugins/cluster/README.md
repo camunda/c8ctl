@@ -13,7 +13,7 @@ c8ctl cluster start stable
 c8ctl cluster start alpha
 
 # Start with a major.minor version (rolling release)
-c8ctl cluster start 8.8
+c8ctl cluster start 8.9
 
 # Starting without specifying a version defaults to stable
 c8ctl cluster start
@@ -61,7 +61,7 @@ patch releases.
 
 ### `start` vs `install` update behavior
 
-- **`start`** uses the local version if available. A non-blocking remote check runs in the background — if a newer rolling release exists, a hint is printed (e.g. *"A newer server version is available. Install it with: c8ctl cluster install 8.8"*). If the network is unreachable, the hint is silently skipped.
+- **`start`** uses the local version if available. A non-blocking remote check runs in the background — if a newer rolling release exists, a hint is printed (e.g. *"A newer server version is available. Install it with: c8ctl cluster install 8.9"*). If the network is unreachable, the hint is silently skipped.
 - **`install`** always checks the remote for a newer rolling release (via ETag comparison) and re-downloads if one is available.
 
 If the download server is unreachable, the aliases fall back to the values
