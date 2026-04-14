@@ -733,6 +733,7 @@ function printSummary(rawOutput, version) {
 async function startC8Run(config, debug = false) {
   const logger = getLogger();
   const binaryPath = getC8RunBinaryPath(config);
+  const logDir = join(dirname(binaryPath), 'log');
 
   if (!existsSync(binaryPath)) {
     throw new Error(`c8run binary not found at ${binaryPath}`);
@@ -761,7 +762,9 @@ async function startC8Run(config, debug = false) {
   });
 
   if (typeof proc.pid !== 'number') {
-    logger.error('Failed to start cluster process: no PID received from c8run. Check logs for details.');
+    logger.error('Failed to start cluster process: no PID received from c8run.');
+    logger.error(`Check logs in: ${logDir}`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`);
     process.exit(1);
   }
 
@@ -818,8 +821,10 @@ async function startC8Run(config, debug = false) {
     printSummary(startupOutput, config.version);
   } else {
     logger.error(
-      'Cluster failed to start within timeout. Check logs for details.',
+      'Cluster failed to start within timeout.',
     );
+    logger.error(`Check logs in: ${logDir}`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`);
     process.exit(1);
   }
 }
