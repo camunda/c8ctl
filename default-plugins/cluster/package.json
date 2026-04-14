@@ -7,7 +7,7 @@
   "main": "c8ctl-plugin.js",
   "c8ctl": {
     "versionAliases": {
-      "stable": "8.8",
+      "stable": "8.9",
       "alpha": "8.9"
     }
   }
