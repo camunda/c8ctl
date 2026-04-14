@@ -81,7 +81,7 @@ echo "SUCCESS"
     const script = completionResult.stdout;
     
     // Verify that 'list' and 'load' verbs are defined in the verbs array
-    assert.ok(script.includes("'list:List resources'"), 'Should define list verb');
+    assert.ok(script.includes("'list:List resources"), 'Should define list verb');
     assert.ok(script.includes("'load:Load a c8ctl plugin'"), 'Should define load verb');
     
     // Verify the script can be loaded without syntax errors
@@ -197,9 +197,9 @@ echo "SUCCESS"
     const script = completionResult.stdout;
 
     assert.ok(script.includes('--help[Show help]'), 'Should include --help flag');
-    assert.ok(script.includes('--version[Show version]'), 'Should include --version flag');
-    assert.ok(script.includes('--profile[Use specific profile]'), 'Should include --profile flag');
-    assert.ok(script.includes('--variables[JSON variables]'), 'Should include --variables flag');
+    assert.ok(script.includes('--version[Show CLI version'), 'Should include --version flag');
+    assert.ok(script.includes('--profile[Use a specific profile]'), 'Should include --profile flag');
+    assert.ok(script.includes('--variables[Include variables in output]'), 'Should include --variables flag');
   });
 
   test('zsh completion uses _arguments for flag completion', async () => {

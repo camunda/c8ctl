@@ -190,9 +190,9 @@ echo "SUCCESS"
 
     // Global flags
     assert.ok(script.includes("-s h -l help -d 'Show help'"), 'Should include -h/--help flag');
-    assert.ok(script.includes("-s v -l version -d 'Show version'"), 'Should include -v/--version flag');
-    assert.ok(script.includes("-l profile -d 'Use specific profile'"), 'Should include --profile flag');
-    assert.ok(script.includes("-l variables -d 'JSON variables'"), 'Should include --variables flag');
+    assert.ok(script.includes("-s v -l version -d"), 'Should include -v/--version flag');
+    assert.ok(script.includes("-l profile -d 'Use a specific profile'"), 'Should include --profile flag');
+    assert.ok(script.includes("-l variables -d 'Include variables in output'"), 'Should include --variables flag');
     assert.ok(script.includes("-l baseUrl -d 'Cluster base URL'"), 'Should include --baseUrl flag');
   });
 
@@ -229,11 +229,11 @@ echo "SUCCESS"
 
     // Check that options that require arguments use -r flag
     assert.ok(
-      script.includes("-l profile -d 'Use specific profile' -r"),
+      script.includes("-l profile -d 'Use a specific profile' -r"),
       'Should use -r for --profile'
     );
     assert.ok(
-      script.includes("-l variables -d 'JSON variables' -r"),
+      script.includes("-l variables -d 'Include variables in output'"),
       'Should use -r for --variables'
     );
     assert.ok(

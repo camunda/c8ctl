@@ -543,7 +543,7 @@ function escZsh(s: string): string {
 }
 
 function escFish(s: string): string {
-	return s.replace(/'/g, "\\'");
+	return s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
