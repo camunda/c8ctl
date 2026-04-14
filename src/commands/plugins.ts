@@ -954,7 +954,7 @@ export async function initPlugin(positionalName?: string): Promise<void> {
 		// Create tsconfig.json
 		writeFileSync(
 			join(pluginDir, "tsconfig.json"),
-			getTemplate("tsconfig.json"),
+			getTemplate("tsconfig.json.template"),
 		);
 
 		// Create src directory
