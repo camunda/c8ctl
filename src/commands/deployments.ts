@@ -7,10 +7,10 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "../client.ts";
+import { defineCommand } from "../command-framework.ts";
 import { resolveClusterConfig, resolveTenantId } from "../config.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
-import { isRecord } from "../index.ts";
-import { getLogger } from "../logger.ts";
+import { getLogger, isRecord } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
 
 const RESOURCE_EXTENSIONS = [".bpmn", ".dmn", ".form"];
@@ -706,3 +706,16 @@ function printDeploymentHints(
 		logMessage(h);
 	});
 }
+
+// ─── defineCommand wrapper ───────────────────────────────────────────────────
+
+/** Side-effectful: collects files, validates, deploys, and renders its own table output. */
+export const deployCommand = defineCommand("deploy", "", async (ctx) => {
+	const paths = ctx.resource
+		? [ctx.resource, ...ctx.positionals]
+		: ctx.positionals.length > 0
+			? ctx.positionals
+			: ["."];
+	await deploy(paths, { profile: ctx.profile });
+	return { kind: "none" };
+});

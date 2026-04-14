@@ -6,13 +6,16 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { c8ctl } from '../../src/runtime.ts';
-import { createIdentityUser, deleteIdentityUser } from '../../src/commands/identity-users.ts';
-import { createIdentityRole, deleteIdentityRole } from '../../src/commands/identity-roles.ts';
-import { createIdentityGroup, deleteIdentityGroup } from '../../src/commands/identity-groups.ts';
-import { createIdentityTenant, deleteIdentityTenant } from '../../src/commands/identity-tenants.ts';
-import { createIdentityMappingRule, deleteIdentityMappingRule } from '../../src/commands/identity-mapping-rules.ts';
-import { createIdentityAuthorization, deleteIdentityAuthorization, validateCreateAuthorizationOptions } from '../../src/commands/identity-authorizations.ts';
+import { createIdentityUserCommand, deleteIdentityUserCommand } from '../../src/commands/identity-users.ts';
+import { createIdentityRoleCommand, deleteIdentityRoleCommand } from '../../src/commands/identity-roles.ts';
+import { createIdentityGroupCommand, deleteIdentityGroupCommand } from '../../src/commands/identity-groups.ts';
+import { createIdentityTenantCommand, deleteIdentityTenantCommand } from '../../src/commands/identity-tenants.ts';
+import { createIdentityMappingRuleCommand, deleteIdentityMappingRuleCommand } from '../../src/commands/identity-mapping-rules.ts';
+import { createIdentityAuthorizationCommand, deleteIdentityAuthorizationCommand, validateCreateAuthorizationOptions } from '../../src/commands/identity-authorizations.ts';
 import { handleAssign, handleUnassign } from '../../src/commands/identity.ts';
+import { getLogger } from '../../src/logger.ts';
+import { createClient } from '../../src/client.ts';
+import { resolveTenantId } from '../../src/config.ts';
 
 const TEST_BASE_URL = 'http://test-cluster/v2';
 
@@ -72,6 +75,25 @@ function capturedJson(): Record<string, unknown> {
   return JSON.parse(logSpy[0]);
 }
 
+/** Build a minimal CommandContext for test execution */
+function buildCtx(profile?: string) {
+  return {
+    client: createClient(profile),
+    logger: getLogger(),
+    tenantId: resolveTenantId(profile),
+    resource: '',
+    positionals: [] as string[],
+    sortOrder: 'asc' as const,
+    sortBy: undefined,
+    limit: undefined,
+    all: undefined,
+    between: undefined,
+    dateField: undefined,
+    dryRun: c8ctl.dryRun,
+    profile,
+  };
+}
+
 // ─── Required-flag validation ────────────────────────────────────────────────
 
 describe('Identity Commands — required-flag validation', () => {
@@ -81,7 +103,7 @@ describe('Identity Commands — required-flag validation', () => {
   // createIdentityUser
   test('createIdentityUser: errors when --username is missing', async () => {
     await assert.rejects(
-      () => createIdentityUser({ password: 'secret' }),
+      () => createIdentityUserCommand.execute(buildCtx(), { password: 'secret' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--username is required')));
@@ -89,7 +111,7 @@ describe('Identity Commands — required-flag validation', () => {
 
   test('createIdentityUser: errors when --password is missing', async () => {
     await assert.rejects(
-      () => createIdentityUser({ username: 'alice' }),
+      () => createIdentityUserCommand.execute(buildCtx(), { username: 'alice' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--password is required')));
@@ -98,7 +120,7 @@ describe('Identity Commands — required-flag validation', () => {
   // createIdentityRole
   test('createIdentityRole: errors when --roleId is missing', async () => {
     await assert.rejects(
-      () => createIdentityRole({ name: 'admin' }),
+      () => createIdentityRoleCommand.execute(buildCtx(), { name: 'admin' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--roleId is required')));
@@ -106,7 +128,7 @@ describe('Identity Commands — required-flag validation', () => {
 
   test('createIdentityRole: errors when --name is missing', async () => {
     await assert.rejects(
-      () => createIdentityRole({ roleId: 'admin-role' }),
+      () => createIdentityRoleCommand.execute(buildCtx(), { roleId: 'admin-role' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--name is required')));
@@ -115,7 +137,7 @@ describe('Identity Commands — required-flag validation', () => {
   // createIdentityMappingRule
   test('createIdentityMappingRule: errors when --mappingRuleId is missing', async () => {
     await assert.rejects(
-      () => createIdentityMappingRule({ name: 'n', claimName: 'c', claimValue: 'v' }),
+      () => createIdentityMappingRuleCommand.execute(buildCtx(), { name: 'n', claimName: 'c', claimValue: 'v' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--mappingRuleId is required')));
@@ -123,7 +145,7 @@ describe('Identity Commands — required-flag validation', () => {
 
   test('createIdentityMappingRule: errors when --name is missing', async () => {
     await assert.rejects(
-      () => createIdentityMappingRule({ mappingRuleId: 'r1', claimName: 'c', claimValue: 'v' }),
+      () => createIdentityMappingRuleCommand.execute(buildCtx(), { mappingRuleId: 'r1', claimName: 'c', claimValue: 'v' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--name is required')));
@@ -131,7 +153,7 @@ describe('Identity Commands — required-flag validation', () => {
 
   test('createIdentityMappingRule: errors when --claimName is missing', async () => {
     await assert.rejects(
-      () => createIdentityMappingRule({ mappingRuleId: 'r1', name: 'n', claimValue: 'v' }),
+      () => createIdentityMappingRuleCommand.execute(buildCtx(), { mappingRuleId: 'r1', name: 'n', claimValue: 'v' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--claimName is required')));
@@ -139,7 +161,7 @@ describe('Identity Commands — required-flag validation', () => {
 
   test('createIdentityMappingRule: errors when --claimValue is missing', async () => {
     await assert.rejects(
-      () => createIdentityMappingRule({ mappingRuleId: 'r1', name: 'n', claimName: 'c' }),
+      () => createIdentityMappingRuleCommand.execute(buildCtx(), { mappingRuleId: 'r1', name: 'n', claimName: 'c' }, []),
       /process\.exit\(1\)/,
     );
     assert.ok(errorSpy.some(l => l.includes('--claimValue is required')));
@@ -238,7 +260,7 @@ describe('Identity Commands — dry-run output', () => {
   afterEach(teardown);
 
   test('createIdentityUser: emits POST to /users with body; password is redacted', async () => {
-    await createIdentityUser({ username: 'alice', password: 'secret', name: 'Alice', email: 'alice@example.com' });
+    await createIdentityUserCommand.execute(buildCtx(), { username: 'alice', password: 'secret', name: 'Alice', email: 'alice@example.com' }, []);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -252,7 +274,7 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('deleteIdentityUser: emits DELETE to /users/:username', async () => {
-    await deleteIdentityUser('alice', {});
+    await deleteIdentityUserCommand.execute(buildCtx(), {}, ['alice']);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -261,7 +283,7 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('createIdentityRole: emits POST to /roles with name in body', async () => {
-    await createIdentityRole({ roleId: 'admin-role', name: 'admin' });
+    await createIdentityRoleCommand.execute(buildCtx(), { roleId: 'admin-role', name: 'admin' }, []);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -271,7 +293,7 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('deleteIdentityRole: emits DELETE to /roles/:roleId', async () => {
-    await deleteIdentityRole('admin-role', {});
+    await deleteIdentityRoleCommand.execute(buildCtx(), {}, ['admin-role']);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -280,12 +302,12 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('createIdentityMappingRule: emits POST to /mapping-rules with all fields', async () => {
-    await createIdentityMappingRule({
+    await createIdentityMappingRuleCommand.execute(buildCtx(), {
       mappingRuleId: 'rule-1',
       name: 'My Rule',
       claimName: 'email',
       claimValue: '*@example.com',
-    });
+    }, []);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -300,7 +322,7 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('deleteIdentityMappingRule: emits DELETE to /mapping-rules/:id', async () => {
-    await deleteIdentityMappingRule('rule-1', {});
+    await deleteIdentityMappingRuleCommand.execute(buildCtx(), {}, ['rule-1']);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -309,14 +331,13 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('createIdentityAuthorization: emits POST to /authorizations with permissionTypes array', async () => {
-    const validated = validateCreateAuthorizationOptions({
+    await createIdentityAuthorizationCommand.execute(buildCtx(), {
       ownerId: 'alice',
       ownerType: 'USER',
       resourceType: 'PROCESS_DEFINITION',
       resourceId: 'my-process',
       permissions: 'READ,UPDATE',
-    });
-    await createIdentityAuthorization(validated);
+    }, []);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
@@ -331,12 +352,12 @@ describe('Identity Commands — dry-run output', () => {
   });
 
   test('deleteIdentityAuthorization: emits DELETE to /authorizations/:key', async () => {
-    await deleteIdentityAuthorization('auth-key-42', {});
+    await deleteIdentityAuthorizationCommand.execute(buildCtx(), {}, ['42']);
 
     const out = capturedJson();
     assert.strictEqual(out.dryRun, true);
     assert.strictEqual(out.method, 'DELETE');
-    assert.ok((out.url as string).endsWith('/authorizations/auth-key-42'));
+    assert.ok((out.url as string).endsWith('/authorizations/42'));
   });
 });
 
@@ -502,50 +523,50 @@ describe('Dry-run schema — all mutating identity commands include body field',
 
   // DELETE commands — body should be null
   test('deleteIdentityUser dry-run includes body: null', async () => {
-    await deleteIdentityUser('alice', {});
+    await deleteIdentityUserCommand.execute(buildCtx(), {}, ['alice']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityUser');
     assert.strictEqual(capturedJson().body, null);
   });
 
   test('deleteIdentityRole dry-run includes body: null', async () => {
-    await deleteIdentityRole('admin', {});
+    await deleteIdentityRoleCommand.execute(buildCtx(), {}, ['admin']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityRole');
     assert.strictEqual(capturedJson().body, null);
   });
 
   test('deleteIdentityGroup dry-run includes body: null', async () => {
-    await deleteIdentityGroup('ops', {});
+    await deleteIdentityGroupCommand.execute(buildCtx(), {}, ['ops']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityGroup');
     assert.strictEqual(capturedJson().body, null);
   });
 
   test('deleteIdentityTenant dry-run includes body: null', async () => {
-    await deleteIdentityTenant('t1', {});
+    await deleteIdentityTenantCommand.execute(buildCtx(), {}, ['t1']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityTenant');
     assert.strictEqual(capturedJson().body, null);
   });
 
   test('deleteIdentityMappingRule dry-run includes body: null', async () => {
-    await deleteIdentityMappingRule('rule-1', {});
+    await deleteIdentityMappingRuleCommand.execute(buildCtx(), {}, ['rule-1']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityMappingRule');
     assert.strictEqual(capturedJson().body, null);
   });
 
   test('deleteIdentityAuthorization dry-run includes body: null', async () => {
-    await deleteIdentityAuthorization('auth-42', {});
+    await deleteIdentityAuthorizationCommand.execute(buildCtx(), {}, ['42']);
     assertDryRunSchema(capturedJson(), 'deleteIdentityAuthorization');
     assert.strictEqual(capturedJson().body, null);
   });
 
   // CREATE commands — body must be present and an object
   test('createIdentityUser dry-run includes body object', async () => {
-    await createIdentityUser({ username: 'alice', password: 'pw' });
+    await createIdentityUserCommand.execute(buildCtx(), { username: 'alice', password: 'pw' }, []);
     assertDryRunSchema(capturedJson(), 'createIdentityUser');
     assert.ok(typeof capturedJson().body === 'object' && capturedJson().body !== null);
   });
 
   test('createIdentityRole dry-run includes body object', async () => {
-    await createIdentityRole({ roleId: 'admin-role', name: 'admin' });
+    await createIdentityRoleCommand.execute(buildCtx(), { roleId: 'admin-role', name: 'admin' }, []);
     assertDryRunSchema(capturedJson(), 'createIdentityRole');
     assert.ok(typeof capturedJson().body === 'object' && capturedJson().body !== null);
   });

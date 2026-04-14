@@ -3,7 +3,6 @@
  */
 
 import {
-	AuthorizationKey,
 	type OwnerTypeEnum,
 	OwnerTypeEnum as OwnerTypeValues,
 	type PermissionTypeEnum,
@@ -11,116 +10,87 @@ import {
 	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import {
 	requireCsvEnum,
 	requireEnum,
 	requireOption,
 } from "../command-validation.ts";
-import { resolveClusterConfig } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import { sortTableData } from "../logger.ts";
 
 /**
  * List all authorizations
  */
-export async function listAuthorizations(options: {
-	profile?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const listAuthorizationsCommand = defineCommand(
+	"list",
+	"authorization",
+	async (ctx) => {
+		const { client, profile, limit } = ctx;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "list authorizations",
 			method: "POST",
 			endpoint: "/authorizations/search",
-			profile: options.profile,
+			profile,
 			body: {},
-		})
-	)
-		return;
+		});
+		if (dr) return dr;
 
-	try {
 		const items = await fetchAllPages(
 			(filter, opts) => client.searchAuthorizations(filter, opts),
 			{},
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (items.length === 0) {
-			logger.info("No authorizations found");
-			return;
-		}
-
-		let tableData = items.map((a) => ({
-			Key: a.authorizationKey ?? "",
-			"Owner ID": a.ownerId ?? "",
-			"Owner Type": a.ownerType ?? "",
-			"Resource Type": a.resourceType ?? "",
-			"Resource ID": a.resourceId ?? "",
-			Permissions: Array.isArray(a.permissionTypes)
-				? a.permissionTypes.join(", ")
-				: "",
-		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
-		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to list authorizations", error);
-	}
-}
-
+		return {
+			kind: "list",
+			items: items.map((a) => ({
+				Key: a.authorizationKey ?? "",
+				"Owner ID": a.ownerId ?? "",
+				"Owner Type": a.ownerType ?? "",
+				"Resource Type": a.resourceType ?? "",
+				"Resource ID": a.resourceId ?? "",
+				Permissions: Array.isArray(a.permissionTypes)
+					? a.permissionTypes.join(", ")
+					: "",
+			})),
+			emptyMessage: "No authorizations found",
+		};
+	},
+);
 /**
  * Search authorizations with filters
  */
-export async function searchIdentityAuthorizations(options: {
-	profile?: string;
-	ownerId?: string;
-	ownerType?: string;
-	resourceType?: string;
-	resourceId?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const searchIdentityAuthorizationsCommand = defineCommand(
+	"search",
+	"authorization",
+	async (ctx, flags, _args) => {
+		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
 
-	try {
 		const filter: Record<string, unknown> = {};
-		if (options.ownerId) filter.ownerId = options.ownerId;
-		if (options.ownerType) filter.ownerType = options.ownerType;
-		if (options.resourceType) filter.resourceType = options.resourceType;
-		if (options.resourceId) filter.resourceIds = [options.resourceId];
+		if (flags.ownerId) filter.ownerId = flags.ownerId;
+		if (flags.ownerType) filter.ownerType = flags.ownerType;
+		if (flags.resourceType) filter.resourceType = flags.resourceType;
+		if (flags.resourceId) filter.resourceIds = [flags.resourceId];
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (
-			emitDryRun({
-				command: "search authorizations",
-				method: "POST",
-				endpoint: "/authorizations/search",
-				profile: options.profile,
-				body: searchFilter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search authorizations",
+			method: "POST",
+			endpoint: "/authorizations/search",
+			profile,
+			body: searchFilter,
+		});
+		if (dr) return dr;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchAuthorizations(f, opts),
 			searchFilter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
 		if (items.length === 0) {
@@ -138,54 +108,36 @@ export async function searchIdentityAuthorizations(options: {
 				? a.permissionTypes.join(", ")
 				: "",
 		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
+		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
 		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to search authorizations", error);
-	}
-}
+	},
+);
 
 /**
  * Get a single authorization by key
  */
-export async function getIdentityAuthorization(
-	authorizationKey: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const getIdentityAuthorizationCommand = defineCommand(
+	"get",
+	"authorization",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const authorizationKey = args.authorizationKey;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "get authorization",
 			method: "GET",
 			endpoint: `/authorizations/${authorizationKey}`,
-			profile: options.profile,
-		})
-	)
-		return;
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getAuthorization(
-			{ authorizationKey: AuthorizationKey.assumeExists(authorizationKey) },
+			{ authorizationKey },
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		logger.json(result);
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to get authorization '${authorizationKey}'`,
-			error,
-		);
-	}
-}
+		return { kind: "get", data: result };
+	},
+);
 
 /**
  * Validated inputs for creating an authorization.
@@ -239,76 +191,66 @@ export function validateCreateAuthorizationOptions(options: {
 /**
  * Create a new authorization
  */
-export async function createIdentityAuthorization(
-	options: CreateAuthorizationInput,
-): Promise<void> {
-	const logger = getLogger();
+export const createIdentityAuthorizationCommand = defineCommand(
+	"create",
+	"authorization",
+	async (ctx, flags, _args) => {
+		const { client, profile } = ctx;
 
-	const body = {
-		ownerId: options.ownerId,
-		ownerType: options.ownerType,
-		resourceType: options.resourceType,
-		resourceId: options.resourceId,
-		permissionTypes: options.permissionTypes,
-	};
+		const validated = validateCreateAuthorizationOptions({
+			profile,
+			ownerId: flags.ownerId,
+			ownerType: flags.ownerType,
+			resourceType: flags.resourceType,
+			resourceId: flags.resourceId,
+			permissions: flags.permissions,
+		});
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const body = {
+			ownerId: validated.ownerId,
+			ownerType: validated.ownerType,
+			resourceType: validated.resourceType,
+			resourceId: validated.resourceId,
+			permissionTypes: validated.permissionTypes,
+		};
+
+		const dr = dryRun({
 			command: "create authorization",
 			method: "POST",
-			url: `${config.baseUrl}/authorizations`,
+			endpoint: "/authorizations",
+			profile,
 			body,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
 		await client.createAuthorization(body);
-		logger.success("Authorization created");
-	} catch (error) {
-		handleCommandError(logger, "Failed to create authorization", error);
-	}
-}
+		return { kind: "success", message: "Authorization created" };
+	},
+);
 
 /**
  * Delete an authorization by key
  */
-export async function deleteIdentityAuthorization(
-	authorizationKey: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const deleteIdentityAuthorizationCommand = defineCommand(
+	"delete",
+	"authorization",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const authorizationKey = args.authorizationKey;
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "delete authorization",
 			method: "DELETE",
-			url: `${config.baseUrl}/authorizations/${encodeURIComponent(String(authorizationKey))}`,
+			endpoint: `/authorizations/${encodeURIComponent(String(authorizationKey))}`,
+			profile,
 			body: null,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		await client.deleteAuthorization({
-			authorizationKey: AuthorizationKey.assumeExists(authorizationKey),
-		});
-		logger.success(`Authorization '${authorizationKey}' deleted`);
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to delete authorization '${authorizationKey}'`,
-			error,
-		);
-	}
-}
+		await client.deleteAuthorization({ authorizationKey });
+		return {
+			kind: "success",
+			message: `Authorization '${authorizationKey}' deleted`,
+		};
+	},
+);

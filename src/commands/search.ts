@@ -2,157 +2,15 @@
  * Search commands
  */
 
-import {
-	createClient,
-	DEFAULT_PAGE_SIZE,
-	emitDryRun,
-	fetchAllPages,
-} from "../client.ts";
-import { resolveTenantId } from "../config.ts";
+import { DEFAULT_PAGE_SIZE, fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
-import { handleCommandError } from "../errors.ts";
-import {
-	getLogger,
-	type Logger,
-	type SortOrder,
-	sortTableData,
-} from "../logger.ts";
+import { type Logger, sortTableData } from "../logger.ts";
 
 export type SearchResult = {
 	items: Array<Record<string, unknown>>;
 	total?: number;
 };
-
-/**
- * CLI infrastructure flags — valid for every command, never passed to search APIs.
- */
-const CLI_FLAGS = new Set(["profile", "help", "version"]);
-
-/**
- * Search behavior flags consumed by shared infrastructure (fetchAllPages / buildDateFilter / sort)
- * for ALL search resources. A flag belongs here only if every search handler consumes it
- * via shared code paths — never for flags consumed by a subset of handlers.
- *
- * If a flag is only relevant to some resources, put it in SEARCH_RESOURCE_FLAGS instead.
- */
-const SHARED_SEARCH_FLAGS = new Set([
-	"sortBy",
-	"asc",
-	"desc",
-	"between",
-	"dateField",
-]);
-
-/**
- * Union of CLI_FLAGS and SHARED_SEARCH_FLAGS — exported for use in detectUnknownSearchFlags.
- * Do NOT add resource-specific flags here; add them to SEARCH_RESOURCE_FLAGS instead.
- */
-export const GLOBAL_FLAGS = new Set([...CLI_FLAGS, ...SHARED_SEARCH_FLAGS]);
-
-/**
- * Valid search filter flags per resource (values keys that are consumed by the search handler).
- * This map is used to detect when a user passes a flag that looks valid but is not recognized
- * for the specific resource, causing silent filter drops.
- */
-export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
-	"process-definition": new Set([
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"name",
-		"key",
-		"iid",
-		"iname",
-	]),
-	"process-instance": new Set([
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"processDefinitionKey",
-		"state",
-		"key",
-		"parentProcessInstanceKey",
-		"iid",
-	]),
-	"user-task": new Set([
-		"state",
-		"assignee",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"elementId",
-		"iassignee",
-	]),
-	incident: new Set([
-		"state",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"errorType",
-		"errorMessage",
-		"ierrorMessage",
-		"iid",
-	]),
-	jobs: new Set([
-		"state",
-		"type",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"itype",
-	]),
-	variable: new Set([
-		"name",
-		"value",
-		"processInstanceKey",
-		"scopeKey",
-		"fullValue",
-		"iname",
-		"ivalue",
-		"limit",
-	]),
-	user: new Set(["username", "name", "email", "limit"]),
-	role: new Set(["roleId", "name", "limit"]),
-	group: new Set(["groupId", "name", "limit"]),
-	tenant: new Set(["tenantId", "name", "limit"]),
-	authorization: new Set([
-		"ownerId",
-		"ownerType",
-		"resourceType",
-		"resourceId",
-		"limit",
-	]),
-	"mapping-rule": new Set([
-		"mappingRuleId",
-		"name",
-		"claimName",
-		"claimValue",
-		"limit",
-	]),
-};
-
-/**
- * Detect flags the user set that are not recognized for the given search resource.
- * Returns the list of unknown flag names (without the --prefix).
- */
-export function detectUnknownSearchFlags(
-	values: Record<string, unknown>,
-	normalizedResource: string,
-): string[] {
-	const validFlags =
-		SEARCH_RESOURCE_FLAGS[normalizedResource] ||
-		SEARCH_RESOURCE_FLAGS[normalizedResource.replace(/s$/, "")];
-	if (!validFlags) return [];
-
-	const unknown: string[] = [];
-	for (const [key, val] of Object.entries(values)) {
-		if (val === undefined || val === false) continue; // not set by the user
-		if (GLOBAL_FLAGS.has(key)) continue;
-		if (validFlags.has(key)) continue;
-		unknown.push(key);
-	}
-	return unknown;
-}
 
 /**
  * Detect wildcard characters (* or ?) in a string value and return
@@ -336,86 +194,69 @@ export function logResultCount(
 /**
  * Search process definitions
  */
-export async function searchProcessDefinitions(options: {
-	profile?: string;
-	processDefinitionId?: string;
-	name?: string;
-	version?: number;
-	key?: string;
-	iProcessDefinitionId?: string;
-	iName?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	const hasCiFilter = !!(options.iProcessDefinitionId || options.iName);
+export const searchProcessDefinitionsCommand = defineCommand(
+	"search",
+	"process-definition",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+		const version = ctx.version;
+		const hasCiFilter = !!(flags.iid || flags.iname);
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.processDefinitionId) {
-		criteria.push(
-			formatCriterion("Process Definition ID", options.processDefinitionId),
-		);
-	}
-	if (options.name) {
-		criteria.push(formatCriterion("name", options.name));
-	}
-	if (options.version !== undefined) {
-		criteria.push(formatCriterion("version", options.version));
-	}
-	if (options.key) {
-		criteria.push(formatCriterion("key", options.key));
-	}
-	if (options.iProcessDefinitionId) {
-		criteria.push(
-			formatCriterion(
-				"Process Definition ID",
-				options.iProcessDefinitionId,
-				true,
-			),
-		);
-	}
-	if (options.iName) {
-		criteria.push(formatCriterion("name", options.iName, true));
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (processDefinitionId) {
+			criteria.push(
+				formatCriterion("Process Definition ID", processDefinitionId),
+			);
+		}
+		if (flags.name) {
+			criteria.push(formatCriterion("name", flags.name));
+		}
+		if (version !== undefined) {
+			criteria.push(formatCriterion("version", version));
+		}
+		if (flags.key) {
+			criteria.push(formatCriterion("key", flags.key));
+		}
+		if (flags.iid) {
+			criteria.push(formatCriterion("Process Definition ID", flags.iid, true));
+		}
+		if (flags.iname) {
+			criteria.push(formatCriterion("name", flags.iname, true));
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(
-				options.processDefinitionId,
-			);
+		if (processDefinitionId) {
+			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
 		}
 
-		if (options.name) {
-			filter.filter.name = toStringFilter(options.name);
+		if (flags.name) {
+			filter.filter.name = toStringFilter(flags.name);
 		}
 
-		if (options.version !== undefined) {
-			filter.filter.version = options.version;
+		if (version !== undefined) {
+			filter.filter.version = version;
 		}
 
-		if (options.key) {
-			filter.filter.processDefinitionKey = options.key;
+		if (flags.key) {
+			filter.filter.processDefinitionKey = flags.key;
 		}
 
-		if (
-			emitDryRun({
-				command: "search process-definitions",
-				method: "POST",
-				endpoint: "/process-definitions/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search process-definitions",
+			method: "POST",
+			endpoint: "/process-definitions/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "Process Definitions", criteria);
 
@@ -443,14 +284,11 @@ export async function searchProcessDefinitions(options: {
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((pd) => {
 				if (
-					options.iProcessDefinitionId &&
-					!matchesCaseInsensitive(
-						pd.processDefinitionId,
-						options.iProcessDefinitionId,
-					)
+					flags.iid &&
+					!matchesCaseInsensitive(pd.processDefinitionId, flags.iid)
 				)
 					return false;
-				if (options.iName && !matchesCaseInsensitive(pd.name, options.iName))
+				if (flags.iname && !matchesCaseInsensitive(pd.name, flags.iname))
 					return false;
 				return true;
 			});
@@ -464,12 +302,7 @@ export async function searchProcessDefinitions(options: {
 				Version: pd.version,
 				"Tenant ID": pd.tenantId,
 			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -478,122 +311,95 @@ export async function searchProcessDefinitions(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"process definitions",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "process definitions", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search process definitions", error);
-	}
-}
+	},
+);
 
 /**
  * Search process instances
  */
-export async function searchProcessInstances(options: {
-	profile?: string;
-	processDefinitionId?: string;
-	processDefinitionKey?: string;
-	version?: number;
-	state?: string;
-	key?: string;
-	parentProcessInstanceKey?: string;
-	iProcessDefinitionId?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
-	between?: string;
-	dateField?: string;
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	const hasCiFilter = !!options.iProcessDefinitionId;
+export const searchProcessInstancesCommand = defineCommand(
+	"search",
+	"process-instance",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+		const version = ctx.version;
+		const hasCiFilter = !!flags.iid;
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.processDefinitionId) {
-		criteria.push(
-			formatCriterion("Process Definition ID", options.processDefinitionId),
-		);
-	}
-	if (options.processDefinitionKey) {
-		criteria.push(
-			formatCriterion("Process Definition Key", options.processDefinitionKey),
-		);
-	}
-	if (options.state) {
-		criteria.push(formatCriterion("state", options.state));
-	}
-	if (options.version !== undefined) {
-		criteria.push(formatCriterion("version", options.version));
-	}
-	if (options.key) {
-		criteria.push(formatCriterion("key", options.key));
-	}
-	if (options.parentProcessInstanceKey) {
-		criteria.push(
-			formatCriterion(
-				"Parent Process Instance Key",
-				options.parentProcessInstanceKey,
-			),
-		);
-	}
-	if (options.iProcessDefinitionId) {
-		criteria.push(
-			formatCriterion(
-				"Process Definition ID",
-				options.iProcessDefinitionId,
-				true,
-			),
-		);
-	}
-	if (options.between) {
-		const field = options.dateField ?? "startDate";
-		criteria.push(`'${field}' between "${options.between}"`);
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (processDefinitionId) {
+			criteria.push(
+				formatCriterion("Process Definition ID", processDefinitionId),
+			);
+		}
+		if (flags.processDefinitionKey) {
+			criteria.push(
+				formatCriterion("Process Definition Key", flags.processDefinitionKey),
+			);
+		}
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+		if (version !== undefined) {
+			criteria.push(formatCriterion("version", version));
+		}
+		if (flags.key) {
+			criteria.push(formatCriterion("key", flags.key));
+		}
+		if (flags.parentProcessInstanceKey) {
+			criteria.push(
+				formatCriterion(
+					"Parent Process Instance Key",
+					flags.parentProcessInstanceKey,
+				),
+			);
+		}
+		if (flags.iid) {
+			criteria.push(formatCriterion("Process Definition ID", flags.iid, true));
+		}
+		if (ctx.between) {
+			const field = ctx.dateField ?? "startDate";
+			criteria.push(`'${field}' between "${ctx.between}"`);
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(
-				options.processDefinitionId,
-			);
+		if (processDefinitionId) {
+			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
 		}
 
-		if (options.processDefinitionKey) {
-			filter.filter.processDefinitionKey = options.processDefinitionKey;
+		if (flags.processDefinitionKey) {
+			filter.filter.processDefinitionKey = flags.processDefinitionKey;
 		}
 
-		if (options.version !== undefined) {
-			filter.filter.processDefinitionVersion = options.version;
+		if (version !== undefined) {
+			filter.filter.processDefinitionVersion = version;
 		}
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.key) {
-			filter.filter.processInstanceKey = options.key;
+		if (flags.key) {
+			filter.filter.processInstanceKey = flags.key;
 		}
 
-		if (options.parentProcessInstanceKey) {
-			filter.filter.parentProcessInstanceKey = options.parentProcessInstanceKey;
+		if (flags.parentProcessInstanceKey) {
+			filter.filter.parentProcessInstanceKey = flags.parentProcessInstanceKey;
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (ctx.between) {
+			const parsed = parseBetween(ctx.between);
 			if (parsed) {
-				const field = options.dateField ?? "startDate";
+				const field = ctx.dateField ?? "startDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
 				logger.error(
@@ -603,16 +409,14 @@ export async function searchProcessInstances(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "search process-instances",
-				method: "POST",
-				endpoint: "/process-instances/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search process-instances",
+			method: "POST",
+			endpoint: "/process-instances/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "Process Instances", criteria);
 
@@ -626,11 +430,8 @@ export async function searchProcessInstances(options: {
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((pi) => {
 				if (
-					options.iProcessDefinitionId &&
-					!matchesCaseInsensitive(
-						pi.processDefinitionId,
-						options.iProcessDefinitionId,
-					)
+					flags.iid &&
+					!matchesCaseInsensitive(pi.processDefinitionId, flags.iid)
 				)
 					return false;
 				return true;
@@ -646,12 +447,7 @@ export async function searchProcessInstances(options: {
 				"Start Date": pi.startDate || "-",
 				"Tenant ID": pi.tenantId,
 			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -660,101 +456,80 @@ export async function searchProcessInstances(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"process instances",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "process instances", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search process instances", error);
-	}
-}
+	},
+);
 
 /**
  * Search user tasks
  */
-export async function searchUserTasks(options: {
-	profile?: string;
-	state?: string;
-	assignee?: string;
-	processInstanceKey?: string;
-	processDefinitionKey?: string;
-	elementId?: string;
-	iAssignee?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
-	between?: string;
-	dateField?: string;
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	const hasCiFilter = !!options.iAssignee;
+export const searchUserTasksCommand = defineCommand(
+	"search",
+	"user-task",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const hasCiFilter = !!flags.iassignee;
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.state) {
-		criteria.push(formatCriterion("state", options.state));
-	}
-	if (options.assignee) {
-		criteria.push(formatCriterion("assignee", options.assignee));
-	}
-	if (options.processInstanceKey) {
-		criteria.push(
-			formatCriterion("Process Instance Key", options.processInstanceKey),
-		);
-	}
-	if (options.processDefinitionKey) {
-		criteria.push(
-			formatCriterion("Process Definition Key", options.processDefinitionKey),
-		);
-	}
-	if (options.elementId) {
-		criteria.push(formatCriterion("Element ID", options.elementId));
-	}
-	if (options.iAssignee) {
-		criteria.push(formatCriterion("assignee", options.iAssignee, true));
-	}
-	if (options.between) {
-		const field = options.dateField ?? "creationDate";
-		criteria.push(`'${field}' between "${options.between}"`);
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+		if (flags.assignee) {
+			criteria.push(formatCriterion("assignee", flags.assignee));
+		}
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.processDefinitionKey) {
+			criteria.push(
+				formatCriterion("Process Definition Key", flags.processDefinitionKey),
+			);
+		}
+		if (flags.elementId) {
+			criteria.push(formatCriterion("Element ID", flags.elementId));
+		}
+		if (flags.iassignee) {
+			criteria.push(formatCriterion("assignee", flags.iassignee, true));
+		}
+		if (ctx.between) {
+			const field = ctx.dateField ?? "creationDate";
+			criteria.push(`'${field}' between "${ctx.between}"`);
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.assignee) {
-			filter.filter.assignee = toStringFilter(options.assignee);
+		if (flags.assignee) {
+			filter.filter.assignee = toStringFilter(flags.assignee);
 		}
 
-		if (options.processInstanceKey) {
-			filter.filter.processInstanceKey = options.processInstanceKey;
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
 		}
 
-		if (options.processDefinitionKey) {
-			filter.filter.processDefinitionKey = options.processDefinitionKey;
+		if (flags.processDefinitionKey) {
+			filter.filter.processDefinitionKey = flags.processDefinitionKey;
 		}
 
-		if (options.elementId) {
-			filter.filter.elementId = options.elementId;
+		if (flags.elementId) {
+			filter.filter.elementId = flags.elementId;
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (ctx.between) {
+			const parsed = parseBetween(ctx.between);
 			if (parsed) {
-				const field = options.dateField ?? "creationDate";
+				const field = ctx.dateField ?? "creationDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
 				logger.error(
@@ -764,16 +539,14 @@ export async function searchUserTasks(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "search user-tasks",
-				method: "POST",
-				endpoint: "/user-tasks/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search user-tasks",
+			method: "POST",
+			endpoint: "/user-tasks/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "User Tasks", criteria);
 
@@ -787,8 +560,8 @@ export async function searchUserTasks(options: {
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((task) => {
 				if (
-					options.iAssignee &&
-					!matchesCaseInsensitive(task.assignee, options.iAssignee)
+					flags.iassignee &&
+					!matchesCaseInsensitive(task.assignee, flags.iassignee)
 				)
 					return false;
 				return true;
@@ -805,12 +578,7 @@ export async function searchUserTasks(options: {
 				"Process Instance": task.processInstanceKey,
 				"Tenant ID": task.tenantId,
 			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -819,129 +587,101 @@ export async function searchUserTasks(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"user tasks",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "user tasks", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search user tasks", error);
-	}
-}
+	},
+);
 
 /**
  * Search incidents
  */
-export async function searchIncidents(options: {
-	profile?: string;
-	state?: string;
-	processInstanceKey?: string;
-	processDefinitionKey?: string;
-	processDefinitionId?: string;
-	errorType?: string;
-	errorMessage?: string;
-	iErrorMessage?: string;
-	iProcessDefinitionId?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
-	between?: string;
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	// The incident API does not support a $like filter for errorMessage; fall back to client-side filtering for wildcard patterns
-	const errorMessageHasWildcard = !!(
-		options.errorMessage && hasUnescapedWildcard(options.errorMessage)
-	);
-	const hasCiFilter = !!(
-		options.iErrorMessage ||
-		options.iProcessDefinitionId ||
-		errorMessageHasWildcard
-	);
+export const searchIncidentsCommand = defineCommand(
+	"search",
+	"incident",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+		// The incident API does not support a $like filter for errorMessage; fall back to client-side filtering for wildcard patterns
+		const errorMessageHasWildcard = !!(
+			flags.errorMessage && hasUnescapedWildcard(flags.errorMessage)
+		);
+		const hasCiFilter = !!(
+			flags.ierrorMessage ||
+			flags.iid ||
+			errorMessageHasWildcard
+		);
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.state) {
-		criteria.push(formatCriterion("state", options.state));
-	}
-	if (options.processInstanceKey) {
-		criteria.push(
-			formatCriterion("Process Instance Key", options.processInstanceKey),
-		);
-	}
-	if (options.processDefinitionKey) {
-		criteria.push(
-			formatCriterion("Process Definition Key", options.processDefinitionKey),
-		);
-	}
-	if (options.errorType) {
-		criteria.push(formatCriterion("Error Type", options.errorType));
-	}
-	if (options.errorMessage) {
-		criteria.push(formatCriterion("Error Message", options.errorMessage));
-	}
-	if (options.processDefinitionId) {
-		criteria.push(
-			formatCriterion("Process Definition ID", options.processDefinitionId),
-		);
-	}
-	if (options.iErrorMessage) {
-		criteria.push(
-			formatCriterion("Error Message", options.iErrorMessage, true),
-		);
-	}
-	if (options.iProcessDefinitionId) {
-		criteria.push(
-			formatCriterion(
-				"Process Definition ID",
-				options.iProcessDefinitionId,
-				true,
-			),
-		);
-	}
-	if (options.between) {
-		criteria.push(`'creationTime' between "${options.between}"`);
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.processDefinitionKey) {
+			criteria.push(
+				formatCriterion("Process Definition Key", flags.processDefinitionKey),
+			);
+		}
+		if (flags.errorType) {
+			criteria.push(formatCriterion("Error Type", flags.errorType));
+		}
+		if (flags.errorMessage) {
+			criteria.push(formatCriterion("Error Message", flags.errorMessage));
+		}
+		if (processDefinitionId) {
+			criteria.push(
+				formatCriterion("Process Definition ID", processDefinitionId),
+			);
+		}
+		if (flags.ierrorMessage) {
+			criteria.push(
+				formatCriterion("Error Message", flags.ierrorMessage, true),
+			);
+		}
+		if (flags.iid) {
+			criteria.push(formatCriterion("Process Definition ID", flags.iid, true));
+		}
+		if (ctx.between) {
+			criteria.push(`'creationTime' between "${ctx.between}"`);
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.processInstanceKey) {
-			filter.filter.processInstanceKey = options.processInstanceKey;
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
 		}
 
-		if (options.processDefinitionKey) {
-			filter.filter.processDefinitionKey = options.processDefinitionKey;
+		if (flags.processDefinitionKey) {
+			filter.filter.processDefinitionKey = flags.processDefinitionKey;
 		}
 
-		if (options.errorType) {
-			filter.filter.errorType = options.errorType;
+		if (flags.errorType) {
+			filter.filter.errorType = flags.errorType;
 		}
 
-		if (options.errorMessage && !errorMessageHasWildcard) {
-			filter.filter.errorMessage = options.errorMessage;
+		if (flags.errorMessage && !errorMessageHasWildcard) {
+			filter.filter.errorMessage = flags.errorMessage;
 		}
 
-		if (options.processDefinitionId) {
-			filter.filter.processDefinitionId = toStringFilter(
-				options.processDefinitionId,
-			);
+		if (processDefinitionId) {
+			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (ctx.between) {
+			const parsed = parseBetween(ctx.between);
 			if (parsed) {
 				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
 			} else {
@@ -952,16 +692,14 @@ export async function searchIncidents(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "search incidents",
-				method: "POST",
-				endpoint: "/incidents/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search incidents",
+			method: "POST",
+			endpoint: "/incidents/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "Incidents", criteria);
 
@@ -975,22 +713,19 @@ export async function searchIncidents(options: {
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((incident) => {
 				if (
-					options.iErrorMessage &&
-					!matchesCaseInsensitive(incident.errorMessage, options.iErrorMessage)
+					flags.ierrorMessage &&
+					!matchesCaseInsensitive(incident.errorMessage, flags.ierrorMessage)
 				)
 					return false;
 				if (
-					options.iProcessDefinitionId &&
-					!matchesCaseInsensitive(
-						incident.processDefinitionId,
-						options.iProcessDefinitionId,
-					)
+					flags.iid &&
+					!matchesCaseInsensitive(incident.processDefinitionId, flags.iid)
 				)
 					return false;
 				if (
 					errorMessageHasWildcard &&
-					options.errorMessage &&
-					!matchesCaseSensitive(incident.errorMessage, options.errorMessage)
+					flags.errorMessage &&
+					!matchesCaseSensitive(incident.errorMessage, flags.errorMessage)
 				)
 					return false;
 				return true;
@@ -1010,12 +745,7 @@ export async function searchIncidents(options: {
 				"Process Instance": incident.processInstanceKey,
 				"Tenant ID": incident.tenantId,
 			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -1024,93 +754,73 @@ export async function searchIncidents(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"incidents",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "incidents", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search incidents", error);
-	}
-}
+	},
+);
 
 /**
  * Search jobs
  */
-export async function searchJobs(options: {
-	profile?: string;
-	state?: string;
-	type?: string;
-	processInstanceKey?: string;
-	processDefinitionKey?: string;
-	iType?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
-	between?: string;
-	dateField?: string;
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	const hasCiFilter = !!options.iType;
+export const searchJobsCommand = defineCommand(
+	"search",
+	"jobs",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const hasCiFilter = !!flags.itype;
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.state) {
-		criteria.push(formatCriterion("state", options.state));
-	}
-	if (options.type) {
-		criteria.push(formatCriterion("type", options.type));
-	}
-	if (options.processInstanceKey) {
-		criteria.push(
-			formatCriterion("Process Instance Key", options.processInstanceKey),
-		);
-	}
-	if (options.processDefinitionKey) {
-		criteria.push(
-			formatCriterion("Process Definition Key", options.processDefinitionKey),
-		);
-	}
-	if (options.iType) {
-		criteria.push(formatCriterion("type", options.iType, true));
-	}
-	if (options.between) {
-		const field = options.dateField ?? "creationTime";
-		criteria.push(`'${field}' between "${options.between}"`);
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (flags.state) {
+			criteria.push(formatCriterion("state", flags.state));
+		}
+		if (flags.type) {
+			criteria.push(formatCriterion("type", flags.type));
+		}
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.processDefinitionKey) {
+			criteria.push(
+				formatCriterion("Process Definition Key", flags.processDefinitionKey),
+			);
+		}
+		if (flags.itype) {
+			criteria.push(formatCriterion("type", flags.itype, true));
+		}
+		if (ctx.between) {
+			const field = ctx.dateField ?? "creationTime";
+			criteria.push(`'${field}' between "${ctx.between}"`);
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.state) {
-			filter.filter.state = options.state;
+		if (flags.state) {
+			filter.filter.state = flags.state;
 		}
 
-		if (options.type) {
-			filter.filter.type = toStringFilter(options.type);
+		if (flags.type) {
+			filter.filter.type = toStringFilter(flags.type);
 		}
 
-		if (options.processInstanceKey) {
-			filter.filter.processInstanceKey = options.processInstanceKey;
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
 		}
 
-		if (options.processDefinitionKey) {
-			filter.filter.processDefinitionKey = options.processDefinitionKey;
+		if (flags.processDefinitionKey) {
+			filter.filter.processDefinitionKey = flags.processDefinitionKey;
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (ctx.between) {
+			const parsed = parseBetween(ctx.between);
 			if (parsed) {
-				const field = options.dateField ?? "creationTime";
+				const field = ctx.dateField ?? "creationTime";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
 				logger.error(
@@ -1120,16 +830,14 @@ export async function searchJobs(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "search jobs",
-				method: "POST",
-				endpoint: "/jobs/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search jobs",
+			method: "POST",
+			endpoint: "/jobs/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "Jobs", criteria);
 
@@ -1142,7 +850,7 @@ export async function searchJobs(options: {
 
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((job) => {
-				if (options.iType && !matchesCaseInsensitive(job.type, options.iType))
+				if (flags.itype && !matchesCaseInsensitive(job.type, flags.itype))
 					return false;
 				return true;
 			});
@@ -1158,12 +866,7 @@ export async function searchJobs(options: {
 				"Process Instance": job.processInstanceKey,
 				"Tenant ID": job.tenantId,
 			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -1172,98 +875,80 @@ export async function searchJobs(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(logger, "jobs", criteria.length > 0, options._unknownFlags);
+			logNoResults(logger, "jobs", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search jobs", error);
-	}
-}
+	},
+);
 
 /**
  * Search variables
  */
-export async function searchVariables(options: {
-	profile?: string;
-	name?: string;
-	value?: string;
-	processInstanceKey?: string;
-	scopeKey?: string;
-	fullValue?: boolean;
-	iName?: string;
-	iValue?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-	_unknownFlags?: string[];
-}): Promise<SearchResult | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-	const hasCiFilter = !!(options.iName || options.iValue);
+export const searchVariablesCommand = defineCommand(
+	"search",
+	"variable",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const hasCiFilter = !!(flags.iname || flags.ivalue);
 
-	// Build search criteria description for user feedback
-	const criteria: string[] = [];
-	if (options.name) {
-		criteria.push(formatCriterion("name", options.name));
-	}
-	if (options.value) {
-		criteria.push(formatCriterion("value", options.value));
-	}
-	if (options.processInstanceKey) {
-		criteria.push(
-			formatCriterion("Process Instance Key", options.processInstanceKey),
-		);
-	}
-	if (options.scopeKey) {
-		criteria.push(formatCriterion("Scope Key", options.scopeKey));
-	}
-	if (options.iName) {
-		criteria.push(formatCriterion("name", options.iName, true));
-	}
-	if (options.iValue) {
-		criteria.push(formatCriterion("value", options.iValue, true));
-	}
-	if (options.fullValue) {
-		criteria.push(formatCriterion("fullValue", true));
-	}
-	try {
+		// Build search criteria description for user feedback
+		const criteria: string[] = [];
+		if (flags.name) {
+			criteria.push(formatCriterion("name", flags.name));
+		}
+		if (flags.value) {
+			criteria.push(formatCriterion("value", flags.value));
+		}
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.scopeKey) {
+			criteria.push(formatCriterion("Scope Key", flags.scopeKey));
+		}
+		if (flags.iname) {
+			criteria.push(formatCriterion("name", flags.iname, true));
+		}
+		if (flags.ivalue) {
+			criteria.push(formatCriterion("value", flags.ivalue, true));
+		}
+		if (flags.fullValue) {
+			criteria.push(formatCriterion("fullValue", true));
+		}
+
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.name) {
-			filter.filter.name = toStringFilter(options.name);
+		if (flags.name) {
+			filter.filter.name = toStringFilter(flags.name);
 		}
 
-		if (options.value) {
-			filter.filter.value = toStringFilter(options.value);
+		if (flags.value) {
+			filter.filter.value = toStringFilter(flags.value);
 		}
 
-		if (options.processInstanceKey) {
-			filter.filter.processInstanceKey = options.processInstanceKey;
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
 		}
 
-		if (options.scopeKey) {
-			filter.filter.scopeKey = options.scopeKey;
+		if (flags.scopeKey) {
+			filter.filter.scopeKey = flags.scopeKey;
 		}
 
 		// By default, truncate values unless --fullValue is specified
-		const truncateValues = !options.fullValue;
+		const truncateValues = !flags.fullValue;
 
-		if (
-			emitDryRun({
-				command: "search variables",
-				method: "POST",
-				endpoint: "/variables/search",
-				profile: options.profile,
-				body: { ...filter, truncateValues },
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search variables",
+			method: "POST",
+			endpoint: "/variables/search",
+			profile,
+			body: { ...filter, truncateValues },
+		});
+		if (dr) return dr;
 
 		logSearchCriteria(logger, "Variables", criteria);
 
@@ -1271,19 +956,16 @@ export async function searchVariables(options: {
 			(f, opts) => client.searchVariables({ ...f, truncateValues }, opts),
 			filter,
 			hasCiFilter ? CI_PAGE_SIZE : DEFAULT_PAGE_SIZE,
-			options.limit,
+			ctx.limit,
 		);
 
 		const result: SearchResult = { items: allItems };
 
 		if (hasCiFilter && result.items) {
 			result.items = result.items.filter((variable) => {
-				if (
-					options.iName &&
-					!matchesCaseInsensitive(variable.name, options.iName)
-				)
+				if (flags.iname && !matchesCaseInsensitive(variable.name, flags.iname))
 					return false;
-				if (options.iValue) {
+				if (flags.ivalue) {
 					// Variable values come JSON-encoded from the API (e.g., '"PendingReview"').
 					// Unwrap the JSON string for comparison so users can match the actual value.
 					let rawValue =
@@ -1296,7 +978,7 @@ export async function searchVariables(options: {
 					} catch {
 						/* keep original value */
 					}
-					if (!matchesCaseInsensitive(rawValue, options.iValue)) return false;
+					if (!matchesCaseInsensitive(rawValue, flags.ivalue)) return false;
 				}
 				return true;
 			});
@@ -1318,12 +1000,7 @@ export async function searchVariables(options: {
 
 				return row;
 			});
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
 			logger.table(tableData);
 			logResultCount(
 				logger,
@@ -1332,22 +1009,13 @@ export async function searchVariables(options: {
 				criteria.length > 0,
 			);
 
-			if (!options.fullValue && result.items.some((v) => v.isTruncated)) {
+			if (!flags.fullValue && result.items.some((v) => v.isTruncated)) {
 				logger.info(
 					"Some values are truncated. Use --fullValue to see full values.",
 				);
 			}
 		} else {
-			logNoResults(
-				logger,
-				"variables",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "variables", criteria.length > 0);
 		}
-
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to search variables", error);
-	}
-}
+	},
+);

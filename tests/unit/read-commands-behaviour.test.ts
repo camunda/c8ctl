@@ -401,9 +401,9 @@ describe('CLI behavioural: search authorizations', () => {
 describe('CLI behavioural: get authorization', () => {
 
   test('--dry-run emits GET to /authorizations/:key', async () => {
-    const result = await c8('get', 'auth', '--dry-run', 'auth-key-42');
+    const result = await c8('get', 'auth', '--dry-run', '12345');
     assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-    assertDryRun(parseJson(result), { method: 'GET', urlSuffix: '/authorizations/auth-key-42' });
+    assertDryRun(parseJson(result), { method: 'GET', urlSuffix: '/authorizations/12345' });
   });
 });
 

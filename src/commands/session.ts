@@ -2,6 +2,7 @@
  * Session management commands (use profile, use tenant, output mode)
  */
 
+import { defineCommand } from "../command-framework.ts";
 import {
 	clearActiveProfile,
 	getProfileOrModeler,
@@ -76,3 +77,44 @@ export function showSessionState(): void {
 	logger.info(`  Output Mode: ${c8ctl.outputMode}`);
 	logger.info("");
 }
+
+// ─── defineCommand wrappers ──────────────────────────────────────────────────
+
+export const outputCommand = defineCommand("output", "", async (ctx) => {
+	if (!ctx.resource) {
+		ctx.logger.info(`Current output mode: ${c8ctl.outputMode}`);
+		if (c8ctl.outputMode === "text") {
+			ctx.logger.info("");
+		}
+		ctx.logger.info("Available modes: json|text");
+		return { kind: "none" };
+	}
+	setOutputFormat(ctx.resource);
+	return { kind: "none" };
+});
+
+export const useProfileCommand = defineCommand(
+	"use",
+	"profile",
+	async (ctx, flags, args) => {
+		if (flags.none) {
+			useProfile("--none");
+			return { kind: "none" };
+		}
+		if (!args.name) {
+			ctx.logger.error("Profile name required. Usage: c8 use profile <name>");
+			process.exit(1);
+		}
+		useProfile(args.name);
+		return { kind: "none" };
+	},
+);
+
+export const useTenantCommand = defineCommand(
+	"use",
+	"tenant",
+	async (_ctx, _flags, args) => {
+		useTenant(args.tenantId);
+		return { kind: "none" };
+	},
+);

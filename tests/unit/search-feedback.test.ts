@@ -1,21 +1,24 @@
 /**
  * Unit tests for search feedback improvements:
- * - Unknown flag detection (detectUnknownSearchFlags)
+ * - Unknown flag detection (detectUnknownFlags — generalised across all verbs)
  * - Empty result messaging with 🕳️ (logNoResults)
  * - Truncation / page-size warnings (logResultCount)
  * - No-filter hints
- * - GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS validation
+ * - GLOBAL_FLAGS and resourceFlags validation
  */
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
-  detectUnknownSearchFlags,
   logNoResults,
   logResultCount,
-  GLOBAL_FLAGS,
-  SEARCH_RESOURCE_FLAGS,
 } from '../../src/commands/search.ts';
+import {
+  COMMAND_REGISTRY,
+  GLOBAL_FLAGS,
+  SEARCH_FLAGS,
+} from '../../src/command-registry.ts';
+import { detectUnknownFlags } from '../../src/command-validation.ts';
 import { Logger, type LogWriter } from '../../src/logger.ts';
 
 /** Create a Logger whose output is captured into arrays for assertions. */
@@ -30,61 +33,61 @@ function createTestLogger(): { logger: Logger; logs: string[]; errors: string[] 
   return { logger, logs, errors };
 }
 
-describe('detectUnknownSearchFlags', () => {
+describe('detectUnknownFlags (search verb)', () => {
   test('returns empty array when no flags are set', () => {
     const values = {};
-    assert.deepStrictEqual(detectUnknownSearchFlags(values, 'process-definition'), []);
+    assert.deepStrictEqual(detectUnknownFlags('search', 'process-definition', values), []);
   });
 
   test('returns empty array when only global flags are set', () => {
     const values = { profile: 'dev', sortBy: 'Name', asc: true };
-    assert.deepStrictEqual(detectUnknownSearchFlags(values, 'process-definition'), []);
+    assert.deepStrictEqual(detectUnknownFlags('search', 'process-definition', values), []);
   });
 
   test('returns empty array when valid resource flags are set', () => {
     const values = { bpmnProcessId: 'my-process', name: 'My Process' };
-    assert.deepStrictEqual(detectUnknownSearchFlags(values, 'process-definition'), []);
+    assert.deepStrictEqual(detectUnknownFlags('search', 'process-definition', values), []);
   });
 
   test('detects unknown flag for process-definitions', () => {
     const values = { assignee: 'john', name: 'My Process' };
-    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    const unknown = detectUnknownFlags('search', 'process-definition', values);
     assert.deepStrictEqual(unknown, ['assignee']);
   });
 
   test('detects unknown flag for user-tasks', () => {
     const values = { name: 'test', state: 'CREATED' };
-    const unknown = detectUnknownSearchFlags(values, 'user-task');
+    const unknown = detectUnknownFlags('search', 'user-task', values);
     assert.deepStrictEqual(unknown, ['name']);
   });
 
   test('detects unknown flag for jobs', () => {
     const values = { assignee: 'john', type: 'email' };
-    const unknown = detectUnknownSearchFlags(values, 'jobs');
+    const unknown = detectUnknownFlags('search', 'jobs', values);
     assert.deepStrictEqual(unknown, ['assignee']);
   });
 
   test('detects unknown flag for variables', () => {
     const values = { type: 'some-type', name: 'myVar' };
-    const unknown = detectUnknownSearchFlags(values, 'variable');
+    const unknown = detectUnknownFlags('search', 'variable', values);
     assert.deepStrictEqual(unknown, ['type']);
   });
 
   test('detects unknown flag for incidents', () => {
     const values = { assignee: 'john', state: 'ACTIVE' };
-    const unknown = detectUnknownSearchFlags(values, 'incident');
+    const unknown = detectUnknownFlags('search', 'incident', values);
     assert.deepStrictEqual(unknown, ['assignee']);
   });
 
   test('ignores undefined and false values', () => {
     const values = { assignee: undefined, errorType: false, state: 'ACTIVE' };
-    const unknown = detectUnknownSearchFlags(values, 'jobs');
+    const unknown = detectUnknownFlags('search', 'jobs', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('detects multiple unknown flags at once', () => {
     const values = { assignee: 'john', errorType: 'IO', type: 'email' };
-    const unknown = detectUnknownSearchFlags(values, 'jobs');
+    const unknown = detectUnknownFlags('search', 'jobs', values);
     // assignee and errorType are not valid for jobs
     assert.ok(unknown.includes('assignee'));
     assert.ok(unknown.includes('errorType'));
@@ -94,87 +97,95 @@ describe('detectUnknownSearchFlags', () => {
   test('handles pluralized resource names (process-definitions → process-definition)', () => {
     const values = { name: 'test' };
     // 'process-definitions' is not a key; the function strips trailing 's' as fallback
-    const unknown = detectUnknownSearchFlags(values, 'process-definitions');
+    const unknown = detectUnknownFlags('search', 'process-definitions', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('handles variables (pluralized → variable)', () => {
     const values = { name: 'myVar', value: 'hello' };
-    const unknown = detectUnknownSearchFlags(values, 'variables');
+    const unknown = detectUnknownFlags('search', 'variables', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--id is valid for process-definition search', () => {
     const values = { id: 'my-process' };
-    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    const unknown = detectUnknownFlags('search', 'process-definition', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--processDefinitionId is valid for process-definition search', () => {
     const values = { processDefinitionId: 'my-process' };
-    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    const unknown = detectUnknownFlags('search', 'process-definition', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--id is valid for process-instance search', () => {
     const values = { id: 'my-process' };
-    const unknown = detectUnknownSearchFlags(values, 'process-instance');
+    const unknown = detectUnknownFlags('search', 'process-instance', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--version is valid for process-instance search (global flag)', () => {
     const values = { version: '2' };
-    const unknown = detectUnknownSearchFlags(values, 'process-instance');
+    const unknown = detectUnknownFlags('search', 'process-instance', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--version is valid for process-definition search (global flag)', () => {
     const values = { version: '3' };
-    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    const unknown = detectUnknownFlags('search', 'process-definition', values);
     assert.deepStrictEqual(unknown, []);
   });
 
   test('--processDefinitionId is valid for incident search', () => {
     const values = { processDefinitionId: 'my-process' };
-    const unknown = detectUnknownSearchFlags(values, 'incident');
+    const unknown = detectUnknownFlags('search', 'incident', values);
     assert.deepStrictEqual(unknown, []);
   });
 
-  test('returns empty array for unknown resource', () => {
+  test('returns empty array for unknown resource (no registry entry)', () => {
     const values = { foo: 'bar' };
-    assert.deepStrictEqual(detectUnknownSearchFlags(values, 'unknown-resource'), []);
+    // Unknown resources have no resource-specific flags; verb-level flags apply
+    const unknown = detectUnknownFlags('search', 'unknown-resource', values);
+    // foo is not in search's merged flags, so it's detected
+    assert.deepStrictEqual(unknown, ['foo']);
   });
 
   test('truly unknown flags (not in any resource) are detected', () => {
     const values = { fooBarBaz: 'test' };
-    const unknown = detectUnknownSearchFlags(values, 'process-definition');
+    const unknown = detectUnknownFlags('search', 'process-definition', values);
     assert.deepStrictEqual(unknown, ['fooBarBaz']);
   });
 });
 
 describe('GLOBAL_FLAGS', () => {
   test('contains expected common flags', () => {
-    assert.ok(GLOBAL_FLAGS.has('profile'));
-    assert.ok(GLOBAL_FLAGS.has('sortBy'));
-    assert.ok(GLOBAL_FLAGS.has('asc'));
-    assert.ok(GLOBAL_FLAGS.has('desc'));
-    assert.ok(GLOBAL_FLAGS.has('help'));
-    assert.ok(GLOBAL_FLAGS.has('version'));
+    assert.ok('profile' in GLOBAL_FLAGS);
+    assert.ok('help' in GLOBAL_FLAGS);
+    assert.ok('version' in GLOBAL_FLAGS);
   });
 
-  test('contains between and dateField (date range filtering applies to all search commands)', () => {
-    assert.ok(GLOBAL_FLAGS.has('between'));
-    assert.ok(GLOBAL_FLAGS.has('dateField'));
+  test('contains dry-run, verbose, fields', () => {
+    assert.ok('dry-run' in GLOBAL_FLAGS);
+    assert.ok('verbose' in GLOBAL_FLAGS);
+    assert.ok('fields' in GLOBAL_FLAGS);
   });
 
-  test('does not contain limit (limit is resource-scoped, not consumed by all handlers)', () => {
-    assert.ok(!GLOBAL_FLAGS.has('limit'));
+  test('SEARCH_FLAGS contains between and dateField', () => {
+    assert.ok('between' in SEARCH_FLAGS);
+    assert.ok('dateField' in SEARCH_FLAGS);
+  });
+
+  test('SEARCH_FLAGS contains sortBy, asc, desc', () => {
+    assert.ok('sortBy' in SEARCH_FLAGS);
+    assert.ok('asc' in SEARCH_FLAGS);
+    assert.ok('desc' in SEARCH_FLAGS);
   });
 
   test('--between is not flagged as unknown for any search resource', () => {
     const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
     for (const resource of resources) {
-      const unknown = detectUnknownSearchFlags({ between: '2024-01-01..2024-12-31' }, resource);
+      const unknown = detectUnknownFlags('search', resource, { between: '2024-01-01..2024-12-31' });
       assert.deepStrictEqual(unknown, [], `--between incorrectly flagged as unknown for '${resource}'`);
     }
   });
@@ -182,133 +193,122 @@ describe('GLOBAL_FLAGS', () => {
   test('--dateField is not flagged as unknown for any search resource', () => {
     const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
     for (const resource of resources) {
-      const unknown = detectUnknownSearchFlags({ dateField: 'startDate' }, resource);
+      const unknown = detectUnknownFlags('search', resource, { dateField: 'startDate' });
       assert.deepStrictEqual(unknown, [], `--dateField incorrectly flagged as unknown for '${resource}'`);
     }
   });
 });
 
-describe('SEARCH_RESOURCE_FLAGS', () => {
+describe('search resourceFlags (from registry)', () => {
+  const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
+
   test('process-definition includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['process-definition'];
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('name'));
-    assert.ok(flags.has('key'));
-    assert.ok(flags.has('iid'));
-    assert.ok(flags.has('iname'));
+    const flags = resourceFlags['process-definition'];
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('name' in flags);
+    assert.ok('key' in flags);
+    assert.ok('iid' in flags);
+    assert.ok('iname' in flags);
   });
 
   test('process-instance includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['process-instance'];
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('key'));
-    assert.ok(flags.has('parentProcessInstanceKey'));
-    assert.ok(flags.has('iid'));
+    const flags = resourceFlags['process-instance'];
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('state' in flags);
+    assert.ok('key' in flags);
+    assert.ok('parentProcessInstanceKey' in flags);
+    assert.ok('iid' in flags);
   });
 
   test('user-task includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['user-task'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('assignee'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('elementId'));
-    assert.ok(flags.has('iassignee'));
+    const flags = resourceFlags['user-task'];
+    assert.ok('state' in flags);
+    assert.ok('assignee' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('elementId' in flags);
+    assert.ok('iassignee' in flags);
   });
 
   test('incident includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['incident'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('bpmnProcessId'));
-    assert.ok(flags.has('id'));
-    assert.ok(flags.has('processDefinitionId'));
-    assert.ok(flags.has('errorType'));
-    assert.ok(flags.has('errorMessage'));
-    assert.ok(flags.has('ierrorMessage'));
-    assert.ok(flags.has('iid'));
+    const flags = resourceFlags['incident'];
+    assert.ok('state' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('bpmnProcessId' in flags);
+    assert.ok('id' in flags);
+    assert.ok('processDefinitionId' in flags);
+    assert.ok('errorType' in flags);
+    assert.ok('errorMessage' in flags);
+    assert.ok('ierrorMessage' in flags);
+    assert.ok('iid' in flags);
   });
 
   test('jobs includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['jobs'];
-    assert.ok(flags.has('state'));
-    assert.ok(flags.has('type'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('processDefinitionKey'));
-    assert.ok(flags.has('itype'));
+    const flags = resourceFlags['jobs'];
+    assert.ok('state' in flags);
+    assert.ok('type' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('processDefinitionKey' in flags);
+    assert.ok('itype' in flags);
   });
 
   test('variable includes all expected flags', () => {
-    const flags = SEARCH_RESOURCE_FLAGS['variable'];
-    assert.ok(flags.has('name'));
-    assert.ok(flags.has('value'));
-    assert.ok(flags.has('processInstanceKey'));
-    assert.ok(flags.has('scopeKey'));
-    assert.ok(flags.has('fullValue'));
-    assert.ok(flags.has('iname'));
-    assert.ok(flags.has('ivalue'));
-    assert.ok(flags.has('limit'));
+    const flags = resourceFlags['variable'];
+    assert.ok('name' in flags);
+    assert.ok('value' in flags);
+    assert.ok('processInstanceKey' in flags);
+    assert.ok('scopeKey' in flags);
+    assert.ok('fullValue' in flags);
+    assert.ok('iname' in flags);
+    assert.ok('ivalue' in flags);
+    // limit is in shared SEARCH_FLAGS, not per-resource
   });
 
   test('all resources have entries', () => {
     const resources = ['process-definition', 'process-instance', 'user-task', 'incident', 'jobs', 'variable'];
     for (const resource of resources) {
-      assert.ok(SEARCH_RESOURCE_FLAGS[resource], `Missing entry for ${resource}`);
-      assert.ok(SEARCH_RESOURCE_FLAGS[resource].size > 0, `Empty flags for ${resource}`);
+      assert.ok(resourceFlags[resource], `Missing entry for ${resource}`);
+      assert.ok(Object.keys(resourceFlags[resource]).length > 0, `Empty flags for ${resource}`);
     }
   });
 
-  test('identity resources have limit in their per-resource sets', () => {
-    const identityResources = ['user', 'role', 'group', 'tenant', 'authorization', 'mapping-rule'];
-    for (const resource of identityResources) {
+  test('limit is in shared SEARCH_FLAGS (valid for all search/list resources)', () => {
+    assert.ok('limit' in SEARCH_FLAGS, 'limit should be in shared SEARCH_FLAGS');
+    // Verify limit is NOT redundantly in per-resource sets
+    for (const [resource, flags] of Object.entries(resourceFlags)) {
       assert.ok(
-        SEARCH_RESOURCE_FLAGS[resource]?.has('limit'),
-        `Identity resource '${resource}' should have 'limit' in its SEARCH_RESOURCE_FLAGS`,
+        !('limit' in flags),
+        `'limit' should not be in resourceFlags['${resource}'] — it's in shared SEARCH_FLAGS`,
       );
     }
   });
 });
 
-// ─── Structural invariant: GLOBAL_FLAGS ↔ shared search infrastructure ─────────────
-// GLOBAL_FLAGS must only contain flags consumed by ALL search handlers.
-// Resource-specific flags belong in SEARCH_RESOURCE_FLAGS instead.
-// This test guards against adding a flag to GLOBAL_FLAGS that is then
-// silently ignored by handlers that don't consume it.
+// ─── Structural invariant: flag scoping integrity ─────────────────────────────
+// GLOBAL_FLAGS and SEARCH_FLAGS should not overlap with per-resource flags.
+// This guards against adding a flag to global scope that then silently hides
+// resource-specific unknown-flag detection.
 
-describe('GLOBAL_FLAGS — structural invariant', () => {
-  // Flags that are CLI infrastructure (not search-API-related) and are
-  // unconditionally valid regardless of which handler runs.
-  const CLI_INFRA_FLAGS = new Set(['profile', 'help', 'version']);
+describe('Flag scoping — structural invariant', () => {
+  const globalAndShared = new Set([
+    ...Object.keys(GLOBAL_FLAGS),
+    ...Object.keys(SEARCH_FLAGS),
+  ]);
 
-  // Flags consumed by shared search infrastructure (fetchAllPages sort,
-  // buildDateFilter) so they genuinely apply to every search resource.
-  const SHARED_INFRA_FLAGS = new Set(['sortBy', 'asc', 'desc', 'between', 'dateField']);
-
-  test('every flag in GLOBAL_FLAGS is either CLI infrastructure or shared search infrastructure', () => {
-    const allowed = new Set([...CLI_INFRA_FLAGS, ...SHARED_INFRA_FLAGS]);
-    for (const flag of GLOBAL_FLAGS) {
-      assert.ok(
-        allowed.has(flag),
-        `'${flag}' is in GLOBAL_FLAGS but is not in CLI_INFRA_FLAGS or SHARED_INFRA_FLAGS. ` +
-        `If this flag is only consumed by some search handlers, move it to SEARCH_RESOURCE_FLAGS instead.`,
-      );
-    }
-  });
-
-  test('GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS do not overlap (no redundant entries)', () => {
-    for (const [resource, flags] of Object.entries(SEARCH_RESOURCE_FLAGS)) {
-      for (const flag of flags) {
+  test('GLOBAL_FLAGS and search resourceFlags do not overlap', () => {
+    const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
+    for (const [resource, flags] of Object.entries(resourceFlags)) {
+      for (const flag of Object.keys(flags)) {
         assert.ok(
-          !GLOBAL_FLAGS.has(flag),
-          `'${flag}' appears in both GLOBAL_FLAGS and SEARCH_RESOURCE_FLAGS['${resource}']. ` +
-          `It should be in one place only: GLOBAL_FLAGS if consumed by all handlers, SEARCH_RESOURCE_FLAGS otherwise.`,
+          !globalAndShared.has(flag),
+          `'${flag}' appears in both global/shared flags and resourceFlags['${resource}']. ` +
+          `It should be in one place only.`,
         );
       }
     }

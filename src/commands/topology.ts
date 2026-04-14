@@ -2,32 +2,26 @@
  * Topology commands
  */
 
-import { createClient, emitDryRun } from "../client.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger } from "../logger.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 
 /**
  * Get cluster topology
  */
-export async function getTopology(options: {
-	profile?: string;
-}): Promise<void> {
-	if (
-		emitDryRun({
+export const getTopologyCommand = defineCommand(
+	"get",
+	"topology",
+	async (ctx) => {
+		const { client, profile } = ctx;
+
+		const dr = dryRun({
 			command: "get topology",
 			method: "GET",
 			endpoint: "/topology",
-			profile: options.profile,
-		})
-	)
-		return;
-	const logger = getLogger();
-	const client = createClient(options.profile);
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getTopology();
-		logger.json(result);
-	} catch (error) {
-		handleCommandError(logger, "Failed to get topology", error);
-	}
-}
+		return { kind: "get", data: result };
+	},
+);

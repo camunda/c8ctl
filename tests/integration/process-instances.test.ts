@@ -1,36 +1,53 @@
 /**
  * Integration tests for process instances
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
- * 
- * These tests validate the project's wrapper functions in src/commands/process-instances.ts,
- * not the underlying @camunda8/orchestration-cluster-api npm module directly.
+ *
+ * These tests validate end-to-end CLI behaviour, not internal function signatures.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { deploy } from '../../src/commands/deployments.ts';
-import { 
-  createProcessInstance, 
-  listProcessInstances
-} from '../../src/commands/process-instances.ts';
+import { createClient } from '../../src/client.ts';
 import { todayRange } from '../utils/date-helpers.ts';
 import { pollUntil } from '../utils/polling.ts';
+import { asyncSpawn } from '../utils/spawn.ts';
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 // Polling configuration for Elasticsearch consistency
 const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
 
+const PROJECT_ROOT = resolve(import.meta.dirname, '..', '..');
+const CLI = join(PROJECT_ROOT, 'src', 'index.ts');
+
+type ProcessInstanceRow = { Key: string | number; 'Process ID': string; State: string; Version: number; 'Start Date': string; 'Tenant ID': string; };
+
+function cli(dataDir: string, ...args: string[]) {
+  return asyncSpawn('node', ['--experimental-strip-types', CLI, ...args], {
+    cwd: PROJECT_ROOT,
+    env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+  });
+}
+
+function parseItems<T>(stdout: string): T[] {
+  if (!stdout.trim()) return [];
+  return JSON.parse(stdout) as T[];
+}
+
 describe('Process Instance Integration Tests (requires Camunda 8 at localhost:8080)', () => {
   let testDir: string;
   let originalEnv: NodeJS.ProcessEnv;
+  const client = createClient();
 
-  beforeEach(() => {
+  beforeEach(async () => {
     testDir = mkdtempSync(join(tmpdir(), 'c8ctl-process-instances-test-'));
     originalEnv = { ...process.env };
     process.env.C8CTL_DATA_DIR = testDir;
+    // Set JSON output mode for CLI-based tests that parse stdout
+    await cli(testDir, 'output', 'json');
   });
 
   afterEach(() => {
@@ -44,8 +61,8 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // First deploy a process to ensure it exists
     await deploy(['tests/fixtures/simple.bpmn'], {});
     
-    // Create process instance using the project's wrapper function
-    const result = await createProcessInstance({
+    // Create process instance using the SDK client directly
+    const result = await client.createProcessInstance({
       processDefinitionId: 'simple-process',
     });
     
@@ -58,43 +75,30 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     );
   });
 
-  test('list process instances filters by process definition', async () => {
-    // First deploy and create an instance
+  test('list process instances filters by process definition via CLI', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({
+    await client.createProcessInstance({
       processDefinitionId: 'simple-process',
     });
-    
-    // List process instances using the project's wrapper function
-    const result = await listProcessInstances({ processDefinitionId: 'simple-process', all: true });
-    
-    // Verify result is returned and has expected structure
-    assert.ok(result, 'Result should be returned');
-    assert.ok(Array.isArray(result.items), 'Result should have items array');
-    // Note: items may be empty if Elasticsearch hasn't indexed yet, so we just verify structure
+
+    // Use CLI to list and verify it runs without error
+    const result = await cli(testDir, 'list', 'pi', '--id', 'simple-process', '--all');
+    assert.strictEqual(result.status, 0, `CLI should succeed. stderr: ${result.stderr}`);
   });
 
-  test('list process instances respects --limit', async () => {
-    // Deploy and create a few instances
+  test('list process instances respects --limit via CLI', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await client.createProcessInstance({ processDefinitionId: 'simple-process' });
+    await client.createProcessInstance({ processDefinitionId: 'simple-process' });
+    await client.createProcessInstance({ processDefinitionId: 'simple-process' });
 
-    // List with limit=2 using the project's wrapper function
-    const result = await listProcessInstances({
-      processDefinitionId: 'simple-process',
-      all: true,
-      limit: 2,
-    });
-
-    assert.ok(result, 'Result should be returned');
-    assert.ok(Array.isArray(result.items), 'Result should have items array');
-    assert.ok(result.items.length <= 2, `--limit 2 should return at most 2 items, got ${result.items.length}`);
+    const result = await cli(testDir, 'list', 'pi', '--all', '--limit', '2');
+    assert.strictEqual(result.status, 0, `CLI should succeed. stderr: ${result.stderr}`);
+    const items = parseItems<ProcessInstanceRow>(result.stdout);
+    assert.ok(items.length <= 2, `--limit 2 should return at most 2 items, got ${items.length}`);
   });
 
-  test('list process instances filters by version', async () => {
-    // Use a unique process ID so version numbering starts at 1 regardless of server state
+  test('list process instances filters by version via CLI', async () => {
     const uniqueId = `version-test-${Date.now()}`;
     const baseBpmn = readFileSync('tests/fixtures/simple.bpmn', 'utf8')
       .replace('id="simple-process"', `id="${uniqueId}"`);
@@ -103,7 +107,7 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     const v1Path = join(testDir, 'v1.bpmn');
     writeFileSync(v1Path, baseBpmn);
     await deploy([v1Path], {});
-    await createProcessInstance({ processDefinitionId: uniqueId });
+    await client.createProcessInstance({ processDefinitionId: uniqueId });
 
     // Deploy v2 with a minimal change (different task name)
     const v2Bpmn = baseBpmn
@@ -111,104 +115,80 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     const v2Path = join(testDir, 'v2.bpmn');
     writeFileSync(v2Path, v2Bpmn);
     await deploy([v2Path], {});
-    await createProcessInstance({ processDefinitionId: uniqueId });
+    await client.createProcessInstance({ processDefinitionId: uniqueId });
 
-    // Wait for both versions to be indexed
+    // Wait for both versions to be indexed via CLI
     const v1Indexed = await pollUntil(async () => {
-      const result = await listProcessInstances({
-        processDefinitionId: uniqueId,
-        version: 1,
-        all: true,
-      });
-      return result !== undefined && result.items.length > 0;
+      const result = await cli(testDir, 'search', 'pi', '--id', uniqueId, '--version', '1');
+      return result.status === 0 && parseItems<ProcessInstanceRow>(result.stdout).length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(v1Indexed, 'Version 1 instances should be indexed');
 
     const v2Indexed = await pollUntil(async () => {
-      const result = await listProcessInstances({
-        processDefinitionId: uniqueId,
-        version: 2,
-        all: true,
-      });
-      return result !== undefined && result.items.length > 0;
+      const result = await cli(testDir, 'search', 'pi', '--id', uniqueId, '--version', '2');
+      return result.status === 0 && parseItems<ProcessInstanceRow>(result.stdout).length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
     assert.ok(v2Indexed, 'Version 2 instances should be indexed');
 
     // Verify version filtering is exclusive
-    const v1Result = await listProcessInstances({
-      processDefinitionId: uniqueId,
-      version: 1,
-      all: true,
-    });
-    assert.ok(v1Result, 'v1 result should be returned');
-    assert.ok(v1Result.items.length > 0, 'Should find v1 instances');
+    const v1Result = await cli(testDir, 'search', 'pi', '--id', uniqueId, '--version', '1');
+    const v1Items = parseItems<ProcessInstanceRow>(v1Result.stdout);
+    assert.ok(v1Items.length > 0, 'Should find v1 instances');
     assert.ok(
-      v1Result.items.every((pi) => Number((pi as Record<string, unknown>).processDefinitionVersion ?? (pi as Record<string, unknown>).version) === 1),
+      v1Items.every((pi) => Number(pi.Version) === 1),
       'All version 1 results should be version 1',
     );
 
-    const v2Result = await listProcessInstances({
-      processDefinitionId: uniqueId,
-      version: 2,
-      all: true,
-    });
-    assert.ok(v2Result, 'v2 result should be returned');
-    assert.ok(v2Result.items.length > 0, 'Should find v2 instances');
+    const v2Result = await cli(testDir, 'search', 'pi', '--id', uniqueId, '--version', '2');
+    const v2Items = parseItems<ProcessInstanceRow>(v2Result.stdout);
+    assert.ok(v2Items.length > 0, 'Should find v2 instances');
     assert.ok(
-      v2Result.items.every((pi) => Number((pi as Record<string, unknown>).processDefinitionVersion ?? (pi as Record<string, unknown>).version) === 2),
+      v2Items.every((pi) => Number(pi.Version) === 2),
       'All version 2 results should be version 2',
     );
   });
 
-  test('list process instances --limit via CLI', async () => {
+  test('list process instances --limit via CLI produces correct output', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await client.createProcessInstance({ processDefinitionId: 'simple-process' });
 
-    const { execSync } = await import('node:child_process');
-    const output = execSync(
-      'node --no-warnings src/index.ts list pi --all --limit 1',
-      { encoding: 'utf8', cwd: process.cwd() }
-    );
+    const result = await cli(testDir, 'list', 'pi', '--all', '--limit', '1');
+    assert.strictEqual(result.status, 0, `CLI should succeed. stderr: ${result.stderr}`);
 
-    // Table output: header + separator + data rows
-    const dataRows = output.trim().split('\n').filter(line => !line.startsWith('---') && line.trim().length > 0);
-    // First row is header, remaining are data
-    const itemCount = dataRows.length - 1;
-    assert.ok(itemCount <= 1, `--limit 1 should produce at most 1 data row, got ${itemCount}`);
+    // JSON mode: output should be parseable array with at most 1 item
+    const items = parseItems<ProcessInstanceRow>(result.stdout);
+    assert.ok(items.length <= 1, `--limit 1 should produce at most 1 item, got ${items.length}`);
   });
 
   test('cancel process instance CLI handles errors gracefully', async () => {
     // Deploy and create an instance
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    const result = await createProcessInstance({
+    const result = await client.createProcessInstance({
       processDefinitionId: 'simple-process',
     });
     
     assert.ok(result, 'Create result should exist');
     const instanceKey = result.processInstanceKey.toString();
     
+    // Reset to text mode for this test (cancel output is not JSON)
+    await cli(testDir, 'output', 'text');
+    
     // Run CLI command - simple-process completes instantly, so cancel will fail
     // We test that the CLI handles this gracefully (exits with error, not crash)
-    const { execSync } = await import('node:child_process');
+    const cancelResult = await cli(testDir, 'cancel', 'pi', instanceKey);
     
-    try {
-      execSync(
-        `node src/index.ts cancel pi --key ${instanceKey}`,
-        { encoding: 'utf8', cwd: process.cwd(), stdio: 'pipe' }
-      );
+    if (cancelResult.status === 0) {
       // If it succeeded, the process was still running (unlikely for simple-process)
       assert.ok(true, 'Process instance cancellation succeeded');
-    } catch (error: any) {
+    } else {
       // CLI should exit with non-zero code when process already completed
-      assert.ok(error.status !== 0, 'CLI should exit with non-zero status for already completed process');
-      // Check that error output contains an error message (either 'Failed', 'NOT_FOUND', or '✗')
-      const hasErrorMessage = error.stderr && (
-        error.stderr.includes('Failed') || 
-        error.stderr.includes('NOT_FOUND') ||
-        error.stderr.includes('✗')
-      );
+      const combinedOutput = `${cancelResult.stdout}\n${cancelResult.stderr}`;
+      const hasErrorMessage = 
+        combinedOutput.includes('Failed') || 
+        combinedOutput.includes('NOT_FOUND') ||
+        combinedOutput.includes('✗');
       assert.ok(hasErrorMessage, 
-        `CLI should output error message for already completed process. Got stderr: ${error.stderr}`);
+        `CLI should output error message for already completed process. Got: ${combinedOutput}`);
     }
   });
 
@@ -216,8 +196,8 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Deploy a simple process first
     await deploy(['tests/fixtures/simple.bpmn'], {});
     
-    // Test with awaitCompletion flag using the project's wrapper function
-    const result = await createProcessInstance({
+    // Test with awaitCompletion flag using the SDK client directly
+    const result = await client.createProcessInstance({
       processDefinitionId: 'simple-process',
       awaitCompletion: true,
     });
@@ -232,58 +212,45 @@ describe('Process Instance Integration Tests (requires Camunda 8 at localhost:80
     // Deploy a simple process first
     await deploy(['tests/fixtures/simple.bpmn'], {});
     
-    // Run the CLI command as a subprocess to test the full integration
-    const { execSync } = await import('node:child_process');
+    // Reset to text mode for this test which checks text output
+    await cli(testDir, 'output', 'text');
     
-    // Execute the CLI command and capture output (using node directly since Node 22+ supports TS)
-    const output = execSync(
-      'node src/index.ts create pi --id simple-process --awaitCompletion',
-      { encoding: 'utf8', cwd: process.cwd() }
-    );
+    // Execute the CLI command and capture output
+    const result = await cli(testDir, 'create', 'pi', '--id', 'simple-process', '--awaitCompletion');
     
     // Verify the output indicates successful completion
-    assert.ok(output.includes('completed'), 'Output should indicate process completed');
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.ok(output.includes('completed'), `Output should indicate process completed. Got: ${output}`);
     // Verify that variables are present in the output (JSON response should contain "variables")
-    assert.ok(output.includes('variables'), 'Output should contain variables when awaitCompletion is true');
+    assert.ok(output.includes('variables'), `Output should contain variables when awaitCompletion is true. Got: ${output}`);
 
     // Also test the 'await pi' command which is an alias for 'create pi --awaitCompletion'
-    const outputWithAlias = execSync(
-      'node src/index.ts await pi --id simple-process',
-      { encoding: 'utf8', cwd: process.cwd() }
-    );
+    const aliasResult = await cli(testDir, 'await', 'pi', '--id', 'simple-process');
     
     // Verify the alias works the same way
-    assert.ok(outputWithAlias.includes('completed'), 'Output with await alias should indicate process completed');
-    assert.ok(outputWithAlias.includes('variables'), 'Output with await alias should contain variables');
+    const aliasOutput = `${aliasResult.stdout}\n${aliasResult.stderr}`;
+    assert.ok(aliasOutput.includes('completed'), `Output with await alias should indicate process completed. Got: ${aliasOutput}`);
+    assert.ok(aliasOutput.includes('variables'), `Output with await alias should contain variables. Got: ${aliasOutput}`);
   });
 
-  test('listProcessInstances with --between spanning today finds recently created instance', async () => {
+  test('list pi --between spanning today finds recently created instance via CLI', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
-    await createProcessInstance({ processDefinitionId: 'simple-process' });
+    await client.createProcessInstance({ processDefinitionId: 'simple-process' });
 
     const found = await pollUntil(async () => {
-      const result = await listProcessInstances({
-        processDefinitionId: 'simple-process',
-        state: 'COMPLETED',
-        between: todayRange(),
-      });
-      return !!(result?.items && result.items.length > 0);
+      const result = await cli(testDir, 'list', 'pi', '--id', 'simple-process', '--state', 'COMPLETED', '--between', todayRange());
+      return result.status === 0 && parseItems<ProcessInstanceRow>(result.stdout).length > 0;
     }, POLL_TIMEOUT_MS, POLL_INTERVAL_MS);
 
-    assert.ok(found, '--between spanning today should find recently completed process instances in list');
+    assert.ok(found, '--between spanning today should find recently completed process instances');
   });
 
-  test('listProcessInstances with --between in far past returns no instances', async () => {
+  test('list pi --between in far past returns no instances via CLI', async () => {
     await deploy(['tests/fixtures/simple.bpmn'], {});
 
-    // Use a date range well before any current test run
-    const result = await listProcessInstances({
-      processDefinitionId: 'simple-process',
-      state: 'COMPLETED',
-      between: '2000-01-01..2000-01-02',
-    });
-
-    assert.ok(result, 'Result should be returned even when empty');
-    assert.strictEqual(result!.items.length, 0, '--between with past date range should return no instances');
+    const result = await cli(testDir, 'list', 'pi', '--id', 'simple-process', '--state', 'COMPLETED', '--between', '2000-01-01..2000-01-02');
+    assert.strictEqual(result.status, 0, `CLI should succeed. stderr: ${result.stderr}`);
+    const items = parseItems<ProcessInstanceRow>(result.stdout);
+    assert.strictEqual(items.length, 0, '--between with past date range should return no instances');
   });
 });

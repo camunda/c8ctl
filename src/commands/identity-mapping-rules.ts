@@ -2,107 +2,78 @@
  * Identity mapping rule commands
  */
 
-import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
-import { resolveClusterConfig } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
+import { getLogger, sortTableData } from "../logger.ts";
 
 /**
  * List all mapping rules
  */
-export async function listMappingRules(options: {
-	profile?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const listMappingRulesCommand = defineCommand(
+	"list",
+	"mapping-rule",
+	async (ctx) => {
+		const { client, profile, limit } = ctx;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "list mapping-rules",
 			method: "POST",
 			endpoint: "/mapping-rules/search",
-			profile: options.profile,
+			profile,
 			body: {},
-		})
-	)
-		return;
+		});
+		if (dr) return dr;
 
-	try {
 		const items = await fetchAllPages(
 			(filter, opts) => client.searchMappingRule(filter, opts),
 			{},
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (items.length === 0) {
-			logger.info("No mapping rules found");
-			return;
-		}
-
-		let tableData = items.map((m) => ({
-			"Mapping Rule ID": m.mappingRuleId ?? "",
-			Name: m.name ?? "",
-			"Claim Name": m.claimName ?? "",
-			"Claim Value": m.claimValue ?? "",
-		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
-		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to list mapping rules", error);
-	}
-}
-
+		return {
+			kind: "list",
+			items: items.map((m) => ({
+				"Mapping Rule ID": m.mappingRuleId ?? "",
+				Name: m.name ?? "",
+				"Claim Name": m.claimName ?? "",
+				"Claim Value": m.claimValue ?? "",
+			})),
+			emptyMessage: "No mapping rules found",
+		};
+	},
+);
 /**
  * Search mapping rules with filters
  */
-export async function searchIdentityMappingRules(options: {
-	profile?: string;
-	mappingRuleId?: string;
-	name?: string;
-	claimName?: string;
-	claimValue?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const searchIdentityMappingRulesCommand = defineCommand(
+	"search",
+	"mapping-rule",
+	async (ctx, flags, _args) => {
+		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
 
-	try {
 		const filter: Record<string, unknown> = {};
-		if (options.mappingRuleId) filter.mappingRuleId = options.mappingRuleId;
-		if (options.name) filter.name = options.name;
-		if (options.claimName) filter.claimName = options.claimName;
-		if (options.claimValue) filter.claimValue = options.claimValue;
+		if (flags.mappingRuleId) filter.mappingRuleId = flags.mappingRuleId;
+		if (flags.name) filter.name = flags.name;
+		if (flags.claimName) filter.claimName = flags.claimName;
+		if (flags.claimValue) filter.claimValue = flags.claimValue;
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (
-			emitDryRun({
-				command: "search mapping-rules",
-				method: "POST",
-				endpoint: "/mapping-rules/search",
-				profile: options.profile,
-				body: searchFilter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search mapping-rules",
+			method: "POST",
+			endpoint: "/mapping-rules/search",
+			profile,
+			body: searchFilter,
+		});
+		if (dr) return dr;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchMappingRule(f, opts),
 			searchFilter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
 		if (items.length === 0) {
@@ -116,146 +87,107 @@ export async function searchIdentityMappingRules(options: {
 			"Claim Name": m.claimName ?? "",
 			"Claim Value": m.claimValue ?? "",
 		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
+		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
 		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to search mapping rules", error);
-	}
-}
+	},
+);
 
 /**
  * Get a single mapping rule by mappingRuleId
  */
-export async function getIdentityMappingRule(
-	mappingRuleId: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const getIdentityMappingRuleCommand = defineCommand(
+	"get",
+	"mapping-rule",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const mappingRuleId = args.mappingRuleId;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "get mapping-rule",
 			method: "GET",
 			endpoint: `/mapping-rules/${mappingRuleId}`,
-			profile: options.profile,
-		})
-	)
-		return;
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getMappingRule(
-			{ mappingRuleId: mappingRuleId },
+			{ mappingRuleId },
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		logger.json(result);
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to get mapping rule '${mappingRuleId}'`,
-			error,
-		);
-	}
-}
+		return { kind: "get", data: result };
+	},
+);
 
 /**
  * Create a new mapping rule
  */
-export async function createIdentityMappingRule(options: {
-	profile?: string;
-	mappingRuleId?: string;
-	name?: string;
-	claimName?: string;
-	claimValue?: string;
-}): Promise<void> {
-	const logger = getLogger();
+export const createIdentityMappingRuleCommand = defineCommand(
+	"create",
+	"mapping-rule",
+	async (ctx, flags, _args) => {
+		const { client, profile } = ctx;
 
-	if (!options.mappingRuleId) {
-		logger.error("--mappingRuleId is required");
-		process.exit(1);
-	}
-	if (!options.name) {
-		logger.error("--name is required");
-		process.exit(1);
-	}
-	if (!options.claimName) {
-		logger.error("--claimName is required");
-		process.exit(1);
-	}
-	if (!options.claimValue) {
-		logger.error("--claimValue is required");
-		process.exit(1);
-	}
+		if (!flags.mappingRuleId) {
+			getLogger().error("--mappingRuleId is required");
+			process.exit(1);
+		}
+		if (!flags.name) {
+			getLogger().error("--name is required");
+			process.exit(1);
+		}
+		if (!flags.claimName) {
+			getLogger().error("--claimName is required");
+			process.exit(1);
+		}
+		if (!flags.claimValue) {
+			getLogger().error("--claimValue is required");
+			process.exit(1);
+		}
 
-	const body = {
-		mappingRuleId: options.mappingRuleId,
-		name: options.name,
-		claimName: options.claimName,
-		claimValue: options.claimValue,
-	};
+		const body = {
+			mappingRuleId: flags.mappingRuleId,
+			name: flags.name,
+			claimName: flags.claimName,
+			claimValue: flags.claimValue,
+		};
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "create mapping-rule",
 			method: "POST",
-			url: `${config.baseUrl}/mapping-rules`,
+			endpoint: "/mapping-rules",
+			profile,
 			body,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
 		await client.createMappingRule(body);
-		logger.success(`Mapping rule '${options.name}' created`);
-	} catch (error) {
-		handleCommandError(logger, "Failed to create mapping rule", error);
-	}
-}
+		return { kind: "success", message: `Mapping rule '${flags.name}' created` };
+	},
+);
 
 /**
  * Delete a mapping rule by mappingRuleId
  */
-export async function deleteIdentityMappingRule(
-	mappingRuleId: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const deleteIdentityMappingRuleCommand = defineCommand(
+	"delete",
+	"mapping-rule",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const mappingRuleId = args.mappingRuleId;
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "delete mapping-rule",
 			method: "DELETE",
-			url: `${config.baseUrl}/mapping-rules/${encodeURIComponent(mappingRuleId)}`,
+			endpoint: `/mapping-rules/${encodeURIComponent(mappingRuleId)}`,
+			profile,
 			body: null,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		await client.deleteMappingRule({ mappingRuleId: mappingRuleId });
-		logger.success(`Mapping rule '${mappingRuleId}' deleted`);
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to delete mapping rule '${mappingRuleId}'`,
-			error,
-		);
-	}
-}
+		await client.deleteMappingRule({ mappingRuleId });
+		return {
+			kind: "success",
+			message: `Mapping rule '${mappingRuleId}' deleted`,
+		};
+	},
+);

@@ -2,103 +2,75 @@
  * Identity tenant commands
  */
 
-import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
-import { resolveClusterConfig } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
+import { getLogger, sortTableData } from "../logger.ts";
 
 /**
  * List all tenants
  */
-export async function listTenants(options: {
-	profile?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const listTenantsCommand = defineCommand(
+	"list",
+	"tenant",
+	async (ctx) => {
+		const { client, profile, limit } = ctx;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "list tenants",
 			method: "POST",
 			endpoint: "/tenants/search",
-			profile: options.profile,
+			profile,
 			body: {},
-		})
-	)
-		return;
+		});
+		if (dr) return dr;
 
-	try {
 		const items = await fetchAllPages(
 			(filter, opts) => client.searchTenants(filter, opts),
 			{},
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (items.length === 0) {
-			logger.info("No tenants found");
-			return;
-		}
-
-		let tableData = items.map((t) => ({
-			"Tenant ID": t.tenantId ?? "",
-			Name: t.name ?? "",
-			Description: t.description ?? "",
-		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
-		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to list tenants", error);
-	}
-}
-
+		return {
+			kind: "list",
+			items: items.map((t) => ({
+				"Tenant ID": t.tenantId ?? "",
+				Name: t.name ?? "",
+				Description: t.description ?? "",
+			})),
+			emptyMessage: "No tenants found",
+		};
+	},
+);
 /**
  * Search tenants with filters
  */
-export async function searchIdentityTenants(options: {
-	profile?: string;
-	tenantId?: string;
-	name?: string;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-}): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const searchIdentityTenantsCommand = defineCommand(
+	"search",
+	"tenant",
+	async (ctx, flags, _args) => {
+		const { client, logger, profile, limit, sortBy, sortOrder } = ctx;
 
-	try {
 		const filter: Record<string, unknown> = {};
-		if (options.tenantId) filter.tenantId = options.tenantId;
-		if (options.name) filter.name = options.name;
+		if (flags.tenantId) filter.tenantId = flags.tenantId;
+		if (flags.name) filter.name = flags.name;
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		if (
-			emitDryRun({
-				command: "search tenants",
-				method: "POST",
-				endpoint: "/tenants/search",
-				profile: options.profile,
-				body: searchFilter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "search tenants",
+			method: "POST",
+			endpoint: "/tenants/search",
+			profile,
+			body: searchFilter,
+		});
+		if (dr) return dr;
 
 		const items = await fetchAllPages(
 			(f, opts) => client.searchTenants(f, opts),
 			searchFilter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
 		if (items.length === 0) {
@@ -111,126 +83,94 @@ export async function searchIdentityTenants(options: {
 			Name: t.name ?? "",
 			Description: t.description ?? "",
 		}));
-		tableData = sortTableData(
-			tableData,
-			options.sortBy,
-			logger,
-			options.sortOrder,
-		);
+		tableData = sortTableData(tableData, sortBy, logger, sortOrder);
 		logger.table(tableData);
-	} catch (error) {
-		handleCommandError(logger, "Failed to search tenants", error);
-	}
-}
+	},
+);
 
 /**
  * Get a single tenant by tenantId
  */
-export async function getIdentityTenant(
-	tenantId: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
+export const getIdentityTenantCommand = defineCommand(
+	"get",
+	"tenant",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const tenantId = args.tenantId;
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "get tenant",
 			method: "GET",
 			endpoint: `/tenants/${tenantId}`,
-			profile: options.profile,
-		})
-	)
-		return;
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getTenant(
-			{ tenantId: TenantId.assumeExists(tenantId) },
+			{ tenantId },
 			{ consistency: { waitUpToMs: 0 } },
 		);
-		logger.json(result);
-	} catch (error) {
-		handleCommandError(logger, `Failed to get tenant '${tenantId}'`, error);
-	}
-}
+		return { kind: "get", data: result };
+	},
+);
 
 /**
  * Create a new tenant
  */
-export async function createIdentityTenant(options: {
-	profile?: string;
-	tenantId?: string;
-	name?: string;
-}): Promise<void> {
-	const logger = getLogger();
+export const createIdentityTenantCommand = defineCommand(
+	"create",
+	"tenant",
+	async (ctx, flags, _args) => {
+		const { client, profile } = ctx;
 
-	if (!options.tenantId) {
-		logger.error("--tenantId is required");
-		process.exit(1);
-	}
-	if (!options.name) {
-		logger.error("--name is required");
-		process.exit(1);
-	}
+		if (!flags.tenantId) {
+			getLogger().error("--tenantId is required");
+			process.exit(1);
+		}
+		if (!flags.name) {
+			getLogger().error("--name is required");
+			process.exit(1);
+		}
 
-	const body = {
-		tenantId: options.tenantId,
-		name: options.name,
-	};
+		const body = {
+			tenantId: flags.tenantId,
+			name: flags.name,
+		};
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "create tenant",
 			method: "POST",
-			url: `${config.baseUrl}/tenants`,
+			endpoint: "/tenants",
+			profile,
 			body,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
 		await client.createTenant(body);
-		logger.success(`Tenant '${options.tenantId}' created`);
-	} catch (error) {
-		handleCommandError(logger, "Failed to create tenant", error);
-	}
-}
+		return { kind: "success", message: `Tenant '${flags.tenantId}' created` };
+	},
+);
 
 /**
  * Delete a tenant by tenantId
  */
-export async function deleteIdentityTenant(
-	tenantId: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const deleteIdentityTenantCommand = defineCommand(
+	"delete",
+	"tenant",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const tenantId = args.tenantId;
 
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "delete tenant",
 			method: "DELETE",
-			url: `${config.baseUrl}/tenants/${encodeURIComponent(tenantId)}`,
+			endpoint: `/tenants/${encodeURIComponent(String(tenantId))}`,
+			profile,
 			body: null,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		await client.deleteTenant({ tenantId: TenantId.assumeExists(tenantId) });
-		logger.success(`Tenant '${tenantId}' deleted`);
-	} catch (error) {
-		handleCommandError(logger, `Failed to delete tenant '${tenantId}'`, error);
-	}
-}
+		await client.deleteTenant({ tenantId });
+		return { kind: "success", message: `Tenant '${tenantId}' deleted` };
+	},
+);

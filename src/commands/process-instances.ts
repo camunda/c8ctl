@@ -2,67 +2,72 @@
  * Process instance commands
  */
 
-import type {
-	createProcessInstanceInput,
-	ProcessInstanceResult,
-} from "@camunda8/orchestration-cluster-api";
+import type { createProcessInstanceInput } from "@camunda8/orchestration-cluster-api";
 import {
 	ProcessDefinitionId,
-	ProcessInstanceKey,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
-import { resolveClusterConfig, resolveTenantId } from "../config.ts";
+import { fetchAllPages } from "../client.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import { buildDateFilter, parseBetween } from "../date-filter.ts";
 import { handleCommandError } from "../errors.ts";
-import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
 
 /**
  * List process instances
  */
-export async function listProcessInstances(options: {
-	profile?: string;
-	processDefinitionId?: string;
-	version?: number;
-	state?: string;
-	all?: boolean;
-	sortBy?: string;
-	sortOrder?: SortOrder;
-	limit?: number;
-	between?: string;
-	dateField?: string;
-}): Promise<{ items: ProcessInstanceResult[]; total?: number } | undefined> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
+export const listProcessInstancesCommand = defineCommand(
+	"list",
+	"process-instance",
+	async (ctx, flags) => {
+		const {
+			client,
+			logger,
+			tenantId,
+			profile,
+			limit,
+			all,
+			between,
+			dateField,
+		} = ctx;
 
-	try {
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
 				tenantId,
 			},
 		};
 
-		if (options.processDefinitionId) {
-			filter.filter.processDefinitionId = options.processDefinitionId;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+		if (processDefinitionId) {
+			filter.filter.processDefinitionId = processDefinitionId;
 		}
 
-		if (options.version !== undefined) {
-			filter.filter.processDefinitionVersion = options.version;
+		// version comes from global --version flag, not resource flags
+		const versionIdx = process.argv.indexOf("--version");
+		const vIdx = process.argv.indexOf("-v");
+		const versionArg =
+			versionIdx >= 0
+				? process.argv[versionIdx + 1]
+				: vIdx >= 0
+					? process.argv[vIdx + 1]
+					: undefined;
+		if (versionArg) {
+			const version = parseInt(versionArg, 10);
+			if (!Number.isNaN(version)) {
+				filter.filter.processDefinitionVersion = version;
+			}
 		}
 
-		if (options.state) {
-			filter.filter.state = options.state;
-		} else if (!options.all) {
-			// By default, exclude COMPLETED instances unless --all is specified
+		if (flags.state) {
+			filter.filter.state = flags.state;
+		} else if (!all) {
 			filter.filter.state = "ACTIVE";
 		}
 
-		if (options.between) {
-			const parsed = parseBetween(options.between);
+		if (between) {
+			const parsed = parseBetween(between);
 			if (parsed) {
-				const field = options.dateField ?? "startDate";
+				const field = dateField ?? "startDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
 				logger.error(
@@ -72,219 +77,183 @@ export async function listProcessInstances(options: {
 			}
 		}
 
-		if (
-			emitDryRun({
-				command: "list process-instances",
-				method: "POST",
-				endpoint: "/process-instances/search",
-				profile: options.profile,
-				body: filter,
-			})
-		)
-			return;
+		const dr = dryRun({
+			command: "list process-instances",
+			method: "POST",
+			endpoint: "/process-instances/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
 
 		const allItems = await fetchAllPages(
 			(f, opts) => client.searchProcessInstances(f, opts),
 			filter,
 			undefined,
-			options.limit,
+			limit,
 		);
 
-		if (allItems.length > 0) {
-			let tableData = allItems.map((pi) => ({
+		return {
+			kind: "list",
+			items: allItems.map((pi) => ({
 				Key: `${pi.hasIncident ? "⚠ " : ""}${pi.processInstanceKey}`,
 				"Process ID": pi.processDefinitionId,
 				State: pi.state,
 				Version: pi.processDefinitionVersion,
 				"Start Date": pi.startDate || "-",
 				"Tenant ID": pi.tenantId,
-			}));
-			tableData = sortTableData(
-				tableData,
-				options.sortBy,
-				logger,
-				options.sortOrder,
-			);
-			logger.table(tableData);
-		} else {
-			logger.info("No process instances found");
-		}
-
-		return { items: allItems, total: allItems.length };
-	} catch (error) {
-		handleCommandError(logger, "Failed to list process instances", error);
-	}
-}
+			})),
+			emptyMessage: "No process instances found",
+		};
+	},
+);
 
 /**
  * Get process instance by key
  */
-export async function getProcessInstance(
-	key: string,
-	options: {
-		profile?: string;
-		variables?: boolean;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-	const consistencyOptions = { consistency: { waitUpToMs: 0 } };
+export const getProcessInstanceCommand = defineCommand(
+	"get",
+	"process-instance",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+		const consistencyOptions = { consistency: { waitUpToMs: 0 } };
+		// --variables is registered as string type in parseArgs (for create pi --variables '{...}')
+		// but used as a boolean toggle for get pi. Check argv directly.
+		const includeVariables = process.argv.includes("--variables");
 
-	if (
-		emitDryRun({
+		const dr = dryRun({
 			command: "get process-instance",
 			method: "GET",
 			endpoint: `/process-instances/${key}`,
-			profile: options.profile,
-		})
-	)
-		return;
+			profile,
+		});
+		if (dr) return dr;
 
-	try {
 		const result = await client.getProcessInstance(
-			{ processInstanceKey: ProcessInstanceKey.assumeExists(key) },
+			{ processInstanceKey: key },
 			consistencyOptions,
 		);
 
-		// Fetch variables if requested
-		if (options.variables) {
-			try {
-				const variablesResult = await client.searchVariables(
-					{
-						filter: {
-							processInstanceKey: ProcessInstanceKey.assumeExists(key),
-						},
-						truncateValues: false, // Get full variable values
+		if (includeVariables) {
+			const variablesResult = await client.searchVariables(
+				{
+					filter: {
+						processInstanceKey: key,
 					},
-					consistencyOptions,
-				);
+					truncateValues: false,
+				},
+				consistencyOptions,
+			);
 
-				// Add variables to the result
-				const resultWithVariables = {
+			return {
+				kind: "get",
+				data: {
 					...result,
 					variables: variablesResult.items || [],
-				};
-				logger.json(resultWithVariables);
-			} catch (varError) {
-				handleCommandError(
-					logger,
-					`Failed to fetch variables for process instance ${key}. The process instance was found, but variables could not be retrieved.`,
-					varError,
-				);
-			}
-		} else {
-			logger.json(result);
+				},
+			};
 		}
-	} catch (error) {
-		handleCommandError(logger, `Failed to get process instance ${key}`, error);
-	}
-}
+
+		return { kind: "get", data: result };
+	},
+);
 
 /**
  * Create process instance
  */
-export async function createProcessInstance(options: {
-	profile?: string;
-	processDefinitionId?: string;
-	version?: number;
-	variables?: string;
-	awaitCompletion?: boolean;
-	fetchVariables?: boolean;
-	requestTimeout?: number;
-}): Promise<
-	| {
-			processInstanceKey: string | number;
-			variables?: Record<string, unknown>;
-			[key: string]: unknown;
-	  }
-	| undefined
-> {
-	const logger = getLogger();
+export const createProcessInstanceCommand = defineCommand(
+	"create",
+	"process-instance",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
 
-	if (!options.processDefinitionId) {
-		logger.error(
-			"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
-		);
-		process.exit(1);
-	}
+		if (!processDefinitionId) {
+			logger.error(
+				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
+			);
+			process.exit(1);
+		}
 
-	const tenantId = resolveTenantId(options.profile);
+		const version = ctx.version;
+		const awaitCompletion = flags.awaitCompletion;
+		const fetchVariables = flags.fetchVariables;
+		const requestTimeout =
+			flags.requestTimeout !== undefined
+				? parseInt(flags.requestTimeout, 10)
+				: undefined;
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
+		// Dry-run: emit the would-be API request without executing
 		const body: Record<string, unknown> = {
-			processDefinitionId: options.processDefinitionId,
+			processDefinitionId,
 			tenantId,
 		};
-		if (options.version !== undefined)
-			body.processDefinitionVersion = options.version;
-		if (options.variables) body.variables = JSON.parse(options.variables);
-		if (options.awaitCompletion) body.awaitCompletion = true;
-		if (options.requestTimeout !== undefined)
-			body.requestTimeout = options.requestTimeout;
-		logger.json({
-			dryRun: true,
+		if (version !== undefined) body.processDefinitionVersion = version;
+		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (awaitCompletion) body.awaitCompletion = true;
+		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
+
+		const dr = dryRun({
 			command: "create process-instance",
 			method: "POST",
-			url: `${config.baseUrl}/process-instances`,
+			endpoint: "/process-instances",
+			profile,
 			body,
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
+		// Validate: fetchVariables requires awaitCompletion
+		if (fetchVariables && !awaitCompletion) {
+			logger.error("--fetchVariables can only be used with --awaitCompletion");
+			process.exit(1);
+		}
 
-	// Validate: fetchVariables requires awaitCompletion
-	if (options.fetchVariables && !options.awaitCompletion) {
-		logger.error("--fetchVariables can only be used with --awaitCompletion");
-		process.exit(1);
-	}
+		// Note: fetchVariables parameter is reserved for future API enhancement
+		// The orchestration-cluster-api currently does not support filtering variables
+		// The API returns all variables by default when awaitCompletion is true
+		if (fetchVariables) {
+			logger.info(
+				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
+			);
+		}
 
-	// Note: fetchVariables parameter is reserved for future API enhancement
-	// The orchestration-cluster-api currently does not support filtering variables
-	// The API returns all variables by default when awaitCompletion is true
-	if (options.fetchVariables) {
-		logger.info(
-			"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
-		);
-	}
-
-	try {
 		// Parse variables early for clear error reporting
 		let variables: Record<string, unknown> | undefined;
-		if (options.variables) {
+		if (flags.variables) {
 			try {
-				variables = JSON.parse(options.variables);
+				variables = JSON.parse(flags.variables);
 			} catch (error) {
 				handleCommandError(logger, "Invalid JSON for variables", error);
 				return;
 			}
 		}
 
-		if (options.awaitCompletion) {
+		if (awaitCompletion) {
 			logger.info("Waiting for process instance to complete...");
 		}
 
 		// Build the request with SDK types as single source of truth
 		const request = {
-			processDefinitionId: ProcessDefinitionId.assumeExists(
-				options.processDefinitionId,
-			),
-			tenantId: TenantId.assumeExists(tenantId),
-			...(options.version !== undefined && {
-				processDefinitionVersion: options.version,
+			processDefinitionId:
+				ProcessDefinitionId.assumeExists(processDefinitionId),
+			...(tenantId !== undefined && {
+				tenantId: TenantId.assumeExists(tenantId),
+			}),
+			...(version !== undefined && {
+				processDefinitionVersion: version,
 			}),
 			...(variables !== undefined && { variables }),
-			...(options.awaitCompletion && { awaitCompletion: true }),
-			...(options.requestTimeout !== undefined && {
-				requestTimeout: options.requestTimeout,
+			...(awaitCompletion && { awaitCompletion: true }),
+			...(requestTimeout !== undefined && {
+				requestTimeout,
 			}),
 		} satisfies createProcessInstanceInput;
 
 		const result = await client.createProcessInstance(request);
 
-		if (options.awaitCompletion) {
+		if (awaitCompletion) {
 			// When awaitCompletion is true, the API returns the completed process instance with variables
 			logger.success("Process instance completed", result.processInstanceKey);
 			logger.json(result);
@@ -292,49 +261,115 @@ export async function createProcessInstance(options: {
 			// When awaitCompletion is false, just show the process instance key
 			logger.success("Process instance created", result.processInstanceKey);
 		}
+	},
+);
 
-		return result;
-	} catch (error) {
-		handleCommandError(logger, "Failed to create process instance", error);
-	}
-}
+/**
+ * Await process instance completion (alias for create --awaitCompletion)
+ */
+export const awaitProcessInstanceCommand = defineCommand(
+	"await",
+	"process-instance",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+		const processDefinitionId =
+			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
+
+		if (!processDefinitionId) {
+			logger.error(
+				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
+			);
+			process.exit(1);
+		}
+
+		const version = ctx.version;
+		const requestTimeout =
+			flags.requestTimeout !== undefined
+				? parseInt(flags.requestTimeout, 10)
+				: undefined;
+
+		// Dry-run: emit the would-be API request without executing
+		const body: Record<string, unknown> = {
+			processDefinitionId,
+			tenantId,
+			awaitCompletion: true,
+		};
+		if (version !== undefined) body.processDefinitionVersion = version;
+		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
+
+		const dr = dryRun({
+			command: "await process-instance",
+			method: "POST",
+			endpoint: "/process-instances",
+			profile,
+			body,
+		});
+		if (dr) return dr;
+
+		// Note: fetchVariables parameter is reserved for future API enhancement
+		if (flags.fetchVariables) {
+			logger.info(
+				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
+			);
+		}
+
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			try {
+				variables = JSON.parse(flags.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+				return;
+			}
+		}
+
+		logger.info("Waiting for process instance to complete...");
+
+		const request = {
+			processDefinitionId:
+				ProcessDefinitionId.assumeExists(processDefinitionId),
+			...(tenantId !== undefined && {
+				tenantId: TenantId.assumeExists(tenantId),
+			}),
+			...(version !== undefined && {
+				processDefinitionVersion: version,
+			}),
+			...(variables !== undefined && { variables }),
+			awaitCompletion: true,
+			...(requestTimeout !== undefined && {
+				requestTimeout,
+			}),
+		} satisfies createProcessInstanceInput;
+
+		const result = await client.createProcessInstance(request);
+
+		logger.success("Process instance completed", result.processInstanceKey);
+		logger.json(result);
+	},
+);
 
 /**
  * Cancel process instance
  */
-export async function cancelProcessInstance(
-	key: string,
-	options: {
-		profile?: string;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const cancelProcessInstanceCommand = defineCommand(
+	"cancel",
+	"process-instance",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
 
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
+		const dr = dryRun({
 			command: "cancel process-instance",
 			method: "POST",
-			url: `${config.baseUrl}/process-instances/${key}/cancellation`,
+			endpoint: `/process-instances/${key}/cancellation`,
+			profile,
 			body: {},
 		});
-		return;
-	}
+		if (dr) return dr;
 
-	const client = createClient(options.profile);
-
-	try {
-		await client.cancelProcessInstance({
-			processInstanceKey: ProcessInstanceKey.assumeExists(key),
-		});
-		logger.success(`Process instance ${key} cancelled`);
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to cancel process instance ${key}`,
-			error,
-		);
-	}
-}
+		await client.cancelProcessInstance({ processInstanceKey: key });
+		return { kind: "success", message: `Process instance ${key} cancelled` };
+	},
+);
