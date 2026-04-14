@@ -81,7 +81,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 /**
  * Flags accepted by every command (infrastructure/agent flags).
  */
-export const GLOBAL_FLAGS: Record<string, FlagDef> = {
+export const GLOBAL_FLAGS = {
 	help: { type: "boolean", description: "Show help", short: "h" },
 	version: {
 		type: "string",
@@ -99,12 +99,12 @@ export const GLOBAL_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Comma-separated list of fields to display",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
 /**
  * Flags shared across all search/list commands.
  */
-export const SEARCH_FLAGS: Record<string, FlagDef> = {
+export const SEARCH_FLAGS = {
 	sortBy: { type: "string", description: "Sort results by field" },
 	asc: { type: "boolean", description: "Sort ascending" },
 	desc: { type: "boolean", description: "Sort descending" },
@@ -117,11 +117,11 @@ export const SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Date field for --between filter",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
 // ─── Reusable flag sets ──────────────────────────────────────────────────────
 
-const PI_SEARCH_FLAGS: Record<string, FlagDef> = {
+const PI_SEARCH_FLAGS = {
 	bpmnProcessId: {
 		type: "string",
 		description: "Filter by BPMN process ID",
@@ -148,9 +148,9 @@ const PI_SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Case-insensitive filter by BPMN process ID",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const PD_SEARCH_FLAGS: Record<string, FlagDef> = {
+const PD_SEARCH_FLAGS = {
 	bpmnProcessId: {
 		type: "string",
 		description: "Filter by BPMN process ID",
@@ -168,9 +168,9 @@ const PD_SEARCH_FLAGS: Record<string, FlagDef> = {
 		description: "Case-insensitive filter by BPMN process ID",
 	},
 	iname: { type: "string", description: "Case-insensitive filter by name" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const UT_SEARCH_FLAGS: Record<string, FlagDef> = {
+const UT_SEARCH_FLAGS = {
 	state: { type: "string", description: "Filter by state" },
 	assignee: { type: "string", description: "Filter by assignee" },
 	processInstanceKey: {
@@ -188,9 +188,9 @@ const UT_SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Case-insensitive filter by assignee",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const INC_SEARCH_FLAGS: Record<string, FlagDef> = {
+const INC_SEARCH_FLAGS = {
 	state: { type: "string", description: "Filter by state" },
 	processInstanceKey: {
 		type: "string",
@@ -225,9 +225,9 @@ const INC_SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Case-insensitive filter by BPMN process ID",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const JOB_SEARCH_FLAGS: Record<string, FlagDef> = {
+const JOB_SEARCH_FLAGS = {
 	state: { type: "string", description: "Filter by state" },
 	type: { type: "string", description: "Filter by job type" },
 	processInstanceKey: {
@@ -244,9 +244,9 @@ const JOB_SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Case-insensitive filter by job type",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const VAR_SEARCH_FLAGS: Record<string, FlagDef> = {
+const VAR_SEARCH_FLAGS = {
 	name: { type: "string", description: "Filter by variable name" },
 	value: { type: "string", description: "Filter by value" },
 	processInstanceKey: {
@@ -267,9 +267,9 @@ const VAR_SEARCH_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Case-insensitive filter by value",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const USER_SEARCH_FLAGS: Record<string, FlagDef> = {
+const USER_SEARCH_FLAGS = {
 	username: {
 		type: "string",
 		description: "Filter by username",
@@ -277,28 +277,28 @@ const USER_SEARCH_FLAGS: Record<string, FlagDef> = {
 	},
 	name: { type: "string", description: "Filter by name" },
 	email: { type: "string", description: "Filter by email" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const ROLE_SEARCH_FLAGS: Record<string, FlagDef> = {
+const ROLE_SEARCH_FLAGS = {
 	roleId: { type: "string", description: "Filter by role ID" },
 	name: { type: "string", description: "Filter by name" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const GROUP_SEARCH_FLAGS: Record<string, FlagDef> = {
+const GROUP_SEARCH_FLAGS = {
 	groupId: { type: "string", description: "Filter by group ID" },
 	name: { type: "string", description: "Filter by name" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const TENANT_SEARCH_FLAGS: Record<string, FlagDef> = {
+const TENANT_SEARCH_FLAGS = {
 	tenantId: {
 		type: "string",
 		description: "Filter by tenant ID",
 		validate: TenantId.assumeExists,
 	},
 	name: { type: "string", description: "Filter by name" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const AUTH_SEARCH_FLAGS: Record<string, FlagDef> = {
+const AUTH_SEARCH_FLAGS = {
 	ownerId: { type: "string", description: "Filter by owner ID" },
 	ownerType: { type: "string", description: "Filter by owner type" },
 	resourceType: {
@@ -306,9 +306,9 @@ const AUTH_SEARCH_FLAGS: Record<string, FlagDef> = {
 		description: "Filter by resource type",
 	},
 	resourceId: { type: "string", description: "Filter by resource ID" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const MR_SEARCH_FLAGS: Record<string, FlagDef> = {
+const MR_SEARCH_FLAGS = {
 	mappingRuleId: {
 		type: "string",
 		description: "Filter by mapping rule ID",
@@ -316,9 +316,9 @@ const MR_SEARCH_FLAGS: Record<string, FlagDef> = {
 	name: { type: "string", description: "Filter by name" },
 	claimName: { type: "string", description: "Filter by claim name" },
 	claimValue: { type: "string", description: "Filter by claim value" },
-};
+} as const satisfies Record<string, FlagDef>;
 
-const ASSIGN_FLAGS: Record<string, FlagDef> = {
+const ASSIGN_FLAGS = {
 	"to-user": { type: "string", description: "Target user ID" },
 	"to-group": { type: "string", description: "Target group ID" },
 	"to-tenant": { type: "string", description: "Target tenant ID" },
@@ -326,9 +326,9 @@ const ASSIGN_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Target mapping rule ID",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const UNASSIGN_FLAGS: Record<string, FlagDef> = {
+const UNASSIGN_FLAGS = {
 	"from-user": { type: "string", description: "Source user ID" },
 	"from-group": { type: "string", description: "Source group ID" },
 	"from-tenant": { type: "string", description: "Source tenant ID" },
@@ -336,9 +336,9 @@ const UNASSIGN_FLAGS: Record<string, FlagDef> = {
 		type: "string",
 		description: "Source mapping rule ID",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
-const PROFILE_CONNECTION_FLAGS: Record<string, FlagDef> = {
+const PROFILE_CONNECTION_FLAGS = {
 	baseUrl: { type: "string", description: "Cluster base URL" },
 	clientId: { type: "string", description: "OAuth client ID" },
 	clientSecret: { type: "string", description: "OAuth client secret" },
@@ -352,7 +352,7 @@ const PROFILE_CONNECTION_FLAGS: Record<string, FlagDef> = {
 		type: "boolean",
 		description: "Import from environment variables",
 	},
-};
+} as const satisfies Record<string, FlagDef>;
 
 // ─── Command Registry ────────────────────────────────────────────────────────
 
@@ -1029,19 +1029,8 @@ export function deriveParseArgsOptions(): Record<
 		{ type: "string" | "boolean"; short?: string }
 	> = {};
 
-	// Global flags
-	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
-		options[name] = { type: def.type, ...(def.short && { short: def.short }) };
-	}
-
-	// Search flags
-	for (const [name, def] of Object.entries(SEARCH_FLAGS)) {
-		options[name] = { type: def.type, ...(def.short && { short: def.short }) };
-	}
-
-	// All command-specific flags
-	for (const cmd of Object.values(COMMAND_REGISTRY)) {
-		for (const [name, def] of Object.entries(cmd.flags)) {
+	function addFlags(flags: Record<string, FlagDef>): void {
+		for (const [name, def] of Object.entries(flags)) {
 			if (!options[name]) {
 				options[name] = {
 					type: def.type,
@@ -1049,6 +1038,17 @@ export function deriveParseArgsOptions(): Record<
 				};
 			}
 		}
+	}
+
+	// Global flags
+	addFlags(GLOBAL_FLAGS);
+
+	// Search flags
+	addFlags(SEARCH_FLAGS);
+
+	// All command-specific flags
+	for (const cmd of Object.values(COMMAND_REGISTRY)) {
+		addFlags(cmd.flags);
 	}
 
 	return options;
