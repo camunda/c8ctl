@@ -356,7 +356,7 @@ const PROFILE_CONNECTION_FLAGS = {
 
 // ─── Command Registry ────────────────────────────────────────────────────────
 
-export const COMMAND_REGISTRY: Record<string, CommandDef> = {
+export const COMMAND_REGISTRY = {
 	// ── Read commands ──────────────────────────────────────────────────────
 
 	list: {
@@ -914,7 +914,10 @@ export const COMMAND_REGISTRY: Record<string, CommandDef> = {
 		resources: ["profile"],
 		flags: {},
 	},
-};
+} satisfies Record<string, CommandDef>;
+
+/** Union of all known verb names, derived from COMMAND_REGISTRY keys. */
+export type Verb = keyof typeof COMMAND_REGISTRY;
 
 // ─── Per-resource search flag scoping ────────────────────────────────────────
 
@@ -947,7 +950,11 @@ export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
  */
 export const VERB_ALIASES: Record<string, string[]> = (() => {
 	const map: Record<string, string[]> = {};
-	for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+	// biome-ignore lint/plugin: widen to CommandDef to access optional aliases property
+	for (const [verb, def] of Object.entries(COMMAND_REGISTRY) as [
+		string,
+		CommandDef,
+	][]) {
 		for (const alias of def.aliases ?? []) {
 			if (!map[alias]) {
 				map[alias] = [];
@@ -972,10 +979,14 @@ export function resolveAlias(resource: string): string {
  * returns the first match. Use VERB_ALIASES directly for multi-target aliases.
  */
 export function getCommandDef(verb: string): CommandDef | undefined {
-	const direct = COMMAND_REGISTRY[verb];
+	// biome-ignore lint/plugin: trust boundary — verb is unvalidated CLI input, must index dynamically
+	const direct = (COMMAND_REGISTRY as Record<string, CommandDef>)[verb];
 	if (direct) return direct;
 	const targets = VERB_ALIASES[verb];
-	return targets ? COMMAND_REGISTRY[targets[0]] : undefined;
+	return targets
+		? // biome-ignore lint/plugin: trust boundary — alias target is a dynamic string
+			(COMMAND_REGISTRY as Record<string, CommandDef>)[targets[0]]
+		: undefined;
 }
 
 /**

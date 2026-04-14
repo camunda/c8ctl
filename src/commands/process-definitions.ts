@@ -4,9 +4,79 @@
 
 import { ProcessDefinitionKey } from "@camunda8/orchestration-cluster-api";
 import { createClient, emitDryRun, fetchAllPages } from "../client.ts";
+import { defineCommand } from "../command-framework.ts";
+import type { FlagDef } from "../command-registry.ts";
 import { resolveTenantId } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger, type SortOrder, sortTableData } from "../logger.ts";
+
+// ─── get pd ──────────────────────────────────────────────────────────────────
+
+const GET_PD_FLAGS = {
+	xml: {
+		type: "boolean",
+		description: "Get BPMN XML (process definitions)",
+	},
+} as const satisfies Record<string, FlagDef>;
+
+export const getProcessDefinitionCommand = defineCommand({
+	verb: "get",
+	resources: ["pd", "process-definition"],
+	flags: GET_PD_FLAGS,
+	handler: async (ctx, flags) => {
+		const { client, logger, positionals, profile } = ctx;
+		const key = positionals[0];
+
+		if (!key) {
+			logger.error("Process definition key required. Usage: c8 get pd <key>");
+			process.exit(1);
+		}
+
+		if (flags.xml) {
+			if (
+				emitDryRun({
+					command: "get process-definition xml",
+					method: "GET",
+					endpoint: `/process-definitions/${key}/xml`,
+					profile,
+				})
+			)
+				return;
+		} else {
+			if (
+				emitDryRun({
+					command: "get process-definition",
+					method: "GET",
+					endpoint: `/process-definitions/${key}`,
+					profile,
+				})
+			)
+				return;
+		}
+
+		try {
+			if (flags.xml) {
+				const result = await client.getProcessDefinitionXml(
+					{ processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
+					{ consistency: { waitUpToMs: 0 } },
+				);
+				logger.output(result);
+			} else {
+				const result = await client.getProcessDefinition(
+					{ processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
+					{ consistency: { waitUpToMs: 0 } },
+				);
+				logger.json(result);
+			}
+		} catch (error) {
+			handleCommandError(
+				logger,
+				`Failed to get process definition ${key}`,
+				error,
+			);
+		}
+	},
+});
 
 /**
  * List process definitions
@@ -66,63 +136,5 @@ export async function listProcessDefinitions(options: {
 		}
 	} catch (error) {
 		handleCommandError(logger, "Failed to list process definitions", error);
-	}
-}
-
-/**
- * Get process definition by key
- */
-export async function getProcessDefinition(
-	key: string,
-	options: {
-		profile?: string;
-		xml?: boolean;
-	},
-): Promise<void> {
-	const logger = getLogger();
-	const client = createClient(options.profile);
-
-	if (options.xml) {
-		if (
-			emitDryRun({
-				command: "get process-definition xml",
-				method: "GET",
-				endpoint: `/process-definitions/${key}/xml`,
-				profile: options.profile,
-			})
-		)
-			return;
-	} else {
-		if (
-			emitDryRun({
-				command: "get process-definition",
-				method: "GET",
-				endpoint: `/process-definitions/${key}`,
-				profile: options.profile,
-			})
-		)
-			return;
-	}
-
-	try {
-		if (options.xml) {
-			const result = await client.getProcessDefinitionXml(
-				{ processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
-				{ consistency: { waitUpToMs: 0 } },
-			);
-			logger.output(result);
-		} else {
-			const result = await client.getProcessDefinition(
-				{ processDefinitionKey: ProcessDefinitionKey.assumeExists(key) },
-				{ consistency: { waitUpToMs: 0 } },
-			);
-			logger.json(result);
-		}
-	} catch (error) {
-		handleCommandError(
-			logger,
-			`Failed to get process definition ${key}`,
-			error,
-		);
 	}
 }

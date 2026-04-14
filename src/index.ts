@@ -8,8 +8,10 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createClient } from "./client.ts";
+import { deserializeFlags } from "./command-framework.ts";
 import {
 	COMMAND_REGISTRY,
+	type CommandDef,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
@@ -82,7 +84,7 @@ import {
 	upgradePlugin,
 } from "./commands/plugins.ts";
 import {
-	getProcessDefinition,
+	getProcessDefinitionCommand,
 	listProcessDefinitions,
 } from "./commands/process-definitions.ts";
 import {
@@ -282,7 +284,8 @@ function warnUnknownFlags(
 
 /** Verbs that require a resource argument — derived from COMMAND_REGISTRY (includes aliases). */
 const VERB_REQUIRES_RESOURCE = new Set(
-	Object.entries(COMMAND_REGISTRY)
+	// biome-ignore lint/plugin: widen to CommandDef to access optional aliases property
+	(Object.entries(COMMAND_REGISTRY) as [string, CommandDef][])
 		.filter(([, def]) => def.requiresResource)
 		.flatMap(([verb, def]) => [verb, ...(def.aliases ?? [])]),
 );
@@ -652,14 +655,21 @@ async function main() {
 	}
 
 	if (verb === "get" && normalizedResource === "process-definition") {
-		if (!args[0]) {
-			logger.error("Process definition key required. Usage: c8 get pd <key>");
-			process.exit(1);
-		}
-		await getProcessDefinition(args[0], {
-			profile: str(values.profile),
-			xml: bool(values.xml),
-		});
+		const flags = deserializeFlags(values, getProcessDefinitionCommand.flags);
+		await getProcessDefinitionCommand.handler(
+			{
+				client: createClient(str(values.profile)),
+				logger,
+				tenantId: resolveTenantId(str(values.profile)),
+				resource: normalizedResource,
+				positionals: args,
+				sortOrder,
+				limit,
+				dryRun: c8ctl.dryRun,
+				profile: str(values.profile),
+			},
+			flags,
+		);
 		return;
 	}
 

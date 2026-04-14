@@ -11,7 +11,7 @@
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
 
-import type { FlagDef } from "./command-registry.ts";
+import type { FlagDef, Verb } from "./command-registry.ts";
 import type { Logger, SortOrder } from "./logger.ts";
 
 // ─── InferFlags ──────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export interface CommandContext {
 	/** Pagination limit from --limit flag (parsed to number). */
 	limit: number | undefined;
 	/** Whether --dry-run was set. */
-	dryRun: boolean;
+	dryRun: boolean | undefined;
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
 }
@@ -69,7 +69,7 @@ export interface CommandContext {
  * inferred from `F`, so branded types flow through without casts.
  */
 export interface CommandDefinition<F extends Record<string, FlagDef>> {
-	verb: string;
+	verb: Verb;
 	resources: string[];
 	flags: F;
 	handler: (ctx: CommandContext, flags: InferFlags<F>) => Promise<void>;
