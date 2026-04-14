@@ -132,24 +132,28 @@ async function getDynamicAliases() {
   return _dynamicAliases;
 }
 
-async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
+export async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
 
-  // When preferLocal is set (e.g. start), try the persisted alias mapping first
+  const dynamic = await getDynamicAliases();
+  const resolved = dynamic?.[versionSpec];
+
+  if (resolved) {
+    // Persist the resolved mapping for future offline use
+    if (cacheDir) {
+      storeLocalAliasMapping(cacheDir, versionSpec, resolved);
+    }
+    return resolved;
+  }
+
+  // When preferLocal is set (e.g. start) and dynamic discovery failed,
+  // fall back to the persisted alias mapping to allow offline usage
   if (preferLocal && cacheDir) {
     const local = readLocalAliasMapping(cacheDir, versionSpec);
     if (local) return local;
   }
 
-  const dynamic = await getDynamicAliases();
-  const resolved = dynamic?.[versionSpec] ?? _fallbackAliases[versionSpec] ?? versionSpec;
-
-  // Persist the resolved mapping for future offline use
-  if (cacheDir && dynamic?.[versionSpec]) {
-    storeLocalAliasMapping(cacheDir, versionSpec, resolved);
-  }
-
-  return resolved;
+  return _fallbackAliases[versionSpec] ?? versionSpec;
 }
 
 function getAliasMappingPath(cacheDir, alias) {
@@ -169,7 +173,7 @@ function readLocalAliasMapping(cacheDir, alias) {
   }
 }
 
-function storeLocalAliasMapping(cacheDir, alias, resolved) {
+export function storeLocalAliasMapping(cacheDir, alias, resolved) {
   try {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);

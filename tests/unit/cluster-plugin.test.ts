@@ -690,6 +690,130 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveVersion – alias resolution with dynamic discovery and local cache
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – resolveVersion', () => {
+  let tempDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    originalFetch = globalThis.fetch;
+    plugin._resetDynamicAliasCache();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'fetch', { value: originalFetch, writable: true, configurable: true });
+    plugin._resetDynamicAliasCache();
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns non-alias version specs unchanged', async () => {
+    const result = await plugin.resolveVersion('8.8.1', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(result, '8.8.1');
+  });
+
+  test('prefers dynamic discovery over stale local cache', async () => {
+    // Simulate a previously cached alias pointing to 8.8
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    // Dynamic discovery returns 8.9 as stable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.8/">8.8</a>
+          <a href="8.9/">8.9</a>
+          <a href="8.10/">8.10</a>
+          <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+        `,
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    const result = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(result, '8.9', 'should use dynamically discovered version, not stale cache');
+  });
+
+  test('falls back to local cache when dynamic discovery fails and preferLocal is set', async () => {
+    // Simulate a previously cached alias pointing to 8.8 with 8.8 installed
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    // Dynamic discovery fails (network error)
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('network error'); },
+      writable: true,
+      configurable: true,
+    });
+
+    const result = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(result, '8.8', 'should fall back to cached alias when offline');
+  });
+
+  test('falls back to package.json aliases when discovery fails and no local cache', async () => {
+    // Dynamic discovery fails
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('network error'); },
+      writable: true,
+      configurable: true,
+    });
+
+    const result = await plugin.resolveVersion('stable', { preferLocal: false, cacheDir: tempDir });
+    // Should return the fallback from package.json (currently "8.9")
+    assert.ok(result.match(/^\d+\.\d+$/), 'should return a major.minor version from package.json fallback');
+  });
+
+  test('does not use local cache when preferLocal is false even if cache exists', async () => {
+    // Simulate a previously cached alias pointing to 8.8 with 8.8 installed
+    const binaryDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(binaryDir, { recursive: true });
+    writeFileSync(join(binaryDir, 'c8run'), '');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    // Dynamic discovery fails
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => { throw new Error('network error'); },
+      writable: true,
+      configurable: true,
+    });
+
+    const result = await plugin.resolveVersion('stable', { preferLocal: false, cacheDir: tempDir });
+    // Should NOT use 8.8 from local cache; should fall back to package.json
+    assert.notStrictEqual(result, '8.8', 'should not use local cache when preferLocal is false');
+  });
+
+  test('persists dynamically resolved alias to local cache', async () => {
+    // Dynamic discovery returns 8.9 as stable
+    Object.defineProperty(globalThis, 'fetch', {
+      value: async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.8/">8.8</a>
+          <a href="8.9/">8.9</a>
+          <a href="8.10/">8.10</a>
+          <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+        `,
+      }),
+      writable: true,
+      configurable: true,
+    });
+
+    await plugin.resolveVersion('stable', { preferLocal: false, cacheDir: tempDir });
+
+    const cachedPath = join(tempDir, 'alias-stable.resolved');
+    assert.strictEqual(existsSync(cachedPath), true, 'should persist the resolved alias');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // clusterStatus
 // ---------------------------------------------------------------------------
 
