@@ -1435,6 +1435,9 @@ export const commands = {
         await startC8Run(config, parsed.debug);
       } catch (error) {
         logger.error(`Failed to start cluster: ${error}`);
+        const installDir = join(config.cacheDir, `c8run-${config.version}`);
+        logger.error(`Check logs in: ${installDir}`);
+        logger.info(`Print logs with: cat ${installDir}/*/log/*.log`);
         process.exit(1);
       }
     } else if (parsed.subcommand === 'stop') {

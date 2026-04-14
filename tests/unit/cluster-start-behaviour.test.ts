@@ -25,5 +25,9 @@ describe('CLI behavioural: cluster start failure', () => {
       combined.includes('check the version exists') || combined.includes('try a different version'),
       `Expected actionable hint in output, got:\n${combined}`,
     );
+    assert.ok(
+      combined.includes('Check logs in:'),
+      `Expected log path hint in output, got:\n${combined}`,
+    );
   });
 });
