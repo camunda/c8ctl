@@ -8,6 +8,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import('../../default-plugins/cluster/c8ctl-plugin.js');
 
 // ---------------------------------------------------------------------------
