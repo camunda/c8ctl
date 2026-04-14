@@ -4,7 +4,7 @@
 
 import { fetchAllPages } from "../client.ts";
 import { defineCommand, dryRun } from "../command-framework.ts";
-import { getLogger, sortTableData } from "../logger.ts";
+import { sortTableData } from "../logger.ts";
 import { toStringFilter } from "./search.ts";
 
 /**
@@ -120,14 +120,14 @@ export const createIdentityUserCommand = defineCommand(
 	"create",
 	"user",
 	async (ctx, flags, _args) => {
-		const { client, profile } = ctx;
+		const { client, logger, profile } = ctx;
 
 		if (!flags.username) {
-			getLogger().error("--username is required");
+			logger.error("--username is required");
 			process.exit(1);
 		}
 		if (!flags.password) {
-			getLogger().error("--password is required");
+			logger.error("--password is required");
 			process.exit(1);
 		}
 

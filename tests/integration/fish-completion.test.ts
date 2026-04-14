@@ -234,7 +234,7 @@ echo "SUCCESS"
     );
     assert.ok(
       script.includes("-l variables -d 'Include variables in output'"),
-      'Should use -r for --variables'
+      'Should include --variables flag (boolean, no -r)'
     );
     assert.ok(
       script.includes("-l baseUrl -d 'Cluster base URL' -r"),

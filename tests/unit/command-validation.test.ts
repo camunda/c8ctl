@@ -259,8 +259,8 @@ const BRANDED_FLAG_NAMES = new Set([
 
 /** Flags whose branded semantics only apply to certain resource contexts. */
 const CONTEXT_DEPENDENT_FLAGS: Record<string, string[]> = {
-  username: ['users'],
-  tenantId: ['tenants'],
+  username: ['user'],
+  tenantId: ['tenant'],
 };
 
 function isBrandedInContext(flagName: string, def: { resources?: string[] }): boolean {

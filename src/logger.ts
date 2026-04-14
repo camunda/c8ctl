@@ -9,9 +9,10 @@ export type OutputMode = "text" | "json";
 
 /**
  * Type guard: narrow unknown to Record<string, unknown>.
+ * Excludes arrays and non-plain objects.
  */
 export function isRecord(value: unknown): value is Record<string, unknown> {
-	return value != null && typeof value === "object";
+	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
