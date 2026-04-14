@@ -24,7 +24,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
-// Version aliases – dynamic discovery with package.json fallback
+// Version aliases – defined in package.json
 // ---------------------------------------------------------------------------
 
 const DOWNLOAD_BASE_URL = 'https://downloads.camunda.cloud/release/camunda/c8run/';
@@ -32,7 +32,7 @@ const DOWNLOAD_BASE_URL = 'https://downloads.camunda.cloud/release/camunda/c8run
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
 );
-const _fallbackAliases = _pluginPackageJson.c8ctl.versionAliases;
+const _versionAliases = _pluginPackageJson.c8ctl.versionAliases;
 const KNOWN_ALIAS_NAMES = new Set(['stable', 'alpha']);
 
 function isVersionAlias(versionSpec) {
@@ -57,136 +57,13 @@ export function isRollingVersion(versionSpec) {
   return isVersionAlias(versionSpec) || isMinorVersionPattern(versionSpec);
 }
 
-/**
- * Fetch the c8run download directory listing and discover the latest
- * stable and alpha minor versions.
- *
- * Returns { stable: "X.Y", alpha: "X.Y" } or null on failure.
- */
-export async function discoverLatestVersions() {
-  try {
-    const response = await fetch(DOWNLOAD_BASE_URL);
-    if (!response.ok) return null;
-    const html = await response.text();
-    return parseVersionsFromHtml(html);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Parse the HTML directory listing from the download server to extract
- * the latest stable and alpha minor versions.
- *
- * - Minor version directories (e.g. "8.8/", "8.9/") are rolling releases
- *   updated in-place.
- * - An alpha train exists when there are "X.Y.0-alphaN/" directories
- *   for a given minor. The highest minor with alphas is the alpha alias.
- * - The highest minor without alphas is the stable alias.
- */
-export function parseVersionsFromHtml(html) {
-  // Match minor-version directories like "8.8/", "8.9/"
-  const minorMatches = [...html.matchAll(/href="(\d+\.\d+)\/"/g)].map(m => m[1]);
-  // Match alpha directories like "8.9.0-alpha5/"
-  const alphaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0-alpha\d+\/"/g)].map(m => m[1]);
-
-  if (minorMatches.length === 0) return null;
-
-  const compareSemver = (a, b) => {
-    const [aMaj, aMin] = a.split('.').map(Number);
-    const [bMaj, bMin] = b.split('.').map(Number);
-    return aMaj - bMaj || aMin - bMin;
-  };
-
-  const sortedMinors = [...new Set(minorMatches)].sort(compareSemver);
-  const alphaSet = new Set(alphaMatches);
-
-  const highestMinor = sortedMinors[sortedMinors.length - 1];
-
-  // The alpha train is the highest minor that has alpha directories.
-  // The stable release is the minor just below the alpha train,
-  // or the highest minor if no alpha train exists.
-  const highestAlphaMinor = [...alphaSet].sort(compareSemver).pop();
-
-  let stable;
-  if (highestAlphaMinor) {
-    // Stable = the highest minor that is lower than the alpha train
-    stable = sortedMinors.filter(v => compareSemver(v, highestAlphaMinor) < 0).pop() || highestMinor;
-  } else {
-    stable = highestMinor;
-  }
-
-  return {
-    stable,
-    alpha: highestMinor,
-  };
-}
-
-// Cache the discovery result for the process lifetime
-let _dynamicAliases = undefined;
-
-async function getDynamicAliases() {
-  if (_dynamicAliases === undefined) {
-    _dynamicAliases = await discoverLatestVersions();
-  }
-  return _dynamicAliases;
-}
-
-async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
+function resolveVersion(versionSpec) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
-
-  // When preferLocal is set (e.g. start), try the persisted alias mapping first
-  if (preferLocal && cacheDir) {
-    const local = readLocalAliasMapping(cacheDir, versionSpec);
-    if (local) return local;
-  }
-
-  const dynamic = await getDynamicAliases();
-  const resolved = dynamic?.[versionSpec] ?? _fallbackAliases[versionSpec] ?? versionSpec;
-
-  // Persist the resolved mapping for future offline use
-  if (cacheDir && dynamic?.[versionSpec]) {
-    storeLocalAliasMapping(cacheDir, versionSpec, resolved);
-  }
-
-  return resolved;
+  return _versionAliases[versionSpec] ?? versionSpec;
 }
 
-function getAliasMappingPath(cacheDir, alias) {
-  return join(cacheDir, `alias-${alias}.resolved`);
-}
-
-function readLocalAliasMapping(cacheDir, alias) {
-  const filePath = getAliasMappingPath(cacheDir, alias);
-  if (!existsSync(filePath)) return null;
-  try {
-    const value = readFileSync(filePath, 'utf-8').trim();
-    // Only use the cached mapping if the version is actually installed
-    const config = { cacheDir, version: value };
-    return isC8RunInstalled(config) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeLocalAliasMapping(cacheDir, alias, resolved) {
-  try {
-    mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
-  } catch {
-    // Best-effort — don't break the command if we can't persist
-  }
-}
-
-async function getVersionAliasEntries() {
-  const dynamic = await getDynamicAliases();
-  const aliases = dynamic || _fallbackAliases;
-  return Object.entries(aliases);
-}
-
-/** Reset the cached dynamic aliases (for testing). */
-export function _resetDynamicAliasCache() {
-  _dynamicAliases = undefined;
+function getVersionAliasEntries() {
+  return Object.entries(_versionAliases);
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,7 +899,7 @@ export async function listInstalledVersions(cacheDir) {
   const installedVersions = getInstalledVersionsList(cacheDir)
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-  const aliasEntries = await getVersionAliasEntries();
+  const aliasEntries = getVersionAliasEntries();
 
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
     logger.json({
@@ -1044,7 +921,7 @@ export async function listInstalledVersions(cacheDir) {
   }
 
   console.log('');
-  console.log('Version aliases (dynamically resolved):');
+  console.log('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
     console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
@@ -1087,7 +964,7 @@ export async function listRemoteVersions() {
     return aMaj - bMaj || aMin - bMin || a.localeCompare(b, undefined, { numeric: true });
   });
 
-  const aliasEntries = await getVersionAliasEntries();
+  const aliasEntries = getVersionAliasEntries();
 
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
     logger.json({
@@ -1103,7 +980,7 @@ export async function listRemoteVersions() {
   }
 
   console.log('');
-  console.log('Version aliases (dynamically resolved):');
+  console.log('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
     console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
@@ -1127,7 +1004,7 @@ export async function deleteVersion(cacheDir, versionSpec) {
   // Resolve named aliases (stable/alpha) to the actual cached version name.
   // Major.minor patterns like 8.8 are used as-is since the cache dir is named c8run-8.8.
   const resolvedVersion = isVersionAlias(versionSpec)
-    ? await resolveVersion(versionSpec)
+    ? resolveVersion(versionSpec)
     : versionSpec;
 
   // Prevent deleting a currently running version
@@ -1319,15 +1196,15 @@ export const commands = {
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
       console.log('A <version> can be:');
-      console.log('  stable / alpha         Named aliases (dynamically resolved to latest)');
+      console.log('  stable / alpha         Named version aliases');
       console.log('  8.8, 8.9               Major.minor — rolling release for that minor');
       console.log('  8.9.0-alpha5           Exact pinned version');
       console.log('');
       console.log('  start uses a local version if available (no remote check).');
       console.log('  install always checks the remote for a newer rolling release.');
       console.log('');
-      console.log('Version aliases (dynamically resolved):')
-      for (const [alias, resolved] of await getVersionAliasEntries()) {
+      console.log('Version aliases:')
+      for (const [alias, resolved] of getVersionAliasEntries()) {
         console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
       console.log('');
@@ -1416,11 +1293,7 @@ export const commands = {
       process.exit(1);
     }
     const theCacheDir = getCacheDir();
-    const version = await resolveVersion(versionSpec, {
-      // start: prefer locally-cached alias mapping to avoid a network fetch when already installed
-      preferLocal: parsed.subcommand === 'start',
-      cacheDir: theCacheDir,
-    });
+    const version = resolveVersion(versionSpec);
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }

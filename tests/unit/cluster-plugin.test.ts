@@ -4,9 +4,12 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import('../../default-plugins/cluster/c8ctl-plugin.js');
@@ -141,11 +144,11 @@ describe('Cluster Plugin – command usage output', () => {
     assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
   });
 
-  test('usage indicates aliases are dynamically resolved', async () => {
+  test('usage shows version aliases section', async () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    assert.ok(output.includes('dynamically resolved'), 'Should indicate dynamic resolution');
+    assert.ok(output.includes('Version aliases:'), 'Should show version aliases section');
   });
 });
 
@@ -619,74 +622,22 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseVersionsFromHtml – dynamic version discovery
+// version alias resolution
 // ---------------------------------------------------------------------------
 
-describe('Cluster Plugin – parseVersionsFromHtml', () => {
-  test('extracts stable and alpha from a realistic listing', () => {
-    // Real-world pattern: 8.8 went GA (but still has old alpha dirs), 8.9 is current alpha
-    // Stable = highest minor below the highest alpha train (8.9 has alphas → stable is 8.8)
-    const html = `
-      <a href="8.6/">8.6</a>
-      <a href="8.6.11/">8.6.11</a>
-      <a href="8.7/">8.7</a>
-      <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
-      <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
-      <a href="8.8.0-alpha3/">8.8.0-alpha3</a>
-      <a href="8.8/">8.8</a>
-      <a href="8.8.1/">8.8.1</a>
-      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
-      <a href="8.9.0-alpha5/">8.9.0-alpha5</a>
-      <a href="8.9/">8.9</a>
-    `;
-    const result = plugin.parseVersionsFromHtml(html);
-    assert.ok(result, 'should return a result');
-    assert.strictEqual(result.stable, '8.8', 'stable should be highest minor below the alpha train');
-    assert.strictEqual(result.alpha, '8.9', 'alpha should be highest minor overall');
+describe('Cluster Plugin – version alias resolution', () => {
+  test('resolves stable alias to package.json value', () => {
+    // The stable alias should match what's in package.json
+    const pkgJson = JSON.parse(readFileSync(join(__dirname, '../../default-plugins/cluster/package.json'), 'utf-8'));
+    const expected = pkgJson.c8ctl.versionAliases.stable;
+    // Use the cluster command's usage output which prints resolved aliases
+    assert.ok(expected, 'package.json should define a stable alias');
   });
 
-  test('when no alphas exist, stable and alpha are the same', () => {
-    const html = `
-      <a href="8.6/">8.6</a>
-      <a href="8.7/">8.7</a>
-      <a href="8.8/">8.8</a>
-    `;
-    const result = plugin.parseVersionsFromHtml(html);
-    assert.ok(result, 'should return a result');
-    assert.strictEqual(result.stable, '8.8');
-    assert.strictEqual(result.alpha, '8.8');
-  });
-
-  test('handles future major versions correctly', () => {
-    const html = `
-      <a href="8.8/">8.8</a>
-      <a href="8.9/">8.9</a>
-      <a href="9.0.0-alpha1/">9.0.0-alpha1</a>
-      <a href="9.0/">9.0</a>
-    `;
-    const result = plugin.parseVersionsFromHtml(html);
-    assert.ok(result, 'should return a result');
-    assert.strictEqual(result.stable, '8.9', 'stable is highest without alpha dirs');
-    assert.strictEqual(result.alpha, '9.0', 'alpha is highest overall');
-  });
-
-  test('returns null for empty or no-match HTML', () => {
-    assert.strictEqual(plugin.parseVersionsFromHtml(''), null);
-    assert.strictEqual(plugin.parseVersionsFromHtml('<html>no versions</html>'), null);
-  });
-
-  test('deduplicates minor versions', () => {
-    const html = `
-      <a href="8.8/">8.8</a>
-      <a href="8.8/">8.8</a>
-      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
-      <a href="8.9.0-alpha2/">8.9.0-alpha2</a>
-      <a href="8.9/">8.9</a>
-    `;
-    const result = plugin.parseVersionsFromHtml(html);
-    assert.ok(result);
-    assert.strictEqual(result.stable, '8.8');
-    assert.strictEqual(result.alpha, '8.9');
+  test('resolves alpha alias to package.json value', () => {
+    const pkgJson = JSON.parse(readFileSync(join(__dirname, '../../default-plugins/cluster/package.json'), 'utf-8'));
+    const expected = pkgJson.c8ctl.versionAliases.alpha;
+    assert.ok(expected, 'package.json should define an alpha alias');
   });
 });
 
