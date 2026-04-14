@@ -24,137 +24,6 @@ export type SearchResult = {
 };
 
 /**
- * CLI infrastructure flags — valid for every command, never passed to search APIs.
- */
-const CLI_FLAGS = new Set(["profile", "help", "version"]);
-
-/**
- * Search behavior flags consumed by shared infrastructure (fetchAllPages / buildDateFilter / sort)
- * for ALL search resources. A flag belongs here only if every search handler consumes it
- * via shared code paths — never for flags consumed by a subset of handlers.
- *
- * If a flag is only relevant to some resources, put it in SEARCH_RESOURCE_FLAGS instead.
- */
-const SHARED_SEARCH_FLAGS = new Set([
-	"sortBy",
-	"asc",
-	"desc",
-	"between",
-	"dateField",
-]);
-
-/**
- * Union of CLI_FLAGS and SHARED_SEARCH_FLAGS — exported for use in detectUnknownSearchFlags.
- * Do NOT add resource-specific flags here; add them to SEARCH_RESOURCE_FLAGS instead.
- */
-export const GLOBAL_FLAGS = new Set([...CLI_FLAGS, ...SHARED_SEARCH_FLAGS]);
-
-/**
- * Valid search filter flags per resource (values keys that are consumed by the search handler).
- * This map is used to detect when a user passes a flag that looks valid but is not recognized
- * for the specific resource, causing silent filter drops.
- */
-export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
-	"process-definition": new Set([
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"name",
-		"key",
-		"iid",
-		"iname",
-	]),
-	"process-instance": new Set([
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"processDefinitionKey",
-		"state",
-		"key",
-		"parentProcessInstanceKey",
-		"iid",
-	]),
-	"user-task": new Set([
-		"state",
-		"assignee",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"elementId",
-		"iassignee",
-	]),
-	incident: new Set([
-		"state",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"bpmnProcessId",
-		"id",
-		"processDefinitionId",
-		"errorType",
-		"errorMessage",
-		"ierrorMessage",
-		"iid",
-	]),
-	jobs: new Set([
-		"state",
-		"type",
-		"processInstanceKey",
-		"processDefinitionKey",
-		"itype",
-	]),
-	variable: new Set([
-		"name",
-		"value",
-		"processInstanceKey",
-		"scopeKey",
-		"fullValue",
-		"iname",
-		"ivalue",
-		"limit",
-	]),
-	user: new Set(["username", "name", "email", "limit"]),
-	role: new Set(["roleId", "name", "limit"]),
-	group: new Set(["groupId", "name", "limit"]),
-	tenant: new Set(["tenantId", "name", "limit"]),
-	authorization: new Set([
-		"ownerId",
-		"ownerType",
-		"resourceType",
-		"resourceId",
-		"limit",
-	]),
-	"mapping-rule": new Set([
-		"mappingRuleId",
-		"name",
-		"claimName",
-		"claimValue",
-		"limit",
-	]),
-};
-
-/**
- * Detect flags the user set that are not recognized for the given search resource.
- * Returns the list of unknown flag names (without the --prefix).
- */
-export function detectUnknownSearchFlags(
-	values: Record<string, unknown>,
-	normalizedResource: string,
-): string[] {
-	const validFlags =
-		SEARCH_RESOURCE_FLAGS[normalizedResource] ||
-		SEARCH_RESOURCE_FLAGS[normalizedResource.replace(/s$/, "")];
-	if (!validFlags) return [];
-
-	const unknown: string[] = [];
-	for (const [key, val] of Object.entries(values)) {
-		if (val === undefined || val === false) continue; // not set by the user
-		if (GLOBAL_FLAGS.has(key)) continue;
-		if (validFlags.has(key)) continue;
-		unknown.push(key);
-	}
-	return unknown;
-}
-
-/**
  * Detect wildcard characters (* or ?) in a string value and return
  * a $like filter object for the API. Returns the plain string for exact match.
  *
@@ -346,7 +215,6 @@ export async function searchProcessDefinitions(options: {
 	iName?: string;
 	sortBy?: string;
 	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
@@ -478,12 +346,7 @@ export async function searchProcessDefinitions(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"process definitions",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "process definitions", criteria.length > 0);
 		}
 
 		return result;
@@ -506,7 +369,6 @@ export async function searchProcessInstances(options: {
 	iProcessDefinitionId?: string;
 	sortBy?: string;
 	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
 	between?: string;
 	dateField?: string;
 }): Promise<SearchResult | undefined> {
@@ -660,12 +522,7 @@ export async function searchProcessInstances(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"process instances",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "process instances", criteria.length > 0);
 		}
 
 		return result;
@@ -687,7 +544,6 @@ export async function searchUserTasks(options: {
 	iAssignee?: string;
 	sortBy?: string;
 	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
 	between?: string;
 	dateField?: string;
 }): Promise<SearchResult | undefined> {
@@ -819,12 +675,7 @@ export async function searchUserTasks(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"user tasks",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "user tasks", criteria.length > 0);
 		}
 
 		return result;
@@ -848,7 +699,6 @@ export async function searchIncidents(options: {
 	iProcessDefinitionId?: string;
 	sortBy?: string;
 	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
 	between?: string;
 }): Promise<SearchResult | undefined> {
 	const logger = getLogger();
@@ -1024,12 +874,7 @@ export async function searchIncidents(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(
-				logger,
-				"incidents",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "incidents", criteria.length > 0);
 		}
 
 		return result;
@@ -1050,7 +895,6 @@ export async function searchJobs(options: {
 	iType?: string;
 	sortBy?: string;
 	sortOrder?: SortOrder;
-	_unknownFlags?: string[];
 	between?: string;
 	dateField?: string;
 }): Promise<SearchResult | undefined> {
@@ -1172,7 +1016,7 @@ export async function searchJobs(options: {
 				criteria.length > 0,
 			);
 		} else {
-			logNoResults(logger, "jobs", criteria.length > 0, options._unknownFlags);
+			logNoResults(logger, "jobs", criteria.length > 0);
 		}
 
 		return result;
@@ -1196,7 +1040,6 @@ export async function searchVariables(options: {
 	sortBy?: string;
 	sortOrder?: SortOrder;
 	limit?: number;
-	_unknownFlags?: string[];
 }): Promise<SearchResult | undefined> {
 	const logger = getLogger();
 	const client = createClient(options.profile);
@@ -1338,12 +1181,7 @@ export async function searchVariables(options: {
 				);
 			}
 		} else {
-			logNoResults(
-				logger,
-				"variables",
-				criteria.length > 0,
-				options._unknownFlags,
-			);
+			logNoResults(logger, "variables", criteria.length > 0);
 		}
 
 		return result;

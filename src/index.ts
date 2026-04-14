@@ -13,7 +13,7 @@ import {
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
-import { validateFlags } from "./command-validation.ts";
+import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { showCompletion } from "./commands/completion.ts";
 import { deploy } from "./commands/deployments.ts";
 import { getForm, getStartForm, getUserTaskForm } from "./commands/forms.ts";
@@ -99,7 +99,6 @@ import {
 } from "./commands/profiles.ts";
 import { run } from "./commands/run.ts";
 import {
-	detectUnknownSearchFlags,
 	searchIncidents,
 	searchJobs,
 	searchProcessDefinitions,
@@ -265,17 +264,19 @@ export function resolveProcessDefinitionId(
 }
 
 /**
- * Warn about unrecognized flags for a search resource.
+ * Warn about unrecognized flags for a verb × resource combination.
  */
-function warnUnknownSearchFlags(
+function warnUnknownFlags(
 	logger: ReturnType<typeof getLogger>,
 	unknownFlags: string[],
+	verb: string,
 	resource: string,
 ): void {
 	if (unknownFlags.length === 0) return;
 	const flagList = unknownFlags.map((f) => `--${f}`).join(", ");
+	const command = resource ? `${verb} ${resource}` : verb;
 	logger.warn(
-		`Flag(s) ${flagList} not recognized for 'search ${resource}'. They will be ignored. Run "c8ctl help search" for valid options.`,
+		`Flag(s) ${flagList} not recognized for '${command}'. They will be ignored. Run "c8ctl help ${verb}" for valid options.`,
 	);
 }
 
@@ -395,6 +396,11 @@ async function main() {
 	if (commandDef) {
 		validateFlags(values, commandDef.flags);
 	}
+
+	// Unknown flag detection — warn about flags not recognised for this verb × resource.
+	// Derived from COMMAND_REGISTRY; resource-scoped for search/list.
+	const unknownFlags = detectUnknownFlags(verb, normalizedResource, values);
+	warnUnknownFlags(logger, unknownFlags, verb, resource);
 
 	// Handle session commands
 	if (verb === "use") {
@@ -941,11 +947,6 @@ async function main() {
 	// Handle search commands
 	if (verb === "search") {
 		const normalizedSearchResource = resolveAlias(resource);
-		const unknownFlags = detectUnknownSearchFlags(
-			values,
-			normalizedSearchResource,
-		);
-		warnUnknownSearchFlags(logger, unknownFlags, resource);
 
 		if (
 			normalizedSearchResource === "process-definition" ||
@@ -961,7 +962,6 @@ async function main() {
 				iName: str(values.iname),
 				sortBy: str(values.sortBy),
 				sortOrder,
-				_unknownFlags: unknownFlags,
 			});
 			return;
 		}
@@ -981,7 +981,6 @@ async function main() {
 				iProcessDefinitionId: str(values.iid),
 				sortBy: str(values.sortBy),
 				sortOrder,
-				_unknownFlags: unknownFlags,
 				between: str(values.between),
 				dateField: str(values.dateField),
 			});
@@ -1002,7 +1001,6 @@ async function main() {
 				iAssignee: str(values.iassignee),
 				sortBy: str(values.sortBy),
 				sortOrder,
-				_unknownFlags: unknownFlags,
 				between: str(values.between),
 				dateField: str(values.dateField),
 			});
@@ -1025,7 +1023,6 @@ async function main() {
 				iProcessDefinitionId: str(values.iid),
 				sortBy: str(values.sortBy),
 				sortOrder,
-				_unknownFlags: unknownFlags,
 				between: str(values.between),
 			});
 			return;
@@ -1041,7 +1038,6 @@ async function main() {
 				iType: str(values.itype),
 				sortBy: str(values.sortBy),
 				sortOrder,
-				_unknownFlags: unknownFlags,
 				between: str(values.between),
 				dateField: str(values.dateField),
 			});
@@ -1064,7 +1060,6 @@ async function main() {
 				sortBy: str(values.sortBy),
 				sortOrder,
 				limit,
-				_unknownFlags: unknownFlags,
 			});
 			return;
 		}

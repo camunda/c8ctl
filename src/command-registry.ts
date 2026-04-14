@@ -929,13 +929,13 @@ export const SEARCH_RESOURCE_FLAGS: Record<string, Set<string>> = {
 	"user-task": new Set(Object.keys(UT_SEARCH_FLAGS)),
 	incident: new Set(Object.keys(INC_SEARCH_FLAGS)),
 	jobs: new Set(Object.keys(JOB_SEARCH_FLAGS)),
-	variable: new Set([...Object.keys(VAR_SEARCH_FLAGS), "limit"]),
-	user: new Set([...Object.keys(USER_SEARCH_FLAGS), "limit"]),
-	role: new Set([...Object.keys(ROLE_SEARCH_FLAGS), "limit"]),
-	group: new Set([...Object.keys(GROUP_SEARCH_FLAGS), "limit"]),
-	tenant: new Set([...Object.keys(TENANT_SEARCH_FLAGS), "limit"]),
-	authorization: new Set([...Object.keys(AUTH_SEARCH_FLAGS), "limit"]),
-	"mapping-rule": new Set([...Object.keys(MR_SEARCH_FLAGS), "limit"]),
+	variable: new Set(Object.keys(VAR_SEARCH_FLAGS)),
+	user: new Set(Object.keys(USER_SEARCH_FLAGS)),
+	role: new Set(Object.keys(ROLE_SEARCH_FLAGS)),
+	group: new Set(Object.keys(GROUP_SEARCH_FLAGS)),
+	tenant: new Set(Object.keys(TENANT_SEARCH_FLAGS)),
+	authorization: new Set(Object.keys(AUTH_SEARCH_FLAGS)),
+	"mapping-rule": new Set(Object.keys(MR_SEARCH_FLAGS)),
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

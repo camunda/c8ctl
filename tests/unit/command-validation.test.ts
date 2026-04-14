@@ -7,7 +7,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { requireOption, requireEnum, requireCsvEnum, requirePositional, requireOneOf } from '../../src/command-validation.ts';
+import { requireOption, requireEnum, requireCsvEnum, requirePositional, requireOneOf, detectUnknownFlags } from '../../src/command-validation.ts';
 
 // A minimal enum-like object matching the SDK pattern
 const ColorEnum = { RED: 'RED', GREEN: 'GREEN', BLUE: 'BLUE' } as const;
@@ -240,7 +240,7 @@ describe('requireOneOf', () => {
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
 import { validateFlags } from '../../src/command-validation.ts';
-import { COMMAND_REGISTRY } from '../../src/command-registry.ts';
+import { COMMAND_REGISTRY, GLOBAL_FLAGS } from '../../src/command-registry.ts';
 
 /**
  * Flag names that are known to map to branded SDK types.
@@ -379,5 +379,156 @@ describe('validateFlags behaviour', () => {
       searchDef.flags,
     );
     assert.strictEqual(result.size, 0);
+  });
+});
+
+// ─── detectUnknownFlags ─────────────────────────────────────────────────────
+
+describe('detectUnknownFlags — non-search verbs', () => {
+  test('get: valid flags are not flagged', () => {
+    const unknown = detectUnknownFlags('get', 'process-definition', { xml: true, profile: 'dev' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('get: unknown flag is detected', () => {
+    const unknown = detectUnknownFlags('get', 'process-definition', { bogus: 'yes' });
+    assert.deepStrictEqual(unknown, ['bogus']);
+  });
+
+  test('create: valid flags are not flagged', () => {
+    const unknown = detectUnknownFlags('create', 'pi', { processDefinitionId: 'my-proc', variables: '{}' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('create: unknown flag is detected', () => {
+    const unknown = detectUnknownFlags('create', 'pi', { assignee: 'john' });
+    assert.deepStrictEqual(unknown, ['assignee']);
+  });
+
+  test('delete: has no verb-specific flags, only global flags are valid', () => {
+    const unknown = detectUnknownFlags('delete', 'user', { name: 'test' });
+    assert.deepStrictEqual(unknown, ['name']);
+  });
+
+  test('delete: global flags are accepted', () => {
+    const unknown = detectUnknownFlags('delete', 'user', { profile: 'dev' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('cancel: unknown flag detected', () => {
+    const unknown = detectUnknownFlags('cancel', 'pi', { reason: 'test' });
+    assert.deepStrictEqual(unknown, ['reason']);
+  });
+
+  test('cancel: global flags accepted', () => {
+    const unknown = detectUnknownFlags('cancel', 'pi', { profile: 'prod' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('complete: valid flag variables accepted', () => {
+    const unknown = detectUnknownFlags('complete', 'ut', { variables: '{}' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('complete: unknown flag detected', () => {
+    const unknown = detectUnknownFlags('complete', 'ut', { assignee: 'john' });
+    assert.deepStrictEqual(unknown, ['assignee']);
+  });
+
+  test('fail: valid flags accepted', () => {
+    const unknown = detectUnknownFlags('fail', 'job', { retries: '3', errorMessage: 'boom' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('fail: unknown flag detected', () => {
+    const unknown = detectUnknownFlags('fail', 'job', { timeout: '5000' });
+    assert.deepStrictEqual(unknown, ['timeout']);
+  });
+
+  test('publish: valid flags accepted', () => {
+    const unknown = detectUnknownFlags('publish', 'msg', { correlationKey: 'k1', variables: '{}' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('publish: unknown flag detected', () => {
+    const unknown = detectUnknownFlags('publish', 'msg', { processDefinitionId: 'pd' });
+    assert.deepStrictEqual(unknown, ['processDefinitionId']);
+  });
+
+  test('activate: valid flags accepted', () => {
+    const unknown = detectUnknownFlags('activate', 'jobs', { maxJobsToActivate: '10', worker: 'w1' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('resolve: no verb-specific flags, only global accepted', () => {
+    const unknown = detectUnknownFlags('resolve', 'inc', { errorMessage: 'test' });
+    assert.deepStrictEqual(unknown, ['errorMessage']);
+  });
+
+  test('ignores undefined and false values', () => {
+    const unknown = detectUnknownFlags('get', 'process-definition', { bogus: undefined, fake: false, xml: true });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('unknown verb returns empty (no false positives for unregistered verbs)', () => {
+    const unknown = detectUnknownFlags('nonexistent-verb', 'any', { profile: 'dev' });
+    assert.deepStrictEqual(unknown, []);
+  });
+
+  test('unknown verb returns empty even with non-global flags', () => {
+    const unknown = detectUnknownFlags('nonexistent-verb', 'any', { weirdFlag: 'xyz' });
+    assert.deepStrictEqual(unknown, []);
+  });
+});
+
+// ─── Structural invariant: every registry verb gets detection coverage ───────
+
+describe('detectUnknownFlags — structural coverage', () => {
+  test('every verb in COMMAND_REGISTRY gets unknown-flag detection that rejects invented flags', () => {
+    for (const verb of Object.keys(COMMAND_REGISTRY)) {
+      const def = COMMAND_REGISTRY[verb];
+      const resource = def.resources?.[0] ?? 'any';
+      const unknown = detectUnknownFlags(verb, resource, { zzz_invented_flag: 'value' });
+      assert.ok(
+        unknown.includes('zzz_invented_flag'),
+        `detectUnknownFlags('${verb}', '${resource}', ...) failed to detect invented flag`,
+      );
+    }
+  });
+
+  test('every verb accepts all global flags without flagging them', () => {
+    for (const verb of Object.keys(COMMAND_REGISTRY)) {
+      const def = COMMAND_REGISTRY[verb];
+      const resource = def.resources?.[0] ?? 'any';
+      const globalValues = Object.fromEntries(
+        Object.keys(GLOBAL_FLAGS).map(k => [k, 'test-value']),
+      );
+      const unknown = detectUnknownFlags(verb, resource, globalValues);
+      assert.deepStrictEqual(
+        unknown,
+        [],
+        `detectUnknownFlags('${verb}', '${resource}', ...) incorrectly flagged global flags: ${unknown.join(', ')}`,
+      );
+    }
+  });
+
+  test('every verb accepts its own registered flags without flagging them', () => {
+    // Resource-scoped verbs (search, list) use per-resource flag sets,
+    // not the full verb union. Test non-scoped verbs here.
+    const RESOURCE_SCOPED = new Set(['search', 'list']);
+    for (const verb of Object.keys(COMMAND_REGISTRY)) {
+      if (RESOURCE_SCOPED.has(verb)) continue;
+      const def = COMMAND_REGISTRY[verb];
+      const resource = def.resources?.[0] ?? 'any';
+      const verbValues = Object.fromEntries(
+        Object.keys(def.flags).map(k => [k, 'test-value']),
+      );
+      const unknown = detectUnknownFlags(verb, resource, verbValues);
+      assert.deepStrictEqual(
+        unknown,
+        [],
+        `detectUnknownFlags('${verb}', '${resource}', ...) incorrectly flagged verb flags: ${unknown.join(', ')}`,
+      );
+    }
   });
 });

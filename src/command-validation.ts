@@ -9,7 +9,13 @@
  * handlers receive already-validated types and need no internal guards.
  */
 
-import type { FlagDef } from "./command-registry.ts";
+import {
+	type FlagDef,
+	GLOBAL_FLAGS,
+	getCommandDef,
+	SEARCH_FLAGS,
+	SEARCH_RESOURCE_FLAGS,
+} from "./command-registry.ts";
 import { getLogger } from "./logger.ts";
 
 /**
@@ -168,4 +174,75 @@ export function validateFlags(
 	}
 
 	return validated;
+}
+
+/** Flag names that are always valid regardless of verb or resource. */
+const GLOBAL_FLAG_NAMES = new Set(Object.keys(GLOBAL_FLAGS));
+
+/** Shared search/list flags valid for all resources of those verbs. */
+const SHARED_SEARCH_FLAG_NAMES = new Set(Object.keys(SEARCH_FLAGS));
+
+/**
+ * Verbs whose flags are resource-scoped: the union of all resource flags
+ * is declared on the verb, but only a subset applies per resource.
+ * For these verbs, SEARCH_RESOURCE_FLAGS provides the per-resource breakdown.
+ */
+const RESOURCE_SCOPED_VERBS = new Set(["search", "list"]);
+
+/**
+ * Verb-level flags that apply to all resources of a resource-scoped verb
+ * but are NOT in SEARCH_FLAGS. e.g. list has "all".
+ */
+const EXTRA_VERB_FLAGS: Record<string, string[]> = {
+	list: ["all"],
+};
+
+/**
+ * Detect flags the user provided that are not recognised for the given
+ * verb (and, for resource-scoped verbs, the specific resource).
+ *
+ * For resource-scoped verbs (search, list): valid flags are
+ *   GLOBAL_FLAGS ∪ SEARCH_FLAGS ∪ extra verb flags ∪ resource-specific flags
+ *
+ * For all other verbs: valid flags are
+ *   GLOBAL_FLAGS ∪ verb flags
+ *
+ * Returns an empty array when the verb is not in the registry
+ * (unknown verbs fall through to the plugin system).
+ */
+export function detectUnknownFlags(
+	verb: string,
+	resource: string,
+	values: Record<string, unknown>,
+): string[] {
+	const commandDef = getCommandDef(verb);
+	if (!commandDef) return [];
+
+	const validFlags = new Set(GLOBAL_FLAG_NAMES);
+
+	if (RESOURCE_SCOPED_VERBS.has(verb) && resource) {
+		// Shared flags valid for all resources of this verb
+		for (const f of SHARED_SEARCH_FLAG_NAMES) validFlags.add(f);
+		for (const f of EXTRA_VERB_FLAGS[verb] ?? []) validFlags.add(f);
+
+		// Resource-specific flags (e.g. processDefinitionKey for "process-instance")
+		const resourceFlags =
+			SEARCH_RESOURCE_FLAGS[resource] ||
+			SEARCH_RESOURCE_FLAGS[resource.replace(/s$/, "")];
+		if (resourceFlags) {
+			for (const f of resourceFlags) validFlags.add(f);
+		}
+	} else {
+		for (const f of Object.keys(commandDef.flags)) {
+			validFlags.add(f);
+		}
+	}
+
+	const unknown: string[] = [];
+	for (const [key, val] of Object.entries(values)) {
+		if (val === undefined || val === false) continue;
+		if (validFlags.has(key)) continue;
+		unknown.push(key);
+	}
+	return unknown;
 }
