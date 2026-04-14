@@ -6,6 +6,14 @@
  * data from this registry instead of maintaining separate copies.
  */
 
+import {
+	ProcessDefinitionId,
+	ProcessDefinitionKey,
+	ProcessInstanceKey,
+	TenantId,
+	Username,
+} from "@camunda8/orchestration-cluster-api";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface FlagDef {
@@ -17,6 +25,15 @@ export interface FlagDef {
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
 	csv?: boolean;
+	/**
+	 * Transform and validate raw CLI input into a typed value.
+	 * Called at the validation boundary before dispatch.
+	 * Should throw on invalid input (error message is surfaced to the user).
+	 * Each concrete validator returns its branded type (e.g. ProcessDefinitionKey),
+	 * erased to unknown here since FlagDef holds heterogeneous validators.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: validators return branded types that vary per flag
+	validate?: (value: string) => any;
 }
 
 export interface CommandDef {
@@ -113,16 +130,19 @@ const PI_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processDefinitionId: {
 		type: "string",
 		description: "Filter by process definition ID",
+		validate: ProcessDefinitionId.assumeExists,
 	},
 	processDefinitionKey: {
 		type: "string",
 		description: "Filter by process definition key",
+		validate: ProcessDefinitionKey.assumeExists,
 	},
 	state: { type: "string", description: "Filter by state" },
 	key: { type: "string", description: "Filter by key" },
 	parentProcessInstanceKey: {
 		type: "string",
 		description: "Filter by parent process instance key",
+		validate: ProcessInstanceKey.assumeExists,
 	},
 	iid: {
 		type: "string",
@@ -139,6 +159,7 @@ const PD_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processDefinitionId: {
 		type: "string",
 		description: "Filter by process definition ID",
+		validate: ProcessDefinitionId.assumeExists,
 	},
 	name: { type: "string", description: "Filter by name" },
 	key: { type: "string", description: "Filter by key" },
@@ -155,10 +176,12 @@ const UT_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processInstanceKey: {
 		type: "string",
 		description: "Filter by process instance key",
+		validate: ProcessInstanceKey.assumeExists,
 	},
 	processDefinitionKey: {
 		type: "string",
 		description: "Filter by process definition key",
+		validate: ProcessDefinitionKey.assumeExists,
 	},
 	elementId: { type: "string", description: "Filter by element ID" },
 	iassignee: {
@@ -172,10 +195,12 @@ const INC_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processInstanceKey: {
 		type: "string",
 		description: "Filter by process instance key",
+		validate: ProcessInstanceKey.assumeExists,
 	},
 	processDefinitionKey: {
 		type: "string",
 		description: "Filter by process definition key",
+		validate: ProcessDefinitionKey.assumeExists,
 	},
 	bpmnProcessId: {
 		type: "string",
@@ -185,6 +210,7 @@ const INC_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processDefinitionId: {
 		type: "string",
 		description: "Filter by process definition ID",
+		validate: ProcessDefinitionId.assumeExists,
 	},
 	errorType: { type: "string", description: "Filter by error type" },
 	errorMessage: {
@@ -207,10 +233,12 @@ const JOB_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processInstanceKey: {
 		type: "string",
 		description: "Filter by process instance key",
+		validate: ProcessInstanceKey.assumeExists,
 	},
 	processDefinitionKey: {
 		type: "string",
 		description: "Filter by process definition key",
+		validate: ProcessDefinitionKey.assumeExists,
 	},
 	itype: {
 		type: "string",
@@ -224,6 +252,7 @@ const VAR_SEARCH_FLAGS: Record<string, FlagDef> = {
 	processInstanceKey: {
 		type: "string",
 		description: "Filter by process instance key",
+		validate: ProcessInstanceKey.assumeExists,
 	},
 	scopeKey: { type: "string", description: "Filter by scope key" },
 	fullValue: {
@@ -241,7 +270,11 @@ const VAR_SEARCH_FLAGS: Record<string, FlagDef> = {
 };
 
 const USER_SEARCH_FLAGS: Record<string, FlagDef> = {
-	username: { type: "string", description: "Filter by username" },
+	username: {
+		type: "string",
+		description: "Filter by username",
+		validate: Username.assumeExists,
+	},
 	name: { type: "string", description: "Filter by name" },
 	email: { type: "string", description: "Filter by email" },
 };
@@ -257,7 +290,11 @@ const GROUP_SEARCH_FLAGS: Record<string, FlagDef> = {
 };
 
 const TENANT_SEARCH_FLAGS: Record<string, FlagDef> = {
-	tenantId: { type: "string", description: "Filter by tenant ID" },
+	tenantId: {
+		type: "string",
+		description: "Filter by tenant ID",
+		validate: TenantId.assumeExists,
+	},
 	name: { type: "string", description: "Filter by name" },
 };
 
@@ -453,6 +490,7 @@ export const COMMAND_REGISTRY: Record<string, CommandDef> = {
 			processDefinitionId: {
 				type: "string",
 				description: "Process definition ID (BPMN process ID)",
+				validate: ProcessDefinitionId.assumeExists,
 			},
 			id: {
 				type: "string",
@@ -476,7 +514,11 @@ export const COMMAND_REGISTRY: Record<string, CommandDef> = {
 				description: "Await timeout in milliseconds",
 			},
 			// Identity user
-			username: { type: "string", description: "Username" },
+			username: {
+				type: "string",
+				description: "Username",
+				validate: Username.assumeExists,
+			},
 			name: { type: "string", description: "Display name" },
 			email: { type: "string", description: "Email address" },
 			password: { type: "string", description: "Password" },
@@ -485,7 +527,11 @@ export const COMMAND_REGISTRY: Record<string, CommandDef> = {
 			// Identity group
 			groupId: { type: "string", description: "Group ID" },
 			// Identity tenant
-			tenantId: { type: "string", description: "Tenant ID" },
+			tenantId: {
+				type: "string",
+				description: "Tenant ID",
+				validate: TenantId.assumeExists,
+			},
 			// Identity authorization
 			ownerId: {
 				type: "string",
@@ -549,6 +595,7 @@ export const COMMAND_REGISTRY: Record<string, CommandDef> = {
 			processDefinitionId: {
 				type: "string",
 				description: "Process definition ID (BPMN process ID)",
+				validate: ProcessDefinitionId.assumeExists,
 			},
 			id: {
 				type: "string",

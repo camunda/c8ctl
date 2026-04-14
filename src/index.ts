@@ -8,7 +8,12 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { createClient } from "./client.ts";
-import { COMMAND_REGISTRY, resolveAlias } from "./command-registry.ts";
+import {
+	COMMAND_REGISTRY,
+	getCommandDef,
+	resolveAlias,
+} from "./command-registry.ts";
+import { validateFlags } from "./command-validation.ts";
 import { showCompletion } from "./commands/completion.ts";
 import { deploy } from "./commands/deployments.ts";
 import { getForm, getStartForm, getUserTaskForm } from "./commands/forms.ts";
@@ -382,6 +387,13 @@ async function main() {
 	if (!resource && VERB_REQUIRES_RESOURCE.has(verb)) {
 		showVerbResources(verb);
 		return;
+	}
+
+	// Flag validation — run all registered validators before dispatch.
+	// Validators throw on invalid input; validateFlags catches and exits.
+	const commandDef = getCommandDef(verb);
+	if (commandDef) {
+		validateFlags(values, commandDef.flags);
 	}
 
 	// Handle session commands

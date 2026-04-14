@@ -7,12 +7,9 @@
  *
  * This module is the single chokepoint for input validation — command
  * handlers receive already-validated types and need no internal guards.
- *
- * Extension points for future issues:
- * - #212: add validateAcceptedFlags(values, accepted, verb, resource)
- * - #213: add requireResource(verb, resource, verbResourceMap)
  */
 
+import type { FlagDef } from "./command-registry.ts";
 import { getLogger } from "./logger.ts";
 
 /**
@@ -136,4 +133,39 @@ export function requireOneOf<T extends string>(
 		process.exit(1);
 	}
 	return match;
+}
+
+/**
+ * Run all registered validators for provided flag values.
+ *
+ * For each flag that has a `validate` function on its FlagDef,
+ * calls the validator with the raw string value. On failure,
+ * logs the error and exits with code 1.
+ *
+ * Returns a map of flag name → validated value for flags that
+ * had validators. Flags without validators are not included.
+ */
+export function validateFlags(
+	values: Record<string, string | boolean | (string | boolean)[] | undefined>,
+	flagDefs: Record<string, FlagDef>,
+): Map<string, unknown> {
+	const validated = new Map<string, unknown>();
+	const logger = getLogger();
+
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (!def.validate) continue;
+
+		const raw = values[flagName];
+		if (raw === undefined || typeof raw !== "string") continue;
+
+		try {
+			validated.set(flagName, def.validate(raw));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logger.error(`Invalid --${flagName}: ${message}`);
+			process.exit(1);
+		}
+	}
+
+	return validated;
 }

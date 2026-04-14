@@ -236,3 +236,148 @@ describe('requireOneOf', () => {
     assert.ok(logSpy.some(l => l.includes('Usage: pick a fruit')));
   });
 });
+
+// ─── validateFlags ───────────────────────────────────────────────────────────
+
+import { validateFlags } from '../../src/command-validation.ts';
+import { COMMAND_REGISTRY } from '../../src/command-registry.ts';
+
+/**
+ * Flag names that are known to map to branded SDK types.
+ * Context-dependent: 'username' only maps to the branded Username type
+ * in verbs that operate on 'users' resources (not in profile management
+ * where it means a basic auth credential).
+ */
+const BRANDED_FLAG_NAMES = new Set([
+  'processDefinitionKey',
+  'processInstanceKey',
+  'processDefinitionId',
+  'parentProcessInstanceKey',
+  'tenantId',
+  'username',
+]);
+
+/** Flags whose branded semantics only apply to certain resource contexts. */
+const CONTEXT_DEPENDENT_FLAGS: Record<string, string[]> = {
+  username: ['users'],
+  tenantId: ['tenants'],
+};
+
+function isBrandedInContext(flagName: string, def: { resources?: string[] }): boolean {
+  const requiredResources = CONTEXT_DEPENDENT_FLAGS[flagName];
+  if (!requiredResources) return true; // unconditionally branded
+  return requiredResources.some(r => def.resources?.includes(r));
+}
+
+describe('validateFlags structural invariants', () => {
+  test('every branded-type flag in the registry has a validate function', () => {
+    const missing: string[] = [];
+
+    for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+      for (const [flagName, flagDef] of Object.entries(def.flags)) {
+        if (BRANDED_FLAG_NAMES.has(flagName) && isBrandedInContext(flagName, def) && !flagDef.validate) {
+          missing.push(`${verb}.flags.${flagName}`);
+        }
+      }
+    }
+
+    assert.strictEqual(
+      missing.length,
+      0,
+      `Flags that map to branded SDK types must have a validate function:\n  ${missing.join('\n  ')}`,
+    );
+  });
+
+  test('validate functions throw on invalid input for key-type flags', () => {
+    for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+      for (const [flagName, flagDef] of Object.entries(def.flags)) {
+        if (!flagDef.validate) continue;
+
+        // Key-type fields (numeric pattern) reject non-numeric strings
+        if (flagName.endsWith('Key')) {
+          assert.throws(
+            () => flagDef.validate!('not-a-number'),
+            `${verb}.flags.${flagName}.validate should throw on invalid input`,
+          );
+        }
+      }
+    }
+  });
+
+  test('validate functions return the input for valid values', () => {
+    for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+      for (const [flagName, flagDef] of Object.entries(def.flags)) {
+        if (!flagDef.validate) continue;
+
+        // Key-type fields accept numeric strings
+        if (flagName.endsWith('Key')) {
+          const result = flagDef.validate('12345');
+          assert.strictEqual(
+            String(result), '12345',
+            `${verb}.flags.${flagName}.validate("12345") should return "12345"`,
+          );
+        }
+
+        // ID/name fields accept arbitrary strings
+        if (['processDefinitionId', 'tenantId', 'username'].includes(flagName)) {
+          const result = flagDef.validate('test-value');
+          assert.strictEqual(
+            String(result), 'test-value',
+            `${verb}.flags.${flagName}.validate("test-value") should return "test-value"`,
+          );
+        }
+      }
+    }
+  });
+});
+
+describe('validateFlags behaviour', () => {
+  beforeEach(setup);
+  afterEach(teardown);
+
+  test('exits on invalid flag value', () => {
+    const searchDef = COMMAND_REGISTRY.search;
+    assert.throws(
+      () => validateFlags(
+        { processDefinitionKey: 'not-a-number' },
+        searchDef.flags,
+      ),
+      /process\.exit\(1\)/,
+    );
+  });
+
+  test('passes valid values through', () => {
+    const searchDef = COMMAND_REGISTRY.search;
+    const result = validateFlags(
+      { processDefinitionKey: '12345' },
+      searchDef.flags,
+    );
+    assert.ok(result.has('processDefinitionKey'));
+    assert.strictEqual(String(result.get('processDefinitionKey')), '12345');
+  });
+
+  test('skips flags without validators', () => {
+    const searchDef = COMMAND_REGISTRY.search;
+    const result = validateFlags(
+      { sortBy: 'key', state: 'ACTIVE' },
+      searchDef.flags,
+    );
+    assert.strictEqual(result.size, 0);
+  });
+
+  test('skips flags not present in values', () => {
+    const searchDef = COMMAND_REGISTRY.search;
+    const result = validateFlags({}, searchDef.flags);
+    assert.strictEqual(result.size, 0);
+  });
+
+  test('skips boolean flag values', () => {
+    const searchDef = COMMAND_REGISTRY.search;
+    // processDefinitionKey as boolean should be skipped (not validated)
+    const result = validateFlags(
+      { processDefinitionKey: true as any },
+      searchDef.flags,
+    );
+    assert.strictEqual(result.size, 0);
+  });
+});
