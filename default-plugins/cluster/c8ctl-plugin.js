@@ -815,7 +815,9 @@ async function startC8Run(config, debug = false) {
       'Cluster failed to start within timeout.',
     );
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat ${logDir}/*.log`);
+    logger.info(
+      `Print logs with: cat "${join(logDir, 'camunda.log')}" "${join(logDir, 'connectors.log')}"`
+    );
     process.exit(1);
   }
 }
