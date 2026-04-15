@@ -141,11 +141,11 @@ describe('Cluster Plugin – command usage output', () => {
     assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
   });
 
-  test('usage indicates aliases are dynamically resolved', async () => {
+  test('usage shows version aliases', async () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    assert.ok(output.includes('dynamically resolved'), 'Should indicate dynamic resolution');
+    assert.ok(output.includes('Version aliases:'), 'Should show version aliases section');
   });
 });
 

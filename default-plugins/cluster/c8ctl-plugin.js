@@ -1058,7 +1058,7 @@ export async function listInstalledVersions(cacheDir) {
   }
 
   console.log('');
-  console.log('Version aliases (dynamically resolved):');
+  console.log('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
     console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
@@ -1117,7 +1117,7 @@ export async function listRemoteVersions() {
   }
 
   console.log('');
-  console.log('Version aliases (dynamically resolved):');
+  console.log('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
     console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
@@ -1333,14 +1333,14 @@ export const commands = {
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
       console.log('A <version> can be:');
-      console.log('  stable / alpha         Named aliases (dynamically resolved to latest)');
+      console.log('  stable / alpha         Named aliases (resolved to latest)');
       console.log('  8.8, 8.9               Major.minor — rolling release for that minor');
       console.log('  8.9.0-alpha5           Exact pinned version');
       console.log('');
       console.log('  start uses a local version if available (no remote check).');
       console.log('  install always checks the remote for a newer rolling release.');
       console.log('');
-      console.log('Version aliases (dynamically resolved):')
+      console.log('Version aliases:')
       for (const [alias, resolved] of await getVersionAliasEntries()) {
         console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
