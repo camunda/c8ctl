@@ -25,6 +25,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "npm run lint && npm run clean && tsc && npm run copy-plugins && npm run copy-templates",
     "lint": "biome check src/",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

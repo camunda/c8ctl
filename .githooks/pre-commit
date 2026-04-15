@@ -1,0 +1,18 @@
+#!/bin/sh
+# Pre-commit hook: run biome check --fix on staged src/ files
+# and re-stage any auto-fixed changes.
+
+# Only check if there are staged files under src/
+STAGED=$(git diff --cached --name-only --diff-filter=d -- 'src/*')
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+npx biome check --fix src/
+
+# Re-stage any files that biome auto-fixed
+for f in $STAGED; do
+  if [ -f "$f" ]; then
+    git add "$f"
+  fi
+done
