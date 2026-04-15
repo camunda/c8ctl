@@ -495,7 +495,7 @@ When plugins are loaded, their commands automatically appear in `c8ctl help` out
 c8ctl ships two flags designed specifically for AI agents and programmatic consumers.
 They appear in their own clearly labelled section in `c8ctl help`.
 
-> For a full machine-readable reference, see [`CONTEXT.md`](./CONTEXT.md).
+> For a full machine-readable reference, see [`AGENTS.md`](./AGENTS.md).
 
 ### `--fields <comma-separated>`
 
@@ -729,4 +729,4 @@ Apache 2.0 - see LICENSE.md
 
 ## Contributing
 
-See `COMMIT-MESSAGE-GUIDELINE.md` for commit message conventions.
+See `AGENTS.md` for commit message conventions.

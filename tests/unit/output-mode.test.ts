@@ -1,7 +1,7 @@
 /**
  * Unit tests for `c8 output` command
  *
- * Exercises the CLI as a subprocess to match DEVELOPMENT.md conventions.
+ * Exercises the CLI as a subprocess to match AGENTS.md conventions.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';

@@ -1,3 +1,4 @@
-# Claude Code Instructions
+# CLAUDE.md
 
-Read and follow the conventions in [DEVELOPMENT.md](DEVELOPMENT.md).
+Claude does not natively support AGENTS.md yet.
+Until it does, please read and follow [AGENTS.md](./AGENTS.md) before starting any task.

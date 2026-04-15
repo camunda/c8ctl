@@ -1207,7 +1207,7 @@ c8 list pi
 ## Agent / Programmatic Consumption
 
 These examples use flags designed specifically for AI agents and programmatic consumers.
-See [`CONTEXT.md`](./CONTEXT.md) for the complete agent reference.
+See [`AGENTS.md`](./AGENTS.md) for the complete agent reference.
 
 ### `--fields` — Reduce Context Window Size
 
