@@ -252,7 +252,7 @@ echo "SUCCESS"
     // Verify key structural elements
     assert.ok(
       script.startsWith('# c8ctl-completion-version:'),
-      'Should start with version
+      'Should start with version header',
     );
     assert.ok(script.includes('complete -c c8ctl -e'), 'Should clear old completions');
     assert.ok(script.includes('complete -c c8 -e'), 'Should clear old completions for c8');
