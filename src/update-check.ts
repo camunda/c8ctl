@@ -19,8 +19,8 @@
  * - Zero extra dependencies (uses global fetch + node:fs)
  * - Never delays command execution (fire-and-forget with AbortController)
  * - Once-per-version notification (cache in the user data dir)
- * - Notification output suppressed in JSON output mode and CI environments
- *   (the background fetch still runs so the cache stays warm)
+ * - Notification output suppressed in JSON output mode; skipped entirely
+ *   in CI environments (no fetch, no cache write)
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -149,12 +149,9 @@ export async function fetchRemoteVersion(
 		const distTags: unknown = data["dist-tags"];
 		if (typeof distTags !== "object" || distTags === null) return undefined;
 		if (!(channel in distTags)) return undefined;
-		// `in` guard above ensures `channel` exists; index via helper to avoid `as`
-		const record: Record<string, unknown> = Object.fromEntries(
-			Object.entries(distTags),
-		);
-		const version: unknown = record[channel];
-		return typeof version === "string" ? version : undefined;
+		// `in` guard above ensures `channel` exists; find it via entries to avoid `as`
+		const entry = Object.entries(distTags).find(([key]) => key === channel);
+		return entry && typeof entry[1] === "string" ? entry[1] : undefined;
 	} catch {
 		return undefined;
 	}
@@ -171,8 +168,9 @@ let pendingNotification: { message: string; version: string } | undefined;
  */
 let checkPromise: Promise<void> | undefined;
 
-/** Whether the background fetch has completed (resolved or rejected). */
-let fetchCompleted = false;
+/** Resolves once the background fetch settles (used by Promise.race). */
+let fetchSettled: Promise<"settled"> | undefined;
+let resolveFetchSettled: (() => void) | undefined;
 
 /** AbortController for the background fetch — exposed so printUpdateNotification can cancel. */
 let fetchController: AbortController | undefined;
@@ -198,6 +196,11 @@ export function startUpdateCheck(currentVersion: string): void {
 		PATIENT_TIMEOUT_MS,
 	);
 
+	// Create a settlement sentinel — avoids microtask ordering issues with a boolean flag
+	fetchSettled = new Promise<"settled">((resolve) => {
+		resolveFetchSettled = () => resolve("settled");
+	});
+
 	checkPromise = fetchRemoteVersion(channel, fetchController.signal)
 		.then((remoteVersion) => {
 			if (!remoteVersion) return;
@@ -222,7 +225,7 @@ export function startUpdateCheck(currentVersion: string): void {
 			// Swallow all errors — this is best-effort
 		})
 		.finally(() => {
-			fetchCompleted = true;
+			resolveFetchSettled?.();
 			clearTimeout(timeoutId);
 		});
 }
@@ -238,8 +241,14 @@ export function startUpdateCheck(currentVersion: string): void {
  * Suppressed in JSON output mode to avoid polluting structured output.
  */
 export async function printUpdateNotification(): Promise<void> {
-	if (checkPromise) {
-		if (fetchCompleted) {
+	if (checkPromise && fetchSettled) {
+		// Race the fetch settlement against an immediately-resolved sentinel.
+		// This avoids microtask ordering issues with a boolean flag.
+		const alreadyDone =
+			(await Promise.race([fetchSettled, Promise.resolve("pending")])) ===
+			"settled";
+
+		if (alreadyDone) {
 			// Already done — no delay
 			await checkPromise;
 		} else if (isPatientCheck()) {
@@ -294,6 +303,7 @@ function persistPatientTimestamp(): void {
 export function _resetForTesting(): void {
 	pendingNotification = undefined;
 	checkPromise = undefined;
-	fetchCompleted = false;
+	fetchSettled = undefined;
+	resolveFetchSettled = undefined;
 	fetchController = undefined;
 }
