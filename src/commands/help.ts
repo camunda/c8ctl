@@ -15,7 +15,9 @@ import {
 } from "../command-registry.ts";
 import { getLogger } from "../logger.ts";
 import {
+	executePluginCommand,
 	getPluginCommandsInfo,
+	isPluginCommand,
 	type PluginCommandInfo,
 } from "../plugin-loader.ts";
 
@@ -815,7 +817,7 @@ function showVirtualTopicHelp(topic: string, resource: string): void {
  * Show detailed help for a specific command.
  * Dispatches to the generic renderer for all verbs.
  */
-export function showCommandHelp(command: string): void {
+export async function showCommandHelp(command: string): Promise<void> {
 	const logger = getLogger();
 
 	// JSON mode: emit structured help for machine/agent consumption
@@ -856,6 +858,14 @@ export function showCommandHelp(command: string): void {
 				break;
 			}
 		}
+	}
+
+	// If the verb is still not in the registry, check if it's a plugin command.
+	// Delegate to the plugin's own handler which renders its own help output.
+	if (!lookupVerb(resolvedVerb) && isPluginCommand(resolvedVerb)) {
+		// Plugin handlers show help when called with no valid subcommand
+		await executePluginCommand(resolvedVerb, []);
+		return;
 	}
 
 	showGenericVerbHelp(resolvedVerb);

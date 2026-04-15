@@ -138,4 +138,22 @@ describe('CLI behavioural: help (text mode)', () => {
 
     rmSync(dataDir, { recursive: true, force: true });
   });
+
+  test('help for plugin command delegates to plugin (c8ctl help cluster)', async () => {
+    dataDir = mkdtempSync(join(tmpdir(), 'c8ctl-help-test-'));
+    writeFileSync(join(dataDir, 'session.json'), JSON.stringify({ outputMode: 'text' }));
+
+    const result = await c8text(dataDir, 'help', 'cluster');
+    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+    const output = result.stdout + result.stderr;
+    // The cluster plugin shows its own help — verify key sections appear
+    assert.ok(output.includes('c8ctl cluster start'), 'Expected cluster start usage');
+    assert.ok(output.includes('c8ctl cluster stop'), 'Expected cluster stop usage');
+    assert.ok(output.includes('Subcommands:'), 'Expected Subcommands section');
+    assert.ok(output.includes('Examples:'), 'Expected Examples section');
+    // Must NOT show the "No detailed help available" fallback
+    assert.ok(!output.includes('No detailed help available'), 'Should not show fallback message');
+
+    rmSync(dataDir, { recursive: true, force: true });
+  });
 });
