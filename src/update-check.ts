@@ -241,9 +241,15 @@ export function startUpdateCheck(currentVersion: string): void {
  * immediately. If it's still pending, wait only if the last "patient" check
  * was more than 24 hours ago. Otherwise, abort and return instantly.
  *
- * Suppressed in JSON output mode to avoid polluting structured output.
+ * Suppressed in JSON output mode (returns immediately with no wait).
  */
 export async function printUpdateNotification(): Promise<void> {
+	// Suppress in JSON mode — don't wait or print, avoid delaying piped/automated usage
+	if (c8ctl.outputMode === "json") {
+		fetchController?.abort();
+		return;
+	}
+
 	if (checkPromise && fetchSettled) {
 		// Race the fetch settlement against an immediately-resolved sentinel.
 		// This avoids microtask ordering issues with a boolean flag.
@@ -267,13 +273,11 @@ export async function printUpdateNotification(): Promise<void> {
 
 	if (!pendingNotification) return;
 
-	// Suppress in JSON mode — don't pollute structured output
-	if (c8ctl.outputMode === "json") return;
-
 	// Persist so we don't nag about this version again (deferred from background
 	// check so JSON-mode suppression doesn't write the cache prematurely)
+	const cache = readCache() ?? {};
 	writeCache({
-		...readCache(),
+		...cache,
 		notifiedVersion: pendingNotification.version,
 	});
 

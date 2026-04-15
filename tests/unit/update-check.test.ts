@@ -31,8 +31,9 @@ describe('detectChannel', () => {
     assert.strictEqual(detectChannel('1.2.3-beta.1'), 'latest');
   });
 
-  test('stable version returns "latest"', () => {
-    assert.strictEqual(detectChannel('1.0.0'), 'latest');
+  test('version containing alpha outside prerelease returns "latest"', () => {
+    // Edge case: "alpha" appears in the string but not as a prerelease tag
+    assert.strictEqual(detectChannel('1.0.0-alphabeta.1'), 'latest');
   });
 });
 
@@ -331,9 +332,7 @@ describe('startUpdateCheck + printUpdateNotification', () => {
   });
 
   test('alpha channel user checks alpha dist-tag, not latest', async () => {
-    let requestedUrl = '';
-    globalThis.fetch = async (input: string | URL | Request) => {
-      requestedUrl = typeof input === 'string' ? input : input.toString();
+    globalThis.fetch = async () => {
       return new Response(JSON.stringify({
         'dist-tags': { latest: '1.0.0', alpha: '2.0.0-alpha.10' }
       }), { status: 200 });
