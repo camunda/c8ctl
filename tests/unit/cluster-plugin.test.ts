@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -729,6 +729,101 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
     assert.ok(result, 'should return a result');
     assert.strictEqual(result.stable, '8.9', 'stable should be 8.9 (GA, below alpha train)');
     assert.strictEqual(result.alpha, '9.0', 'alpha should be 9.0 (highest minor)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveVersion – alias resolution with preferLocal and background freshness
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – resolveVersion', () => {
+  let tempDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-resolve-'));
+    originalFetch = globalThis.fetch;
+    plugin._resetDynamicAliasCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    plugin._resetDynamicAliasCache();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function seedInstalledVersion(cacheDir: string, version: string) {
+    // Create a fake c8run installation so readLocalAliasMapping considers the alias valid
+    const installDir = join(cacheDir, `c8run-${version}`, `c8run-${version}`);
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(join(installDir, 'c8run'), 'fake');
+  }
+
+  function mockFetchWithVersions(html: string) {
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => html,
+    });
+  }
+
+  function mockFetchOffline() {
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => { throw new Error('offline'); };
+  }
+
+  test('preferLocal returns cached alias when version is installed', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    // Remote says stable is 8.9, but preferLocal should return 8.8
+    mockFetchWithVersions(`
+      <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+    `);
+
+    const resolved = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should use cached alias, not remote');
+  });
+
+  test('without preferLocal, remote takes precedence', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    mockFetchWithVersions(`
+      <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+    `);
+
+    const resolved = await plugin.resolveVersion('stable', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.9', 'should use remote resolution');
+
+    // Cache should also be updated
+    const cached = readFileSync(join(tempDir, 'alias-stable.resolved'), 'utf-8').trim();
+    assert.strictEqual(cached, '8.9', 'should update cached alias');
+  });
+
+  test('offline with preferLocal falls back to cached alias', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+    mockFetchOffline();
+
+    const resolved = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should use cached alias when offline');
+  });
+
+  test('offline without preferLocal falls back to cached alias', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+    mockFetchOffline();
+
+    const resolved = await plugin.resolveVersion('stable', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should fall back to cached alias when offline');
+  });
+
+  test('non-alias version specs pass through unchanged', async () => {
+    const resolved = await plugin.resolveVersion('8.8.5', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8.5', 'non-alias should pass through');
   });
 });
 

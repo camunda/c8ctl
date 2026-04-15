@@ -131,7 +131,7 @@ async function getDynamicAliases() {
   return _dynamicAliases;
 }
 
-async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
+export async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
 
   // start: use cached alias if the version is installed (deterministic)
@@ -178,7 +178,7 @@ function readLocalAliasMapping(cacheDir, alias) {
   }
 }
 
-function storeLocalAliasMapping(cacheDir, alias, resolved) {
+export function storeLocalAliasMapping(cacheDir, alias, resolved) {
   try {
     mkdirSync(cacheDir, { recursive: true });
     writeFileSync(getAliasMappingPath(cacheDir, alias), resolved);
@@ -1139,9 +1139,11 @@ export async function deleteVersion(cacheDir, versionSpec) {
   validateVersionSpec(versionSpec);
 
   // Resolve named aliases (stable/alpha) to the actual cached version name.
+  // Use preferLocal so we delete the version that's actually installed,
+  // not whatever the remote currently resolves the alias to.
   // Major.minor patterns like 8.8 are used as-is since the cache dir is named c8run-8.8.
   const resolvedVersion = isVersionAlias(versionSpec)
-    ? await resolveVersion(versionSpec)
+    ? await resolveVersion(versionSpec, { preferLocal: true, cacheDir })
     : versionSpec;
 
   // Prevent deleting a currently running version
