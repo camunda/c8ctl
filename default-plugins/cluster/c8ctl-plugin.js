@@ -1460,16 +1460,17 @@ export const commands = {
         .then((res) => res.ok ? res.text() : null)
         .then((html) => {
           clearTimeout(timeoutId);
-          if (!html) return;
-          const remote = parseVersionsFromHtml(html);
-          const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && remoteVersion !== version) {
-            // Update the persisted mapping so the next `cluster install` uses it
-            storeLocalAliasMapping(theCacheDir, versionSpec, remoteVersion);
-            logger.info(
-              `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
-              `Install it with: c8ctl cluster install ${versionSpec}`,
-            );
+          if (html) {
+            const remote = parseVersionsFromHtml(html);
+            const remoteVersion = remote?.[versionSpec];
+            if (remoteVersion && remoteVersion !== version) {
+              // Update the persisted mapping so the next `cluster install` uses it
+              storeLocalAliasMapping(theCacheDir, versionSpec, remoteVersion);
+              logger.info(
+                `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
+                `Install it with: c8ctl cluster install ${versionSpec}`,
+              );
+            }
           }
         })
         .catch(() => {
