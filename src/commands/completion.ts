@@ -648,7 +648,7 @@ function getFishCompletionsDir(): string {
 /** Generate the source line that goes into the shell RC file.
  *  Uses single quotes to prevent shell expansion of the path. */
 function buildSourceLine(completionFilePath: string): string {
-	const escaped = completionFilePath.replaceAll("'", "'\''");
+	const escaped = completionFilePath.replaceAll("'", "'\\''");
 	return `source '${escaped}'`;
 }
 
