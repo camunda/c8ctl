@@ -26,6 +26,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getUserDataDir } from "./config.ts";
+import { isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 /** npm registry metadata endpoint (returns JSON with dist-tags). */
@@ -64,11 +65,11 @@ function readCache(): UpdateCache | undefined {
 		const filePath = join(dir, CACHE_FILE);
 		if (!existsSync(filePath)) return undefined;
 		const raw: unknown = JSON.parse(readFileSync(filePath, "utf-8"));
-		if (typeof raw !== "object" || raw === null) return undefined;
+		if (!isRecord(raw)) return undefined;
 		const cache: UpdateCache = {};
-		if ("notifiedVersion" in raw && typeof raw.notifiedVersion === "string")
+		if (typeof raw.notifiedVersion === "string")
 			cache.notifiedVersion = raw.notifiedVersion;
-		if ("lastPatientCheck" in raw && typeof raw.lastPatientCheck === "number")
+		if (typeof raw.lastPatientCheck === "number")
 			cache.lastPatientCheck = raw.lastPatientCheck;
 		return cache;
 	} catch {
@@ -103,7 +104,12 @@ export function isNewer(local: string, remote: string): boolean {
 		const [core, pre] = v.split("-", 2);
 		const parts = core.split(".").map(Number);
 		// Extract numeric suffix from prerelease tag like "alpha.5"
-		const preNum = pre ? Number(pre.split(".").pop()) : undefined;
+		// Normalize NaN to undefined so comparisons don't silently break
+		const rawPreNum = pre ? Number(pre.split(".").pop()) : undefined;
+		const preNum =
+			rawPreNum !== undefined && Number.isFinite(rawPreNum)
+				? rawPreNum
+				: undefined;
 		return { major: parts[0], minor: parts[1], patch: parts[2], pre, preNum };
 	};
 
@@ -144,14 +150,11 @@ export async function fetchRemoteVersion(
 		const res = await fetch(REGISTRY_URL, { signal });
 		if (!res.ok) return undefined;
 		const data: unknown = await res.json();
-		if (typeof data !== "object" || data === null) return undefined;
-		if (!("dist-tags" in data)) return undefined;
-		const distTags: unknown = data["dist-tags"];
-		if (typeof distTags !== "object" || distTags === null) return undefined;
-		if (!(channel in distTags)) return undefined;
-		// `in` guard above ensures `channel` exists; find it via entries to avoid `as`
-		const entry = Object.entries(distTags).find(([key]) => key === channel);
-		return entry && typeof entry[1] === "string" ? entry[1] : undefined;
+		if (!isRecord(data)) return undefined;
+		const distTags = data["dist-tags"];
+		if (!isRecord(distTags)) return undefined;
+		const version = distTags[channel];
+		return typeof version === "string" ? version : undefined;
 	} catch {
 		return undefined;
 	}

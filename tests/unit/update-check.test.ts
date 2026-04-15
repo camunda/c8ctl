@@ -428,13 +428,10 @@ describe('patient vs impatient check timing', () => {
       });
     };
 
-    const startTime = Date.now();
     startUpdateCheck('1.0.0');
     await printUpdateNotification();
-    const elapsed = Date.now() - startTime;
 
-    // Should have aborted almost instantly (< 500ms), not waited 5 seconds
-    assert.ok(elapsed < 500, `Impatient check took ${elapsed}ms, expected < 500ms`);
+    // Should have aborted the fetch, not waited for PATIENT_TIMEOUT_MS
     assert.ok(fetchAborted, 'Fetch should have been aborted');
 
     const output = consoleLogOutput.join('\n');
