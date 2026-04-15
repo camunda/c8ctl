@@ -649,7 +649,7 @@ describe('Cluster Plugin – version alias resolution', () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    const escapedVersion = expected.replace(/\./g, '\\.');
+    const escapedVersion = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(
       output,
       new RegExp(`stable\\s+→\\s+${escapedVersion}`),
@@ -665,7 +665,7 @@ describe('Cluster Plugin – version alias resolution', () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    const escapedVersion = expected.replace(/\./g, '\\.');
+    const escapedVersion = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(
       output,
       new RegExp(`alpha\\s+→\\s+${escapedVersion}`),
