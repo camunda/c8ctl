@@ -194,7 +194,7 @@ async function main() {
 	) {
 		// Check if user wants help for a specific command
 		if (resource) {
-			showCommandHelp(resource);
+			await showCommandHelp(resource);
 		} else {
 			showHelp();
 		}
