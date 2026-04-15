@@ -81,14 +81,17 @@ export async function discoverLatestVersions() {
  * - Minor version directories (e.g. "8.8/", "8.9/") are rolling releases
  *   updated in-place.
  * - An alpha train exists when there are "X.Y.0-alphaN/" directories
- *   for a given minor. The highest minor with alphas is the alpha alias.
- * - The highest minor without alphas is the stable alias.
+ *   for a given minor that has NOT yet shipped a GA release (X.Y.0/).
+ *   The highest such minor is the alpha alias.
+ * - The highest minor that is NOT the alpha train is the stable alias.
  */
 export function parseVersionsFromHtml(html) {
   // Match minor-version directories like "8.8/", "8.9/"
   const minorMatches = [...html.matchAll(/href="(\d+\.\d+)\/"/g)].map(m => m[1]);
   // Match alpha directories like "8.9.0-alpha5/"
   const alphaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0-alpha\d+\/"/g)].map(m => m[1]);
+  // Match GA release directories like "8.9.0/"
+  const gaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0\/"/g)].map(m => m[1]);
 
   if (minorMatches.length === 0) return null;
 
@@ -99,13 +102,18 @@ export function parseVersionsFromHtml(html) {
   };
 
   const sortedMinors = [...new Set(minorMatches)].sort(compareSemver);
-  const alphaSet = new Set(alphaMatches);
+  const gaSet = new Set(gaMatches);
+
+  // A minor is only in the alpha train if it has alpha dirs but NO GA release yet.
+  // Once X.Y.0/ exists, that minor has graduated.
+  const alphaOnlyMinors = [...new Set(alphaMatches)].filter(v => !gaSet.has(v));
+  const alphaSet = new Set(alphaOnlyMinors);
 
   const highestMinor = sortedMinors[sortedMinors.length - 1];
 
-  // The alpha train is the highest minor that has alpha directories.
-  // The stable release is the minor just below the alpha train,
-  // or the highest minor if no alpha train exists.
+  // The alpha train is the highest minor that has alpha directories
+  // but has not yet shipped a GA release.
+  // The stable release is the highest minor that is NOT the alpha train.
   const highestAlphaMinor = [...alphaSet].sort(compareSemver).pop();
 
   let stable;

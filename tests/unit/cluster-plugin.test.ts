@@ -688,6 +688,46 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
     assert.strictEqual(result.stable, '8.8');
     assert.strictEqual(result.alpha, '8.9');
   });
+
+  test('graduated alpha: minor with both alphas and GA release is not the alpha train', () => {
+    // 8.9 went GA (8.9.0/ exists), so its alpha dirs are historical.
+    // With no new alpha train above 8.9, stable = alpha = 8.9.
+    const html = `
+      <a href="8.6/">8.6</a>
+      <a href="8.7/">8.7</a>
+      <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
+      <a href="8.7.0/">8.7.0</a>
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.8.1/">8.8.1</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0-alpha5/">8.9.0-alpha5</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.9/">8.9</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.9', 'stable should be 8.9 since it has gone GA');
+    assert.strictEqual(result.alpha, '8.9', 'alpha should be 8.9 (highest minor)');
+  });
+
+  test('graduated alpha with new alpha train above', () => {
+    // 8.9 went GA, and 9.0 alphas have started
+    const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="9.0.0-alpha1/">9.0.0-alpha1</a>
+      <a href="9.0/">9.0</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.9', 'stable should be 8.9 (GA, below alpha train)');
+    assert.strictEqual(result.alpha, '9.0', 'alpha should be 9.0 (highest minor)');
+  });
 });
 
 // ---------------------------------------------------------------------------
