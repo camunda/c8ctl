@@ -281,8 +281,7 @@ export async function printUpdateNotification(): Promise<void> {
 		notifiedVersion: pendingNotification.version,
 	});
 
-	console.log("");
-	console.log(pendingNotification.message);
+	console.log(`\n${pendingNotification.message}`);
 }
 
 /**
