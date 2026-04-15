@@ -214,6 +214,20 @@ async function main() {
 			installCompletion(str(values.shell));
 			return;
 		}
+		// Warn if --shell is used with a non-install resource (it's only valid for install)
+		if (values.shell !== undefined) {
+			const logger = getLogger();
+			logger.warn(
+				`--shell is only valid for 'completion install'. It will be ignored for 'completion ${resource ?? ""}'. Run "c8ctl help completion" for valid options.`,
+			);
+		}
+		// Warn if --shell is used with a non-install resource (it's only valid for install)
+		if (values.shell !== undefined) {
+			const logger = getLogger();
+			logger.warn(
+				`--shell is only valid for 'completion install'. It will be ignored for 'completion ${resource ?? ""}'. Run "c8ctl help completion" for valid options.`,
+			);
+		}
 		showCompletion(resource);
 		return;
 	}

@@ -665,8 +665,12 @@ function rcAlreadyConfigured(
 	completionFilePath: string,
 ): boolean {
 	if (!existsSync(rcFile)) return false;
-	const content = readFileSync(rcFile, "utf-8");
-	return content.includes(completionFilePath);
+	try {
+		const content = readFileSync(rcFile, "utf-8");
+		return content.includes(completionFilePath);
+	} catch {
+		return false;
+	}
 }
 
 /** Generate the completion script content for a given shell. */
@@ -777,7 +781,9 @@ export function installCompletion(shellOverride?: string): void {
 		}
 
 		logger.info("Restart your shell or run:");
-		logger.info(`  source ${rcFile ?? completionFile}`);
+		logger.info(
+			`  ${rcFile ? buildSourceLine(rcFile) : buildSourceLine(completionFile)}`,
+		);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		logger.error(`Failed to install completions: ${msg}`);
@@ -806,8 +812,12 @@ export function refreshCompletionsIfStale(currentVersion: string): void {
 	for (const shell of ["bash", "zsh", "fish"]) {
 		const filePath = getCompletionFilePath(shell);
 		const installed = extractCompletionVersion(filePath);
-		if (!installed) continue; // not installed for this shell
-		if (installed === currentVersion) continue; // up to date
+		if (installed === undefined) {
+			// No version header — treat existing file as stale, regenerate
+			if (!existsSync(filePath)) continue; // not installed for this shell
+		} else if (installed === currentVersion) {
+			continue; // up to date
+		}
 
 		// Stale — regenerate
 		try {

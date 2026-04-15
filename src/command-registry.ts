@@ -1686,6 +1686,13 @@ export function deriveParseArgsOptions(): Record<
 	// All command-specific flags
 	for (const cmd of Object.values(COMMAND_REGISTRY)) {
 		addFlags(cmd.flags);
+		// Include resource-specific flags so parseArgs can parse them
+		if ("resourceFlags" in cmd) {
+			const rf = cmd.resourceFlags;
+			for (const rFlags of Object.values(rf)) {
+				addFlags(rFlags);
+			}
+		}
 	}
 
 	return options;
