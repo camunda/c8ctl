@@ -31,8 +31,7 @@ describe('detectChannel', () => {
     assert.strictEqual(detectChannel('1.2.3-beta.1'), 'latest');
   });
 
-  test('version with alpha in patch (not prerelease) returns "latest"', () => {
-    // Edge case: "alpha" in the version but not as a prerelease tag
+  test('stable version returns "latest"', () => {
     assert.strictEqual(detectChannel('1.0.0'), 'latest');
   });
 });
@@ -348,7 +347,12 @@ describe('startUpdateCheck + printUpdateNotification', () => {
     assert.ok(output.includes('2.0.0-alpha.10'), 'Should find alpha update');
     // Should NOT recommend stable install (without @alpha suffix)
     assert.ok(output.includes('@camunda8/cli@alpha'), 'Should show alpha install command');
-    assert.ok(!output.includes('Update with: npm install -g @camunda8/cli\n'), 'Should not recommend stable install for alpha user');
+    // Should NOT recommend stable install (without @alpha suffix).
+    // Use regex with word boundary to distinguish @camunda8/cli from @camunda8/cli@alpha.
+    assert.ok(
+      !/npm install -g @camunda8\/cli(?!@)/.test(output),
+      'Should not recommend stable install for alpha user',
+    );
   });
 });
 
