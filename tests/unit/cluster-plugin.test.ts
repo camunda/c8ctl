@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,17 +82,25 @@ describe('Cluster Plugin – commands export', () => {
 describe('Cluster Plugin – command usage output', () => {
   let captured: string[];
   let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
     captured = [];
     originalLog = console.log;
+    originalFetch = globalThis.fetch;
     console.log = (...args: unknown[]) => {
       captured.push(args.map(String).join(' '));
     };
+    // Stub fetch so usage tests never hit the network
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => { throw new Error('offline'); };
+    plugin._resetDynamicAliasCache();
   });
 
   afterEach(() => {
     console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    plugin._resetDynamicAliasCache();
   });
 
   test('prints usage when called with no arguments', async () => {
@@ -136,16 +144,9 @@ describe('Cluster Plugin – command usage output', () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    assert.ok(output.includes('Version aliases'), 'Should contain a Version aliases section');
+    assert.ok(output.includes('Version aliases:'), 'Should contain a Version aliases section');
     assert.ok(/^\s+alpha\s+→/m.test(output), 'Should list the alpha alias with arrow separator');
     assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
-  });
-
-  test('usage indicates aliases are dynamically resolved', async () => {
-    await plugin.commands['cluster']([]);
-
-    const output = captured.join('\n');
-    assert.ok(output.includes('dynamically resolved'), 'Should indicate dynamic resolution');
   });
 });
 
@@ -624,15 +625,17 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 
 describe('Cluster Plugin – parseVersionsFromHtml', () => {
   test('extracts stable and alpha from a realistic listing', () => {
-    // Real-world pattern: 8.8 went GA (but still has old alpha dirs), 8.9 is current alpha
-    // Stable = highest minor below the highest alpha train (8.9 has alphas → stable is 8.8)
+    // Real-world pattern: 8.7 and 8.8 went GA (have both alpha dirs and X.Y.0/), 8.9 is current alpha
+    // Stable = highest minor NOT in the alpha train (8.7/8.8 graduated, 8.9 is alpha-only → stable is 8.8)
     const html = `
       <a href="8.6/">8.6</a>
       <a href="8.6.11/">8.6.11</a>
       <a href="8.7/">8.7</a>
       <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
+      <a href="8.7.0/">8.7.0</a>
       <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
       <a href="8.8.0-alpha3/">8.8.0-alpha3</a>
+      <a href="8.8.0/">8.8.0</a>
       <a href="8.8/">8.8</a>
       <a href="8.8.1/">8.8.1</a>
       <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
@@ -687,6 +690,254 @@ describe('Cluster Plugin – parseVersionsFromHtml', () => {
     assert.ok(result);
     assert.strictEqual(result.stable, '8.8');
     assert.strictEqual(result.alpha, '8.9');
+  });
+
+  test('graduated alpha: minor with both alphas and GA release is not the alpha train', () => {
+    // 8.9 went GA (8.9.0/ exists), so its alpha dirs are historical.
+    // With no new alpha train above 8.9, stable = alpha = 8.9.
+    const html = `
+      <a href="8.6/">8.6</a>
+      <a href="8.7/">8.7</a>
+      <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
+      <a href="8.7.0/">8.7.0</a>
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.8.1/">8.8.1</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0-alpha5/">8.9.0-alpha5</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.9/">8.9</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.9', 'stable should be 8.9 since it has gone GA');
+    assert.strictEqual(result.alpha, '8.9', 'alpha should be 8.9 (highest minor)');
+  });
+
+  test('graduated alpha with new alpha train above', () => {
+    // 8.9 went GA, and 9.0 alphas have started
+    const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="9.0.0-alpha1/">9.0.0-alpha1</a>
+      <a href="9.0/">9.0</a>
+    `;
+    const result = plugin.parseVersionsFromHtml(html);
+    assert.ok(result, 'should return a result');
+    assert.strictEqual(result.stable, '8.9', 'stable should be 8.9 (GA, below alpha train)');
+    assert.strictEqual(result.alpha, '9.0', 'alpha should be 9.0 (highest minor)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveVersion – alias resolution with preferLocal and background freshness
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – resolveVersion', () => {
+  let tempDir: string;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-resolve-'));
+    originalFetch = globalThis.fetch;
+    plugin._resetDynamicAliasCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    plugin._resetDynamicAliasCache();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function seedInstalledVersion(cacheDir: string, version: string) {
+    // Create a fake c8run installation so readLocalAliasMapping considers the alias valid
+    const installDir = join(cacheDir, `c8run-${version}`, `c8run-${version}`);
+    mkdirSync(installDir, { recursive: true });
+    writeFileSync(join(installDir, 'c8run'), 'fake');
+  }
+
+  function mockFetchWithVersions(html: string) {
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => html,
+    });
+  }
+
+  function mockFetchOffline() {
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => { throw new Error('offline'); };
+  }
+
+  test('preferLocal returns cached alias when version is installed', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    // Remote says stable is 8.9, but preferLocal should return 8.8
+    mockFetchWithVersions(`
+      <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+    `);
+
+    const resolved = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should use cached alias, not remote');
+  });
+
+  test('without preferLocal, remote takes precedence', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+    mockFetchWithVersions(`
+      <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+    `);
+
+    const resolved = await plugin.resolveVersion('stable', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.9', 'should use remote resolution');
+
+    // Cache should also be updated
+    const cached = readFileSync(join(tempDir, 'alias-stable.resolved'), 'utf-8').trim();
+    assert.strictEqual(cached, '8.9', 'should update cached alias');
+  });
+
+  test('offline with preferLocal falls back to cached alias', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+    mockFetchOffline();
+
+    const resolved = await plugin.resolveVersion('stable', { preferLocal: true, cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should use cached alias when offline');
+  });
+
+  test('offline without preferLocal falls back to cached alias', async () => {
+    seedInstalledVersion(tempDir, '8.8');
+    plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+    mockFetchOffline();
+
+    const resolved = await plugin.resolveVersion('stable', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8', 'should fall back to cached alias when offline');
+  });
+
+  test('non-alias version specs pass through unchanged', async () => {
+    const resolved = await plugin.resolveVersion('8.8.5', { cacheDir: tempDir });
+    assert.strictEqual(resolved, '8.8.5', 'non-alias should pass through');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkBackgroundAliasFreshness
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – checkBackgroundAliasFreshness', () => {
+  let originalFetch: typeof globalThis.fetch;
+  let loggedMessages: string[];
+  let originalC8ctl: any;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalC8ctl = globalThis.c8ctl;
+    loggedMessages = [];
+    // @ts-expect-error — mock c8ctl logger
+    globalThis.c8ctl = {
+      getLogger: () => ({
+        info: (msg: string) => loggedMessages.push(msg),
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      }),
+    };
+    plugin._resetDynamicAliasCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.c8ctl = originalC8ctl;
+    plugin._resetDynamicAliasCache();
+  });
+
+  test('prints hint when remote alias differs from resolved version', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => `
+        <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+      `,
+    });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+    assert.ok(
+      loggedMessages.some((m: string) => m.includes('newer') && m.includes('8.9') && m.includes('cluster install')),
+      `Should print upgrade hint, got: ${loggedMessages.join('; ')}`,
+    );
+  });
+
+  test('does not print hint when remote alias matches resolved version', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => `
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+      `,
+    });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.9');
+
+    assert.strictEqual(
+      loggedMessages.filter((m: string) => m.includes('newer')).length, 0,
+      'Should not print upgrade hint when versions match',
+    );
+  });
+
+  test('does not persist alias mapping (start remains deterministic)', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-bg-'));
+    try {
+      // Seed a cached alias file pointing to 8.8
+      plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+      // @ts-expect-error — mock fetch: remote says stable is 8.9
+      globalThis.fetch = async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+        `,
+      });
+
+      await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+      // The alias file should still point to 8.8 — not overwritten to 8.9
+      const cached = readFileSync(join(tempDir, 'alias-stable.resolved'), 'utf-8').trim();
+      assert.strictEqual(cached, '8.8', 'background check must not update persisted alias');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('stays silent when offline (fetch throws)', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => { throw new Error('Network unreachable'); };
+
+    await assert.doesNotReject(
+      () => plugin.checkBackgroundAliasFreshness('stable', '8.8'),
+      'should swallow network errors',
+    );
+
+    assert.strictEqual(loggedMessages.length, 0, 'should not log anything when offline');
+  });
+
+  test('stays silent when server returns non-OK', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({ ok: false, text: async () => '' });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+    assert.strictEqual(loggedMessages.length, 0, 'should not log anything on non-OK response');
   });
 });
 
