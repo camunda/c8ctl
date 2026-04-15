@@ -1203,7 +1203,7 @@ export const commands = {
       console.log('  start uses a local version if available (no remote check).');
       console.log('  install always checks the remote for a newer rolling release.');
       console.log('');
-      console.log('Version aliases:')
+      console.log('Version aliases:');
       for (const [alias, resolved] of getVersionAliasEntries()) {
         console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
