@@ -9,6 +9,7 @@ if [ -z "$STAGED" ]; then
 fi
 
 npx biome check --fix src/
+BIOME_EXIT=$?
 
 # Re-stage any files that biome auto-fixed
 for f in $STAGED; do
@@ -16,3 +17,6 @@ for f in $STAGED; do
     git add "$f"
   fi
 done
+
+# Fail the commit if biome reported unfixable errors
+exit $BIOME_EXIT
