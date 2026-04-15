@@ -279,8 +279,12 @@ describe("installCompletion", () => {
 			content.startsWith("# c8ctl-completion-version:"),
 			"Should have version header",
 		);
-		// Zsh completions contain #compdef
+		// Zsh completions contain #compdef and runtime compdef for sourced use
 		assert.ok(content.includes("#compdef"), "Should be valid zsh completion");
+		assert.ok(
+			content.includes("compdef _c8ctl c8ctl c8"),
+			"Should register completion function for sourced use",
+		);
 	});
 
 	test("writes completion file for bash", () => {
@@ -315,7 +319,7 @@ describe("installCompletion", () => {
 		const rcContent = readFileSync(rcFile, "utf-8");
 		const completionFile = join(testDir, "completions", "c8ctl.zsh");
 		assert.ok(
-			rcContent.includes(`source "${completionFile}"`),
+			rcContent.includes(`source '${completionFile}'`),
 			"RC file should contain source line",
 		);
 	});
@@ -327,7 +331,7 @@ describe("installCompletion", () => {
 		installCompletion("zsh");
 		const rcContent = readFileSync(rcFile, "utf-8");
 		const completionFile = join(testDir, "completions", "c8ctl.zsh");
-		const sourceLine = `source "${completionFile}"`;
+		const sourceLine = `source '${completionFile}'`;
 		const count = rcContent.split(sourceLine).length - 1;
 		assert.strictEqual(count, 1, "Source line should appear exactly once");
 	});

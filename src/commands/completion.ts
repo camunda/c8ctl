@@ -436,7 +436,7 @@ ${resourceCases.join("\n")}
   esac
 }
 
-# compdef is handled by the #compdef directive at the top
+compdef _c8ctl c8ctl c8
 `;
 }
 
@@ -645,9 +645,11 @@ function getFishCompletionsDir(): string {
 	return join(configHome, "fish", "completions");
 }
 
-/** Generate the source line that goes into the shell RC file. */
+/** Generate the source line that goes into the shell RC file.
+ *  Uses single quotes to prevent shell expansion of the path. */
 function buildSourceLine(completionFilePath: string): string {
-	return `source "${completionFilePath}"`;
+	const escaped = completionFilePath.replaceAll("'", "'\''");
+	return `source '${escaped}'`;
 }
 
 /** Generate the comment+source block for the RC file. */
@@ -655,14 +657,16 @@ function buildRcBlock(completionFilePath: string): string {
 	return `\n# c8ctl shell completion\n${buildSourceLine(completionFilePath)}\n`;
 }
 
-/** Check if the RC file already contains the source line. */
+/** Check if the RC file already contains the source line.
+ *  Checks for the completion file path regardless of quoting style
+ *  so upgrades from double-quoted to single-quoted are detected. */
 function rcAlreadyConfigured(
 	rcFile: string,
 	completionFilePath: string,
 ): boolean {
 	if (!existsSync(rcFile)) return false;
 	const content = readFileSync(rcFile, "utf-8");
-	return content.includes(buildSourceLine(completionFilePath));
+	return content.includes(completionFilePath);
 }
 
 /** Generate the completion script content for a given shell. */
