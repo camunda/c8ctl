@@ -1487,7 +1487,7 @@ export const COMMAND_REGISTRY = {
 	completion: {
 		description: "Generate shell completion script",
 		helpResource: "bash|zsh|fish|install",
-		mutating: false,
+		mutating: true,
 		requiresResource: false,
 		helpExamples: [
 			{

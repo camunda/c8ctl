@@ -243,13 +243,17 @@ describe("refreshCompletionsIfStale", () => {
 
 describe("installCompletion", () => {
 	let origDataDir: string | undefined;
+	let origHome: string | undefined;
 	let testDir: string;
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
+		origHome = process.env.HOME;
 		testDir = join(tmpdir(), `c8ctl-completion-install-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
+		// Isolate HOME so RC wiring doesn't touch the real user's shell config
+		process.env.HOME = testDir;
 	});
 
 	afterEach(() => {
@@ -257,6 +261,11 @@ describe("installCompletion", () => {
 			delete process.env.C8CTL_DATA_DIR;
 		} else {
 			process.env.C8CTL_DATA_DIR = origDataDir;
+		}
+		if (origHome === undefined) {
+			delete process.env.HOME;
+		} else {
+			process.env.HOME = origHome;
 		}
 		rmSync(testDir, { recursive: true, force: true });
 	});
@@ -297,6 +306,31 @@ describe("installCompletion", () => {
 		const second = readFileSync(file, "utf-8");
 		assert.strictEqual(first, second);
 	});
+
+	test("appends source line to RC file on first install", () => {
+		// Create an empty .zshrc in the isolated home
+		const rcFile = join(testDir, ".zshrc");
+		writeFileSync(rcFile, "# existing config\n");
+		installCompletion("zsh");
+		const rcContent = readFileSync(rcFile, "utf-8");
+		const completionFile = join(testDir, "completions", "c8ctl.zsh");
+		assert.ok(
+			rcContent.includes(`source "${completionFile}"`),
+			"RC file should contain source line",
+		);
+	});
+
+	test("does not duplicate source line on second install", () => {
+		const rcFile = join(testDir, ".zshrc");
+		writeFileSync(rcFile, "# existing config\n");
+		installCompletion("zsh");
+		installCompletion("zsh");
+		const rcContent = readFileSync(rcFile, "utf-8");
+		const completionFile = join(testDir, "completions", "c8ctl.zsh");
+		const sourceLine = `source "${completionFile}"`;
+		const count = rcContent.split(sourceLine).length - 1;
+		assert.strictEqual(count, 1, "Source line should appear exactly once");
+	});
 });
 
 // ─── version header structural invariant ─────────────────────────────────────
@@ -305,12 +339,14 @@ describe("completion version header", () => {
 	test("all three generators produce a version header", () => {
 		// We test via installCompletion to exercise the full path
 		const origDataDir = process.env.C8CTL_DATA_DIR;
+		const origHome = process.env.HOME;
 		const testDir = join(
 			tmpdir(),
 			`c8ctl-completion-header-${Date.now()}`,
 		);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
+		process.env.HOME = testDir;
 
 		try {
 			for (const shell of ["bash", "zsh", "fish"]) {
@@ -328,6 +364,11 @@ describe("completion version header", () => {
 				delete process.env.C8CTL_DATA_DIR;
 			} else {
 				process.env.C8CTL_DATA_DIR = origDataDir;
+			}
+			if (origHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = origHome;
 			}
 			rmSync(testDir, { recursive: true, force: true });
 		}

@@ -639,9 +639,10 @@ export function getCompletionFilePath(shell: string): string {
 	return join(getUserDataDir(), COMPLETIONS_DIR, `c8ctl.${ext}`);
 }
 
-/** Get the fish completions dir (fish auto-loads from here). */
+/** Get the fish completions dir (fish auto-loads from here). Respects XDG_CONFIG_HOME. */
 function getFishCompletionsDir(): string {
-	return join(homedir(), ".config", "fish", "completions");
+	const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+	return join(configHome, "fish", "completions");
 }
 
 /** Generate the source line that goes into the shell RC file. */
@@ -741,44 +742,49 @@ export function installCompletion(shellOverride?: string): void {
 	}
 
 	// Write the completion file
-	const completionDir = join(getUserDataDir(), COMPLETIONS_DIR);
-	mkdirSync(completionDir, { recursive: true });
-	const script = generateForShell(shell);
-	writeFileSync(completionFile, script, "utf-8");
-	logger.info(`Completion script written to ${completionFile}`);
+	try {
+		const completionDir = join(getUserDataDir(), COMPLETIONS_DIR);
+		mkdirSync(completionDir, { recursive: true });
+		const script = generateForShell(shell);
+		writeFileSync(completionFile, script, "utf-8");
+		logger.info(`Completion script written to ${completionFile}`);
 
-	// Fish: also copy to fish auto-load directory
-	if (shell === "fish") {
-		const fishDir = getFishCompletionsDir();
-		mkdirSync(fishDir, { recursive: true });
-		writeFileSync(join(fishDir, "c8ctl.fish"), script, "utf-8");
-		logger.info(`Fish completion installed to ${fishDir}/c8ctl.fish`);
-		logger.info(
-			"Completions will be loaded automatically on next shell start.",
-		);
-		return;
-	}
+		// Fish: also copy to fish auto-load directory
+		if (shell === "fish") {
+			const fishDir = getFishCompletionsDir();
+			mkdirSync(fishDir, { recursive: true });
+			writeFileSync(join(fishDir, "c8ctl.fish"), script, "utf-8");
+			logger.info(`Fish completion installed to ${fishDir}/c8ctl.fish`);
+			logger.info(
+				"Completions will be loaded automatically on next shell start.",
+			);
+			return;
+		}
 
-	// Wire into RC file (bash/zsh)
-	if (rcFile) {
-		if (rcConfigured) {
-			logger.info(`RC file already configured: ${rcFile}`);
-		} else {
-			try {
+		// Wire into RC file (bash/zsh)
+		if (rcFile) {
+			if (rcConfigured) {
+				logger.info(`RC file already configured: ${rcFile}`);
+			} else {
 				const block = buildRcBlock(completionFile);
 				writeFileSync(rcFile, block, { encoding: "utf-8", flag: "a" });
 				logger.info(`Added source line to ${rcFile}`);
-			} catch {
-				logger.error(`Could not write to ${rcFile}`);
-				logger.info(
-					`Add this line manually to your shell config:\n  ${buildSourceLine(completionFile)}`,
-				);
 			}
 		}
-	}
 
-	logger.info("Restart your shell or run:");
-	logger.info(`  source ${rcFile ?? completionFile}`);
+		logger.info("Restart your shell or run:");
+		logger.info(`  source ${rcFile ?? completionFile}`);
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		logger.error(`Failed to install completions: ${msg}`);
+		logger.info(`Target path: ${completionFile}`);
+		if (rcFile) {
+			logger.info(
+				`Add this line manually to your shell config:\n  ${buildSourceLine(completionFile)}`,
+			);
+		}
+		process.exit(1);
+	}
 }
 
 /**
@@ -789,6 +795,9 @@ export function installCompletion(shellOverride?: string): void {
  * Synchronous write (~1ms for a few KB).
  */
 export function refreshCompletionsIfStale(currentVersion: string): void {
+	// Skip in dry-run mode — refresh is a side effect
+	if (c8ctl.dryRun) return;
+
 	// Check each shell — user may have installed for multiple shells
 	for (const shell of ["bash", "zsh", "fish"]) {
 		const filePath = getCompletionFilePath(shell);
