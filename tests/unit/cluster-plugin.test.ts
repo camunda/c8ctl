@@ -626,18 +626,51 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 // ---------------------------------------------------------------------------
 
 describe('Cluster Plugin – version alias resolution', () => {
-  test('resolves stable alias to package.json value', () => {
-    // The stable alias should match what's in package.json
-    const pkgJson = JSON.parse(readFileSync(join(__dirname, '../../default-plugins/cluster/package.json'), 'utf-8'));
-    const expected = pkgJson.c8ctl.versionAliases.stable;
-    // Use the cluster command's usage output which prints resolved aliases
-    assert.ok(expected, 'package.json should define a stable alias');
+  let captured: string[];
+  let originalLog: typeof console.log;
+
+  beforeEach(() => {
+    captured = [];
+    originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      captured.push(args.map(String).join(' '));
+    };
   });
 
-  test('resolves alpha alias to package.json value', () => {
+  afterEach(() => {
+    console.log = originalLog;
+  });
+
+  test('resolves stable alias to the version defined in package.json', async () => {
     const pkgJson = JSON.parse(readFileSync(join(__dirname, '../../default-plugins/cluster/package.json'), 'utf-8'));
-    const expected = pkgJson.c8ctl.versionAliases.alpha;
+    const expected: string = pkgJson.c8ctl.versionAliases.stable;
+    assert.ok(expected, 'package.json should define a stable alias');
+
+    await plugin.commands['cluster']([]);
+
+    const output = captured.join('\n');
+    const escapedVersion = expected.replace(/\./g, '\\.');
+    assert.match(
+      output,
+      new RegExp(`stable\\s+→\\s+${escapedVersion}`),
+      `Usage output should show "stable → ${expected}"`,
+    );
+  });
+
+  test('resolves alpha alias to the version defined in package.json', async () => {
+    const pkgJson = JSON.parse(readFileSync(join(__dirname, '../../default-plugins/cluster/package.json'), 'utf-8'));
+    const expected: string = pkgJson.c8ctl.versionAliases.alpha;
     assert.ok(expected, 'package.json should define an alpha alias');
+
+    await plugin.commands['cluster']([]);
+
+    const output = captured.join('\n');
+    const escapedVersion = expected.replace(/\./g, '\\.');
+    assert.match(
+      output,
+      new RegExp(`alpha\\s+→\\s+${escapedVersion}`),
+      `Usage output should show "alpha → ${expected}"`,
+    );
   });
 });
 

@@ -586,25 +586,26 @@ async function waitForClusterReady(maxWaitMs = CLUSTER_STARTUP_TIMEOUT_MS) {
 }
 
 function printSummary(rawOutput, version) {
+  const logger = getLogger();
   const summary = extractStartupSummary(rawOutput);
 
   if (summary) {
-    console.log(`\n${summary}\n`);
+    logger.info(`\n${summary}\n`);
     return;
   }
 
   // c8run daemonizes so captured output is often empty — print known defaults
-  console.log('');
-  console.log(`Camunda 8 (${version}) is running:`);
-  console.log('');
-  console.log('  - Operate:    http://localhost:8080/operate');
-  console.log('  - Tasklist:   http://localhost:8080/tasklist');
-  console.log('  - Zeebe GRPC: localhost:26500');
-  console.log('  - Zeebe REST: http://localhost:8080/v2/');
-  console.log('  - Health:     http://localhost:9600/actuator/health');
-  console.log('');
-  console.log('  Default credentials: demo / demo');
-  console.log('');
+  logger.info('');
+  logger.info(`Camunda 8 (${version}) is running:`);
+  logger.info('');
+  logger.info('  - Operate:    http://localhost:8080/operate');
+  logger.info('  - Tasklist:   http://localhost:8080/tasklist');
+  logger.info('  - Zeebe GRPC: localhost:26500');
+  logger.info('  - Zeebe REST: http://localhost:8080/v2/');
+  logger.info('  - Health:     http://localhost:9600/actuator/health');
+  logger.info('');
+  logger.info('  Default credentials: demo / demo');
+  logger.info('');
 }
 
 async function startC8Run(config, debug = false) {
@@ -861,32 +862,32 @@ export async function clusterStatus(cacheDir) {
   }
 
   if (!markerExists && !isHealthy) {
-    console.log('Cluster status: stopped');
-    console.log('');
-    console.log('  Start with: c8ctl cluster start');
+    logger.info('Cluster status: stopped');
+    logger.info('');
+    logger.info('  Start with: c8ctl cluster start');
     return;
   }
 
-  console.log(`Cluster status: ${status}`);
+  logger.info(`Cluster status: ${status}`);
   if (version) {
-    console.log(`  Version:    ${version}`);
+    logger.info(`  Version:    ${version}`);
   }
 
   if (isHealthy) {
-    console.log('');
-    console.log('  - Operate:    ' + CLUSTER_URLS.operate);
-    console.log('  - Tasklist:   ' + CLUSTER_URLS.tasklist);
-    console.log('  - Zeebe GRPC: ' + CLUSTER_URLS.zeebeGrpc);
-    console.log('  - Zeebe REST: ' + CLUSTER_URLS.zeebeRest);
-    console.log('  - Health:     ' + CLUSTER_URLS.health);
-    console.log('');
-    console.log('  Default credentials: demo / demo');
+    logger.info('');
+    logger.info('  - Operate:    ' + CLUSTER_URLS.operate);
+    logger.info('  - Tasklist:   ' + CLUSTER_URLS.tasklist);
+    logger.info('  - Zeebe GRPC: ' + CLUSTER_URLS.zeebeGrpc);
+    logger.info('  - Zeebe REST: ' + CLUSTER_URLS.zeebeRest);
+    logger.info('  - Health:     ' + CLUSTER_URLS.health);
+    logger.info('');
+    logger.info('  Default credentials: demo / demo');
   } else {
-    console.log('');
-    console.log('  The cluster appears to have been started but is not yet responding.');
-    console.log('  Run "c8ctl cluster status" again in a moment, or check the logs.');
+    logger.info('');
+    logger.info('  The cluster appears to have been started but is not yet responding.');
+    logger.info('  Run "c8ctl cluster status" again in a moment, or check the logs.');
   }
-  console.log('');
+  logger.info('');
 }
 
 // ---------------------------------------------------------------------------
@@ -910,22 +911,22 @@ export async function listInstalledVersions(cacheDir) {
   }
 
   if (installedVersions.length === 0) {
-    console.log('No versions installed locally.');
-    console.log('');
-    console.log('  Install one with: c8ctl cluster start [version]');
+    logger.info('No versions installed locally.');
+    logger.info('');
+    logger.info('  Install one with: c8ctl cluster start [version]');
   } else {
-    console.log('Installed versions:');
+    logger.info('Installed versions:');
     for (const v of installedVersions) {
-      console.log(`  ${v}`);
+      logger.info(`  ${v}`);
     }
   }
 
-  console.log('');
-  console.log('Version aliases:');
+  logger.info('');
+  logger.info('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
-    console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
+    logger.info(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
-  console.log('');
+  logger.info('');
 }
 
 // ---------------------------------------------------------------------------
@@ -974,17 +975,17 @@ export async function listRemoteVersions() {
     return;
   }
 
-  console.log('Available versions on remote:');
+  logger.info('Available versions on remote:');
   for (const v of sorted) {
-    console.log(`  ${v}`);
+    logger.info(`  ${v}`);
   }
 
-  console.log('');
-  console.log('Version aliases:');
+  logger.info('');
+  logger.info('Version aliases:');
   for (const [alias, resolved] of aliasEntries) {
-    console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
+    logger.info(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
   }
-  console.log('');
+  logger.info('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,56 +1171,56 @@ export const commands = {
     const parsed = parsePluginArgs(args);
 
     if (!parsed.subcommand || !VALID_SUBCOMMANDS.includes(parsed.subcommand)) {
-      console.log('Usage:');
-      console.log('  c8ctl cluster start [<version>] [--debug]');
-      console.log('  c8ctl cluster stop');
-      console.log('  c8ctl cluster status');
-      console.log('  c8ctl cluster logs              (alias: log)');
-      console.log('  c8ctl cluster list');
-      console.log('  c8ctl cluster list-remote');
-      console.log('  c8ctl cluster install <version>');
-      console.log('  c8ctl cluster delete <version>');
-      console.log('');
-      console.log('Subcommands:');
-      console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
-      console.log('  stop         Stop the running local Camunda 8 cluster');
-      console.log('  status       Show whether a cluster is running and connection details');
-      console.log('  logs         Stream log output from the running cluster');
-      console.log('  list         List locally cached versions and available version aliases');
-      console.log('  list-remote  List all versions available on the remote download server');
-      console.log('  install      Download a version without starting it');
-      console.log('  delete       Remove a locally cached version to reclaim disk space');
-      console.log('');
-      console.log('Options:');
-      console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
-      console.log('  --c8-version <version> Alternative flag form for version');
-      console.log('  --debug                Stream raw c8run output during start');
-      console.log('');
-      console.log('A <version> can be:');
-      console.log('  stable / alpha         Named version aliases');
-      console.log('  8.8, 8.9               Major.minor — rolling release for that minor');
-      console.log('  8.9.0-alpha5           Exact pinned version');
-      console.log('');
-      console.log('  start uses a local version if available (no remote check).');
-      console.log('  install always checks the remote for a newer rolling release.');
-      console.log('');
-      console.log('Version aliases:');
+      logger.info('Usage:');
+      logger.info('  c8ctl cluster start [<version>] [--debug]');
+      logger.info('  c8ctl cluster stop');
+      logger.info('  c8ctl cluster status');
+      logger.info('  c8ctl cluster logs              (alias: log)');
+      logger.info('  c8ctl cluster list');
+      logger.info('  c8ctl cluster list-remote');
+      logger.info('  c8ctl cluster install <version>');
+      logger.info('  c8ctl cluster delete <version>');
+      logger.info('');
+      logger.info('Subcommands:');
+      logger.info('  start        Download (if needed) and start a local Camunda 8 cluster');
+      logger.info('  stop         Stop the running local Camunda 8 cluster');
+      logger.info('  status       Show whether a cluster is running and connection details');
+      logger.info('  logs         Stream log output from the running cluster');
+      logger.info('  list         List locally cached versions and available version aliases');
+      logger.info('  list-remote  List all versions available on the remote download server');
+      logger.info('  install      Download a version without starting it');
+      logger.info('  delete       Remove a locally cached version to reclaim disk space');
+      logger.info('');
+      logger.info('Options:');
+      logger.info('  <version>              Camunda version, alias, or major.minor (default: stable)');
+      logger.info('  --c8-version <version> Alternative flag form for version');
+      logger.info('  --debug                Stream raw c8run output during start');
+      logger.info('');
+      logger.info('A <version> can be:');
+      logger.info('  stable / alpha         Named version aliases');
+      logger.info('  8.8, 8.9               Major.minor — rolling release for that minor');
+      logger.info('  8.9.0-alpha5           Exact pinned version');
+      logger.info('');
+      logger.info('  start uses a local version if available (no remote check).');
+      logger.info('  install always checks the remote for a newer rolling release.');
+      logger.info('');
+      logger.info('Version aliases:');
       for (const [alias, resolved] of getVersionAliasEntries()) {
-        console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
+        logger.info(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
-      console.log('');
-      console.log('Examples:');
-      console.log('  c8ctl cluster start              # Start using default alias (stable)');
-      console.log('  c8ctl cluster start stable       # Start latest stable release');
-      console.log('  c8ctl cluster start 8.8           # Start latest cached 8.8.x release');
-      console.log('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
-      console.log('  c8ctl cluster stop');
-      console.log('  c8ctl cluster status');
-      console.log('  c8ctl cluster logs              (alias: log)');
-      console.log('  c8ctl cluster list');
-      console.log('  c8ctl cluster list-remote');
-      console.log('  c8ctl cluster install 8.8');
-      console.log('  c8ctl cluster delete 8.8');
+      logger.info('');
+      logger.info('Examples:');
+      logger.info('  c8ctl cluster start              # Start using default alias (stable)');
+      logger.info('  c8ctl cluster start stable       # Start latest stable release');
+      logger.info('  c8ctl cluster start 8.8           # Start latest cached 8.8.x release');
+      logger.info('  c8ctl cluster start 8.9.0-alpha5 # Start specific version');
+      logger.info('  c8ctl cluster stop');
+      logger.info('  c8ctl cluster status');
+      logger.info('  c8ctl cluster logs              (alias: log)');
+      logger.info('  c8ctl cluster list');
+      logger.info('  c8ctl cluster list-remote');
+      logger.info('  c8ctl cluster install 8.8');
+      logger.info('  c8ctl cluster delete 8.8');
       return;
     }
 
