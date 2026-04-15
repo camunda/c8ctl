@@ -82,8 +82,9 @@ export async function discoverLatestVersions() {
  *   updated in-place.
  * - An alpha train exists when there are "X.Y.0-alphaN/" directories
  *   for a given minor that has NOT yet shipped a GA release (X.Y.0/).
- *   The highest such minor is the alpha alias.
- * - The highest minor that is NOT the alpha train is the stable alias.
+ *   The highest such minor is the alpha train.
+ * - stable = highest minor that is NOT in the alpha train.
+ * - alpha  = highest minor overall (regardless of alpha train membership).
  */
 export function parseVersionsFromHtml(html) {
   // Match minor-version directories like "8.8/", "8.9/"
@@ -111,18 +112,8 @@ export function parseVersionsFromHtml(html) {
 
   const highestMinor = sortedMinors[sortedMinors.length - 1];
 
-  // The alpha train is the highest minor that has alpha directories
-  // but has not yet shipped a GA release.
-  // The stable release is the highest minor that is NOT the alpha train.
-  const highestAlphaMinor = [...alphaSet].sort(compareSemver).pop();
-
-  let stable;
-  if (highestAlphaMinor) {
-    // Stable = the highest minor that is lower than the alpha train
-    stable = sortedMinors.filter(v => compareSemver(v, highestAlphaMinor) < 0).pop() || highestMinor;
-  } else {
-    stable = highestMinor;
-  }
+  // Stable = highest minor that is NOT in the alpha train
+  const stable = sortedMinors.filter(v => !alphaSet.has(v)).pop() || highestMinor;
 
   return {
     stable,

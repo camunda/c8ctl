@@ -624,15 +624,17 @@ describe('Cluster Plugin – ensureC8RunInstalled', () => {
 
 describe('Cluster Plugin – parseVersionsFromHtml', () => {
   test('extracts stable and alpha from a realistic listing', () => {
-    // Real-world pattern: 8.8 went GA (but still has old alpha dirs), 8.9 is current alpha
-    // Stable = highest minor below the highest alpha train (8.9 has alphas → stable is 8.8)
+    // Real-world pattern: 8.7 and 8.8 went GA (have both alpha dirs and X.Y.0/), 8.9 is current alpha
+    // Stable = highest minor NOT in the alpha train (8.7/8.8 graduated, 8.9 is alpha-only → stable is 8.8)
     const html = `
       <a href="8.6/">8.6</a>
       <a href="8.6.11/">8.6.11</a>
       <a href="8.7/">8.7</a>
       <a href="8.7.0-alpha5/">8.7.0-alpha5</a>
+      <a href="8.7.0/">8.7.0</a>
       <a href="8.8.0-alpha2/">8.8.0-alpha2</a>
       <a href="8.8.0-alpha3/">8.8.0-alpha3</a>
+      <a href="8.8.0/">8.8.0</a>
       <a href="8.8/">8.8</a>
       <a href="8.8.1/">8.8.1</a>
       <a href="8.9.0-alpha1/">8.9.0-alpha1</a>
