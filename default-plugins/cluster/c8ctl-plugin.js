@@ -140,13 +140,20 @@ async function getDynamicAliases() {
   return _dynamicAliases;
 }
 
-async function resolveVersion(versionSpec, { cacheDir } = {}) {
+async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
 
+  // start: use cached alias if the version is installed (deterministic)
+  if (preferLocal && cacheDir) {
+    const local = readLocalAliasMapping(cacheDir, versionSpec);
+    if (local) return local;
+  }
+
+  // Try remote discovery
   const dynamic = await getDynamicAliases();
 
   if (dynamic?.[versionSpec]) {
-    // Remote discovery succeeded — use it and persist for offline use
+    // Persist for offline use and future preferLocal lookups
     if (cacheDir) {
       storeLocalAliasMapping(cacheDir, versionSpec, dynamic[versionSpec]);
     }
@@ -154,7 +161,7 @@ async function resolveVersion(versionSpec, { cacheDir } = {}) {
   }
 
   // Remote unavailable — fall back to persisted alias if the version is installed
-  if (cacheDir) {
+  if (!preferLocal && cacheDir) {
     const local = readLocalAliasMapping(cacheDir, versionSpec);
     if (local) return local;
   }
@@ -1432,11 +1439,34 @@ export const commands = {
       process.exit(1);
     }
     const theCacheDir = getCacheDir();
+    const isStart = parsed.subcommand === 'start';
     const version = await resolveVersion(versionSpec, {
+      // start: use cached alias if installed (deterministic behavior)
+      preferLocal: isStart,
       cacheDir: theCacheDir,
     });
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
+    }
+
+    // For start with a named alias, check in the background whether the
+    // remote resolves to a different (newer) version and hint if so.
+    if (isStart && isVersionAlias(versionSpec)) {
+      getDynamicAliases()
+        .then((dynamic) => {
+          const remoteVersion = dynamic?.[versionSpec];
+          if (remoteVersion && remoteVersion !== version) {
+            // Update the persisted mapping so the next `cluster install` uses it
+            storeLocalAliasMapping(theCacheDir, versionSpec, remoteVersion);
+            logger.info(
+              `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
+              `Install it with: c8ctl cluster install ${versionSpec}`,
+            );
+          }
+        })
+        .catch(() => {
+          // Offline or timeout — don't bother the user
+        });
     }
     const rolling = isRollingVersion(versionSpec);
     const config = {
