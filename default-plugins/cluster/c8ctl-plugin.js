@@ -140,24 +140,27 @@ async function getDynamicAliases() {
   return _dynamicAliases;
 }
 
-async function resolveVersion(versionSpec, { preferLocal = false, cacheDir } = {}) {
+async function resolveVersion(versionSpec, { cacheDir } = {}) {
   if (!isVersionAlias(versionSpec)) return versionSpec;
 
-  // When preferLocal is set (e.g. start), try the persisted alias mapping first
-  if (preferLocal && cacheDir) {
+  const dynamic = await getDynamicAliases();
+
+  if (dynamic?.[versionSpec]) {
+    // Remote discovery succeeded — use it and persist for offline use
+    if (cacheDir) {
+      storeLocalAliasMapping(cacheDir, versionSpec, dynamic[versionSpec]);
+    }
+    return dynamic[versionSpec];
+  }
+
+  // Remote unavailable — fall back to persisted alias if the version is installed
+  if (cacheDir) {
     const local = readLocalAliasMapping(cacheDir, versionSpec);
     if (local) return local;
   }
 
-  const dynamic = await getDynamicAliases();
-  const resolved = dynamic?.[versionSpec] ?? _fallbackAliases[versionSpec] ?? versionSpec;
-
-  // Persist the resolved mapping for future offline use
-  if (cacheDir && dynamic?.[versionSpec]) {
-    storeLocalAliasMapping(cacheDir, versionSpec, resolved);
-  }
-
-  return resolved;
+  // Last resort: hardcoded fallback from package.json
+  return _fallbackAliases[versionSpec] ?? versionSpec;
 }
 
 function getAliasMappingPath(cacheDir, alias) {
@@ -1430,8 +1433,6 @@ export const commands = {
     }
     const theCacheDir = getCacheDir();
     const version = await resolveVersion(versionSpec, {
-      // start: prefer locally-cached alias mapping to avoid a network fetch when already installed
-      preferLocal: parsed.subcommand === 'start',
       cacheDir: theCacheDir,
     });
     if (isVersionAlias(versionSpec)) {
