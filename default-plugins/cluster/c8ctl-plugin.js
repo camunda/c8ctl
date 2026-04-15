@@ -207,6 +207,52 @@ export function _resetDynamicAliasCache() {
   _dynamicAliases = undefined;
 }
 
+/**
+ * Non-blocking background check: query the remote download server and print
+ * a hint if the remote alias resolves to a different (newer) version.
+ *
+ * Important: does NOT update the persisted alias mapping. The mapping is only
+ * updated when the user explicitly runs `cluster install`, keeping `start`
+ * deterministic across runs.
+ *
+ * Returns the fire-and-forget promise (for testing).
+ */
+export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
+  const logger = getLogger();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  return fireAndForget(
+    fetch(DOWNLOAD_BASE_URL, { signal: controller.signal })
+      .then((res) => res.ok ? res.text() : null)
+      .then((html) => {
+        if (html) {
+          const remote = parseVersionsFromHtml(html);
+          const remoteVersion = remote?.[versionSpec];
+          if (remoteVersion && remoteVersion !== resolvedVersion) {
+            logger.info(
+              `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
+              `Install it with: c8ctl cluster install ${versionSpec}`,
+            );
+          }
+        }
+      })
+      .finally(() => clearTimeout(timeoutId)),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers – fire-and-forget
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a promise without blocking the caller. Errors are always swallowed so
+ * fire-and-forget chains never produce unhandled-rejection warnings.
+ * Returns the guarded promise (useful in tests).
+ */
+function fireAndForget(promise) {
+  return promise.catch(() => {});
+}
+
 // ---------------------------------------------------------------------------
 // Plugin metadata
 // ---------------------------------------------------------------------------
@@ -644,17 +690,16 @@ export async function ensureC8RunInstalled(config) {
       // For rolling versions on start, do a bounded non-blocking check and hint.
       // We store the promise so tests can await it, but we don't block the caller.
       if (config.checkForUpdateHint) {
-        config._hintPromise = hasNewerVersionAvailable(config)
-          .then((hasUpdate) => {
-            if (hasUpdate) {
-              logger.info(
-                `A newer server version is available. Install it with: c8ctl cluster install ${config.version}`,
-              );
-            }
-          })
-          .catch(() => {
-            // Swallow — offline or timeout, don't bother the user
-          });
+        config._hintPromise = fireAndForget(
+          hasNewerVersionAvailable(config)
+            .then((hasUpdate) => {
+              if (hasUpdate) {
+                logger.info(
+                  `A newer server version is available. Install it with: c8ctl cluster install ${config.version}`,
+                );
+              }
+            }),
+        );
       }
 
       return;
@@ -1454,29 +1499,7 @@ export const commands = {
     // For start with a named alias, check in the background whether the
     // remote resolves to a different (newer) version and hint if so.
     if (isStart && isVersionAlias(versionSpec)) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      fetch(DOWNLOAD_BASE_URL, { signal: controller.signal })
-        .then((res) => res.ok ? res.text() : null)
-        .then((html) => {
-          clearTimeout(timeoutId);
-          if (html) {
-            const remote = parseVersionsFromHtml(html);
-            const remoteVersion = remote?.[versionSpec];
-            if (remoteVersion && remoteVersion !== version) {
-              // Update the persisted mapping so the next `cluster install` uses it
-              storeLocalAliasMapping(theCacheDir, versionSpec, remoteVersion);
-              logger.info(
-                `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
-                `Install it with: c8ctl cluster install ${versionSpec}`,
-              );
-            }
-          }
-        })
-        .catch(() => {
-          clearTimeout(timeoutId);
-          // Offline — don't bother the user
-        });
+      checkBackgroundAliasFreshness(versionSpec, version);
     }
     const rolling = isRollingVersion(versionSpec);
     const config = {

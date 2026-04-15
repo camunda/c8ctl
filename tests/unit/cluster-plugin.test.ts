@@ -829,6 +829,119 @@ describe('Cluster Plugin – resolveVersion', () => {
 });
 
 // ---------------------------------------------------------------------------
+// checkBackgroundAliasFreshness
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – checkBackgroundAliasFreshness', () => {
+  let originalFetch: typeof globalThis.fetch;
+  let loggedMessages: string[];
+  let originalC8ctl: any;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    originalC8ctl = globalThis.c8ctl;
+    loggedMessages = [];
+    // @ts-expect-error — mock c8ctl logger
+    globalThis.c8ctl = {
+      getLogger: () => ({
+        info: (msg: string) => loggedMessages.push(msg),
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      }),
+    };
+    plugin._resetDynamicAliasCache();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    globalThis.c8ctl = originalC8ctl;
+    plugin._resetDynamicAliasCache();
+  });
+
+  test('prints hint when remote alias differs from resolved version', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => `
+        <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+      `,
+    });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+    assert.ok(
+      loggedMessages.some((m: string) => m.includes('newer') && m.includes('8.9') && m.includes('cluster install')),
+      `Should print upgrade hint, got: ${loggedMessages.join('; ')}`,
+    );
+  });
+
+  test('does not print hint when remote alias matches resolved version', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => `
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+      `,
+    });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.9');
+
+    assert.strictEqual(
+      loggedMessages.filter((m: string) => m.includes('newer')).length, 0,
+      'Should not print upgrade hint when versions match',
+    );
+  });
+
+  test('does not persist alias mapping (start remains deterministic)', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-bg-'));
+    try {
+      // Seed a cached alias file pointing to 8.8
+      plugin.storeLocalAliasMapping(tempDir, 'stable', '8.8');
+
+      // @ts-expect-error — mock fetch: remote says stable is 8.9
+      globalThis.fetch = async () => ({
+        ok: true,
+        text: async () => `
+          <a href="8.8/">8.8</a><a href="8.8.0/">8.8.0</a>
+          <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+        `,
+      });
+
+      await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+      // The alias file should still point to 8.8 — not overwritten to 8.9
+      const cached = readFileSync(join(tempDir, 'alias-stable.resolved'), 'utf-8').trim();
+      assert.strictEqual(cached, '8.8', 'background check must not update persisted alias');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('stays silent when offline (fetch throws)', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => { throw new Error('Network unreachable'); };
+
+    await assert.doesNotReject(
+      () => plugin.checkBackgroundAliasFreshness('stable', '8.8'),
+      'should swallow network errors',
+    );
+
+    assert.strictEqual(loggedMessages.length, 0, 'should not log anything when offline');
+  });
+
+  test('stays silent when server returns non-OK', async () => {
+    // @ts-expect-error — mock fetch
+    globalThis.fetch = async () => ({ ok: false, text: async () => '' });
+
+    await plugin.checkBackgroundAliasFreshness('stable', '8.8');
+
+    assert.strictEqual(loggedMessages.length, 0, 'should not log anything on non-OK response');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // clusterStatus
 // ---------------------------------------------------------------------------
 
