@@ -1486,7 +1486,7 @@ export const COMMAND_REGISTRY = {
 
 	completion: {
 		description: "Generate shell completion script",
-		helpResource: "bash|zsh|fish",
+		helpResource: "bash|zsh|fish|install",
 		mutating: false,
 		requiresResource: false,
 		helpExamples: [
@@ -1494,9 +1494,23 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl completion bash",
 				description: "Generate bash completion script",
 			},
+			{
+				command: "c8ctl completion install",
+				description:
+					"Auto-detect shell and install completions (auto-refreshes on upgrade)",
+			},
+			{
+				command: "c8ctl completion install --shell zsh",
+				description: "Install completions for a specific shell",
+			},
 		],
-		resources: ["bash", "zsh", "fish"],
-		flags: {},
+		resources: ["bash", "zsh", "fish", "install"],
+		flags: {
+			shell: {
+				type: "string" as const,
+				description: "Shell to install completions for (bash, zsh, fish)",
+			},
+		},
 	},
 
 	"mcp-proxy": {
