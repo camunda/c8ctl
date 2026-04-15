@@ -438,8 +438,9 @@ Use this to reduce context window size when parsing output programmatically.
 
 ##### `--dry-run`
 
-Applies to all **mutating** commands: `create`, `cancel`, `deploy`,
-`complete`, `fail`, `activate`, `resolve`, `publish`, `correlate`.
+Applies to **all** commands — both queries (`list`, `search`, `get`) and
+mutations (`create`, `cancel`, `deploy`, `complete`, `fail`, `activate`,
+`resolve`, `publish`, `correlate`).
 
 In dry-run mode:
 - All inputs are validated
@@ -458,6 +459,7 @@ In dry-run mode:
 c8ctl create pi --id=my-process --dry-run
 c8ctl deploy ./my-process.bpmn --dry-run
 c8ctl cancel pi 2251799813685249 --dry-run
+c8ctl search pd --dry-run
 ```
 
 #### JSON mode help
