@@ -1510,8 +1510,7 @@ export const COMMAND_REGISTRY = {
 			install: {
 				shell: {
 					type: "string" as const,
-					description:
-						"Shell to install completions for (bash, zsh, fish)",
+					description: "Shell to install completions for (bash, zsh, fish)",
 				},
 			},
 		},
