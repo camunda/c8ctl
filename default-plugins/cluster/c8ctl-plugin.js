@@ -193,6 +193,15 @@ async function getVersionAliasEntries() {
   return Object.entries(aliases);
 }
 
+/**
+ * Synchronous variant that uses only the cached discovery result or fallback.
+ * Used for help output so it never blocks on a network request.
+ */
+function getVersionAliasEntriesSync() {
+  const aliases = _dynamicAliases || _fallbackAliases;
+  return Object.entries(aliases);
+}
+
 /** Reset the cached dynamic aliases (for testing). */
 export function _resetDynamicAliasCache() {
   _dynamicAliases = undefined;
@@ -1335,15 +1344,15 @@ export const commands = {
       console.log('  --debug                Stream raw c8run output during start');
       console.log('');
       console.log('A <version> can be:');
-      console.log('  stable / alpha         Named aliases (resolved to latest)');
+      console.log('  stable / alpha         Named aliases');
       console.log('  8.8, 8.9               Major.minor — rolling release for that minor');
       console.log('  8.9.0-alpha5           Exact pinned version');
       console.log('');
-      console.log('  start uses a local version if available (no remote check).');
+      console.log('  start uses a locally installed version if available.');
       console.log('  install always checks the remote for a newer rolling release.');
       console.log('');
-      console.log('Version aliases:')
-      for (const [alias, resolved] of await getVersionAliasEntries()) {
+      console.log('Version aliases:');
+      for (const [alias, resolved] of getVersionAliasEntriesSync()) {
         console.log(`  ${alias.padEnd(ALIAS_COLUMN_WIDTH)} → ${resolved}`);
       }
       console.log('');
@@ -1445,9 +1454,15 @@ export const commands = {
     // For start with a named alias, check in the background whether the
     // remote resolves to a different (newer) version and hint if so.
     if (isStart && isVersionAlias(versionSpec)) {
-      getDynamicAliases()
-        .then((dynamic) => {
-          const remoteVersion = dynamic?.[versionSpec];
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      fetch(DOWNLOAD_BASE_URL, { signal: controller.signal })
+        .then((res) => res.ok ? res.text() : null)
+        .then((html) => {
+          clearTimeout(timeoutId);
+          if (!html) return;
+          const remote = parseVersionsFromHtml(html);
+          const remoteVersion = remote?.[versionSpec];
           if (remoteVersion && remoteVersion !== version) {
             // Update the persisted mapping so the next `cluster install` uses it
             storeLocalAliasMapping(theCacheDir, versionSpec, remoteVersion);
@@ -1458,7 +1473,8 @@ export const commands = {
           }
         })
         .catch(() => {
-          // Offline or timeout — don't bother the user
+          clearTimeout(timeoutId);
+          // Offline — don't bother the user
         });
     }
     const rolling = isRollingVersion(versionSpec);

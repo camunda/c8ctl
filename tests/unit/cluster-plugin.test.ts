@@ -82,17 +82,25 @@ describe('Cluster Plugin – commands export', () => {
 describe('Cluster Plugin – command usage output', () => {
   let captured: string[];
   let originalLog: typeof console.log;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(() => {
     captured = [];
     originalLog = console.log;
+    originalFetch = globalThis.fetch;
     console.log = (...args: unknown[]) => {
       captured.push(args.map(String).join(' '));
     };
+    // Stub fetch so usage tests never hit the network
+    // @ts-expect-error — mock fetch for testing
+    globalThis.fetch = async () => { throw new Error('offline'); };
+    plugin._resetDynamicAliasCache();
   });
 
   afterEach(() => {
     console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    plugin._resetDynamicAliasCache();
   });
 
   test('prints usage when called with no arguments', async () => {
@@ -136,16 +144,9 @@ describe('Cluster Plugin – command usage output', () => {
     await plugin.commands['cluster']([]);
 
     const output = captured.join('\n');
-    assert.ok(output.includes('Version aliases'), 'Should contain a Version aliases section');
+    assert.ok(output.includes('Version aliases:'), 'Should contain a Version aliases section');
     assert.ok(/^\s+alpha\s+→/m.test(output), 'Should list the alpha alias with arrow separator');
     assert.ok(/^\s+stable\s+→/m.test(output), 'Should list the stable alias with arrow separator');
-  });
-
-  test('usage shows version aliases', async () => {
-    await plugin.commands['cluster']([]);
-
-    const output = captured.join('\n');
-    assert.ok(output.includes('Version aliases:'), 'Should show version aliases section');
   });
 });
 
