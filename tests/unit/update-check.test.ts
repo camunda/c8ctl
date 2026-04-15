@@ -13,7 +13,6 @@ import {
   startUpdateCheck,
   printUpdateNotification,
   _resetForTesting,
-  fetchRemoteVersion,
 } from '../../src/update-check.ts';
 import { c8ctl } from '../../src/runtime.ts';
 
@@ -101,7 +100,7 @@ describe('startUpdateCheck + printUpdateNotification', () => {
     // Capture console.log
     consoleLogOutput = [];
     originalLog = console.log;
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       consoleLogOutput.push(args.join(' '));
     };
 
@@ -347,8 +346,9 @@ describe('startUpdateCheck + printUpdateNotification', () => {
     const output = consoleLogOutput.join('\n');
     // Should check the alpha tag and find 2.0.0-alpha.10
     assert.ok(output.includes('2.0.0-alpha.10'), 'Should find alpha update');
-    // Should NOT recommend stable install
-    assert.ok(!output.includes('npm install -g @camunda8/cli\n'), 'Should not recommend stable install for alpha user');
+    // Should NOT recommend stable install (without @alpha suffix)
+    assert.ok(output.includes('@camunda8/cli@alpha'), 'Should show alpha install command');
+    assert.ok(!output.includes('Update with: npm install -g @camunda8/cli\n'), 'Should not recommend stable install for alpha user');
   });
 });
 
@@ -367,7 +367,7 @@ describe('patient vs impatient check timing', () => {
     _resetForTesting();
     consoleLogOutput = [];
     originalLog = console.log;
-    console.log = (...args: any[]) => {
+    console.log = (...args: unknown[]) => {
       consoleLogOutput.push(args.join(' '));
     };
     originalFetch = globalThis.fetch;

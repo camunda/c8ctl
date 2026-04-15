@@ -3,8 +3,8 @@
  *
  * On every invocation a fire-and-forget fetch checks the npm registry for a
  * newer version on the appropriate channel (latest or alpha, based on the
- * running version). If one is found and hasn't been notified yet, a one-line
- * hint is printed after the command completes.
+ * running version). If one is found and hasn't been notified yet, an update
+ * notification is printed after the command completes.
  *
  * Timing strategy — "patient once per day":
  * - Every invocation fires a background fetch immediately.
@@ -19,7 +19,8 @@
  * - Zero extra dependencies (uses global fetch + node:fs)
  * - Never delays command execution (fire-and-forget with AbortController)
  * - Once-per-version notification (cache in the user data dir)
- * - Suppressed in JSON output mode and CI environments
+ * - Notification output suppressed in JSON output mode and CI environments
+ *   (the background fetch still runs so the cache stays warm)
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -62,8 +63,14 @@ function readCache(): UpdateCache | undefined {
 		const dir = getUserDataDir();
 		const filePath = join(dir, CACHE_FILE);
 		if (!existsSync(filePath)) return undefined;
-		// biome-ignore lint/plugin: JSON.parse returns unknown — shape validated by the catch block
-		return JSON.parse(readFileSync(filePath, "utf-8")) as UpdateCache;
+		const raw: unknown = JSON.parse(readFileSync(filePath, "utf-8"));
+		if (typeof raw !== "object" || raw === null) return undefined;
+		const cache: UpdateCache = {};
+		if ("notifiedVersion" in raw && typeof raw.notifiedVersion === "string")
+			cache.notifiedVersion = raw.notifiedVersion;
+		if ("lastPatientCheck" in raw && typeof raw.lastPatientCheck === "number")
+			cache.lastPatientCheck = raw.lastPatientCheck;
+		return cache;
 	} catch {
 		return undefined;
 	}
@@ -136,11 +143,18 @@ export async function fetchRemoteVersion(
 	try {
 		const res = await fetch(REGISTRY_URL, { signal });
 		if (!res.ok) return undefined;
-		// biome-ignore lint/plugin: external JSON response — shape validated by optional chaining below
-		const data = (await res.json()) as {
-			"dist-tags"?: Record<string, string>;
-		};
-		return data["dist-tags"]?.[channel];
+		const data: unknown = await res.json();
+		if (typeof data !== "object" || data === null) return undefined;
+		if (!("dist-tags" in data)) return undefined;
+		const distTags: unknown = data["dist-tags"];
+		if (typeof distTags !== "object" || distTags === null) return undefined;
+		if (!(channel in distTags)) return undefined;
+		// `in` guard above ensures `channel` exists; index via helper to avoid `as`
+		const record: Record<string, unknown> = Object.fromEntries(
+			Object.entries(distTags),
+		);
+		const version: unknown = record[channel];
+		return typeof version === "string" ? version : undefined;
 	} catch {
 		return undefined;
 	}
@@ -150,7 +164,7 @@ export async function fetchRemoteVersion(
  * The resolved result of an update check.
  * Stored on the module so the notification can be printed after the command.
  */
-let pendingNotification: string | undefined;
+let pendingNotification: { message: string; version: string } | undefined;
 
 /**
  * A reference to the background check promise (for testing).
@@ -193,18 +207,16 @@ export function startUpdateCheck(currentVersion: string): void {
 			const cache = readCache();
 			if (cache?.notifiedVersion === remoteVersion) return;
 
-			// Store the notification for later printing
+			// Store the notification for later printing (cache write deferred to print time
+			// so JSON-mode suppression doesn't poison the cache)
 			const installCmd =
 				channel === "alpha"
 					? "npm install -g @camunda8/cli@alpha"
 					: "npm install -g @camunda8/cli";
-			pendingNotification = `A newer version of c8ctl is available (${currentVersion} → ${remoteVersion}). Update with: ${installCmd}`;
-
-			// Persist so we don't nag about this version again
-			writeCache({
-				...readCache(),
-				notifiedVersion: remoteVersion,
-			});
+			pendingNotification = {
+				message: `A newer version of c8ctl is available (${currentVersion} → ${remoteVersion}). Update with: ${installCmd}`,
+				version: remoteVersion,
+			};
 		})
 		.catch(() => {
 			// Swallow all errors — this is best-effort
@@ -246,8 +258,15 @@ export async function printUpdateNotification(): Promise<void> {
 	// Suppress in JSON mode — don't pollute structured output
 	if (c8ctl.outputMode === "json") return;
 
+	// Persist so we don't nag about this version again (deferred from background
+	// check so JSON-mode suppression doesn't write the cache prematurely)
+	writeCache({
+		...readCache(),
+		notifiedVersion: pendingNotification.version,
+	});
+
 	console.log("");
-	console.log(pendingNotification);
+	console.log(pendingNotification.message);
 }
 
 /**
