@@ -65,6 +65,7 @@ c8ctl help fail       # Shows fail command with all flags
 c8ctl help activate   # Shows activate command with all flags
 c8ctl help publish    # Shows publish command with all flags
 c8ctl help correlate  # Shows correlate command with all flags
+c8ctl help cluster    # Shows local cluster management help
 c8ctl help profiles   # Shows profile management help
 c8ctl help plugin     # Shows plugin management help
 
@@ -568,6 +569,44 @@ c8ctl help list     # → JSON for specific command
 
 ---
 
+### Local Cluster
+
+c8ctl includes a built-in `cluster` command for managing a local Camunda 8 instance (powered by a default plugin). No Docker or docker-compose required — it downloads and runs Camunda directly.
+
+```bash
+# Start the latest stable version
+c8ctl cluster start
+
+# Start a specific version
+c8ctl cluster start 8.8
+c8ctl cluster start 8.9.0-alpha5
+
+# Stop the running cluster
+c8ctl cluster stop
+
+# Check cluster status
+c8ctl cluster status
+
+# Stream cluster logs
+c8ctl cluster logs
+
+# List locally cached versions
+c8ctl cluster list
+
+# List available remote versions
+c8ctl cluster list-remote
+
+# Pre-download a version without starting it
+c8ctl cluster install 8.8
+
+# Remove a cached version
+c8ctl cluster delete 8.8
+```
+
+Run `c8ctl help cluster` for full details. See [EXAMPLES.md](EXAMPLES.md#local-cluster) for a complete local development workflow.
+
+---
+
 ### Core Components
 
 - **Logger** (`src/logger.ts`): Handles output in text or JSON mode
@@ -604,6 +643,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `sync` - Synchronize plugins
 - `use` - Set active profile or tenant
 - `output` - Show or set output format
+- `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list)
 - `completion` - Generate shell completion script
 - `feedback` - Open the feedback page to report issues or request features
 
