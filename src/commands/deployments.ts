@@ -12,6 +12,7 @@ import { resolveClusterConfig, resolveTenantId } from "../config.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger, isRecord } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
+import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
 
@@ -125,6 +126,7 @@ function collectResourceFiles(
 	basePath?: string,
 	ig?: Ignore,
 	ignoreBaseDir?: string,
+	force?: boolean,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -193,6 +195,10 @@ function collectResourceFiles(
 				if (ig && ignoreBaseDir && isIgnored(ig, fullPath, ignoreBaseDir)) {
 					return;
 				}
+				// Unless --force, only collect files with known deployable extensions
+				if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(fullPath))) {
+					return;
+				}
 				files.push(fullPath);
 			}
 		});
@@ -212,7 +218,14 @@ function collectResourceFiles(
 
 		// Process building block folders first (prioritized)
 		bbFolders.forEach((bbFolder) => {
-			collectResourceFiles(bbFolder, collected, basePath, ig, ignoreBaseDir);
+			collectResourceFiles(
+				bbFolder,
+				collected,
+				basePath,
+				ig,
+				ignoreBaseDir,
+				force,
+			);
 		});
 
 		// Then process regular folders
@@ -223,6 +236,7 @@ function collectResourceFiles(
 				basePath,
 				ig,
 				ignoreBaseDir,
+				force,
 			);
 		});
 	}
@@ -257,6 +271,7 @@ export async function deploy(
 		profile?: string;
 		continueOnError?: boolean;
 		continueOnUserError?: boolean;
+		force?: boolean;
 	},
 ): Promise<void> {
 	const logger = getLogger();
@@ -280,7 +295,14 @@ export async function deploy(
 
 		// Collect all resource files (respecting .c8ignore)
 		paths.forEach((path) => {
-			collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir);
+			collectResourceFiles(
+				path,
+				resources,
+				undefined,
+				ig,
+				ignoreBaseDir,
+				options.force,
+			);
 		});
 
 		if (resources.length === 0) {
@@ -702,12 +724,12 @@ function printDeploymentHints(
 // ─── defineCommand wrapper ───────────────────────────────────────────────────
 
 /** Side-effectful: collects files, validates, deploys, and renders its own table output. */
-export const deployCommand = defineCommand("deploy", "", async (ctx) => {
+export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	const paths = ctx.resource
 		? [ctx.resource, ...ctx.positionals]
 		: ctx.positionals.length > 0
 			? ctx.positionals
 			: ["."];
-	await deploy(paths, { profile: ctx.profile });
+	await deploy(paths, { profile: ctx.profile, force: flags.force });
 	return { kind: "none" };
 });

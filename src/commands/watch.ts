@@ -8,20 +8,7 @@ import { defineCommand } from "../command-framework.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger } from "../logger.ts";
 import { deploy } from "./deployments.ts";
-
-export const DEFAULT_WATCHED_EXTENSIONS = [
-	".bpmn",
-	".dmn",
-	".form",
-	".md",
-	".txt",
-	".xml",
-	".rpa",
-	".json",
-	".config",
-	".yml",
-	".yaml",
-];
+import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
@@ -41,7 +28,7 @@ export async function watchFiles(
 	const watchedExtensions =
 		options.extensions && options.extensions.length > 0
 			? options.extensions
-			: DEFAULT_WATCHED_EXTENSIONS;
+			: DEPLOYABLE_EXTENSIONS;
 
 	if (!paths || paths.length === 0) {
 		paths = ["."];

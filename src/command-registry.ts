@@ -1151,7 +1151,13 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		resources: [],
-		flags: {},
+		flags: {
+			force: {
+				type: "boolean",
+				description:
+					"Deploy any file type, ignoring the default extension allow-list",
+			},
+		},
 	},
 
 	run: {
