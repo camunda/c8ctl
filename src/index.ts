@@ -217,7 +217,7 @@ async function main() {
 			resource ?? "",
 			values,
 		);
-		warnUnknownFlags(logger, completionUnknownFlags, verb, resource);
+		warnUnknownFlags(logger, completionUnknownFlags, verb, resource ?? "");
 
 		if (resource === "install") {
 			installCompletion(str(values.shell));
