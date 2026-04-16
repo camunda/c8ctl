@@ -17,6 +17,44 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
 
+function assertSafeProcessString(value: string, fieldName: string): void {
+	// Reject control characters that can corrupt process invocation semantics.
+	if (
+		value.includes("\u0000") ||
+		value.includes("\n") ||
+		value.includes("\r")
+	) {
+		throw new Error(
+			`Unsafe ${fieldName}: contains disallowed control characters`,
+		);
+	}
+}
+
+function validateSpawnInputs(
+	command: string,
+	args: string[],
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+): void {
+	assertSafeProcessString(command, "command");
+
+	for (const [index, arg] of args.entries()) {
+		assertSafeProcessString(arg, `args[${index}]`);
+	}
+
+	if (options?.cwd !== undefined) {
+		assertSafeProcessString(options.cwd, "cwd");
+	}
+
+	if (options?.env) {
+		for (const [key, value] of Object.entries(options.env)) {
+			assertSafeProcessString(key, `env key (${key})`);
+			if (typeof value === "string") {
+				assertSafeProcessString(value, `env value (${key})`);
+			}
+		}
+	}
+}
+
 export interface SpawnResult {
 	stdout: string;
 	stderr: string;
@@ -28,6 +66,7 @@ export async function asyncSpawn(
 	args: string[],
 	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): Promise<SpawnResult> {
+	validateSpawnInputs(command, args, options);
 	try {
 		const { stdout, stderr } = await execFile(command, args, {
 			...options,

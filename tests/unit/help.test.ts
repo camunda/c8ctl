@@ -404,8 +404,9 @@ describe("Help Module", () => {
 			output.includes("feedback"),
 			"help should include feedback command",
 		);
-		assert.ok(
-			output.includes("https://github.com/camunda/c8ctl/issues"),
+		assert.match(
+			output,
+			/(^|\s)https:\/\/github\.com\/camunda\/c8ctl\/issues\b/,
 			"help should include feedback URL",
 		);
 		assert.ok(
