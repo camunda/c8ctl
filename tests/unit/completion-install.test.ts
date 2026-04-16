@@ -149,6 +149,12 @@ describe("extractCompletionVersion", () => {
 		assert.strictEqual(extractCompletionVersion(file), "1.2.3");
 	});
 
+	test("extracts version when header is not on line 1 (zsh #compdef first)", () => {
+		const file = join(testDir, "c8ctl.zsh");
+		writeFileSync(file, "#compdef c8ctl c8\n# c8ctl-completion-version: 2.0.0\n\n_c8ctl() {\n");
+		assert.strictEqual(extractCompletionVersion(file), "2.0.0");
+	});
+
 	test("returns undefined for missing file", () => {
 		assert.strictEqual(
 			extractCompletionVersion(join(testDir, "nope")),
@@ -212,7 +218,7 @@ describe("refreshCompletionsIfStale", () => {
 		const content = readFileSync(file, "utf-8");
 		// Should now have the new version header
 		assert.ok(
-			content.startsWith(`# c8ctl-completion-version: ${c8ctl.version}`),
+			content.includes(`# c8ctl-completion-version: ${c8ctl.version}`),
 			"Should have current version header after refresh",
 		);
 		// Old content should be gone
@@ -277,8 +283,13 @@ describe("installCompletion", () => {
 		assert.ok(existsSync(file), "Completion file should exist");
 		const content = readFileSync(file, "utf-8");
 		assert.ok(
-			content.startsWith("# c8ctl-completion-version:"),
+			content.includes("# c8ctl-completion-version:"),
 			"Should have version header",
+		);
+		// Zsh must have #compdef on line 1 for compinit fpath discovery
+		assert.ok(
+			content.startsWith("#compdef"),
+			"Zsh completion should start with #compdef",
 		);
 		// Zsh completions contain #compdef and runtime compdef for sourced use
 		assert.ok(content.includes("#compdef"), "Should be valid zsh completion");
@@ -383,10 +394,9 @@ describe("completion version header", () => {
 				installCompletion(shell);
 				const file = join(testDir, "completions", `c8ctl.${shell}`);
 				const content = readFileSync(file, "utf-8");
-				const firstLine = content.split("\n")[0];
 				assert.ok(
-					firstLine.startsWith("# c8ctl-completion-version:"),
-					`${shell} completion should start with version header, got: ${firstLine}`,
+					content.includes("# c8ctl-completion-version:"),
+					`${shell} completion should contain version header`,
 				);
 			}
 		} finally {

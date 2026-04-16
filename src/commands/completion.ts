@@ -407,8 +407,8 @@ function generateZshCompletion(): string {
 		);
 	}
 
-	return `# c8ctl-completion-version: ${c8ctl.version}
-#compdef c8ctl c8
+	return `#compdef c8ctl c8
+# c8ctl-completion-version: ${c8ctl.version}
 
 _c8ctl() {
   local -a verbs resources flags
@@ -693,14 +693,18 @@ function generateForShell(shell: string): string {
 	}
 }
 
-/** Extract the version from a completion file's first line. */
+/** Extract the version from a completion file's header lines.
+ *  Scans the first few lines so the header can appear after
+ *  shell-required directives like zsh's #compdef. */
 export function extractCompletionVersion(filePath: string): string | undefined {
 	if (!existsSync(filePath)) return undefined;
 	try {
 		const content = readFileSync(filePath, "utf-8");
-		const firstLine = content.split("\n")[0];
-		if (firstLine.startsWith(VERSION_HEADER_PREFIX)) {
-			return firstLine.slice(VERSION_HEADER_PREFIX.length).trim();
+		const lines = content.split("\n").slice(0, 5);
+		for (const line of lines) {
+			if (line.startsWith(VERSION_HEADER_PREFIX)) {
+				return line.slice(VERSION_HEADER_PREFIX.length).trim();
+			}
 		}
 		return undefined;
 	} catch {
