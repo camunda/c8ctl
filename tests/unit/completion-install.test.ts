@@ -335,6 +335,31 @@ describe("installCompletion", () => {
 		const count = rcContent.split(sourceLine).length - 1;
 		assert.strictEqual(count, 1, "Source line should appear exactly once");
 	});
+
+	test("idempotent when data dir path contains a single quote", () => {
+		// Paths with single quotes get escaped in buildSourceLine ('→'\'''),
+		// so rcAlreadyConfigured must also check the escaped form.
+		const dirWithQuote = join(testDir, "it's");
+		mkdirSync(dirWithQuote, { recursive: true });
+		process.env.C8CTL_DATA_DIR = dirWithQuote;
+		process.env.HOME = dirWithQuote;
+		const rcFile = join(dirWithQuote, ".zshrc");
+		writeFileSync(rcFile, "# existing config\n");
+
+		installCompletion("zsh");
+		installCompletion("zsh");
+
+		const rcContent = readFileSync(rcFile, "utf-8");
+		const completionFile = join(dirWithQuote, "completions", "c8ctl.zsh");
+		const escaped = completionFile.replaceAll("'", "'\\''");
+		const sourceLine = `source '${escaped}'`;
+		const count = rcContent.split(sourceLine).length - 1;
+		assert.strictEqual(
+			count,
+			1,
+			"Source line should appear exactly once even with quotes in path",
+		);
+	});
 });
 
 // ─── version header structural invariant ─────────────────────────────────────

@@ -658,8 +658,9 @@ function buildRcBlock(completionFilePath: string): string {
 }
 
 /** Check if the RC file already contains the source line.
- *  Checks for the completion file path regardless of quoting style
- *  so upgrades from double-quoted to single-quoted are detected. */
+ *  Checks for both the raw completion file path and the escaped source line
+ *  so upgrades from double-quoted to single-quoted are detected, and paths
+ *  containing single quotes don't cause duplicate blocks. */
 function rcAlreadyConfigured(
 	rcFile: string,
 	completionFilePath: string,
@@ -667,7 +668,10 @@ function rcAlreadyConfigured(
 	if (!existsSync(rcFile)) return false;
 	try {
 		const content = readFileSync(rcFile, "utf-8");
-		return content.includes(completionFilePath);
+		return (
+			content.includes(completionFilePath) ||
+			content.includes(buildSourceLine(completionFilePath))
+		);
 	} catch {
 		return false;
 	}
