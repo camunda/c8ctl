@@ -30,6 +30,13 @@ describe("Lazy client getter", () => {
 				if (!_client) _client = factories.createClient();
 				return _client;
 			},
+			get tenantId() {
+				if (!_tenantResolved) {
+					_tenantId = factories.resolveTenantId();
+					_tenantResolved = true;
+				}
+				return _tenantId;
+			},
 			// biome-ignore lint/suspicious/noExplicitAny: test stub
 		} as any as CommandContext;
 	}
@@ -67,19 +74,13 @@ describe("Lazy client getter", () => {
 
 	test("tenantId resolver is not called until ctx.tenantId is accessed", () => {
 		let called = false;
-
-		let _tenantId: string | undefined;
-		let _tenantResolved = false;
-		const ctx = {
-			get tenantId() {
-				if (!_tenantResolved) {
-					called = true;
-					_tenantId = "test-tenant";
-					_tenantResolved = true;
-				}
-				return _tenantId;
+		const ctx = buildContext({
+			createClient: () => ({ fake: "client" }),
+			resolveTenantId: () => {
+				called = true;
+				return "test-tenant";
 			},
-		} as unknown as CommandContext;
+		});
 
 		assert.strictEqual(called, false, "Resolver must not be called eagerly");
 		const tid = ctx.tenantId;
@@ -89,19 +90,13 @@ describe("Lazy client getter", () => {
 
 	test("tenantId resolver is called only once (cached)", () => {
 		let callCount = 0;
-
-		let _tenantId: string | undefined;
-		let _tenantResolved = false;
-		const ctx = {
-			get tenantId() {
-				if (!_tenantResolved) {
-					callCount++;
-					_tenantId = "t1";
-					_tenantResolved = true;
-				}
-				return _tenantId;
+		const ctx = buildContext({
+			createClient: () => ({ fake: "client" }),
+			resolveTenantId: () => {
+				callCount++;
+				return "t1";
 			},
-		} as unknown as CommandContext;
+		});
 
 		const first = ctx.tenantId;
 		const second = ctx.tenantId;
