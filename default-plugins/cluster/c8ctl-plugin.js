@@ -892,12 +892,115 @@ async function startC8Run(config, debug = false) {
   }
 }
 
-async function stopC8Run(config) {
+export function hasRunningClusterPidfiles(cacheDir) {
+  if (!existsSync(cacheDir)) {
+    return false;
+  }
+
+  const versionDirs = readdirSync(cacheDir, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() && entry.name.startsWith('c8run-'),
+    )
+    .map((entry) => join(cacheDir, entry.name));
+
+  // Scan each version dir and its immediate subdirectories (max depth 1)
+  // rather than a full recursive DFS — c8run installs can contain large
+  // extracted trees, logs, and data that would make a deep walk slow.
+  for (const versionDir of versionDirs) {
+    let entries;
+    try {
+      entries = readdirSync(versionDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    // Collect directories at this level to also check one level deeper.
+    const dirsToCheck = [versionDir];
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        dirsToCheck.push(join(versionDir, entry.name));
+      }
+    }
+
+    for (const dir of dirsToCheck) {
+      let dirEntries;
+      try {
+        dirEntries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of dirEntries) {
+        if (!entry.isFile() || !entry.name.endsWith('.process')) {
+          continue;
+        }
+
+        const entryPath = join(dir, entry.name);
+
+        let pid;
+        try {
+          pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+        } catch {
+          // Pidfile may have been removed between listing and reading.
+          continue;
+        }
+
+        if (!Number.isInteger(pid) || pid <= 0) {
+          continue;
+        }
+
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch (error) {
+          if (error && error.code === 'EPERM') {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export async function stopC8Run(config, debug = false) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   const markerExists = existsSync(markerFile);
+  const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
+
+  if (!markerExists && !clusterAppearsRunning) {
+    logger.warn(
+      'No cluster is currently running.',
+    );
+    return;
+  }
+
+  if (markerExists && !clusterAppearsRunning) {
+    // Stale marker left behind (e.g. crash or forced kill). Clean up and
+    // return early — there is nothing to stop.
+    logger.warn(
+      'Cluster marker file found, but no running cluster processes detected. Cleaning up stale marker.',
+    );
+    if (existsSync(markerFile)) {
+      rmSync(markerFile);
+    }
+    if (existsSync(versionFile)) {
+      rmSync(versionFile);
+    }
+    return;
+  }
+
+  if (!markerExists && clusterAppearsRunning) {
+    logger.warn(
+      'Cluster marker file is missing, but running cluster processes were detected. Proceeding with stop.',
+    );
+  }
+
   const installedVersions = existsSync(config.cacheDir)
     ? readdirSync(config.cacheDir, { withFileTypes: true })
         .filter(
@@ -907,13 +1010,6 @@ async function stopC8Run(config) {
         .map((entry) => entry.name.slice('c8run-'.length))
         .sort()
     : [];
-
-  if (!markerExists && installedVersions.length === 0) {
-    logger.warn(
-      'No running cluster found (use "c8ctl cluster start" to start one).',
-    );
-    return;
-  }
 
   const versionsToTry = [];
 
@@ -949,18 +1045,53 @@ async function stopC8Run(config) {
 
     attempted += 1;
 
-    const { code: exitCode, signal: exitSignal } = await new Promise(
+    const { code: exitCode, signal: exitSignal, stdout: procStdout, stderr: procStderr } = await new Promise(
       (resolve, reject) => {
         const proc = spawn(binaryPath, ['stop'], {
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           cwd: dirname(binaryPath),
         });
-        proc.on('exit', (code, signal) => resolve({ code, signal }));
+
+        const stdoutChunks = [];
+        const stderrChunks = [];
+        let stdoutLen = 0;
+        let stderrLen = 0;
+        const MAX_BUFFER = 64 * 1024; // 64 KB cap per stream
+
+        proc.stdout?.on('data', (chunk) => {
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+          if (debug) {
+            process.stdout.write(text);
+          }
+          if (stdoutLen < MAX_BUFFER) {
+            stdoutChunks.push(text);
+            stdoutLen += text.length;
+          }
+        });
+        proc.stderr?.on('data', (chunk) => {
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+          if (debug) {
+            process.stderr.write(text);
+          }
+          if (stderrLen < MAX_BUFFER) {
+            stderrChunks.push(text);
+            stderrLen += text.length;
+          }
+        });
+
+        proc.on('close', (code, signal) =>
+          resolve({
+            code,
+            signal,
+            stdout: stdoutChunks.join(''),
+            stderr: stderrChunks.join(''),
+          }),
+        );
         proc.on('error', reject);
       },
     ).catch((error) => {
       lastError = error instanceof Error ? error : new Error(String(error));
-      return { code: -1, signal: null };
+      return { code: -1, signal: null, stdout: '', stderr: '' };
     });
 
     if (exitCode === 0 || (exitCode === null && !exitSignal)) {
@@ -971,7 +1102,10 @@ async function stopC8Run(config) {
         `Stop command terminated by signal ${exitSignal}`,
       );
     } else if (exitCode !== -1) {
-      lastError = new Error(`Stop command failed with code ${exitCode}`);
+      const output = [procStdout, procStderr].filter(Boolean).join('\n');
+      lastError = new Error(
+        `Stop command failed with code ${exitCode}${output ? `:\n${output}` : ''}`,
+      );
     }
   }
 
@@ -1522,7 +1656,7 @@ export const commands = {
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        await stopC8Run(config);
+        await stopC8Run(config, parsed.debug);
       } catch (error) {
         logger.error(`Failed to stop cluster: ${error}`);
         process.exit(1);
