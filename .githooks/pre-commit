@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run biome check --fix on staged src/ files
+# and re-stage any auto-fixed changes.
+
+staged_files=()
+while IFS= read -r -d '' f; do
+  staged_files+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates')
+
+# Only check if there are staged files under src/
+if [ ${#staged_files[@]} -eq 0 ]; then
+  exit 0
+fi
+
+# Abort if any staged file also has unstaged changes — running biome on the
+# working-tree version and then `git add`-ing would sweep in those unstaged edits.
+dirty_files=()
+while IFS= read -r -d '' f; do
+  for sf in "${staged_files[@]}"; do
+    if [ "$f" = "$sf" ]; then
+      dirty_files+=("$f")
+      break
+    fi
+  done
+done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates')
+
+if [ ${#dirty_files[@]} -gt 0 ]; then
+  echo "pre-commit: These files have both staged and unstaged changes:"
+  printf '  %s\n' "${dirty_files[@]}"
+  echo "Stage or stash the unstaged changes before committing."
+  exit 1
+fi
+
+# Skip if biome is not installed locally (avoid npx downloading it)
+if ! npx --no-install biome --version >/dev/null 2>&1; then
+  echo "pre-commit: Skipping — biome not installed locally. Run npm install first."
+  exit 0
+fi
+
+npx --no-install biome check --fix -- "${staged_files[@]}"
+BIOME_EXIT=$?
+
+# Re-stage any files that biome auto-fixed
+for f in "${staged_files[@]}"; do
+  if [ -f "$f" ]; then
+    git add -- "$f"
+  fi
+done
+
+# Fail the commit if biome reported unfixable errors
+exit $BIOME_EXIT

@@ -25,6 +25,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && sh -c 'hp=$(git config --local --get core.hooksPath 2>/dev/null || true); if [ -z \"$hp\" ] || [ \"$hp\" = \".githooks\" ]; then git config --local core.hooksPath .githooks; else echo \"prepare: leaving existing core.hooksPath=$hp\"; fi' || true",
     "build": "npm run lint && npm run clean && tsc && npm run copy-plugins && npm run copy-templates",
     "lint": "biome check src/",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
