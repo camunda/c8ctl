@@ -162,7 +162,7 @@ describe("deserializeFlags", () => {
 		);
 		assert.strictEqual(result.name, "Alice");
 		// bogus is not in the result because it's not in the schema
-		assert.strictEqual((result as Record<string, unknown>).bogus, undefined);
+		assert.ok(!Object.hasOwn(result, "bogus"));
 	});
 
 	test("only includes keys from schema", () => {
@@ -227,7 +227,7 @@ describe("defineCommand", () => {
 		const cmd = defineCommand(
 			"get",
 			"process-definition",
-			async () => ({ kind: "get", data: {} }) as CommandResult,
+			async () => ({ kind: "get", data: {} }) satisfies CommandResult,
 		);
 		assert.strictEqual(cmd.verb, "get");
 		assert.strictEqual(cmd.resource, "process-definition");
@@ -238,7 +238,7 @@ describe("defineCommand", () => {
 		defineCommand("get", "process-definition", async (_ctx, flags) => {
 			const _xml: boolean | undefined = flags.xml;
 			void _xml;
-			return { kind: "get", data: {} } as CommandResult;
+			return { kind: "get", data: {} } satisfies CommandResult;
 		});
 		assert.ok(true, "compiles — flags.xml is boolean | undefined");
 	});
@@ -249,7 +249,7 @@ describe("defineCommand", () => {
 			const _key: ReturnType<typeof ProcessDefinitionKey.assumeExists> =
 				args.key;
 			void _key;
-			return { kind: "get", data: {} } as CommandResult;
+			return { kind: "get", data: {} } satisfies CommandResult;
 		});
 		assert.ok(true, "compiles — args.key is ProcessDefinitionKey");
 	});
@@ -259,7 +259,7 @@ describe("defineCommand", () => {
 		defineCommand("delete", "user", async (_ctx, flags) => {
 			// flags should be an empty record — no keys
 			void flags;
-			return { kind: "get", data: {} } as CommandResult;
+			return { kind: "get", data: {} } satisfies CommandResult;
 		});
 		assert.ok(true, "compiles — verb-level flags used as fallback");
 	});
@@ -269,7 +269,7 @@ describe("defineCommand", () => {
 		defineCommand("search", "process-instance", async (_ctx, _flags, args) => {
 			// args should be Record<string, never> — empty
 			void args;
-			return { kind: "get", data: {} } as CommandResult;
+			return { kind: "get", data: {} } satisfies CommandResult;
 		});
 		assert.ok(true, "compiles — no positionals");
 	});
@@ -284,24 +284,32 @@ describe("defineCommand", () => {
 			async (_ctx, flags, args) => {
 				receivedXml = flags.xml;
 				receivedKey = args.key;
-				return { kind: "get", data: {} } as CommandResult;
+				return { kind: "get", data: {} } satisfies CommandResult;
 			},
 		);
 
-		// Simulate dispatch
-		const mockLogger = {
-			json: () => {},
-			table: () => {},
-			output: () => {},
-			info: () => {},
-		} as unknown as CommandContext["logger"];
-		const mockCtx = {
-			client: {} as CommandContext["client"],
+		// Simulate dispatch. The handler under test does not touch ctx.client, and
+		// it does not log directly, but cmd.execute() may still use ctx.logger
+		// when rendering a non-undefined CommandResult. The two casts below are
+		// the unavoidable boundary where we stub external SDK and internal class
+		// types that cannot be satisfied structurally.
+		const mockLogger: CommandContext["logger"] =
+			// biome-ignore lint/plugin: test-only stub for Logger class; structural satisfaction impractical
+			{
+				json: () => {},
+				table: () => {},
+				output: () => {},
+				info: () => {},
+			} as unknown as CommandContext["logger"];
+		// biome-ignore lint/plugin: test-only stub for CamundaClient class; structural satisfaction impractical
+		const mockClient = {} as CommandContext["client"];
+		const mockCtx: CommandContext = {
+			client: mockClient,
 			logger: mockLogger,
 			tenantId: undefined,
 			resource: "process-definition",
 			positionals: ["12345"],
-			sortOrder: "asc" as CommandContext["sortOrder"],
+			sortOrder: "asc",
 			sortBy: undefined,
 			limit: undefined,
 			all: undefined,
@@ -324,7 +332,7 @@ describe("defineCommand", () => {
 			void _logger;
 			void _resource;
 			void _positionals;
-			return { kind: "get", data: {} } as CommandResult;
+			return { kind: "get", data: {} } satisfies CommandResult;
 		});
 		assert.ok(true, "compiles with CommandContext");
 	});
@@ -344,10 +352,12 @@ describe("ResolvedFlags / ResolvedPositionals (compile-time)", () => {
 
 	test("ResolvedFlags for get form is resource-scoped", () => {
 		type Flags = ResolvedFlags<"get", "form">;
-		// Should have userTask and processDefinition (from GET_FORM_FLAGS)
+		// Should have userTask and processDefinition (plus ut/pd aliases) from GET_FORM_FLAGS
 		const _check: InferFlags<Flags> = {
 			userTask: true,
+			ut: undefined,
 			processDefinition: undefined,
+			pd: undefined,
 		};
 		assert.ok(true, "compiles — scoped to form flags");
 	});
