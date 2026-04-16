@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run biome check --fix on staged src/ files
+# and re-stage any auto-fixed changes.
+
+staged_files=()
+while IFS= read -r -d '' f; do
+  staged_files+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/')
+
+# Only check if there are staged files under src/
+if [ ${#staged_files[@]} -eq 0 ]; then
+  exit 0
+fi
+
+npx biome check --fix -- "${staged_files[@]}"
+BIOME_EXIT=$?
+
+# Re-stage any files that biome auto-fixed
+for f in "${staged_files[@]}"; do
+  if [ -f "$f" ]; then
+    git add -- "$f"
+  fi
+done
+
+# Fail the commit if biome reported unfixable errors
+exit $BIOME_EXIT
+#!/bin/sh
+# Pre-commit hook: run biome check --fix on staged src/ files
+# and re-stage any auto-fixed changes.
+
+# Only check if there are staged files under src/
+if ! git diff --cached --name-only --diff-filter=d -z -- 'src/' | grep -qz .; then
+  exit 0
+fi
+
+git diff --cached --name-only --diff-filter=d -z -- 'src/' \
+  | xargs -0 npx biome check --fix
+BIOME_EXIT=$?
+
+# Re-stage any files that biome auto-fixed
+git diff --cached --name-only --diff-filter=d -z -- 'src/' \
+  | while IFS= read -r -d '' f; do
+  if [ -f "$f" ]; then
+    git add -- "$f"
+  fi
+done
+
+# Fail the commit if biome reported unfixable errors
+exit $BIOME_EXIT
