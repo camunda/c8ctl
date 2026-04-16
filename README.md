@@ -578,7 +578,7 @@ c8ctl includes a built-in `cluster` command for managing a local Camunda 8 insta
 c8ctl cluster start
 
 # Start a specific version
-c8ctl cluster start 8.8
+c8ctl cluster start 8.9
 c8ctl cluster start 8.9.0-alpha5
 
 # Stop the running cluster
@@ -597,11 +597,34 @@ c8ctl cluster list
 c8ctl cluster list-remote
 
 # Pre-download a version without starting it
-c8ctl cluster install 8.8
+c8ctl cluster install 8.9
 
 # Remove a cached version
-c8ctl cluster delete 8.8
+c8ctl cluster delete 8.9
 ```
+
+#### Version Aliases
+
+Instead of an exact version number, you can use:
+
+- **`stable`** — the latest GA release (highest minor version that has shipped a `.0` release)
+- **`alpha`** — the latest alpha-train release (highest minor version overall, which may only have alpha builds)
+- **A major.minor pattern** like `8.9` — resolves to the latest patch/alpha within that minor
+
+`c8ctl cluster start` with no version argument defaults to `stable`.
+
+```bash
+c8ctl cluster start stable
+c8ctl cluster start alpha
+c8ctl cluster start 8.9     # latest 8.9.x
+```
+
+#### Online vs Offline Behaviour
+
+- **`cluster start`** prefers locally cached versions. If the requested version is already installed, it starts immediately without going online. A non-blocking background check runs to hint if a newer build is available, but never delays startup.
+- **`cluster install`** always checks the remote download server for the latest build. If a newer ETag is detected for an already-installed version, it re-downloads.
+- **`cluster list-remote`** fetches the full list of available versions from the download server.
+- **Offline fallback**: if the network is unavailable, alias resolution falls back to a locally cached mapping, then to a hardcoded default.
 
 Run `c8ctl help cluster` for full details. See [EXAMPLES.md](EXAMPLES.md#local-cluster) for a complete local development workflow.
 
@@ -643,7 +666,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `sync` - Synchronize plugins
 - `use` - Set active profile or tenant
 - `output` - Show or set output format
-- `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list)
+- `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list, list-remote)
 - `completion` - Generate shell completion script
 - `feedback` - Open the feedback page to report issues or request features
 
