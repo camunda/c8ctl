@@ -9,8 +9,8 @@ Follow conventions in [COMMIT-MESSAGE-GUIDELINE.md](COMMIT-MESSAGE-GUIDELINE.md)
 
 ### Review-comment fix-ups
 
-Commits that address PR review comments must use `chore:`, **not** `fix:`.
-`fix:` triggers a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
+Commits that address PR review comments must use the `chore` type (e.g. `chore:` or `chore(<scope>):`), **not** the `fix` type.
+`fix` commits (e.g. `fix:` or `fix(<scope>):`) trigger a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
 
 ```
 # Correct
