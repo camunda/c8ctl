@@ -20,9 +20,27 @@ function assertDryRun(
 	assert.strictEqual(out.dryRun, true);
 	assert.strictEqual(out.method, expected.method);
 	assert.ok(
-		(out.url as string).endsWith(expected.urlSuffix),
-		`Expected URL to end with "${expected.urlSuffix}", got "${out.url}"`,
+		typeof out.url === "string" && out.url.endsWith(expected.urlSuffix),
+		`Expected URL to end with "${expected.urlSuffix}", got "${String(out.url)}"`,
 	);
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Narrow the `body.filter` of a dry-run payload to a record. Throws with a
+ * descriptive message if the shape is wrong — no type assertions needed at
+ * call sites.
+ */
+function getFilter(out: Record<string, unknown>): Record<string, unknown> {
+	assert.ok(isRecord(out.body), "expected dry-run body to be an object");
+	assert.ok(
+		isRecord(out.body.filter),
+		"expected dry-run body.filter to be an object",
+	);
+	return out.body.filter;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -58,18 +76,14 @@ describe("CLI behavioural: search process-instances", () => {
 			method: "POST",
 			urlSuffix: "/process-instances/search",
 		});
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.state, "ACTIVE");
+		assert.strictEqual(getFilter(out).state, "ACTIVE");
 	});
 
 	test("--dry-run includes processDefinitionId filter", async () => {
 		const result = await c8("search", "pi", "--dry-run", "--id", "my-process");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<
-			string,
-			Record<string, unknown>
-		>;
-		assert.strictEqual(body.filter?.processDefinitionId, "my-process");
+		const out = parseJson(result);
+		assert.strictEqual(getFilter(out).processDefinitionId, "my-process");
 	});
 
 	test("--dry-run includes date range filter", async () => {
@@ -81,11 +95,8 @@ describe("CLI behavioural: search process-instances", () => {
 			"2024-01-01..2024-12-31",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<
-			string,
-			Record<string, unknown>
-		>;
-		assert.ok(body.filter?.startDate, "Expected startDate filter");
+		const out = parseJson(result);
+		assert.ok(getFilter(out).startDate, "Expected startDate filter");
 	});
 });
 
@@ -139,8 +150,7 @@ describe("CLI behavioural: search process-definitions", () => {
 			method: "POST",
 			urlSuffix: "/process-definitions/search",
 		});
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "My Process");
+		assert.strictEqual(getFilter(out).name, "My Process");
 	});
 
 	test("--dry-run includes processDefinitionId filter", async () => {
@@ -152,11 +162,8 @@ describe("CLI behavioural: search process-definitions", () => {
 			"order-process",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<
-			string,
-			Record<string, unknown>
-		>;
-		assert.strictEqual(body.filter?.processDefinitionId, "order-process");
+		const out = parseJson(result);
+		assert.strictEqual(getFilter(out).processDefinitionId, "order-process");
 	});
 });
 
@@ -201,8 +208,7 @@ describe("CLI behavioural: search user-tasks", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/user-tasks/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.state, "CREATED");
+		assert.strictEqual(getFilter(out).state, "CREATED");
 	});
 
 	test("--dry-run includes assignee filter", async () => {
@@ -214,11 +220,8 @@ describe("CLI behavioural: search user-tasks", () => {
 			"alice",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<
-			string,
-			Record<string, unknown>
-		>;
-		assert.strictEqual(body.filter?.assignee, "alice");
+		const out = parseJson(result);
+		assert.strictEqual(getFilter(out).assignee, "alice");
 	});
 });
 
@@ -243,8 +246,7 @@ describe("CLI behavioural: search incidents", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/incidents/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.state, "ACTIVE");
+		assert.strictEqual(getFilter(out).state, "ACTIVE");
 	});
 });
 
@@ -275,8 +277,7 @@ describe("CLI behavioural: search jobs", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/jobs/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.state, "ACTIVATABLE");
+		assert.strictEqual(getFilter(out).state, "ACTIVATABLE");
 	});
 
 	test("--dry-run includes type filter", async () => {
@@ -288,11 +289,8 @@ describe("CLI behavioural: search jobs", () => {
 			"send-email",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<
-			string,
-			Record<string, unknown>
-		>;
-		assert.strictEqual(body.filter?.type, "send-email");
+		const out = parseJson(result);
+		assert.strictEqual(getFilter(out).type, "send-email");
 	});
 });
 
@@ -306,8 +304,7 @@ describe("CLI behavioural: search variables", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/variables/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "orderId");
+		assert.strictEqual(getFilter(out).name, "orderId");
 	});
 });
 
@@ -338,8 +335,7 @@ describe("CLI behavioural: search users", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/users/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.username, "alice");
+		assert.strictEqual(getFilter(out).username, "alice");
 	});
 });
 
@@ -375,8 +371,7 @@ describe("CLI behavioural: search roles", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/roles/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "admin");
+		assert.strictEqual(getFilter(out).name, "admin");
 	});
 });
 
@@ -418,8 +413,7 @@ describe("CLI behavioural: search groups", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/groups/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "engineering");
+		assert.strictEqual(getFilter(out).name, "engineering");
 	});
 });
 
@@ -455,8 +449,7 @@ describe("CLI behavioural: search tenants", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/tenants/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "acme");
+		assert.strictEqual(getFilter(out).name, "acme");
 	});
 });
 
@@ -498,8 +491,7 @@ describe("CLI behavioural: search authorizations", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/authorizations/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.ownerId, "alice");
+		assert.strictEqual(getFilter(out).ownerId, "alice");
 	});
 });
 
@@ -535,8 +527,7 @@ describe("CLI behavioural: search mapping-rules", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assertDryRun(out, { method: "POST", urlSuffix: "/mapping-rules/search" });
-		const body = out.body as Record<string, Record<string, unknown>>;
-		assert.strictEqual(body.filter?.name, "my-rule");
+		assert.strictEqual(getFilter(out).name, "my-rule");
 	});
 });
 
