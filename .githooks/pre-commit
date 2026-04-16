@@ -1,28 +1,39 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run biome check --fix on staged src/ files
-# and re-stage any auto-fixed changes.
+# Pre-commit hook: run biome on staged files and re-stage any auto-fixed changes.
+# - src/ files: full biome check --fix (lint + format + plugin)
+# - tests/ files: biome check --fix (format only — linter scoped to src/ in biome.json)
+#
+# Note: typechecking (`tsc --noEmit -p tsconfig.check.json`) is not run here;
+# use `npm run typecheck` to verify types. Tests currently have pre-existing
+# type errors that will be fixed in follow-up PRs.
 
-staged_files=()
+# --- Collect staged src files ---
+staged_src=()
 while IFS= read -r -d '' f; do
-  staged_files+=("$f")
-done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates')
+  staged_src+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**')
 
-# Only check if there are staged files under src/
-if [ ${#staged_files[@]} -eq 0 ]; then
+# --- Collect staged test files ---
+staged_tests=()
+while IFS= read -r -d '' f; do
+  staged_tests+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'tests/*.ts' 'tests/**/*.ts')
+
+# Nothing to check
+if [ ${#staged_src[@]} -eq 0 ] && [ ${#staged_tests[@]} -eq 0 ]; then
   exit 0
 fi
 
-# Abort if any staged file also has unstaged changes — running biome on the
-# working-tree version and then `git add`-ing would sweep in those unstaged edits.
+# --- Abort if any staged file also has unstaged changes ---
 dirty_files=()
 while IFS= read -r -d '' f; do
-  for sf in "${staged_files[@]}"; do
+  for sf in "${staged_src[@]}" "${staged_tests[@]}"; do
     if [ "$f" = "$sf" ]; then
       dirty_files+=("$f")
       break
     fi
   done
-done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates')
+done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**' 'tests/*.ts' 'tests/**/*.ts')
 
 if [ ${#dirty_files[@]} -gt 0 ]; then
   echo "pre-commit: These files have both staged and unstaged changes:"
@@ -33,19 +44,30 @@ fi
 
 # Skip if biome is not installed locally (avoid npx downloading it)
 if ! npx --no-install biome --version >/dev/null 2>&1; then
-  echo "pre-commit: Skipping — biome not installed locally. Run npm install first."
+  echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
   exit 0
 fi
 
-npx --no-install biome check --fix -- "${staged_files[@]}"
-BIOME_EXIT=$?
+BIOME_EXIT=0
 
-# Re-stage any files that biome auto-fixed
-for f in "${staged_files[@]}"; do
-  if [ -f "$f" ]; then
-    git add -- "$f"
-  fi
-done
+# Run biome on staged src files (lint + format + plugin)
+if [ ${#staged_src[@]} -gt 0 ]; then
+  npx --no-install biome check --fix -- "${staged_src[@]}"
+  BIOME_EXIT=$?
+  for f in "${staged_src[@]}"; do
+    [ -f "$f" ] && git add -- "$f"
+  done
+fi
 
-# Fail the commit if biome reported unfixable errors
+# Run biome on staged test files (format only — linter scoped to src/ in biome.json)
+if [ ${#staged_tests[@]} -gt 0 ]; then
+  npx --no-install biome check --fix -- "${staged_tests[@]}"
+  TEST_EXIT=$?
+  [ $TEST_EXIT -ne 0 ] && BIOME_EXIT=$TEST_EXIT
+  for f in "${staged_tests[@]}"; do
+    [ -f "$f" ] && git add -- "$f"
+  done
+fi
+
+# Fail the commit if any check reported errors
 exit $BIOME_EXIT

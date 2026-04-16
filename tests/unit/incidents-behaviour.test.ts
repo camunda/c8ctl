@@ -6,51 +6,40 @@
  * correctly through index.ts dispatch → validation → handler → JSON output.
  */
 
-import { test, describe } from 'node:test';
-import assert from 'node:assert';
-import { c8, parseJson } from '../utils/cli.ts';
+import assert from "node:assert";
+import { describe, test } from "node:test";
+import { c8, parseJson } from "../utils/cli.ts";
 
 // ─── resolve incident ────────────────────────────────────────────────────────
 
-describe('CLI behavioural: resolve incident', () => {
+describe("CLI behavioural: resolve incident", () => {
+	test("--dry-run emits POST to /incidents/:key/resolution", async () => {
+		const result = await c8("resolve", "incident", "--dry-run", "77777");
 
-  test('--dry-run emits POST to /incidents/:key/resolution', async () => {
-    const result = await c8(
-      'resolve', 'incident',
-      '--dry-run',
-      '77777',
-    );
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
 
-    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-    const out = parseJson(result);
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok((out.url as string).includes("/incidents/77777/resolution"));
+	});
 
-    assert.strictEqual(out.dryRun, true);
-    assert.strictEqual(out.method, 'POST');
-    assert.ok((out.url as string).includes('/incidents/77777/resolution'));
-  });
+	test("--dry-run works with inc alias", async () => {
+		const result = await c8("resolve", "inc", "--dry-run", "77777");
 
-  test('--dry-run works with inc alias', async () => {
-    const result = await c8(
-      'resolve', 'inc',
-      '--dry-run',
-      '77777',
-    );
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assert.strictEqual(out.dryRun, true);
+		assert.ok((out.url as string).includes("/incidents/77777/resolution"));
+	});
 
-    assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-    const out = parseJson(result);
-    assert.strictEqual(out.dryRun, true);
-    assert.ok((out.url as string).includes('/incidents/77777/resolution'));
-  });
+	test("rejects missing incident key with exit code 1", async () => {
+		const result = await c8("resolve", "inc");
 
-  test('rejects missing incident key with exit code 1', async () => {
-    const result = await c8(
-      'resolve', 'inc',
-    );
-
-    assert.strictEqual(result.status, 1);
-    assert.ok(
-      result.stderr.includes('Incident key required'),
-      `stderr: ${result.stderr}`,
-    );
-  });
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Incident key required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
 });

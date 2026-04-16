@@ -7,19 +7,19 @@
  * codebase.
  */
 
-import { test, describe } from "node:test";
 import assert from "node:assert";
+import { describe, test } from "node:test";
 import {
 	COMMAND_REGISTRY,
-	RESOURCE_ALIASES,
+	deriveParseArgsOptions,
 	GLOBAL_FLAGS,
+	getAcceptedFlags,
+	getCommandDef,
+	isValidCommand,
+	RESOURCE_ALIASES,
+	resolveAlias,
 	SEARCH_FLAGS,
 	VERB_ALIASES,
-	resolveAlias,
-	getCommandDef,
-	getAcceptedFlags,
-	deriveParseArgsOptions,
-	isValidCommand,
 } from "../../src/command-registry.ts";
 
 // ─── Registry completeness ──────────────────────────────────────────────────
@@ -87,10 +87,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 				typeof def.description === "string" && def.description.length > 0,
 				`${verb}: missing description`,
 			);
-			assert.ok(
-				typeof def.mutating === "boolean",
-				`${verb}: missing mutating`,
-			);
+			assert.ok(typeof def.mutating === "boolean", `${verb}: missing mutating`);
 			assert.ok(
 				typeof def.requiresResource === "boolean",
 				`${verb}: missing requiresResource`,
@@ -291,7 +288,10 @@ describe("helper functions", () => {
 	test("getCommandDef resolves verb aliases", () => {
 		const def = getCommandDef("w");
 		assert.ok(def);
-		assert.strictEqual(def.description, "Watch files for changes and auto-deploy");
+		assert.strictEqual(
+			def.description,
+			"Watch files for changes and auto-deploy",
+		);
 		const rmDef = getCommandDef("rm");
 		assert.ok(rmDef);
 	});
@@ -494,11 +494,7 @@ describe("mutating flag correctness", () => {
 		for (const verb of MUTATING_VERBS) {
 			const def = COMMAND_REGISTRY[verb];
 			assert.ok(def, `Missing entry for "${verb}"`);
-			assert.strictEqual(
-				def.mutating,
-				true,
-				`"${verb}" should be mutating`,
-			);
+			assert.strictEqual(def.mutating, true, `"${verb}" should be mutating`);
 		}
 	});
 

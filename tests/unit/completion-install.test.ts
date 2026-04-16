@@ -4,7 +4,6 @@
  * Uses C8CTL_DATA_DIR for file-system isolation.
  */
 
-import { describe, test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import {
 	existsSync,
@@ -15,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	detectShell,
 	extractCompletionVersion,
@@ -145,13 +145,19 @@ describe("extractCompletionVersion", () => {
 
 	test("extracts version from a tagged completion file", () => {
 		const file = join(testDir, "c8ctl.zsh");
-		writeFileSync(file, "# c8ctl-completion-version: 1.2.3\n# rest of script\n");
+		writeFileSync(
+			file,
+			"# c8ctl-completion-version: 1.2.3\n# rest of script\n",
+		);
 		assert.strictEqual(extractCompletionVersion(file), "1.2.3");
 	});
 
 	test("extracts version when header is not on line 1 (zsh #compdef first)", () => {
 		const file = join(testDir, "c8ctl.zsh");
-		writeFileSync(file, "#compdef c8ctl c8\n# c8ctl-completion-version: 2.0.0\n\n_c8ctl() {\n");
+		writeFileSync(
+			file,
+			"#compdef c8ctl c8\n# c8ctl-completion-version: 2.0.0\n\n_c8ctl() {\n",
+		);
 		assert.strictEqual(extractCompletionVersion(file), "2.0.0");
 	});
 
@@ -222,7 +228,10 @@ describe("refreshCompletionsIfStale", () => {
 			"Should have current version header after refresh",
 		);
 		// Old content should be gone
-		assert.ok(!content.includes("# old script"), "Old content should be replaced");
+		assert.ok(
+			!content.includes("# old script"),
+			"Old content should be replaced",
+		);
 	});
 
 	test("regenerates all installed shells", () => {
@@ -391,10 +400,7 @@ describe("completion version header", () => {
 		const origDataDir = process.env.C8CTL_DATA_DIR;
 		const origHome = process.env.HOME;
 		const origXdgConfigHome = process.env.XDG_CONFIG_HOME;
-		const testDir = join(
-			tmpdir(),
-			`c8ctl-completion-header-${Date.now()}`,
-		);
+		const testDir = join(tmpdir(), `c8ctl-completion-header-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
 		process.env.HOME = testDir;

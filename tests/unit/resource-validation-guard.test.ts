@@ -6,18 +6,15 @@
  * the dispatch chain is either covered by the guard or explicitly exempt.
  */
 
-import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const indexSrc = readFileSync(
-	join(__dirname, "../../src/index.ts"),
-	"utf-8",
-);
+const indexSrc = readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
 
 /**
  * Derive VERB_REQUIRES_RESOURCE from the registry (same logic as index.ts).

@@ -9,8 +9,8 @@
  * These tests verify the lazy getter pattern used in the dispatcher.
  */
 
-import { test, describe } from "node:test";
 import assert from "node:assert";
+import { describe, test } from "node:test";
 import type { CommandContext } from "../../src/command-framework.ts";
 
 describe("Lazy client getter", () => {
@@ -108,8 +108,8 @@ describe("Lazy client getter", () => {
 // ─── Dispatch-level behavioural test ─────────────────────────────────────────
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
@@ -123,7 +123,9 @@ const canStripTypes = major > 22 || (major === 22 && minor >= 6);
 
 describe("Lazy client dispatch integration", () => {
 	test("clientless command does not emit env-var override warning", {
-		skip: canStripTypes ? false : "requires Node 22.6+ for --experimental-strip-types",
+		skip: canStripTypes
+			? false
+			: "requires Node 22.6+ for --experimental-strip-types",
 	}, async () => {
 		// Set up a test data dir with an active profile AND CAMUNDA_BASE_URL.
 		// Before the lazy getter fix, this combination would trigger:
@@ -146,12 +148,7 @@ describe("Lazy client dispatch integration", () => {
 
 			const result = await asyncSpawn(
 				"node",
-				[
-					"--experimental-strip-types",
-					CLI,
-					"which",
-					"profile",
-				],
+				["--experimental-strip-types", CLI, "which", "profile"],
 				{
 					env: {
 						...process.env,
@@ -162,7 +159,11 @@ describe("Lazy client dispatch integration", () => {
 				},
 			);
 
-			assert.strictEqual(result.status, 0, `exit=${result.status} stdout: ${result.stdout} stderr: ${result.stderr}`);
+			assert.strictEqual(
+				result.status,
+				0,
+				`exit=${result.status} stdout: ${result.stdout} stderr: ${result.stderr}`,
+			);
 			assert.ok(
 				!result.stderr.includes("overriding"),
 				`Expected no override warning, got stderr: ${result.stderr}`,

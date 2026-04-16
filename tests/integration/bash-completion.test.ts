@@ -3,31 +3,49 @@
  * Tests that the generated bash completion script works correctly in a real bash shell
  */
 
-import { test, describe } from 'node:test';
-import assert from 'node:assert';
-import { asyncSpawn } from '../utils/spawn.ts';
+import assert from "node:assert";
+import { describe, test } from "node:test";
+import { asyncSpawn } from "../utils/spawn.ts";
 
-describe('Bash Completion Integration Tests', () => {
-  test('bash completion script is generated without errors', async () => {
-    const result = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+describe("Bash Completion Integration Tests", () => {
+	test("bash completion script is generated without errors", async () => {
+		const result = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    assert.strictEqual(result.status, 0, 'completion bash command should succeed');
-    assert.ok(result.stdout.includes('_c8ctl_completions'), 'Should contain completion function');
-    assert.ok(result.stdout.includes('complete -F _c8ctl_completions c8ctl'), 'Should register completion');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			"completion bash command should succeed",
+		);
+		assert.ok(
+			result.stdout.includes("_c8ctl_completions"),
+			"Should contain completion function",
+		);
+		assert.ok(
+			result.stdout.includes("complete -F _c8ctl_completions c8ctl"),
+			"Should register completion",
+		);
+	});
 
-  test('bash completion script loads without errors in bash', async () => {
-    // Generate completion script
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test("bash completion script loads without errors in bash", async () => {
+		// Generate completion script
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const completionScript = completionResult.stdout;
+		const completionScript = completionResult.stdout;
 
-    // Create a test script that sources the completion and verifies it loads
-    const testScript = `
+		// Create a test script that sources the completion and verifies it loads
+		const testScript = `
 set -e
 ${completionScript}
 
@@ -40,18 +58,30 @@ complete -p c8ctl | grep -q "_c8ctl_completions" || exit 2
 echo "SUCCESS"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Bash script should succeed');
-    assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
-  });
+		assert.strictEqual(result.status, 0, "Bash script should succeed");
+		assert.ok(
+			result.stdout.includes("SUCCESS"),
+			"Completion should load successfully",
+		);
+	});
 
-  test('bash completion completes verbs starting with "l"', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test('bash completion completes verbs starting with "l"', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -64,19 +94,28 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('list'), 'Should complete to "list"');
-    assert.ok(result.stdout.includes('load'), 'Should complete to "load"');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(result.stdout.includes("list"), 'Should complete to "list"');
+		assert.ok(result.stdout.includes("load"), 'Should complete to "load"');
+	});
 
-  test('bash completion completes resources for "list" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test('bash completion completes resources for "list" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -89,20 +128,32 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('process-instances'), 'Should include "process-instances"');
-    assert.ok(result.stdout.includes('profiles'), 'Should include "profiles"');
-    assert.ok(result.stdout.includes('plugins'), 'Should include "plugins"');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(
+			result.stdout.includes("process-instances"),
+			'Should include "process-instances"',
+		);
+		assert.ok(result.stdout.includes("profiles"), 'Should include "profiles"');
+		assert.ok(result.stdout.includes("plugins"), 'Should include "plugins"');
+	});
 
-  test('bash completion completes shell types for "completion" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test('bash completion completes shell types for "completion" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -115,20 +166,29 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('bash'), 'Should include "bash"');
-    assert.ok(result.stdout.includes('zsh'), 'Should include "zsh"');
-    assert.ok(result.stdout.includes('fish'), 'Should include "fish"');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(result.stdout.includes("bash"), 'Should include "bash"');
+		assert.ok(result.stdout.includes("zsh"), 'Should include "zsh"');
+		assert.ok(result.stdout.includes("fish"), 'Should include "fish"');
+	});
 
-  test('bash completion completes resources for "get" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test('bash completion completes resources for "get" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -141,19 +201,31 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('process-instance'), 'Should include "process-instance"');
-    assert.ok(result.stdout.includes('topology'), 'Should include "topology"');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(
+			result.stdout.includes("process-instance"),
+			'Should include "process-instance"',
+		);
+		assert.ok(result.stdout.includes("topology"), 'Should include "topology"');
+	});
 
-  test('bash completion handles flags correctly', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test("bash completion handles flags correctly", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -166,18 +238,27 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('--help'), 'Should include "--help" flag');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(result.stdout.includes("--help"), 'Should include "--help" flag');
+	});
 
-  test('bash completion completes aliases (pi for process-instance)', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test("bash completion completes aliases (pi for process-instance)", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const testScript = `
+		const testScript = `
 set -e
 ${completionResult.stdout}
 
@@ -190,31 +271,40 @@ _c8ctl_completions
 echo "\${COMPREPLY[@]}"
 `;
 
-    const result = await asyncSpawn('bash', ['--norc', '--noprofile', '-c', testScript]);
+		const result = await asyncSpawn("bash", [
+			"--norc",
+			"--noprofile",
+			"-c",
+			testScript,
+		]);
 
-    assert.strictEqual(result.status, 0, 'Completion test should succeed');
-    assert.ok(result.stdout.includes('pi'), 'Should include "pi" alias');
-  });
+		assert.strictEqual(result.status, 0, "Completion test should succeed");
+		assert.ok(result.stdout.includes("pi"), 'Should include "pi" alias');
+	});
 
-  test('bash completion does not use external dependencies', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'bash'], {
-      cwd: process.cwd(),
-    });
+	test("bash completion does not use external dependencies", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    // Verify the script doesn't rely on _init_completion from bash-completion package
-    assert.ok(
-      !completionResult.stdout.includes('_init_completion ||'),
-      'Should not use _init_completion from bash-completion package'
-    );
-    
-    // Verify it initializes variables manually
-    assert.ok(
-      completionResult.stdout.includes('cur="${COMP_WORDS[COMP_CWORD]}"'),
-      'Should initialize cur variable'
-    );
-    assert.ok(
-      completionResult.stdout.includes('prev="${COMP_WORDS[COMP_CWORD-1]}"'),
-      'Should initialize prev variable'
-    );
-  });
+		// Verify the script doesn't rely on _init_completion from bash-completion package
+		assert.ok(
+			!completionResult.stdout.includes("_init_completion ||"),
+			"Should not use _init_completion from bash-completion package",
+		);
+
+		// Verify it initializes variables manually
+		assert.ok(
+			completionResult.stdout.includes('cur="${COMP_WORDS[COMP_CWORD]}"'),
+			"Should initialize cur variable",
+		);
+		assert.ok(
+			completionResult.stdout.includes('prev="${COMP_WORDS[COMP_CWORD-1]}"'),
+			"Should initialize prev variable",
+		);
+	});
 });
