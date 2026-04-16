@@ -814,7 +814,10 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 			// only uses env vars when CAMUNDA_BASE_URL is present.
 			// Skip the warning when suppressProfileWarning is set (e.g. during
 			// `use profile --none` which is about to clear the profile).
-			if (process.env.CAMUNDA_BASE_URL?.trim() && !c8ctl.suppressProfileWarning) {
+			if (
+				process.env.CAMUNDA_BASE_URL?.trim() &&
+				!c8ctl.suppressProfileWarning
+			) {
 				const logger = getLogger();
 				logger.warn(
 					`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
