@@ -80,6 +80,7 @@ describe('Config Module', () => {
         rmSync(testModelerDir, { recursive: true, force: true });
       }
       process.env = originalEnv;
+      c8ctl.activeProfile = undefined;
     });
 
     test('loadProfiles returns empty array when no profiles exist', () => {

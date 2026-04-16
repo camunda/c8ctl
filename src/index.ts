@@ -292,27 +292,35 @@ async function main() {
 		// Suppress the env-var-override warning when the user is about to
 		// clear the active profile — the warning tells them to run the very
 		// command they are already running.
-		if (verb === "use" && normalizedResource === "profile" && values.none) {
+		const suppressWarning =
+			verb === "use" && normalizedResource === "profile" && values.none;
+		if (suppressWarning) {
 			c8ctl.suppressProfileWarning = true;
 		}
 
-		const ctx: CommandContext = {
-			client: createClient(profile),
-			logger,
-			tenantId: resolveTenantId(profile),
-			resource: useResourceKey ? normalizedResource : resource || "",
-			positionals: args,
-			sortOrder,
-			sortBy: str(values.sortBy),
-			limit,
-			all: bool(values.all),
-			between: str(values.between),
-			dateField: str(values.dateField),
-			version: parseVersionFlag(values),
-			dryRun: c8ctl.dryRun,
-			profile,
-		};
-		await handler.execute(ctx, values, args);
+		try {
+			const ctx: CommandContext = {
+				client: createClient(profile),
+				logger,
+				tenantId: resolveTenantId(profile),
+				resource: useResourceKey ? normalizedResource : resource || "",
+				positionals: args,
+				sortOrder,
+				sortBy: str(values.sortBy),
+				limit,
+				all: bool(values.all),
+				between: str(values.between),
+				dateField: str(values.dateField),
+				version: parseVersionFlag(values),
+				dryRun: c8ctl.dryRun,
+				profile,
+			};
+			await handler.execute(ctx, values, args);
+		} finally {
+			if (suppressWarning) {
+				c8ctl.suppressProfileWarning = false;
+			}
+		}
 		return;
 	}
 
