@@ -904,53 +904,59 @@ export function hasRunningClusterPidfiles(cacheDir) {
     )
     .map((entry) => join(cacheDir, entry.name));
 
-  const pathsToScan = [...versionDirs];
-
-  while (pathsToScan.length > 0) {
-    const currentPath = pathsToScan.pop();
-
-    if (!currentPath || !existsSync(currentPath)) {
-      continue;
-    }
-
+  // Scan each version dir and its immediate subdirectories (max depth 1)
+  // rather than a full recursive DFS — c8run installs can contain large
+  // extracted trees, logs, and data that would make a deep walk slow.
+  for (const versionDir of versionDirs) {
     let entries;
     try {
-      entries = readdirSync(currentPath, { withFileTypes: true });
+      entries = readdirSync(versionDir, { withFileTypes: true });
     } catch {
-      // Directory may have been removed between the existsSync check and now.
       continue;
     }
 
+    // Collect directories at this level to also check one level deeper.
+    const dirsToCheck = [versionDir];
     for (const entry of entries) {
-      const entryPath = join(currentPath, entry.name);
-
       if (entry.isDirectory()) {
-        pathsToScan.push(entryPath);
-        continue;
+        dirsToCheck.push(join(versionDir, entry.name));
       }
+    }
 
-      if (!entry.isFile() || !entry.name.endsWith('.process')) {
-        continue;
-      }
-
-      let pid;
+    for (const dir of dirsToCheck) {
+      let dirEntries;
       try {
-        pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+        dirEntries = readdirSync(dir, { withFileTypes: true });
       } catch {
-        // Pidfile may have been removed between listing and reading.
         continue;
       }
 
-      if (!Number.isInteger(pid) || pid <= 0) {
-        continue;
-      }
+      for (const entry of dirEntries) {
+        if (!entry.isFile() || !entry.name.endsWith('.process')) {
+          continue;
+        }
 
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        if (error && error.code === 'EPERM') {
+        const entryPath = join(dir, entry.name);
+
+        let pid;
+        try {
+          pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+        } catch {
+          // Pidfile may have been removed between listing and reading.
+          continue;
+        }
+
+        if (!Number.isInteger(pid) || pid <= 0) {
+          continue;
+        }
+
+        try {
+          process.kill(pid, 0);
           return true;
+        } catch (error) {
+          if (error && error.code === 'EPERM') {
+            return true;
+          }
         }
       }
     }
@@ -1048,17 +1054,28 @@ export async function stopC8Run(config, debug = false) {
 
         const stdoutChunks = [];
         const stderrChunks = [];
+        let stdoutLen = 0;
+        let stderrLen = 0;
+        const MAX_BUFFER = 64 * 1024; // 64 KB cap per stream
 
         proc.stdout?.on('data', (chunk) => {
-          stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf-8'));
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
           if (debug) {
-            process.stdout.write(stdoutChunks[stdoutChunks.length - 1]);
+            process.stdout.write(text);
+          }
+          if (stdoutLen < MAX_BUFFER) {
+            stdoutChunks.push(text);
+            stdoutLen += text.length;
           }
         });
         proc.stderr?.on('data', (chunk) => {
-          stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf-8'));
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
           if (debug) {
-            process.stderr.write(stderrChunks[stderrChunks.length - 1]);
+            process.stderr.write(text);
+          }
+          if (stderrLen < MAX_BUFFER) {
+            stderrChunks.push(text);
+            stderrLen += text.length;
           }
         });
 
