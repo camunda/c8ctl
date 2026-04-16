@@ -20,7 +20,7 @@ describe("Lazy client getter", () => {
 	 */
 	function buildContext(factories: {
 		createClient: () => unknown;
-		resolveTenantId: () => string | undefined;
+		resolveTenantId: () => string;
 	}): CommandContext {
 		let _client: unknown | undefined;
 		let _tenantId: string | undefined;
@@ -102,5 +102,73 @@ describe("Lazy client getter", () => {
 		const second = ctx.tenantId;
 		assert.strictEqual(callCount, 1, "Resolver must be called exactly once");
 		assert.strictEqual(first, second);
+	});
+});
+
+// ─── Dispatch-level behavioural test ─────────────────────────────────────────
+
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { asyncSpawn } from "../utils/spawn.ts";
+
+const CLI = "src/index.ts";
+
+/**
+ * Node 22.6+ supports --experimental-strip-types; older versions don't.
+ * Behavioural tests that spawn the CLI require it, so skip on older Node.
+ */
+const [major] = process.versions.node.split(".").map(Number);
+const canStripTypes = major >= 22;
+
+describe("Lazy client dispatch integration", () => {
+	test("clientless command does not emit env-var override warning", {
+		skip: canStripTypes ? false : "requires Node 22+ for --experimental-strip-types",
+	}, async () => {
+		// Set up a test data dir with an active profile AND CAMUNDA_BASE_URL.
+		// Before the lazy getter fix, this combination would trigger:
+		//   "Active profile 'test-profile' is overriding CAMUNDA_* environment variables."
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-lazy-test-"));
+		writeFileSync(
+			join(dataDir, "profiles.json"),
+			JSON.stringify([
+				{ name: "test-profile", baseUrl: "http://localhost:8080/v2" },
+			]),
+		);
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({
+				activeProfile: "test-profile",
+				outputMode: "text",
+			}),
+		);
+
+		const result = await asyncSpawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				CLI,
+				"which",
+				"profile",
+			],
+			{
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://other-cluster/v2",
+					C8CTL_DATA_DIR: dataDir,
+					HOME: "/tmp/c8ctl-lazy-test-home",
+				},
+			},
+		);
+
+		assert.strictEqual(result.status, 0, `exit=${result.status} stdout: ${result.stdout} stderr: ${result.stderr}`);
+		assert.ok(
+			!result.stderr.includes("overriding"),
+			`Expected no override warning, got stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			!result.stdout.includes("overriding"),
+			`Expected no override warning, got stdout: ${result.stdout}`,
+		);
 	});
 });
