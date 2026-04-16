@@ -166,11 +166,14 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		: ctx.positionals.length > 0
 			? ctx.positionals
 			: ["."];
-	const extensions = flags.extensions
-		? String(flags.extensions)
-				.split(",")
-				.map((e) => (e.startsWith(".") ? e : `.${e}`))
-		: undefined;
+	const extensions =
+		flags.extensions && String(flags.extensions).trim()
+			? String(flags.extensions)
+					.split(",")
+					.map((e) => e.trim())
+					.filter(Boolean)
+					.map((e) => (e.startsWith(".") ? e : `.${e}`))
+			: undefined;
 	await watchFiles(paths, {
 		profile: ctx.profile,
 		force: flags.force,
