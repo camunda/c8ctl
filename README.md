@@ -808,4 +808,4 @@ Apache 2.0 - see LICENSE.md
 
 ## Contributing
 
-See `COMMIT-MESSAGE-GUIDELINE.md` for commit message conventions.
+See `AGENTS.md` for commit message conventions.

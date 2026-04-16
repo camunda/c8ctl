@@ -1,13 +1,97 @@
-# Camunda 8 CLI - Development Conventions
+# AGENTS.md
 
-This project provides a CLI for Camunda 8. It is based on the Camunda 8 Orchestration
-Cluster API npm module https://www.npmjs.com/package/@camunda8/orchestration-cluster-api. It makes the REST API available with corresponding commands from the command line.
+> **Note:** This file delegates to a central AGENTS.md. Read and apply it before proceeding.
 
-## Commit Message Guidelines
+**URL:**
+https://raw.githubusercontent.com/camunda/.github/refs/heads/main/AGENTS.md
 
-Follow conventions in [COMMIT-MESSAGE-GUIDELINE.md](COMMIT-MESSAGE-GUIDELINE.md).
+Treat the central file's contents as if they were written directly in this file.
+Instructions below extend those guidelines and take precedence if there is any conflict.
 
-### Review-comment fix-ups
+## Repo-specific instructions
+
+### Role & boundary
+
+c8ctl is a CLI for Camunda 8. It makes the Camunda 8 Orchestration Cluster REST API available as command-line commands. It is based on the `@camunda8/orchestration-cluster-api` npm module.
+
+The following are upstream dependencies — when they misbehave, report it. Do not work around it here:
+- `@camunda8/orchestration-cluster-api` (primary API client)
+- Camunda 8 REST API
+
+**Path map:**
+
+| Path | Ownership and intent |
+| --- | --- |
+| `src/` | Production TypeScript code, primary edit surface |
+| `src/commands/` | Command handler implementations |
+| `src/templates/` | Plugin scaffold templates — do not edit directly |
+| `tests/unit/` | Unit tests |
+| `tests/integration/` | Integration tests (require live Camunda or Docker) |
+| `tests/fixtures/` | BPMN/DMN test fixtures |
+| `default-plugins/` | Built-in embedded plugins (JavaScript) |
+| `plugins/` | GritQL lint and refactoring rules |
+| `assets/c8/rest-api/` | OpenAPI backup reference — do not edit |
+| `.github/SDK_GAPS.md` | SDK gap tracking — check before implementing SDK features |
+
+Entry points: `src/index.ts`
+
+### Architecture
+
+```
+COMMAND_REGISTRY   →  metadata (flags, resources, help, validation)
+defineCommand()    →  handler (receives typed flags + positionals)
+COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
+```
+
+Key components:
+
+- `src/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
+- `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions
+- `src/command-framework.ts` — provides `defineCommand()` and the `dryRun()` helper
+- `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers
+- `src/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
+- `src/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
+- `src/commands/` — per-resource command handler files
+- `default-plugins/` — built-in embedded plugins (JavaScript, not TypeScript)
+
+### Commit message guidelines
+
+We use Conventional Commits.
+
+Format:
+
+```
+<type>(optional scope): <subject>
+
+<body>
+
+BREAKING CHANGE: <explanation>
+```
+
+Allowed type values (common set):
+
+```
+feat
+fix
+chore
+docs
+style
+refactor
+test
+ci
+build
+perf
+```
+
+Rules:
+
+- Subject length: 5–100 characters (commitlint enforces subject-min-length & subject-max-length).
+- Use imperative mood ("add support", not "added support").
+- Lowercase subject (except proper nouns). No PascalCase subjects (rule enforced).
+- Keep subject concise; body can include details, rationale, links.
+- Prefix breaking changes with BREAKING CHANGE: either in body or footer.
+
+#### Review-comment fix-ups
 
 Commits that address PR review comments must use the `chore` type (e.g. `chore:` or `chore(<scope>):`), **not** the `fix` type.
 `fix` commits (e.g. `fix:` or `fix(<scope>):`) trigger a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
@@ -20,7 +104,50 @@ chore: address review comments — use logger.json for dry-run
 fix: address review comments — use logger.json for dry-run
 ```
 
-## Implementation Details
+Examples:
+
+```
+feat(worker): add job worker concurrency gating
+fix(retry): prevent double backoff application
+chore(ci): stabilize deterministic publish (skip spec fetch)
+chore: address review comments — NUL-safe pre-commit hook
+docs: document deterministic build flag
+refactor(auth): simplify token refresh jitter logic
+```
+
+### Build pipeline
+
+#### Always-green policy
+
+Before every AI-assisted session, verify CI is green:
+
+```bash
+npm test
+```
+
+Warnings are fatal. Do not suppress a warning to make a build pass.
+Do not treat any failure as pre-existing or unrelated without explicit confirmation from the engineer.
+
+```bash
+# Verify baseline -> always green (always run before an AI-assisted session)
+npm test
+
+# Fast inner loop (unit tests only) to iterate quickly
+npm run test:unit
+
+# Full pipeline before committing the change
+npm run build && npm test
+```
+
+Never skip the lint and type-check steps before pushing.
+
+- **only use** Node.js 22 LTS and respect [.nvmrc](.nvmrc)
+- this is a native Node.js project running TS files
+- there is no build step for development. Only compile for test purposes or release.
+- run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped. It also catches compilation and type errors early.
+- on changes, make sure all tests pass and a build via `npm run build` works without errors
+
+### Implementation details
 
 - always make sure that CLI commands, resources and options are reflected in
   - the `help` tests
@@ -32,9 +159,7 @@ fix: address review comments — use logger.json for dry-run
 
 - don't use Promises in tests to wait for the overall system status to settle. Instead, use the polling helper from [tests/utils/polling.ts](tests/utils/polling.ts) to wait for specific conditions to be met.
 
-- run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped. It also catches compilation and type errors early.
-
-### Work Environment
+### Work environment
 
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
 - prefer cross-platform solutions where reasonable
@@ -47,29 +172,7 @@ fix: address review comments — use logger.json for dry-run
 - consult [EXAMPLES.md](EXAMPLES.md) for command usage patterns
 - consult [PLUGIN-HELP.md](PLUGIN-HELP.md) when working on the plugin system
 
-### BPMN and DMN Validation
-
-- when creating or modifying `.bpmn` files, validate them with [bpmnlint](https://github.com/bpmn-io/bpmnlint) by running `npx bpmnlint <file>` before considering the task complete
-- when creating or modifying `.dmn` files, validate them with [dmnlint](https://github.com/bpmn-io/dmnlint) by running `npx dmnlint <file>` before considering the task complete
-- fix any reported errors before proceeding
-
-### Terminal Commands
-
-- when running terminal commands through an AI agent or other automation tool, avoid heredocs (`<< EOF`) because they don't work reliably in zsh on macOS
-- when using an AI agent or automation tooling, prefer its native file-editing capabilities for creating or modifying files
-- for appending single lines from the shell in those workflows, `echo` or `printf` is fine: `echo "content" >> file.txt`
-
-### Development
-
-- **only use** Node.js 22 LTS and respect [.nvmrc](.nvmrc)
-- this is a native Node.js project running TS files
-- there is no build step for development. Only compile for test purposes or release.
-- on changes, make sure all tests pass and a build via `npm run build` works without errors
-
-- pay attention to cross-platform compatibility (Linux, macOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
-- prefer functional programming over OOP where reasonable
-- prefer concise expressions over verbose control structures
-- when outputting errors, provide clear, concise and actionable hints to the user
+### TypeScript conventions
 
 - use modern TypeScript syntax and features
 - **never use `any`** — use `unknown` and narrow with type guards. Enforced by Biome (`noExplicitAny`, `noImplicitAnyLet`, `noEvolvingTypes` — all set to `error`)
@@ -98,16 +201,34 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 }
 ```
 
-### Refactoring Discipline
+- use `logger.ts:isRecord(value)` to narrow `unknown` to `Record<string, unknown>` (no `as` casts)
+- prefer functional programming over OOP where reasonable
+- prefer concise expressions over verbose control structures
+- when outputting errors, provide clear, concise and actionable hints to the user
+- pay attention to cross-platform compatibility (Linux, macOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
+
+### BPMN and DMN validation
+
+- when creating or modifying `.bpmn` files, validate them with [bpmnlint](https://github.com/bpmn-io/bpmnlint) by running `npx bpmnlint <file>` before considering the task complete
+- when creating or modifying `.dmn` files, validate them with [dmnlint](https://github.com/bpmn-io/dmnlint) by running `npx dmnlint <file>` before considering the task complete
+- fix any reported errors before proceeding
+
+### Terminal commands
+
+- when running terminal commands through an AI agent or other automation tool, avoid heredocs (`<< EOF`) because they don't work reliably in zsh on macOS
+- when using an AI agent or automation tooling, prefer its native file-editing capabilities for creating or modifying files
+- for appending single lines from the shell in those workflows, `echo` or `printf` is fine: `echo "content" >> file.txt`
+
+### Refactoring discipline
 
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
 - between refactors, always run `npx tsc --noEmit`, `npx biome check src`, and `npx vitest run` to verify correctness
 
-## Adding a New Command
+### Adding a new command
 
 Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
 
-### Architecture overview
+#### Architecture overview
 
 ```
 COMMAND_REGISTRY   →  metadata (flags, resources, help, validation)
@@ -115,9 +236,9 @@ defineCommand()    →  handler (receives typed flags + positionals)
 COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
 ```
 
-### Step-by-step
+#### Step-by-step
 
-#### 1. Declare the command in `COMMAND_REGISTRY`
+##### 1. Declare the command in `COMMAND_REGISTRY`
 
 Add or extend a verb entry in `src/command-registry.ts`:
 
@@ -154,7 +275,7 @@ myverb: {
 },
 ```
 
-#### 2. Define flag sets with `as const satisfies`
+##### 2. Define flag sets with `as const satisfies`
 
 Flag sets must use `as const satisfies` to preserve concrete validator return types for `InferFlags`:
 
@@ -178,7 +299,7 @@ const MY_RESOURCE_POSITIONALS = [
 ] as const satisfies readonly PositionalDef[];
 ```
 
-#### 3. Add resource aliases (if new resource)
+##### 3. Add resource aliases (if new resource)
 
 If introducing a new resource, add aliases in `RESOURCE_ALIASES`:
 
@@ -190,7 +311,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 };
 ```
 
-#### 4. Write the handler with `defineCommand()`
+##### 4. Write the handler with `defineCommand()`
 
 Create a handler file in `src/commands/`:
 
@@ -239,7 +360,7 @@ export const myverbMyResourceCommand = defineCommand(
 
 The `dryRun()` helper checks the `--dry-run` flag and returns a `DryRunResult` if set, or `undefined` to continue.
 
-#### 5. Register in `COMMAND_DISPATCH`
+##### 5. Register in `COMMAND_DISPATCH`
 
 Add the handler to the dispatch map in `src/command-dispatch.ts`:
 
@@ -254,14 +375,14 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map(
 
 The key format is `"verb:resource"`. For resourceless verbs (like `deploy`), use `"verb:"`.
 
-#### 6. Add tests
+##### 6. Add tests
 
 - **Unit tests** in `tests/unit/` — test the handler via the CLI subprocess helper `c8()`
 - **Behaviour tests** — `c8('myverb', 'my-resource', '--dry-run')` proves end-to-end dispatch
 - **Help tests** — verify the command appears in help output
 - **Completion tests** — the new command is automatically included in shell completions (derived from registry)
 
-### What you get for free
+#### What you get for free
 
 By adding the registry entry and dispatch wiring, these features are automatically derived:
 
@@ -274,7 +395,7 @@ By adding the registry entry and dispatch wiring, these features are automatical
 - Output rendering (JSON, table, fields filtering) handled by the framework
 - Resource alias resolution (`mr` → `my-resource`) works everywhere
 
-### Resourceless commands
+#### Resourceless commands
 
 Some verbs don't take a resource (e.g. `deploy`, `run`, `watch`). Set `requiresResource: false` and `resources: []`, then register with an empty resource key:
 
