@@ -7,6 +7,19 @@ Cluster API npm module https://www.npmjs.com/package/@camunda8/orchestration-clu
 
 Follow conventions in [COMMIT-MESSAGE-GUIDELINE.md](COMMIT-MESSAGE-GUIDELINE.md).
 
+### Review-comment fix-ups
+
+Commits that address PR review comments must use `chore:`, **not** `fix:`.
+`fix:` triggers a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
+
+```
+# Correct
+chore: address review comments — use logger.json for dry-run
+
+# Wrong — will pollute the CHANGELOG
+fix: address review comments — use logger.json for dry-run
+```
+
 ## Implementation Details
 
 - always make sure that CLI commands, resources and options are reflected in
