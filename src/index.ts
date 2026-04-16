@@ -308,10 +308,25 @@ async function main() {
 		(useResourceKey ? COMMAND_DISPATCH.get(`${verb}:`) : undefined);
 	if (handler) {
 		const profile = str(values.profile);
+		// Lazy config access: createClient() and resolveTenantId() are deferred
+		// until first access, so commands that never touch ctx.client or
+		// ctx.tenantId (e.g. session/profile management) skip config resolution.
+		let _client: ReturnType<typeof createClient> | undefined;
+		let _tenantId: string | undefined;
+		let _tenantResolved = false;
 		const ctx: CommandContext = {
-			client: createClient(profile),
+			get client() {
+				if (!_client) _client = createClient(profile);
+				return _client;
+			},
 			logger,
-			tenantId: resolveTenantId(profile),
+			get tenantId() {
+				if (!_tenantResolved) {
+					_tenantId = resolveTenantId(profile);
+					_tenantResolved = true;
+				}
+				return _tenantId;
+			},
 			resource: useResourceKey ? normalizedResource : resource || "",
 			positionals: args,
 			sortOrder,
