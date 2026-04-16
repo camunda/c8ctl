@@ -1039,7 +1039,7 @@ export async function stopC8Run(config, debug = false) {
 
     attempted += 1;
 
-    const { code: exitCode, signal: exitSignal } = await new Promise(
+    const { code: exitCode, signal: exitSignal, stdout: procStdout, stderr: procStderr } = await new Promise(
       (resolve, reject) => {
         const proc = spawn(binaryPath, ['stop'], {
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -1085,7 +1085,7 @@ export async function stopC8Run(config, debug = false) {
         `Stop command terminated by signal ${exitSignal}`,
       );
     } else if (exitCode !== -1) {
-      const output = [stdout, stderr].filter(Boolean).join('\n');
+      const output = [procStdout, procStderr].filter(Boolean).join('\n');
       lastError = new Error(
         `Stop command failed with code ${exitCode}${output ? `:\n${output}` : ''}`,
       );
