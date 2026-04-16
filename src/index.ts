@@ -293,7 +293,9 @@ async function main() {
 		// clear the active profile — the warning tells them to run the very
 		// command they are already running.
 		const suppressWarning =
-			verb === "use" && normalizedResource === "profile" && values.none;
+			verb === "use" &&
+			normalizedResource === "profile" &&
+			bool(values.none) === true;
 		if (suppressWarning) {
 			c8ctl.suppressProfileWarning = true;
 		}
