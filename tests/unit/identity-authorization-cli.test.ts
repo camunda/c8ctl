@@ -12,6 +12,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 
 // ─── create authorization ────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ describe("CLI behavioral: create authorization", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/authorizations"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.ownerId, "alice");
 		assert.strictEqual(body.ownerType, "USER");
 		assert.strictEqual(body.resourceType, "PROCESS_DEFINITION");
@@ -70,7 +71,7 @@ describe("CLI behavioral: create authorization", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.deepStrictEqual(body.permissionTypes, ["READ", "UPDATE", "DELETE"]);
 	});
 

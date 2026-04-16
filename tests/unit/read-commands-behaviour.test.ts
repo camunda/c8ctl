@@ -10,6 +10,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { getFilter } from "../utils/guards.ts";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -23,24 +24,6 @@ function assertDryRun(
 		typeof out.url === "string" && out.url.endsWith(expected.urlSuffix),
 		`Expected URL to end with "${expected.urlSuffix}", got "${String(out.url)}"`,
 	);
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-	return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-/**
- * Narrow the `body.filter` of a dry-run payload to a record. Throws with a
- * descriptive message if the shape is wrong — no type assertions needed at
- * call sites.
- */
-function getFilter(out: Record<string, unknown>): Record<string, unknown> {
-	assert.ok(isRecord(out.body), "expected dry-run body to be an object");
-	assert.ok(
-		isRecord(out.body.filter),
-		"expected dry-run body.filter to be an object",
-	);
-	return out.body.filter;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

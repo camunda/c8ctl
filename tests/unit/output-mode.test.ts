@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { makeTestEnv } from "../utils/mocks.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -19,7 +20,7 @@ let dataDir = "";
 function cli(...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
-		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
 	});
 }
 

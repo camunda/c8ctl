@@ -37,8 +37,8 @@ describe("Lazy client getter", () => {
 				}
 				return _tenantId;
 			},
-			// biome-ignore lint/suspicious/noExplicitAny: test stub
-		} as any as CommandContext;
+			// biome-ignore lint/plugin: test stub for CommandContext with only lazy getters populated
+		} as unknown as CommandContext;
 	}
 
 	test("client factory is not called until ctx.client is accessed", () => {

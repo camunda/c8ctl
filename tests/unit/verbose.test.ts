@@ -33,9 +33,10 @@ describe("handleCommandError", () => {
 		console.log = (...args: any[]) => {
 			infoSpy.push(args.join(" "));
 		};
-		(process.exit as any) = (code: number) => {
+		process.exit = ((code: number) => {
 			throw new Error(`process.exit(${code})`);
-		};
+			// biome-ignore lint/plugin: test-only override of process.exit signature
+		}) as typeof process.exit;
 
 		c8ctl.verbose = false;
 		c8ctl.outputMode = "text";

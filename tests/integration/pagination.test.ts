@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
@@ -55,7 +56,7 @@ let dataDir: string;
 function cli(...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
-		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
 	});
 }
 

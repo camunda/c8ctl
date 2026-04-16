@@ -31,10 +31,11 @@ describe("Completion Module", () => {
 
 		// Stub process.exit to capture exit codes
 		processExitStub = process.exit;
-		(process.exit as any) = (code: number) => {
+		process.exit = ((code: number) => {
 			exitCode = code;
 			throw new Error(`process.exit(${code})`);
-		};
+			// biome-ignore lint/plugin: test-only override of process.exit signature
+		}) as typeof process.exit;
 	});
 
 	afterEach(() => {

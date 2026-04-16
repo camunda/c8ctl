@@ -29,9 +29,10 @@ function setup() {
 	originalError = console.error;
 	originalExit = process.exit;
 	console.error = (...args: any[]) => errorSpy.push(args.join(" "));
-	(process.exit as any) = (code: number) => {
+	process.exit = ((code: number) => {
 		throw new Error(`process.exit(${code})`);
-	};
+		// biome-ignore lint/plugin: test-only override of process.exit signature
+	}) as typeof process.exit;
 }
 
 function teardown() {
@@ -400,7 +401,8 @@ describe("validateFlags behaviour", () => {
 		const searchDef = COMMAND_REGISTRY.search;
 		// processDefinitionKey as boolean should be skipped (not validated)
 		const result = validateFlags(
-			{ processDefinitionKey: true as any },
+			// biome-ignore lint/plugin: intentionally passing wrong type to test skip path
+			{ processDefinitionKey: true as unknown as string },
 			searchDef.flags,
 		);
 		assert.strictEqual(result.size, 0);

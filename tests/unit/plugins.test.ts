@@ -167,7 +167,7 @@ describe("Plugin Structure", () => {
 			try {
 				// Need to inject global for the plugin to work
 				const { c8ctl } = await import("../../src/runtime.js");
-				(globalThis as any).c8ctl = c8ctl;
+				Object.assign(globalThis, { c8ctl });
 
 				const pluginPath = join(
 					process.cwd(),

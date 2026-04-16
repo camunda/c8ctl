@@ -118,11 +118,9 @@ describe("open command", () => {
 		});
 
 		test("defaults to xdg-open for unknown platforms", () => {
-			const { command, args } = getBrowserCommand(
-				url,
-				"freebsd" as NodeJS.Platform,
-				{},
-			);
+			// biome-ignore lint/plugin: narrowing unknown platform string to NodeJS.Platform for test
+			const platform = "freebsd" as NodeJS.Platform;
+			const { command, args } = getBrowserCommand(url, platform, {});
 			assert.strictEqual(command, "xdg-open");
 			assert.deepStrictEqual(args, [url]);
 		});
@@ -159,10 +157,11 @@ describe("open command", () => {
 			console.error = (...args: any[]) => {
 				consoleErrorSpy.push(args.join(" "));
 			};
-			(process.exit as any) = (code: number) => {
+			process.exit = ((code: number) => {
 				exitCode = code;
 				throw new Error(`process.exit(${code})`);
-			};
+				// biome-ignore lint/plugin: test-only override of process.exit signature
+			}) as typeof process.exit;
 		});
 
 		afterEach(() => {

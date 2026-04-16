@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 
 // ─── create process-instance ─────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ describe("CLI behavioural: create process-instance", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/process-instances"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.processDefinitionId, "my-process");
 	});
 
@@ -43,7 +44,7 @@ describe("CLI behavioural: create process-instance", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.deepStrictEqual(body.variables, { foo: "bar" });
 	});
 
@@ -59,7 +60,7 @@ describe("CLI behavioural: create process-instance", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.processDefinitionVersion, 3);
 	});
 
@@ -74,7 +75,7 @@ describe("CLI behavioural: create process-instance", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.awaitCompletion, true);
 	});
 
@@ -91,7 +92,7 @@ describe("CLI behavioural: create process-instance", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.requestTimeout, 5000);
 	});
 
@@ -118,7 +119,7 @@ describe("CLI behavioural: await process-instance", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.processDefinitionId, "my-process");
 		assert.strictEqual(body.awaitCompletion, true);
 	});

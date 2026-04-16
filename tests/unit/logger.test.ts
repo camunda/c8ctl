@@ -671,7 +671,7 @@ describe("sortTableData", () => {
 
 	test("places null/undefined values last", () => {
 		const data = [{ State: null }, { State: "ACTIVE" }, { State: undefined }];
-		const result = sortTableData(data as any, "State", logger);
+		const result = sortTableData(data, "State", logger);
 		assert.strictEqual(result[0].State, "ACTIVE");
 	});
 
@@ -709,7 +709,7 @@ describe("sortTableData", () => {
 			{ State: "ACTIVE" },
 			{ State: undefined },
 		];
-		const result = sortTableData(data as any, "State", logger, "desc");
+		const result = sortTableData(data, "State", logger, "desc");
 		assert.strictEqual(result[0].State, "COMPLETED");
 		assert.strictEqual(result[1].State, "ACTIVE");
 	});

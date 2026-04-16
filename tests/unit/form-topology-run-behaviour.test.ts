@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ describe("CLI behavioural: run", () => {
 			(out.url as string).includes("/deployments"),
 			`Expected URL to contain /deployments, got "${out.url}"`,
 		);
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.path, "test.bpmn");
 	});
 
@@ -132,7 +133,7 @@ describe("CLI behavioural: run", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.path, "test.bpmn");
 		assert.strictEqual(body.variables, '{"x":1}');
 	});

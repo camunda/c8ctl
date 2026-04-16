@@ -100,6 +100,7 @@ export async function asyncSpawn(
 		});
 		return { stdout: stdout ?? "", stderr: stderr ?? "", status: 0 };
 	} catch (err) {
+		// biome-ignore lint/plugin: unavoidable narrowing of catch-clause unknown to ExecFileException
 		const e = err as ExecFileException & { stdout?: string; stderr?: string };
 		return {
 			stdout: e.stdout ?? "",

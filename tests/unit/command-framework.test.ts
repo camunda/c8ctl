@@ -28,6 +28,7 @@ import {
 	type ResolvedPositionals,
 } from "../../src/command-framework.ts";
 import type { FlagDef } from "../../src/command-registry.ts";
+import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 // ─── Test flag schemas ───────────────────────────────────────────────────────
 
@@ -288,21 +289,12 @@ describe("defineCommand", () => {
 			},
 		);
 
-		// Simulate dispatch. The handler under test does not touch ctx.client, and
-		// it does not log directly, but cmd.execute() may still use ctx.logger
-		// when rendering a non-undefined CommandResult. The two casts below are
-		// the unavoidable boundary where we stub external SDK and internal class
-		// types that cannot be satisfied structurally.
-		const mockLogger: CommandContext["logger"] =
-			// biome-ignore lint/plugin: test-only stub for Logger class; structural satisfaction impractical
-			{
-				json: () => {},
-				table: () => {},
-				output: () => {},
-				info: () => {},
-			} as unknown as CommandContext["logger"];
-		// biome-ignore lint/plugin: test-only stub for CamundaClient class; structural satisfaction impractical
-		const mockClient = {} as CommandContext["client"];
+		// Simulate dispatch. The handler under test does not touch ctx.client,
+		// and it does not log directly, but cmd.execute() may still use
+		// ctx.logger when rendering a non-undefined CommandResult. The stubs
+		// below cross the unavoidable test/SDK boundary via tests/utils/mocks.ts.
+		const mockLogger = makeMockLogger();
+		const mockClient = makeMockClient();
 		const mockCtx: CommandContext = {
 			client: mockClient,
 			logger: mockLogger,

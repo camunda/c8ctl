@@ -12,6 +12,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 
 // ─── create user ─────────────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ describe("CLI behavioural: create user", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/users"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.username, "alice");
 		// password is redacted by sanitizeForLogging
 		assert.ok(
@@ -59,7 +60,7 @@ describe("CLI behavioural: create user", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.name, "Bob Smith");
 		assert.strictEqual(body.email, "bob@example.com");
 	});
@@ -128,7 +129,7 @@ describe("CLI behavioural: create role", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/roles"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.roleId, "admin");
 		assert.strictEqual(body.name, "Administrator");
 	});
@@ -192,7 +193,7 @@ describe("CLI behavioural: create group", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/groups"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.groupId, "devs");
 		assert.strictEqual(body.name, "Developers");
 	});
@@ -256,7 +257,7 @@ describe("CLI behavioural: create tenant", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/tenants"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.tenantId, "acme");
 		assert.strictEqual(body.name, "ACME Corp");
 	});
@@ -324,7 +325,7 @@ describe("CLI behavioural: create mapping-rule", () => {
 		assert.strictEqual(out.method, "POST");
 		assert.ok((out.url as string).endsWith("/mapping-rules"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.mappingRuleId, "rule-1");
 		assert.strictEqual(body.name, "My Rule");
 		assert.strictEqual(body.claimName, "groups");

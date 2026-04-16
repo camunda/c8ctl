@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
+import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
@@ -24,12 +25,13 @@ let dataDir = "";
 function cli(...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
-		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
 	});
 }
 
 function parseJson<T>(stdout: string): T {
 	try {
+		// biome-ignore lint/plugin: generic JSON parse helper; T supplied by caller
 		return JSON.parse(stdout) as T;
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
