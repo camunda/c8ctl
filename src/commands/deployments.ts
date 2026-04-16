@@ -13,7 +13,6 @@ import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger, isRecord } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
 
-const RESOURCE_EXTENSIONS = [".bpmn", ".dmn", ".form"];
 const PROCESS_APPLICATION_FILE = ".process-application";
 
 /**
@@ -142,18 +141,15 @@ function collectResourceFiles(
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
 			return collected;
 		}
-		const ext = extname(dirPath);
-		if (RESOURCE_EXTENSIONS.includes(ext)) {
-			const groupInfo = findGroupRoot(dirPath, basePath);
-			collected.push({
-				path: dirPath,
-				name: basename(dirPath),
-				content: readFileSync(dirPath),
-				isBuildingBlock: groupInfo.type === "bb",
-				isProcessApplication: groupInfo.type === "pa",
-				groupPath: groupInfo.root || undefined,
-			});
-		}
+		const groupInfo = findGroupRoot(dirPath, basePath);
+		collected.push({
+			path: dirPath,
+			name: basename(dirPath),
+			content: readFileSync(dirPath),
+			isBuildingBlock: groupInfo.type === "bb",
+			isProcessApplication: groupInfo.type === "pa",
+			groupPath: groupInfo.root || undefined,
+		});
 		return collected;
 	}
 
@@ -189,6 +185,10 @@ function collectResourceFiles(
 					regularFolders.push(fullPath);
 				}
 			} else if (entryStat.isFile()) {
+				// Skip hidden files (e.g. .c8ignore, .process-application)
+				if (entry.startsWith(".")) {
+					return;
+				}
 				// Skip ignored files
 				if (ig && ignoreBaseDir && isIgnored(ig, fullPath, ignoreBaseDir)) {
 					return;
@@ -199,18 +199,15 @@ function collectResourceFiles(
 
 		// Process files in current directory first
 		files.forEach((file) => {
-			const ext = extname(file);
-			if (RESOURCE_EXTENSIONS.includes(ext)) {
-				const groupInfo = findGroupRoot(file, basePath);
-				collected.push({
-					path: file,
-					name: basename(file),
-					content: readFileSync(file),
-					isBuildingBlock: groupInfo.type === "bb",
-					isProcessApplication: groupInfo.type === "pa",
-					groupPath: groupInfo.root || undefined,
-				});
-			}
+			const groupInfo = findGroupRoot(file, basePath);
+			collected.push({
+				path: file,
+				name: basename(file),
+				content: readFileSync(file),
+				isBuildingBlock: groupInfo.type === "bb",
+				isProcessApplication: groupInfo.type === "pa",
+				groupPath: groupInfo.root || undefined,
+			});
 		});
 
 		// Process building block folders first (prioritized)
@@ -287,7 +284,7 @@ export async function deploy(
 		});
 
 		if (resources.length === 0) {
-			logger.error("No BPMN/DMN/Form files found in the specified paths");
+			logger.error("No deployable files found in the specified paths");
 			process.exit(1);
 		}
 
@@ -613,13 +610,8 @@ function formatDeploymentErrorDetail(detail: string): string {
 	let inFileError = false;
 
 	for (const line of lines) {
-		if (
-			line.startsWith("'") &&
-			(line.includes(".bpmn") ||
-				line.includes(".dmn") ||
-				line.includes(".form"))
-		) {
-			// This is a file-specific error
+		if (line.startsWith("'") && line.includes("':", 1)) {
+			// This is a file-specific error (e.g. "'filename.ext': ...")
 			inFileError = true;
 			result.push(`  📄 ${line}`);
 		} else if (line.startsWith("- Element:")) {

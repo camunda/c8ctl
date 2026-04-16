@@ -12,7 +12,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
-- **Watch Mode**: Monitors a folder for changes to `*.{bpmn,dmn,form}` and auto-redeploys
+- **Watch Mode**: Monitors a folder for file changes and auto-redeploys (configurable extensions via `--extensions`)
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
 - **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
@@ -672,7 +672,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `resolve` - Resolve incident
 - `publish` - Publish message
 - `correlate` - Correlate message
-- `deploy` - Deploy BPMN/DMN/forms
+- `deploy` - Deploy resources
 - `run` - Deploy and start process
 - `watch` (alias: `w`) - Watch for changes and auto-deploy
 - `add` - Add a profile

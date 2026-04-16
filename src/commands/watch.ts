@@ -9,7 +9,19 @@ import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger } from "../logger.ts";
 import { deploy } from "./deployments.ts";
 
-const WATCHED_EXTENSIONS = [".bpmn", ".dmn", ".form"];
+export const DEFAULT_WATCHED_EXTENSIONS = [
+	".bpmn",
+	".dmn",
+	".form",
+	".md",
+	".txt",
+	".xml",
+	".rpa",
+	".json",
+	".config",
+	".yml",
+	".yaml",
+];
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
@@ -21,9 +33,15 @@ export async function watchFiles(
 	options: {
 		profile?: string;
 		force?: boolean;
+		extensions?: string[];
 	},
 ): Promise<void> {
 	const logger = getLogger();
+
+	const watchedExtensions =
+		options.extensions && options.extensions.length > 0
+			? options.extensions
+			: DEFAULT_WATCHED_EXTENSIONS;
 
 	if (!paths || paths.length === 0) {
 		paths = ["."];
@@ -45,7 +63,7 @@ export async function watchFiles(
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-	logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(", ")}`);
+	logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
 	if (options.force) {
 		logger.info(
 			"🔒 Force mode: will continue watching after deployment errors",
@@ -72,7 +90,7 @@ export async function watchFiles(
 				const file = filename;
 
 				const ext = extname(filename);
-				if (!WATCHED_EXTENSIONS.includes(ext)) {
+				if (!watchedExtensions.includes(ext)) {
 					return;
 				}
 
@@ -148,9 +166,15 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		: ctx.positionals.length > 0
 			? ctx.positionals
 			: ["."];
+	const extensions = flags.extensions
+		? String(flags.extensions)
+				.split(",")
+				.map((e) => (e.startsWith(".") ? e : `.${e}`))
+		: undefined;
 	await watchFiles(paths, {
 		profile: ctx.profile,
 		force: flags.force,
+		extensions,
 	});
 	return { kind: "never" };
 });

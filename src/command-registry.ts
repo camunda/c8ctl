@@ -1136,9 +1136,9 @@ export const COMMAND_REGISTRY = {
 	},
 
 	deploy: {
-		description: "Deploy BPMN/DMN/forms",
+		description: "Deploy resources",
 		helpDescription:
-			"Deploy BPMN, DMN, and form files (auto-discovers deployable files)",
+			"Deploy files to Camunda (auto-discovers deployable files in directories)",
 		helpResource: "[path...]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show deploy command with all flags",
@@ -1230,8 +1230,7 @@ export const COMMAND_REGISTRY = {
 
 	watch: {
 		description: "Watch files for changes and auto-deploy",
-		helpDescription:
-			"Watch files for changes and auto-deploy (BPMN, DMN, forms)",
+		helpDescription: "Watch files for changes and auto-deploy",
 		helpResource: "[path...]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show watch command with all flags",
@@ -1248,6 +1247,11 @@ export const COMMAND_REGISTRY = {
 			force: {
 				type: "boolean",
 				description: "Continue watching after all deployment errors",
+			},
+			extensions: {
+				type: "string",
+				description:
+					"Comma-separated list of file extensions to watch (e.g. .bpmn,.dmn,.form)",
 			},
 		},
 		aliases: ["w"],

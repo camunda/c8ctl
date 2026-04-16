@@ -77,4 +77,42 @@ describe("CLI behavioural: deploy", () => {
 			`stderr: ${result.stderr}`,
 		);
 	});
+
+	test("rejects file with unsupported extension", async () => {
+		const unsupportedFile = join(tempDir, "process.unsupported");
+		writeFileSync(unsupportedFile, "dummy content");
+
+		const result = await c8("deploy", unsupportedFile, "--dry-run");
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("No deployable files found") ||
+				result.stderr.includes("No deployable"),
+			`Expected rejection for unsupported extension.\nstderr: ${result.stderr}`,
+		);
+	});
+
+	test("--force deploys file with unsupported extension (dry-run)", async () => {
+		const unsupportedFile = join(tempDir, "process.unsupported");
+		writeFileSync(unsupportedFile, "dummy content");
+
+		const result = await c8(
+			"deploy",
+			unsupportedFile,
+			"--force",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok(
+			typeof out.url === "string" && out.url.endsWith("/deployments"),
+		);
+
+		const body = asRecord(out.body);
+		const resources = asRecordArray(body.resources);
+		assert.ok(resources.length > 0, "should include at least one resource");
+		assert.strictEqual(resources[0].name, "process.unsupported");
+	});
 });
