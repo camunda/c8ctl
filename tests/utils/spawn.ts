@@ -17,8 +17,16 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
 
-function assertSafeProcessString(value: string, fieldName: string): void {
-	// Reject control characters that can corrupt process invocation semantics.
+function assertNoNul(value: string, fieldName: string): void {
+	// NUL terminates argv/envp on POSIX, so it corrupts process invocation.
+	if (value.includes("\u0000")) {
+		throw new Error(`Unsafe ${fieldName}: contains NUL byte`);
+	}
+}
+
+function assertNoControlChars(value: string, fieldName: string): void {
+	// For command and cwd, also reject newlines/CR that can confuse path handling
+	// and downstream shell invocations that may embed them into scripts.
 	if (
 		value.includes("\u0000") ||
 		value.includes("\n") ||
@@ -35,21 +43,23 @@ function validateSpawnInputs(
 	args: string[],
 	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): void {
-	assertSafeProcessString(command, "command");
+	assertNoControlChars(command, "command");
 
+	// args may legitimately contain newlines (e.g. `bash -c "multi\nline"`);
+	// only NUL bytes are truly unsafe.
 	for (const [index, arg] of args.entries()) {
-		assertSafeProcessString(arg, `args[${index}]`);
+		assertNoNul(arg, `args[${index}]`);
 	}
 
 	if (options?.cwd !== undefined) {
-		assertSafeProcessString(options.cwd, "cwd");
+		assertNoControlChars(options.cwd, "cwd");
 	}
 
 	if (options?.env) {
 		for (const [key, value] of Object.entries(options.env)) {
-			assertSafeProcessString(key, `env key (${key})`);
+			assertNoControlChars(key, `env key (${key})`);
 			if (typeof value === "string") {
-				assertSafeProcessString(value, `env value (${key})`);
+				assertNoNul(value, `env value (${key})`);
 			}
 		}
 	}
