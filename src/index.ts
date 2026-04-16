@@ -210,16 +210,18 @@ async function main() {
 
 	// Handle completion command
 	if (verb === "completion") {
+		// Run unknown-flag detection before early return (completion returns
+		// before the general detectUnknownFlags call below).
+		const completionUnknownFlags = detectUnknownFlags(
+			verb,
+			resource ?? "",
+			values,
+		);
+		warnUnknownFlags(logger, completionUnknownFlags, verb, resource);
+
 		if (resource === "install") {
 			installCompletion(str(values.shell));
 			return;
-		}
-		// Warn if --shell is used with a non-install resource (it's only valid for install)
-		if (values.shell !== undefined) {
-			const logger = getLogger();
-			logger.warn(
-				`--shell is only valid for 'completion install'. It will be ignored for 'completion ${resource ?? ""}'. Run "c8ctl help completion" for valid options.`,
-			);
 		}
 		showCompletion(resource);
 		return;
