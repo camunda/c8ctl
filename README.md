@@ -166,7 +166,23 @@ For comprehensive examples of all commands and their flags, see [EXAMPLES.md](EX
 
 ### Shell Completion
 
-c8ctl supports shell completion for `bash`, `zsh`, and `fish`. To enable completion:
+c8ctl supports shell completion for `bash`, `zsh`, and `fish`.
+
+#### Quick Install (recommended)
+
+```bash
+# Auto-detect your shell and install completions
+c8ctl completion install
+
+# Or specify a shell explicitly
+c8ctl completion install --shell zsh
+```
+
+This writes a completion script to the c8ctl data directory and wires it into your shell config (RC file for bash/zsh; completions directory for fish). Completions are **automatically refreshed** when c8ctl is upgraded — no manual re-install needed.
+
+#### Manual Setup
+
+If you prefer to manage the completion script yourself:
 
 #### Bash
 

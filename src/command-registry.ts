@@ -1486,17 +1486,34 @@ export const COMMAND_REGISTRY = {
 
 	completion: {
 		description: "Generate shell completion script",
-		helpResource: "bash|zsh|fish",
-		mutating: false,
+		helpResource: "bash|zsh|fish|install",
+		mutating: true,
 		requiresResource: false,
 		helpExamples: [
 			{
 				command: "c8ctl completion bash",
 				description: "Generate bash completion script",
 			},
+			{
+				command: "c8ctl completion install",
+				description:
+					"Auto-detect shell and install completions (auto-refreshes on upgrade)",
+			},
+			{
+				command: "c8ctl completion install --shell zsh",
+				description: "Install completions for a specific shell",
+			},
 		],
-		resources: ["bash", "zsh", "fish"],
+		resources: ["bash", "zsh", "fish", "install"],
 		flags: {},
+		resourceFlags: {
+			install: {
+				shell: {
+					type: "string" as const,
+					description: "Shell to install completions for (bash, zsh, fish)",
+				},
+			},
+		},
 	},
 
 	"mcp-proxy": {
@@ -1669,6 +1686,12 @@ export function deriveParseArgsOptions(): Record<
 	// All command-specific flags
 	for (const cmd of Object.values(COMMAND_REGISTRY)) {
 		addFlags(cmd.flags);
+		// Include resource-specific flags so parseArgs can parse them
+		if ("resourceFlags" in cmd && cmd.resourceFlags) {
+			for (const rFlags of Object.values(cmd.resourceFlags)) {
+				addFlags(rFlags);
+			}
+		}
 	}
 
 	return options;

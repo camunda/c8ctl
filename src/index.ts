@@ -18,7 +18,11 @@ import {
 	resolveAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
-import { showCompletion } from "./commands/completion.ts";
+import {
+	installCompletion,
+	refreshCompletionsIfStale,
+	showCompletion,
+} from "./commands/completion.ts";
 import {
 	showCommandHelp,
 	showHelp,
@@ -170,6 +174,9 @@ async function main() {
 	// Load installed plugins
 	await loadInstalledPlugins();
 
+	// Auto-refresh installed completions if CLI version changed
+	refreshCompletionsIfStale();
+
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
 
@@ -207,6 +214,19 @@ async function main() {
 
 	// Handle completion command
 	if (verb === "completion") {
+		// Run unknown-flag detection before early return (completion returns
+		// before the general detectUnknownFlags call below).
+		const completionUnknownFlags = detectUnknownFlags(
+			verb,
+			resource ?? "",
+			values,
+		);
+		warnUnknownFlags(logger, completionUnknownFlags, verb, resource ?? "");
+
+		if (resource === "install") {
+			installCompletion(str(values.shell));
+			return;
+		}
 		showCompletion(resource);
 		return;
 	}

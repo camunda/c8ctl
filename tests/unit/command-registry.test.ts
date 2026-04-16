@@ -465,6 +465,7 @@ describe("mutating flag correctness", () => {
 		"run",
 		"assign",
 		"unassign",
+		"completion",
 	];
 
 	const NON_MUTATING_VERBS = [
@@ -483,7 +484,6 @@ describe("mutating flag correctness", () => {
 		"init",
 		"use",
 		"output",
-		"completion",
 		"mcp-proxy",
 		"feedback",
 		"help",
