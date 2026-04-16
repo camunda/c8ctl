@@ -23,6 +23,7 @@ import {
 	installCompletion,
 	refreshCompletionsIfStale,
 } from "../../src/commands/completion.ts";
+import { c8ctl } from "../../src/runtime.ts";
 
 // ─── detectShell ─────────────────────────────────────────────────────────────
 
@@ -186,16 +187,16 @@ describe("refreshCompletionsIfStale", () => {
 
 	test("no-op when no completion files are installed", () => {
 		// Should not throw
-		refreshCompletionsIfStale("2.0.0");
+		refreshCompletionsIfStale();
 	});
 
 	test("no-op when installed version matches current", () => {
 		const file = join(testDir, "completions", "c8ctl.zsh");
 		writeFileSync(
 			file,
-			"# c8ctl-completion-version: 1.0.0\n# script body\n",
+			`# c8ctl-completion-version: ${c8ctl.version}\n# script body\n`,
 		);
-		refreshCompletionsIfStale("1.0.0");
+		refreshCompletionsIfStale();
 		// File should be unchanged
 		const content = readFileSync(file, "utf-8");
 		assert.ok(content.includes("# script body"));
@@ -205,14 +206,14 @@ describe("refreshCompletionsIfStale", () => {
 		const file = join(testDir, "completions", "c8ctl.zsh");
 		writeFileSync(
 			file,
-			"# c8ctl-completion-version: 0.9.0\n# old script\n",
+			"# c8ctl-completion-version: 0.0.0-stale\n# old script\n",
 		);
-		refreshCompletionsIfStale("1.0.0");
+		refreshCompletionsIfStale();
 		const content = readFileSync(file, "utf-8");
 		// Should now have the new version header
 		assert.ok(
-			content.startsWith("# c8ctl-completion-version:"),
-			"Should start with version header after refresh",
+			content.startsWith(`# c8ctl-completion-version: ${c8ctl.version}`),
+			"Should have current version header after refresh",
 		);
 		// Old content should be gone
 		assert.ok(!content.includes("# old script"), "Old content should be replaced");
@@ -224,15 +225,15 @@ describe("refreshCompletionsIfStale", () => {
 			const file = join(testDir, "completions", `c8ctl.${shell}`);
 			writeFileSync(
 				file,
-				`# c8ctl-completion-version: 0.5.0\n# old ${shell}\n`,
+				`# c8ctl-completion-version: 0.0.0-stale\n# old ${shell}\n`,
 			);
 		}
-		refreshCompletionsIfStale("1.0.0");
+		refreshCompletionsIfStale();
 		for (const shell of ["bash", "zsh"]) {
 			const file = join(testDir, "completions", `c8ctl.${shell}`);
 			const content = readFileSync(file, "utf-8");
 			assert.ok(
-				!content.includes("0.5.0"),
+				!content.includes("0.0.0-stale"),
 				`${shell} should have been regenerated`,
 			);
 		}

@@ -808,9 +808,12 @@ export function installCompletion(shellOverride?: string): void {
  * or if the embedded version matches the running CLI version.
  * Synchronous write (~1ms for a few KB).
  */
-export function refreshCompletionsIfStale(currentVersion: string): void {
+export function refreshCompletionsIfStale(): void {
 	// Skip in dry-run mode — refresh is a side effect
 	if (c8ctl.dryRun) return;
+
+	// Use the same source of truth as generateForShell() for version headers
+	const currentVersion = c8ctl.version;
 
 	// Check each shell — user may have installed for multiple shells
 	for (const shell of ["bash", "zsh", "fish"]) {

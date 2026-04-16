@@ -171,7 +171,7 @@ async function main() {
 	await loadInstalledPlugins();
 
 	// Auto-refresh installed completions if CLI version changed
-	refreshCompletionsIfStale(c8ctl.version);
+	refreshCompletionsIfStale();
 
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
