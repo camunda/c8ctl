@@ -660,9 +660,9 @@ function buildRcBlock(completionFilePath: string): string {
 }
 
 /** Check if the RC file already contains the source line.
- *  Checks for the block comment marker and for both the current single-quoted
- *  source line and legacy double-quoted form, so upgrades are detected
- *  without false-positiving on the raw path appearing in unrelated lines. */
+ *  Checks for both the current single-quoted source line and the legacy
+ *  double-quoted form, so upgrades are detected without false-positiving
+ *  on the raw path appearing in unrelated lines. */
 function rcAlreadyConfigured(
 	rcFile: string,
 	completionFilePath: string,
@@ -670,8 +670,6 @@ function rcAlreadyConfigured(
 	if (!existsSync(rcFile)) return false;
 	try {
 		const content = readFileSync(rcFile, "utf-8");
-		// Check for the managed block marker
-		if (content.includes("# c8ctl shell completion")) return true;
 		// Check for current single-quoted source line
 		if (content.includes(buildSourceLine(completionFilePath))) return true;
 		// Check for legacy double-quoted source line
