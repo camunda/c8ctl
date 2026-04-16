@@ -162,7 +162,7 @@ describe("deserializeFlags", () => {
 		);
 		assert.strictEqual(result.name, "Alice");
 		// bogus is not in the result because it's not in the schema
-		assert.ok(!("bogus" in result));
+		assert.ok(!Object.hasOwn(result, "bogus"));
 	});
 
 	test("only includes keys from schema", () => {
@@ -288,10 +288,11 @@ describe("defineCommand", () => {
 			},
 		);
 
-		// Simulate dispatch. The handler under test does not touch ctx.client or
-		// ctx.logger, but CommandContext still requires them; the two casts below
-		// are the unavoidable boundary where we stub external SDK and internal
-		// class types that cannot be satisfied structurally.
+		// Simulate dispatch. The handler under test does not touch ctx.client, and
+		// it does not log directly, but cmd.execute() may still use ctx.logger
+		// when rendering a non-undefined CommandResult. The two casts below are
+		// the unavoidable boundary where we stub external SDK and internal class
+		// types that cannot be satisfied structurally.
 		const mockLogger: CommandContext["logger"] =
 			// biome-ignore lint/plugin: test-only stub for Logger class; structural satisfaction impractical
 			{
