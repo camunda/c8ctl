@@ -17,6 +17,21 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
 
+// Strict allowlist of binaries this test utility is permitted to invoke.
+// Callers pass a bare command name; the allowlist prevents an unexpected
+// absolute path or uncontrolled value from being spawned. This also satisfies
+// CodeQL's "Shell command built from environment values" query by sanitising
+// the taint flow into `command`.
+const ALLOWED_COMMANDS = new Set(["node", "sh", "bash", "zsh", "fish"]);
+
+function assertAllowedCommand(command: string): void {
+	if (!ALLOWED_COMMANDS.has(command)) {
+		throw new Error(
+			`Unsafe command: ${JSON.stringify(command)} is not in the allowlist`,
+		);
+	}
+}
+
 function assertNoNul(value: string, fieldName: string): void {
 	// NUL terminates argv/envp on POSIX, so it corrupts process invocation.
 	if (value.includes("\u0000")) {
@@ -43,6 +58,7 @@ function validateSpawnInputs(
 	args: string[],
 	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
 ): void {
+	assertAllowedCommand(command);
 	assertNoControlChars(command, "command");
 
 	// args may legitimately contain newlines (e.g. `bash -c "multi\nline"`);
