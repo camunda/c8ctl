@@ -660,9 +660,9 @@ function buildRcBlock(completionFilePath: string): string {
 }
 
 /** Check if the RC file already contains the source line.
- *  Checks for both the raw completion file path and the escaped source line
- *  so upgrades from double-quoted to single-quoted are detected, and paths
- *  containing single quotes don't cause duplicate blocks. */
+ *  Checks for the block comment marker and for both the current single-quoted
+ *  source line and legacy double-quoted form, so upgrades are detected
+ *  without false-positiving on the raw path appearing in unrelated lines. */
 function rcAlreadyConfigured(
 	rcFile: string,
 	completionFilePath: string,
@@ -670,10 +670,14 @@ function rcAlreadyConfigured(
 	if (!existsSync(rcFile)) return false;
 	try {
 		const content = readFileSync(rcFile, "utf-8");
-		return (
-			content.includes(completionFilePath) ||
-			content.includes(buildSourceLine(completionFilePath))
-		);
+		// Check for the managed block marker
+		if (content.includes("# c8ctl shell completion")) return true;
+		// Check for current single-quoted source line
+		if (content.includes(buildSourceLine(completionFilePath))) return true;
+		// Check for legacy double-quoted source line
+		const escaped = completionFilePath.replaceAll('"', '\\"');
+		if (content.includes(`source "${escaped}"`)) return true;
+		return false;
 	} catch {
 		return false;
 	}
