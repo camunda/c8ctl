@@ -95,6 +95,9 @@ class C8ctl implements C8ctlPluginRuntime {
 	private _resolvedBaseUrl?: string;
 	private _deps?: C8ctlDeps;
 
+	/** When true, resolveClusterConfig skips the env-var-override warning. */
+	suppressProfileWarning = false;
+
 	readonly env: C8ctlEnv = {
 		version: getVersion(),
 		nodeVersion: process.version,

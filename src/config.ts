@@ -362,6 +362,13 @@ export function removeProfile(name: string): boolean {
 	}
 
 	saveProfiles(filtered);
+
+	// If the removed profile was the active session profile, clear it
+	// so `which profile` doesn't report a ghost profile.
+	if (c8ctl.activeProfile === name) {
+		clearActiveProfile();
+	}
+
 	return true;
 }
 
@@ -804,8 +811,10 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 		if (profile) {
 			// Warn when env vars are also present — avoids silent surprise
 			// Only warn when CAMUNDA_BASE_URL is set, since resolveClusterConfig
-			// only uses env vars when CAMUNDA_BASE_URL is present
-			if (process.env.CAMUNDA_BASE_URL?.trim()) {
+			// only uses env vars when CAMUNDA_BASE_URL is present.
+			// Skip the warning when suppressProfileWarning is set (e.g. during
+			// `use profile --none` which is about to clear the profile).
+			if (process.env.CAMUNDA_BASE_URL?.trim() && !c8ctl.suppressProfileWarning) {
 				const logger = getLogger();
 				logger.warn(
 					`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,

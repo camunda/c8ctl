@@ -288,6 +288,14 @@ async function main() {
 		(useResourceKey ? COMMAND_DISPATCH.get(`${verb}:`) : undefined);
 	if (handler) {
 		const profile = str(values.profile);
+
+		// Suppress the env-var-override warning when the user is about to
+		// clear the active profile — the warning tells them to run the very
+		// command they are already running.
+		if (verb === "use" && normalizedResource === "profile" && values.none) {
+			c8ctl.suppressProfileWarning = true;
+		}
+
 		const ctx: CommandContext = {
 			client: createClient(profile),
 			logger,

@@ -227,6 +227,26 @@ describe('Profile management', () => {
       const allOutput = consoleErrorSpy.join('\n') + consoleLogSpy.join('\n');
       assert.ok(!allOutput.includes('overriding'), 'Should not warn when no env vars conflict');
     });
+
+    test('no warning when suppressProfileWarning is set (use profile --none)', () => {
+      addProfile({
+        name: 'about-to-clear',
+        baseUrl: 'https://profile-cluster.example.com',
+      });
+      c8ctl.activeProfile = 'about-to-clear';
+      process.env.CAMUNDA_BASE_URL = 'https://env-cluster.example.com';
+      c8ctl.suppressProfileWarning = true;
+
+      try {
+        resolveClusterConfig();
+
+        const allOutput = consoleErrorSpy.join('\n') + consoleLogSpy.join('\n');
+        assert.ok(!allOutput.includes('overriding'),
+          'Should not warn when suppressProfileWarning is set');
+      } finally {
+        c8ctl.suppressProfileWarning = false;
+      }
+    });
   });
 
   describe('clearActiveProfile', () => {
