@@ -30,6 +30,7 @@ import { loadSessionState, resolveTenantId } from "./config.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
 import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
+import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.
@@ -121,6 +122,9 @@ const VERB_REQUIRES_RESOURCE = new Set(
 async function main() {
 	// Load session state from disk at startup
 	loadSessionState();
+
+	// Fire-and-forget: check for CLI updates in the background
+	startUpdateCheck(c8ctl.version);
 
 	const { values, positionals } = parseCliArgs();
 
@@ -319,13 +323,15 @@ async function main() {
 // Use realpathSync to resolve symlinks (e.g. when installed globally via npm link)
 try {
 	if (realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-		main().catch((error) => {
-			if (c8ctl.verbose) {
-				throw error;
-			}
-			console.error("Unexpected error:", error);
-			process.exit(1);
-		});
+		main()
+			.then(() => printUpdateNotification())
+			.catch((error) => {
+				if (c8ctl.verbose) {
+					throw error;
+				}
+				console.error("Unexpected error:", error);
+				process.exit(1);
+			});
 	}
 } catch {
 	/* not invoked directly */
