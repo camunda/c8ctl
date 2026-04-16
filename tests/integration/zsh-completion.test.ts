@@ -18,7 +18,7 @@ describe("Zsh Completion Integration Tests", () => {
 	test("zsh completion script is generated without errors", async () => {
 		const result = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -45,7 +45,7 @@ describe("Zsh Completion Integration Tests", () => {
 		// Generate completion script
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -99,7 +99,7 @@ echo "SUCCESS"
 	}, async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -158,7 +158,7 @@ echo "SUCCESS"
 	test("zsh completion script structure is valid", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -189,7 +189,7 @@ echo "SUCCESS"
 	test('zsh completion has resources for "list" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -211,7 +211,7 @@ echo "SUCCESS"
 	test('zsh completion has resources for "get" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -232,7 +232,7 @@ echo "SUCCESS"
 	test('zsh completion supports shell types for "completion" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -251,7 +251,7 @@ echo "SUCCESS"
 	test("zsh completion includes aliases (pi for process-instance)", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -268,7 +268,7 @@ echo "SUCCESS"
 	test("zsh completion includes flags with descriptions", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},
@@ -297,7 +297,7 @@ echo "SUCCESS"
 	test("zsh completion uses _arguments for flag completion", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "zsh"],
+			["--experimental-strip-types", "src/index.ts", "completion", "zsh"],
 			{
 				cwd: process.cwd(),
 			},

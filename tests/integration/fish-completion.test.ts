@@ -18,7 +18,7 @@ describe("Fish Completion Integration Tests", () => {
 	test("fish completion script is generated without errors", async () => {
 		const result = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -49,7 +49,7 @@ describe("Fish Completion Integration Tests", () => {
 		// Generate completion script
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -94,7 +94,7 @@ echo "SUCCESS"
 	test("fish completion includes verbs", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -118,7 +118,7 @@ echo "SUCCESS"
 	test("fish completion uses __fish_use_subcommand condition", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -140,7 +140,7 @@ echo "SUCCESS"
 	test('fish completion has resources for "list" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -176,7 +176,7 @@ echo "SUCCESS"
 	test('fish completion has resources for "get" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -197,7 +197,7 @@ echo "SUCCESS"
 	test('fish completion supports shell types for "completion" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -222,7 +222,7 @@ echo "SUCCESS"
 	test("fish completion includes aliases (pi for process-instance)", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -239,7 +239,7 @@ echo "SUCCESS"
 	test("fish completion includes flags with descriptions", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -273,7 +273,7 @@ echo "SUCCESS"
 	test("fish completion clears existing completions", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -295,7 +295,7 @@ echo "SUCCESS"
 	test("fish completion has flags for both c8ctl and c8 commands", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -317,7 +317,7 @@ echo "SUCCESS"
 	test("fish completion uses -r flag for options requiring arguments", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},
@@ -343,7 +343,7 @@ echo "SUCCESS"
 	test("fish completion structure is valid", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "fish"],
+			["--experimental-strip-types", "src/index.ts", "completion", "fish"],
 			{
 				cwd: process.cwd(),
 			},

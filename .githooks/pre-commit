@@ -11,7 +11,7 @@
 staged_src=()
 while IFS= read -r -d '' f; do
   staged_src+=("$f")
-done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates')
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**')
 
 # --- Collect staged test files ---
 staged_tests=()
@@ -33,7 +33,7 @@ while IFS= read -r -d '' f; do
       break
     fi
   done
-done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':!src/templates' 'tests/*.ts' 'tests/**/*.ts')
+done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**' 'tests/*.ts' 'tests/**/*.ts')
 
 if [ ${#dirty_files[@]} -gt 0 ]; then
   echo "pre-commit: These files have both staged and unstaged changes:"

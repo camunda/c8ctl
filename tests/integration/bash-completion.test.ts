@@ -11,7 +11,7 @@ describe("Bash Completion Integration Tests", () => {
 	test("bash completion script is generated without errors", async () => {
 		const result = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -36,7 +36,7 @@ describe("Bash Completion Integration Tests", () => {
 		// Generate completion script
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -75,7 +75,7 @@ echo "SUCCESS"
 	test('bash completion completes verbs starting with "l"', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -109,7 +109,7 @@ echo "\${COMPREPLY[@]}"
 	test('bash completion completes resources for "list" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -147,7 +147,7 @@ echo "\${COMPREPLY[@]}"
 	test('bash completion completes shell types for "completion" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -182,7 +182,7 @@ echo "\${COMPREPLY[@]}"
 	test('bash completion completes resources for "get" command', async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -219,7 +219,7 @@ echo "\${COMPREPLY[@]}"
 	test("bash completion handles flags correctly", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -252,7 +252,7 @@ echo "\${COMPREPLY[@]}"
 	test("bash completion completes aliases (pi for process-instance)", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},
@@ -285,7 +285,7 @@ echo "\${COMPREPLY[@]}"
 	test("bash completion does not use external dependencies", async () => {
 		const completionResult = await asyncSpawn(
 			"node",
-			["src/index.ts", "completion", "bash"],
+			["--experimental-strip-types", "src/index.ts", "completion", "bash"],
 			{
 				cwd: process.cwd(),
 			},

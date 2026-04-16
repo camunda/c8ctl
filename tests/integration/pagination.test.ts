@@ -53,7 +53,7 @@ let dataDir: string;
  * Uses a dedicated C8CTL_DATA_DIR so session state is isolated.
  */
 function cli(...args: string[]) {
-	return asyncSpawn("node", [CLI, ...args], {
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
 		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
 	});
