@@ -362,6 +362,13 @@ export function removeProfile(name: string): boolean {
 	}
 
 	saveProfiles(filtered);
+
+	// If the removed profile was the active session profile, clear it
+	// so `which profile` doesn't report a ghost profile.
+	if (c8ctl.activeProfile === name) {
+		clearActiveProfile();
+	}
+
 	return true;
 }
 

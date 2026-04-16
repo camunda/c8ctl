@@ -80,6 +80,7 @@ describe('Config Module', () => {
         rmSync(testModelerDir, { recursive: true, force: true });
       }
       process.env = originalEnv;
+      c8ctl.activeProfile = undefined;
     });
 
     test('loadProfiles returns empty array when no profiles exist', () => {
@@ -191,6 +192,26 @@ describe('Config Module', () => {
     test('removeProfile returns false for non-existent profile', () => {
       const removed = removeProfile('nonexistent');
       assert.strictEqual(removed, false);
+    });
+
+    test('removeProfile clears active session profile when it matches the removed profile', () => {
+      addProfile({ name: 'doomed', baseUrl: 'http://doomed.com/v2' });
+      setActiveProfile('doomed');
+      assert.strictEqual(c8ctl.activeProfile, 'doomed');
+
+      const removed = removeProfile('doomed');
+      assert.strictEqual(removed, true);
+      assert.strictEqual(c8ctl.activeProfile, undefined, 'Active profile should be cleared after deletion');
+    });
+
+    test('removeProfile does not clear active session profile when a different profile is removed', () => {
+      addProfile({ name: 'keep-active', baseUrl: 'http://keep.com/v2' });
+      addProfile({ name: 'remove-other', baseUrl: 'http://other.com/v2' });
+      setActiveProfile('keep-active');
+
+      const removed = removeProfile('remove-other');
+      assert.strictEqual(removed, true);
+      assert.strictEqual(c8ctl.activeProfile, 'keep-active', 'Active profile should be unchanged');
     });
   });
   
