@@ -892,12 +892,20 @@ async function startC8Run(config, debug = false) {
   }
 }
 
-async function stopC8Run(config) {
+async function stopC8Run(config, debug = false) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   const markerExists = existsSync(markerFile);
+
+  if (!markerExists) {
+    logger.warn(
+      'No cluster is currently running.',
+    );
+    return;
+  }
+
   const installedVersions = existsSync(config.cacheDir)
     ? readdirSync(config.cacheDir, { withFileTypes: true })
         .filter(
@@ -907,13 +915,6 @@ async function stopC8Run(config) {
         .map((entry) => entry.name.slice('c8run-'.length))
         .sort()
     : [];
-
-  if (!markerExists && installedVersions.length === 0) {
-    logger.warn(
-      'No running cluster found (use "c8ctl cluster start" to start one).',
-    );
-    return;
-  }
 
   const versionsToTry = [];
 
@@ -952,9 +953,20 @@ async function stopC8Run(config) {
     const { code: exitCode, signal: exitSignal } = await new Promise(
       (resolve, reject) => {
         const proc = spawn(binaryPath, ['stop'], {
-          stdio: 'inherit',
+          stdio: ['ignore', 'pipe', 'pipe'],
           cwd: dirname(binaryPath),
         });
+
+        const handleOutput = (chunk, stream) => {
+          if (debug) {
+            const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+            stream.write(text);
+          }
+        };
+
+        proc.stdout?.on('data', (chunk) => handleOutput(chunk, process.stdout));
+        proc.stderr?.on('data', (chunk) => handleOutput(chunk, process.stderr));
+
         proc.on('exit', (code, signal) => resolve({ code, signal }));
         proc.on('error', reject);
       },
@@ -1522,7 +1534,7 @@ export const commands = {
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        await stopC8Run(config);
+        await stopC8Run(config, parsed.debug);
       } catch (error) {
         logger.error(`Failed to stop cluster: ${error}`);
         process.exit(1);
