@@ -327,8 +327,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
 		try {
 			const initialized = await pollUntil(
-				async () =>
-					watch.getOutput().includes("Monitoring extensions: .xml"),
+				async () => watch.getOutput().includes("Monitoring extensions: .xml"),
 				5000,
 				POLL_INTERVAL_MS,
 			);
@@ -348,8 +347,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 			// Step 2: copy a valid BPMN as a .xml file — this SHOULD be detected and deployed
 			copyFileSync(VALID_BPMN, join(testWatchDir, "process.xml"));
 			const detected = await pollUntil(
-				async () =>
-					watch.getOutput().includes("Change detected: process.xml"),
+				async () => watch.getOutput().includes("Change detected: process.xml"),
 				POLL_TIMEOUT_MS,
 				POLL_INTERVAL_MS,
 			);

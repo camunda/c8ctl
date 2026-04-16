@@ -143,6 +143,10 @@ function collectResourceFiles(
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
 			return collected;
 		}
+		// Unless --force, reject files with unsupported extensions
+		if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(dirPath))) {
+			return collected;
+		}
 		const groupInfo = findGroupRoot(dirPath, basePath);
 		collected.push({
 			path: dirPath,

@@ -95,20 +95,13 @@ describe("CLI behavioural: deploy", () => {
 		const unsupportedFile = join(tempDir, "process.unsupported");
 		writeFileSync(unsupportedFile, "dummy content");
 
-		const result = await c8(
-			"deploy",
-			unsupportedFile,
-			"--force",
-			"--dry-run",
-		);
+		const result = await c8("deploy", unsupportedFile, "--force", "--dry-run");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok(
-			typeof out.url === "string" && out.url.endsWith("/deployments"),
-		);
+		assert.ok(typeof out.url === "string" && out.url.endsWith("/deployments"));
 
 		const body = asRecord(out.body);
 		const resources = asRecordArray(body.resources);
