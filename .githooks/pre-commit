@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run biome + tsc on staged files and re-stage any auto-fixed changes.
+# Pre-commit hook: run biome on staged files and re-stage any auto-fixed changes.
 # - src/ files: full biome check --fix (lint + format + plugin)
 # - tests/ files: biome check --fix (format only — linter scoped to src/ in biome.json)
-# - Both: tsc --noEmit via tsconfig.check.json
+#
+# Note: typechecking (`tsc --noEmit -p tsconfig.check.json`) is not run here;
+# use `npm run typecheck` to verify types. Tests currently have pre-existing
+# type errors that will be fixed in follow-up PRs.
 
 # --- Collect staged src files ---
 staged_src=()
