@@ -29,10 +29,24 @@ Lowercase subject (except proper nouns). No PascalCase subjects (rule enforced).
 Keep subject concise; body can include details, rationale, links.
 Prefix breaking changes with BREAKING CHANGE: either in body or footer.
 
+### Review-comment fix-ups
+
+Commits that address PR review comments must use the `chore` type (e.g. `chore:` or `chore(<scope>):`), **not** the `fix` type.
+`fix` commits (e.g. `fix:` or `fix(<scope>):`) trigger a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
+
+```
+# Correct
+chore: address review comments — use logger.json for dry-run
+
+# Wrong — will pollute the CHANGELOG
+fix: address review comments — use logger.json for dry-run
+```
+
 Examples:
 
 feat(worker): add job worker concurrency gating
 fix(retry): prevent double backoff application
 chore(ci): stabilize deterministic publish (skip spec fetch)
+chore: address review comments — NUL-safe pre-commit hook
 docs: document deterministic build flag
 refactor(auth): simplify token refresh jitter logic
