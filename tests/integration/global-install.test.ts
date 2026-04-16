@@ -13,77 +13,116 @@
  * Run `npm run build` to enable them.
  */
 
-import { test, describe, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert';
-import { mkdirSync, rmSync, symlinkSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
-import { asyncSpawn } from '../utils/spawn.ts';
+import assert from "node:assert";
+import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
+import { asyncSpawn } from "../utils/spawn.ts";
 
-const projectRoot = resolve(import.meta.dirname, '..', '..');
-const distEntry = join(projectRoot, 'dist', 'index.js');
-const skipReason = existsSync(distEntry) ? undefined : 'dist/index.js not found - run "npm run build" first';
+const projectRoot = resolve(import.meta.dirname, "..", "..");
+const distEntry = join(projectRoot, "dist", "index.js");
+const skipReason = existsSync(distEntry)
+	? undefined
+	: 'dist/index.js not found - run "npm run build" first';
 
-describe('Global Install (symlink) Integration Tests', { skip: skipReason }, () => {
-  let tempBinDir: string;
-  let symlinkPath: string;
+describe("Global Install (symlink) Integration Tests", {
+	skip: skipReason,
+}, () => {
+	let tempBinDir: string;
+	let symlinkPath: string;
 
-  beforeEach(() => {
-    tempBinDir = join(tmpdir(), `c8ctl-global-test-${Date.now()}`);
-    mkdirSync(tempBinDir, { recursive: true });
-    symlinkPath = join(tempBinDir, 'c8ctl.js');
-  });
+	beforeEach(() => {
+		tempBinDir = join(tmpdir(), `c8ctl-global-test-${Date.now()}`);
+		mkdirSync(tempBinDir, { recursive: true });
+		symlinkPath = join(tempBinDir, "c8ctl.js");
+	});
 
-  afterEach(() => {
-    if (existsSync(tempBinDir)) {
-      rmSync(tempBinDir, { recursive: true, force: true });
-    }
-  });
+	afterEach(() => {
+		if (existsSync(tempBinDir)) {
+			rmSync(tempBinDir, { recursive: true, force: true });
+		}
+	});
 
-  test('binary works when invoked directly with node', async () => {
-    const result = await asyncSpawn('node', [distEntry, 'help']);
+	test("binary works when invoked directly with node", async () => {
+		const result = await asyncSpawn("node", [distEntry, "help"]);
 
-    assert.strictEqual(result.status, 0, `Expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
-    assert.ok(result.stdout.includes('c8ctl'), 'help output should mention c8ctl');
-    assert.ok(result.stdout.includes('Usage:'), 'help output should contain Usage');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stdout.includes("c8ctl"),
+			"help output should mention c8ctl",
+		);
+		assert.ok(
+			result.stdout.includes("Usage:"),
+			"help output should contain Usage",
+		);
+	});
 
-  test('binary works when node receives a symlink as argv[1] (simulates npm link / npm install -g)', async () => {
-    symlinkSync(distEntry, symlinkPath);
+	test("binary works when node receives a symlink as argv[1] (simulates npm link / npm install -g)", async () => {
+		symlinkSync(distEntry, symlinkPath);
 
-    // Use `node <symlink>` — this is how npm global installs work:
-    // the shebang causes node to be invoked with the symlink path as argv[1]
-    const result = await asyncSpawn('node', [symlinkPath, 'help']);
+		// Use `node <symlink>` — this is how npm global installs work:
+		// the shebang causes node to be invoked with the symlink path as argv[1]
+		const result = await asyncSpawn("node", [symlinkPath, "help"]);
 
-    assert.strictEqual(result.status, 0, `Expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
-    assert.ok(result.stdout.includes('c8ctl'), 'help output should mention c8ctl');
-    assert.ok(result.stdout.includes('Usage:'), 'help output should contain Usage');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stdout.includes("c8ctl"),
+			"help output should mention c8ctl",
+		);
+		assert.ok(
+			result.stdout.includes("Usage:"),
+			"help output should contain Usage",
+		);
+	});
 
-  test('binary shows version when invoked through a symlink', async () => {
-    symlinkSync(distEntry, symlinkPath);
+	test("binary shows version when invoked through a symlink", async () => {
+		symlinkSync(distEntry, symlinkPath);
 
-    const result = await asyncSpawn('node', [symlinkPath, 'help']);
+		const result = await asyncSpawn("node", [symlinkPath, "help"]);
 
-    assert.strictEqual(result.status, 0, `Expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
-    // Version line appears in help output header
-    assert.match(result.stdout, /v\d+\.\d+\.\d+/, 'output should contain a version string');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		// Version line appears in help output header
+		assert.match(
+			result.stdout,
+			/v\d+\.\d+\.\d+/,
+			"output should contain a version string",
+		);
+	});
 
-  test('binary works through a double symlink (symlink -> symlink -> dist/index.js)', async () => {
-    // Simulates npm global bin -> node_modules symlink -> project dist
-    const intermediateDir = join(tempBinDir, 'node_modules');
-    mkdirSync(intermediateDir, { recursive: true });
-    const intermediatePath = join(intermediateDir, 'index.js');
+	test("binary works through a double symlink (symlink -> symlink -> dist/index.js)", async () => {
+		// Simulates npm global bin -> node_modules symlink -> project dist
+		const intermediateDir = join(tempBinDir, "node_modules");
+		mkdirSync(intermediateDir, { recursive: true });
+		const intermediatePath = join(intermediateDir, "index.js");
 
-    // First symlink: intermediate -> real file
-    symlinkSync(distEntry, intermediatePath);
-    // Second symlink: bin entry -> intermediate
-    symlinkSync(intermediatePath, symlinkPath);
+		// First symlink: intermediate -> real file
+		symlinkSync(distEntry, intermediatePath);
+		// Second symlink: bin entry -> intermediate
+		symlinkSync(intermediatePath, symlinkPath);
 
-    const result = await asyncSpawn('node', [symlinkPath, 'help']);
+		const result = await asyncSpawn("node", [symlinkPath, "help"]);
 
-    assert.strictEqual(result.status, 0, `Expected exit 0, got ${result.status}. stderr: ${result.stderr}`);
-    assert.ok(result.stdout.includes('c8ctl'), 'help output should mention c8ctl');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stdout.includes("c8ctl"),
+			"help output should mention c8ctl",
+		);
+	});
 });

@@ -3,39 +3,62 @@
  * Tests that the generated fish completion script works correctly in a real fish shell
  */
 
-import { test, describe } from 'node:test';
-import assert from 'node:assert';
-import { spawnSync } from 'node:child_process';
-import { asyncSpawn } from '../utils/spawn.ts';
+import assert from "node:assert";
+import { spawnSync } from "node:child_process";
+import { describe, test } from "node:test";
+import { asyncSpawn } from "../utils/spawn.ts";
 
 // Check if fish is available (sync check is fine — runs once before tests)
 function isFishAvailable(): boolean {
-  const result = spawnSync('which', ['fish'], { encoding: 'utf-8' });
-  return result.status === 0;
+	const result = spawnSync("which", ["fish"], { encoding: "utf-8" });
+	return result.status === 0;
 }
 
-describe('Fish Completion Integration Tests', () => {
-  test('fish completion script is generated without errors', async () => {
-    const result = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+describe("Fish Completion Integration Tests", () => {
+	test("fish completion script is generated without errors", async () => {
+		const result = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    assert.strictEqual(result.status, 0, 'completion fish command should succeed');
-    assert.ok(result.stdout.includes('# c8ctl fish completion'), 'Should contain fish completion header');
-    assert.ok(result.stdout.includes('complete -c c8ctl'), 'Should contain complete commands for c8ctl');
-    assert.ok(result.stdout.includes('complete -c c8'), 'Should contain complete commands for c8');
-  });
+		assert.strictEqual(
+			result.status,
+			0,
+			"completion fish command should succeed",
+		);
+		assert.ok(
+			result.stdout.includes("# c8ctl fish completion"),
+			"Should contain fish completion header",
+		);
+		assert.ok(
+			result.stdout.includes("complete -c c8ctl"),
+			"Should contain complete commands for c8ctl",
+		);
+		assert.ok(
+			result.stdout.includes("complete -c c8"),
+			"Should contain complete commands for c8",
+		);
+	});
 
-  test('fish completion script loads without errors in fish', { skip: !isFishAvailable() ? 'fish not available' : false }, async () => {
-    // Generate completion script
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion script loads without errors in fish", {
+		skip: !isFishAvailable() ? "fish not available" : false,
+	}, async () => {
+		// Generate completion script
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const completionScript = completionResult.stdout;
+		const completionScript = completionResult.stdout;
 
-    // Create a test script that sources the completion and verifies it loads
-    const testScript = `
+		// Create a test script that sources the completion and verifies it loads
+		const testScript = `
 # Create isolated fish config
 export XDG_CONFIG_HOME=$(mktemp -d)
 export HOME=$XDG_CONFIG_HOME
@@ -57,208 +80,296 @@ echo "SUCCESS"
 ' 2>&1
 `;
 
-    const result = await asyncSpawn('sh', ['-c', testScript], {
-      env: { ...process.env, PATH: process.env.PATH },
-    });
+		const result = await asyncSpawn("sh", ["-c", testScript], {
+			env: { ...process.env, PATH: process.env.PATH },
+		});
 
-    assert.strictEqual(result.status, 0, 'Fish script should succeed');
-    assert.ok(result.stdout.includes('SUCCESS'), 'Completion should load successfully');
-  });
+		assert.strictEqual(result.status, 0, "Fish script should succeed");
+		assert.ok(
+			result.stdout.includes("SUCCESS"),
+			"Completion should load successfully",
+		);
+	});
 
-  test('fish completion includes verbs', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion includes verbs", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Check for verb completions
-    assert.ok(script.includes("'list'"), 'Should include list verb');
-    assert.ok(script.includes("'get'"), 'Should include get verb');
-    assert.ok(script.includes("'create'"), 'Should include create verb');
-    assert.ok(script.includes("'deploy'"), 'Should include deploy verb');
-    assert.ok(script.includes("'run'"), 'Should include run verb');
-    assert.ok(script.includes("'watch'"), 'Should include watch verb');
-    assert.ok(script.includes("'completion'"), 'Should include completion verb');
-  });
+		// Check for verb completions
+		assert.ok(script.includes("'list'"), "Should include list verb");
+		assert.ok(script.includes("'get'"), "Should include get verb");
+		assert.ok(script.includes("'create'"), "Should include create verb");
+		assert.ok(script.includes("'deploy'"), "Should include deploy verb");
+		assert.ok(script.includes("'run'"), "Should include run verb");
+		assert.ok(script.includes("'watch'"), "Should include watch verb");
+		assert.ok(
+			script.includes("'completion'"),
+			"Should include completion verb",
+		);
+	});
 
-  test('fish completion uses __fish_use_subcommand condition', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion uses __fish_use_subcommand condition", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Verify that verbs use __fish_use_subcommand to only show when no command given
-    assert.ok(
-      script.includes("__fish_use_subcommand' -a 'list'"),
-      'Should use __fish_use_subcommand for list'
-    );
-    assert.ok(
-      script.includes("__fish_use_subcommand' -a 'get'"),
-      'Should use __fish_use_subcommand for get'
-    );
-  });
+		// Verify that verbs use __fish_use_subcommand to only show when no command given
+		assert.ok(
+			script.includes("__fish_use_subcommand' -a 'list'"),
+			"Should use __fish_use_subcommand for list",
+		);
+		assert.ok(
+			script.includes("__fish_use_subcommand' -a 'get'"),
+			"Should use __fish_use_subcommand for get",
+		);
+	});
 
-  test('fish completion has resources for "list" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test('fish completion has resources for "list" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Check that list command has appropriate resources
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from list' -a 'process-instances'"),
-      'Should include process-instances for list'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from list' -a 'user-tasks'"),
-      'Should include user-tasks for list'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from list' -a 'incidents'"),
-      'Should include incidents for list'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from list' -a 'profiles'"),
-      'Should include profiles for list'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from list' -a 'plugins'"),
-      'Should include plugins for list'
-    );
-  });
+		// Check that list command has appropriate resources
+		assert.ok(
+			script.includes(
+				"__fish_seen_subcommand_from list' -a 'process-instances'",
+			),
+			"Should include process-instances for list",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from list' -a 'user-tasks'"),
+			"Should include user-tasks for list",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from list' -a 'incidents'"),
+			"Should include incidents for list",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from list' -a 'profiles'"),
+			"Should include profiles for list",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from list' -a 'plugins'"),
+			"Should include plugins for list",
+		);
+	});
 
-  test('fish completion has resources for "get" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test('fish completion has resources for "get" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from get' -a 'process-instance'"),
-      'Should include process-instance for get'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from get' -a 'topology'"),
-      'Should include topology for get'
-    );
-  });
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from get' -a 'process-instance'"),
+			"Should include process-instance for get",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from get' -a 'topology'"),
+			"Should include topology for get",
+		);
+	});
 
-  test('fish completion supports shell types for "completion" command', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test('fish completion supports shell types for "completion" command', async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from completion' -a 'bash'"),
-      'Should include bash for completion'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from completion' -a 'zsh'"),
-      'Should include zsh for completion'
-    );
-    assert.ok(
-      script.includes("__fish_seen_subcommand_from completion' -a 'fish'"),
-      'Should include fish for completion'
-    );
-  });
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from completion' -a 'bash'"),
+			"Should include bash for completion",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from completion' -a 'zsh'"),
+			"Should include zsh for completion",
+		);
+		assert.ok(
+			script.includes("__fish_seen_subcommand_from completion' -a 'fish'"),
+			"Should include fish for completion",
+		);
+	});
 
-  test('fish completion includes aliases (pi for process-instance)', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion includes aliases (pi for process-instance)", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    assert.ok(script.includes("'pi'"), 'Should include pi alias');
-    assert.ok(script.includes("'ut'"), 'Should include ut alias');
-    assert.ok(script.includes("'inc'"), 'Should include inc alias');
-    assert.ok(script.includes("'msg'"), 'Should include msg alias');
-  });
+		assert.ok(script.includes("'pi'"), "Should include pi alias");
+		assert.ok(script.includes("'ut'"), "Should include ut alias");
+		assert.ok(script.includes("'inc'"), "Should include inc alias");
+		assert.ok(script.includes("'msg'"), "Should include msg alias");
+	});
 
-  test('fish completion includes flags with descriptions', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion includes flags with descriptions", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Global flags
-    assert.ok(script.includes("-s h -l help -d 'Show help'"), 'Should include -h/--help flag');
-    assert.ok(script.includes("-s v -l version -d"), 'Should include -v/--version flag');
-    assert.ok(script.includes("-l profile -d 'Use a specific profile'"), 'Should include --profile flag');
-    assert.ok(script.includes("-l variables -d 'Include variables in output'"), 'Should include --variables flag');
-    assert.ok(script.includes("-l baseUrl -d 'Cluster base URL'"), 'Should include --baseUrl flag');
-  });
+		// Global flags
+		assert.ok(
+			script.includes("-s h -l help -d 'Show help'"),
+			"Should include -h/--help flag",
+		);
+		assert.ok(
+			script.includes("-s v -l version -d"),
+			"Should include -v/--version flag",
+		);
+		assert.ok(
+			script.includes("-l profile -d 'Use a specific profile'"),
+			"Should include --profile flag",
+		);
+		assert.ok(
+			script.includes("-l variables -d 'Include variables in output'"),
+			"Should include --variables flag",
+		);
+		assert.ok(
+			script.includes("-l baseUrl -d 'Cluster base URL'"),
+			"Should include --baseUrl flag",
+		);
+	});
 
-  test('fish completion clears existing completions', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion clears existing completions", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Verify that script clears existing completions first
-    assert.ok(script.includes('complete -c c8ctl -e'), 'Should clear c8ctl completions');
-    assert.ok(script.includes('complete -c c8 -e'), 'Should clear c8 completions');
-  });
+		// Verify that script clears existing completions first
+		assert.ok(
+			script.includes("complete -c c8ctl -e"),
+			"Should clear c8ctl completions",
+		);
+		assert.ok(
+			script.includes("complete -c c8 -e"),
+			"Should clear c8 completions",
+		);
+	});
 
-  test('fish completion has flags for both c8ctl and c8 commands', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion has flags for both c8ctl and c8 commands", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Check that both commands have the same completions
-    assert.ok(script.includes('complete -c c8ctl -s h -l help'), 'Should have flags for c8ctl');
-    assert.ok(script.includes('complete -c c8 -s h -l help'), 'Should have flags for c8');
-  });
+		// Check that both commands have the same completions
+		assert.ok(
+			script.includes("complete -c c8ctl -s h -l help"),
+			"Should have flags for c8ctl",
+		);
+		assert.ok(
+			script.includes("complete -c c8 -s h -l help"),
+			"Should have flags for c8",
+		);
+	});
 
-  test('fish completion uses -r flag for options requiring arguments', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion uses -r flag for options requiring arguments", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Check that options that require arguments use -r flag
-    assert.ok(
-      script.includes("-l profile -d 'Use a specific profile' -r"),
-      'Should use -r for --profile'
-    );
-    assert.ok(
-      script.includes("-l variables -d 'Include variables in output'"),
-      'Should include --variables flag (boolean, no -r)'
-    );
-    assert.ok(
-      script.includes("-l baseUrl -d 'Cluster base URL' -r"),
-      'Should use -r for --baseUrl'
-    );
-  });
+		// Check that options that require arguments use -r flag
+		assert.ok(
+			script.includes("-l profile -d 'Use a specific profile' -r"),
+			"Should use -r for --profile",
+		);
+		assert.ok(
+			script.includes("-l variables -d 'Include variables in output'"),
+			"Should include --variables flag (boolean, no -r)",
+		);
+		assert.ok(
+			script.includes("-l baseUrl -d 'Cluster base URL' -r"),
+			"Should use -r for --baseUrl",
+		);
+	});
 
-  test('fish completion structure is valid', async () => {
-    const completionResult = await asyncSpawn('node', ['src/index.ts', 'completion', 'fish'], {
-      cwd: process.cwd(),
-    });
+	test("fish completion structure is valid", async () => {
+		const completionResult = await asyncSpawn(
+			"node",
+			["src/index.ts", "completion", "fish"],
+			{
+				cwd: process.cwd(),
+			},
+		);
 
-    const script = completionResult.stdout;
+		const script = completionResult.stdout;
 
-    // Verify key structural elements
-    assert.ok(
-      script.startsWith('# c8ctl-completion-version:'),
-      'Should start with version header',
-    );
-    assert.ok(script.includes('complete -c c8ctl -e'), 'Should clear old completions');
-    assert.ok(script.includes('complete -c c8 -e'), 'Should clear old completions for c8');
-    
-    // Count approximate number of complete statements (should be many)
-    const completeCount = (script.match(/complete -c/g) || []).length;
-    assert.ok(completeCount > 100, `Should have many complete statements (found ${completeCount})`);
-  });
+		// Verify key structural elements
+		assert.ok(
+			script.startsWith("# c8ctl-completion-version:"),
+			"Should start with version header",
+		);
+		assert.ok(
+			script.includes("complete -c c8ctl -e"),
+			"Should clear old completions",
+		);
+		assert.ok(
+			script.includes("complete -c c8 -e"),
+			"Should clear old completions for c8",
+		);
+
+		// Count approximate number of complete statements (should be many)
+		const completeCount = (script.match(/complete -c/g) || []).length;
+		assert.ok(
+			completeCount > 100,
+			`Should have many complete statements (found ${completeCount})`,
+		);
+	});
 });

@@ -10,7 +10,9 @@ export const MS_PER_DAY = 86_400_000;
  * so any resource created during the current test run falls inside the window.
  */
 export function todayRange(): string {
-  const yesterday = new Date(Date.now() - MS_PER_DAY).toISOString().slice(0, 10);
-  const tomorrow  = new Date(Date.now() + MS_PER_DAY).toISOString().slice(0, 10);
-  return `${yesterday}..${tomorrow}`;
+	const yesterday = new Date(Date.now() - MS_PER_DAY)
+		.toISOString()
+		.slice(0, 10);
+	const tomorrow = new Date(Date.now() + MS_PER_DAY).toISOString().slice(0, 10);
+	return `${yesterday}..${tomorrow}`;
 }
