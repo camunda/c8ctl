@@ -1644,3 +1644,108 @@ describe('Cluster Plugin – ensureC8RunInstalled start vs install behavior', ()
     assert.ok(existsSync(join(tempDir, 'c8run-8.8')), 'should not purge the install');
   });
 });
+
+// ---------------------------------------------------------------------------
+// stopC8Run
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – stopC8Run', () => {
+  let tempDir: string;
+  let captured: string[];
+  let originalLog: typeof console.log;
+  let originalWarn: typeof console.warn;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+    captured = [];
+    originalLog = console.log;
+    originalWarn = console.warn;
+    console.log = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+    console.warn = (...args: unknown[]) => { captured.push(args.map(String).join(' ')); };
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+
+  test('returns early with warning when no marker and no running pidfiles', async () => {
+    const config = { cacheDir: tempDir, version: '8.8' };
+    await plugin.stopC8Run(config);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No cluster is currently running'), 'Should warn no cluster running');
+  });
+
+  test('returns early even when installed versions exist but no marker and no running pidfiles', async () => {
+    // Create an installed version directory (but no marker, no running processes)
+    const versionDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(versionDir, { recursive: true });
+
+    const config = { cacheDir: tempDir, version: '8.8' };
+    await plugin.stopC8Run(config);
+    const output = captured.join('\n');
+    assert.ok(output.includes('No cluster is currently running'), 'Should warn no cluster running');
+    assert.ok(!output.includes('Stopping'), 'Should not attempt to stop');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasRunningClusterPidfiles
+// ---------------------------------------------------------------------------
+
+describe('Cluster Plugin – hasRunningClusterPidfiles', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'c8ctl-test-'));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test('returns false when cache dir does not exist', () => {
+    const result = plugin.hasRunningClusterPidfiles(join(tempDir, 'nonexistent'));
+    assert.strictEqual(result, false);
+  });
+
+  test('returns false when no version directories exist', () => {
+    const result = plugin.hasRunningClusterPidfiles(tempDir);
+    assert.strictEqual(result, false);
+  });
+
+  test('returns false when .process files contain invalid PIDs', () => {
+    const versionDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(versionDir, { recursive: true });
+    writeFileSync(join(versionDir, 'camunda.process'), 'not-a-number');
+    const result = plugin.hasRunningClusterPidfiles(tempDir);
+    assert.strictEqual(result, false);
+  });
+
+  test('returns false when .process files reference non-running PIDs', () => {
+    const versionDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(versionDir, { recursive: true });
+    // Use a PID that almost certainly does not exist
+    writeFileSync(join(versionDir, 'camunda.process'), '999999999');
+    const result = plugin.hasRunningClusterPidfiles(tempDir);
+    assert.strictEqual(result, false);
+  });
+
+  test('returns true when a .process file references the current process PID', () => {
+    const versionDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(versionDir, { recursive: true });
+    // Use our own PID — guaranteed to be running
+    writeFileSync(join(versionDir, 'camunda.process'), String(process.pid));
+    const result = plugin.hasRunningClusterPidfiles(tempDir);
+    assert.strictEqual(result, true);
+  });
+
+  test('ignores non-.process files', () => {
+    const versionDir = join(tempDir, 'c8run-8.8', 'c8run-8.8.1');
+    mkdirSync(versionDir, { recursive: true });
+    writeFileSync(join(versionDir, 'camunda.log'), String(process.pid));
+    const result = plugin.hasRunningClusterPidfiles(tempDir);
+    assert.strictEqual(result, false);
+  });
+});

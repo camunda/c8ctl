@@ -892,18 +892,78 @@ async function startC8Run(config, debug = false) {
   }
 }
 
-async function stopC8Run(config, debug = false) {
+export function hasRunningClusterPidfiles(cacheDir) {
+  if (!existsSync(cacheDir)) {
+    return false;
+  }
+
+  const versionDirs = readdirSync(cacheDir, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() && entry.name.startsWith('c8run-'),
+    )
+    .map((entry) => join(cacheDir, entry.name));
+
+  const pathsToScan = [...versionDirs];
+
+  while (pathsToScan.length > 0) {
+    const currentPath = pathsToScan.pop();
+
+    if (!currentPath || !existsSync(currentPath)) {
+      continue;
+    }
+
+    for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+      const entryPath = join(currentPath, entry.name);
+
+      if (entry.isDirectory()) {
+        pathsToScan.push(entryPath);
+        continue;
+      }
+
+      if (!entry.isFile() || !entry.name.endsWith('.process')) {
+        continue;
+      }
+
+      const pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+
+      if (!Number.isInteger(pid) || pid <= 0) {
+        continue;
+      }
+
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        if (error && error.code === 'EPERM') {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+export async function stopC8Run(config, debug = false) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   const markerExists = existsSync(markerFile);
+  const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
 
-  if (!markerExists) {
+  if (!markerExists && !clusterAppearsRunning) {
     logger.warn(
       'No cluster is currently running.',
     );
     return;
+  }
+
+  if (!markerExists && clusterAppearsRunning) {
+    logger.warn(
+      'Cluster marker file is missing, but running cluster processes were detected. Proceeding with stop.',
+    );
   }
 
   const installedVersions = existsSync(config.cacheDir)
@@ -967,7 +1027,7 @@ async function stopC8Run(config, debug = false) {
         proc.stdout?.on('data', (chunk) => handleOutput(chunk, process.stdout));
         proc.stderr?.on('data', (chunk) => handleOutput(chunk, process.stderr));
 
-        proc.on('exit', (code, signal) => resolve({ code, signal }));
+        proc.on('close', (code, signal) => resolve({ code, signal }));
         proc.on('error', reject);
       },
     ).catch((error) => {
