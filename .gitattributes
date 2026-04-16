@@ -1,0 +1,10 @@
+# Normalize all text files to LF line endings in the repository.
+# On checkout, Git will use the platform-native line endings only for
+# files not explicitly pinned below.
+* text=auto
+
+# Always check out with LF regardless of platform
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
