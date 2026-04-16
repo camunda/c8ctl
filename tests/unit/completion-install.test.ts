@@ -251,16 +251,20 @@ describe("refreshCompletionsIfStale", () => {
 describe("installCompletion", () => {
 	let origDataDir: string | undefined;
 	let origHome: string | undefined;
+	let origXdgConfigHome: string | undefined;
 	let testDir: string;
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
 		origHome = process.env.HOME;
+		origXdgConfigHome = process.env.XDG_CONFIG_HOME;
 		testDir = join(tmpdir(), `c8ctl-completion-install-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
 		// Isolate HOME so RC wiring doesn't touch the real user's shell config
 		process.env.HOME = testDir;
+		// Isolate XDG config so fish completions do not write outside the temp dir
+		process.env.XDG_CONFIG_HOME = join(testDir, ".config");
 	});
 
 	afterEach(() => {
@@ -273,6 +277,11 @@ describe("installCompletion", () => {
 			delete process.env.HOME;
 		} else {
 			process.env.HOME = origHome;
+		}
+		if (origXdgConfigHome === undefined) {
+			delete process.env.XDG_CONFIG_HOME;
+		} else {
+			process.env.XDG_CONFIG_HOME = origXdgConfigHome;
 		}
 		rmSync(testDir, { recursive: true, force: true });
 	});
@@ -381,6 +390,7 @@ describe("completion version header", () => {
 		// We test via installCompletion to exercise the full path
 		const origDataDir = process.env.C8CTL_DATA_DIR;
 		const origHome = process.env.HOME;
+		const origXdgConfigHome = process.env.XDG_CONFIG_HOME;
 		const testDir = join(
 			tmpdir(),
 			`c8ctl-completion-header-${Date.now()}`,
@@ -388,6 +398,7 @@ describe("completion version header", () => {
 		mkdirSync(testDir, { recursive: true });
 		process.env.C8CTL_DATA_DIR = testDir;
 		process.env.HOME = testDir;
+		process.env.XDG_CONFIG_HOME = testDir;
 
 		try {
 			for (const shell of ["bash", "zsh", "fish"]) {
@@ -409,6 +420,11 @@ describe("completion version header", () => {
 				delete process.env.HOME;
 			} else {
 				process.env.HOME = origHome;
+			}
+			if (origXdgConfigHome === undefined) {
+				delete process.env.XDG_CONFIG_HOME;
+			} else {
+				process.env.XDG_CONFIG_HOME = origXdgConfigHome;
 			}
 			rmSync(testDir, { recursive: true, force: true });
 		}
