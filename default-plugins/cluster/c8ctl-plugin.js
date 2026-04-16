@@ -913,7 +913,15 @@ export function hasRunningClusterPidfiles(cacheDir) {
       continue;
     }
 
-    for (const entry of readdirSync(currentPath, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(currentPath, { withFileTypes: true });
+    } catch {
+      // Directory may have been removed between the existsSync check and now.
+      continue;
+    }
+
+    for (const entry of entries) {
       const entryPath = join(currentPath, entry.name);
 
       if (entry.isDirectory()) {
@@ -925,7 +933,13 @@ export function hasRunningClusterPidfiles(cacheDir) {
         continue;
       }
 
-      const pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+      let pid;
+      try {
+        pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+      } catch {
+        // Pidfile may have been removed between listing and reading.
+        continue;
+      }
 
       if (!Number.isInteger(pid) || pid <= 0) {
         continue;
@@ -957,6 +971,21 @@ export async function stopC8Run(config, debug = false) {
     logger.warn(
       'No cluster is currently running.',
     );
+    return;
+  }
+
+  if (markerExists && !clusterAppearsRunning) {
+    // Stale marker left behind (e.g. crash or forced kill). Clean up and
+    // return early — there is nothing to stop.
+    logger.warn(
+      'Cluster marker file found, but no running cluster processes detected. Cleaning up stale marker.',
+    );
+    if (existsSync(markerFile)) {
+      rmSync(markerFile);
+    }
+    if (existsSync(versionFile)) {
+      rmSync(versionFile);
+    }
     return;
   }
 
@@ -1017,22 +1046,35 @@ export async function stopC8Run(config, debug = false) {
           cwd: dirname(binaryPath),
         });
 
-        const handleOutput = (chunk, stream) => {
+        const stdoutChunks = [];
+        const stderrChunks = [];
+
+        proc.stdout?.on('data', (chunk) => {
+          stdoutChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf-8'));
           if (debug) {
-            const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
-            stream.write(text);
+            process.stdout.write(stdoutChunks[stdoutChunks.length - 1]);
           }
-        };
+        });
+        proc.stderr?.on('data', (chunk) => {
+          stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf-8'));
+          if (debug) {
+            process.stderr.write(stderrChunks[stderrChunks.length - 1]);
+          }
+        });
 
-        proc.stdout?.on('data', (chunk) => handleOutput(chunk, process.stdout));
-        proc.stderr?.on('data', (chunk) => handleOutput(chunk, process.stderr));
-
-        proc.on('close', (code, signal) => resolve({ code, signal }));
+        proc.on('close', (code, signal) =>
+          resolve({
+            code,
+            signal,
+            stdout: stdoutChunks.join(''),
+            stderr: stderrChunks.join(''),
+          }),
+        );
         proc.on('error', reject);
       },
     ).catch((error) => {
       lastError = error instanceof Error ? error : new Error(String(error));
-      return { code: -1, signal: null };
+      return { code: -1, signal: null, stdout: '', stderr: '' };
     });
 
     if (exitCode === 0 || (exitCode === null && !exitSignal)) {
@@ -1043,7 +1085,10 @@ export async function stopC8Run(config, debug = false) {
         `Stop command terminated by signal ${exitSignal}`,
       );
     } else if (exitCode !== -1) {
-      lastError = new Error(`Stop command failed with code ${exitCode}`);
+      const output = [stdout, stderr].filter(Boolean).join('\n');
+      lastError = new Error(
+        `Stop command failed with code ${exitCode}${output ? `:\n${output}` : ''}`,
+      );
     }
   }
 

@@ -1688,6 +1688,22 @@ describe('Cluster Plugin – stopC8Run', () => {
     assert.ok(output.includes('No cluster is currently running'), 'Should warn no cluster running');
     assert.ok(!output.includes('Stopping'), 'Should not attempt to stop');
   });
+
+  test('cleans up stale markers and returns early when marker exists but no processes running', async () => {
+    // Simulate stale marker left behind after a crash
+    writeFileSync(join(tempDir, 'cluster.active'), '');
+    writeFileSync(join(tempDir, 'cluster.version'), '8.8.1');
+
+    const config = { cacheDir: tempDir, version: '8.8' };
+    await plugin.stopC8Run(config);
+
+    const output = captured.join('\n');
+    assert.ok(output.includes('stale marker'), 'Should warn about stale marker');
+    assert.ok(!output.includes('Stopping'), 'Should not attempt to stop');
+    // Marker files should be cleaned up
+    assert.ok(!existsSync(join(tempDir, 'cluster.active')), 'Active marker should be removed');
+    assert.ok(!existsSync(join(tempDir, 'cluster.version')), 'Version marker should be removed');
+  });
 });
 
 // ---------------------------------------------------------------------------
