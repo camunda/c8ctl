@@ -436,7 +436,9 @@ ${resourceCases.join("\n")}
   esac
 }
 
-compdef _c8ctl c8ctl c8
+if (( $+functions[compdef] )); then
+  compdef _c8ctl c8ctl c8
+fi
 `;
 }
 
