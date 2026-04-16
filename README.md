@@ -177,7 +177,7 @@ c8ctl completion install
 c8ctl completion install --shell zsh
 ```
 
-This writes a completion script to the c8ctl data directory and wires it into your shell config (RC file for bash/zsh; completions directory for fish)C file for bash/zsh; completions directory for fish). Completions are **automatically refreshed** when c8ctl is upgraded — no manual re-install needed.
+This writes a completion script to the c8ctl data directory and wires it into your shell config (RC file for bash/zsh; completions directory for fish). Completions are **automatically refreshed** when c8ctl is upgraded — no manual re-install needed.
 
 #### Manual Setup
 

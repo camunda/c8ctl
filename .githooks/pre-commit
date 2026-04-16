@@ -3,12 +3,12 @@
 # and re-stage any auto-fixed changes.
 
 # Only check if there are staged files under src/
-STAGED=$(git diff --cached --name-only --diff-filter=d -- 'src/*')
+STAGED=$(git diff --cached --name-only --diff-filter=d -- 'src/')
 if [ -z "$STAGED" ]; then
   exit 0
 fi
 
-npx biome check --fix src/
+npx biome check --fix $STAGED
 BIOME_EXIT=$?
 
 # Re-stage any files that biome auto-fixed
