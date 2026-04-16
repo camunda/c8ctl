@@ -270,8 +270,22 @@ Examples:
 feat(worker): add job worker concurrency gating
 fix(retry): prevent double backoff application
 chore(ci): stabilize deterministic publish (skip spec fetch)
+chore: address review comments — NUL-safe pre-commit hook
 docs: document deterministic build flag
 refactor(auth): simplify token refresh jitter logic
+```
+
+#### Review-comment fix-ups
+
+Commits that address PR review comments must use `chore:`, **not** `fix:`.
+`fix:` triggers a patch release and a CHANGELOG entry — review iterations are not user-facing bug fixes.
+
+```
+# Correct
+chore: address review comments — use logger.json for dry-run
+
+# Wrong — will pollute the CHANGELOG
+fix: address review comments — use logger.json for dry-run
 ```
 
 ### Build pipeline
