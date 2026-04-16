@@ -650,6 +650,14 @@ function getFishCompletionsDir(): string {
 /** Generate the source line that goes into the shell RC file.
  *  Uses single quotes to prevent shell expansion of the path. */
 function buildSourceLine(completionFilePath: string): string {
+	// Reject control characters (newlines, null, etc.) that could inject
+	// additional commands into the shell RC file.
+	for (const ch of completionFilePath) {
+		const code = ch.charCodeAt(0);
+		if (code <= 0x1f || code === 0x7f) {
+			throw new Error("Completion file path contains control characters.");
+		}
+	}
 	const escaped = completionFilePath.replaceAll("'", "'\\''");
 	return `source '${escaped}'`;
 }
