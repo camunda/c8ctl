@@ -1177,6 +1177,11 @@ export const COMMAND_REGISTRY = {
 		resources: [],
 		flags: {
 			variables: { type: "string", description: "JSON variables" },
+			force: {
+				type: "boolean",
+				description:
+					"Deploy any file type, ignoring the default extension allow-list",
+			},
 		},
 	},
 

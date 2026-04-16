@@ -3,7 +3,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import {
 	ProcessDefinitionId,
 	TenantId,
@@ -13,6 +13,7 @@ import { defineCommand } from "../command-framework.ts";
 import { resolveTenantId } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger } from "../logger.ts";
+import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
 /**
  * Extract process ID from BPMN file
@@ -30,6 +31,7 @@ export async function run(
 	options: {
 		profile?: string;
 		variables?: string;
+		force?: boolean;
 	},
 ): Promise<void> {
 	if (
@@ -43,6 +45,16 @@ export async function run(
 	)
 		return;
 	const logger = getLogger();
+
+	// Validate file extension unless --force is set
+	const ext = extname(path);
+	if (!options.force && ext && !DEPLOYABLE_EXTENSIONS.includes(ext)) {
+		logger.error(
+			`Unsupported file extension "${ext}". Use --force to deploy any file type.`,
+		);
+		process.exit(1);
+	}
+
 	const client = createClient(options.profile);
 	const tenantId = resolveTenantId(options.profile);
 
@@ -96,11 +108,12 @@ export async function run(
 
 // ─── defineCommand wrapper ───────────────────────────────────────────────────
 
-/** Side-effectful: deploys a BPMN file and creates a process instance, logging progress inline. */
+/** Side-effectful: deploys a file and creates a process instance, logging progress inline. */
 export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 	await run(ctx.resource, {
 		profile: ctx.profile,
 		variables: flags.variables,
+		force: flags.force,
 	});
 	return { kind: "none" };
 });

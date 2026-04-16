@@ -143,4 +143,27 @@ describe("CLI behavioural: run", () => {
 		assert.strictEqual(result.status, 1);
 		assert.ok(result.stdout.includes("Usage: c8ctl run"));
 	});
+
+	test("rejects unsupported file extension without --force", async () => {
+		const result = await c8("run", "process.unsupported");
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Unsupported file extension"),
+			`Expected unsupported extension error in stderr.\nActual stderr:\n${result.stderr}`,
+		);
+	});
+
+	test("--force bypasses extension check (dry-run)", async () => {
+		const result = await c8(
+			"run",
+			"process.unsupported",
+			"--force",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assert.strictEqual(out.dryRun, true);
+		const body = asRecord(out.body, "dry-run body");
+		assert.strictEqual(body.path, "process.unsupported");
+	});
 });
