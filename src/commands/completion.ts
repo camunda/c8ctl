@@ -745,7 +745,7 @@ export function installCompletion(shellOverride?: string): void {
 		if (shell === "fish") {
 			result.fishCompletionsDir = getFishCompletionsDir();
 		}
-		console.log(JSON.stringify(result, null, 2));
+		logger.json(result);
 		return;
 	}
 
@@ -781,9 +781,7 @@ export function installCompletion(shellOverride?: string): void {
 		}
 
 		logger.info("Restart your shell or run:");
-		logger.info(
-			`  ${rcFile ? buildSourceLine(rcFile) : buildSourceLine(completionFile)}`,
-		);
+		logger.info(`  ${buildSourceLine(completionFile)}`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		logger.error(`Failed to install completions: ${msg}`);
