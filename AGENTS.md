@@ -228,6 +228,7 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 
 ### Refactoring discipline
 
+- **red/green refactor for new behaviour and bug fixes** — write the failing test first, then the minimal production change that makes it pass. The test serves two roles simultaneously: it encodes the acceptance criteria for the change, and it becomes a permanent regression guard. Writing the test first proves it can actually detect the defect or the missing behaviour; if a test passes before the production change lands, it isn't guarding anything. For bug fixes, scope the test to the defect *class*, not just the instance, so the same category of bug can't recur in a sibling code path
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
 - between refactors, always run `npm run typecheck` (`tsc --noEmit -p tsconfig.check.json`, covering `src/` and `tests/`), `npx biome check`, and `npm run test:unit` to verify correctness
 
