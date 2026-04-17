@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Pre-commit hook: run biome on staged files and re-stage any auto-fixed changes.
-# - src/ files: full biome check --fix (lint + format + plugin)
-# - tests/ files: biome check --fix (format only — linter scoped to src/ in biome.json)
-#
-# Note: typechecking (`tsc --noEmit -p tsconfig.check.json`) is not run here;
-# use `npm run typecheck` to verify types. Tests currently have pre-existing
-# type errors that will be fixed in follow-up PRs.
+# Pre-commit hook:
+# 1. Run biome check --fix on staged src/ and tests/ files (lint + format + plugin).
+#    Both trees are in biome scope per biome.json; the custom
+#    no-unsafe-type-assertion plugin applies to both.
+# 2. Run tsc --noEmit -p tsconfig.check.json to catch type/parse errors in
+#    both src/ and tests/ before they hit CI.
 
 # --- Collect staged src files ---
 staged_src=()
@@ -42,32 +41,52 @@ if [ ${#dirty_files[@]} -gt 0 ]; then
   exit 1
 fi
 
-# Skip if biome is not installed locally (avoid npx downloading it)
-if ! npx --no-install biome --version >/dev/null 2>&1; then
-  echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
-  exit 0
+EXIT_CODE=0
+
+# Run biome on all staged ts files (lint + format + plugin).
+# Skip (non-fatal) if biome is not installed locally — tsc still runs below.
+all_staged=("${staged_src[@]}" "${staged_tests[@]}")
+if [ ${#all_staged[@]} -gt 0 ]; then
+  if npx --no-install biome --version >/dev/null 2>&1; then
+    npx --no-install biome check --fix -- "${all_staged[@]}"
+    EXIT_CODE=$?
+    for f in "${all_staged[@]}"; do
+      [ -f "$f" ] && git add -- "$f"
+    done
+  else
+    echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
+  fi
 fi
 
-BIOME_EXIT=0
+# Typecheck the staged files (transitive imports are still resolved, so any
+# broken code reachable from a staged file is caught — but unrelated WIP in
+# src/ or tests/ won't block the commit). Skip if tsc is not installed.
+if [ ${#all_staged[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1; then
+  repo_root=$(git rev-parse --show-toplevel)
+  tmp_tsconfig=$(mktemp "$repo_root/.tsconfig.pre-commit.XXXXXX.json")
+  trap 'rm -f "$tmp_tsconfig"' EXIT
 
-# Run biome on staged src files (lint + format + plugin)
-if [ ${#staged_src[@]} -gt 0 ]; then
-  npx --no-install biome check --fix -- "${staged_src[@]}"
-  BIOME_EXIT=$?
-  for f in "${staged_src[@]}"; do
-    [ -f "$f" ] && git add -- "$f"
+  # Build a JSON array of the staged file paths (relative to repo root,
+  # which is where the temp tsconfig lives, so tsc resolves them correctly).
+  files_json=""
+  for f in "${all_staged[@]}"; do
+    files_json+="\"$f\","
   done
+  files_json="[${files_json%,}]"
+
+  cat > "$tmp_tsconfig" <<EOF
+{
+  "extends": "./tsconfig.check.json",
+  "include": [],
+  "files": $files_json
+}
+EOF
+
+  npx --no-install tsc --noEmit -p "$tmp_tsconfig"
+  TSC_EXIT=$?
+  [ $TSC_EXIT -ne 0 ] && EXIT_CODE=$TSC_EXIT
+elif [ ${#all_staged[@]} -gt 0 ]; then
+  echo "pre-commit: Skipping tsc — not installed locally. Run npm install first."
 fi
 
-# Run biome on staged test files (format only — linter scoped to src/ in biome.json)
-if [ ${#staged_tests[@]} -gt 0 ]; then
-  npx --no-install biome check --fix -- "${staged_tests[@]}"
-  TEST_EXIT=$?
-  [ $TEST_EXIT -ne 0 ] && BIOME_EXIT=$TEST_EXIT
-  for f in "${staged_tests[@]}"; do
-    [ -f "$f" ] && git add -- "$f"
-  done
-fi
-
-# Fail the commit if any check reported errors
-exit $BIOME_EXIT
+exit $EXIT_CODE

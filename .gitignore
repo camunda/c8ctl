@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Test plugin directories
 c8ctl-test-*
 test-plugin-temp
+
+# Temp tsconfig created by .githooks/pre-commit
+.tsconfig.pre-commit.*.json
