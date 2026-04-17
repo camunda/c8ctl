@@ -80,7 +80,12 @@ export function asError(v: unknown, label = "error"): Error {
  */
 export function getExecErrorOutput(v: unknown): string {
 	if (isRecord(v)) {
-		for (const key of ["stderr", "stdout", "message"] as const) {
+		const keys: Array<"stderr" | "stdout" | "message"> = [
+			"stderr",
+			"stdout",
+			"message",
+		];
+		for (const key of keys) {
 			const val = v[key];
 			if (typeof val === "string" && val.length > 0) return val;
 			if (val != null) {

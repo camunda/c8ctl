@@ -59,8 +59,10 @@ export function makeTestEnv(
 
 /**
  * Replace `process.exit` with a throwing stub and return a restore function.
- * The returned stub throws `new Error("exit")` (or the supplied error) so
- * callers can assert on it via `await ....catch(() => {})` or `assert.throws`.
+ * The returned stub always throws `new Error("exit")` so callers can assert
+ * on it via `await ....catch(() => {})` or `assert.throws`. The optional
+ * `onExit` callback runs before the throw and receives the exit code; if it
+ * throws, its error propagates instead of the default `Error("exit")`.
  *
  * Centralizes the unavoidable cast: the replacement function always throws,
  * so its return type is `never`, but TypeScript cannot widen

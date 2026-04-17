@@ -56,7 +56,7 @@ function assertNoControlChars(value: string, fieldName: string): void {
 function validateSpawnInputs(
 	command: string,
 	args: string[],
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
 ): void {
 	assertAllowedCommand(command);
 	assertNoControlChars(command, "command");
@@ -77,6 +77,19 @@ function validateSpawnInputs(
 			if (typeof value === "string") {
 				assertNoNul(value, `env value (${key})`);
 			}
+		}
+	}
+
+	if (options?.timeout !== undefined) {
+		if (
+			typeof options.timeout !== "number" ||
+			!Number.isFinite(options.timeout) ||
+			options.timeout < 0 ||
+			!Number.isSafeInteger(options.timeout)
+		) {
+			throw new Error(
+				`Unsafe timeout: must be a non-negative safe integer (got ${String(options.timeout)})`,
+			);
 		}
 	}
 }

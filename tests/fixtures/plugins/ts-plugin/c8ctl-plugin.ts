@@ -3,10 +3,11 @@
  * This demonstrates the expected structure for a c8ctl plugin
  */
 
-// c8ctl runtime is available as a global variable
-// biome-ignore lint/plugin: plugin boundary — c8ctl runtime is injected at runtime
-// biome-ignore lint/suspicious/noExplicitAny: plugin fixture intentionally uses any to mirror real-world plugin authoring
-const c8ctl = (globalThis as any).c8ctl;
+// c8ctl runtime is available as a global variable (typed in src/runtime.ts)
+const c8ctl = globalThis.c8ctl;
+if (!c8ctl) {
+	throw new Error("c8ctl runtime is not available on globalThis");
+}
 
 export const metadata = {
 	name: "sample-ts-plugin",
