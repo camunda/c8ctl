@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { MS_PER_DAY, todayRange } from "../utils/date-helpers.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
-import { pollUntil } from "../utils/polling.ts";
+import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 // Polling configuration for Elasticsearch consistency
@@ -430,8 +430,7 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 		await cli("deploy", "tests/fixtures/simple-will-create-incident.bpmn");
 		await cli("create", "pi", "--id=Process_0yyrstd");
 
-		let jobKey: string | undefined;
-		const jobFound = await pollUntil(
+		const jobKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -440,26 +439,20 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 					"--state=CREATED",
 				);
 				const items = parseItems<JobRow>(result.stdout);
-				if (items.length > 0) {
-					const createdJob = items.find(
-						(j) => String(j.State).toUpperCase() === "CREATED",
-					);
-					if (createdJob) {
-						jobKey = String(createdJob.Key);
-						return true;
-					}
-				}
-				return false;
+				const createdJob = items.find(
+					(j) => String(j.State).toUpperCase() === "CREATED",
+				);
+				return createdJob ? String(createdJob.Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"job key (incident test)",
 		);
-		assert.ok(jobFound && jobKey, "Job should appear before failing it");
 
 		await cli(
 			"fail",
 			"job",
-			jobKey!,
+			jobKey,
 			"--retries=0",
 			"--errorMessage=Intentional failure for incident test",
 		);
@@ -1040,8 +1033,7 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
 		// Wait for the job and fail it to produce an incident; filter by processInstanceKey to avoid
 		// picking up jobs from previous tests that may still appear as CREATED in the search index
-		let jobKey: string | undefined;
-		const jobFound = await pollUntil(
+		const jobKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -1051,26 +1043,20 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 					`--processInstanceKey=${piKey}`,
 				);
 				const items = parseItems<JobRow>(result.stdout);
-				if (items.length > 0) {
-					const job = items.find(
-						(j) => String(j.State).toUpperCase() === "CREATED",
-					);
-					if (job) {
-						jobKey = String(job.Key);
-						return true;
-					}
-				}
-				return false;
+				const job = items.find(
+					(j) => String(j.State).toUpperCase() === "CREATED",
+				);
+				return job ? String(job.Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"job key (between test)",
 		);
-		assert.ok(jobFound && jobKey, "Job should exist before failing");
 
 		await cli(
 			"fail",
 			"job",
-			jobKey!,
+			jobKey,
 			"--retries=0",
 			"--errorMessage=Intentional failure for between test",
 		);
@@ -1151,8 +1137,7 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 
 		// Wait for a job and fail it to produce an incident; filter by processInstanceKey to avoid
 		// picking up jobs from previous tests that may still appear as CREATED in the search index
-		let jobKey: string | undefined;
-		await pollUntil(
+		const jobKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -1162,24 +1147,19 @@ describe("Search Command Integration Tests (requires Camunda 8 at localhost:8080
 					`--processInstanceKey=${piKey}`,
 				);
 				const items = parseItems<JobRow>(result.stdout);
-				if (items.length > 0) {
-					const job = items.find(
-						(j) => String(j.State).toUpperCase() === "CREATED",
-					);
-					if (job) {
-						jobKey = String(job.Key);
-						return true;
-					}
-				}
-				return false;
+				const job = items.find(
+					(j) => String(j.State).toUpperCase() === "CREATED",
+				);
+				return job ? String(job.Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"job key (list between test)",
 		);
 		await cli(
 			"fail",
 			"job",
-			jobKey!,
+			jobKey,
 			"--retries=0",
 			"--errorMessage=Intentional failure for list between test",
 		);

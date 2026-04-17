@@ -299,11 +299,11 @@ echo "\${COMPREPLY[@]}"
 
 		// Verify it initializes variables manually
 		assert.ok(
-			completionResult.stdout.includes('cur="${COMP_WORDS[COMP_CWORD]}"'),
+			completionResult.stdout.includes(`cur="\${COMP_WORDS[COMP_CWORD]}"`),
 			"Should initialize cur variable",
 		);
 		assert.ok(
-			completionResult.stdout.includes('prev="${COMP_WORDS[COMP_CWORD-1]}"'),
+			completionResult.stdout.includes(`prev="\${COMP_WORDS[COMP_CWORD-1]}"`),
 			"Should initialize prev variable",
 		);
 	});

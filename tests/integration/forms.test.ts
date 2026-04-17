@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { makeTestEnv } from "../utils/mocks.ts";
-import { pollUntil } from "../utils/polling.ts";
+import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -97,8 +97,7 @@ describe("Form Integration Tests", () => {
 		assert.ok(piKey, "Process instance key should exist");
 
 		// Poll until user task is available
-		let userTaskKey: string | undefined;
-		const userTaskFound = await pollUntil(
+		const userTaskKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -106,20 +105,15 @@ describe("Form Integration Tests", () => {
 					`--processInstanceKey=${piKey}`,
 				);
 				const items = parseJson<UserTaskRow[]>(result.stdout);
-				if (items.length > 0) {
-					userTaskKey = String(items[0].Key);
-					return true;
-				}
-				return false;
+				return items.length > 0 ? String(items[0].Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"user task key",
 		);
-		assert.ok(userTaskFound, "User task should be created and indexed");
-		assert.ok(userTaskKey, "User task key should exist");
 
 		// Retrieve the form via CLI
-		const formResult = await cli("get", "form", userTaskKey!, "--ut");
+		const formResult = await cli("get", "form", userTaskKey, "--ut");
 		assert.strictEqual(
 			formResult.status,
 			0,
@@ -141,25 +135,19 @@ describe("Form Integration Tests", () => {
 		await cli("deploy", "tests/fixtures/list-pis");
 
 		// Poll until process definition is indexed and get its key
-		let processDefinitionKey: string | undefined;
-		const definitionFound = await pollUntil(
+		const processDefinitionKey = await pollUntilValue(
 			async () => {
 				const result = await cli("search", "pd", "--id=Process_0t60ay7");
 				const items = parseJson<{ Key: string | number }[]>(result.stdout);
-				if (items.length > 0) {
-					processDefinitionKey = String(items[0].Key);
-					return true;
-				}
-				return false;
+				return items.length > 0 ? String(items[0].Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"process definition key",
 		);
-		assert.ok(definitionFound, "Process definition should exist");
-		assert.ok(processDefinitionKey, "Process definition key should exist");
 
 		// This BPMN doesn't have a start form, so the CLI should indicate no form
-		const formResult = await cli("get", "form", processDefinitionKey!, "--pd");
+		const formResult = await cli("get", "form", processDefinitionKey, "--pd");
 		// The CLI logs "no associated start form" to stderr and exits 0
 		assert.strictEqual(
 			formResult.status,
@@ -200,8 +188,7 @@ describe("Form Integration Tests", () => {
 		assert.ok(piKey, "Process instance key should exist");
 
 		// Poll until user task is available
-		let userTaskKey: string | undefined;
-		const userTaskFound = await pollUntil(
+		const userTaskKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -209,20 +196,15 @@ describe("Form Integration Tests", () => {
 					`--processInstanceKey=${piKey}`,
 				);
 				const items = parseJson<UserTaskRow[]>(result.stdout);
-				if (items.length > 0) {
-					userTaskKey = String(items[0].Key);
-					return true;
-				}
-				return false;
+				return items.length > 0 ? String(items[0].Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"user task key",
 		);
-		assert.ok(userTaskFound, "User task should be created");
-		assert.ok(userTaskKey, "User task key should exist");
 
 		// Retrieve form via CLI with --ut flag
-		const formResult = await cli("get", "form", userTaskKey!, "--ut");
+		const formResult = await cli("get", "form", userTaskKey, "--ut");
 		assert.strictEqual(
 			formResult.status,
 			0,
@@ -264,8 +246,7 @@ describe("Form Integration Tests", () => {
 		assert.ok(piKey, "Process instance key should exist");
 
 		// Poll until user task is available
-		let userTaskKey: string | undefined;
-		const userTaskFound = await pollUntil(
+		const userTaskKey = await pollUntilValue(
 			async () => {
 				const result = await cli(
 					"search",
@@ -273,20 +254,15 @@ describe("Form Integration Tests", () => {
 					`--processInstanceKey=${piKey}`,
 				);
 				const items = parseJson<UserTaskRow[]>(result.stdout);
-				if (items.length > 0) {
-					userTaskKey = String(items[0].Key);
-					return true;
-				}
-				return false;
+				return items.length > 0 ? String(items[0].Key) : undefined;
 			},
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
+			"user task key",
 		);
-		assert.ok(userTaskFound, "User task should be created");
-		assert.ok(userTaskKey, "User task key should exist");
 
 		// Use generic getForm via CLI (no --ut or --pd flag — tries both APIs)
-		const formResult = await cli("get", "form", userTaskKey!);
+		const formResult = await cli("get", "form", userTaskKey);
 		assert.strictEqual(
 			formResult.status,
 			0,
