@@ -116,6 +116,7 @@ import {
 	completeUserTaskCommand,
 	listUserTasksCommand,
 } from "./commands/user-tasks.ts";
+import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
 
 /**
@@ -242,6 +243,9 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	// `completion` is resourceless in the registry; the handler branches
 	// on ctx.resource (bash / zsh / fish / install).
 	["completion:", completionCommand],
+
+	// ── Variables ───────────────────────────────────────────────────────
+	["set:variable", setVariableCommand],
 
 	// ── Resourceless verbs ─────────────────────────────────────────────
 	["deploy:", deployCommand],
