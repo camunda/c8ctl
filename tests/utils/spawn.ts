@@ -90,13 +90,14 @@ export interface SpawnResult {
 export async function asyncSpawn(
 	command: string,
 	args: string[],
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
 ): Promise<SpawnResult> {
 	validateSpawnInputs(command, args, options);
 	try {
 		const { stdout, stderr } = await execFile(command, args, {
 			...options,
 			maxBuffer: 10 * 1024 * 1024,
+			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
 		});
 		return { stdout: stdout ?? "", stderr: stderr ?? "", status: 0 };
 	} catch (err) {
