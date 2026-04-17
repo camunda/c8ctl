@@ -58,13 +58,34 @@ if [ ${#all_staged[@]} -gt 0 ]; then
   fi
 fi
 
-# Typecheck both src/ and tests/ via tsconfig.check.json.
-# Skip if tsc is not installed locally.
-if npx --no-install tsc --version >/dev/null 2>&1; then
-  npx --no-install tsc --noEmit -p tsconfig.check.json
+# Typecheck the staged files (transitive imports are still resolved, so any
+# broken code reachable from a staged file is caught — but unrelated WIP in
+# src/ or tests/ won't block the commit). Skip if tsc is not installed.
+if [ ${#all_staged[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1; then
+  repo_root=$(git rev-parse --show-toplevel)
+  tmp_tsconfig=$(mktemp "$repo_root/.tsconfig.pre-commit.XXXXXX.json")
+  trap 'rm -f "$tmp_tsconfig"' EXIT
+
+  # Build a JSON array of the staged file paths (relative to repo root,
+  # which is where the temp tsconfig lives, so tsc resolves them correctly).
+  files_json=""
+  for f in "${all_staged[@]}"; do
+    files_json+="\"$f\","
+  done
+  files_json="[${files_json%,}]"
+
+  cat > "$tmp_tsconfig" <<EOF
+{
+  "extends": "./tsconfig.check.json",
+  "include": [],
+  "files": $files_json
+}
+EOF
+
+  npx --no-install tsc --noEmit -p "$tmp_tsconfig"
   TSC_EXIT=$?
   [ $TSC_EXIT -ne 0 ] && EXIT_CODE=$TSC_EXIT
-else
+elif [ ${#all_staged[@]} -gt 0 ]; then
   echo "pre-commit: Skipping tsc — not installed locally. Run npm install first."
 fi
 
