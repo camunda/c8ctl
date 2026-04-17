@@ -1,4 +1,76 @@
 #!/usr/bin/env bash
+# Pre-commit hook:
+# 1. Run biome check --fix on staged src/ and tests/ files (lint + format + plugin).
+#    Both trees are in biome scope per biome.json; the custom
+#    no-unsafe-type-assertion plugin applies to both.
+# 2. Run tsc --noEmit -p tsconfig.check.json to catch type/parse errors in
+#    both src/ and tests/ before they hit CI.
+
+# --- Collect staged src files ---
+staged_src=()
+while IFS= read -r -d '' f; do
+  staged_src+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**')
+
+# --- Collect staged test files ---
+staged_tests=()
+while IFS= read -r -d '' f; do
+  staged_tests+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z -- 'tests/*.ts' 'tests/**/*.ts')
+
+# Nothing to check
+if [ ${#staged_src[@]} -eq 0 ] && [ ${#staged_tests[@]} -eq 0 ]; then
+  exit 0
+fi
+
+# --- Abort if any staged file also has unstaged changes ---
+dirty_files=()
+while IFS= read -r -d '' f; do
+  for sf in "${staged_src[@]}" "${staged_tests[@]}"; do
+    if [ "$f" = "$sf" ]; then
+      dirty_files+=("$f")
+      break
+    fi
+  done
+done < <(git diff --name-only -z -- 'src/*.ts' 'src/**/*.ts' ':(exclude)src/templates/**' 'tests/*.ts' 'tests/**/*.ts')
+
+if [ ${#dirty_files[@]} -gt 0 ]; then
+  echo "pre-commit: These files have both staged and unstaged changes:"
+  printf '  %s\n' "${dirty_files[@]}"
+  echo "Stage or stash the unstaged changes before committing."
+  exit 1
+fi
+
+# Skip if biome is not installed locally (avoid npx downloading it)
+if ! npx --no-install biome --version >/dev/null 2>&1; then
+  echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
+  exit 0
+fi
+
+EXIT_CODE=0
+
+# Run biome on all staged ts files (lint + format + plugin)
+all_staged=("${staged_src[@]}" "${staged_tests[@]}")
+if [ ${#all_staged[@]} -gt 0 ]; then
+  npx --no-install biome check --fix -- "${all_staged[@]}"
+  EXIT_CODE=$?
+  for f in "${all_staged[@]}"; do
+    [ -f "$f" ] && git add -- "$f"
+  done
+fi
+
+# Typecheck both src/ and tests/ via tsconfig.check.json.
+# Skip if tsc is not installed locally.
+if npx --no-install tsc --version >/dev/null 2>&1; then
+  npx --no-install tsc --noEmit -p tsconfig.check.json
+  TSC_EXIT=$?
+  [ $TSC_EXIT -ne 0 ] && EXIT_CODE=$TSC_EXIT
+else
+  echo "pre-commit: Skipping tsc — not installed locally. Run npm install first."
+fi
+
+exit $EXIT_CODE
+#!/usr/bin/env bash
 # Pre-commit hook: run biome on staged files and re-stage any auto-fixed changes.
 # - src/ files: full biome check --fix (lint + format + plugin)
 # - tests/ files: biome check --fix (format only — linter scoped to src/ in biome.json)
