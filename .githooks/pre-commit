@@ -41,22 +41,21 @@ if [ ${#dirty_files[@]} -gt 0 ]; then
   exit 1
 fi
 
-# Skip if biome is not installed locally (avoid npx downloading it)
-if ! npx --no-install biome --version >/dev/null 2>&1; then
-  echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
-  exit 0
-fi
-
 EXIT_CODE=0
 
-# Run biome on all staged ts files (lint + format + plugin)
+# Run biome on all staged ts files (lint + format + plugin).
+# Skip (non-fatal) if biome is not installed locally — tsc still runs below.
 all_staged=("${staged_src[@]}" "${staged_tests[@]}")
 if [ ${#all_staged[@]} -gt 0 ]; then
-  npx --no-install biome check --fix -- "${all_staged[@]}"
-  EXIT_CODE=$?
-  for f in "${all_staged[@]}"; do
-    [ -f "$f" ] && git add -- "$f"
-  done
+  if npx --no-install biome --version >/dev/null 2>&1; then
+    npx --no-install biome check --fix -- "${all_staged[@]}"
+    EXIT_CODE=$?
+    for f in "${all_staged[@]}"; do
+      [ -f "$f" ] && git add -- "$f"
+    done
+  else
+    echo "pre-commit: Skipping biome — not installed locally. Run npm install first."
+  fi
 fi
 
 # Typecheck both src/ and tests/ via tsconfig.check.json.
