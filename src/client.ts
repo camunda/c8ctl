@@ -82,6 +82,8 @@ type PagedResponse<T> = {
 	};
 };
 
+export type { PagedResponse };
+
 /**
  * Fetch all pages from a Camunda 8 search endpoint using cursor-based
  * pagination. The caller supplies a search function that accepts a filter
@@ -94,7 +96,7 @@ type PagedResponse<T> = {
  * @returns all collected items across every page (up to maxItems)
  */
 /** Consistency options passed to every search call in fetchAllPages */
-type SearchConsistencyOpts = { consistency: { waitUpToMs: number } };
+export type SearchConsistencyOpts = { consistency: { waitUpToMs: number } };
 
 export async function fetchAllPages<
 	T,

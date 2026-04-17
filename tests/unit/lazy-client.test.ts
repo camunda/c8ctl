@@ -49,7 +49,7 @@ describe("Lazy client getter", () => {
 				called = true;
 				return { fake: "client" };
 			},
-			resolveTenantId: () => undefined,
+			resolveTenantId: () => "",
 		});
 
 		assert.strictEqual(called, false, "Factory must not be called eagerly");
@@ -64,7 +64,7 @@ describe("Lazy client getter", () => {
 				callCount++;
 				return { fake: "client" };
 			},
-			resolveTenantId: () => undefined,
+			resolveTenantId: () => "",
 		});
 
 		const first = ctx.client;

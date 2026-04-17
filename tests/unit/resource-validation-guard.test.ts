@@ -11,7 +11,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import type { CommandDef } from "../../src/command-registry.ts";
 import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
+
+const REGISTRY: Record<string, CommandDef> = COMMAND_REGISTRY as Record<
+	string,
+	CommandDef
+>;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const indexSrc = readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
@@ -22,7 +28,7 @@ const indexSrc = readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");
  */
 function deriveVerbRequiresResource(): Set<string> {
 	return new Set(
-		Object.entries(COMMAND_REGISTRY)
+		Object.entries(REGISTRY)
 			.filter(([, def]) => def.requiresResource)
 			.flatMap(([verb, def]) => [verb, ...(def.aliases ?? [])]),
 	);

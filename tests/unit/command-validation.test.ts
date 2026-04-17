@@ -251,8 +251,15 @@ describe("requireOneOf", () => {
 
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
+import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
 import { COMMAND_REGISTRY, GLOBAL_FLAGS } from "../../src/command-registry.ts";
 import { validateFlags } from "../../src/command-validation.ts";
+
+/** Widened view of COMMAND_REGISTRY for iterating with index signatures. */
+const REGISTRY: Record<string, CommandDef> = COMMAND_REGISTRY as Record<
+	string,
+	CommandDef
+>;
 
 /**
  * Flag names that are known to map to branded SDK types.
@@ -288,7 +295,7 @@ describe("validateFlags structural invariants", () => {
 	test("every branded-type flag in the registry has a validate function", () => {
 		const missing: string[] = [];
 
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			for (const [flagName, flagDef] of Object.entries(def.flags)) {
 				if (
 					BRANDED_FLAG_NAMES.has(flagName) &&
@@ -308,7 +315,7 @@ describe("validateFlags structural invariants", () => {
 	});
 
 	test("validate functions throw on invalid input for key-type flags", () => {
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			for (const [flagName, flagDef] of Object.entries(def.flags)) {
 				if (!flagDef.validate) continue;
 
@@ -324,7 +331,7 @@ describe("validateFlags structural invariants", () => {
 	});
 
 	test("validate functions return the input for valid values", () => {
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			for (const [flagName, flagDef] of Object.entries(def.flags)) {
 				if (!flagDef.validate) continue;
 
@@ -538,8 +545,8 @@ describe("detectUnknownFlags — non-search verbs", () => {
 
 describe("detectUnknownFlags — structural coverage", () => {
 	test("every verb in COMMAND_REGISTRY gets unknown-flag detection that rejects invented flags", () => {
-		for (const verb of Object.keys(COMMAND_REGISTRY)) {
-			const def = COMMAND_REGISTRY[verb];
+		for (const verb of Object.keys(REGISTRY)) {
+			const def = REGISTRY[verb];
 			const resource = def.resources?.[0] ?? "any";
 			const unknown = detectUnknownFlags(verb, resource, {
 				zzz_invented_flag: "value",
@@ -552,8 +559,8 @@ describe("detectUnknownFlags — structural coverage", () => {
 	});
 
 	test("every verb accepts all global flags without flagging them", () => {
-		for (const verb of Object.keys(COMMAND_REGISTRY)) {
-			const def = COMMAND_REGISTRY[verb];
+		for (const verb of Object.keys(REGISTRY)) {
+			const def = REGISTRY[verb];
 			const resource = def.resources?.[0] ?? "any";
 			const globalValues = Object.fromEntries(
 				Object.keys(GLOBAL_FLAGS).map((k) => [k, "test-value"]),
@@ -570,8 +577,8 @@ describe("detectUnknownFlags — structural coverage", () => {
 	test("every verb accepts its own registered flags without flagging them", () => {
 		// Verbs with resourceFlags scope flags per-resource — test each resource separately.
 		// Verbs without resourceFlags use the full verb-level flag set.
-		for (const verb of Object.keys(COMMAND_REGISTRY)) {
-			const def = COMMAND_REGISTRY[verb];
+		for (const verb of Object.keys(REGISTRY)) {
+			const def = REGISTRY[verb];
 			if (def.resourceFlags) {
 				// Test each resource entry in resourceFlags
 				for (const [resource, resFlags] of Object.entries(def.resourceFlags)) {

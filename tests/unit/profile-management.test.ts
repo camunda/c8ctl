@@ -442,7 +442,10 @@ describe("Profile management", () => {
 			mkdirSync(testDataDir, { recursive: true });
 
 			// Strip all CAMUNDA_* vars from the child env
-			const childEnv = { ...process.env, C8CTL_DATA_DIR: testDataDir };
+			const childEnv: NodeJS.ProcessEnv = {
+				...process.env,
+				C8CTL_DATA_DIR: testDataDir,
+			};
 			delete childEnv.CAMUNDA_BASE_URL;
 			delete childEnv.CAMUNDA_CLIENT_ID;
 			delete childEnv.CAMUNDA_CLIENT_SECRET;

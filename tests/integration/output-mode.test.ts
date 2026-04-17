@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/client.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
@@ -46,7 +47,7 @@ describe("Output Mode Integration Tests", () => {
 
 		const client = createClient();
 		await client.createProcessInstance({
-			processDefinitionId: "Process_0t60ay7",
+			processDefinitionId: ProcessDefinitionId.assumeExists("Process_0t60ay7"),
 		});
 
 		// Set JSON output mode for indexing poll
