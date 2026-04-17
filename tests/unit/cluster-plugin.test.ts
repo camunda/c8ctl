@@ -139,7 +139,6 @@ describe("Cluster Plugin – command usage output", () => {
 			captured.push(args.map(String).join(" "));
 		};
 		// Stub fetch so usage tests never hit the network
-		// @ts-expect-error — mock fetch for testing
 		globalThis.fetch = async () => {
 			throw new Error("offline");
 		};
@@ -982,7 +981,6 @@ describe("Cluster Plugin – resolveVersion", () => {
 	}
 
 	function mockFetchOffline() {
-		// @ts-expect-error — mock fetch for testing
 		globalThis.fetch = async () => {
 			throw new Error("offline");
 		};
@@ -1075,8 +1073,8 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		originalFetch = globalThis.fetch;
 		originalC8ctl = globalThis.c8ctl;
 		loggedMessages = [];
-		// @ts-expect-error — mock c8ctl logger
 		globalThis.c8ctl = {
+			// @ts-expect-error — partial Logger mock for testing
 			getLogger: () => ({
 				info: (msg: string) => loggedMessages.push(msg),
 				warn: () => {},
@@ -1167,7 +1165,6 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 	});
 
 	test("stays silent when offline (fetch throws)", async () => {
-		// @ts-expect-error — mock fetch
 		globalThis.fetch = async () => {
 			throw new Error("Network unreachable");
 		};
@@ -1978,7 +1975,14 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 
 	test("start (checkForUpdateHint=true) does not block or re-download, but checks remote for hint", async () => {
 		// Simulate: 8.8 is installed locally with an old ETag, remote has a new ETag
-		const config = {
+		const config: {
+			cacheDir: string;
+			version: string;
+			isRolling: boolean;
+			checkForUpdates: boolean;
+			checkForUpdateHint: boolean;
+			_hintPromise?: Promise<unknown>;
+		} = {
 			cacheDir: tempDir,
 			version: "8.8",
 			isRolling: true,
@@ -2052,7 +2056,14 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 	});
 
 	test("start with minor version succeeds offline (hint check swallows error)", async () => {
-		const config = {
+		const config: {
+			cacheDir: string;
+			version: string;
+			isRolling: boolean;
+			checkForUpdates: boolean;
+			checkForUpdateHint: boolean;
+			_hintPromise?: Promise<unknown>;
+		} = {
 			cacheDir: tempDir,
 			version: "8.8",
 			isRolling: true,
@@ -2078,7 +2089,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 
 		// Await the hint promise — it should resolve (swallowing the error) without throwing
 		await assert.doesNotReject(
-			() => config._hintPromise,
+			() => config._hintPromise ?? Promise.resolve(),
 			"hint check should swallow network errors",
 		);
 

@@ -9,6 +9,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
+import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	deriveParseArgsOptions,
@@ -20,6 +21,11 @@ import {
 	SEARCH_FLAGS,
 	VERB_ALIASES,
 } from "../../src/command-registry.ts";
+
+/** Widened read-only views for iterating with index signatures. */
+const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
+const GLOBAL_FLAGS_MAP: Readonly<Record<string, FlagDef>> = GLOBAL_FLAGS;
+const SEARCH_FLAGS_MAP: Readonly<Record<string, FlagDef>> = SEARCH_FLAGS;
 
 // ─── Registry completeness ──────────────────────────────────────────────────
 
@@ -63,15 +69,12 @@ describe("COMMAND_REGISTRY completeness", () => {
 
 	test("every expected verb has a registry entry", () => {
 		for (const verb of EXPECTED_VERBS) {
-			assert.ok(
-				COMMAND_REGISTRY[verb],
-				`Missing registry entry for verb "${verb}"`,
-			);
+			assert.ok(REGISTRY[verb], `Missing registry entry for verb "${verb}"`);
 		}
 	});
 
 	test("registry contains no unexpected verbs", () => {
-		const registryVerbs = Object.keys(COMMAND_REGISTRY);
+		const registryVerbs = Object.keys(REGISTRY);
 		for (const verb of registryVerbs) {
 			assert.ok(
 				EXPECTED_VERBS.includes(verb),
@@ -81,7 +84,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 	});
 
 	test("every command has required metadata fields", () => {
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			assert.ok(
 				typeof def.description === "string" && def.description.length > 0,
 				`${verb}: missing description`,
@@ -106,7 +109,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		// Some verbs require a positional arg but accept free-form input (e.g. file path)
 		// rather than a fixed set of resource names.
 		const FREE_FORM_POSITIONAL = new Set(["run"]);
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			if (def.requiresResource && !FREE_FORM_POSITIONAL.has(verb)) {
 				assert.ok(
 					def.resources.length > 0,
@@ -117,14 +120,14 @@ describe("COMMAND_REGISTRY completeness", () => {
 	});
 
 	test("verb aliases point to existing registry entries", () => {
-		for (const [verb, def] of Object.entries(COMMAND_REGISTRY)) {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
 			for (const alias of def.aliases ?? []) {
 				assert.ok(
 					typeof alias === "string" && alias.length > 0,
 					`${verb}: alias must be a non-empty string`,
 				);
 				assert.ok(
-					!COMMAND_REGISTRY[alias],
+					!REGISTRY[alias],
 					`${verb}: alias "${alias}" conflicts with an existing verb entry`,
 				);
 			}
@@ -136,11 +139,11 @@ describe("COMMAND_REGISTRY completeness", () => {
 		for (const [alias, targets] of Object.entries(VERB_ALIASES)) {
 			for (const target of targets) {
 				assert.ok(
-					COMMAND_REGISTRY[target],
+					REGISTRY[target],
 					`VERB_ALIASES["${alias}"] points to "${target}" which is not in COMMAND_REGISTRY`,
 				);
 				assert.ok(
-					COMMAND_REGISTRY[target].aliases?.includes(alias),
+					REGISTRY[target].aliases?.includes(alias),
 					`VERB_ALIASES["${alias}"] → "${target}" but ${target}.aliases does not include "${alias}"`,
 				);
 			}
@@ -193,7 +196,11 @@ describe("RESOURCE_ALIASES consistency", () => {
 // ─── Search resource flags ───────────────────────────────────────────────────
 
 describe("search resourceFlags consistency", () => {
-	const resourceFlags = COMMAND_REGISTRY.search.resourceFlags;
+	const resourceFlagsRaw:
+		| Readonly<Record<string, Readonly<Record<string, FlagDef>>>>
+		| undefined = COMMAND_REGISTRY.search.resourceFlags;
+	assert.ok(resourceFlagsRaw, "search.resourceFlags must be defined");
+	const resourceFlags = resourceFlagsRaw;
 	const EXPECTED_SEARCH_RESOURCES = [
 		"process-definition",
 		"process-instance",
@@ -251,7 +258,7 @@ describe("GLOBAL_FLAGS", () => {
 	test("includes required infrastructure flags", () => {
 		const required = ["help", "version", "profile", "dry-run", "verbose"];
 		for (const flag of required) {
-			assert.ok(GLOBAL_FLAGS[flag], `Missing global flag "${flag}"`);
+			assert.ok(GLOBAL_FLAGS_MAP[flag], `Missing global flag "${flag}"`);
 		}
 	});
 
@@ -270,7 +277,7 @@ describe("SEARCH_FLAGS", () => {
 	test("includes shared search flags", () => {
 		const expected = ["sortBy", "asc", "desc", "limit", "between", "dateField"];
 		for (const flag of expected) {
-			assert.ok(SEARCH_FLAGS[flag], `Missing search flag "${flag}"`);
+			assert.ok(SEARCH_FLAGS_MAP[flag], `Missing search flag "${flag}"`);
 		}
 	});
 });
@@ -491,7 +498,7 @@ describe("mutating flag correctness", () => {
 
 	test("all mutating verbs are marked as mutating", () => {
 		for (const verb of MUTATING_VERBS) {
-			const def = COMMAND_REGISTRY[verb];
+			const def = REGISTRY[verb];
 			assert.ok(def, `Missing entry for "${verb}"`);
 			assert.strictEqual(def.mutating, true, `"${verb}" should be mutating`);
 		}
@@ -499,7 +506,7 @@ describe("mutating flag correctness", () => {
 
 	test("all non-mutating verbs are marked as non-mutating", () => {
 		for (const verb of NON_MUTATING_VERBS) {
-			const def = COMMAND_REGISTRY[verb];
+			const def = REGISTRY[verb];
 			assert.ok(def, `Missing entry for "${verb}"`);
 			assert.strictEqual(
 				def.mutating,

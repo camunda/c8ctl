@@ -8,8 +8,8 @@ import { getLogger, Logger, sortTableData } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
 
 describe("Logger Module", () => {
-	let consoleLogSpy: unknown[];
-	let consoleErrorSpy: unknown[];
+	let consoleLogSpy: string[];
+	let consoleErrorSpy: string[];
 	let originalLog: typeof console.log;
 	let originalError: typeof console.error;
 
@@ -436,8 +436,8 @@ describe("Logger Module", () => {
 
 		test("Logger accepts custom writer", () => {
 			c8ctl.outputMode = "text";
-			const customLogOutput: unknown[] = [];
-			const customErrorOutput: unknown[] = [];
+			const customLogOutput: string[] = [];
+			const customErrorOutput: string[] = [];
 
 			const customWriter = {
 				log(...data: unknown[]): void {
@@ -533,15 +533,15 @@ describe("Logger Module", () => {
 
 		test("Custom writer works with JSON mode", () => {
 			c8ctl.outputMode = "json";
-			const logOutput: unknown[] = [];
-			const errorOutput: unknown[] = [];
+			const logOutput: string[] = [];
+			const errorOutput: string[] = [];
 
 			const customWriter = {
 				log(...data: unknown[]): void {
-					logOutput.push(data[0]);
+					logOutput.push(String(data[0]));
 				},
 				error(...data: unknown[]): void {
-					errorOutput.push(data[0]);
+					errorOutput.push(String(data[0]));
 				},
 			};
 
@@ -585,7 +585,10 @@ describe("Logger Module", () => {
 
 			assert.strictEqual(errorCalls.length, 1);
 			assert.ok(errorCalls[0].length > 1, "Should have multiple arguments");
-			assert.ok(errorCalls[0][0].includes("Debug with args"));
+			const firstArg = errorCalls[0][0];
+			assert.ok(
+				typeof firstArg === "string" && firstArg.includes("Debug with args"),
+			);
 		});
 	});
 });

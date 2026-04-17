@@ -81,3 +81,35 @@ export async function pollUntil(
 		);
 	return false;
 }
+
+/**
+ * Poll until an async function returns a defined value; returns that value.
+ * Throws with a descriptive message on timeout.
+ *
+ * Prefer over `let x: T | undefined` + `pollUntil` + non-null assertion:
+ * the return type is narrowed to `T`, eliminating `!` at call sites.
+ */
+export async function pollUntilValue<T>(
+	fetchValue: () => Promise<T | undefined | null>,
+	maxDuration: number,
+	interval: number,
+	label = "value",
+): Promise<T> {
+	let captured: T | undefined;
+	const found = await pollUntil(
+		async () => {
+			const result = await fetchValue();
+			if (result === undefined || result === null) return false;
+			captured = result;
+			return true;
+		},
+		maxDuration,
+		interval,
+	);
+	if (!found || captured === undefined) {
+		throw new Error(
+			`pollUntilValue: timed out waiting for ${label} after ${maxDuration}ms`,
+		);
+	}
+	return captured;
+}

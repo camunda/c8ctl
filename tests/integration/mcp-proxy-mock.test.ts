@@ -10,12 +10,9 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import type { createClient } from "../../src/client.ts";
 import { createCamundaFetch } from "../../src/commands/mcp-proxy.ts";
 import type { Logger } from "../../src/logger.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
-
-type CamundaClient = ReturnType<typeof createClient>;
 
 describe("MCP Proxy Mock Server Integration Tests", () => {
 	let mockServer: Server;

@@ -5,7 +5,7 @@
   },
   "linter": {
     "enabled": true,
-    "includes": ["src/**/*.ts", "!/src/templates/**"],
+    "includes": ["src/**/*.ts", "!/src/templates/**", "tests/**/*.ts"],
     "rules": {
       "recommended": true,
       "suspicious": {

@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/client.ts";
 import { deploy } from "../../src/commands/deployments.ts";
 import { todayRange } from "../utils/date-helpers.ts";
@@ -78,7 +79,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 		// Create process instance using the SDK client directly
 		const result = await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		// Verify instance key is returned
@@ -97,7 +98,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	test("list process instances filters by process definition via CLI", async () => {
 		await deploy(["tests/fixtures/simple.bpmn"], {});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		// Use CLI to list and verify it runs without error
@@ -119,13 +120,13 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	test("list process instances respects --limit via CLI", async () => {
 		await deploy(["tests/fixtures/simple.bpmn"], {});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		const result = await cli(testDir, "list", "pi", "--all", "--limit", "2");
@@ -152,7 +153,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		const v1Path = join(testDir, "v1.bpmn");
 		writeFileSync(v1Path, baseBpmn);
 		await deploy([v1Path], {});
-		await client.createProcessInstance({ processDefinitionId: uniqueId });
+		await client.createProcessInstance({
+			processDefinitionId: ProcessDefinitionId.assumeExists(uniqueId),
+		});
 
 		// Deploy v2 with a minimal change (different task name)
 		const v2Bpmn = baseBpmn.replace(
@@ -162,7 +165,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		const v2Path = join(testDir, "v2.bpmn");
 		writeFileSync(v2Path, v2Bpmn);
 		await deploy([v2Path], {});
-		await client.createProcessInstance({ processDefinitionId: uniqueId });
+		await client.createProcessInstance({
+			processDefinitionId: ProcessDefinitionId.assumeExists(uniqueId),
+		});
 
 		// Wait for both versions to be indexed via CLI
 		const v1Indexed = await pollUntil(
@@ -244,7 +249,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	test("list process instances --limit via CLI produces correct output", async () => {
 		await deploy(["tests/fixtures/simple.bpmn"], {});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		const result = await cli(testDir, "list", "pi", "--all", "--limit", "1");
@@ -266,7 +271,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		// Deploy and create an instance
 		await deploy(["tests/fixtures/simple.bpmn"], {});
 		const result = await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		assert.ok(result, "Create result should exist");
@@ -302,7 +307,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 		// Test with awaitCompletion flag using the SDK client directly
 		const result = await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 			awaitCompletion: true,
 		});
 
@@ -368,7 +373,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	test("list pi --between spanning today finds recently created instance via CLI", async () => {
 		await deploy(["tests/fixtures/simple.bpmn"], {});
 		await client.createProcessInstance({
-			processDefinitionId: "simple-process",
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
 
 		const found = await pollUntil(

@@ -4,7 +4,29 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { DEFAULT_MAX_ITEMS, fetchAllPages } from "../../src/client.ts";
+import {
+	DEFAULT_MAX_ITEMS,
+	fetchAllPages,
+	type PagedResponse,
+	type SearchConsistencyOpts,
+} from "../../src/client.ts";
+
+/** Build a properly shaped PagedResponse, filling missing fields with defaults. */
+function makePage<T>(
+	items: T[],
+	overrides: Partial<PagedResponse<T>["page"]> = {},
+): PagedResponse<T> {
+	return {
+		items,
+		page: {
+			totalItems: 0,
+			startCursor: null,
+			endCursor: null,
+			hasMoreTotalItems: false,
+			...overrides,
+		},
+	};
+}
 
 /** Helper: create a mock search function that returns `totalItems` items across pages. */
 function createMockSearch(totalItems: number, pageSize: number) {
@@ -15,31 +37,28 @@ function createMockSearch(totalItems: number, pageSize: number) {
 
 	const searchFn = async (
 		filter: Record<string, unknown> & { page?: Record<string, unknown> },
-		_opts?: unknown,
-	) => {
+		_opts: SearchConsistencyOpts,
+	): Promise<PagedResponse<{ id: number }>> => {
 		callCount++;
 		const afterRaw = filter.page?.after;
 		const after = typeof afterRaw === "number" ? afterRaw : undefined;
 		const start = after ?? 0;
 		const end = Math.min(start + pageSize, totalItems);
 		const items = allItems.slice(start, end);
-		const endCursor = end < totalItems ? end : undefined;
+		const endCursor = end < totalItems ? String(end) : null;
 
-		return {
-			items,
-			page: {
-				totalItems,
-				startCursor: String(start),
-				endCursor: endCursor !== undefined ? String(endCursor) : undefined,
-			},
-		};
+		return makePage(items, {
+			totalItems,
+			startCursor: String(start),
+			endCursor,
+		});
 	};
 
 	// Expose a way to parse the `after` cursor back into a number
 	const wrappedSearch = async (
 		filter: Record<string, unknown> & { page?: Record<string, unknown> },
-		opts?: unknown,
-	) => {
+		opts: SearchConsistencyOpts,
+	): Promise<PagedResponse<{ id: number }>> => {
 		const parsedFilter = {
 			...filter,
 			page: {
@@ -140,16 +159,13 @@ describe("fetchAllPages", () => {
 		let callCount = 0;
 		const stuckSearch = async (
 			_filter: Record<string, unknown>,
-			_opts?: unknown,
-		) => {
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<{ id: number }>> => {
 			callCount++;
-			return {
-				items: [{ id: callCount }],
-				page: {
-					totalItems: 999,
-					endCursor: "same-cursor-forever",
-				},
-			};
+			return makePage([{ id: callCount }], {
+				totalItems: 999,
+				endCursor: "same-cursor-forever",
+			});
 		};
 
 		const items = await fetchAllPages(stuckSearch, {});
@@ -163,16 +179,13 @@ describe("fetchAllPages", () => {
 		let callCount = 0;
 		const noCursorSearch = async (
 			_filter: Record<string, unknown>,
-			_opts?: unknown,
-		) => {
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<{ id: number }>> => {
 			callCount++;
-			return {
-				items: [{ id: callCount }],
-				page: {
-					totalItems: 999,
-					endCursor: undefined,
-				},
-			};
+			return makePage([{ id: callCount }], {
+				totalItems: 999,
+				endCursor: null,
+			});
 		};
 
 		const items = await fetchAllPages(noCursorSearch, {});
@@ -185,19 +198,19 @@ describe("fetchAllPages", () => {
 		let callCount = 0;
 		const emptySearch = async (
 			_filter: Record<string, unknown>,
-			_opts?: unknown,
-		) => {
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<{ id: number }>> => {
 			callCount++;
 			if (callCount === 1) {
-				return {
-					items: [{ id: 1 }],
-					page: { totalItems: 10, endCursor: "cursor-1" },
-				};
+				return makePage([{ id: 1 }], {
+					totalItems: 10,
+					endCursor: "cursor-1",
+				});
 			}
-			return {
-				items: [],
-				page: { totalItems: 10, endCursor: "cursor-2" },
-			};
+			return makePage<{ id: number }>([], {
+				totalItems: 10,
+				endCursor: "cursor-2",
+			});
 		};
 
 		const items = await fetchAllPages(emptySearch, {});
@@ -206,53 +219,59 @@ describe("fetchAllPages", () => {
 	});
 
 	test("passes filter through to search function", async () => {
-		let receivedFilter: unknown;
+		let receivedFilter:
+			| (Record<string, unknown> & { page?: Record<string, unknown> })
+			| undefined;
 		const capturingSearch = async (
-			filter: Record<string, unknown> & { page?: Record<string, unknown> },
-			_opts?: unknown,
-		) => {
+			filter: { filter: { state: string } } & {
+				page?: Record<string, unknown>;
+			},
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<never>> => {
 			receivedFilter = filter;
-			return { items: [], page: {} };
+			return makePage<never>([]);
 		};
 
 		await fetchAllPages(capturingSearch, { filter: { state: "ACTIVE" } }, 50);
 
 		assert.ok(receivedFilter, "search function should have been called");
 		assert.deepStrictEqual(receivedFilter.filter, { state: "ACTIVE" });
-		assert.strictEqual(receivedFilter.page.limit, 50);
+		assert.strictEqual(receivedFilter.page?.limit, 50);
 	});
 
 	test("passes cursor in page.after on subsequent calls", async () => {
-		const receivedFilters: unknown[] = [];
+		const receivedFilters: Array<{
+			page?: { after?: unknown; limit?: unknown };
+		}> = [];
 		let callCount = 0;
 		const trackingSearch = async (
 			filter: Record<string, unknown> & { page?: Record<string, unknown> },
-			_opts?: unknown,
-		) => {
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<{ id: number }>> => {
 			receivedFilters.push(JSON.parse(JSON.stringify(filter)));
 			callCount++;
 			if (callCount === 1) {
-				return {
-					items: [{ id: 1 }],
-					page: { totalItems: 2, endCursor: "abc123" },
-				};
+				return makePage([{ id: 1 }], {
+					totalItems: 2,
+					endCursor: "abc123",
+				});
 			}
-			return {
-				items: [{ id: 2 }],
-				page: { totalItems: 2, endCursor: undefined },
-			};
+			return makePage([{ id: 2 }], {
+				totalItems: 2,
+				endCursor: null,
+			});
 		};
 
 		await fetchAllPages(trackingSearch, {});
 
 		assert.strictEqual(receivedFilters.length, 2);
 		assert.strictEqual(
-			receivedFilters[0].page.after,
+			receivedFilters[0].page?.after,
 			undefined,
 			"first call should not have after",
 		);
 		assert.strictEqual(
-			receivedFilters[1].page.after,
+			receivedFilters[1].page?.after,
 			"abc123",
 			"second call should have cursor",
 		);
@@ -268,16 +287,13 @@ describe("fetchAllPages", () => {
 		let callCount = 0;
 		const bigintTotalItemsSearch = async (
 			_filter: Record<string, unknown>,
-			_opts?: unknown,
-		) => {
+			_opts: SearchConsistencyOpts,
+		): Promise<PagedResponse<{ id: number }>> => {
 			callCount++;
-			return {
-				items: [{ id: 1 }, { id: 2 }],
-				page: {
-					totalItems: 2n, // BigInt, as returned by the SDK
-					endCursor: undefined,
-				},
-			};
+			return makePage([{ id: 1 }, { id: 2 }], {
+				totalItems: 2n, // BigInt, as returned by the SDK
+				endCursor: null,
+			});
 		};
 
 		// Should NOT throw TypeError: Cannot mix BigInt and other types

@@ -14,7 +14,7 @@ import {
 import { c8ctl } from "../../src/runtime.ts";
 
 describe("Help Module", () => {
-	let consoleLogSpy: unknown[];
+	let consoleLogSpy: string[];
 	let originalLog: typeof console.log;
 	let originalOutputMode: typeof c8ctl.outputMode;
 

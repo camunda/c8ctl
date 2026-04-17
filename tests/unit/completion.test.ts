@@ -52,7 +52,7 @@ describe("Completion Module", () => {
 		assert.ok(output.includes("# c8ctl bash completion"));
 		assert.ok(output.includes("_c8ctl_completions()"));
 		assert.ok(
-			output.includes('cur="${COMP_WORDS[COMP_CWORD]}"'),
+			output.includes(`cur="\${COMP_WORDS[COMP_CWORD]}"`),
 			"Should initialize cur variable",
 		);
 		assert.ok(output.includes("COMPREPLY=()"), "Should initialize COMPREPLY");
