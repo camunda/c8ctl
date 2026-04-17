@@ -1764,6 +1764,8 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	let originalWarn: typeof console.warn;
 	let originalError: typeof console.error;
 	let originalFetch: typeof globalThis.fetch;
+	let originalCacheDir: string | undefined;
+	let tempCacheDir: string;
 
 	beforeEach(() => {
 		captured = [];
@@ -1779,6 +1781,13 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		console.error = (...args: unknown[]) => {
 			captured.push(args.map(String).join(" "));
 		};
+		// Redirect the plugin to an empty temp cache dir so the `logs`
+		// subcommand does not spawn `tail -f` against a real running
+		// cluster on the developer's machine (which would leak and hang
+		// the test runner).
+		originalCacheDir = process.env.C8RUN_CACHE_DIR;
+		tempCacheDir = mkdtempSync(join(tmpdir(), "c8ctl-test-cache-"));
+		process.env.C8RUN_CACHE_DIR = tempCacheDir;
 		originalFetch = globalThis.fetch;
 		Object.defineProperty(globalThis, "fetch", {
 			value: async () => {
@@ -1793,6 +1802,14 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		console.log = originalLog;
 		console.warn = originalWarn;
 		console.error = originalError;
+		if (originalCacheDir === undefined) {
+			delete process.env.C8RUN_CACHE_DIR;
+		} else {
+			process.env.C8RUN_CACHE_DIR = originalCacheDir;
+		}
+		if (existsSync(tempCacheDir)) {
+			rmSync(tempCacheDir, { recursive: true, force: true });
+		}
 		Object.defineProperty(globalThis, "fetch", {
 			value: originalFetch,
 			writable: true,
