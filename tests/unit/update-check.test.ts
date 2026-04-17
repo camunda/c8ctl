@@ -557,7 +557,7 @@ describe("patient vs impatient check timing", () => {
 			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
-			return new Promise((resolve, reject) => {
+			return new Promise((_resolve, reject) => {
 				// If aborted before resolving, record it
 				init?.signal?.addEventListener("abort", () => {
 					fetchAborted = true;

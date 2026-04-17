@@ -10,7 +10,17 @@ describe("Process Instances Table Formatting", () => {
 	 * The table row mapping used in listProcessInstances.
 	 * Mirrors the logic in src/commands/process-instances.ts.
 	 */
-	const formatRow = (pi: any) => ({
+	const formatRow = (pi: {
+		hasIncident?: boolean;
+		processInstanceKey?: string;
+		key?: string;
+		processDefinitionId?: string;
+		state?: string;
+		processDefinitionVersion?: number | string;
+		version?: number | string;
+		startDate?: string;
+		tenantId?: string;
+	}) => ({
 		Key: `${pi.hasIncident ? "⚠ " : ""}${pi.processInstanceKey || pi.key}`,
 		"Process ID": pi.processDefinitionId,
 		State: pi.state,

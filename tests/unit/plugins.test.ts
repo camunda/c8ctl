@@ -167,7 +167,7 @@ describe("Plugin Structure", () => {
 			try {
 				// Need to inject global for the plugin to work
 				const { c8ctl } = await import("../../src/runtime.js");
-				(globalThis as any).c8ctl = c8ctl;
+				Object.assign(globalThis, { c8ctl });
 
 				const pluginPath = join(
 					process.cwd(),
@@ -177,7 +177,7 @@ describe("Plugin Structure", () => {
 
 				assert.ok(plugin.commands, "Plugin has commands export");
 				assert.ok(
-					typeof plugin.commands["analyze"] === "function",
+					typeof plugin.commands.analyze === "function",
 					"analyze is a function",
 				);
 				assert.ok(
@@ -188,7 +188,7 @@ describe("Plugin Structure", () => {
 					typeof plugin.commands.config === "function",
 					"config is a function",
 				);
-			} catch (error) {
+			} catch (_error) {
 				// If import fails, just verify the file exists
 				const pluginPath = join(
 					process.cwd(),

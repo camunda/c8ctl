@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { getExecErrorOutput } from "../utils/guards.ts";
 
 describe("Deployment Validation", () => {
 	let testDir: string;
@@ -47,8 +48,8 @@ describe("Deployment Validation", () => {
 				env: process.env,
 			});
 			assert.fail("Should have thrown an error for duplicate process IDs");
-		} catch (error: any) {
-			const output = error.stdout + error.stderr;
+		} catch (error) {
+			const output = getExecErrorOutput(error);
 			assert.match(
 				output,
 				/Cannot deploy.*Multiple files with the same process\/decision ID/,
@@ -85,9 +86,9 @@ describe("Deployment Validation", () => {
 			});
 			// If Camunda is running, this should succeed
 			assert.ok(true);
-		} catch (error: any) {
+		} catch (error) {
 			// If it fails, it should be a connection error, not a validation error
-			const output = error.stdout + error.stderr;
+			const output = getExecErrorOutput(error);
 			assert.doesNotMatch(
 				output,
 				/Cannot deploy.*Multiple files/,
@@ -108,9 +109,9 @@ describe("Deployment Validation", () => {
 			});
 			// If Camunda is running, this should succeed
 			assert.ok(true);
-		} catch (error: any) {
+		} catch (error) {
 			// If it fails, it should be a connection error, not a validation error
-			const output = error.stdout + error.stderr;
+			const output = getExecErrorOutput(error);
 			assert.doesNotMatch(
 				output,
 				/Cannot deploy.*Multiple files/,

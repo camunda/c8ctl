@@ -56,7 +56,7 @@ function assertNoControlChars(value: string, fieldName: string): void {
 function validateSpawnInputs(
 	command: string,
 	args: string[],
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
 ): void {
 	assertAllowedCommand(command);
 	assertNoControlChars(command, "command");
@@ -79,6 +79,19 @@ function validateSpawnInputs(
 			}
 		}
 	}
+
+	if (options?.timeout !== undefined) {
+		if (
+			typeof options.timeout !== "number" ||
+			!Number.isFinite(options.timeout) ||
+			options.timeout < 0 ||
+			!Number.isSafeInteger(options.timeout)
+		) {
+			throw new Error(
+				`Unsafe timeout: must be a non-negative safe integer (got ${String(options.timeout)})`,
+			);
+		}
+	}
 }
 
 export interface SpawnResult {
@@ -90,16 +103,18 @@ export interface SpawnResult {
 export async function asyncSpawn(
 	command: string,
 	args: string[],
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv },
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
 ): Promise<SpawnResult> {
 	validateSpawnInputs(command, args, options);
 	try {
 		const { stdout, stderr } = await execFile(command, args, {
 			...options,
 			maxBuffer: 10 * 1024 * 1024,
+			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
 		});
 		return { stdout: stdout ?? "", stderr: stderr ?? "", status: 0 };
 	} catch (err) {
+		// biome-ignore lint/plugin: unavoidable narrowing of catch-clause unknown to ExecFileException
 		const e = err as ExecFileException & { stdout?: string; stderr?: string };
 		return {
 			stdout: e.stdout ?? "",

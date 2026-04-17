@@ -5,13 +5,14 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { showCompletion } from "../../src/commands/completion.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 describe("Completion Module", () => {
-	let consoleLogSpy: any[];
-	let consoleErrorSpy: any[];
+	let consoleLogSpy: unknown[];
+	let consoleErrorSpy: unknown[];
 	let originalLog: typeof console.log;
 	let originalError: typeof console.error;
-	let processExitStub: ((code: number) => never) | undefined;
+	let restoreExit: (() => void) | undefined;
 	let exitCode: number | undefined;
 
 	beforeEach(() => {
@@ -21,28 +22,25 @@ describe("Completion Module", () => {
 		originalError = console.error;
 		exitCode = undefined;
 
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(args.join(" "));
 		};
 
-		console.error = (...args: any[]) => {
+		console.error = (...args: unknown[]) => {
 			consoleErrorSpy.push(args.join(" "));
 		};
 
 		// Stub process.exit to capture exit codes
-		processExitStub = process.exit;
-		(process.exit as any) = (code: number) => {
-			exitCode = code;
+		restoreExit = mockProcessExit((code) => {
+			exitCode = typeof code === "number" ? code : undefined;
 			throw new Error(`process.exit(${code})`);
-		};
+		});
 	});
 
 	afterEach(() => {
 		console.log = originalLog;
 		console.error = originalError;
-		if (processExitStub) {
-			process.exit = processExitStub;
-		}
+		restoreExit?.();
 	});
 
 	test("generates bash completion script", () => {
@@ -173,8 +171,10 @@ describe("Completion Module", () => {
 		try {
 			showCompletion(undefined);
 			assert.fail("Should have thrown an error");
-		} catch (error: any) {
-			assert.ok(error.message.includes("process.exit(1)"));
+		} catch (error) {
+			assert.ok(
+				error instanceof Error && error.message.includes("process.exit(1)"),
+			);
 			assert.strictEqual(exitCode, 1);
 		}
 
@@ -187,8 +187,10 @@ describe("Completion Module", () => {
 		try {
 			showCompletion("powershell");
 			assert.fail("Should have thrown an error");
-		} catch (error: any) {
-			assert.ok(error.message.includes("process.exit(1)"));
+		} catch (error) {
+			assert.ok(
+				error instanceof Error && error.message.includes("process.exit(1)"),
+			);
 			assert.strictEqual(exitCode, 1);
 		}
 

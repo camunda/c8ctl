@@ -12,10 +12,7 @@ import {
 	deleteIdentityAuthorizationCommand,
 	validateCreateAuthorizationOptions,
 } from "../../src/commands/identity-authorizations.ts";
-import {
-	createIdentityGroupCommand,
-	deleteIdentityGroupCommand,
-} from "../../src/commands/identity-groups.ts";
+import { deleteIdentityGroupCommand } from "../../src/commands/identity-groups.ts";
 import {
 	createIdentityMappingRuleCommand,
 	deleteIdentityMappingRuleCommand,
@@ -24,10 +21,7 @@ import {
 	createIdentityRoleCommand,
 	deleteIdentityRoleCommand,
 } from "../../src/commands/identity-roles.ts";
-import {
-	createIdentityTenantCommand,
-	deleteIdentityTenantCommand,
-} from "../../src/commands/identity-tenants.ts";
+import { deleteIdentityTenantCommand } from "../../src/commands/identity-tenants.ts";
 import {
 	createIdentityUserCommand,
 	deleteIdentityUserCommand,
@@ -35,6 +29,8 @@ import {
 import { resolveTenantId } from "../../src/config.ts";
 import { getLogger } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 const TEST_BASE_URL = "http://test-cluster/v2";
 
@@ -44,7 +40,7 @@ let logSpy: string[];
 let errorSpy: string[];
 let originalLog: typeof console.log;
 let originalError: typeof console.error;
-let originalExit: typeof process.exit;
+let restoreExit: () => void;
 let originalBaseUrl: string | undefined;
 let originalActiveProfile: typeof c8ctl.activeProfile;
 let originalDryRun: typeof c8ctl.dryRun;
@@ -55,18 +51,17 @@ function setup() {
 	errorSpy = [];
 	originalLog = console.log;
 	originalError = console.error;
-	originalExit = process.exit;
 	originalBaseUrl = process.env.CAMUNDA_BASE_URL;
 	originalActiveProfile = c8ctl.activeProfile;
 	originalDryRun = c8ctl.dryRun;
 	originalOutputMode = c8ctl.outputMode;
 
-	console.log = (...args: any[]) => logSpy.push(args.join(" "));
-	console.error = (...args: any[]) => errorSpy.push(args.join(" "));
+	console.log = (...args: unknown[]) => logSpy.push(args.join(" "));
+	console.error = (...args: unknown[]) => errorSpy.push(args.join(" "));
 	// Make process.exit throw so tests can catch it with assert.rejects / assert.throws
-	(process.exit as any) = (code: number) => {
+	restoreExit = mockProcessExit((code) => {
 		throw new Error(`process.exit(${code})`);
-	};
+	});
 
 	// Provide a base URL so resolveClusterConfig uses the env-var path,
 	// no profile file or local cluster needed.
@@ -79,7 +74,7 @@ function setup() {
 function teardown() {
 	console.log = originalLog;
 	console.error = originalError;
-	process.exit = originalExit;
+	restoreExit();
 	if (originalBaseUrl === undefined) {
 		delete process.env.CAMUNDA_BASE_URL;
 	} else {
@@ -98,12 +93,13 @@ function capturedJson(): Record<string, unknown> {
 
 /** Build a minimal CommandContext for test execution */
 function buildCtx(profile?: string) {
+	const positionals: string[] = [];
 	return {
 		client: createClient(profile),
 		logger: getLogger(),
 		tenantId: resolveTenantId(profile),
 		resource: "",
-		positionals: [] as string[],
+		positionals,
 		sortOrder: "asc" as const,
 		sortBy: undefined,
 		limit: undefined,
@@ -385,10 +381,10 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 		assert.ok(
-			(out.url as string).endsWith("/users"),
+			getUrl(out).endsWith("/users"),
 			`expected URL to end with /users, got: ${out.url}`,
 		);
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.username, "alice");
 		assert.strictEqual(
 			body.password,
@@ -406,7 +402,7 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
 		assert.ok(
-			(out.url as string).endsWith("/users/alice"),
+			getUrl(out).endsWith("/users/alice"),
 			`expected URL to end with /users/alice, got: ${out.url}`,
 		);
 	});
@@ -422,7 +418,7 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 		assert.ok(
-			(out.url as string).endsWith("/roles"),
+			getUrl(out).endsWith("/roles"),
 			`expected URL to end with /roles, got: ${out.url}`,
 		);
 		assert.deepStrictEqual(out.body, { roleId: "admin-role", name: "admin" });
@@ -434,7 +430,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/roles/admin-role"));
+		assert.ok(getUrl(out).endsWith("/roles/admin-role"));
 	});
 
 	test("createIdentityMappingRule: emits POST to /mapping-rules with all fields", async () => {
@@ -452,7 +448,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/mapping-rules"));
+		assert.ok(getUrl(out).endsWith("/mapping-rules"));
 		assert.deepStrictEqual(out.body, {
 			mappingRuleId: "rule-1",
 			name: "My Rule",
@@ -467,7 +463,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/mapping-rules/rule-1"));
+		assert.ok(getUrl(out).endsWith("/mapping-rules/rule-1"));
 	});
 
 	test("createIdentityAuthorization: emits POST to /authorizations with permissionTypes array", async () => {
@@ -486,8 +482,8 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/authorizations"));
-		const body = out.body as Record<string, unknown>;
+		assert.ok(getUrl(out).endsWith("/authorizations"));
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.ownerId, "alice");
 		assert.strictEqual(body.ownerType, "USER");
 		assert.strictEqual(body.resourceType, "PROCESS_DEFINITION");
@@ -501,7 +497,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/authorizations/42"));
+		assert.ok(getUrl(out).endsWith("/authorizations/42"));
 	});
 });
 
@@ -519,7 +515,7 @@ describe("handleAssign — dry-run and flag validation", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.command, "assign");
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/roles/admin-role/users/alice"));
+		assert.ok(getUrl(out).includes("/roles/admin-role/users/alice"));
 		assert.strictEqual(out.body, null);
 	});
 
@@ -579,10 +575,8 @@ describe("handleAssign — dry-run and flag validation", () => {
 		);
 
 		const out = capturedJson();
-		assert.ok(
-			(out.url as string).includes(encodeURIComponent("alice@example.com")),
-		);
-		assert.ok((out.url as string).includes(encodeURIComponent("my group")));
+		assert.ok(getUrl(out).includes(encodeURIComponent("alice@example.com")));
+		assert.ok(getUrl(out).includes(encodeURIComponent("my group")));
 	});
 });
 
@@ -598,7 +592,7 @@ describe("handleUnassign — dry-run and flag validation", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.command, "unassign");
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).includes("/users/alice/groups/ops"));
+		assert.ok(getUrl(out).includes("/users/alice/groups/ops"));
 		assert.strictEqual(out.body, null);
 	});
 
@@ -639,45 +633,49 @@ describe("sanitizeForLogging — credential redaction", () => {
 	// Import directly to unit-test the sanitizer in isolation
 	test("redacts password from a flat object", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
-		const result = sanitizeForLogging({
-			username: "alice",
-			password: "secret",
-		}) as any;
+		const result = asRecord(
+			sanitizeForLogging({
+				username: "alice",
+				password: "secret",
+			}),
+		);
 		assert.strictEqual(result.username, "alice");
 		assert.strictEqual(result.password, "[REDACTED]");
 	});
 
 	test("redacts clientSecret from a nested body object", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
-		const result = sanitizeForLogging({
-			config: { clientId: "id", clientSecret: "shhh" },
-		}) as any;
-		assert.strictEqual(result.config.clientId, "id");
-		assert.strictEqual(result.config.clientSecret, "[REDACTED]");
+		const result = asRecord(
+			sanitizeForLogging({
+				config: { clientId: "id", clientSecret: "shhh" },
+			}),
+		);
+		const config = asRecord(result.config);
+		assert.strictEqual(config.clientId, "id");
+		assert.strictEqual(config.clientSecret, "[REDACTED]");
 	});
 
 	test("does NOT redact oAuthUrl (it is a URL, not a credential)", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
 		const url = "https://auth.example.com/oauth/token";
-		const result = sanitizeForLogging({ oAuthUrl: url }) as Record<
-			string,
-			unknown
-		>;
+		const result = asRecord(sanitizeForLogging({ oAuthUrl: url }));
 		assert.strictEqual(result.oAuthUrl, url);
 	});
 
 	test("does NOT redact authorizationKey (false positive — it is a resource identifier)", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
-		const result = sanitizeForLogging({ authorizationKey: "42" }) as any;
+		const result = asRecord(sanitizeForLogging({ authorizationKey: "42" }));
 		assert.strictEqual(result.authorizationKey, "42");
 	});
 
 	test("redacts password inside an array of objects", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
-		const result = sanitizeForLogging([
+		const raw = sanitizeForLogging([
 			{ user: "alice", password: "p1" },
 			{ user: "bob", password: "p2" },
-		]) as any[];
+		]);
+		assert.ok(Array.isArray(raw), "expected array result");
+		const result = raw.map((x) => asRecord(x));
 		assert.strictEqual(result[0].password, "[REDACTED]");
 		assert.strictEqual(result[1].password, "[REDACTED]");
 		assert.strictEqual(result[0].user, "alice");
@@ -815,7 +813,7 @@ describe("handleAssign — every allowed resource/target pair works in dry-run",
 			assert.strictEqual(out.dryRun, true);
 			assert.strictEqual(out.command, "assign");
 			assert.strictEqual(out.method, "POST");
-			assert.ok(typeof out.url === "string" && (out.url as string).length > 0);
+			assert.ok(typeof out.url === "string" && out.url.length > 0);
 		});
 	}
 
@@ -845,7 +843,7 @@ describe("sanitizeForLogging — built-in type preservation", () => {
 	test("preserves Error name, message, and stack", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
 		const err = new Error("something broke");
-		const result = sanitizeForLogging(err) as Record<string, unknown>;
+		const result = asRecord(sanitizeForLogging(err));
 		assert.strictEqual(result.name, "Error");
 		assert.strictEqual(result.message, "something broke");
 		assert.ok(
@@ -858,17 +856,17 @@ describe("sanitizeForLogging — built-in type preservation", () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
 		const inner = new Error("root cause");
 		const outer = new Error("wrapper", { cause: inner });
-		const result = sanitizeForLogging(outer) as Record<string, unknown>;
+		const result = asRecord(sanitizeForLogging(outer));
 		assert.strictEqual(result.message, "wrapper");
-		const causeResult = result.cause as Record<string, unknown>;
+		const causeResult = asRecord(result.cause);
 		assert.strictEqual(causeResult.message, "root cause");
 	});
 
 	test("redacts sensitive fields on Error with enumerable credentials", async () => {
 		const { sanitizeForLogging } = await import("../../src/logger.ts");
 		const err = new Error("auth failed");
-		(err as any).password = "secret123";
-		const result = sanitizeForLogging(err) as Record<string, unknown>;
+		Object.assign(err, { password: "secret123" });
+		const result = asRecord(sanitizeForLogging(err));
 		assert.strictEqual(result.message, "auth failed");
 		assert.strictEqual(result.password, "[REDACTED]");
 	});

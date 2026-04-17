@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { getUrl } from "../utils/guards.ts";
 
 // ─── resolve incident ────────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ describe("CLI behavioural: resolve incident", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/incidents/77777/resolution"));
+		assert.ok(getUrl(out).includes("/incidents/77777/resolution"));
 	});
 
 	test("--dry-run works with inc alias", async () => {
@@ -30,7 +31,7 @@ describe("CLI behavioural: resolve incident", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
-		assert.ok((out.url as string).includes("/incidents/77777/resolution"));
+		assert.ok(getUrl(out).includes("/incidents/77777/resolution"));
 	});
 
 	test("rejects missing incident key with exit code 1", async () => {

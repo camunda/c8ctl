@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── activate jobs ───────────────────────────────────────────────────────────
 
@@ -21,9 +22,9 @@ describe("CLI behavioural: activate jobs", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/jobs/activation"));
+		assert.ok(getUrl(out).endsWith("/jobs/activation"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.type, "my-job-type");
 		assert.strictEqual(body.maxJobsToActivate, 10);
 		assert.strictEqual(body.timeout, 60000);
@@ -41,7 +42,7 @@ describe("CLI behavioural: activate jobs", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.maxJobsToActivate, 5);
 	});
 
@@ -58,7 +59,7 @@ describe("CLI behavioural: activate jobs", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.timeout, 30000);
 		assert.strictEqual(body.worker, "custom-worker");
 	});
@@ -85,7 +86,7 @@ describe("CLI behavioural: complete job", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/jobs/99999/completion"));
+		assert.ok(getUrl(out).includes("/jobs/99999/completion"));
 	});
 
 	test("--dry-run includes variables when provided", async () => {
@@ -99,7 +100,7 @@ describe("CLI behavioural: complete job", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.deepStrictEqual(body.variables, { result: "ok" });
 	});
 
@@ -125,9 +126,9 @@ describe("CLI behavioural: fail job", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/jobs/88888/failure"));
+		assert.ok(getUrl(out).includes("/jobs/88888/failure"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.retries, 0);
 		assert.strictEqual(body.errorMessage, "Job failed via c8ctl");
 	});
@@ -145,7 +146,7 @@ describe("CLI behavioural: fail job", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.retries, 3);
 		assert.strictEqual(body.errorMessage, "custom error");
 	});

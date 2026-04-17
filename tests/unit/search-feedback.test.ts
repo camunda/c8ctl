@@ -27,10 +27,10 @@ function createTestLogger(): {
 	const logs: string[] = [];
 	const errors: string[] = [];
 	const logWriter: LogWriter = {
-		log(...data: any[]) {
+		log(...data: unknown[]) {
 			logs.push(data.map(String).join(" "));
 		},
-		error(...data: any[]) {
+		error(...data: unknown[]) {
 			errors.push(data.map(String).join(" "));
 		},
 	};
@@ -276,7 +276,7 @@ describe("search resourceFlags (from registry)", () => {
 	});
 
 	test("incident includes all expected flags", () => {
-		const flags = resourceFlags["incident"];
+		const flags = resourceFlags.incident;
 		assert.ok("state" in flags);
 		assert.ok("processInstanceKey" in flags);
 		assert.ok("processDefinitionKey" in flags);
@@ -290,7 +290,7 @@ describe("search resourceFlags (from registry)", () => {
 	});
 
 	test("jobs includes all expected flags", () => {
-		const flags = resourceFlags["jobs"];
+		const flags = resourceFlags.jobs;
 		assert.ok("state" in flags);
 		assert.ok("type" in flags);
 		assert.ok("processInstanceKey" in flags);
@@ -299,7 +299,7 @@ describe("search resourceFlags (from registry)", () => {
 	});
 
 	test("variable includes all expected flags", () => {
-		const flags = resourceFlags["variable"];
+		const flags = resourceFlags.variable;
 		assert.ok("name" in flags);
 		assert.ok("value" in flags);
 		assert.ok("processInstanceKey" in flags);

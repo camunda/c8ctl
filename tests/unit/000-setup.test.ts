@@ -24,7 +24,7 @@ function cleanUserDataDir() {
 	if (existsSync(profilesPath)) {
 		try {
 			rmSync(profilesPath, { force: true });
-		} catch (error) {
+		} catch (_error) {
 			// Ignore errors - file might be locked or already removed
 		}
 	}
@@ -32,7 +32,7 @@ function cleanUserDataDir() {
 	if (existsSync(sessionPath)) {
 		try {
 			rmSync(sessionPath, { force: true });
-		} catch (error) {
+		} catch (_error) {
 			// Ignore errors - file might be locked or already removed
 		}
 	}

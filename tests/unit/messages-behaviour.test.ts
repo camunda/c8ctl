@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── publish message ─────────────────────────────────────────────────────────
 
@@ -21,9 +22,9 @@ describe("CLI behavioural: publish message", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/messages/publication"));
+		assert.ok(getUrl(out).includes("/messages/publication"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.name, "my-message");
 	});
 
@@ -38,7 +39,7 @@ describe("CLI behavioural: publish message", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.correlationKey, "order-123");
 	});
 
@@ -53,7 +54,7 @@ describe("CLI behavioural: publish message", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.deepStrictEqual(body.variables, { orderId: "123" });
 	});
 
@@ -68,7 +69,7 @@ describe("CLI behavioural: publish message", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.timeToLive, 60000);
 	});
 
@@ -94,9 +95,9 @@ describe("CLI behavioural: correlate message", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/messages/correlation"));
+		assert.ok(getUrl(out).includes("/messages/correlation"));
 
-		const body = out.body as Record<string, unknown>;
+		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.name, "my-message");
 	});
 
@@ -113,7 +114,7 @@ describe("CLI behavioural: correlate message", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.correlationKey, "order-456");
 		assert.deepStrictEqual(body.variables, { status: "done" });
 	});

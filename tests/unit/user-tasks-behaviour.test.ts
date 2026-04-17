@@ -9,6 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── complete user-task ──────────────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ describe("CLI behavioural: complete user-task", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/user-tasks/66666/completion"));
+		assert.ok(getUrl(out).includes("/user-tasks/66666/completion"));
 	});
 
 	test("--dry-run works with ut alias", async () => {
@@ -30,7 +31,7 @@ describe("CLI behavioural: complete user-task", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
-		assert.ok((out.url as string).includes("/user-tasks/66666/completion"));
+		assert.ok(getUrl(out).includes("/user-tasks/66666/completion"));
 	});
 
 	test("--dry-run includes variables when provided", async () => {
@@ -44,7 +45,7 @@ describe("CLI behavioural: complete user-task", () => {
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = parseJson(result).body as Record<string, unknown>;
+		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.deepStrictEqual(body.variables, { approved: true });
 	});
 

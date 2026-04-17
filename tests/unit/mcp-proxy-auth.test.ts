@@ -4,11 +4,9 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import type { createClient } from "../../src/client.ts";
 import { createCamundaFetch } from "../../src/commands/mcp-proxy.ts";
 import type { Logger } from "../../src/logger.ts";
-
-type CamundaClient = ReturnType<typeof createClient>;
+import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("createCamundaFetch", () => {
 	let originalFetch: typeof fetch;
@@ -16,13 +14,7 @@ describe("createCamundaFetch", () => {
 
 	beforeEach(() => {
 		originalFetch = global.fetch;
-		mockLogger = {
-			info: () => {},
-			debug: () => {},
-			error: () => {},
-			warn: () => {},
-			json: () => {},
-		} as unknown as Logger;
+		mockLogger = makeMockLogger();
 	});
 
 	afterEach(() => {
@@ -32,19 +24,19 @@ describe("createCamundaFetch", () => {
 	test("injects auth headers from CamundaClient", async () => {
 		let capturedHeaders: Headers | undefined;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({
 				Authorization: "Bearer test-token",
 				"X-Custom-Header": "custom-value",
 			}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
-			capturedHeaders = init?.headers as Headers;
+			capturedHeaders = new Headers(init?.headers);
 			return new Response("success", { status: 200 });
 		};
 
@@ -62,16 +54,16 @@ describe("createCamundaFetch", () => {
 	test("merges auth headers with existing request headers", async () => {
 		let capturedHeaders: Headers | undefined;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({ Authorization: "Bearer test-token" }),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
-			capturedHeaders = init?.headers as Headers;
+			capturedHeaders = new Headers(init?.headers);
 			return new Response("success", { status: 200 });
 		};
 
@@ -95,7 +87,7 @@ describe("createCamundaFetch", () => {
 		let callCount = 0;
 		let authRefreshCalled = false;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({
 				Authorization:
 					callCount === 0 ? "Bearer expired-token" : "Bearer fresh-token",
@@ -104,13 +96,13 @@ describe("createCamundaFetch", () => {
 				authRefreshCalled = true;
 			},
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
-			const headers = init?.headers as Headers;
+			const headers = new Headers(init?.headers);
 			const authHeader = headers?.get("Authorization");
 
 			if (callCount === 0) {
@@ -132,14 +124,14 @@ describe("createCamundaFetch", () => {
 	});
 
 	test("converts AbortError to descriptive timeout error", async () => {
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			const error = new Error("The operation was aborted");
 			error.name = "AbortError";
@@ -158,17 +150,18 @@ describe("createCamundaFetch", () => {
 	});
 
 	test("converts ECONNREFUSED to descriptive connection error", async () => {
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
-			const error: any = new Error("fetch failed");
-			error.cause = { code: "ECONNREFUSED" };
+			const error = new Error("fetch failed", {
+				cause: { code: "ECONNREFUSED" },
+			});
 			throw error;
 		};
 
@@ -189,16 +182,16 @@ describe("createCamundaFetch", () => {
 	});
 
 	test("preserves other errors unchanged", async () => {
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		const customError = new Error("Custom network error");
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			throw customError;
 		};
@@ -217,13 +210,13 @@ describe("createCamundaFetch", () => {
 	test("merges abort signals from init and timeout", async () => {
 		let capturedSignal: AbortSignal | null | undefined;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedSignal = init?.signal;
@@ -244,13 +237,13 @@ describe("createCamundaFetch", () => {
 	test("uses timeout signal when no external signal provided", async () => {
 		let capturedSignal: AbortSignal | null | undefined;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedSignal = init?.signal;
@@ -268,20 +261,20 @@ describe("createCamundaFetch", () => {
 		let firstCallHeaders: Headers | undefined;
 		let secondCallHeaders: Headers | undefined;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({
 				Authorization:
 					callCount === 0 ? "Bearer expired-token" : "Bearer fresh-token",
 			}),
 			forceAuthRefresh: async () => {},
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
-			const headers = init?.headers as Headers;
+			const headers = new Headers(init?.headers);
 
 			if (callCount === 0) {
 				firstCallHeaders = headers;
@@ -315,13 +308,13 @@ describe("createCamundaFetch", () => {
 	});
 
 	test("respects custom timeout value", async () => {
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			// Simulate slow response - wait for abort signal
@@ -332,7 +325,7 @@ describe("createCamundaFetch", () => {
 
 				init?.signal?.addEventListener("abort", () => {
 					clearTimeout(timeout);
-					const error: any = new Error("The operation was aborted");
+					const error = new Error("The operation was aborted");
 					error.name = "AbortError";
 					reject(error);
 				});
@@ -351,14 +344,14 @@ describe("createCamundaFetch", () => {
 	});
 
 	test("clears timeout on successful response", async () => {
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: "http://localhost:8080" }),
-		} as unknown as CamundaClient;
+		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			return new Response("success", { status: 200 });
 		};

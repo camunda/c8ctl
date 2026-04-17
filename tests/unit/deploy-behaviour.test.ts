@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
+import { asRecord, asRecordArray } from "../utils/guards.ts";
 
 const MINIMAL_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -52,11 +53,10 @@ describe("CLI behavioural: deploy", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/deployments"));
+		assert.ok(typeof out.url === "string" && out.url.endsWith("/deployments"));
 
-		const body = out.body as Record<string, unknown>;
-		const resources = body.resources as Array<Record<string, unknown>>;
-		assert.ok(Array.isArray(resources), "body.resources should be an array");
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
 		assert.ok(resources.length > 0, "should include at least one resource");
 		assert.ok(resources[0].name, "resource should have a name");
 	});

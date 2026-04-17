@@ -4,17 +4,12 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import {
-	getLogger,
-	Logger,
-	type SortOrder,
-	sortTableData,
-} from "../../src/logger.ts";
+import { getLogger, Logger, sortTableData } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
 
 describe("Logger Module", () => {
-	let consoleLogSpy: any[];
-	let consoleErrorSpy: any[];
+	let consoleLogSpy: unknown[];
+	let consoleErrorSpy: unknown[];
 	let originalLog: typeof console.log;
 	let originalError: typeof console.error;
 
@@ -24,11 +19,11 @@ describe("Logger Module", () => {
 		originalLog = console.log;
 		originalError = console.error;
 
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(args.join(" "));
 		};
 
-		console.error = (...args: any[]) => {
+		console.error = (...args: unknown[]) => {
 			consoleErrorSpy.push(args.join(" "));
 		};
 
@@ -441,14 +436,14 @@ describe("Logger Module", () => {
 
 		test("Logger accepts custom writer", () => {
 			c8ctl.outputMode = "text";
-			const customLogOutput: any[] = [];
-			const customErrorOutput: any[] = [];
+			const customLogOutput: unknown[] = [];
+			const customErrorOutput: unknown[] = [];
 
 			const customWriter = {
-				log(...data: any[]): void {
+				log(...data: unknown[]): void {
 					customLogOutput.push(data.join(" "));
 				},
-				error(...data: any[]): void {
+				error(...data: unknown[]): void {
 					customErrorOutput.push(data.join(" "));
 				},
 			};
@@ -474,14 +469,14 @@ describe("Logger Module", () => {
 
 		test("Custom writer receives all method calls", () => {
 			c8ctl.outputMode = "text";
-			const logCalls: any[][] = [];
-			const errorCalls: any[][] = [];
+			const logCalls: unknown[][] = [];
+			const errorCalls: unknown[][] = [];
 
 			const trackingWriter = {
-				log(...data: any[]): void {
+				log(...data: unknown[]): void {
 					logCalls.push(data);
 				},
-				error(...data: any[]): void {
+				error(...data: unknown[]): void {
 					errorCalls.push(data);
 				},
 			};
@@ -508,10 +503,10 @@ describe("Logger Module", () => {
 
 			// Simulate stderrWriter behavior
 			const stderrWriter = {
-				log(...data: any[]): void {
+				log(...data: unknown[]): void {
 					console.error(...data);
 				},
-				error(...data: any[]): void {
+				error(...data: unknown[]): void {
 					console.error(...data);
 				},
 			};
@@ -538,14 +533,14 @@ describe("Logger Module", () => {
 
 		test("Custom writer works with JSON mode", () => {
 			c8ctl.outputMode = "json";
-			const logOutput: any[] = [];
-			const errorOutput: any[] = [];
+			const logOutput: unknown[] = [];
+			const errorOutput: unknown[] = [];
 
 			const customWriter = {
-				log(...data: any[]): void {
+				log(...data: unknown[]): void {
 					logOutput.push(data[0]);
 				},
-				error(...data: any[]): void {
+				error(...data: unknown[]): void {
 					errorOutput.push(data[0]);
 				},
 			};
@@ -574,11 +569,11 @@ describe("Logger Module", () => {
 
 		test("Custom writer handles debug with multiple arguments", () => {
 			c8ctl.outputMode = "text";
-			const errorCalls: any[][] = [];
+			const errorCalls: unknown[][] = [];
 
 			const trackingWriter = {
-				log(...data: any[]): void {},
-				error(...data: any[]): void {
+				log(..._data: unknown[]): void {},
+				error(...data: unknown[]): void {
 					errorCalls.push(data);
 				},
 			};
@@ -602,8 +597,8 @@ describe("sortTableData", () => {
 	beforeEach(() => {
 		warnMessages = [];
 		const trackingWriter = {
-			log(...data: any[]): void {},
-			error(...data: any[]): void {
+			log(..._data: unknown[]): void {},
+			error(...data: unknown[]): void {
 				warnMessages.push(data.join(" "));
 			},
 		};
@@ -671,7 +666,7 @@ describe("sortTableData", () => {
 
 	test("places null/undefined values last", () => {
 		const data = [{ State: null }, { State: "ACTIVE" }, { State: undefined }];
-		const result = sortTableData(data as any, "State", logger);
+		const result = sortTableData(data, "State", logger);
 		assert.strictEqual(result[0].State, "ACTIVE");
 	});
 
@@ -709,7 +704,7 @@ describe("sortTableData", () => {
 			{ State: "ACTIVE" },
 			{ State: undefined },
 		];
-		const result = sortTableData(data as any, "State", logger, "desc");
+		const result = sortTableData(data, "State", logger, "desc");
 		assert.strictEqual(result[0].State, "COMPLETED");
 		assert.strictEqual(result[1].State, "ACTIVE");
 	});
@@ -717,10 +712,10 @@ describe("sortTableData", () => {
 	test("sorted output is serialized in order when table() is called in json mode", () => {
 		const logMessages: string[] = [];
 		const trackingWriter = {
-			log(...data: any[]): void {
+			log(...data: unknown[]): void {
 				logMessages.push(data.join(" "));
 			},
-			error(...data: any[]): void {},
+			error(..._data: unknown[]): void {},
 		};
 		const jsonLogger = new Logger(trackingWriter);
 		c8ctl.outputMode = "json";
@@ -736,7 +731,7 @@ describe("sortTableData", () => {
 		assert.strictEqual(logMessages.length, 1);
 		const parsed = JSON.parse(logMessages[0]);
 		assert.deepStrictEqual(
-			parsed.map((r: any) => r.State),
+			parsed.map((r: { State: string }) => r.State),
 			["ACTIVE", "CANCELED", "COMPLETED"],
 		);
 	});
@@ -744,8 +739,8 @@ describe("sortTableData", () => {
 	test("warns with JSON-formatted message in json mode when column not found", () => {
 		const warnJson: string[] = [];
 		const trackingWriter = {
-			log(...data: any[]): void {},
-			error(...data: any[]): void {
+			log(..._data: unknown[]): void {},
+			error(...data: unknown[]): void {
 				warnJson.push(data.join(" "));
 			},
 		};

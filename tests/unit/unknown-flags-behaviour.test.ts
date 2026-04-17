@@ -36,7 +36,7 @@ function parseWarning(
 /** Assert stderr contains NO unknown-flag warning. */
 function assertNoWarning(stderr: string): void {
 	const warning = parseWarning(stderr);
-	if (warning && warning.message.includes("not recognized")) {
+	if (warning?.message.includes("not recognized")) {
 		assert.fail(`Unexpected unknown-flag warning: ${warning.message}`);
 	}
 }

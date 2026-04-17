@@ -18,7 +18,7 @@ describe("--fields flag (output field filtering)", () => {
 		originalLog = console.log;
 		originalOutputMode = c8ctl.outputMode;
 		originalFields = c8ctl.fields;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(args.join(" "));
 		};
 	});

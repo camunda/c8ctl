@@ -44,11 +44,9 @@ describe("Topology Integration Tests (requires Camunda 8 at localhost:8080)", ()
 			const badClient = createClient();
 
 			// Should throw an error when trying to connect to non-existent server
-			let errorThrown = false;
 			try {
 				await badClient.getTopology();
-			} catch (error: any) {
-				errorThrown = true;
+			} catch (error) {
 				// Verify it's a connection-related error
 				assert.ok(error instanceof Error, "Should be an Error instance");
 			}

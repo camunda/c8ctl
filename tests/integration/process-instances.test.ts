@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { createClient } from "../../src/client.ts";
 import { deploy } from "../../src/commands/deployments.ts";
 import { todayRange } from "../utils/date-helpers.ts";
+import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
@@ -41,12 +42,13 @@ type ProcessInstanceRow = {
 function cli(dataDir: string, ...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
-		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
 	});
 }
 
 function parseItems<T>(stdout: string): T[] {
 	if (!stdout.trim()) return [];
+	// biome-ignore lint/plugin: generic JSON parse helper; T supplied by caller
 	return JSON.parse(stdout) as T[];
 }
 

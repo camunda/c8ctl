@@ -3,8 +3,11 @@
  * This demonstrates the expected structure for a c8ctl plugin
  */
 
-// c8ctl runtime is available as a global variable
-const c8ctl = (globalThis as any).c8ctl;
+// c8ctl runtime is available as a global variable (typed in src/runtime.ts)
+const c8ctl = globalThis.c8ctl;
+if (!c8ctl) {
+	throw new Error("c8ctl runtime is not available on globalThis");
+}
 
 export const metadata = {
 	name: "sample-ts-plugin",

@@ -25,7 +25,7 @@ describe("Lazy client getter", () => {
 		let _client: unknown | undefined;
 		let _tenantId: string | undefined;
 		let _tenantResolved = false;
-		return {
+		const stub = {
 			get client() {
 				if (!_client) _client = factories.createClient();
 				return _client;
@@ -37,8 +37,9 @@ describe("Lazy client getter", () => {
 				}
 				return _tenantId;
 			},
-			// biome-ignore lint/suspicious/noExplicitAny: test stub
-		} as any as CommandContext;
+		};
+		// biome-ignore lint/plugin: test stub for CommandContext with only lazy getters populated
+		return stub as unknown as CommandContext;
 	}
 
 	test("client factory is not called until ctx.client is accessed", () => {

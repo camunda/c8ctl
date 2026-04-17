@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import type { createClient } from "../../src/client.ts";
 import { createCamundaFetch } from "../../src/commands/mcp-proxy.ts";
 import type { Logger } from "../../src/logger.ts";
+import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 type CamundaClient = ReturnType<typeof createClient>;
 
@@ -27,13 +28,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		mockServerPort = 9876 + Math.floor(Math.random() * 1000);
 		mockServerUrl = `http://localhost:${mockServerPort}`;
 
-		mockLogger = {
-			info: () => {},
-			debug: () => {},
-			error: () => {},
-			warn: () => {},
-			json: () => {},
-		} as unknown as Logger;
+		mockLogger = makeMockLogger();
 	});
 
 	afterEach(async () => {
@@ -57,10 +52,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({ Authorization: "Bearer test-token-123" }),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		const response = await customFetch(`${mockServerUrl}/mcp/cluster`, {});
@@ -70,7 +65,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 404 response from server", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(404, { "Content-Type": "text/plain" });
 			res.end("Not Found");
 		});
@@ -79,10 +74,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		const response = await customFetch(`${mockServerUrl}/mcp/cluster`, {});
@@ -91,7 +86,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 500 error from server", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(500, { "Content-Type": "text/plain" });
 			res.end("Internal Server Error");
 		});
@@ -100,10 +95,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		const response = await customFetch(`${mockServerUrl}/mcp/cluster`, {});
@@ -133,14 +128,14 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({
 				Authorization:
 					requestCount === 0 ? "Bearer expired-token" : "Bearer fresh-token",
 			}),
 			forceAuthRefresh: async () => {},
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		const response = await customFetch(`${mockServerUrl}/mcp/cluster`, {});
@@ -154,12 +149,12 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		// Don't start server - connection will be refused
 		const unreachablePort = 9999;
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({
 				restAddress: `http://localhost:${unreachablePort}`,
 			}),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 
@@ -182,7 +177,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 
 	test("handles slow server response with timeout", async () => {
 		mockServer = createServer(
-			async (req: IncomingMessage, res: ServerResponse) => {
+			async (_req: IncomingMessage, res: ServerResponse) => {
 				// Simulate slow response (200ms)
 				await new Promise((resolve) => setTimeout(resolve, 200));
 				res.writeHead(200, { "Content-Type": "application/json" });
@@ -194,10 +189,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		// Set timeout to 100ms (shorter than server response time)
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger, 100);
@@ -212,7 +207,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("successfully completes request within timeout", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			// Fast response
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ success: true }));
@@ -222,10 +217,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		// Set generous timeout
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger, 5000);
@@ -251,10 +246,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		await customFetch(`${mockServerUrl}/api`, {
@@ -287,10 +282,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			mockServer.listen(mockServerPort, () => resolve());
 		});
 
-		const mockCamundaClient = {
+		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({ restAddress: mockServerUrl }),
-		} as unknown as CamundaClient;
+		});
 
 		const customFetch = createCamundaFetch(mockCamundaClient, mockLogger);
 		const requestBody = JSON.stringify({ test: "data" });

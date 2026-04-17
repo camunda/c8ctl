@@ -16,7 +16,6 @@ import {
 	addProfile,
 	clearActiveProfile,
 	envVarsToProfile,
-	getProfile,
 	hasCamundaEnvVars,
 	loadSessionState,
 	parseEnvFile,
@@ -161,10 +160,10 @@ describe("Profile management", () => {
 			consoleLogSpy = [];
 			originalError = console.error;
 			originalLog = console.log;
-			console.error = (...args: any[]) => {
+			console.error = (...args: unknown[]) => {
 				consoleErrorSpy.push(args.join(" "));
 			};
-			console.log = (...args: any[]) => {
+			console.log = (...args: unknown[]) => {
 				consoleLogSpy.push(args.join(" "));
 			};
 			c8ctl.activeProfile = undefined;
@@ -196,8 +195,7 @@ describe("Profile management", () => {
 			// Profile should win
 			assert.strictEqual(config.baseUrl, "https://profile-cluster.example.com");
 			// Warning on stderr, hints on stdout
-			const allOutput =
-				consoleErrorSpy.join("\n") + "\n" + consoleLogSpy.join("\n");
+			const allOutput = `${consoleErrorSpy.join("\n")}\n${consoleLogSpy.join("\n")}`;
 			assert.ok(
 				allOutput.includes(
 					"Active profile 'my-profile' is overriding CAMUNDA_*",

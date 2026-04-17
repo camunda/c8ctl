@@ -154,7 +154,7 @@ describe("Plugin Registry", () => {
 			// Verify it's a valid ISO 8601 timestamp
 			const timestamp = new Date(entry.installedAt);
 			assert.ok(
-				!isNaN(timestamp.getTime()),
+				!Number.isNaN(timestamp.getTime()),
 				"installedAt should be a valid date",
 			);
 

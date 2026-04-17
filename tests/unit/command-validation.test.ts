@@ -15,28 +15,27 @@ import {
 	requireOption,
 	requirePositional,
 } from "../../src/command-validation.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 // A minimal enum-like object matching the SDK pattern
 const ColorEnum = { RED: "RED", GREEN: "GREEN", BLUE: "BLUE" } as const;
-type ColorEnum = (typeof ColorEnum)[keyof typeof ColorEnum];
 
 let errorSpy: string[];
 let originalError: typeof console.error;
-let originalExit: typeof process.exit;
+let restoreExit: () => void;
 
 function setup() {
 	errorSpy = [];
 	originalError = console.error;
-	originalExit = process.exit;
-	console.error = (...args: any[]) => errorSpy.push(args.join(" "));
-	(process.exit as any) = (code: number) => {
+	console.error = (...args: unknown[]) => errorSpy.push(args.join(" "));
+	restoreExit = mockProcessExit((code) => {
 		throw new Error(`process.exit(${code})`);
-	};
+	});
 }
 
 function teardown() {
 	console.error = originalError;
-	process.exit = originalExit;
+	restoreExit();
 }
 
 // ─── requireOption ───────────────────────────────────────────────────────────
@@ -189,7 +188,7 @@ describe("requirePositional", () => {
 	test("prints hint when provided", () => {
 		const logSpy: string[] = [];
 		const origLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			logSpy.push(args.join(" "));
 		};
 		try {
@@ -237,7 +236,7 @@ describe("requireOneOf", () => {
 	test("prints hint when provided", () => {
 		const logSpy: string[] = [];
 		const origLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			logSpy.push(args.join(" "));
 		};
 		try {
@@ -316,7 +315,7 @@ describe("validateFlags structural invariants", () => {
 				// Key-type fields (numeric pattern) reject non-numeric strings
 				if (flagName.endsWith("Key")) {
 					assert.throws(
-						() => flagDef.validate!("not-a-number"),
+						() => flagDef.validate?.("not-a-number"),
 						`${verb}.flags.${flagName}.validate should throw on invalid input`,
 					);
 				}
@@ -400,7 +399,7 @@ describe("validateFlags behaviour", () => {
 		const searchDef = COMMAND_REGISTRY.search;
 		// processDefinitionKey as boolean should be skipped (not validated)
 		const result = validateFlags(
-			{ processDefinitionKey: true as any },
+			{ processDefinitionKey: true },
 			searchDef.flags,
 		);
 		assert.strictEqual(result.size, 0);

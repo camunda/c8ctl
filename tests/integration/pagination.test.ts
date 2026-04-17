@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
@@ -41,7 +42,7 @@ const DEPLOY_BATCH_SIZE = 25;
 const POLL_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 3_000;
 
-/** Spawn timeout for CLI commands */
+/** Spawn timeout for CLI commands (bounds CLI hangs during this long-running integration test) */
 const SPAWN_TIMEOUT_MS = 300_000;
 
 /** Shared temp directory + data dir for this test suite */
@@ -55,7 +56,8 @@ let dataDir: string;
 function cli(...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd: PROJECT_ROOT,
-		env: { ...process.env, C8CTL_DATA_DIR: dataDir } as NodeJS.ProcessEnv,
+		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
+		timeout: SPAWN_TIMEOUT_MS,
 	});
 }
 

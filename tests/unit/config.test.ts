@@ -9,34 +9,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
-	AUTH_TYPES,
 	addProfile,
-	type Connection,
 	connectionToClusterConfig,
-	connectionToProfile,
 	DEFAULT_PROFILE,
 	DEFAULT_PROFILE_CONFIG,
 	ensureDefaultProfile,
-	getAllProfiles,
 	getModelerDataDir,
 	getProfile,
-	getProfileOrModeler,
 	getUserDataDir,
 	loadModelerConnections,
 	loadProfiles,
 	loadSessionState,
 	type Profile,
-	profileToClusterConfig,
 	removeProfile,
 	resolveClusterConfig,
-	resolveTenantId,
 	saveProfiles,
-	saveSessionState,
 	setActiveProfile,
-	setActiveTenant,
-	setOutputMode,
 	TARGET_TYPES,
-	validateConnection,
 } from "../../src/config.ts";
 import { c8ctl } from "../../src/runtime.ts";
 

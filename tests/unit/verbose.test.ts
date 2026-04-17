@@ -7,13 +7,14 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { handleCommandError } from "../../src/errors.ts";
 import { Logger } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 describe("handleCommandError", () => {
 	let errorSpy: string[];
 	let infoSpy: string[];
 	let originalErr: typeof console.error;
 	let originalLog: typeof console.log;
-	let originalExit: typeof process.exit;
+	let restoreExit: () => void;
 	let originalVerbose: typeof c8ctl.verbose;
 	let originalOutputMode: typeof c8ctl.outputMode;
 	let logger: Logger;
@@ -23,19 +24,18 @@ describe("handleCommandError", () => {
 		infoSpy = [];
 		originalErr = console.error;
 		originalLog = console.log;
-		originalExit = process.exit;
 		originalVerbose = c8ctl.verbose;
 		originalOutputMode = c8ctl.outputMode;
 
-		console.error = (...args: any[]) => {
+		console.error = (...args: unknown[]) => {
 			errorSpy.push(args.join(" "));
 		};
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			infoSpy.push(args.join(" "));
 		};
-		(process.exit as any) = (code: number) => {
+		restoreExit = mockProcessExit((code) => {
 			throw new Error(`process.exit(${code})`);
-		};
+		});
 
 		c8ctl.verbose = false;
 		c8ctl.outputMode = "text";
@@ -45,7 +45,7 @@ describe("handleCommandError", () => {
 	afterEach(() => {
 		console.error = originalErr;
 		console.log = originalLog;
-		process.exit = originalExit;
+		restoreExit();
 		c8ctl.verbose = originalVerbose;
 		c8ctl.outputMode = originalOutputMode;
 	});
