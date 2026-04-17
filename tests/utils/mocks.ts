@@ -56,3 +56,28 @@ export function makeTestEnv(
 ): NodeJS.ProcessEnv {
 	return { ...process.env, ...overrides };
 }
+
+/**
+ * Replace `process.exit` with a throwing stub and return a restore function.
+ * The returned stub throws `new Error("exit")` (or the supplied error) so
+ * callers can assert on it via `await ....catch(() => {})` or `assert.throws`.
+ *
+ * Centralizes the unavoidable cast: the replacement function always throws,
+ * so its return type is `never`, but TypeScript cannot widen
+ * `(code?: number | string | null) => never` from a plain `() => never`
+ * without help.
+ */
+export function mockProcessExit(
+	onExit?: (code?: number | string | null) => void,
+): () => void {
+	const original = process.exit;
+	const stub = ((code?: number | string | null): never => {
+		onExit?.(code);
+		throw new Error("exit");
+	}) satisfies (code?: number | string | null) => never;
+	// biome-ignore lint/plugin: test-only override of process.exit global; signature matches via satisfies
+	process.exit = stub as typeof process.exit;
+	return () => {
+		process.exit = original;
+	};
+}

@@ -7,7 +7,6 @@ import assert from "node:assert";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, test } from "node:test";
-import { createClient } from "../../src/client.ts";
 import { deploy } from "../../src/commands/deployments.ts";
 import { getUserDataDir } from "../../src/config.ts";
 

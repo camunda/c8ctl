@@ -16,7 +16,6 @@ import {
 	getAcceptedFlags,
 	getCommandDef,
 	isValidCommand,
-	RESOURCE_ALIASES,
 	resolveAlias,
 	SEARCH_FLAGS,
 	VERB_ALIASES,

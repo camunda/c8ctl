@@ -9,7 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── create process-instance ─────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ describe("CLI behavioural: create process-instance", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/process-instances"));
+		assert.ok(getUrl(out).endsWith("/process-instances"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.processDefinitionId, "my-process");
@@ -136,9 +136,7 @@ describe("CLI behavioural: cancel process-instance", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok(
-			(out.url as string).includes("/process-instances/12345/cancellation"),
-		);
+		assert.ok(getUrl(out).includes("/process-instances/12345/cancellation"));
 	});
 
 	test("rejects missing key with exit code 1", async () => {

@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
@@ -37,13 +38,13 @@ describe("Cluster Plugin – metadata", () => {
 
 	test('declares the "cluster" command', () => {
 		assert.ok(
-			plugin.metadata.commands["cluster"],
+			plugin.metadata.commands.cluster,
 			'Should declare a "cluster" command',
 		);
 	});
 
 	test("cluster command has a description", () => {
-		const cmd = plugin.metadata.commands["cluster"];
+		const cmd = plugin.metadata.commands.cluster;
 		assert.ok(
 			typeof cmd.description === "string" && cmd.description.length > 0,
 			"cluster command should have a non-empty description",
@@ -51,7 +52,7 @@ describe("Cluster Plugin – metadata", () => {
 	});
 
 	test("cluster command provides examples", () => {
-		const examples = plugin.metadata.commands["cluster"].examples;
+		const examples = plugin.metadata.commands.cluster.examples;
 		assert.ok(Array.isArray(examples), "examples should be an array");
 		assert.ok(examples.length >= 2, "Should have at least two examples");
 
@@ -68,7 +69,7 @@ describe("Cluster Plugin – metadata", () => {
 	});
 
 	test("examples include start, stop, status, list, logs, list-remote, install, and delete commands", () => {
-		const examples = plugin.metadata.commands["cluster"].examples;
+		const examples = plugin.metadata.commands.cluster.examples;
 		const cmds = examples.map((e: { command: string }) => e.command);
 		assert.ok(
 			cmds.some((c: string) => c.includes("start")),
@@ -115,7 +116,7 @@ describe("Cluster Plugin – commands export", () => {
 	test('exports a commands object with a "cluster" key', () => {
 		assert.ok(plugin.commands, "Should export commands");
 		assert.ok(
-			typeof plugin.commands["cluster"] === "function",
+			typeof plugin.commands.cluster === "function",
 			'"cluster" should be a function',
 		);
 	});
@@ -152,7 +153,7 @@ describe("Cluster Plugin – command usage output", () => {
 	});
 
 	test("prints usage when called with no arguments", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 
 		const output = captured.join("\n");
 		assert.ok(output.includes("Usage"), "Should print usage header");
@@ -161,7 +162,7 @@ describe("Cluster Plugin – command usage output", () => {
 	});
 
 	test("prints usage when called with an invalid subcommand", async () => {
-		await plugin.commands["cluster"](["invalid"]);
+		await plugin.commands.cluster(["invalid"]);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -171,7 +172,7 @@ describe("Cluster Plugin – command usage output", () => {
 	});
 
 	test("usage mentions version option", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -181,14 +182,14 @@ describe("Cluster Plugin – command usage output", () => {
 	});
 
 	test("usage mentions --debug flag", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 
 		const output = captured.join("\n");
 		assert.ok(output.includes("--debug"), "Should document --debug flag");
 	});
 
 	test("usage contains examples", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -198,7 +199,7 @@ describe("Cluster Plugin – command usage output", () => {
 	});
 
 	test("usage lists version aliases", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -360,7 +361,7 @@ describe("Cluster Plugin – findC8RunBinaryPath", () => {
 		writeFileSync(join(binaryDir, "c8run"), "");
 		const result = plugin.findC8RunBinaryPath(config);
 		assert.ok(result !== null, "should find binary");
-		assert.ok(result!.includes("c8run"), "path should reference binary name");
+		assert.ok(result?.includes("c8run"), "path should reference binary name");
 	});
 });
 
@@ -1068,7 +1069,7 @@ describe("Cluster Plugin – resolveVersion", () => {
 describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 	let originalFetch: typeof globalThis.fetch;
 	let loggedMessages: string[];
-	let originalC8ctl: any;
+	let originalC8ctl: typeof globalThis.c8ctl;
 
 	beforeEach(() => {
 		originalFetch = globalThis.fetch;
@@ -1424,7 +1425,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("status subcommand does not print usage", async () => {
-		await plugin.commands["cluster"](["status"]);
+		await plugin.commands.cluster(["status"]);
 		const output = captured.join("\n");
 		assert.ok(
 			!output.includes("Usage:"),
@@ -1433,7 +1434,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("list subcommand does not print usage", async () => {
-		await plugin.commands["cluster"](["list"]);
+		await plugin.commands.cluster(["list"]);
 		const output = captured.join("\n");
 		assert.ok(
 			!output.includes("Usage:"),
@@ -1442,7 +1443,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions status subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("status"),
@@ -1451,7 +1452,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions list subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("list"),
@@ -1460,7 +1461,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions logs subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("logs"),
@@ -1469,7 +1470,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions list-remote subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("list-remote"),
@@ -1478,7 +1479,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions install subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("install"),
@@ -1487,7 +1488,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage mentions delete subcommand", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("delete"),
@@ -1496,7 +1497,7 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("usage shows stable as default alias", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		assert.ok(
 			output.includes("default: stable"),
@@ -1505,13 +1506,13 @@ describe("Cluster Plugin – status and list subcommands", () => {
 	});
 
 	test("stop usage does not show a [<version>] argument", async () => {
-		await plugin.commands["cluster"]([]);
+		await plugin.commands.cluster([]);
 		const output = captured.join("\n");
 		// The stop line should just be 'c8ctl cluster stop' with no version arg
 		const stopLine = output.split("\n").find((l) => l.includes("cluster stop"));
 		assert.ok(stopLine, "Should have a stop usage line");
 		assert.ok(
-			!stopLine!.includes("[<version>]"),
+			!stopLine?.includes("[<version>]"),
 			"stop usage should not show [<version>]",
 		);
 	});
@@ -1581,16 +1582,19 @@ describe("Cluster Plugin – deleteVersion", () => {
 		writeFileSync(join(tempDir, "cluster.version"), "8.8");
 
 		let exitCalled = false;
-		process.exit = (() => {
+		const restoreExit = mockProcessExit(() => {
 			exitCalled = true;
-			throw new Error("exit");
-		}) as never;
+		});
 
-		await assert.rejects(() => plugin.deleteVersion(tempDir, "8.8"), /exit/);
-		assert.ok(
-			exitCalled,
-			"Should call process.exit when trying to delete running version",
-		);
+		try {
+			await assert.rejects(() => plugin.deleteVersion(tempDir, "8.8"), /exit/);
+			assert.ok(
+				exitCalled,
+				"Should call process.exit when trying to delete running version",
+			);
+		} finally {
+			restoreExit();
+		}
 	});
 });
 
@@ -1682,18 +1686,16 @@ describe("Cluster Plugin – listRemoteVersions", () => {
 			configurable: true,
 		});
 
-		const originalExit = process.exit;
 		let exitCalled = false;
-		process.exit = (() => {
+		const restoreExit = mockProcessExit(() => {
 			exitCalled = true;
-			throw new Error("exit");
-		}) as never;
+		});
 
 		try {
 			await assert.rejects(() => plugin.listRemoteVersions(), /exit/);
 			assert.ok(exitCalled, "Should exit on network error");
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 	});
 });
@@ -1818,7 +1820,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("log subcommand does not print usage", async () => {
-		await plugin.commands["cluster"](["log"]);
+		await plugin.commands.cluster(["log"]);
 		const output = captured.join("\n");
 		assert.ok(
 			!output.includes("Usage:"),
@@ -1827,7 +1829,7 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("logs subcommand does not print usage", async () => {
-		await plugin.commands["cluster"](["logs"]);
+		await plugin.commands.cluster(["logs"]);
 		const output = captured.join("\n");
 		assert.ok(
 			!output.includes("Usage:"),
@@ -1836,15 +1838,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("list-remote subcommand does not print usage", async () => {
-		const originalExit = process.exit;
-		process.exit = (() => {
-			throw new Error("exit");
-		}) as never;
+		const restoreExit = mockProcessExit();
 
 		try {
-			await plugin.commands["cluster"](["list-remote"]).catch(() => {});
+			await plugin.commands.cluster(["list-remote"]).catch(() => {});
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 		// If we got here without "Usage:" in output, the subcommand was recognized
 		const output = captured.join("\n");
@@ -1855,15 +1854,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("delete subcommand does not print usage", async () => {
-		const originalExit = process.exit;
-		process.exit = (() => {
-			throw new Error("exit");
-		}) as never;
+		const restoreExit = mockProcessExit();
 
 		try {
-			await plugin.commands["cluster"](["delete", "8.8"]).catch(() => {});
+			await plugin.commands.cluster(["delete", "8.8"]).catch(() => {});
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 		const output = captured.join("\n");
 		assert.ok(
@@ -1873,15 +1869,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("install subcommand does not print usage", async () => {
-		const originalExit = process.exit;
-		process.exit = (() => {
-			throw new Error("exit");
-		}) as never;
+		const restoreExit = mockProcessExit();
 
 		try {
-			await plugin.commands["cluster"](["install", "8.8"]).catch(() => {});
+			await plugin.commands.cluster(["install", "8.8"]).catch(() => {});
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 		const output = captured.join("\n");
 		assert.ok(
@@ -1891,15 +1884,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("install without version exits with error", async () => {
-		const originalExit = process.exit;
-		process.exit = (() => {
-			throw new Error("exit");
-		}) as never;
+		const restoreExit = mockProcessExit();
 
 		try {
-			await plugin.commands["cluster"](["install"]).catch(() => {});
+			await plugin.commands.cluster(["install"]).catch(() => {});
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 		const output = captured.join("\n");
 		assert.ok(
@@ -1909,15 +1899,12 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 	});
 
 	test("delete without version exits with error", async () => {
-		const originalExit = process.exit;
-		process.exit = (() => {
-			throw new Error("exit");
-		}) as never;
+		const restoreExit = mockProcessExit();
 
 		try {
-			await plugin.commands["cluster"](["delete"]).catch(() => {});
+			await plugin.commands.cluster(["delete"]).catch(() => {});
 		} finally {
-			process.exit = originalExit;
+			restoreExit();
 		}
 		const output = captured.join("\n");
 		assert.ok(
@@ -1991,7 +1978,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 
 	test("start (checkForUpdateHint=true) does not block or re-download, but checks remote for hint", async () => {
 		// Simulate: 8.8 is installed locally with an old ETag, remote has a new ETag
-		const config: any = {
+		const config = {
 			cacheDir: tempDir,
 			version: "8.8",
 			isRolling: true,
@@ -2065,7 +2052,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 	});
 
 	test("start with minor version succeeds offline (hint check swallows error)", async () => {
-		const config: any = {
+		const config = {
 			cacheDir: tempDir,
 			version: "8.8",
 			isRolling: true,

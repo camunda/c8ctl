@@ -13,9 +13,13 @@ function createMockSearch(totalItems: number, pageSize: number) {
 	}));
 	let callCount = 0;
 
-	const searchFn = async (filter: any, _opts?: any) => {
+	const searchFn = async (
+		filter: Record<string, unknown> & { page?: Record<string, unknown> },
+		_opts?: unknown,
+	) => {
 		callCount++;
-		const after = filter.page?.after as number | undefined;
+		const afterRaw = filter.page?.after;
+		const after = typeof afterRaw === "number" ? afterRaw : undefined;
 		const start = after ?? 0;
 		const end = Math.min(start + pageSize, totalItems);
 		const items = allItems.slice(start, end);
@@ -32,7 +36,10 @@ function createMockSearch(totalItems: number, pageSize: number) {
 	};
 
 	// Expose a way to parse the `after` cursor back into a number
-	const wrappedSearch = async (filter: any, opts?: any) => {
+	const wrappedSearch = async (
+		filter: Record<string, unknown> & { page?: Record<string, unknown> },
+		opts?: unknown,
+	) => {
 		const parsedFilter = {
 			...filter,
 			page: {
@@ -131,7 +138,10 @@ describe("fetchAllPages", () => {
 
 	test("stops when search returns duplicate cursor", async () => {
 		let callCount = 0;
-		const stuckSearch = async (_filter: any, _opts?: any) => {
+		const stuckSearch = async (
+			_filter: Record<string, unknown>,
+			_opts?: unknown,
+		) => {
 			callCount++;
 			return {
 				items: [{ id: callCount }],
@@ -151,7 +161,10 @@ describe("fetchAllPages", () => {
 
 	test("stops when search returns no endCursor", async () => {
 		let callCount = 0;
-		const noCursorSearch = async (_filter: any, _opts?: any) => {
+		const noCursorSearch = async (
+			_filter: Record<string, unknown>,
+			_opts?: unknown,
+		) => {
 			callCount++;
 			return {
 				items: [{ id: callCount }],
@@ -170,7 +183,10 @@ describe("fetchAllPages", () => {
 
 	test("stops when search returns empty items", async () => {
 		let callCount = 0;
-		const emptySearch = async (_filter: any, _opts?: any) => {
+		const emptySearch = async (
+			_filter: Record<string, unknown>,
+			_opts?: unknown,
+		) => {
 			callCount++;
 			if (callCount === 1) {
 				return {
@@ -190,8 +206,11 @@ describe("fetchAllPages", () => {
 	});
 
 	test("passes filter through to search function", async () => {
-		let receivedFilter: any;
-		const capturingSearch = async (filter: any, _opts?: any) => {
+		let receivedFilter: unknown;
+		const capturingSearch = async (
+			filter: Record<string, unknown> & { page?: Record<string, unknown> },
+			_opts?: unknown,
+		) => {
 			receivedFilter = filter;
 			return { items: [], page: {} };
 		};
@@ -204,9 +223,12 @@ describe("fetchAllPages", () => {
 	});
 
 	test("passes cursor in page.after on subsequent calls", async () => {
-		const receivedFilters: any[] = [];
+		const receivedFilters: unknown[] = [];
 		let callCount = 0;
-		const trackingSearch = async (filter: any, _opts?: any) => {
+		const trackingSearch = async (
+			filter: Record<string, unknown> & { page?: Record<string, unknown> },
+			_opts?: unknown,
+		) => {
 			receivedFilters.push(JSON.parse(JSON.stringify(filter)));
 			callCount++;
 			if (callCount === 1) {
@@ -244,7 +266,10 @@ describe("fetchAllPages", () => {
 		// The Camunda 8 SDK uses z.coerce.bigint() for totalItems, so it returns BigInt at runtime.
 		// fetchAllPages must convert it to number before comparing with allItems.length (a number).
 		let callCount = 0;
-		const bigintTotalItemsSearch = async (_filter: any, _opts?: any) => {
+		const bigintTotalItemsSearch = async (
+			_filter: Record<string, unknown>,
+			_opts?: unknown,
+		) => {
 			callCount++;
 			return {
 				items: [{ id: 1 }, { id: 2 }],

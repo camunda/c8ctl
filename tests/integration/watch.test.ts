@@ -161,7 +161,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 			// Step 1: write an invalid BPMN to trigger a deployment error.
 			// On some file systems, creating a new file via rename can occasionally
 			// miss the first watch event, so we retry with an in-place rewrite.
-			const tmpInvalid = bpmnFile + ".tmp";
+			const tmpInvalid = `${bpmnFile}.tmp`;
 			writeFileSync(tmpInvalid, invalidBpmn());
 			renameSync(tmpInvalid, bpmnFile);
 
@@ -212,7 +212,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 				cooldownElapsed,
 				`Expected cooldown to elapse before correcting BPMN file.\nActual output:\n${watch.getOutput()}`,
 			);
-			const tmpValid = bpmnFile + ".tmp";
+			const tmpValid = `${bpmnFile}.tmp`;
 			writeFileSync(tmpValid, validBpmn());
 			renameSync(tmpValid, bpmnFile);
 
@@ -248,7 +248,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 			);
 
 			// Step 1: write an invalid BPMN to trigger an INVALID_ARGUMENT deployment error
-			const tmpInvalid = bpmnFile + ".tmp";
+			const tmpInvalid = `${bpmnFile}.tmp`;
 			writeFileSync(tmpInvalid, invalidBpmn());
 			renameSync(tmpInvalid, bpmnFile);
 
@@ -299,7 +299,7 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 				cooldownElapsed,
 				`Timed out waiting for deployment cooldown before correcting the file.\nActual output:\n${watch.getOutput()}`,
 			);
-			const tmpValid = bpmnFile + ".tmp";
+			const tmpValid = `${bpmnFile}.tmp`;
 			writeFileSync(tmpValid, validBpmn());
 			renameSync(tmpValid, bpmnFile);
 

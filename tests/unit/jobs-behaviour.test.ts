@@ -9,7 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── activate jobs ───────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ describe("CLI behavioural: activate jobs", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/jobs/activation"));
+		assert.ok(getUrl(out).endsWith("/jobs/activation"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.type, "my-job-type");
@@ -86,7 +86,7 @@ describe("CLI behavioural: complete job", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/jobs/99999/completion"));
+		assert.ok(getUrl(out).includes("/jobs/99999/completion"));
 	});
 
 	test("--dry-run includes variables when provided", async () => {
@@ -126,7 +126,7 @@ describe("CLI behavioural: fail job", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/jobs/88888/failure"));
+		assert.ok(getUrl(out).includes("/jobs/88888/failure"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.retries, 0);

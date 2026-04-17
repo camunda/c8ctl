@@ -43,7 +43,7 @@ const POLL_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 3_000;
 
 /** Spawn timeout for CLI commands */
-const SPAWN_TIMEOUT_MS = 300_000;
+const _SPAWN_TIMEOUT_MS = 300_000;
 
 /** Shared temp directory + data dir for this test suite */
 let bpmnDir: string;

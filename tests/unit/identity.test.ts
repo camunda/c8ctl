@@ -12,10 +12,7 @@ import {
 	deleteIdentityAuthorizationCommand,
 	validateCreateAuthorizationOptions,
 } from "../../src/commands/identity-authorizations.ts";
-import {
-	createIdentityGroupCommand,
-	deleteIdentityGroupCommand,
-} from "../../src/commands/identity-groups.ts";
+import { deleteIdentityGroupCommand } from "../../src/commands/identity-groups.ts";
 import {
 	createIdentityMappingRuleCommand,
 	deleteIdentityMappingRuleCommand,
@@ -24,10 +21,7 @@ import {
 	createIdentityRoleCommand,
 	deleteIdentityRoleCommand,
 } from "../../src/commands/identity-roles.ts";
-import {
-	createIdentityTenantCommand,
-	deleteIdentityTenantCommand,
-} from "../../src/commands/identity-tenants.ts";
+import { deleteIdentityTenantCommand } from "../../src/commands/identity-tenants.ts";
 import {
 	createIdentityUserCommand,
 	deleteIdentityUserCommand,
@@ -35,7 +29,8 @@ import {
 import { resolveTenantId } from "../../src/config.ts";
 import { getLogger } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 const TEST_BASE_URL = "http://test-cluster/v2";
 
@@ -45,7 +40,7 @@ let logSpy: string[];
 let errorSpy: string[];
 let originalLog: typeof console.log;
 let originalError: typeof console.error;
-let originalExit: typeof process.exit;
+let restoreExit: () => void;
 let originalBaseUrl: string | undefined;
 let originalActiveProfile: typeof c8ctl.activeProfile;
 let originalDryRun: typeof c8ctl.dryRun;
@@ -56,19 +51,17 @@ function setup() {
 	errorSpy = [];
 	originalLog = console.log;
 	originalError = console.error;
-	originalExit = process.exit;
 	originalBaseUrl = process.env.CAMUNDA_BASE_URL;
 	originalActiveProfile = c8ctl.activeProfile;
 	originalDryRun = c8ctl.dryRun;
 	originalOutputMode = c8ctl.outputMode;
 
-	console.log = (...args: any[]) => logSpy.push(args.join(" "));
-	console.error = (...args: any[]) => errorSpy.push(args.join(" "));
+	console.log = (...args: unknown[]) => logSpy.push(args.join(" "));
+	console.error = (...args: unknown[]) => errorSpy.push(args.join(" "));
 	// Make process.exit throw so tests can catch it with assert.rejects / assert.throws
-	process.exit = ((code: number) => {
+	restoreExit = mockProcessExit((code) => {
 		throw new Error(`process.exit(${code})`);
-		// biome-ignore lint/plugin: test-only override of process.exit signature
-	}) as typeof process.exit;
+	});
 
 	// Provide a base URL so resolveClusterConfig uses the env-var path,
 	// no profile file or local cluster needed.
@@ -81,7 +74,7 @@ function setup() {
 function teardown() {
 	console.log = originalLog;
 	console.error = originalError;
-	process.exit = originalExit;
+	restoreExit();
 	if (originalBaseUrl === undefined) {
 		delete process.env.CAMUNDA_BASE_URL;
 	} else {
@@ -100,12 +93,13 @@ function capturedJson(): Record<string, unknown> {
 
 /** Build a minimal CommandContext for test execution */
 function buildCtx(profile?: string) {
+	const positionals: string[] = [];
 	return {
 		client: createClient(profile),
 		logger: getLogger(),
 		tenantId: resolveTenantId(profile),
 		resource: "",
-		positionals: [] as string[],
+		positionals,
 		sortOrder: "asc" as const,
 		sortBy: undefined,
 		limit: undefined,
@@ -387,7 +381,7 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith("/users"),
+			getUrl(out).endsWith("/users"),
 			`expected URL to end with /users, got: ${out.url}`,
 		);
 		const body = asRecord(out.body, "dry-run body");
@@ -408,7 +402,7 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
 		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith("/users/alice"),
+			getUrl(out).endsWith("/users/alice"),
 			`expected URL to end with /users/alice, got: ${out.url}`,
 		);
 	});
@@ -424,7 +418,7 @@ describe("Identity Commands — dry-run output", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith("/roles"),
+			getUrl(out).endsWith("/roles"),
 			`expected URL to end with /roles, got: ${out.url}`,
 		);
 		assert.deepStrictEqual(out.body, { roleId: "admin-role", name: "admin" });
@@ -436,11 +430,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith(
-				"/roles/admin-role",
-			),
-		);
+		assert.ok(getUrl(out).endsWith("/roles/admin-role"));
 	});
 
 	test("createIdentityMappingRule: emits POST to /mapping-rules with all fields", async () => {
@@ -458,9 +448,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith("/mapping-rules"),
-		);
+		assert.ok(getUrl(out).endsWith("/mapping-rules"));
 		assert.deepStrictEqual(out.body, {
 			mappingRuleId: "rule-1",
 			name: "My Rule",
@@ -475,11 +463,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith(
-				"/mapping-rules/rule-1",
-			),
-		);
+		assert.ok(getUrl(out).endsWith("/mapping-rules/rule-1"));
 	});
 
 	test("createIdentityAuthorization: emits POST to /authorizations with permissionTypes array", async () => {
@@ -498,9 +482,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith("/authorizations"),
-		);
+		assert.ok(getUrl(out).endsWith("/authorizations"));
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.ownerId, "alice");
 		assert.strictEqual(body.ownerType, "USER");
@@ -515,11 +497,7 @@ describe("Identity Commands — dry-run output", () => {
 		const out = capturedJson();
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok(
-			(typeof out.url === "string" ? out.url : "").endsWith(
-				"/authorizations/42",
-			),
-		);
+		assert.ok(getUrl(out).endsWith("/authorizations/42"));
 	});
 });
 
@@ -537,7 +515,7 @@ describe("handleAssign — dry-run and flag validation", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.command, "assign");
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/roles/admin-role/users/alice"));
+		assert.ok(getUrl(out).includes("/roles/admin-role/users/alice"));
 		assert.strictEqual(out.body, null);
 	});
 
@@ -597,10 +575,8 @@ describe("handleAssign — dry-run and flag validation", () => {
 		);
 
 		const out = capturedJson();
-		assert.ok(
-			(out.url as string).includes(encodeURIComponent("alice@example.com")),
-		);
-		assert.ok((out.url as string).includes(encodeURIComponent("my group")));
+		assert.ok(getUrl(out).includes(encodeURIComponent("alice@example.com")));
+		assert.ok(getUrl(out).includes(encodeURIComponent("my group")));
 	});
 });
 
@@ -616,7 +592,7 @@ describe("handleUnassign — dry-run and flag validation", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.command, "unassign");
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).includes("/users/alice/groups/ops"));
+		assert.ok(getUrl(out).includes("/users/alice/groups/ops"));
 		assert.strictEqual(out.body, null);
 	});
 
@@ -837,10 +813,7 @@ describe("handleAssign — every allowed resource/target pair works in dry-run",
 			assert.strictEqual(out.dryRun, true);
 			assert.strictEqual(out.command, "assign");
 			assert.strictEqual(out.method, "POST");
-			assert.ok(
-				typeof out.url === "string" &&
-					(typeof out.url === "string" ? out.url : "").length > 0,
-			);
+			assert.ok(typeof out.url === "string" && out.url.length > 0);
 		});
 	}
 

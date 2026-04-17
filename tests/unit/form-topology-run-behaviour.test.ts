@@ -9,7 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ function assertDryRun(
 	assert.strictEqual(out.dryRun, true);
 	assert.strictEqual(out.method, expected.method);
 	assert.ok(
-		(out.url as string).endsWith(expected.urlSuffix),
+		getUrl(out).endsWith(expected.urlSuffix),
 		`Expected URL to end with "${expected.urlSuffix}", got "${out.url}"`,
 	);
 }
@@ -92,7 +92,7 @@ describe("CLI behavioural: get form", () => {
 		assert.strictEqual(out.method, "GET");
 		// The generic form lookup tries user-tasks first, then process-definitions
 		assert.ok(
-			(out.url as string).includes("/user-tasks/abc/form"),
+			getUrl(out).includes("/user-tasks/abc/form"),
 			`Expected URL to contain /user-tasks/abc/form, got "${out.url}"`,
 		);
 	});
@@ -115,7 +115,7 @@ describe("CLI behavioural: run", () => {
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
 		assert.ok(
-			(out.url as string).includes("/deployments"),
+			getUrl(out).includes("/deployments"),
 			`Expected URL to contain /deployments, got "${out.url}"`,
 		);
 		const body = asRecord(out.body, "dry-run body");

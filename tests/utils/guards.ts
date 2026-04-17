@@ -47,3 +47,63 @@ export function asRecordArray(
 	assert.ok(Array.isArray(v), `expected ${label} to be an array`);
 	return v.map((item, i) => asRecord(item, `${label}[${i}]`));
 }
+
+/**
+ * Assert `v` is a string and return it. Throws with a descriptive message
+ * on failure.
+ */
+export function asString(v: unknown, label = "value"): string {
+	assert.ok(typeof v === "string", `expected ${label} to be a string`);
+	return v;
+}
+
+/**
+ * Extract `out.url` as a string. Used by dry-run tests.
+ */
+export function getUrl(out: Record<string, unknown>): string {
+	return asString(out.url, "dry-run url");
+}
+
+/**
+ * Assert `v` is an Error instance and return it. Throws with a descriptive
+ * message on failure. Useful for narrowing in catch blocks.
+ */
+export function asError(v: unknown, label = "error"): Error {
+	assert.ok(v instanceof Error, `expected ${label} to be an Error`);
+	return v;
+}
+
+/**
+ * Extract stderr/stdout/message from a Node `child_process` error (e.g. the
+ * object thrown by `execSync` on a non-zero exit). Falls back through
+ * `stderr`, `stdout`, then `message`.
+ */
+export function getExecErrorOutput(v: unknown): string {
+	if (isRecord(v)) {
+		for (const key of ["stderr", "stdout", "message"] as const) {
+			const val = v[key];
+			if (typeof val === "string" && val.length > 0) return val;
+			if (val != null) {
+				const s = String(val);
+				if (s.length > 0 && s !== "[object Object]") return s;
+			}
+		}
+	}
+	return String(v);
+}
+
+/**
+ * Extract a single field from a Node `child_process` error object. Returns
+ * an empty string when the field is missing or the value is not a string.
+ */
+export function getExecField(
+	v: unknown,
+	field: "stdout" | "stderr" | "message",
+): string {
+	if (isRecord(v)) {
+		const val = v[field];
+		if (typeof val === "string") return val;
+		if (val != null) return String(val);
+	}
+	return "";
+}

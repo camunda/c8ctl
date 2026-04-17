@@ -4,12 +4,9 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import type { createClient } from "../../src/client.ts";
 import { createCamundaFetch } from "../../src/commands/mcp-proxy.ts";
 import type { Logger } from "../../src/logger.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
-
-type CamundaClient = ReturnType<typeof createClient>;
 
 describe("createCamundaFetch", () => {
 	let originalFetch: typeof fetch;
@@ -36,7 +33,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedHeaders = new Headers(init?.headers);
@@ -63,7 +60,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedHeaders = new Headers(init?.headers);
@@ -102,7 +99,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			const headers = new Headers(init?.headers);
@@ -133,8 +130,8 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			const error = new Error("The operation was aborted");
 			error.name = "AbortError";
@@ -159,11 +156,12 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
-			const error: any = new Error("fetch failed");
-			error.cause = { code: "ECONNREFUSED" };
+			const error = new Error("fetch failed", {
+				cause: { code: "ECONNREFUSED" },
+			});
 			throw error;
 		};
 
@@ -192,8 +190,8 @@ describe("createCamundaFetch", () => {
 		const customError = new Error("Custom network error");
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			throw customError;
 		};
@@ -218,7 +216,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedSignal = init?.signal;
@@ -245,7 +243,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			capturedSignal = init?.signal;
@@ -273,7 +271,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			const headers = new Headers(init?.headers);
@@ -316,7 +314,7 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
+			_input: string | URL | Request,
 			init?: RequestInit,
 		) => {
 			// Simulate slow response - wait for abort signal
@@ -327,7 +325,7 @@ describe("createCamundaFetch", () => {
 
 				init?.signal?.addEventListener("abort", () => {
 					clearTimeout(timeout);
-					const error: any = new Error("The operation was aborted");
+					const error = new Error("The operation was aborted");
 					error.name = "AbortError";
 					reject(error);
 				});
@@ -352,8 +350,8 @@ describe("createCamundaFetch", () => {
 		});
 
 		global.fetch = async (
-			input: string | URL | Request,
-			init?: RequestInit,
+			_input: string | URL | Request,
+			_init?: RequestInit,
 		) => {
 			return new Response("success", { status: 200 });
 		};

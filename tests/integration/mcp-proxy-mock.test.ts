@@ -65,7 +65,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 404 response from server", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(404, { "Content-Type": "text/plain" });
 			res.end("Not Found");
 		});
@@ -86,7 +86,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 500 error from server", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(500, { "Content-Type": "text/plain" });
 			res.end("Internal Server Error");
 		});
@@ -177,7 +177,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 
 	test("handles slow server response with timeout", async () => {
 		mockServer = createServer(
-			async (req: IncomingMessage, res: ServerResponse) => {
+			async (_req: IncomingMessage, res: ServerResponse) => {
 				// Simulate slow response (200ms)
 				await new Promise((resolve) => setTimeout(resolve, 200));
 				res.writeHead(200, { "Content-Type": "application/json" });
@@ -207,7 +207,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("successfully completes request within timeout", async () => {
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
 			// Fast response
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ success: true }));

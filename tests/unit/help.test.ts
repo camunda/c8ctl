@@ -14,7 +14,7 @@ import {
 import { c8ctl } from "../../src/runtime.ts";
 
 describe("Help Module", () => {
-	let consoleLogSpy: any[];
+	let consoleLogSpy: unknown[];
 	let originalLog: typeof console.log;
 	let originalOutputMode: typeof c8ctl.outputMode;
 
@@ -24,7 +24,7 @@ describe("Help Module", () => {
 		originalOutputMode = c8ctl.outputMode;
 		c8ctl.outputMode = "text";
 
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(args.join(" "));
 		};
 	});
@@ -634,7 +634,7 @@ describe("Help Module", () => {
 		c8ctl.outputMode = "json";
 		const jsonSpy: string[] = [];
 		const originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			jsonSpy.push(args.join(" "));
 		};
 
@@ -666,7 +666,7 @@ describe("Help Module", () => {
 		c8ctl.outputMode = "json";
 		const jsonSpy: string[] = [];
 		const originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			jsonSpy.push(args.join(" "));
 		};
 
@@ -674,7 +674,7 @@ describe("Help Module", () => {
 
 		console.log = originalConsoleLog;
 		const parsed = JSON.parse(jsonSpy[0]);
-		const flagNames = parsed.agentFlags.map((f: any) => f.flag);
+		const flagNames = parsed.agentFlags.map((f: { flag: string }) => f.flag);
 		assert.ok(
 			flagNames.includes("--fields"),
 			"agentFlags should include --fields",
@@ -689,7 +689,7 @@ describe("Help Module", () => {
 		c8ctl.outputMode = "json";
 		const jsonSpy: string[] = [];
 		const originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			jsonSpy.push(args.join(" "));
 		};
 
@@ -697,10 +697,14 @@ describe("Help Module", () => {
 
 		console.log = originalConsoleLog;
 		const parsed = JSON.parse(jsonSpy[0]);
-		const createCmd = parsed.commands.find((c: any) => c.verb === "create");
+		const createCmd = parsed.commands.find(
+			(c: { verb: string }) => c.verb === "create",
+		);
 		assert.ok(createCmd, "commands should include create");
 		assert.strictEqual(createCmd.mutating, true, "create should be mutating");
-		const listCmd = parsed.commands.find((c: any) => c.verb === "list");
+		const listCmd = parsed.commands.find(
+			(c: { verb: string }) => c.verb === "list",
+		);
 		assert.ok(listCmd, "commands should include list");
 		assert.strictEqual(listCmd.mutating, false, "list should not be mutating");
 	});
@@ -709,7 +713,7 @@ describe("Help Module", () => {
 		c8ctl.outputMode = "json";
 		const jsonSpy: string[] = [];
 		const originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			jsonSpy.push(args.join(" "));
 		};
 
@@ -1109,7 +1113,7 @@ describe("Help Module", () => {
 		c8ctl.outputMode = "json";
 		const jsonSpy: string[] = [];
 		const originalConsoleLog = console.log;
-		console.log = (...args: any[]) => {
+		console.log = (...args: unknown[]) => {
 			jsonSpy.push(args.join(" "));
 		};
 
@@ -1119,7 +1123,7 @@ describe("Help Module", () => {
 		const parsed = JSON.parse(jsonSpy[0]);
 
 		// Check for new verbs
-		const verbs = parsed.commands.map((c: any) => c.verb);
+		const verbs = parsed.commands.map((c: { verb: string }) => c.verb);
 		assert.ok(verbs.includes("delete"), "JSON help should include delete verb");
 		assert.ok(verbs.includes("assign"), "JSON help should include assign verb");
 		assert.ok(
@@ -1135,7 +1139,9 @@ describe("Help Module", () => {
 		assert.ok(parsed.resourceAliases.mr, "JSON help should include mr alias");
 
 		// Check identity resources in list verb
-		const listCmd = parsed.commands.find((c: any) => c.verb === "list");
+		const listCmd = parsed.commands.find(
+			(c: { verb: string }) => c.verb === "list",
+		);
 		assert.ok(
 			listCmd.resources.includes("users"),
 			"list resources should include users",
@@ -1150,7 +1156,9 @@ describe("Help Module", () => {
 		);
 
 		// Check delete is mutating
-		const deleteCmd = parsed.commands.find((c: any) => c.verb === "delete");
+		const deleteCmd = parsed.commands.find(
+			(c: { verb: string }) => c.verb === "delete",
+		);
 		assert.ok(deleteCmd, "commands should include delete");
 		assert.strictEqual(deleteCmd.mutating, true, "delete should be mutating");
 	});

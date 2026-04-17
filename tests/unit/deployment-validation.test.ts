@@ -47,7 +47,7 @@ describe("Deployment Validation", () => {
 				env: process.env,
 			});
 			assert.fail("Should have thrown an error for duplicate process IDs");
-		} catch (error: any) {
+		} catch (error) {
 			const output = error.stdout + error.stderr;
 			assert.match(
 				output,
@@ -85,7 +85,7 @@ describe("Deployment Validation", () => {
 			});
 			// If Camunda is running, this should succeed
 			assert.ok(true);
-		} catch (error: any) {
+		} catch (error) {
 			// If it fails, it should be a connection error, not a validation error
 			const output = error.stdout + error.stderr;
 			assert.doesNotMatch(
@@ -108,7 +108,7 @@ describe("Deployment Validation", () => {
 			});
 			// If Camunda is running, this should succeed
 			assert.ok(true);
-		} catch (error: any) {
+		} catch (error) {
 			// If it fails, it should be a connection error, not a validation error
 			const output = error.stdout + error.stderr;
 			assert.doesNotMatch(

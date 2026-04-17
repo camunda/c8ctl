@@ -12,7 +12,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── create authorization ────────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ describe("CLI behavioral: create authorization", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/authorizations"));
+		assert.ok(getUrl(out).endsWith("/authorizations"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.ownerId, "alice");
@@ -203,6 +203,6 @@ describe("CLI behavioral: delete authorization", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/authorizations/42"));
+		assert.ok(getUrl(out).endsWith("/authorizations/42"));
 	});
 });

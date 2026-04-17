@@ -20,10 +20,8 @@ import {
 	type CommandResult,
 	defineCommand,
 	deserializeFlags,
-	deserializePositionals,
 	type InferFlags,
 	type InferPositionals,
-	type PositionalDef,
 	type ResolvedFlags,
 	type ResolvedPositionals,
 } from "../../src/command-framework.ts";

@@ -9,7 +9,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── publish message ─────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ describe("CLI behavioural: publish message", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/messages/publication"));
+		assert.ok(getUrl(out).includes("/messages/publication"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.name, "my-message");
@@ -95,7 +95,7 @@ describe("CLI behavioural: correlate message", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/messages/correlation"));
+		assert.ok(getUrl(out).includes("/messages/correlation"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.name, "my-message");

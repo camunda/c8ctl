@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { getUserDataDir } from "../../src/config.ts";
+import { getExecErrorOutput, getExecField } from "../utils/guards.ts";
 
 describe("Plugin Lifecycle Integration Tests", () => {
 	const testPluginDir = join(process.cwd(), "test-plugin-temp");
@@ -139,12 +140,11 @@ describe("Plugin Lifecycle Integration Tests", () => {
 					encoding: "utf-8",
 					timeout: 5000,
 				});
-			} catch (error: any) {
+			} catch (error) {
 				// Command may exit with 0 or throw, check both outputs
-				commandOutput = error.stdout || "";
-				commandStderr = error.stderr || "";
+				commandOutput = getExecField(error, "stdout");
+				commandStderr = getExecField(error, "stderr");
 			}
-
 			assert.ok(
 				commandOutput.includes("TEST_COMMAND_EXECUTED"),
 				`Plugin command should execute. Output: ${commandOutput}, Stderr: ${commandStderr}`,
@@ -192,9 +192,9 @@ describe("Plugin Lifecycle Integration Tests", () => {
 				});
 				// If we get here, command didn't fail as expected
 				shouldFail = !failOutput.includes("TEST_COMMAND_EXECUTED");
-			} catch (error: any) {
+			} catch (error) {
 				// Expected to fail - check error message
-				const errorOutput = error.stderr || error.stdout || error.message;
+				const errorOutput = getExecErrorOutput(error);
 				shouldFail =
 					errorOutput.includes("Unknown command") ||
 					errorOutput.includes("test-command");
@@ -237,8 +237,8 @@ describe("Plugin Lifecycle Integration Tests", () => {
 				env: { ...process.env, C8CTL_DATA_DIR: tempDir },
 			});
 			assert.fail("Unloading a non-existent plugin should fail");
-		} catch (error: any) {
-			const errorOutput = error.stderr || error.message;
+		} catch (error) {
+			const errorOutput = getExecErrorOutput(error);
 			assert.ok(
 				errorOutput.includes("neither registered nor installed"),
 				`Error should mention plugin is neither registered nor installed. Got: ${errorOutput}`,
@@ -667,8 +667,8 @@ export const commands = {
 					encoding: "utf-8",
 					timeout: 5000,
 				});
-			} catch (error: any) {
-				commandOutput = error.stdout || "";
+			} catch (error) {
+				commandOutput = getExecField(error, "stdout");
 			}
 
 			assert.ok(
@@ -803,8 +803,9 @@ export const commands = {
 					encoding: "utf-8",
 					timeout: 5000,
 				});
-			} catch (error: any) {
-				listOutput = error.stdout || error.stderr || "";
+			} catch (error) {
+				listOutput =
+					getExecField(error, "stdout") || getExecField(error, "stderr");
 			}
 
 			// Built-in command should execute (showing profiles or "No profiles found")
@@ -923,11 +924,10 @@ export const commands = {
 						timeout: 5000,
 					},
 				);
-			} catch (error: any) {
+			} catch (error) {
 				downgradeFailed = true;
-				downgradeOutput = `${error.stdout || ""}${error.stderr || ""}`;
+				downgradeOutput = `${getExecField(error, "stdout")}${getExecField(error, "stderr")}`;
 			}
-
 			assert.ok(
 				downgradeFailed,
 				"Downgrade should fail for file-based plugin source",
@@ -1043,11 +1043,10 @@ export const commands = {
 						timeout: 5000,
 					},
 				);
-			} catch (error: any) {
+			} catch (error) {
 				upgradeFailed = true;
-				upgradeOutput = `${error.stdout || ""}${error.stderr || ""}`;
+				upgradeOutput = `${getExecField(error, "stdout")}${getExecField(error, "stderr")}`;
 			}
-
 			assert.ok(
 				upgradeFailed,
 				"Versioned upgrade should fail for file-based plugin source",
@@ -1115,10 +1114,11 @@ export const commands = {
 
 		try {
 			// Create two distinct plugin directories
-			for (const [dir, name, cmd] of [
+			const pluginConfigs: Array<[string, string, string]> = [
 				[pluginOneDir, pluginOneName, "multi-test-one"],
 				[pluginTwoDir, pluginTwoName, "multi-test-two"],
-			] as [string, string, string][]) {
+			];
+			for (const [dir, name, cmd] of pluginConfigs) {
 				mkdirSync(dir, { recursive: true });
 				writeFileSync(
 					join(dir, "package.json"),
@@ -1277,9 +1277,9 @@ export const commands = {
 					env: cliEnv,
 				},
 			);
-		} catch (err: any) {
+		} catch (err) {
 			throw new Error(
-				`Failed to load plugin: ${err.stdout || ""}${err.stderr || ""}`,
+				`Failed to load plugin: ${getExecField(err, "stdout")}${getExecField(err, "stderr")}`,
 			);
 		}
 	});

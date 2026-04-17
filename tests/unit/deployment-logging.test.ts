@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { getExecField } from "../utils/guards.ts";
 
 // Timeout for deployment commands (longer for CI environments)
 const DEPLOYMENT_TIMEOUT = 10000;
@@ -53,8 +54,8 @@ describe("Deployment Logging", () => {
 				env: process.env,
 			});
 			return output;
-		} catch (error: any) {
-			return error.stdout + error.stderr;
+		} catch (error) {
+			return getExecField(error, "stdout") + getExecField(error, "stderr");
 		}
 	}
 

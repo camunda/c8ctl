@@ -13,6 +13,7 @@ import {
 	OPEN_APPS,
 	validateOpenAppOptions,
 } from "../../src/commands/open.ts";
+import { mockProcessExit } from "../utils/mocks.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
 
@@ -140,7 +141,7 @@ describe("open command", () => {
 		let consoleErrorSpy: string[];
 		let originalLog: typeof console.log;
 		let originalError: typeof console.error;
-		let originalExit: typeof process.exit;
+		let restoreExit: () => void;
 		let exitCode: number | undefined;
 
 		beforeEach(() => {
@@ -148,34 +149,32 @@ describe("open command", () => {
 			consoleErrorSpy = [];
 			originalLog = console.log;
 			originalError = console.error;
-			originalExit = process.exit;
 			exitCode = undefined;
 
-			console.log = (...args: any[]) => {
+			console.log = (...args: unknown[]) => {
 				consoleLogSpy.push(args.join(" "));
 			};
-			console.error = (...args: any[]) => {
+			console.error = (...args: unknown[]) => {
 				consoleErrorSpy.push(args.join(" "));
 			};
-			process.exit = ((code: number) => {
-				exitCode = code;
+			restoreExit = mockProcessExit((code) => {
+				exitCode = typeof code === "number" ? code : undefined;
 				throw new Error(`process.exit(${code})`);
-				// biome-ignore lint/plugin: test-only override of process.exit signature
-			}) as typeof process.exit;
+			});
 		});
 
 		afterEach(() => {
 			console.log = originalLog;
 			console.error = originalError;
-			process.exit = originalExit;
+			restoreExit();
 		});
 
 		test("exits with error when app is undefined", async () => {
 			try {
 				validateOpenAppOptions(undefined, {});
 				assert.fail("Should have thrown");
-			} catch (e: any) {
-				assert.ok(e.message.includes("process.exit(1)"));
+			} catch (e) {
+				assert.ok(e instanceof Error && e.message.includes("process.exit(1)"));
 				assert.strictEqual(exitCode, 1);
 			}
 			const errorOutput = consoleErrorSpy.join("\n");
@@ -187,8 +186,8 @@ describe("open command", () => {
 			try {
 				validateOpenAppOptions("console", {});
 				assert.fail("Should have thrown");
-			} catch (e: any) {
-				assert.ok(e.message.includes("process.exit(1)"));
+			} catch (e) {
+				assert.ok(e instanceof Error && e.message.includes("process.exit(1)"));
 				assert.strictEqual(exitCode, 1);
 			}
 			const errorOutput = consoleErrorSpy.join("\n");

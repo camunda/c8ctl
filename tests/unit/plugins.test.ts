@@ -177,7 +177,7 @@ describe("Plugin Structure", () => {
 
 				assert.ok(plugin.commands, "Plugin has commands export");
 				assert.ok(
-					typeof plugin.commands["analyze"] === "function",
+					typeof plugin.commands.analyze === "function",
 					"analyze is a function",
 				);
 				assert.ok(
@@ -188,7 +188,7 @@ describe("Plugin Structure", () => {
 					typeof plugin.commands.config === "function",
 					"config is a function",
 				);
-			} catch (error) {
+			} catch (_error) {
 				// If import fails, just verify the file exists
 				const pluginPath = join(
 					process.cwd(),

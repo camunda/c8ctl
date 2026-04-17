@@ -12,7 +12,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord } from "../utils/guards.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── create user ─────────────────────────────────────────────────────────────
 
@@ -33,7 +33,7 @@ describe("CLI behavioural: create user", () => {
 
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/users"));
+		assert.ok(getUrl(out).endsWith("/users"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.username, "alice");
@@ -96,7 +96,7 @@ describe("CLI behavioural: delete user", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/users/alice"));
+		assert.ok(getUrl(out).endsWith("/users/alice"));
 	});
 
 	test("rejects missing username with exit code 1", async () => {
@@ -127,7 +127,7 @@ describe("CLI behavioural: create role", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/roles"));
+		assert.ok(getUrl(out).endsWith("/roles"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.roleId, "admin");
@@ -161,7 +161,7 @@ describe("CLI behavioural: delete role", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/roles/admin"));
+		assert.ok(getUrl(out).endsWith("/roles/admin"));
 	});
 
 	test("rejects missing role ID with exit code 1", async () => {
@@ -191,7 +191,7 @@ describe("CLI behavioural: create group", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/groups"));
+		assert.ok(getUrl(out).endsWith("/groups"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.groupId, "devs");
@@ -225,7 +225,7 @@ describe("CLI behavioural: delete group", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/groups/devs"));
+		assert.ok(getUrl(out).endsWith("/groups/devs"));
 	});
 
 	test("rejects missing group ID with exit code 1", async () => {
@@ -255,7 +255,7 @@ describe("CLI behavioural: create tenant", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/tenants"));
+		assert.ok(getUrl(out).endsWith("/tenants"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.tenantId, "acme");
@@ -289,7 +289,7 @@ describe("CLI behavioural: delete tenant", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/tenants/acme"));
+		assert.ok(getUrl(out).endsWith("/tenants/acme"));
 	});
 
 	test("rejects missing tenant ID with exit code 1", async () => {
@@ -323,7 +323,7 @@ describe("CLI behavioural: create mapping-rule", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).endsWith("/mapping-rules"));
+		assert.ok(getUrl(out).endsWith("/mapping-rules"));
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.mappingRuleId, "rule-1");
@@ -377,7 +377,7 @@ describe("CLI behavioural: delete mapping-rule", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).endsWith("/mapping-rules/rule-1"));
+		assert.ok(getUrl(out).endsWith("/mapping-rules/rule-1"));
 	});
 
 	test("rejects missing mapping-rule ID with exit code 1", async () => {
@@ -407,8 +407,8 @@ describe("CLI behavioural: assign", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/roles/admin/"));
-		assert.ok((out.url as string).includes("alice"));
+		assert.ok(getUrl(out).includes("/roles/admin/"));
+		assert.ok(getUrl(out).includes("alice"));
 	});
 
 	test("--dry-run assign role --to-group emits POST", async () => {
@@ -424,8 +424,8 @@ describe("CLI behavioural: assign", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "POST");
-		assert.ok((out.url as string).includes("/roles/admin/"));
-		assert.ok((out.url as string).includes("devs"));
+		assert.ok(getUrl(out).includes("/roles/admin/"));
+		assert.ok(getUrl(out).includes("devs"));
 	});
 
 	test("--dry-run assign user --to-tenant emits POST", async () => {
@@ -441,10 +441,7 @@ describe("CLI behavioural: assign", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "POST");
-		assert.ok(
-			(out.url as string).includes("alice") ||
-				(out.url as string).includes("acme"),
-		);
+		assert.ok(getUrl(out).includes("alice") || getUrl(out).includes("acme"));
 	});
 
 	test("rejects missing target flag with exit code 1", async () => {
@@ -484,10 +481,7 @@ describe("CLI behavioural: unassign", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok(
-			(out.url as string).includes("alice") ||
-				(out.url as string).includes("ops"),
-		);
+		assert.ok(getUrl(out).includes("alice") || getUrl(out).includes("ops"));
 	});
 
 	test("--dry-run unassign role --from-user emits DELETE", async () => {
@@ -503,7 +497,7 @@ describe("CLI behavioural: unassign", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(out.method, "DELETE");
-		assert.ok((out.url as string).includes("/roles/admin/"));
+		assert.ok(getUrl(out).includes("/roles/admin/"));
 	});
 
 	test("rejects missing source flag with exit code 1", async () => {

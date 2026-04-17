@@ -78,7 +78,7 @@ describe("Form Integration Tests", () => {
 		const definitionFound = await pollUntil(
 			async () => {
 				const result = await cli("search", "pd", "--id=Process_0t60ay7");
-				const items = parseJson<any[]>(result.stdout);
+				const items = parseJson<unknown[]>(result.stdout);
 				return items.length > 0;
 			},
 			POLL_TIMEOUT_MS,
@@ -181,7 +181,7 @@ describe("Form Integration Tests", () => {
 		const definitionFound = await pollUntil(
 			async () => {
 				const result = await cli("search", "pd", "--id=Process_0t60ay7");
-				const items = parseJson<any[]>(result.stdout);
+				const items = parseJson<unknown[]>(result.stdout);
 				return items.length > 0;
 			},
 			POLL_TIMEOUT_MS,
@@ -246,7 +246,7 @@ describe("Form Integration Tests", () => {
 		const definitionFound = await pollUntil(
 			async () => {
 				const result = await cli("search", "pd", "--id=Process_0t60ay7");
-				const items = parseJson<any[]>(result.stdout);
+				const items = parseJson<unknown[]>(result.stdout);
 				return items.length > 0;
 			},
 			POLL_TIMEOUT_MS,
