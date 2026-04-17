@@ -22,19 +22,10 @@ import {
 	VERB_ALIASES,
 } from "../../src/command-registry.ts";
 
-/** Widened views for iterating with index signatures. */
-const REGISTRY: Record<string, CommandDef> = COMMAND_REGISTRY as Record<
-	string,
-	CommandDef
->;
-const GLOBAL_FLAGS_MAP: Record<string, FlagDef> = GLOBAL_FLAGS as Record<
-	string,
-	FlagDef
->;
-const SEARCH_FLAGS_MAP: Record<string, FlagDef> = SEARCH_FLAGS as Record<
-	string,
-	FlagDef
->;
+/** Widened read-only views for iterating with index signatures. */
+const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
+const GLOBAL_FLAGS_MAP: Readonly<Record<string, FlagDef>> = GLOBAL_FLAGS;
+const SEARCH_FLAGS_MAP: Readonly<Record<string, FlagDef>> = SEARCH_FLAGS;
 
 // ─── Registry completeness ──────────────────────────────────────────────────
 
@@ -205,16 +196,11 @@ describe("RESOURCE_ALIASES consistency", () => {
 // ─── Search resource flags ───────────────────────────────────────────────────
 
 describe("search resourceFlags consistency", () => {
-	const resourceFlagsRaw = COMMAND_REGISTRY.search.resourceFlags as
-		| Record<string, Record<string, FlagDef>>
-		| undefined;
-	if (!resourceFlagsRaw) {
-		throw new Error("search.resourceFlags must be defined");
-	}
-	const resourceFlags: Record<
-		string,
-		Record<string, FlagDef>
-	> = resourceFlagsRaw;
+	const resourceFlagsRaw:
+		| Readonly<Record<string, Readonly<Record<string, FlagDef>>>>
+		| undefined = COMMAND_REGISTRY.search.resourceFlags;
+	assert.ok(resourceFlagsRaw, "search.resourceFlags must be defined");
+	const resourceFlags = resourceFlagsRaw;
 	const EXPECTED_SEARCH_RESOURCES = [
 		"process-definition",
 		"process-instance",

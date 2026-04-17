@@ -14,10 +14,7 @@ import { fileURLToPath } from "node:url";
 import type { CommandDef } from "../../src/command-registry.ts";
 import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
 
-const REGISTRY: Record<string, CommandDef> = COMMAND_REGISTRY as Record<
-	string,
-	CommandDef
->;
+const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const indexSrc = readFileSync(join(__dirname, "../../src/index.ts"), "utf-8");

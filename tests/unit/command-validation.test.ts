@@ -251,15 +251,12 @@ describe("requireOneOf", () => {
 
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
-import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
+import type { CommandDef } from "../../src/command-registry.ts";
 import { COMMAND_REGISTRY, GLOBAL_FLAGS } from "../../src/command-registry.ts";
 import { validateFlags } from "../../src/command-validation.ts";
 
-/** Widened view of COMMAND_REGISTRY for iterating with index signatures. */
-const REGISTRY: Record<string, CommandDef> = COMMAND_REGISTRY as Record<
-	string,
-	CommandDef
->;
+/** Widened read-only view of COMMAND_REGISTRY for iterating with index signatures. */
+const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
 
 /**
  * Flag names that are known to map to branded SDK types.

@@ -240,13 +240,11 @@ describe("GLOBAL_FLAGS", () => {
 });
 
 describe("search resourceFlags (from registry)", () => {
-	const rawFlags = COMMAND_REGISTRY.search.resourceFlags as
-		| Record<string, Record<string, unknown>>
-		| undefined;
-	if (!rawFlags) {
-		throw new Error("search.resourceFlags must be defined");
-	}
-	const resourceFlags: Record<string, Record<string, unknown>> = rawFlags;
+	const rawFlags:
+		| Readonly<Record<string, Readonly<Record<string, unknown>>>>
+		| undefined = COMMAND_REGISTRY.search.resourceFlags;
+	assert.ok(rawFlags, "search.resourceFlags must be defined");
+	const resourceFlags = rawFlags;
 
 	test("process-definition includes all expected flags", () => {
 		const flags = resourceFlags["process-definition"];
@@ -361,12 +359,10 @@ describe("Flag scoping — structural invariant", () => {
 	]);
 
 	test("GLOBAL_FLAGS and search resourceFlags do not overlap", () => {
-		const resourceFlags = COMMAND_REGISTRY.search.resourceFlags as
-			| Record<string, Record<string, unknown>>
-			| undefined;
-		if (!resourceFlags) {
-			throw new Error("search.resourceFlags must be defined");
-		}
+		const resourceFlags:
+			| Readonly<Record<string, Readonly<Record<string, unknown>>>>
+			| undefined = COMMAND_REGISTRY.search.resourceFlags;
+		assert.ok(resourceFlags, "search.resourceFlags must be defined");
 		for (const [resource, flags] of Object.entries(resourceFlags)) {
 			for (const flag of Object.keys(flags)) {
 				assert.ok(
