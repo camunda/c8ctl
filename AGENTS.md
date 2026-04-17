@@ -147,6 +147,13 @@ Never skip the lint and type-check steps before pushing.
 - run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped. It also catches compilation and type errors early.
 - on changes, make sure all tests pass and a build via `npm run build` works without errors
 
+#### Local checks
+
+- `npm run typecheck` — runs `tsc --noEmit -p tsconfig.check.json` over `src/` and `tests/`
+- `npx biome check` — lints and formats `src/` and `tests/` per `biome.json` (includes the `no-unsafe-type-assertion` plugin)
+- `npm run test:unit` — fast unit tests (no live Camunda required)
+- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
+
 ### Implementation details
 
 - always make sure that CLI commands, resources and options are reflected in
@@ -176,9 +183,9 @@ Never skip the lint and type-check steps before pushing.
 
 - use modern TypeScript syntax and features
 - **never use `any`** — use `unknown` and narrow with type guards. Enforced by Biome (`noExplicitAny`, `noImplicitAnyLet`, `noEvolvingTypes` — all set to `error`)
-- **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`). Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
-- run `npx biome check src/` to verify — this runs as part of `npm run build` and CI. Zero diagnostics required
-- run `npx biome check --fix src/` before committing to auto-fix formatting and lint issues
+- **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`) that applies to both `src/` and `tests/`. Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
+- run `npx biome check` to verify — `biome.json` scopes this to `src/` and `tests/`. This runs as part of `npm run build`, CI, and the pre-commit hook (on staged files). Zero diagnostics required
+- run `npx biome check --fix` before committing to auto-fix formatting and lint issues
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript
@@ -222,7 +229,7 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 ### Refactoring discipline
 
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
-- between refactors, always run `npx tsc --noEmit`, `npx biome check src`, and `npx vitest run` to verify correctness
+- between refactors, always run `npm run typecheck` (`tsc --noEmit -p tsconfig.check.json`, covering `src/` and `tests/`), `npx biome check`, and `npm run test:unit` to verify correctness
 
 ### Adding a new command
 
