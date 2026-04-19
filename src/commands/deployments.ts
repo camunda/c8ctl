@@ -376,7 +376,9 @@ export async function deploy(
 		// summary line.
 		logger.error(duplicateIdsMessage);
 		duplicates.forEach((dupPaths, id) => {
-			logMessage(`  Process/Decision ID "${id}" found in: ${dupPaths.join(", ")}`);
+			logMessage(
+				`  Process/Decision ID "${id}" found in: ${dupPaths.join(", ")}`,
+			);
 		});
 		logMessage(
 			"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
