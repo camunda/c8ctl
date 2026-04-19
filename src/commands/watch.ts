@@ -134,17 +134,18 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	});
 
 	// Block until SIGINT, then close watchers, cancel any pending debounced
-	// deploys, and resolve so the handler returns naturally. Cancelling
-	// pending timers prevents a deploy from firing after Ctrl+C and keeps
-	// the event loop from staying alive past shutdown. The framework
-	// treats this as `{ kind: "never" }` and the process exits with code 0.
-	await new Promise<void>((resolveSignal) => {
+	// deploys, and exit immediately. Calling `process.exit(0)` (rather than
+	// resolving so the handler returns) prevents an in-flight deploy whose
+	// debounce timer has already fired from delaying shutdown or emitting
+	// log output after the goodbye message. The Promise body intentionally
+	// never resolves — `process.exit` short-circuits.
+	await new Promise<void>(() => {
 		process.once("SIGINT", () => {
 			logger.info("\n\n🍹 - bottoms up.");
 			for (const w of watchers) w.close();
 			for (const timer of debounceTimers.values()) clearTimeout(timer);
 			debounceTimers.clear();
-			resolveSignal();
+			process.exit(0);
 		});
 	});
 

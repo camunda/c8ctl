@@ -13,6 +13,7 @@ import {
 import { createClient } from "../client.ts";
 import { defineCommand } from "../command-framework.ts";
 import { isRecord, Logger, type LogWriter } from "../logger.ts";
+import { c8ctl } from "../runtime.ts";
 import { getVersion } from "./help.ts";
 
 /**
@@ -391,16 +392,26 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 			process.once("SIGTERM", () => shutdown("SIGTERM"));
 		});
 	} catch (error) {
+		const normalizedError =
+			error instanceof Error ? error : new Error(String(error));
+
 		if (proxy) await proxy.stop().catch(() => {});
+
+		// In verbose mode users want the full stack trace, so re-throw and
+		// let Node print it to stderr. The framework's default error handler
+		// short-circuits to a plain rethrow when `c8ctl.verbose` is set
+		// (see src/errors.ts), so no stdout hint is emitted in that path.
+		if (c8ctl.verbose) {
+			throw normalizedError;
+		}
+
 		// MCP-proxy uses STDIO for protocol; we must NOT let the framework's
 		// default error handler write hints to stdout (that would corrupt
 		// the MCP stream for any remaining client read). Log to stderr via
 		// our stderr-backed logger and surface failure through the exit
 		// code instead of re-throwing into `handleCommandError`.
 		process.exitCode = 1;
-		logger.error(
-			`mcp-proxy failed: ${error instanceof Error ? error.message : String(error)}`,
-		);
+		logger.error(`mcp-proxy failed: ${normalizedError.message}`);
 	}
 
 	return { kind: "never" };

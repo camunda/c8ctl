@@ -97,7 +97,10 @@ export function startWatchProcess(options: StartWatchOptions): WatchProcess {
 				}
 				resolveExit(null);
 			}, timeoutMs);
-			child.once("exit", (code) => {
+			// Wait for `close` (not `exit`) so stdio streams are fully drained
+			// before callers assert on captured output. `exit` can fire before
+			// fast failures finish flushing their final line.
+			child.once("close", (code) => {
 				clearTimeout(timer);
 				resolveExit(code);
 			});
