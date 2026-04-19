@@ -4,7 +4,7 @@
 
 import { fetchAllPages } from "../client.ts";
 import { defineCommand, dryRun } from "../command-framework.ts";
-import { getLogger, sortTableData } from "../logger.ts";
+import { sortTableData } from "../logger.ts";
 
 /**
  * List all tenants
@@ -124,12 +124,10 @@ export const createIdentityTenantCommand = defineCommand(
 		const { client, profile } = ctx;
 
 		if (!flags.tenantId) {
-			getLogger().error("--tenantId is required");
-			process.exit(1);
+			throw new Error("--tenantId is required");
 		}
 		if (!flags.name) {
-			getLogger().error("--name is required");
-			process.exit(1);
+			throw new Error("--name is required");
 		}
 
 		const body = {

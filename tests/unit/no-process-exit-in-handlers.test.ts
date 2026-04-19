@@ -63,14 +63,9 @@ const COMMANDS_DIR = join(PROJECT_ROOT, "src", "commands");
  */
 const PENDING_MIGRATION: ReadonlySet<string> = new Set([
 	"src/commands/completion.ts",
-	"src/commands/identity-groups.ts",
 	"src/commands/identity-mapping-rules.ts",
-	"src/commands/identity-roles.ts",
-	"src/commands/identity-tenants.ts",
-	"src/commands/identity-users.ts",
 	"src/commands/identity.ts",
 	"src/commands/jobs.ts",
-	"src/commands/messages.ts",
 	"src/commands/plugins.ts",
 	"src/commands/process-instances.ts",
 	"src/commands/profiles.ts",
