@@ -5,6 +5,7 @@
 import { existsSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
+import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { deploy } from "./deployments.ts";
 
@@ -139,7 +140,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 							if (ac.signal.aborted) return;
 							logger.error(
 								`Failed to deploy ${basename(file)}`,
-								error instanceof Error ? error : new Error(String(error)),
+								normalizeToError(error, "Deployment request failed"),
 							);
 						} finally {
 							inflightDeploys.delete(ac);

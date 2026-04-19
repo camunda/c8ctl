@@ -24,6 +24,12 @@ import { startWatchProcess } from "../utils/watch-process.ts";
 const POLL_INTERVAL_MS = 100;
 const STARTUP_TIMEOUT_MS = 5_000;
 const EXIT_TIMEOUT_MS = 5_000;
+// SIGINT shutdown does I/O (close fs watchers, abort in-flight HTTP, drain
+// the event loop). On a loaded CI runner that sometimes takes longer than
+// the missing-path early-exit, so we use a more generous budget for the
+// signal-handling assertion. The correctness signal is "exits 0 after the
+// handler runs", not "exits within 5 s".
+const SIGINT_EXIT_TIMEOUT_MS = 15_000;
 
 describe("watch command lifecycle", () => {
 	let dataDir: string;
@@ -68,9 +74,19 @@ describe("watch command lifecycle", () => {
 		const watch = startWatchProcess({ watchDir, dataDir });
 
 		try {
-			// Wait for the watcher to be ready before sending the signal.
+			// Wait for the watcher to be fully initialized before sending
+			// the signal. We poll for the LAST line printed before the
+			// `await new Promise((r) => process.once("SIGINT", r))` block in
+			// `src/commands/watch.ts` — earlier lines (e.g. "Watching for
+			// changes") are emitted before the synchronous `fs.watch` setup
+			// and BEFORE the SIGINT handler is registered, so signalling on
+			// them races: SIGINT can land before `process.once` runs and
+			// trigger Node's default behaviour (exit 130) instead of our
+			// graceful path. "Press Ctrl+C to stop watching" is the last
+			// line emitted before the `await`, so seeing it on stdout
+			// guarantees the handler is registered.
 			const ready = await pollUntil(
-				async () => watch.getOutput().includes("Watching for changes"),
+				async () => watch.getOutput().includes("Press Ctrl+C to stop watching"),
 				STARTUP_TIMEOUT_MS,
 				POLL_INTERVAL_MS,
 			);
@@ -80,7 +96,7 @@ describe("watch command lifecycle", () => {
 			);
 
 			watch.child.kill("SIGINT");
-			const exitCode = await watch.waitForExit(EXIT_TIMEOUT_MS);
+			const exitCode = await watch.waitForExit(SIGINT_EXIT_TIMEOUT_MS);
 			const output = watch.getOutput();
 
 			assert.strictEqual(
