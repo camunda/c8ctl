@@ -17,8 +17,8 @@
  * test file (`tests/unit/round-2b-error-paths.test.ts`). The baseline
  * assertions in THIS file remain green throughout.
  *
- * Sites covered (21 total across 5 files):
- *   - src/commands/identity-mapping-rules.ts (4 sites, short-circuit at first)
+ * Sites covered (19 total across 5 files):
+ *   - src/commands/identity-mapping-rules.ts (4 sites: --mappingRuleId / --name / --claimName / --claimValue required)
  *   - src/commands/jobs.ts                   (4 sites: list / activate ×2 / fail)
  *   - src/commands/process-instances.ts      (4 sites: list / create ×2 / await)
  *   - src/commands/search.ts                 (4 sites: search process-instance / user-task / incident / jobs, all `--between`)
@@ -28,9 +28,10 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { c8 } from "../utils/cli.ts";
+import type { SpawnResult } from "../utils/spawn.ts";
 
 function assertExitOneWithMessage(
-	result: { status: number | null; stderr: string },
+	result: SpawnResult,
 	fragment: string,
 	context: string,
 ): void {
@@ -52,6 +53,54 @@ describe("Round 2b baseline — identity-mapping-rules.ts", () => {
 			result,
 			"--mappingRuleId is required",
 			"create mapping-rule (no flags)",
+		);
+	});
+
+	test("create mapping-rule without --name fails with required-flag message", async () => {
+		const result = await c8(
+			"create",
+			"mapping-rule",
+			"--mappingRuleId",
+			"rule-123",
+		);
+		assertExitOneWithMessage(
+			result,
+			"--name is required",
+			"create mapping-rule (missing --name)",
+		);
+	});
+
+	test("create mapping-rule without --claimName fails with required-flag message", async () => {
+		const result = await c8(
+			"create",
+			"mapping-rule",
+			"--mappingRuleId",
+			"rule-123",
+			"--name",
+			"test-rule",
+		);
+		assertExitOneWithMessage(
+			result,
+			"--claimName is required",
+			"create mapping-rule (missing --claimName)",
+		);
+	});
+
+	test("create mapping-rule without --claimValue fails with required-flag message", async () => {
+		const result = await c8(
+			"create",
+			"mapping-rule",
+			"--mappingRuleId",
+			"rule-123",
+			"--name",
+			"test-rule",
+			"--claimName",
+			"sub",
+		);
+		assertExitOneWithMessage(
+			result,
+			"--claimValue is required",
+			"create mapping-rule (missing --claimValue)",
 		);
 	});
 });
