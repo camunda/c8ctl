@@ -402,10 +402,9 @@ export const searchProcessInstancesCommand = defineCommand(
 				const field = ctx.dateField ?? "startDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 
@@ -532,10 +531,9 @@ export const searchUserTasksCommand = defineCommand(
 				const field = ctx.dateField ?? "creationDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 
@@ -685,10 +683,9 @@ export const searchIncidentsCommand = defineCommand(
 			if (parsed) {
 				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 
@@ -823,10 +820,9 @@ export const searchJobsCommand = defineCommand(
 				const field = ctx.dateField ?? "creationTime";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 

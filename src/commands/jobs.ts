@@ -14,8 +14,7 @@ export const listJobsCommand = defineCommand(
 	"list",
 	"jobs",
 	async (ctx, flags) => {
-		const { client, logger, tenantId, profile, limit, between, dateField } =
-			ctx;
+		const { client, tenantId, profile, limit, between, dateField } = ctx;
 
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -37,10 +36,9 @@ export const listJobsCommand = defineCommand(
 				const field = dateField ?? "creationTime";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 
@@ -92,12 +90,10 @@ export const activateJobsCommand = defineCommand(
 		const worker = flags.worker || "c8ctl";
 
 		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
-			ctx.logger.error("--maxJobsToActivate must be a positive integer");
-			process.exit(1);
+			throw new Error("--maxJobsToActivate must be a positive integer");
 		}
 		if (Number.isNaN(timeout) || timeout < 1) {
-			ctx.logger.error("--timeout must be a positive integer (milliseconds)");
-			process.exit(1);
+			throw new Error("--timeout must be a positive integer (milliseconds)");
 		}
 
 		const dr = dryRun({
@@ -191,8 +187,7 @@ export const failJobCommand = defineCommand(
 		const errorMessage = flags.errorMessage || "Job failed via c8ctl";
 
 		if (Number.isNaN(retries) || retries < 0) {
-			ctx.logger.error("--retries must be a non-negative integer");
-			process.exit(1);
+			throw new Error("--retries must be a non-negative integer");
 		}
 
 		const dr = dryRun({

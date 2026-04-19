@@ -4,7 +4,7 @@
 
 import { fetchAllPages } from "../client.ts";
 import { defineCommand, dryRun } from "../command-framework.ts";
-import { getLogger, sortTableData } from "../logger.ts";
+import { sortTableData } from "../logger.ts";
 
 /**
  * List all mapping rules
@@ -128,20 +128,16 @@ export const createIdentityMappingRuleCommand = defineCommand(
 		const { client, profile } = ctx;
 
 		if (!flags.mappingRuleId) {
-			getLogger().error("--mappingRuleId is required");
-			process.exit(1);
+			throw new Error("--mappingRuleId is required");
 		}
 		if (!flags.name) {
-			getLogger().error("--name is required");
-			process.exit(1);
+			throw new Error("--name is required");
 		}
 		if (!flags.claimName) {
-			getLogger().error("--claimName is required");
-			process.exit(1);
+			throw new Error("--claimName is required");
 		}
 		if (!flags.claimValue) {
-			getLogger().error("--claimValue is required");
-			process.exit(1);
+			throw new Error("--claimValue is required");
 		}
 
 		const body = {
