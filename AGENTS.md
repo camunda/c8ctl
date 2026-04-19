@@ -232,6 +232,22 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
 - between refactors, always run `npm run typecheck` (`tsc --noEmit -p tsconfig.check.json`, covering `src/` and `tests/`), `npx biome check`, and `npm run test:unit` to verify correctness
 
+#### There are no flaky tests
+
+We do not acknowledge the existence of "flaky tests". A test that passes sometimes and fails other times is reporting one of two things:
+
+1. **A test defect** — the test contains a race, an unbounded timeout, an order-of-operation assumption, an unsynchronised readiness signal, or a dependency on wall-clock timing. Fix the test so its outcome is deterministic for the behaviour it claims to assert.
+2. **A product defect** — the production code has a race, a missed signal, an unhandled error path, or a resource it leaks under load. Fix the product.
+
+Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" in the PR description. "Re-run and hope" is a coping strategy, not engineering.
+
+When triaging an intermittent CI failure:
+
+- Reproduce locally if possible (loops, resource pressure, timeout reduction). If you cannot reproduce, reason from first principles about what *could* differ between local and CI (load, filesystem semantics, signal delivery latency, parallel test interaction).
+- Identify the specific race or assumption. Common shapes: polling for an output line that is printed *before* the relevant handler is registered; timeouts that double as correctness assertions; tests that share a temp directory across runs; tests that depend on event ordering across two processes.
+- Pick category 1 vs category 2 explicitly in the fix commit message, and explain which signal the test was previously relying on and which deterministic signal it now relies on.
+- If timeouts must be generous to absorb runner load, the timeout is a safety net — not a correctness signal. State this in a comment so future maintainers don't tighten it back into a race.
+
 #### Coverage analysis before a behaviour-preserving refactor
 
 Before starting any non-trivial refactor, **audit whether the surface you are about to change is sufficiently guarded**. A passing test suite is necessary but not sufficient — it only proves that *what is currently tested* still works. The risk of a refactor is the behaviour that nobody asserts.
