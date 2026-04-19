@@ -124,8 +124,8 @@ describe("watch command cancels in-flight deploys on SIGINT", () => {
 			);
 
 			// 2. Trigger a deploy by dropping a BPMN into the watched dir.
-			//    The watcher debounces by 500ms, so the deploy actually
-			//    starts shortly after the copy.
+			//    The watcher debounces by `DEBOUNCE_DELAY` (200ms), so the
+			//    deploy actually starts shortly after the copy.
 			const droppedFile = join(watchDir, "simple-user-task.bpmn");
 			copyFileSync(VALID_BPMN, droppedFile);
 

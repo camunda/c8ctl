@@ -263,11 +263,11 @@ export async function deploy(
 		/**
 		 * Optional cancellation signal. When aborted, an in-flight
 		 * `createDeployment` HTTP request is cancelled via the SDK's
-		 * `CancelablePromise.cancel()` and the awaited promise rejects with
-		 * an `AbortError`. Callers that supply a signal are responsible for
-		 * suppressing the resulting rejection (see `watch.ts` for the
-		 * pattern: check `signal.aborted` in the catch and treat it as a
-		 * no-op rather than a deploy failure).
+		 * `CancelablePromise.cancel()`. Cancellation is handled internally:
+		 * if the signal is aborted, `deploy()` returns early without
+		 * surfacing the cancellation as a deploy failure (no
+		 * "Deployment failed" log, no rejection from the awaited promise).
+		 * Callers do not need their own try/catch to suppress aborts.
 		 */
 		signal?: AbortSignal;
 	},

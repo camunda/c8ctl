@@ -130,9 +130,12 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 								signal: ac.signal,
 							});
 						} catch (error) {
-							// User-initiated cancellation (Ctrl+C). Don't surface as a
-							// deploy failure — the goodbye message is the user-visible
-							// signal that we shut down.
+							// `deploy()` normally returns early when its signal is
+							// aborted, so SIGINT cancellation is not expected to land
+							// here. Keep this as a defensive fallback in case an
+							// aborted deploy ever re-throws — and never log it as a
+							// deploy failure, since the goodbye message is the
+							// user-visible shutdown signal.
 							if (ac.signal.aborted) return;
 							logger.error(
 								`Failed to deploy ${basename(file)}`,
