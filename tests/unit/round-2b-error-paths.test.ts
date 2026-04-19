@@ -8,8 +8,10 @@
  * single new assertion the refactor enables: the framework's
  * `Failed to <verb> <resource>` prefix now appears in stderr.
  *
- * That prefix is added by `handleCommandError` in `command-framework.ts`
- * and CANNOT appear if the helper called `process.exit(1)` directly.
+ * That prefix string is constructed by `defineCommand` in
+ * `command-framework.ts` and passed into `handleCommandError` in
+ * `src/errors.ts`, and CANNOT appear if the helper called
+ * `process.exit(1)` directly.
  * Its presence is the durable behavioural confirmation that each migrated
  * call site is wired through the framework's error pipeline.
  *
