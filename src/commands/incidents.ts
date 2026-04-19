@@ -13,7 +13,7 @@ export const listIncidentsCommand = defineCommand(
 	"list",
 	"incident",
 	async (ctx, flags) => {
-		const { client, logger, tenantId, profile, limit, between } = ctx;
+		const { client, tenantId, profile, limit, between } = ctx;
 
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -34,10 +34,9 @@ export const listIncidentsCommand = defineCommand(
 			if (parsed) {
 				filter.filter.creationTime = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 

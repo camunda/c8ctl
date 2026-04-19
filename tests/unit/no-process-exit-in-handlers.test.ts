@@ -63,23 +63,19 @@ const COMMANDS_DIR = join(PROJECT_ROOT, "src", "commands");
  */
 const PENDING_MIGRATION: ReadonlySet<string> = new Set([
 	"src/commands/completion.ts",
-	"src/commands/forms.ts",
 	"src/commands/identity-groups.ts",
 	"src/commands/identity-mapping-rules.ts",
 	"src/commands/identity-roles.ts",
 	"src/commands/identity-tenants.ts",
 	"src/commands/identity-users.ts",
 	"src/commands/identity.ts",
-	"src/commands/incidents.ts",
 	"src/commands/jobs.ts",
 	"src/commands/messages.ts",
 	"src/commands/plugins.ts",
 	"src/commands/process-instances.ts",
 	"src/commands/profiles.ts",
-	"src/commands/run.ts",
 	"src/commands/search.ts",
 	"src/commands/session.ts",
-	"src/commands/user-tasks.ts",
 ]);
 
 function listCommandFiles(): string[] {

@@ -30,7 +30,7 @@ export const getFormCommand = defineCommand(
 	"get",
 	"form",
 	async (ctx, flags, args) => {
-		const { client, logger, profile } = ctx;
+		const { client, profile } = ctx;
 		const key = args.key;
 
 		const isUserTask = flags.userTask === true || flags.ut === true;
@@ -39,10 +39,9 @@ export const getFormCommand = defineCommand(
 
 		// If both flags specified, error
 		if (isUserTask && isProcessDefinition) {
-			logger.error(
+			throw new Error(
 				"Cannot specify both --userTask|--ut and --processDefinition|--pd. Use one or the other, or omit both to search both types.",
 			);
-			process.exit(1);
 		}
 
 		if (isUserTask) {
