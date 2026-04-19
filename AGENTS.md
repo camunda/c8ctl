@@ -247,7 +247,7 @@ For every gap, **write the missing guard test first, on the pre-refactor branch*
 1. **Green on the pre-refactor code** — proves the test encodes preserved behaviour, not aspirational behaviour.
 2. **Green on the refactored code** — proves the refactor preserved it.
 
-Land the guard tests in a separate PR off `main` before (or alongside) the refactor PR. A guard test that lands together with the change it is supposed to guard is weaker — there is no recorded moment at which it passed against the old code, so reviewers cannot tell whether it would have caught a regression.
+Land the guard tests in a separate PR off `main`, and merge that PR to `main` before the refactor PR merges. A guard test that lands together with the change it is supposed to guard is weaker — there is no recorded moment at which it passed against the old code, so reviewers cannot tell whether it would have caught a regression.
 
 If you find that the surface is genuinely unguardable without a major investment (for example, full end-to-end tests of `mcp-proxy` against a remote MCP server), record that gap in the PR description and shrink the refactor scope rather than proceeding without a net.
 
