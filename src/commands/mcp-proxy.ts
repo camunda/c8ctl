@@ -392,7 +392,15 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 		});
 	} catch (error) {
 		if (proxy) await proxy.stop().catch(() => {});
-		throw error;
+		// MCP-proxy uses STDIO for protocol; we must NOT let the framework's
+		// default error handler write hints to stdout (that would corrupt
+		// the MCP stream for any remaining client read). Log to stderr via
+		// our stderr-backed logger and surface failure through the exit
+		// code instead of re-throwing into `handleCommandError`.
+		process.exitCode = 1;
+		logger.error(
+			`mcp-proxy failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 
 	return { kind: "never" };

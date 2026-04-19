@@ -133,13 +133,17 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		return watcher;
 	});
 
-	// Block until SIGINT, then close watchers and resolve so the handler
-	// returns naturally. The framework treats this as `{ kind: "never" }`
-	// and the process exits with code 0.
+	// Block until SIGINT, then close watchers, cancel any pending debounced
+	// deploys, and resolve so the handler returns naturally. Cancelling
+	// pending timers prevents a deploy from firing after Ctrl+C and keeps
+	// the event loop from staying alive past shutdown. The framework
+	// treats this as `{ kind: "never" }` and the process exits with code 0.
 	await new Promise<void>((resolveSignal) => {
 		process.once("SIGINT", () => {
 			logger.info("\n\n🍹 - bottoms up.");
 			for (const w of watchers) w.close();
+			for (const timer of debounceTimers.values()) clearTimeout(timer);
+			debounceTimers.clear();
 			resolveSignal();
 		});
 	});
