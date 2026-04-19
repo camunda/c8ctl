@@ -32,10 +32,9 @@ export const publishMessageCommand = defineCommand(
 			: undefined;
 		if (timeToLive !== undefined) {
 			if (Number.isNaN(timeToLive) || timeToLive < 0) {
-				ctx.logger.error(
+				throw new Error(
 					"--timeToLive must be a non-negative integer (milliseconds)",
 				);
-				process.exit(1);
 			}
 			body.timeToLive = timeToLive;
 		}
@@ -88,10 +87,9 @@ export const correlateMessageCommand = defineCommand(
 			: undefined;
 		if (timeToLive !== undefined) {
 			if (Number.isNaN(timeToLive) || timeToLive < 0) {
-				ctx.logger.error(
+				throw new Error(
 					"--timeToLive must be a non-negative integer (milliseconds)",
 				);
-				process.exit(1);
 			}
 			body.timeToLive = timeToLive;
 		}

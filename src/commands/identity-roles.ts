@@ -4,7 +4,7 @@
 
 import { fetchAllPages } from "../client.ts";
 import { defineCommand, dryRun } from "../command-framework.ts";
-import { getLogger, sortTableData } from "../logger.ts";
+import { sortTableData } from "../logger.ts";
 
 /**
  * List all roles
@@ -120,12 +120,10 @@ export const createIdentityRoleCommand = defineCommand(
 		const { client, profile } = ctx;
 
 		if (!flags.roleId) {
-			getLogger().error("--roleId is required");
-			process.exit(1);
+			throw new Error("--roleId is required");
 		}
 		if (!flags.name) {
-			getLogger().error("--name is required");
-			process.exit(1);
+			throw new Error("--name is required");
 		}
 
 		const body = { roleId: flags.roleId, name: flags.name };
