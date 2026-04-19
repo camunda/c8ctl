@@ -563,6 +563,28 @@ export async function deploy(
 }
 
 /**
+ * Build a human-readable message for a non-`Error` deploy failure
+ * (typically an RFC 9457 problem-detail object thrown by the SDK)
+ * for use under `--verbose`. Falls back gracefully when the input
+ * lacks any of `title` / `detail` / `status`.
+ *
+ * Exported for unit testing — the class of defect this guards against
+ * is throwing `new Error(String(error))` for non-Error values, which
+ * collapses problem-detail objects to the useless `"[object Object]"`.
+ */
+export function buildVerboseErrorMessage(
+	raw: Record<string, unknown>,
+	problemTitle: string | undefined,
+): string {
+	const detail = typeof raw.detail === "string" ? raw.detail : undefined;
+	const status = typeof raw.status === "number" ? raw.status : undefined;
+	const head = [problemTitle ?? "Deployment request failed", detail]
+		.filter((p): p is string => Boolean(p))
+		.join(": ");
+	return status !== undefined ? `${head} (status ${status})` : head;
+}
+
+/**
  * Format and display deployment errors with actionable guidance
  */
 function handleDeploymentError(
@@ -585,7 +607,17 @@ function handleDeploymentError(
 		}
 		// Verbose mode: surface the original error to the framework so
 		// `handleCommandError` rethrows it and Node prints the stack trace.
-		throw error instanceof Error ? error : new Error(String(error));
+		// Non-Error throws (e.g. RFC 9457 problem-detail plain objects from
+		// the SDK) get wrapped in a synthesized Error whose message is built
+		// from `title` / `detail` / `status` so `--verbose` is actionable
+		// instead of printing `Error: [object Object]`. The original value
+		// is preserved as `cause` so it remains inspectable.
+		if (error instanceof Error) {
+			throw error;
+		}
+		throw new Error(buildVerboseErrorMessage(raw, problemTitle), {
+			cause: error,
+		});
 	}
 
 	// Try to interpret common transport/network issues first for actionable guidance
