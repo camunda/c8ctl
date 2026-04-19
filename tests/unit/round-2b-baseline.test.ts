@@ -259,7 +259,11 @@ describe("Round 2b baseline — session.ts", () => {
 			"profile",
 			"definitely-not-a-real-profile-name-xyz",
 		);
-		assertExitOneWithMessage(result, "not found", "use profile <nonexistent>");
+		assertExitOneWithMessage(
+			result,
+			"Profile 'definitely-not-a-real-profile-name-xyz' not found",
+			"use profile <nonexistent>",
+		);
 	});
 
 	test("output <invalid-mode> fails with invalid-mode message", async () => {
