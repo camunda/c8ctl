@@ -12,7 +12,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createClient } from "../client.ts";
 import { defineCommand } from "../command-framework.ts";
-import { handleCommandError } from "../errors.ts";
 import { isRecord, Logger, type LogWriter } from "../logger.ts";
 import { getVersion } from "./help.ts";
 
@@ -341,51 +340,19 @@ class McpProxy {
 	}
 }
 
-async function runProxy(
-	camundaClient: CamundaClient,
-	logger: Logger,
-	mcpServerPath: string,
-) {
-	let proxy: McpProxy | null = null;
-
-	try {
-		// Create and start proxy
-		proxy = new McpProxy(camundaClient, logger, mcpServerPath);
-		await proxy.start();
-
-		// Handle graceful shutdown
-		const shutdown = async (signal: string) => {
-			logger.info(`Received ${signal}, shutting down gracefully...`);
-			if (proxy) {
-				await proxy.stop();
-			}
-			process.exit(0);
-		};
-
-		process.on("SIGINT", () => shutdown("SIGINT"));
-		process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-		// Keep process alive
-		await new Promise(() => {});
-	} catch (error) {
-		if (proxy) {
-			await proxy.stop().catch(() => {});
-		}
-		handleCommandError(
-			logger,
-			"Failed to run MCP proxy. Shutting down...",
-			error,
-		);
-	}
-}
+// ─── defineCommand ───────────────────────────────────────────────────────────
 
 /**
- * Run STDIO to remote HTTP MCP proxy with Camunda authentication
+ * Run an STDIO ↔ remote-HTTP MCP proxy with Camunda authentication.
+ *
+ * Long-running: stays alive until SIGINT/SIGTERM, then stops the proxy
+ * and resolves so the framework returns naturally with `{ kind: "never" }`.
  */
-export async function mcpProxy(
-	args: string[],
-	options: { profile?: string },
-): Promise<void> {
+export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
+	const allPositionals = ctx.resource
+		? [ctx.resource, ...ctx.positionals]
+		: ctx.positionals;
+
 	const stderrLogWriter: LogWriter = {
 		log(...data: unknown[]): void {
 			console.error(...data);
@@ -396,7 +363,7 @@ export async function mcpProxy(
 	};
 
 	const logger = new Logger(stderrLogWriter);
-	const camundaClient = createClient(options.profile, {
+	const camundaClient = createClient(ctx.profile, {
 		log: {
 			transport: (evt) => {
 				logger.json(evt);
@@ -404,16 +371,29 @@ export async function mcpProxy(
 		},
 	});
 
-	const mcpServerPath = args[0] ?? "/mcp/cluster";
-	await runProxy(camundaClient, logger, mcpServerPath);
-}
+	const mcpServerPath = allPositionals[0] ?? "/mcp/cluster";
 
-// ─── defineCommand wrapper ───────────────────────────────────────────────────
+	let proxy: McpProxy | null = null;
+	try {
+		proxy = new McpProxy(camundaClient, logger, mcpServerPath);
+		await proxy.start();
 
-export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
-	const allPositionals = ctx.resource
-		? [ctx.resource, ...ctx.positionals]
-		: ctx.positionals;
-	await mcpProxy(allPositionals, { profile: ctx.profile });
+		// Block until a shutdown signal is received, then stop the proxy
+		// and resolve so the handler returns. The framework treats this as
+		// `{ kind: "never" }` and the process exits naturally.
+		await new Promise<void>((resolve) => {
+			const shutdown = (signal: string): void => {
+				logger.info(`Received ${signal}, shutting down gracefully...`);
+				const stop = proxy ? proxy.stop().catch(() => {}) : Promise.resolve();
+				void stop.then(() => resolve());
+			};
+			process.once("SIGINT", () => shutdown("SIGINT"));
+			process.once("SIGTERM", () => shutdown("SIGTERM"));
+		});
+	} catch (error) {
+		if (proxy) await proxy.stop().catch(() => {});
+		throw error;
+	}
+
 	return { kind: "never" };
 });

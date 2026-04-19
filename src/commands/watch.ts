@@ -6,37 +6,36 @@ import { existsSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
-import { getLogger } from "../logger.ts";
 import { deploy } from "./deployments.ts";
 
 const WATCHED_EXTENSIONS = [".bpmn", ".dmn", ".form"];
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
+// ─── defineCommand ───────────────────────────────────────────────────────────
+
 /**
- * Watch for file changes and auto-deploy
+ * Watch one or more paths for BPMN/DMN/Form changes and auto-deploy.
+ *
+ * Long-running: stays alive until SIGINT, then resolves so the framework
+ * returns naturally with `{ kind: "never" }`. SIGTERM is handled by Node's
+ * default behaviour (immediate termination).
  */
-export async function watchFiles(
-	paths: string[],
-	options: {
-		profile?: string;
-		force?: boolean;
-	},
-): Promise<void> {
-	const logger = getLogger();
+export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
+	const { logger } = ctx;
 
-	if (!paths || paths.length === 0) {
-		paths = ["."];
-	}
+	// watch treats resource + positionals as path varargs; default to "."
+	const rawPaths = ctx.resource
+		? [ctx.resource, ...ctx.positionals]
+		: ctx.positionals.length > 0
+			? ctx.positionals
+			: ["."];
 
-	// Resolve all paths
-	const resolvedPaths = paths.map((p) => resolve(p));
+	const resolvedPaths = rawPaths.map((p) => resolve(p));
 
-	// Validate paths exist
 	for (const path of resolvedPaths) {
 		if (!existsSync(path)) {
-			logger.error(`Path does not exist: ${path}`);
-			process.exit(1);
+			throw new Error(`Path does not exist: ${path}`);
 		}
 	}
 
@@ -46,7 +45,7 @@ export async function watchFiles(
 
 	logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
 	logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(", ")}`);
-	if (options.force) {
+	if (flags.force) {
 		logger.info(
 			"🔒 Force mode: will continue watching after deployment errors",
 		);
@@ -59,7 +58,7 @@ export async function watchFiles(
 	const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	// Watch each path
-	for (const path of resolvedPaths) {
+	const watchers = resolvedPaths.map((path) => {
 		const stats = statSync(path);
 		const isDirectory = stats.isDirectory();
 
@@ -111,8 +110,8 @@ export async function watchFiles(
 
 						try {
 							await deploy([fullPath], {
-								profile: options.profile,
-								continueOnError: options.force,
+								profile: ctx.profile,
+								continueOnError: flags.force,
 								continueOnUserError: true,
 							});
 						} catch (error) {
@@ -130,27 +129,20 @@ export async function watchFiles(
 		watcher.on("error", (error) => {
 			logger.error("Watcher error", error);
 		});
-	}
 
-	// Keep process alive
-	process.on("SIGINT", () => {
-		logger.info("\n\n🍹 - bottoms up.");
-		process.exit(0);
+		return watcher;
 	});
-}
 
-// ─── defineCommand wrapper ───────────────────────────────────────────────────
-
-export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
-	// watch treats resource + positionals as path varargs
-	const paths = ctx.resource
-		? [ctx.resource, ...ctx.positionals]
-		: ctx.positionals.length > 0
-			? ctx.positionals
-			: ["."];
-	await watchFiles(paths, {
-		profile: ctx.profile,
-		force: flags.force,
+	// Block until SIGINT, then close watchers and resolve so the handler
+	// returns naturally. The framework treats this as `{ kind: "never" }`
+	// and the process exits with code 0.
+	await new Promise<void>((resolveSignal) => {
+		process.once("SIGINT", () => {
+			logger.info("\n\n🍹 - bottoms up.");
+			for (const w of watchers) w.close();
+			resolveSignal();
+		});
 	});
+
 	return { kind: "never" };
 });
