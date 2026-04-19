@@ -155,10 +155,18 @@ describe("handleCommandError", () => {
 				message: "connection refused",
 			};
 
+			// `normalizeToError` (src/errors.ts) wraps non-Error throws in an
+			// Error whose message is built from RFC 9457 problem-detail fields
+			// (`title` / `detail` / `status`) when present, falling back to
+			// the caller's message otherwise. The original is preserved as
+			// `cause`. The previous behaviour (`new Error(String(error))` →
+			// `Error: [object Object]`) lost all actionable information.
 			assert.throws(
 				() => handleCommandError(logger, "Failed to connect", originalError),
 				(thrown) =>
-					thrown instanceof Error && thrown.message === String(originalError),
+					thrown instanceof Error &&
+					thrown.message === "Failed to connect" &&
+					thrown.cause === originalError,
 			);
 		});
 	});

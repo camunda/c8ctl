@@ -12,6 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { createClient } from "../client.ts";
 import { defineCommand } from "../command-framework.ts";
+import { normalizeToError } from "../errors.ts";
 import { isRecord, Logger, type LogWriter } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
 import { getVersion } from "./help.ts";
@@ -392,8 +393,7 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 			process.once("SIGTERM", () => shutdown("SIGTERM"));
 		});
 	} catch (error) {
-		const normalizedError =
-			error instanceof Error ? error : new Error(String(error));
+		const normalizedError = normalizeToError(error, "MCP proxy failed");
 
 		if (proxy) await proxy.stop().catch(() => {});
 

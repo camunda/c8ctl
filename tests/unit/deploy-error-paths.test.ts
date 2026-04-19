@@ -35,7 +35,6 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { buildVerboseErrorMessage } from "../../src/commands/deployments.ts";
 import { c8 } from "../utils/cli.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -72,59 +71,6 @@ describe("deploy: structural guard — no process.exit in deployments.ts", () =>
 			`Expected zero \`process.exit\` calls in deployments.ts, found ${matches.length}. ` +
 				`Every error path must throw so the framework's handleCommandError pipeline owns process termination.`,
 		);
-	});
-});
-
-describe("deploy: buildVerboseErrorMessage — non-Error throws are not collapsed to '[object Object]'", () => {
-	// Class-of-defect guard: any future regression that wraps a non-Error
-	// throw with `new Error(String(error))` (or any equivalent that
-	// stringifies a plain object) loses the actionable information from
-	// RFC 9457 problem-detail responses. These tests pin the contract:
-	// the synthesized verbose Error message must include whichever of
-	// `title` / `detail` / `status` is available, and must never
-	// produce the literal `[object Object]`.
-
-	test("RFC 9457 problem detail with title + detail + status", () => {
-		const message = buildVerboseErrorMessage(
-			{
-				title: "INVALID_ARGUMENT",
-				detail: "Process definition has no executable element",
-				status: 400,
-			},
-			"INVALID_ARGUMENT",
-		);
-		assert.strictEqual(
-			message,
-			"INVALID_ARGUMENT: Process definition has no executable element (status 400)",
-		);
-		assert.ok(!message.includes("[object Object]"));
-	});
-
-	test("title only", () => {
-		const message = buildVerboseErrorMessage(
-			{ title: "NOT_FOUND" },
-			"NOT_FOUND",
-		);
-		assert.strictEqual(message, "NOT_FOUND");
-	});
-
-	test("status only", () => {
-		const message = buildVerboseErrorMessage({ status: 503 }, undefined);
-		assert.strictEqual(message, "Deployment request failed (status 503)");
-	});
-
-	test("empty raw / no problem title — falls back to a generic message, never '[object Object]'", () => {
-		const message = buildVerboseErrorMessage({}, undefined);
-		assert.strictEqual(message, "Deployment request failed");
-		assert.ok(!message.includes("[object Object]"));
-	});
-
-	test("non-string title is ignored (defensive against malformed responses)", () => {
-		const message = buildVerboseErrorMessage(
-			{ title: 42, detail: "boom", status: 500 },
-			undefined,
-		);
-		assert.strictEqual(message, "Deployment request failed: boom (status 500)");
 	});
 });
 
