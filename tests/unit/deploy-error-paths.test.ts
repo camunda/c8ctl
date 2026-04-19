@@ -10,11 +10,15 @@
  *
  * This file pairs a STRUCTURAL guard with BEHAVIOURAL guards:
  *
- *   - Structural: scan `src/commands/deployments.ts` for
- *     `process.exit` substrings. Any future regression that adds a
- *     `process.exit(...)` call into the deploy logic fails here
- *     immediately, without needing to construct a CLI scenario for
- *     the new code path. This is the durable class-of-defect guard.
+ *   - Structural: parse `src/commands/deployments.ts` with the
+ *     TypeScript compiler and walk the AST for any
+ *     `process.exit(...)` CallExpression. Any future regression that
+ *     adds a `process.exit(...)` call into the deploy logic fails
+ *     here immediately, without needing to construct a CLI scenario
+ *     for the new code path. AST-based (not regex) so string
+ *     literals containing `process.exit(` and stripped-comment
+ *     edge cases cannot produce false positives or false negatives.
+ *     This is the durable class-of-defect guard.
  *
  *   - Behavioural: drive the CLI as a subprocess to confirm the
  *     migration actually wires up — when a deploy fails, the
@@ -25,17 +29,12 @@
  */
 
 import assert from "node:assert";
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8 } from "../utils/cli.ts";
+import { findProcessExitCalls } from "../utils/no-process-exit.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const DEPLOYMENTS_TS = join(PROJECT_ROOT, "src", "commands", "deployments.ts");
@@ -57,19 +56,16 @@ const DUP_BPMN_TEMPLATE = (
 const FRAMEWORK_PREFIX = "Failed to deploy";
 
 describe("deploy: structural guard — no process.exit in deployments.ts", () => {
-	test("src/commands/deployments.ts contains no `process.exit` calls", () => {
-		const source = readFileSync(DEPLOYMENTS_TS, "utf8");
-		// Strip line/block comments so a future docstring mentioning
-		// `process.exit` doesn't trip the grep.
-		const stripped = source
-			.replace(/\/\*[\s\S]*?\*\//g, "")
-			.replace(/\/\/[^\n]*/g, "");
-		const matches = stripped.match(/process\s*\.\s*exit\s*\(/g) ?? [];
+	test("src/commands/deployments.ts contains no `process.exit(...)` calls", () => {
+		const calls = findProcessExitCalls(DEPLOYMENTS_TS);
 		assert.strictEqual(
-			matches.length,
+			calls.length,
 			0,
-			`Expected zero \`process.exit\` calls in deployments.ts, found ${matches.length}. ` +
-				`Every error path must throw so the framework's handleCommandError pipeline owns process termination.`,
+			`Expected zero \`process.exit(...)\` calls in deployments.ts, found ${calls.length}:\n` +
+				calls
+					.map((c) => `  - line ${c.line}:${c.column} — ${c.text}`)
+					.join("\n") +
+				`\n\nEvery error path must throw so the framework's handleCommandError pipeline owns process termination.`,
 		);
 	});
 });
