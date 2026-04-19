@@ -260,6 +260,16 @@ export async function deploy(
 		profile?: string;
 		continueOnError?: boolean;
 		continueOnUserError?: boolean;
+		/**
+		 * Optional cancellation signal. When aborted, an in-flight
+		 * `createDeployment` HTTP request is cancelled via the SDK's
+		 * `CancelablePromise.cancel()` and the awaited promise rejects with
+		 * an `AbortError`. Callers that supply a signal are responsible for
+		 * suppressing the resulting rejection (see `watch.ts` for the
+		 * pattern: check `signal.aborted` in the catch and treat it as a
+		 * no-op rather than a deploy failure).
+		 */
+		signal?: AbortSignal;
 	},
 ): Promise<void> {
 	const logger = getLogger();
@@ -388,7 +398,7 @@ export async function deploy(
 		});
 
 		// Create deployment request - convert buffers to File objects with proper MIME types
-		const result = await client.createDeployment({
+		const pendingDeploy = client.createDeployment({
 			tenantId: TenantId.assumeExists(tenantId),
 			resources: resources.map((r) => {
 				// Determine MIME type based on extension
@@ -407,6 +417,29 @@ export async function deploy(
 				});
 			}),
 		});
+
+		// Wire optional cancellation: when the caller's AbortSignal fires,
+		// cancel the underlying CancelablePromise so the in-flight HTTP
+		// request is aborted promptly. Used by `watch` so SIGINT mid-deploy
+		// shuts down within ~one event-loop tick rather than blocking on
+		// the network round-trip.
+		const onAbort = (): void => {
+			pendingDeploy.cancel();
+		};
+		if (options.signal) {
+			if (options.signal.aborted) {
+				onAbort();
+			} else {
+				options.signal.addEventListener("abort", onAbort, { once: true });
+			}
+		}
+
+		let result: Awaited<typeof pendingDeploy>;
+		try {
+			result = await pendingDeploy;
+		} finally {
+			options.signal?.removeEventListener("abort", onAbort);
+		}
 
 		logger.success("Deployment successful", result.deploymentKey.toString());
 
@@ -491,6 +524,14 @@ export async function deploy(
 			logger.table(displayData);
 		}
 	} catch (error) {
+		// Caller-initiated cancellation (e.g. SIGINT in `watch`): the
+		// CancelablePromise rejects with a "Cancelled" error after we
+		// invoked `pendingDeploy.cancel()` from the abort listener. The
+		// caller already knows the request was aborted — do not surface
+		// it as a user-visible deploy failure or exit non-zero.
+		if (options.signal?.aborted) {
+			return;
+		}
 		handleDeploymentError(
 			error,
 			resources,

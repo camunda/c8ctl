@@ -31,6 +31,12 @@ export interface StartWatchOptions {
 	dataDir: string;
 	/** Extra CLI args inserted between `watch` and `<watchDir>`. */
 	extraArgs?: string[];
+	/**
+	 * Extra environment variables to merge into the spawn env (after
+	 * `makeTestEnv`). Used by tests that need to point the SDK at a mock
+	 * server via `CAMUNDA_BASE_URL`.
+	 */
+	env?: Record<string, string>;
 }
 
 export interface WatchProcess {
@@ -61,14 +67,14 @@ export interface WatchProcess {
  * and return handles for output, exit, and guaranteed cleanup.
  */
 export function startWatchProcess(options: StartWatchOptions): WatchProcess {
-	const { watchDir, dataDir, extraArgs = [] } = options;
+	const { watchDir, dataDir, extraArgs = [], env: extraEnv = {} } = options;
 
 	const child = spawn(
 		"node",
 		["--experimental-strip-types", CLI, "watch", ...extraArgs, watchDir],
 		{
 			cwd: PROJECT_ROOT,
-			env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
+			env: { ...makeTestEnv({ C8CTL_DATA_DIR: dataDir }), ...extraEnv },
 			stdio: ["ignore", "pipe", "pipe"],
 		},
 	);
