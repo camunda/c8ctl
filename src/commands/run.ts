@@ -52,8 +52,7 @@ export async function run(
 		const processId = extractProcessId(content);
 
 		if (!processId) {
-			logger.error("Could not extract process ID from BPMN file");
-			process.exit(1);
+			throw new Error("Could not extract process ID from BPMN file");
 		}
 
 		logger.info(`Deploying ${path}...`);
