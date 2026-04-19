@@ -375,8 +375,8 @@ export async function deploy(
 		// framework records the failure without re-rendering a duplicate
 		// summary line.
 		logger.error(duplicateIdsMessage);
-		duplicates.forEach((paths, id) => {
-			logMessage(`  Process/Decision ID "${id}" found in: ${paths.join(", ")}`);
+		duplicates.forEach((dupPaths, id) => {
+			logMessage(`  Process/Decision ID "${id}" found in: ${dupPaths.join(", ")}`);
 		});
 		logMessage(
 			"\nCamunda does not allow deploying multiple resources with the same definition ID in a single deployment.",
