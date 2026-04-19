@@ -232,6 +232,25 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
 - between refactors, always run `npm run typecheck` (`tsc --noEmit -p tsconfig.check.json`, covering `src/` and `tests/`), `npx biome check`, and `npm run test:unit` to verify correctness
 
+#### Coverage analysis before a behaviour-preserving refactor
+
+Before starting any non-trivial refactor, **audit whether the surface you are about to change is sufficiently guarded**. A passing test suite is necessary but not sufficient — it only proves that *what is currently tested* still works. The risk of a refactor is the behaviour that nobody asserts.
+
+Produce a short coverage table in the planning step that maps each behaviour you intend to preserve to the test that locks it in. For each row, ask:
+
+- Does an existing test fail if this behaviour changes? If not, the behaviour is unguarded.
+- Is the test scoped to the defect *class* (e.g. "all long-running handlers exit 0 on SIGINT") or only to one instance? Class-scoped guards are durable; instance-scoped guards rot.
+- For lifecycle / signal / process-exit behaviours, does any test actually exercise the signal? `child.kill('SIGTERM')` does **not** exercise a `SIGINT` handler.
+
+For every gap, **write the missing guard test first, on the pre-refactor branch**, and prove it passes against the current implementation. This is the **green/green discipline**:
+
+1. **Green on the pre-refactor code** — proves the test encodes preserved behaviour, not aspirational behaviour.
+2. **Green on the refactored code** — proves the refactor preserved it.
+
+Land the guard tests in a separate PR off `main`, and merge that PR to `main` before the refactor PR merges. A guard test that lands together with the change it is supposed to guard is weaker — there is no recorded moment at which it passed against the old code, so reviewers cannot tell whether it would have caught a regression.
+
+If you find that the surface is genuinely unguardable without a major investment (for example, full end-to-end tests of `mcp-proxy` against a remote MCP server), record that gap in the PR description and shrink the refactor scope rather than proceeding without a net.
+
 ### Adding a new command
 
 Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
