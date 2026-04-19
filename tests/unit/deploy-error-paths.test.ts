@@ -50,11 +50,10 @@ const DUP_BPMN_TEMPLATE = (
   </bpmn:process>
 </bpmn:definitions>`;
 
-// `Failed to deploy ` — the framework's handleCommandError prefix for
-// the deploy verb. Note the trailing space (resourceless verb wart;
-// pre-existing framework issue, not in this PR's scope). This prefix
-// is added BY the framework, so its presence in stderr proves the
-// error flowed through `handleCommandError` rather than `process.exit(1)`.
+// `Failed to deploy` — the framework's handleCommandError prefix for
+// the deploy verb. This prefix is added BY the framework, so its
+// presence in stderr proves the error flowed through
+// `handleCommandError` rather than `process.exit(1)`.
 const FRAMEWORK_PREFIX = "Failed to deploy";
 
 describe("deploy: structural guard — no process.exit in deployments.ts", () => {

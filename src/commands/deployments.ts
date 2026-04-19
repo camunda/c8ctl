@@ -283,14 +283,15 @@ export async function deploy(
 	// HTTP deploy call (further down) is wrapped in a catch that routes
 	// through `handleDeploymentError` for rich Problem-Detail rendering.
 
-	// Store the base paths for relative path calculation
-	const basePaths = paths.length === 0 ? [process.cwd()] : paths;
-
 	if (paths.length === 0) {
 		throw new Error(
 			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
 		);
 	}
+
+	// Store the base paths for relative path calculation. Safe to assign
+	// directly now: the empty-paths guard above has already thrown.
+	const basePaths = paths;
 
 	// Load .c8ignore rules from the working directory
 	const ignoreBaseDir = resolve(process.cwd());
@@ -364,13 +365,16 @@ export async function deploy(
 	// Validate for duplicate process/decision IDs
 	const duplicates = findDuplicateDefinitionIds(resources);
 	if (duplicates.size > 0) {
+		// Single source of truth for both the user-visible logger.error and
+		// the SilentError message — keeps stderr and `--verbose` rethrow
+		// stack message aligned even if the wording is later edited.
+		const duplicateIdsMessage =
+			"Cannot deploy: Multiple files with the same process/decision ID in one deployment";
 		// Pre-render the rich detail (per-id file list + guidance) so the
 		// user sees actionable context, then throw a SilentError so the
 		// framework records the failure without re-rendering a duplicate
 		// summary line.
-		logger.error(
-			"Cannot deploy: Multiple files with the same process/decision ID in one deployment",
-		);
+		logger.error(duplicateIdsMessage);
 		duplicates.forEach((paths, id) => {
 			logMessage(`  Process/Decision ID "${id}" found in: ${paths.join(", ")}`);
 		});
@@ -380,9 +384,7 @@ export async function deploy(
 		logMessage(
 			"Please deploy these files separately or ensure each process/decision has a unique ID.",
 		);
-		throw new SilentError(
-			"Cannot deploy: Multiple files with the same process/decision ID in one deployment",
-		);
+		throw new SilentError(duplicateIdsMessage);
 	}
 
 	logger.info(`Deploying ${resources.length} resource(s)...`);
