@@ -1,9 +1,14 @@
 /**
  * Centralized error handling for c8ctl command operations.
  *
- * When --verbose is set, errors are re-thrown so the full stack trace is
- * visible. When it is not set, a terse user-friendly message is emitted and
- * the process exits with a non-zero code, with a hint about using --verbose.
+ * When --verbose is set, errors are normalized via `normalizeToError`
+ * (Errors pass through unchanged; non-Error throws like RFC 9457
+ * problem-detail objects are wrapped in an `Error` whose message is
+ * built from `title` / `detail` / `status` and whose `cause` retains
+ * the original value) and then thrown so Node.js prints a meaningful
+ * stack trace. When it is not set, a terse user-friendly message is
+ * emitted and the process exits with a non-zero code, with a hint
+ * about using --verbose.
  */
 
 import type { Logger } from "./logger.ts";
@@ -69,14 +74,25 @@ export function normalizeToError(
 /**
  * Handle a command error in a consistent way across the codebase.
  *
- * - In verbose mode (`--verbose`): the original error is re-thrown so Node.js
- *   prints the full stack trace.
- * - In normal mode: a terse message is printed via the logger, followed by any
- *   optional additional hints, and then a hint to re-run with `--verbose`.
- *   The process exits with code 1.
- * - For `SilentError`: skip the default render entirely (the caller has
- *   already shown a user-facing error), and just exit non-zero (or
- *   rethrow in verbose mode).
+ * - In verbose mode (`--verbose`): the input is run through
+ *   `normalizeToError` and the resulting `Error` is thrown so Node.js
+ *   prints the full stack trace. For inputs that are already an
+ *   `Error` this is a no-op (the same instance is thrown). For non-
+ *   Error throws the thrown value is the synthesized normalized
+ *   `Error`, which preserves the original value as `cause`. (Callers
+ *   that need the exact original reference can read `.cause` from the
+ *   thrown error.)
+ * - In normal mode: a terse message is printed via the logger,
+ *   followed by any optional additional hints, and then a hint to
+ *   re-run with `--verbose`. The process exits with code 1. To avoid
+ *   duplicated output when the normalized error has no actionable
+ *   detail beyond `message` (e.g. for primitive throws), the second
+ *   `error` argument to `logger.error` is omitted in that case so the
+ *   user message appears exactly once.
+ * - For `SilentError`: skip the default render entirely (the caller
+ *   has already shown a user-facing error), and just exit non-zero
+ *   (or rethrow in verbose mode — `SilentError` is an `Error`, so
+ *   normalization is a no-op and the same instance is thrown).
  */
 export function handleCommandError(
 	logger: Logger,
