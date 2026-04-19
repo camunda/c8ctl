@@ -97,7 +97,18 @@ export function handleCommandError(
 		process.exit(1);
 	}
 
-	logger.error(message, normalizedError);
+	// Avoid duplicated output when `normalizeToError` had no actionable
+	// fields to extract and fell back to the caller's `message`. In that
+	// case `Logger.error(message, error)` would print the same string
+	// twice (the prefix line "✗ <message>" followed by the indented
+	// "  <error.message>" line, or both `message` and `error` fields in
+	// JSON mode). Pass only `message` so the second line / `error` field
+	// is omitted.
+	if (normalizedError.message === message) {
+		logger.error(message);
+	} else {
+		logger.error(message, normalizedError);
+	}
 	if (additionalHints) {
 		for (const hint of additionalHints) {
 			logger.info(hint);

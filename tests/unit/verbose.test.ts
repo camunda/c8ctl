@@ -5,7 +5,7 @@
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { handleCommandError } from "../../src/errors.ts";
-import { Logger } from "../../src/logger.ts";
+import { isRecord, Logger } from "../../src/logger.ts";
 import { c8ctl } from "../../src/runtime.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
@@ -114,6 +114,58 @@ describe("handleCommandError", () => {
 						new Error("fetch failed"),
 					),
 				(err: Error) => err.message === "process.exit(1)",
+			);
+		});
+
+		test("does not duplicate the prefix line when normalizeToError fell back to the caller message (text mode)", () => {
+			// Class-of-defect guard: when a non-Error throw lacks RFC 9457
+			// fields, `normalizeToError` synthesizes an Error whose message
+			// is the caller's `message` argument. `Logger.error(message,
+			// error)` would then print the same string twice — once as
+			// the prefix line "✗ <message>" and once as the indented
+			// "  <error.message>" line. `handleCommandError` must elide
+			// the second pass.
+			c8ctl.outputMode = "text";
+			const messageLine = "Failed to do the thing";
+			assert.throws(() => {
+				// Non-Error throw with no actionable fields → normalizeToError
+				// will fall back to `message`.
+				handleCommandError(logger, messageLine, "opaque");
+			});
+			const occurrences = errorSpy.filter((line) =>
+				line.includes(messageLine),
+			).length;
+			assert.strictEqual(
+				occurrences,
+				1,
+				`expected the message to appear exactly once in stderr, got ${occurrences}. ` +
+					`Output:\n${errorSpy.join("\n")}`,
+			);
+		});
+
+		test("does not duplicate the message in JSON mode when normalizeToError fell back to the caller message", () => {
+			// Same defect class as above, but in JSON output mode the
+			// duplication shows up as both `message` and `error` fields
+			// carrying identical strings. The `error` field should be
+			// omitted in that case.
+			c8ctl.outputMode = "json";
+			const messageLine = "Failed to do the thing";
+			assert.throws(() => {
+				handleCommandError(logger, messageLine, "opaque");
+			});
+			const errorLine = errorSpy.find((line) => line.includes(messageLine));
+			assert.ok(
+				errorLine,
+				`no error line emitted. Output:\n${errorSpy.join("\n")}`,
+			);
+			const parsed: unknown = JSON.parse(errorLine);
+			assert.ok(
+				isRecord(parsed) && "message" in parsed,
+				"expected JSON output with a message field",
+			);
+			assert.ok(
+				!("error" in parsed) || parsed.error !== messageLine,
+				`JSON 'error' field must not duplicate 'message' when there is no extra detail. Output: ${errorLine}`,
 			);
 		});
 	});
