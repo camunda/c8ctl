@@ -14,16 +14,13 @@
  */
 
 import assert from "node:assert";
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
+import { startWatchProcess } from "../utils/watch-process.ts";
 
-const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
-const CLI = join(PROJECT_ROOT, "src", "index.ts");
 const POLL_INTERVAL_MS = 100;
 const STARTUP_TIMEOUT_MS = 5_000;
 const EXIT_TIMEOUT_MS = 5_000;
@@ -41,97 +38,50 @@ describe("watch command lifecycle", () => {
 
 	test("exits non-zero with a clear message when the path does not exist", async () => {
 		const missingPath = join(tmpdir(), `c8ctl-watch-missing-${Date.now()}`);
+		const watch = startWatchProcess({ watchDir: missingPath, dataDir });
 
-		const child = spawn(
-			"node",
-			["--experimental-strip-types", CLI, "watch", missingPath],
-			{
-				cwd: PROJECT_ROOT,
-				env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
-				stdio: ["ignore", "pipe", "pipe"],
-			},
-		);
+		try {
+			const exitCode = await watch.waitForExit(EXIT_TIMEOUT_MS);
+			const output = watch.getOutput();
 
-		let output = "";
-		child.stdout.on("data", (chunk: Buffer) => {
-			output += chunk.toString();
-		});
-		child.stderr.on("data", (chunk: Buffer) => {
-			output += chunk.toString();
-		});
-
-		const exitCode = await new Promise<number | null>((resolveExit) => {
-			const timer = setTimeout(() => {
-				child.kill("SIGKILL");
-				resolveExit(null);
-			}, EXIT_TIMEOUT_MS);
-			child.once("exit", (code) => {
-				clearTimeout(timer);
-				resolveExit(code);
-			});
-		});
-
-		assert.notStrictEqual(
-			exitCode,
-			0,
-			`watch with a missing path should exit non-zero. Output:\n${output}`,
-		);
-		assert.notStrictEqual(
-			exitCode,
-			null,
-			`watch should exit promptly on a missing path. Output:\n${output}`,
-		);
-		assert.ok(
-			output.includes("Path does not exist") || output.includes(missingPath),
-			`Expected a clear missing-path error. Output:\n${output}`,
-		);
+			assert.notStrictEqual(
+				exitCode,
+				0,
+				`watch with a missing path should exit non-zero. Output:\n${output}`,
+			);
+			assert.notStrictEqual(
+				exitCode,
+				null,
+				`watch should exit promptly on a missing path. Output:\n${output}`,
+			);
+			assert.ok(
+				output.includes("Path does not exist") || output.includes(missingPath),
+				`Expected a clear missing-path error. Output:\n${output}`,
+			);
+		} finally {
+			await watch.cleanup(EXIT_TIMEOUT_MS);
+		}
 	});
 
 	test("SIGINT shuts down cleanly with exit code 0 and the goodbye message", async () => {
 		const watchDir = mkdtempSync(join(tmpdir(), "c8ctl-watch-sigint-"));
+		const watch = startWatchProcess({ watchDir, dataDir });
 
 		try {
-			const child = spawn(
-				"node",
-				["--experimental-strip-types", CLI, "watch", watchDir],
-				{
-					cwd: PROJECT_ROOT,
-					env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
-					stdio: ["ignore", "pipe", "pipe"],
-				},
-			);
-
-			let output = "";
-			child.stdout.on("data", (chunk: Buffer) => {
-				output += chunk.toString();
-			});
-			child.stderr.on("data", (chunk: Buffer) => {
-				output += chunk.toString();
-			});
-
 			// Wait for the watcher to be ready before sending the signal.
 			const ready = await pollUntil(
-				async () => output.includes("Watching for changes"),
+				async () => watch.getOutput().includes("Watching for changes"),
 				STARTUP_TIMEOUT_MS,
 				POLL_INTERVAL_MS,
 			);
 			assert.ok(
 				ready,
-				`watch did not start within ${STARTUP_TIMEOUT_MS}ms. Output:\n${output}`,
+				`watch did not start within ${STARTUP_TIMEOUT_MS}ms. Output:\n${watch.getOutput()}`,
 			);
 
-			child.kill("SIGINT");
-
-			const exitCode = await new Promise<number | null>((resolveExit) => {
-				const timer = setTimeout(() => {
-					child.kill("SIGKILL");
-					resolveExit(null);
-				}, EXIT_TIMEOUT_MS);
-				child.once("exit", (code) => {
-					clearTimeout(timer);
-					resolveExit(code);
-				});
-			});
+			watch.child.kill("SIGINT");
+			const exitCode = await watch.waitForExit(EXIT_TIMEOUT_MS);
+			const output = watch.getOutput();
 
 			assert.strictEqual(
 				exitCode,
@@ -143,6 +93,7 @@ describe("watch command lifecycle", () => {
 				`Expected the SIGINT goodbye message. Output:\n${output}`,
 			);
 		} finally {
+			await watch.cleanup(EXIT_TIMEOUT_MS);
 			rmSync(watchDir, { recursive: true, force: true });
 		}
 	});
