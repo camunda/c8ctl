@@ -120,6 +120,41 @@ describe("search: framework prefix for migrated handlers", () => {
 			"search process-instances",
 		);
 	});
+
+	test("search user-tasks --between bad shows 'Failed to search user task'", async () => {
+		const result = await c8(
+			"search",
+			"user-tasks",
+			"--between",
+			"not-a-valid-range",
+		);
+		assertFrameworkPrefix(
+			result,
+			"Failed to search user task",
+			"search user-tasks",
+		);
+	});
+
+	test("search incidents --between bad shows 'Failed to search incident'", async () => {
+		const result = await c8(
+			"search",
+			"incidents",
+			"--between",
+			"not-a-valid-range",
+		);
+		assertFrameworkPrefix(
+			result,
+			"Failed to search incident",
+			"search incidents",
+		);
+	});
+
+	// Note: registered resource is `jobs` (plural), so the prefix is
+	// `Failed to search jobs` — not `search job` as Copilot's suggestion had.
+	test("search jobs --between bad shows 'Failed to search jobs'", async () => {
+		const result = await c8("search", "jobs", "--between", "not-a-valid-range");
+		assertFrameworkPrefix(result, "Failed to search jobs", "search jobs");
+	});
 });
 
 describe("session: framework prefix for migrated handlers", () => {
