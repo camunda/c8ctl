@@ -7,13 +7,13 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
 import { asRecord, asRecordArray } from "../utils/guards.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
+import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
 
@@ -21,17 +21,27 @@ const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
  * Spawn the CLI with a custom cwd. The standard `c8()` helper does not
  * support cwd; tests that must exercise the "default to current directory"
  * path or path-relative resolution use this thin wrapper directly.
+ *
+ * Hermeticity: each call gets its own throwaway data dir with a
+ * `session.json` pinning `outputMode: "json"` (mirroring the shared
+ * `c8()` helper), and the env is reduced to `PATH` plus the explicit
+ * test overrides. This isolates the test from any host
+ * `C8CTL_DATA_DIR` and from concurrent `node --test` workers.
  */
-async function c8In(
-	cwd: string,
-	...args: string[]
-): Promise<{ stdout: string; stderr: string; status: number | null }> {
+async function c8In(cwd: string, ...args: string[]): Promise<SpawnResult> {
+	const dataDir = mkdtempSync(join(cwd, ".c8ctl-data-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		cwd,
 		env: {
-			...process.env,
+			PATH: process.env.PATH,
 			CAMUNDA_BASE_URL: "http://test-cluster/v2",
 			HOME: "/tmp/c8ctl-test-nonexistent-home",
+			C8CTL_DATA_DIR: dataDir,
 		},
 	});
 }
@@ -87,7 +97,6 @@ describe("CLI behavioural: deploy", () => {
 		// Create an empty subdirectory
 		const emptyDir = join(tempDir, "empty");
 		rmSync(emptyDir, { recursive: true, force: true });
-		const { mkdirSync } = await import("node:fs");
 		mkdirSync(emptyDir, { recursive: true });
 
 		const result = await c8("deploy", emptyDir, "--dry-run");
@@ -113,7 +122,7 @@ describe("CLI behavioural: deploy", () => {
 		const result = await c8In(tempDir, "deploy", "--dry-run");
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const out = JSON.parse(result.stdout);
+		const out = parseJson(result);
 		const body = asRecord(out.body, "dry-run body");
 		const resources = asRecordArray(body.resources, "body.resources");
 		const names = resources.map((r) => r.name);
@@ -128,7 +137,6 @@ describe("CLI behavioural: deploy", () => {
 		// (regression guard for `[ctx.resource, ...ctx.positionals]` shape).
 		const dirA = join(tempDir, "a");
 		const dirB = join(tempDir, "b");
-		const { mkdirSync } = await import("node:fs");
 		mkdirSync(dirA, { recursive: true });
 		mkdirSync(dirB, { recursive: true });
 		const fileA = join(dirA, "alpha.bpmn");
