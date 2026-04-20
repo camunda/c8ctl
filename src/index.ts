@@ -207,20 +207,6 @@ async function main() {
 		return;
 	}
 
-	// Handle completion command — routed through COMMAND_DISPATCH below.
-	// Unknown-flag detection runs here because `completion` uses
-	// resource-specific flags (see resourceFlags.install) and the general
-	// detectUnknownFlags call later may not cover this verb's resource-scoped
-	// flag shape.
-	if (verb === "completion") {
-		const completionUnknownFlags = detectUnknownFlags(
-			verb,
-			resource ?? "",
-			values,
-		);
-		warnUnknownFlags(logger, completionUnknownFlags, verb, resource ?? "");
-	}
-
 	// Normalize resource
 	const normalizedResource = resource ? resolveAlias(resource) : "";
 

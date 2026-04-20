@@ -21,44 +21,15 @@
  */
 
 import assert from "node:assert";
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, describe, test } from "node:test";
 
-interface SpawnResult {
-	status: number | null;
-	stdout: string;
-	stderr: string;
-}
+import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
-
-function asyncSpawn(
-	cmd: string,
-	args: string[],
-	opts: { env?: NodeJS.ProcessEnv } = {},
-): Promise<SpawnResult> {
-	return new Promise((res) => {
-		const proc = spawn(cmd, args, {
-			env: opts.env ?? process.env,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		let stdout = "";
-		let stderr = "";
-		proc.stdout.on("data", (chunk) => {
-			stdout += chunk.toString();
-		});
-		proc.stderr.on("data", (chunk) => {
-			stderr += chunk.toString();
-		});
-		proc.on("close", (status) => {
-			res({ status, stdout, stderr });
-		});
-	});
-}
 
 const TEST_DATA_DIR = mkdtempSync(join(tmpdir(), "c8ctl-round3-paths-"));
 // Minimal profile so CAMUNDA_BASE_URL is set for tests that go through the
