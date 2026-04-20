@@ -18,7 +18,10 @@ import assert from "node:assert";
 import { describe, test } from "node:test";
 
 import { COMMAND_DISPATCH } from "../../src/command-dispatch.ts";
-import { isDefinedCommand } from "../../src/command-framework.ts";
+import {
+	DEFINE_COMMAND_MARKER,
+	isDefinedCommand,
+} from "../../src/command-framework.ts";
 
 describe("COMMAND_DISPATCH structural invariant (#290)", () => {
 	test("every dispatch entry is produced by defineCommand()", () => {
@@ -69,6 +72,36 @@ describe("COMMAND_DISPATCH structural invariant (#290)", () => {
 		assert.strictEqual(
 			isDefinedCommand(() => {}),
 			false,
+		);
+	});
+
+	test("isDefinedCommand rejects an inherited (prototype) marker", () => {
+		// Forging the brand on a prototype must NOT satisfy the guard — only
+		// own-property markers (which `defineCommand` stamps) should pass. This
+		// closes the prototype-pollution-style false-positive class.
+		const proto: Record<PropertyKey, unknown> = {};
+		proto[DEFINE_COMMAND_MARKER] = true;
+		const inheriting = Object.create(proto);
+		assert.strictEqual(isDefinedCommand(inheriting), false);
+	});
+
+	test("the brand stamped by defineCommand is non-enumerable", () => {
+		// Pick any dispatch entry — the brand should exist as an own property
+		// but be invisible to `Object.keys`, spread, and `JSON.stringify`.
+		const [, sample] = [...COMMAND_DISPATCH][0];
+		assert.ok(Object.hasOwn(sample, DEFINE_COMMAND_MARKER));
+		const descriptor = Object.getOwnPropertyDescriptor(
+			sample,
+			DEFINE_COMMAND_MARKER,
+		);
+		assert.ok(descriptor, "expected an own descriptor for the brand");
+		assert.strictEqual(descriptor.enumerable, false);
+		assert.strictEqual(
+			Object.getOwnPropertySymbols(sample).filter(
+				(s) => Object.getOwnPropertyDescriptor(sample, s)?.enumerable,
+			).length,
+			0,
+			"brand symbol should not appear among enumerable symbol keys",
 		);
 	});
 });

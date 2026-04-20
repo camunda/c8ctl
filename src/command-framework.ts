@@ -275,9 +275,14 @@ export interface CommandHandler<V extends keyof Registry, R extends string> {
 
 /**
  * Test-time guard: returns true iff `value` was produced by `defineCommand`.
+ *
+ * Uses an own-property check so a forged marker on a prototype cannot satisfy
+ * the brand — only objects that explicitly carry the symbol on themselves
+ * (i.e. those produced by `defineCommand`) pass.
  */
 export function isDefinedCommand(value: unknown): value is AnyCommandHandler {
 	if (typeof value !== "object" || value === null) return false;
+	if (!Object.hasOwn(value, DEFINE_COMMAND_MARKER)) return false;
 	return Reflect.get(value, DEFINE_COMMAND_MARKER) === true;
 }
 
@@ -322,40 +327,47 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 	const flagDefs = entry.resourceFlags?.[resource] ?? entry.flags;
 	const positionalDefs = entry.resourcePositionals?.[resource] ?? [];
 
-	const handler_: CommandHandler<V, R> = {
-		verb,
-		resource,
-		// Non-enumerable brand: present at runtime, not visible in JSON or
-		// `Object.keys`, so test-only structural checks can detect it without
-		// polluting normal iteration.
-		[DEFINE_COMMAND_MARKER]: true,
-		execute: async (ctx, rawValues, rawArgs) => {
-			const flags = deserializeFlags(rawValues, flagDefs);
-			const args = deserializePositionals(
-				rawArgs,
-				positionalDefs,
-				verb,
-				resource,
+	// Build the handler and stamp the brand as a non-enumerable own property
+	// so it doesn't appear in `Object.keys`, spreads, or JSON output but is
+	// still detectable by `isDefinedCommand` via `Object.hasOwn`.
+	const execute: CommandHandler<V, R>["execute"] = async (
+		ctx,
+		rawValues,
+		rawArgs,
+	) => {
+		const flags = deserializeFlags(rawValues, flagDefs);
+		const args = deserializePositionals(
+			rawArgs,
+			positionalDefs,
+			verb,
+			resource,
+		);
+		try {
+			const result = await handler(
+				ctx,
+				// biome-ignore lint/plugin: framework-internal assertion — flagDefs resolved from COMMAND_REGISTRY[V][R]
+				flags as InferFlags<ResolvedFlags<V, R>>,
+				// biome-ignore lint/plugin: framework-internal assertion — positionalDefs resolved from COMMAND_REGISTRY[V][R]
+				args as InferPositionals<ResolvedPositionals<V, R>>,
 			);
-			try {
-				const result = await handler(
-					ctx,
-					// biome-ignore lint/plugin: framework-internal assertion — flagDefs resolved from COMMAND_REGISTRY[V][R]
-					flags as InferFlags<ResolvedFlags<V, R>>,
-					// biome-ignore lint/plugin: framework-internal assertion — positionalDefs resolved from COMMAND_REGISTRY[V][R]
-					args as InferPositionals<ResolvedPositionals<V, R>>,
-				);
-				if (result) renderResult(result, ctx);
-			} catch (error) {
-				handleCommandError(
-					ctx.logger,
-					`Failed to ${verb} ${resource.replace(/-/g, " ")}`,
-					error,
-				);
-			}
-		},
+			if (result) renderResult(result, ctx);
+		} catch (error) {
+			handleCommandError(
+				ctx.logger,
+				`Failed to ${verb} ${resource.replace(/-/g, " ")}`,
+				error,
+			);
+		}
 	};
-	return handler_;
+	const handler_ = { verb, resource, execute };
+	Object.defineProperty(handler_, DEFINE_COMMAND_MARKER, {
+		value: true,
+		enumerable: false,
+		writable: false,
+		configurable: false,
+	});
+	// biome-ignore lint/plugin: framework-internal assertion — brand stamped via defineProperty above to satisfy CommandHandler's required marker
+	return handler_ as CommandHandler<V, R>;
 }
 
 // ─── deserializeFlags ────────────────────────────────────────────────────────
