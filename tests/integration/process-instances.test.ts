@@ -18,7 +18,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/client.ts";
-import { deploy } from "../../src/commands/deployments.ts";
+import { deployResources as deploy } from "../../src/commands/deployments.ts";
 import { todayRange } from "../utils/date-helpers.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
