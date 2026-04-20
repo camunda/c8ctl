@@ -140,4 +140,20 @@ describe("CLI behavioural: correlate message", () => {
 			`stderr: ${result.stderr}`,
 		);
 	});
+
+	// Regression guard for #308: `correlationKey` is the motivating defect for
+	// framework-boundary required-flag enforcement. Pre-#308 the handler
+	// duplicated this check; post-#308 the framework rejects it before the
+	// handler runs. This subprocess test proves the index dispatch actually
+	// invokes validateFlags for this verb (the class-scoped guard in
+	// command-validation.test.ts proves validateFlags itself rejects it).
+	test("rejects missing --correlationKey with exit code 1 (#308)", async () => {
+		const result = await c8("correlate", "msg", "--dry-run", "my-message");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--correlationKey is required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
 });
