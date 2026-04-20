@@ -410,6 +410,156 @@ describe("validateFlags behaviour", () => {
 	});
 });
 
+// ─── validateFlags — required-flag enforcement (#308) ────────────────────────
+
+/**
+ * Resolve the effective flag set for a (verb, resource) dispatch, mirroring
+ * the resolution used by the command framework:
+ *   effective = resourceFlags?.[resource] ?? flags
+ */
+function effectiveFlags(
+	def: CommandDef,
+	resource: string | undefined,
+): Record<string, import("../../src/command-registry.ts").FlagDef> {
+	if (def.resourceFlags && resource && def.resourceFlags[resource]) {
+		return def.resourceFlags[resource];
+	}
+	return def.flags;
+}
+
+/**
+ * Class-scoped regression guard (#308): every flag declared `required: true`
+ * in the COMMAND_REGISTRY must be enforced by validateFlags. The framework
+ * boundary — not the handler — is the canonical place to reject missing
+ * required input. Without this guard, a `required: true` in the registry is
+ * pure metadata and handlers have to duplicate the check (or forget to, as
+ * `correlate:message`'s `correlationKey` did pre-#308).
+ */
+describe("validateFlags enforces FlagDef.required (#308)", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	/**
+	 * Enumerate every (verb, resource, requiredFlagName) triple in the
+	 * registry's effective flag sets.
+	 */
+	function collectRequiredFlags(): Array<{
+		verb: string;
+		resource: string;
+		flagName: string;
+	}> {
+		const triples: Array<{
+			verb: string;
+			resource: string;
+			flagName: string;
+		}> = [];
+		for (const [verb, def] of Object.entries(REGISTRY)) {
+			const resources =
+				def.resources && def.resources.length > 0 ? def.resources : [""];
+			for (const resource of resources) {
+				const flags = effectiveFlags(def, resource);
+				for (const [flagName, fd] of Object.entries(flags)) {
+					if (fd.required === true) {
+						triples.push({ verb, resource, flagName });
+					}
+				}
+			}
+		}
+		return triples;
+	}
+
+	test("registry has at least one required flag (sanity — detector is non-vacuous)", () => {
+		assert.ok(
+			collectRequiredFlags().length > 0,
+			"expected at least one required flag in COMMAND_REGISTRY",
+		);
+	});
+
+	test("every required flag is rejected by validateFlags when missing", () => {
+		const failures: string[] = [];
+
+		for (const { verb, resource, flagName } of collectRequiredFlags()) {
+			const def = REGISTRY[verb];
+			if (!def) continue;
+			const flags = effectiveFlags(def, resource);
+
+			// Build values with every OTHER required flag in the effective set
+			// populated with a dummy, so the only missing required flag is `flagName`.
+			const values: Record<string, string> = {};
+			for (const [otherName, otherDef] of Object.entries(flags)) {
+				if (otherName === flagName) continue;
+				if (otherDef.required === true) {
+					values[otherName] = "dummy";
+				}
+			}
+
+			let threw = false;
+			try {
+				validateFlags(values, flags);
+			} catch {
+				threw = true;
+			}
+
+			if (!threw) {
+				failures.push(
+					`${verb}${resource ? ` ${resource}` : ""}: missing --${flagName} was silently accepted`,
+				);
+			}
+		}
+
+		assert.strictEqual(
+			failures.length,
+			0,
+			`required flags not enforced by validateFlags:\n  ${failures.join("\n  ")}`,
+		);
+	});
+
+	test("error message cites the specific missing flag", () => {
+		const triples = collectRequiredFlags();
+		assert.ok(triples.length > 0);
+
+		// Pick a deterministic representative.
+		const sample = triples[0];
+		if (!sample) return;
+		const def = REGISTRY[sample.verb];
+		if (!def) return;
+		const flags = effectiveFlags(def, sample.resource);
+
+		errorSpy = [];
+		try {
+			validateFlags({}, flags);
+		} catch {
+			/* expected process.exit */
+		}
+
+		const combined = errorSpy.join("\n");
+		assert.ok(
+			combined.includes(`--${sample.flagName} is required`),
+			`expected '--${sample.flagName} is required' in stderr; got:\n${combined}`,
+		);
+	});
+
+	test("validateFlags passes when all required flags are present", () => {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
+			const resources =
+				def.resources && def.resources.length > 0 ? def.resources : [""];
+			for (const resource of resources) {
+				const flags = effectiveFlags(def, resource);
+				const values: Record<string, string> = {};
+				for (const [flagName, fd] of Object.entries(flags)) {
+					if (fd.required === true) values[flagName] = "dummy";
+				}
+				// Should not throw — all required present, no validators invoked for "dummy"
+				// values on non-validated flags.
+				assert.doesNotThrow(
+					() => validateFlags(values, flags),
+					`${verb} ${resource}: validateFlags threw with all required flags populated`,
+				);
+			}
+		}
+	});
+});
+
 // ─── detectUnknownFlags ─────────────────────────────────────────────────────
 
 describe("detectUnknownFlags — non-search verbs", () => {
