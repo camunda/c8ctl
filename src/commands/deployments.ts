@@ -253,9 +253,6 @@ function findDuplicateDefinitionIds(
 }
 
 /**
- * Deploy resources
- */
-/**
  * Collect deployable resources from the given paths, applying `.c8ignore`
  * rules. Throws on the two pre-API guard failures so callers (deploy
  * handler, watch, dry-run preview) all surface the same errors with the
@@ -808,29 +805,29 @@ export const deployCommand = defineCommand("deploy", "", async (ctx) => {
 	// Dry-run preview. Collect resources first so the preview body
 	// reflects what would actually be sent — and so the empty-paths /
 	// no-files guards still surface as thrown errors before we emit.
-	// `dryRun()` returns null when `c8ctl.dryRun` is false, so this whole
-	// block is a no-op outside dry-run mode.
-	if (c8ctl.dryRun) {
+	// Uses `ctx.dryRun` and `ctx.tenantId` from the framework rather
+	// than reaching into the global runtime/config layer.
+	if (ctx.dryRun) {
 		const previewResources = collectResourcesForPaths(paths);
-		const tenantId = resolveTenantId(ctx.profile);
 		const dr = dryRun({
 			command: "deploy",
 			method: "POST",
 			endpoint: "/deployments",
 			profile: ctx.profile,
 			body: {
-				tenantId,
+				tenantId: ctx.tenantId,
 				resources: previewResources.map((r) => ({ name: r.name })),
 			},
 		});
 		if (dr) return dr;
 	}
 
-	// Execute path: `deployResources` re-runs `collectResourcesForPaths`
-	// internally and renders the success table. The double-walk in
-	// dry-run mode is intentional: keeping the helper self-contained
-	// avoids threading pre-collected state between the handler and the
-	// shared helper used by `watch`.
+	// Execute path: only reached when not in dry-run mode (the branch
+	// above returns early). `deployResources` runs its own
+	// `collectResourcesForPaths` internally and renders the success
+	// table. Keeping the helper self-contained avoids threading
+	// pre-collected state between the handler and the shared helper
+	// used by `watch`.
 	await deployResources(paths, { profile: ctx.profile });
 	return { kind: "none" };
 });

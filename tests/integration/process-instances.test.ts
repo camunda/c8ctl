@@ -2,7 +2,10 @@
  * Integration tests for process instances
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  *
- * These tests validate end-to-end CLI behaviour, not internal function signatures.
+ * These tests primarily validate end-to-end CLI behaviour. The setup phase
+ * imports the internal `deployResources` helper from `src/commands/deployments.ts`
+ * to seed process definitions before each test, but every assertion exercises
+ * the CLI subprocess.
  */
 
 import assert from "node:assert";
