@@ -81,7 +81,7 @@ import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, test } from "node:test";
+import { after, describe, test } from "node:test";
 import { c8 } from "../utils/cli.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
@@ -99,6 +99,12 @@ writeFileSync(
 	join(TEST_DATA_DIR, "session.json"),
 	JSON.stringify({ outputMode: "json" }),
 );
+
+// Clean up the module-scoped test data dir after the whole suite runs, so
+// repeated local/CI runs don't leak tmp directories.
+after(() => {
+	rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+});
 
 /**
  * Spawn the CLI with the standard deterministic test base env, applying the
@@ -137,6 +143,23 @@ function assertExitOneWithMessage(
 		1,
 		`${context}: expected exit 1, got ${result.status}. stderr:\n${result.stderr}`,
 	);
+	assert.ok(
+		result.stderr.includes(fragment),
+		`${context}: expected stderr to contain '${fragment}'. stderr:\n${result.stderr}`,
+	);
+}
+
+/**
+ * Assert a stderr fragment is present without re-checking the exit code.
+ * Use this for the second and subsequent fragment checks on a single
+ * `SpawnResult` so the exit-code assertion isn't duplicated (and failures
+ * are less noisy).
+ */
+function assertStderrContains(
+	result: SpawnResult,
+	fragment: string,
+	context: string,
+): void {
 	assert.ok(
 		result.stderr.includes(fragment),
 		`${context}: expected stderr to contain '${fragment}'. stderr:\n${result.stderr}`,
@@ -330,7 +353,7 @@ describe("baseline: plugins.ts unload/upgrade/downgrade plugin guards", () => {
 			"nonexistent-pkg-xyz",
 			"upgrade plugin (not registered) — name appears in stderr",
 		);
-		assertExitOneWithMessage(
+		assertStderrContains(
 			result,
 			"is not registered",
 			"upgrade plugin (not registered) — message fragment",
@@ -349,7 +372,7 @@ describe("baseline: plugins.ts unload/upgrade/downgrade plugin guards", () => {
 			"nonexistent-pkg-xyz",
 			"downgrade plugin (not registered) — name appears in stderr",
 		);
-		assertExitOneWithMessage(
+		assertStderrContains(
 			result,
 			"is not registered",
 			"downgrade plugin (not registered) — message fragment",
