@@ -134,8 +134,38 @@ describe("CLI behavioural: set variable", () => {
 
 		assert.strictEqual(result.status, 1);
 		assert.ok(
-			result.stderr.includes("Invalid JSON"),
+			result.stderr.includes("Failed to set variable"),
+			`expected framework prefix; stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("must be a JSON object (not an array)"),
 			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects JSON primitive in --variables with exit code 1", async () => {
+		const result = await c8(
+			"set",
+			"variable",
+			"2251799813685249",
+			"--variables",
+			"42",
+			"--dry-run",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Failed to set variable"),
+			`expected framework prefix; stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("--variables must be a JSON object"),
+			`stderr: ${result.stderr}`,
+		);
+		// Primitive should NOT report as an array.
+		assert.ok(
+			!result.stderr.includes("(not an array)"),
+			`primitive misreported as array; stderr: ${result.stderr}`,
 		);
 	});
 });

@@ -25,17 +25,22 @@ export const setVariableCommand = defineCommand(
 			);
 		}
 
-		let variables: Record<string, unknown>;
+		let parsed: unknown;
 		try {
-			const parsed: unknown = JSON.parse(rawVariables);
-			if (!isRecord(parsed)) {
-				throw new Error("variables must be a JSON object (not an array)");
-			}
-			variables = parsed;
+			parsed = JSON.parse(rawVariables);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			throw new Error(`Invalid JSON for --variables: ${msg}`);
 		}
+
+		if (!isRecord(parsed)) {
+			throw new Error(
+				Array.isArray(parsed)
+					? "--variables must be a JSON object (not an array)"
+					: "--variables must be a JSON object",
+			);
+		}
+		const variables: Record<string, unknown> = parsed;
 
 		const local = flags.local === true;
 
