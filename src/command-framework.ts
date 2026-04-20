@@ -243,6 +243,20 @@ export interface CommandContext {
 // ─── CommandHandler ──────────────────────────────────────────────────────────
 
 /**
+ * Brand symbol stamped on every value returned by `defineCommand`.
+ *
+ * This is the structural seam tested by `command-dispatch-structure.test.ts`
+ * (#290): every value in `COMMAND_DISPATCH` must carry this marker, which
+ * guarantees the entry was produced by the framework factory and therefore
+ * goes through flag deserialization, dry-run handling, result rendering, and
+ * the `handleCommandError` wrapper. A hand-rolled function with the right
+ * signature cannot satisfy this marker.
+ */
+export const DEFINE_COMMAND_MARKER: unique symbol = Symbol(
+	"c8ctl.defineCommand",
+);
+
+/**
  * Return type of `defineCommand`. Stores the verb, resource, and an
  * `execute` method that deserializes raw CLI input and calls the handler
  * with fully typed flags and positionals.
@@ -255,6 +269,16 @@ export interface CommandHandler<V extends keyof Registry, R extends string> {
 		rawValues: Record<string, unknown>,
 		rawArgs: string[],
 	) => Promise<void>;
+	/** Brand attached by `defineCommand`. See `DEFINE_COMMAND_MARKER`. */
+	readonly [DEFINE_COMMAND_MARKER]: true;
+}
+
+/**
+ * Test-time guard: returns true iff `value` was produced by `defineCommand`.
+ */
+export function isDefinedCommand(value: unknown): value is AnyCommandHandler {
+	if (typeof value !== "object" || value === null) return false;
+	return Reflect.get(value, DEFINE_COMMAND_MARKER) === true;
 }
 
 /**
@@ -298,9 +322,13 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 	const flagDefs = entry.resourceFlags?.[resource] ?? entry.flags;
 	const positionalDefs = entry.resourcePositionals?.[resource] ?? [];
 
-	return {
+	const handler_: CommandHandler<V, R> = {
 		verb,
 		resource,
+		// Non-enumerable brand: present at runtime, not visible in JSON or
+		// `Object.keys`, so test-only structural checks can detect it without
+		// polluting normal iteration.
+		[DEFINE_COMMAND_MARKER]: true,
 		execute: async (ctx, rawValues, rawArgs) => {
 			const flags = deserializeFlags(rawValues, flagDefs);
 			const args = deserializePositionals(
@@ -327,6 +355,7 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 			}
 		},
 	};
+	return handler_;
 }
 
 // ─── deserializeFlags ────────────────────────────────────────────────────────
