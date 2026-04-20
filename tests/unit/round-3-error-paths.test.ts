@@ -23,13 +23,13 @@
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { after, describe, test } from "node:test";
 
+import { c8 } from "../utils/cli.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
-const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
-const CLI = join(PROJECT_ROOT, "src", "index.ts");
+const CLI = "src/index.ts";
 
 const TEST_DATA_DIR = mkdtempSync(join(tmpdir(), "c8ctl-round3-paths-"));
 // Minimal profile so CAMUNDA_BASE_URL is set for tests that go through the
@@ -44,10 +44,17 @@ after(() => {
 	rmSync(TEST_DATA_DIR, { recursive: true, force: true });
 });
 
-async function c8(...args: string[]): Promise<SpawnResult> {
-	return c8WithEnv({}, ...args);
-}
-
+/**
+ * Spawn the CLI with a deterministic base env plus caller-supplied overrides.
+ * Mirrors `round-3-baseline.test.ts`: intentionally does NOT spread
+ * `process.env` — only `PATH` is inherited so the child process is isolated
+ * from any host-side CAMUNDA_*, HOME, SHELL, etc.
+ *
+ * The few tests that need this are the ones whose failure trigger depends on
+ * an env var (`SHELL` for `completion install`, `CAMUNDA_BASE_URL` for
+ * `add profile --from-env`). Tests without env sensitivity use the shared
+ * `c8()` helper from `tests/utils/cli.ts`.
+ */
 async function c8WithEnv(
 	overrides: Record<string, string>,
 	...args: string[]
