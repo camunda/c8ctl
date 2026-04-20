@@ -18,18 +18,13 @@ import {
 	resolveAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
-import {
-	installCompletion,
-	refreshCompletionsIfStale,
-	showCompletion,
-} from "./commands/completion.ts";
+import { refreshCompletionsIfStale } from "./commands/completion.ts";
 import {
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
 } from "./commands/help.ts";
-import { handleAssign, handleUnassign } from "./commands/identity.ts";
 import { loadSessionState, resolveTenantId } from "./config.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
 import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
@@ -212,23 +207,18 @@ async function main() {
 		return;
 	}
 
-	// Handle completion command
+	// Handle completion command — routed through COMMAND_DISPATCH below.
+	// Unknown-flag detection runs here because `completion` uses
+	// resource-specific flags (see resourceFlags.install) and the general
+	// detectUnknownFlags call later may not cover this verb's resource-scoped
+	// flag shape.
 	if (verb === "completion") {
-		// Run unknown-flag detection before early return (completion returns
-		// before the general detectUnknownFlags call below).
 		const completionUnknownFlags = detectUnknownFlags(
 			verb,
 			resource ?? "",
 			values,
 		);
 		warnUnknownFlags(logger, completionUnknownFlags, verb, resource ?? "");
-
-		if (resource === "install") {
-			installCompletion(str(values.shell));
-			return;
-		}
-		showCompletion(resource);
-		return;
 	}
 
 	// Normalize resource
@@ -258,33 +248,6 @@ async function main() {
 	// Derived from COMMAND_REGISTRY; resource-scoped for search/list.
 	const unknownFlags = detectUnknownFlags(verb, normalizedResource, values);
 	warnUnknownFlags(logger, unknownFlags, verb, resource);
-
-	// ── Assign / unassign — legacy delegation (not yet migrated to defineCommand) ──
-	if (verb === "assign") {
-		if (!args[0]) {
-			logger.error(
-				`ID required. Usage: c8 assign ${normalizedResource} <id> --to-<target>=<targetId>`,
-			);
-			process.exit(1);
-		}
-		await handleAssign(normalizedResource, args[0], values, {
-			profile: str(values.profile),
-		});
-		return;
-	}
-
-	if (verb === "unassign") {
-		if (!args[0]) {
-			logger.error(
-				`ID required. Usage: c8 unassign ${normalizedResource} <id> --from-<target>=<targetId>`,
-			);
-			process.exit(1);
-		}
-		await handleUnassign(normalizedResource, args[0], values, {
-			profile: str(values.profile),
-		});
-		return;
-	}
 
 	// ── Registry-driven dispatch ───────────────────────────────────────────
 	// For verbs with enumerated resources (e.g. `list process-instance`),

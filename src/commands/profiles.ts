@@ -81,8 +81,7 @@ export function showProfile(name: string): void {
 	const profile = getProfileOrModeler(name);
 
 	if (!profile) {
-		logger.error(`Profile '${name}' not found`);
-		process.exit(1);
+		throw new Error(`Profile '${name}' not found`);
 	}
 
 	const isModeler = profile.name.startsWith(MODELER_PREFIX);
@@ -149,35 +148,33 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 
 	// Prevent adding profiles with "modeler:" prefix
 	if (name.startsWith(MODELER_PREFIX)) {
-		logger.error(
-			`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`,
-		);
 		logger.info(
 			"Please choose a different name or manage this profile in Camunda Modeler",
 		);
-		process.exit(1);
+		throw new Error(
+			`Profile names cannot start with "${MODELER_PREFIX}" - this prefix is reserved for Camunda Modeler connections`,
+		);
 	}
 
 	let profile: Profile;
 
 	if (options.envFile && options.fromEnv) {
-		logger.error("Cannot use --from-file and --from-env together. Choose one.");
-		process.exit(1);
+		throw new Error(
+			"Cannot use --from-file and --from-env together. Choose one.",
+		);
 	}
 
 	if (options.envFile) {
 		// --from-file: read a .env file and map CAMUNDA_* vars to profile fields
 		if (!existsSync(options.envFile)) {
-			logger.error(`File not found: ${options.envFile}`);
-			process.exit(1);
+			throw new Error(`File not found: ${options.envFile}`);
 		}
 		const content = readFileSync(options.envFile, "utf-8");
 		const vars = parseEnvFile(content);
 		profile = envVarsToProfile(name, vars);
 		if (!profile.baseUrl) {
-			logger.error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
 			logger.info("The .env file must contain at least CAMUNDA_BASE_URL.");
-			process.exit(1);
+			throw new Error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from ${options.envFile})`);
@@ -187,9 +184,8 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 		// --from-env: read from current process environment
 		profile = envVarsToProfile(name, process.env);
 		if (!profile.baseUrl) {
-			logger.error("CAMUNDA_BASE_URL not set in environment");
 			logger.info("Set CAMUNDA_BASE_URL before using --from-env.");
-			process.exit(1);
+			throw new Error("CAMUNDA_BASE_URL not set in environment");
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from environment)`);
@@ -221,17 +217,15 @@ export function removeProfile(name: string): void {
 
 	// Prevent removing Modeler profiles
 	if (name.startsWith(MODELER_PREFIX)) {
-		logger.error("Cannot remove Modeler profiles via c8ctl");
 		logger.info("Manage Modeler connections directly in Camunda Modeler");
-		process.exit(1);
+		throw new Error("Cannot remove Modeler profiles via c8ctl");
 	}
 
 	const removed = removeProfileConfig(name);
 	if (removed) {
 		logger.success(`Profile '${name}' removed`);
 	} else {
-		logger.error(`Profile '${name}' not found`);
-		process.exit(1);
+		throw new Error(`Profile '${name}' not found`);
 	}
 }
 

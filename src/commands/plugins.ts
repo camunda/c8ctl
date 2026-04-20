@@ -65,31 +65,27 @@ export const loadPluginCommand = defineCommand(
 
 		// Validate input
 		if (fromUrl && packageName) {
-			logger.error(
+			throw new Error(
 				'Cannot specify both a positional argument and --from flag. Use either "c8 load plugin <name>" or "c8 load plugin --from <url>"',
 			);
-			process.exit(1);
 		}
 
 		if (!packageName && !fromUrl) {
-			logger.error(
+			throw new Error(
 				"Package name or URL required. Usage: c8 load plugin <name> or c8 load plugin --from <url>",
 			);
-			process.exit(1);
 		}
 
 		if (fromUrl && !isAcceptedUrl(fromUrl)) {
-			logger.error(
+			throw new Error(
 				"Invalid URL format. Accepted URL formats include file://, https://, git:// (see help for more)",
 			);
-			process.exit(1);
 		}
 
 		if (packageName && isAcceptedUrl(packageName)) {
-			logger.error(
+			throw new Error(
 				"Package name cannot be a URL. If you want to load from a URL, use the --from flag. Usage: c8 load plugin --from <url>",
 			);
-			process.exit(1);
 		}
 
 		// Get global plugins directory
@@ -119,11 +115,10 @@ export const loadPluginCommand = defineCommand(
 
 				// Validate plugin name
 				if (!pluginName || pluginName.trim() === "") {
-					logger.error("Failed to extract plugin name from URL");
 					logger.info(
 						"Ensure the URL points to a valid npm package with a package.json file",
 					);
-					process.exit(1);
+					throw new Error("Failed to extract plugin name from URL");
 				}
 
 				logger.success("Plugin loaded successfully from URL", fromUrl);
@@ -348,10 +343,9 @@ export const unloadPluginCommand = defineCommand(
 		const force = flags.force;
 
 		if (!packageName) {
-			logger.error(
+			throw new Error(
 				"Package name required. Usage: c8ctl unload plugin <package-name>",
 			);
-			process.exit(1);
 		}
 
 		const pluginsDir = ensurePluginsDir();
@@ -359,22 +353,20 @@ export const unloadPluginCommand = defineCommand(
 		const isPresent = existsSync(join(pluginsDir, "node_modules", packageName));
 
 		if (!isRegistered && !isPresent) {
-			logger.error(
+			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			throw new Error(
 				`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`,
 			);
-			logger.info('Run "c8ctl list plugins" to see installed plugins');
-			process.exit(1);
 		}
 
 		// Limbo state: present in node_modules but not in the registry — requires --force
 		if (!isRegistered && !force) {
-			logger.error(
-				`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`,
-			);
 			logger.info(
 				`Use --force to remove it: c8ctl unload plugin ${packageName} --force`,
 			);
-			process.exit(1);
+			throw new Error(
+				`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`,
+			);
 		}
 
 		const action = isRegistered ? "Unloading" : "Force-removing";
@@ -786,17 +778,15 @@ export const upgradePluginCommand = defineCommand(
 		const version = args.version;
 
 		if (!packageName) {
-			logger.error(
+			throw new Error(
 				"Package name required. Usage: c8ctl upgrade plugin <package-name> [version]",
 			);
-			process.exit(1);
 		}
 
 		// Check if plugin is registered
 		if (!isPluginRegistered(packageName)) {
-			logger.error(`Plugin "${packageName}" is not registered.`);
 			logger.info('Run "c8ctl list plugins" to see installed plugins');
-			process.exit(1);
+			throw new Error(`Plugin "${packageName}" is not registered.`);
 		}
 
 		const pluginEntry = getPluginEntry(packageName);
@@ -807,14 +797,13 @@ export const upgradePluginCommand = defineCommand(
 		// Versioned upgrade needs to respect source type
 		// File-based plugins do not have a version selector in npm install syntax
 		if (version && source.startsWith("file:")) {
-			logger.error(
-				`Cannot upgrade file-based plugin "${packageName}" to a specific version.`,
-			);
 			logger.info(`Plugin source is: ${source}`);
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
 			);
-			process.exit(1);
+			throw new Error(
+				`Cannot upgrade file-based plugin "${packageName}" to a specific version.`,
+			);
 		}
 
 		const installTarget = resolveInstallTarget(source, packageName, version);
@@ -864,17 +853,15 @@ export const downgradePluginCommand = defineCommand(
 		const version = args.version;
 
 		if (!packageName || !version) {
-			logger.error(
+			throw new Error(
 				"Package name and version required. Usage: c8ctl downgrade plugin <package-name> <version>",
 			);
-			process.exit(1);
 		}
 
 		// Check if plugin is registered
 		if (!isPluginRegistered(packageName)) {
-			logger.error(`Plugin "${packageName}" is not registered.`);
 			logger.info('Run "c8ctl list plugins" to see installed plugins');
-			process.exit(1);
+			throw new Error(`Plugin "${packageName}" is not registered.`);
 		}
 
 		const pluginEntry = getPluginEntry(packageName);
@@ -885,14 +872,13 @@ export const downgradePluginCommand = defineCommand(
 		// Downgrade needs to respect the plugin source
 		// File-based plugins do not have a version selector in npm install syntax
 		if (source.startsWith("file:")) {
-			logger.error(
-				`Cannot downgrade file-based plugin "${packageName}" by version.`,
-			);
 			logger.info(`Plugin source is: ${source}`);
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
 			);
-			process.exit(1);
+			throw new Error(
+				`Cannot downgrade file-based plugin "${packageName}" by version.`,
+			);
 		}
 
 		const installTarget = resolveInstallTarget(source, packageName, version);
@@ -946,11 +932,10 @@ export const initPluginCommand = defineCommand(
 			: rawName;
 
 		if (!pluginName) {
-			logger.error(
+			logger.info("Example: c8ctl init plugin myplugin");
+			throw new Error(
 				'Plugin name cannot be empty. Provide a name suffix after "c8ctl-plugin-".',
 			);
-			logger.info("Example: c8ctl init plugin myplugin");
-			process.exit(1);
 		}
 
 		const dirName = `c8ctl-plugin-${pluginName}`;
@@ -958,9 +943,8 @@ export const initPluginCommand = defineCommand(
 
 		// Check if directory already exists
 		if (existsSync(pluginDir)) {
-			logger.error(`Directory "${dirName}" already exists.`);
 			logger.info("Choose a different name or remove the existing directory");
-			process.exit(1);
+			throw new Error(`Directory "${dirName}" already exists.`);
 		}
 
 		try {

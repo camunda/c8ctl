@@ -528,25 +528,16 @@ describe("handleAssign — dry-run and flag validation", () => {
 					{ "to-user": "alice", "to-group": "ops" },
 					{},
 				),
-			/process\.exit\(1\)/,
-		);
-		const allError = errorSpy.join("\n");
-		assert.ok(
-			allError.includes("--to-user"),
-			"error should list the conflicting flags",
-		);
-		assert.ok(
-			allError.includes("--to-group"),
-			"error should list the conflicting flags",
+			(err: Error) =>
+				err.message.includes("--to-user") && err.message.includes("--to-group"),
 		);
 	});
 
 	test("errors when no --to-* flag is provided", async () => {
 		await assert.rejects(
 			() => handleAssign("role", "admin-role", {}, {}),
-			/process\.exit\(1\)/,
+			/Target required/,
 		);
-		assert.ok(errorSpy.some((l) => l.includes("Target required")));
 	});
 
 	test("dry-run with multiple --to-* flags errors before emitting", async () => {
@@ -559,7 +550,7 @@ describe("handleAssign — dry-run and flag validation", () => {
 					{ "to-user": "alice", "to-group": "ops", "to-tenant": "t1" },
 					{},
 				),
-			/process\.exit\(1\)/,
+			/Exactly one target flag/,
 		);
 		// No JSON should have been emitted
 		assert.strictEqual(logSpy.length, 0);
@@ -605,25 +596,17 @@ describe("handleUnassign — dry-run and flag validation", () => {
 					{ "from-group": "ops", "from-tenant": "t1" },
 					{},
 				),
-			/process\.exit\(1\)/,
-		);
-		const allError = errorSpy.join("\n");
-		assert.ok(
-			allError.includes("--from-group"),
-			"error should list the conflicting flags",
-		);
-		assert.ok(
-			allError.includes("--from-tenant"),
-			"error should list the conflicting flags",
+			(err: Error) =>
+				err.message.includes("--from-group") &&
+				err.message.includes("--from-tenant"),
 		);
 	});
 
 	test("errors when no --from-* flag is provided", async () => {
 		await assert.rejects(
 			() => handleUnassign("user", "alice", {}, {}),
-			/process\.exit\(1\)/,
+			/Source required/,
 		);
-		assert.ok(errorSpy.some((l) => l.includes("Source required")));
 	});
 });
 
@@ -820,17 +803,16 @@ describe("handleAssign — every allowed resource/target pair works in dry-run",
 	test("assign rejects unsupported resource", async () => {
 		await assert.rejects(
 			() => handleAssign("bogus", "id", { "to-user": "a" }, {}),
-			/process\.exit\(1\)/,
+			/Cannot assign resource type: bogus/,
 		);
 	});
 
 	test("assign rejects unsupported target flag for resource", async () => {
-		// user does not support --to-user (you can\'t assign a user to another user)
+		// user does not support --to-user (you can't assign a user to another user)
 		await assert.rejects(
 			() => handleAssign("user", "alice", { "to-user": "bob" }, {}),
-			/process\.exit\(1\)/,
+			/Unsupported target flag/,
 		);
-		assert.ok(errorSpy.some((l) => l.includes("Unsupported target flag")));
 	});
 });
 
