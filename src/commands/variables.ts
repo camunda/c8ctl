@@ -17,13 +17,9 @@ export const setVariableCommand = defineCommand(
 		const { client, profile } = ctx;
 		const key = args.key;
 
-		// Parse variables JSON
+		// `--variables` is declared `required: true` in the registry and enforced
+		// by validateFlags (#308), so rawVariables is guaranteed non-empty here.
 		const rawVariables = flags.variables;
-		if (!rawVariables) {
-			throw new Error(
-				"--variables is required. Provide a JSON object, e.g. --variables='{\"myVar\":42}'",
-			);
-		}
 
 		let parsed: unknown;
 		try {

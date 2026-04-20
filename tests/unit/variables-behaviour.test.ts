@@ -90,11 +90,10 @@ describe("CLI behavioural: set variable", () => {
 	test("rejects missing --variables flag with exit code 1", async () => {
 		const result = await c8("set", "variable", "2251799813685249", "--dry-run");
 
+		// Missing required flag is enforced at the framework boundary
+		// (validateFlags in src/index.ts), before the handler runs — so the
+		// `Failed to set variable:` prefix is not attached.
 		assert.strictEqual(result.status, 1);
-		assert.ok(
-			result.stderr.includes("Failed to set variable"),
-			`expected framework prefix; stderr: ${result.stderr}`,
-		);
 		assert.ok(
 			result.stderr.includes("--variables is required"),
 			`stderr: ${result.stderr}`,

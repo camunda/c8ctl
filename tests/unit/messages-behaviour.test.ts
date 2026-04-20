@@ -88,7 +88,14 @@ describe("CLI behavioural: publish message", () => {
 
 describe("CLI behavioural: correlate message", () => {
 	test("--dry-run emits POST to /messages/correlation", async () => {
-		const result = await c8("correlate", "message", "--dry-run", "my-message");
+		const result = await c8(
+			"correlate",
+			"message",
+			"--dry-run",
+			"my-message",
+			"--correlationKey",
+			"order-123",
+		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
@@ -120,7 +127,12 @@ describe("CLI behavioural: correlate message", () => {
 	});
 
 	test("rejects missing message name with exit code 1", async () => {
-		const result = await c8("correlate", "msg");
+		const result = await c8(
+			"correlate",
+			"msg",
+			"--correlationKey",
+			"order-123",
+		);
 
 		assert.strictEqual(result.status, 1);
 		assert.ok(

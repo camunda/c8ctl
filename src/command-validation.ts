@@ -140,14 +140,22 @@ export function requireOneOf<T extends string>(
 }
 
 /**
- * Run all registered validators for provided flag values.
+ * Run all registered validators for provided flag values, and enforce
+ * `required: true` on any declared-required flag.
  *
- * For each flag that has a `validate` function on its FlagDef,
- * calls the validator with the raw string value. On failure,
- * logs the error and exits with code 1.
+ * Enforcement order:
+ *   1. Every flag with a `validate` function has it applied (invalid → exit 1).
+ *   2. Every flag with `required: true` must be present as a non-empty string
+ *      (missing → exit 1 with `--<flag> is required`).
  *
- * Returns a map of flag name → validated value for flags that
- * had validators. Flags without validators are not included.
+ * Returns a map of flag name → validated value for flags that had validators.
+ * Flags without validators are not included.
+ *
+ * Note: `validateFlags` expects the **effective** flag set for the dispatched
+ * (verb, resource), i.e. `commandDef.resourceFlags?.[resource] ?? commandDef.flags`.
+ * Passing the raw top-level `commandDef.flags` for verbs with resource-scoped
+ * flags can over-enforce required flags that are only meaningful for certain
+ * resources.
  */
 export function validateFlags(
 	values: Record<string, string | boolean | (string | boolean)[] | undefined>,
@@ -167,6 +175,18 @@ export function validateFlags(
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			logger.error(`Invalid --${flagName}: ${message}`);
+			process.exit(1);
+		}
+	}
+
+	// Required-flag enforcement (#308). Run after validators so that an
+	// explicitly-invalid value (e.g. bad enum) surfaces its specific error
+	// before the generic "is required" message.
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (def.required !== true) continue;
+		const raw = values[flagName];
+		if (typeof raw !== "string" || raw.length === 0) {
+			logger.error(`--${flagName} is required`);
 			process.exit(1);
 		}
 	}
