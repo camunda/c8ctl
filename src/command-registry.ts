@@ -8,6 +8,7 @@
 
 import {
 	AuthorizationKey,
+	ElementInstanceKey,
 	IncidentKey,
 	JobKey,
 	ProcessDefinitionId,
@@ -126,6 +127,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	msg: "message",
 	vars: "variable",
 	variables: "variable",
+	var: "variable",
 	profile: "profile",
 	profiles: "profile",
 	plugin: "plugin",
@@ -1131,6 +1133,55 @@ export const COMMAND_REGISTRY = {
 		resourcePositionals: {
 			message: [
 				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
+	},
+
+	set: {
+		description: "Set variables on an element instance",
+		helpDescription:
+			"Set variables on an element instance (process instance or flow element scope). Variables are propagated to the outermost scope by default; use --local to restrict to the specified scope.",
+		helpResource: "variable <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show set command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					'c8ctl set variable 2251799813685249 --variables=\'{"status":"approved"}\'',
+				description: "Set variables on a process instance",
+			},
+			{
+				command:
+					"c8ctl set variable 2251799813685249 --variables='{\"x\":1}' --local",
+				description: "Set variables in local scope only",
+			},
+		],
+		resources: ["variable"],
+		flags: {
+			variables: {
+				type: "string",
+				description: "JSON object of variables to set (required)",
+				required: true,
+				showInTopLevelHelp: true,
+				helpHint: "use with 'set variable'",
+			},
+			local: {
+				type: "boolean",
+				description:
+					"Set variables in local scope only (default: propagate to outermost scope)",
+				showInTopLevelHelp: true,
+				helpHint: "use with 'set variable'",
+			},
+		},
+		resourcePositionals: {
+			variable: [
+				{
+					name: "key",
+					required: true,
+					validate: ElementInstanceKey.assumeExists,
+				},
 			] as const satisfies readonly PositionalDef[],
 		},
 	},
