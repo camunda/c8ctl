@@ -78,7 +78,7 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -88,14 +88,40 @@ import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 const CLI = "src/index.ts";
 
 /**
- * Spawn the CLI with a custom environment — used for the few sites whose
- * trigger requires an env var the standard `c8` helper sets unconditionally
- * (SHELL for completion install, CAMUNDA_BASE_URL for `add profile --from-env`).
+ * Deterministic test data dir, mirroring what `tests/utils/cli.ts` does for
+ * the standard `c8()` helper. Used by `c8WithEnv` so the few tests that need
+ * a custom env still get an isolated `C8CTL_DATA_DIR` and a non-existent
+ * `HOME`, preventing them from reading or writing the runner's real user
+ * config (which would make tests flaky depending on host state).
+ */
+const TEST_DATA_DIR = mkdtempSync(join(tmpdir(), "c8ctl-r3-baseline-"));
+writeFileSync(
+	join(TEST_DATA_DIR, "session.json"),
+	JSON.stringify({ outputMode: "json" }),
+);
+
+/**
+ * Spawn the CLI with the standard deterministic test base env, applying the
+ * caller's overrides on top. Used for the few sites whose trigger requires a
+ * specific env var (SHELL for `completion install`, CAMUNDA_BASE_URL for
+ * `add profile --from-env`).
+ *
+ * The base env intentionally does NOT spread `process.env` — only `PATH` is
+ * inherited (so `node` can resolve). This keeps the child process isolated
+ * from any inherited CAMUNDA_*, HOME, SHELL, etc. that would make these
+ * tests host-dependent.
  */
 async function c8WithEnv(
-	env: NodeJS.ProcessEnv,
+	overrides: Record<string, string>,
 	...args: string[]
 ): Promise<SpawnResult> {
+	const env: NodeJS.ProcessEnv = {
+		PATH: process.env.PATH,
+		CAMUNDA_BASE_URL: "http://test-cluster/v2",
+		HOME: "/tmp/c8ctl-test-nonexistent-home",
+		C8CTL_DATA_DIR: TEST_DATA_DIR,
+		...overrides,
+	};
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
 		env,
 	});
@@ -139,8 +165,7 @@ describe("baseline: completion.ts validation guards", () => {
 	});
 
 	test("`SHELL='' c8 completion install` → exit 1 + 'Could not detect shell'", async () => {
-		const env = { ...process.env, SHELL: "" };
-		const result = await c8WithEnv(env, "completion", "install");
+		const result = await c8WithEnv({ SHELL: "" }, "completion", "install");
 		assertExitOneWithMessage(
 			result,
 			"Could not detect shell",
@@ -391,29 +416,32 @@ describe("baseline: profiles.ts validation guards", () => {
 	test("`c8 add profile p --from-file=<.env without CAMUNDA_BASE_URL>` → exit 1 + 'CAMUNDA_BASE_URL not found in'", async () => {
 		// Write an .env file with no CAMUNDA_BASE_URL to trigger L178.
 		const dir = mkdtempSync(join(tmpdir(), "c8ctl-baseline-r3-"));
-		const envFile = join(dir, "missing-base-url.env");
-		writeFileSync(envFile, "OTHER_VAR=value\n");
-		const result = await c8(
-			"add",
-			"profile",
-			"testp",
-			`--from-file=${envFile}`,
-		);
-		assertExitOneWithMessage(
-			result,
-			`CAMUNDA_BASE_URL not found in ${envFile}`,
-			"add profile (env file missing CAMUNDA_BASE_URL)",
-		);
+		try {
+			const envFile = join(dir, "missing-base-url.env");
+			writeFileSync(envFile, "OTHER_VAR=value\n");
+			const result = await c8(
+				"add",
+				"profile",
+				"testp",
+				`--from-file=${envFile}`,
+			);
+			assertExitOneWithMessage(
+				result,
+				`CAMUNDA_BASE_URL not found in ${envFile}`,
+				"add profile (env file missing CAMUNDA_BASE_URL)",
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	test("`CAMUNDA_BASE_URL='' c8 add profile p --from-env` → exit 1 + 'CAMUNDA_BASE_URL not set in environment'", async () => {
-		const env = { ...process.env };
-		// Strip any inherited CAMUNDA_* so envVarsToProfile sees no baseUrl.
-		for (const key of Object.keys(env)) {
-			if (key.startsWith("CAMUNDA_")) delete env[key];
-		}
+		// Override CAMUNDA_BASE_URL to the empty string in the deterministic
+		// test base env. The base env doesn't spread `process.env`, so no other
+		// CAMUNDA_* keys leak in from the host — `envVarsToProfile` sees a
+		// single empty CAMUNDA_BASE_URL and the L190 guard fires.
 		const result = await c8WithEnv(
-			env,
+			{ CAMUNDA_BASE_URL: "" },
 			"add",
 			"profile",
 			"testp",
@@ -422,7 +450,7 @@ describe("baseline: profiles.ts validation guards", () => {
 		assertExitOneWithMessage(
 			result,
 			"CAMUNDA_BASE_URL not set in environment",
-			"add profile --from-env (no env)",
+			"add profile --from-env (CAMUNDA_BASE_URL='')",
 		);
 	});
 
