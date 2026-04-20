@@ -252,7 +252,11 @@ describe("requireOneOf", () => {
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
 import type { CommandDef } from "../../src/command-registry.ts";
-import { COMMAND_REGISTRY, GLOBAL_FLAGS } from "../../src/command-registry.ts";
+import {
+	COMMAND_REGISTRY,
+	GLOBAL_FLAGS,
+	resolveAlias,
+} from "../../src/command-registry.ts";
 import { validateFlags } from "../../src/command-validation.ts";
 
 /** Widened read-only view of COMMAND_REGISTRY for iterating with index signatures. */
@@ -407,6 +411,244 @@ describe("validateFlags behaviour", () => {
 			searchDef.flags,
 		);
 		assert.strictEqual(result.size, 0);
+	});
+});
+
+// ─── validateFlags — required-flag enforcement (#308) ────────────────────────
+
+/**
+ * Resolve the effective flag set for a (verb, resource) dispatch, mirroring
+ * the resolution used by the command framework:
+ *   effective = resourceFlags?.[resource] ?? flags
+ */
+function effectiveFlags(
+	def: CommandDef,
+	resource: string | undefined,
+): Record<string, import("../../src/command-registry.ts").FlagDef> {
+	if (def.resourceFlags && resource && def.resourceFlags[resource]) {
+		return def.resourceFlags[resource];
+	}
+	return def.flags;
+}
+
+/**
+ * Enumerate every resource bucket we need to test for a verb. The framework's
+ * effective-flag lookup keys on the *canonical* resource name (after
+ * `resolveAlias`), but `def.resources` may list aliases (e.g. `auth` →
+ * `authorization`). To avoid silently skipping `resourceFlags`-only buckets
+ * (which is exactly how the post-#308 move of `create authorization` flags
+ * went uncovered initially), we union:
+ *
+ *   - canonical forms of each entry in `def.resources`
+ *   - explicit `Object.keys(def.resourceFlags ?? {})`
+ *
+ * For resourceless verbs we yield a single empty-string bucket.
+ */
+function effectiveResourceBuckets(def: CommandDef): string[] {
+	const set = new Set<string>();
+	for (const r of def.resources ?? []) set.add(resolveAlias(r));
+	for (const r of Object.keys(def.resourceFlags ?? {})) set.add(r);
+	if (set.size === 0) set.add("");
+	return [...set];
+}
+
+/**
+ * Class-scoped regression guard (#308): every flag declared `required: true`
+ * in the COMMAND_REGISTRY must be enforced by validateFlags. The framework
+ * boundary — not the handler — is the canonical place to reject missing
+ * required input. Without this guard, a `required: true` in the registry is
+ * pure metadata and handlers have to duplicate the check (or forget to, as
+ * `correlate:message`'s `correlationKey` did pre-#308).
+ */
+describe("validateFlags enforces FlagDef.required (#308)", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	/**
+	 * Enumerate every (verb, resource, requiredFlagName) triple in the
+	 * registry's effective flag sets.
+	 */
+	function collectRequiredFlags(): Array<{
+		verb: string;
+		resource: string;
+		flagName: string;
+	}> {
+		const triples: Array<{
+			verb: string;
+			resource: string;
+			flagName: string;
+		}> = [];
+		for (const [verb, def] of Object.entries(REGISTRY)) {
+			for (const resource of effectiveResourceBuckets(def)) {
+				const flags = effectiveFlags(def, resource);
+				for (const [flagName, fd] of Object.entries(flags)) {
+					if (fd.required === true) {
+						triples.push({ verb, resource, flagName });
+					}
+				}
+			}
+		}
+		return triples;
+	}
+
+	test("registry has at least one required flag (sanity — detector is non-vacuous)", () => {
+		assert.ok(
+			collectRequiredFlags().length > 0,
+			"expected at least one required flag in COMMAND_REGISTRY",
+		);
+	});
+
+	test("every required flag is rejected by validateFlags when missing", () => {
+		const failures: string[] = [];
+
+		for (const { verb, resource, flagName } of collectRequiredFlags()) {
+			const def = REGISTRY[verb];
+			if (!def) continue;
+			const flags = effectiveFlags(def, resource);
+
+			// Build values with every OTHER required flag in the effective set
+			// populated with a dummy, so the only missing required flag is `flagName`.
+			const values: Record<string, string> = {};
+			for (const [otherName, otherDef] of Object.entries(flags)) {
+				if (otherName === flagName) continue;
+				if (otherDef.required === true) {
+					values[otherName] = "dummy";
+				}
+			}
+
+			let threw = false;
+			try {
+				validateFlags(values, flags);
+			} catch {
+				threw = true;
+			}
+
+			if (!threw) {
+				failures.push(
+					`${verb}${resource ? ` ${resource}` : ""}: missing --${flagName} was silently accepted`,
+				);
+			}
+		}
+
+		assert.strictEqual(
+			failures.length,
+			0,
+			`required flags not enforced by validateFlags:\n  ${failures.join("\n  ")}`,
+		);
+	});
+
+	test("error message cites the specific missing flag", () => {
+		const triples = collectRequiredFlags();
+		assert.ok(triples.length > 0);
+
+		// Pick a deterministic representative.
+		const sample = triples[0];
+		if (!sample) return;
+		const def = REGISTRY[sample.verb];
+		if (!def) return;
+		const flags = effectiveFlags(def, sample.resource);
+
+		errorSpy = [];
+		try {
+			validateFlags({}, flags);
+		} catch {
+			/* expected process.exit */
+		}
+
+		const combined = errorSpy.join("\n");
+		assert.ok(
+			combined.includes(`--${sample.flagName} is required`),
+			`expected '--${sample.flagName} is required' in stderr; got:\n${combined}`,
+		);
+	});
+
+	test("validateFlags passes when all required flags are present", () => {
+		for (const [verb, def] of Object.entries(REGISTRY)) {
+			for (const resource of effectiveResourceBuckets(def)) {
+				const flags = effectiveFlags(def, resource);
+				const values: Record<string, string> = {};
+				for (const [flagName, fd] of Object.entries(flags)) {
+					if (fd.required === true) values[flagName] = "dummy";
+				}
+				// Should not throw — all required present, no validators invoked for "dummy"
+				// values on non-validated flags.
+				assert.doesNotThrow(
+					() => validateFlags(values, flags),
+					`${verb} ${resource}: validateFlags threw with all required flags populated`,
+				);
+			}
+		}
+	});
+});
+
+// ─── validateFlags — repeated flag (array) handling ──────────────────────────
+
+/**
+ * Regression guard for the array-value defect class. node:util `parseArgs`
+ * with `strict: false` returns `string[]` (or `(string|boolean)[]`) when the
+ * same flag is supplied more than once on the command line, e.g.
+ *
+ *   c8ctl create authorization --ownerId a --ownerId b
+ *
+ * Pre-fix, validateFlags treated any non-string value as "missing" for the
+ * required-flag check and silently skipped it for the validator pass. That
+ * meant a supplied flag could be:
+ *   1. incorrectly reported as missing, or
+ *   2. silently bypass its validator (an invalid second occurrence would
+ *      not be rejected).
+ *
+ * Both branches now use last-write-wins semantics on the array.
+ */
+describe("validateFlags handles repeated-flag arrays", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const requiredFlag: Record<
+		string,
+		import("../../src/command-registry.ts").FlagDef
+	> = {
+		owner: { type: "string", description: "Owner", required: true },
+	};
+
+	test("required flag supplied as a non-empty string array is accepted", () => {
+		assert.doesNotThrow(() =>
+			validateFlags({ owner: ["alice", "bob"] }, requiredFlag),
+		);
+	});
+
+	test("required flag supplied as an empty array is rejected", () => {
+		assert.throws(() => validateFlags({ owner: [] }, requiredFlag));
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("--owner is required"), combined);
+	});
+
+	const validatedFlag: Record<
+		string,
+		import("../../src/command-registry.ts").FlagDef
+	> = {
+		num: {
+			type: "string",
+			description: "Number",
+			validate: (v: string) => {
+				if (!/^[0-9]+$/.test(v)) throw new Error("must be numeric");
+				return v;
+			},
+		},
+	};
+
+	test("validator is applied to the last string in a repeated-flag array", () => {
+		// Last value is invalid — must be rejected, not silently skipped.
+		assert.throws(() => validateFlags({ num: ["123", "abc"] }, validatedFlag));
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("Invalid --num"), combined);
+	});
+
+	test("validator accepts the last string in a repeated-flag array when valid", () => {
+		const result = validateFlags({ num: ["abc", "456"] }, validatedFlag);
+		// Wait — first value would throw before second is reached if we ran
+		// the validator on every element. Last-write-wins means we only run
+		// on "456" which is valid.
+		assert.strictEqual(result.get("num"), "456");
 	});
 });
 

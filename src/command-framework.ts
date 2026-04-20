@@ -79,11 +79,14 @@ export type ResolvedPositionals<
 /**
  * Map a flag schema to typed handler parameters.
  *
- * - Flags with `validate` → the validator's return type (branded) | undefined
- * - Boolean flags → boolean | undefined
- * - Everything else → string | undefined
+ * - Flags with `validate` → the validator's return type
+ * - Boolean flags → boolean
+ * - Everything else → string
  *
- * All flags are optional because CLI users may omit any flag.
+ * A flag is non-optional in the handler's view iff it is declared
+ * `required: true` in the FlagDef. `required: true` is enforced at the
+ * framework boundary by validateFlags (#308), so the handler is guaranteed
+ * to see a value.
  *
  * The type parameter is unconstrained so conditional types like
  * `ResolvedFlags<V, R>` can be passed through without constraint errors.
@@ -91,10 +94,16 @@ export type ResolvedPositionals<
 // biome-ignore lint/suspicious/noExplicitAny: unconstrained to accept conditional types
 export type InferFlags<F extends Record<string, any>> = {
 	[K in keyof F]: F[K] extends { validate: (v: string) => infer R }
-		? R | undefined
+		? F[K] extends { required: true }
+			? R
+			: R | undefined
 		: F[K] extends { type: "boolean" }
-			? boolean | undefined
-			: string | undefined;
+			? F[K] extends { required: true }
+				? boolean
+				: boolean | undefined
+			: F[K] extends { required: true }
+				? string
+				: string | undefined;
 };
 
 // ─── InferPositionals ────────────────────────────────────────────────────────

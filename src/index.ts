@@ -225,9 +225,12 @@ async function main() {
 
 	// Flag validation — run all registered validators before dispatch.
 	// Validators throw on invalid input; validateFlags catches and exits.
+	// Also enforces `required: true` on the effective flag set (#308).
 	const commandDef = getCommandDef(verb);
 	if (commandDef) {
-		validateFlags(values, commandDef.flags);
+		const effectiveFlags =
+			commandDef.resourceFlags?.[normalizedResource] ?? commandDef.flags;
+		validateFlags(values, effectiveFlags);
 	}
 
 	// Unknown flag detection — warn about flags not recognised for this verb × resource.

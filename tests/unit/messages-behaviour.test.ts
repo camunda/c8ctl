@@ -88,7 +88,14 @@ describe("CLI behavioural: publish message", () => {
 
 describe("CLI behavioural: correlate message", () => {
 	test("--dry-run emits POST to /messages/correlation", async () => {
-		const result = await c8("correlate", "message", "--dry-run", "my-message");
+		const result = await c8(
+			"correlate",
+			"message",
+			"--dry-run",
+			"my-message",
+			"--correlationKey",
+			"order-123",
+		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
@@ -120,11 +127,32 @@ describe("CLI behavioural: correlate message", () => {
 	});
 
 	test("rejects missing message name with exit code 1", async () => {
-		const result = await c8("correlate", "msg");
+		const result = await c8(
+			"correlate",
+			"msg",
+			"--correlationKey",
+			"order-123",
+		);
 
 		assert.strictEqual(result.status, 1);
 		assert.ok(
 			result.stderr.includes("Message name required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	// Regression guard for #308: `correlationKey` is the motivating defect for
+	// framework-boundary required-flag enforcement. Pre-#308 the handler
+	// duplicated this check; post-#308 the framework rejects it before the
+	// handler runs. This subprocess test proves the index dispatch actually
+	// invokes validateFlags for this verb (the class-scoped guard in
+	// command-validation.test.ts proves validateFlags itself rejects it).
+	test("rejects missing --correlationKey with exit code 1 (#308)", async () => {
+		const result = await c8("correlate", "msg", "--dry-run", "my-message");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--correlationKey is required"),
 			`stderr: ${result.stderr}`,
 		);
 	});

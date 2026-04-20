@@ -865,33 +865,6 @@ export const COMMAND_REGISTRY = {
 				description: "Tenant ID",
 				validate: TenantId.assumeExists,
 			},
-			// Identity authorization
-			ownerId: {
-				type: "string",
-				description: "Authorization owner ID",
-				required: true,
-			},
-			ownerType: {
-				type: "string",
-				description: "Authorization owner type",
-				required: true,
-			},
-			resourceType: {
-				type: "string",
-				description: "Authorization resource type",
-				required: true,
-			},
-			resourceId: {
-				type: "string",
-				description: "Authorization resource ID",
-				required: true,
-			},
-			permissions: {
-				type: "string",
-				description: "Comma-separated permissions",
-				required: true,
-				csv: true,
-			},
 			// Identity mapping rule
 			mappingRuleId: {
 				type: "string",
@@ -899,6 +872,40 @@ export const COMMAND_REGISTRY = {
 			},
 			claimName: { type: "string", description: "Claim name" },
 			claimValue: { type: "string", description: "Claim value" },
+		},
+		// Resource-scoped flags: the authorization-specific flags below are
+		// only required when creating an authorization. Declaring them at the
+		// verb level would force every `create <resource>` invocation to
+		// supply them (see #308 — required-flag enforcement).
+		resourceFlags: {
+			authorization: {
+				ownerId: {
+					type: "string",
+					description: "Authorization owner ID",
+					required: true,
+				},
+				ownerType: {
+					type: "string",
+					description: "Authorization owner type",
+					required: true,
+				},
+				resourceType: {
+					type: "string",
+					description: "Authorization resource type",
+					required: true,
+				},
+				resourceId: {
+					type: "string",
+					description: "Authorization resource ID",
+					required: true,
+				},
+				permissions: {
+					type: "string",
+					description: "Comma-separated permissions",
+					required: true,
+					csv: true,
+				},
+			},
 		},
 	},
 
@@ -1671,14 +1678,21 @@ export function getCommandDef(verb: string): CommandDef | undefined {
 }
 
 /**
- * Get all flags accepted for a given verb, including global flags.
+ * Get all flags accepted for a given verb, including global flags and any
+ * resource-scoped flags declared under `resourceFlags`.
  */
 export function getAcceptedFlags(
 	verb: string,
 ): Record<string, FlagDef> | undefined {
 	const def = getCommandDef(verb);
 	if (!def) return undefined;
-	return { ...GLOBAL_FLAGS, ...def.flags };
+	const merged: Record<string, FlagDef> = { ...GLOBAL_FLAGS, ...def.flags };
+	if (def.resourceFlags) {
+		for (const rFlags of Object.values(def.resourceFlags)) {
+			Object.assign(merged, rFlags);
+		}
+	}
+	return merged;
 }
 
 /**

@@ -137,6 +137,8 @@ describe("messages: behavioural — invalid --timeToLive flows through the frame
 			"correlate",
 			"message",
 			"some-name",
+			"--correlationKey",
+			"order-123",
 			"--timeToLive=-5",
 		);
 
