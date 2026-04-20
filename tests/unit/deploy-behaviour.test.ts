@@ -7,12 +7,44 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
 import { asRecord, asRecordArray } from "../utils/guards.ts";
+import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
+
+const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
+
+/**
+ * Spawn the CLI with a custom cwd. The standard `c8()` helper does not
+ * support cwd; tests that must exercise the "default to current directory"
+ * path or path-relative resolution use this thin wrapper directly.
+ *
+ * Hermeticity: each call gets its own throwaway data dir with a
+ * `session.json` pinning `outputMode: "json"` (mirroring the shared
+ * `c8()` helper), and the env is reduced to `PATH` plus the explicit
+ * test overrides. This isolates the test from any host
+ * `C8CTL_DATA_DIR` and from concurrent `node --test` workers.
+ */
+async function c8In(cwd: string, ...args: string[]): Promise<SpawnResult> {
+	const dataDir = mkdtempSync(join(cwd, ".c8ctl-data-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+		cwd,
+		env: {
+			PATH: process.env.PATH,
+			CAMUNDA_BASE_URL: "http://test-cluster/v2",
+			HOME: "/tmp/c8ctl-test-nonexistent-home",
+			C8CTL_DATA_DIR: dataDir,
+		},
+	});
+}
 
 const MINIMAL_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
@@ -65,7 +97,6 @@ describe("CLI behavioural: deploy", () => {
 		// Create an empty subdirectory
 		const emptyDir = join(tempDir, "empty");
 		rmSync(emptyDir, { recursive: true, force: true });
-		const { mkdirSync } = await import("node:fs");
 		mkdirSync(emptyDir, { recursive: true });
 
 		const result = await c8("deploy", emptyDir, "--dry-run");
@@ -75,6 +106,58 @@ describe("CLI behavioural: deploy", () => {
 			result.stderr.includes("No BPMN/DMN/Form files found") ||
 				result.stderr.includes("No deployable"),
 			`stderr: ${result.stderr}`,
+		);
+	});
+
+	// ── Pre-#288 coverage guards ────────────────────────────────────────────
+	// These pin the public observable behaviour of the dispatch wrapper so
+	// the planned move of the deploy body into the defineCommand handler
+	// (issue #288) cannot silently regress argument forwarding.
+
+	test("no positional args defaults to current working directory", async () => {
+		// Write a BPMN file at the root of a temp dir, invoke `c8 deploy --dry-run`
+		// from that dir with no path argument, and assert the file is picked up.
+		writeFileSync(join(tempDir, "root.bpmn"), MINIMAL_BPMN);
+
+		const result = await c8In(tempDir, "deploy", "--dry-run");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
+		assert.ok(
+			names.includes("root.bpmn"),
+			`expected root.bpmn in resources, got: ${JSON.stringify(names)}`,
+		);
+	});
+
+	test("multiple positional path args are all collected", async () => {
+		// Two BPMN files in separate dirs to prove both positionals are forwarded
+		// (regression guard for `[ctx.resource, ...ctx.positionals]` shape).
+		const dirA = join(tempDir, "a");
+		const dirB = join(tempDir, "b");
+		mkdirSync(dirA, { recursive: true });
+		mkdirSync(dirB, { recursive: true });
+		const fileA = join(dirA, "alpha.bpmn");
+		const fileB = join(dirB, "beta.bpmn");
+		writeFileSync(fileA, MINIMAL_BPMN.replace("test-process", "alpha-process"));
+		writeFileSync(fileB, MINIMAL_BPMN.replace("test-process", "beta-process"));
+
+		const result = await c8("deploy", fileA, fileB, "--dry-run");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
+		assert.ok(
+			names.includes("alpha.bpmn"),
+			`expected alpha.bpmn in resources, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			names.includes("beta.bpmn"),
+			`expected beta.bpmn in resources, got: ${JSON.stringify(names)}`,
 		);
 	});
 });
