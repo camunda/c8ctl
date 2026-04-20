@@ -167,11 +167,21 @@ export function validateFlags(
 	for (const [flagName, def] of Object.entries(flagDefs)) {
 		if (!def.validate) continue;
 
+		// Pick the value to validate. As with required-flag enforcement
+		// below, accept the last string from a repeated-flag array so that
+		// `--foo a --foo b` (which `parseArgs({ strict: false })` returns as
+		// `["a","b"]`) is validated rather than silently skipped.
 		const raw = values[flagName];
-		if (raw === undefined || typeof raw !== "string") continue;
+		const value =
+			typeof raw === "string"
+				? raw
+				: Array.isArray(raw)
+					? lastString(raw)
+					: undefined;
+		if (value === undefined) continue;
 
 		try {
-			validated.set(flagName, def.validate(raw));
+			validated.set(flagName, def.validate(value));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			logger.error(`Invalid --${flagName}: ${message}`);
@@ -182,16 +192,50 @@ export function validateFlags(
 	// Required-flag enforcement (#308). Run after validators so that an
 	// explicitly-invalid value (e.g. bad enum) surfaces its specific error
 	// before the generic "is required" message.
+	//
+	// "Present" means: a non-empty string, OR a non-empty array whose last
+	// element is a non-empty string. node:util `parseArgs({ strict: false })`
+	// returns an array when the same flag is supplied more than once
+	// (`--foo a --foo b` → `["a","b"]`), so a strict `typeof === "string"`
+	// check would incorrectly report a supplied flag as missing.
 	for (const [flagName, def] of Object.entries(flagDefs)) {
 		if (def.required !== true) continue;
 		const raw = values[flagName];
-		if (typeof raw !== "string" || raw.length === 0) {
+		if (!isPresentString(raw)) {
 			logger.error(`--${flagName} is required`);
 			process.exit(1);
 		}
 	}
 
 	return validated;
+}
+
+/**
+ * True iff `raw` is a non-empty string, or an array whose last entry is a
+ * non-empty string. Mirrors the semantics of `--foo` being supplied at least
+ * once with a value (single or repeated).
+ */
+function isPresentString(
+	raw: string | boolean | (string | boolean)[] | undefined,
+): boolean {
+	if (typeof raw === "string") return raw.length > 0;
+	if (Array.isArray(raw)) {
+		const last = lastString(raw);
+		return last !== undefined && last.length > 0;
+	}
+	return false;
+}
+
+/**
+ * Return the last string element of an array (typical "last write wins"
+ * semantics for repeated CLI flags), or undefined if there is none.
+ */
+function lastString(arr: (string | boolean)[]): string | undefined {
+	for (let i = arr.length - 1; i >= 0; i--) {
+		const v = arr[i];
+		if (typeof v === "string") return v;
+	}
+	return undefined;
 }
 
 /** Flag names that are always valid regardless of verb or resource. */
