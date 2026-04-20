@@ -9,9 +9,15 @@
  */
 
 import type { AnyCommandHandler } from "./command-framework.ts";
+import { completionCommand } from "./commands/completion.ts";
 import { deployCommand } from "./commands/deployments.ts";
 import { getFormCommand } from "./commands/forms.ts";
 import {
+	assignFallbackCommand,
+	assignGroupCommand,
+	assignMappingRuleCommand,
+	assignRoleCommand,
+	assignUserCommand,
 	createIdentityAuthorizationCommand,
 	createIdentityGroupCommand,
 	createIdentityMappingRuleCommand,
@@ -42,6 +48,11 @@ import {
 	searchIdentityRolesCommand,
 	searchIdentityTenantsCommand,
 	searchIdentityUsersCommand,
+	unassignFallbackCommand,
+	unassignGroupCommand,
+	unassignMappingRuleCommand,
+	unassignRoleCommand,
+	unassignUserCommand,
 } from "./commands/identity.ts";
 import {
 	getIncidentCommand,
@@ -212,6 +223,25 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["delete:tenant", deleteIdentityTenantCommand],
 	["delete:authorization", deleteIdentityAuthorizationCommand],
 	["delete:mapping-rule", deleteIdentityMappingRuleCommand],
+
+	// ── Identity: assign / unassign ────────────────────────────────────
+	["assign:role", assignRoleCommand],
+	["assign:user", assignUserCommand],
+	["assign:group", assignGroupCommand],
+	["assign:mapping-rule", assignMappingRuleCommand],
+	["unassign:role", unassignRoleCommand],
+	["unassign:user", unassignUserCommand],
+	["unassign:group", unassignGroupCommand],
+	["unassign:mapping-rule", unassignMappingRuleCommand],
+	// Fallbacks for unknown resource names — preserve the canonical
+	// "Cannot (un)assign resource type: <name>" error from handleAssign.
+	["assign:", assignFallbackCommand],
+	["unassign:", unassignFallbackCommand],
+
+	// ── Completion ─────────────────────────────────────────────────────
+	// `completion` is resourceless in the registry; the handler branches
+	// on ctx.resource (bash / zsh / fish / install).
+	["completion:", completionCommand],
 
 	// ── Resourceless verbs ─────────────────────────────────────────────
 	["deploy:", deployCommand],

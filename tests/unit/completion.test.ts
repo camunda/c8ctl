@@ -13,14 +13,12 @@ describe("Completion Module", () => {
 	let originalLog: typeof console.log;
 	let originalError: typeof console.error;
 	let restoreExit: (() => void) | undefined;
-	let exitCode: number | undefined;
 
 	beforeEach(() => {
 		consoleLogSpy = [];
 		consoleErrorSpy = [];
 		originalLog = console.log;
 		originalError = console.error;
-		exitCode = undefined;
 
 		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(args.join(" "));
@@ -30,9 +28,9 @@ describe("Completion Module", () => {
 			consoleErrorSpy.push(args.join(" "));
 		};
 
-		// Stub process.exit to capture exit codes
+		// Stub process.exit so any stray call throws (kept as a safety net
+		// even though migrated handlers now throw instead of calling exit).
 		restoreExit = mockProcessExit((code) => {
-			exitCode = typeof code === "number" ? code : undefined;
 			throw new Error(`process.exit(${code})`);
 		});
 	});
@@ -173,14 +171,13 @@ describe("Completion Module", () => {
 			assert.fail("Should have thrown an error");
 		} catch (error) {
 			assert.ok(
-				error instanceof Error && error.message.includes("process.exit(1)"),
+				error instanceof Error && error.message.includes("Shell type required"),
 			);
-			assert.strictEqual(exitCode, 1);
+			assert.ok(
+				error instanceof Error &&
+					error.message.includes("c8 completion <bash|zsh|fish>"),
+			);
 		}
-
-		const errorOutput = consoleErrorSpy.join("\n");
-		assert.ok(errorOutput.includes("Shell type required"));
-		assert.ok(errorOutput.includes("c8 completion <bash|zsh|fish>"));
 	});
 
 	test("handles unknown shell", () => {
@@ -189,18 +186,14 @@ describe("Completion Module", () => {
 			assert.fail("Should have thrown an error");
 		} catch (error) {
 			assert.ok(
-				error instanceof Error && error.message.includes("process.exit(1)"),
+				error instanceof Error &&
+					error.message.includes("Unknown shell: powershell"),
 			);
-			assert.strictEqual(exitCode, 1);
+			assert.ok(
+				error instanceof Error &&
+					error.message.includes("Supported shells: bash, zsh, fish"),
+			);
 		}
-
-		// logger.error outputs to console.error
-		const errorOutput = consoleErrorSpy.join("\n");
-		assert.ok(errorOutput.includes("Unknown shell: powershell"));
-
-		// logger.info outputs to console.log
-		const logOutput = consoleLogSpy.join("\n");
-		assert.ok(logOutput.includes("Supported shells: bash, zsh, fish"));
 	});
 
 	test("handles case-insensitive shell names", () => {

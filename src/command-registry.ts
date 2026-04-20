@@ -1505,7 +1505,12 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		resources: ["bash", "zsh", "fish", "install"],
-		flags: {},
+		flags: {
+			shell: {
+				type: "string" as const,
+				description: "Shell to install completions for (bash, zsh, fish)",
+			},
+		},
 		resourceFlags: {
 			install: {
 				shell: {
