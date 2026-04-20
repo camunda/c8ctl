@@ -29,8 +29,7 @@ export function useProfile(name: string): void {
 	// Verify profile exists (checks both c8ctl and Modeler profiles)
 	const profile = getProfileOrModeler(name);
 	if (!profile) {
-		logger.error(`Profile '${name}' not found`);
-		process.exit(1);
+		throw new Error(`Profile '${name}' not found`);
 	}
 
 	setActiveProfile(name);
@@ -53,8 +52,7 @@ export function setOutputFormat(mode: string): void {
 	const logger = getLogger();
 
 	if (mode !== "json" && mode !== "text") {
-		logger.error(`Invalid output mode: ${mode}. Must be 'json' or 'text'`);
-		process.exit(1);
+		throw new Error(`Invalid output mode: ${mode}. Must be 'json' or 'text'`);
 	}
 
 	setOutputMode(mode);
@@ -96,14 +94,13 @@ export const outputCommand = defineCommand("output", "", async (ctx) => {
 export const useProfileCommand = defineCommand(
 	"use",
 	"profile",
-	async (ctx, flags, args) => {
+	async (_ctx, flags, args) => {
 		if (flags.none) {
 			useProfile("--none");
 			return { kind: "none" };
 		}
 		if (!args.name) {
-			ctx.logger.error("Profile name required. Usage: c8 use profile <name>");
-			process.exit(1);
+			throw new Error("Profile name required. Usage: c8 use profile <name>");
 		}
 		useProfile(args.name);
 		return { kind: "none" };
