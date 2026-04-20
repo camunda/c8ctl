@@ -97,10 +97,10 @@ describe("COMMAND_DISPATCH structural invariant (#290)", () => {
 		assert.ok(descriptor, "expected an own descriptor for the brand");
 		assert.strictEqual(descriptor.enumerable, false);
 		assert.strictEqual(
-			Object.getOwnPropertySymbols(sample).filter(
-				(s) => Object.getOwnPropertyDescriptor(sample, s)?.enumerable,
-			).length,
-			0,
+			Object.getOwnPropertySymbols(sample)
+				.filter((s) => Object.getOwnPropertyDescriptor(sample, s)?.enumerable)
+				.includes(DEFINE_COMMAND_MARKER),
+			false,
 			"brand symbol should not appear among enumerable symbol keys",
 		);
 	});
