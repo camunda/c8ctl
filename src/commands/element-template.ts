@@ -2,10 +2,11 @@
  * Element template commands — apply templates and inspect properties.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type { CommandResult } from "../command-framework.ts";
 import { defineCommand } from "../command-framework.ts";
+import { readFileOrUrl } from "../file-fetch.ts";
 import { readBpmnInput } from "./bpmn.ts";
 
 // ---------------------------------------------------------------------------
@@ -231,12 +232,9 @@ function warnUnmetConditions(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function readTemplate(templatePath: string): ElementTemplate {
-	const resolved = resolvePath(templatePath);
-	if (!existsSync(resolved)) {
-		throw new Error(`Template file not found: ${templatePath}`);
-	}
-	return JSON.parse(readFileSync(resolved, "utf-8"));
+async function readTemplate(templatePath: string): Promise<ElementTemplate> {
+	const content = await readFileOrUrl(templatePath);
+	return JSON.parse(content);
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +263,7 @@ export const applyElementTemplateCommand = defineCommand(
 			throw new Error("--in-place cannot be used with stdin input");
 		}
 
-		const template = readTemplate(templatePath);
+		const template = await readTemplate(templatePath);
 
 		// Apply --set overrides to template properties before calling applyTemplate
 		let setBindingNames: string[] = [];
@@ -335,7 +333,7 @@ export const listPropertiesCommand = defineCommand(
 	async (ctx, _flags, args): Promise<CommandResult> => {
 		const { logger } = ctx;
 		const templatePath = args.template;
-		const template = readTemplate(templatePath);
+		const template = await readTemplate(templatePath);
 
 		const settable = getSettableProperties(template.properties);
 		const groupLabelMap = new Map(
