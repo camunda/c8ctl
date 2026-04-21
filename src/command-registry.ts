@@ -136,6 +136,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	roles: "role",
 	groups: "group",
 	tenants: "tenant",
+	"apply-template": "apply-element-template",
 };
 
 // ─── Global Flags ────────────────────────────────────────────────────────────
@@ -1487,6 +1488,58 @@ export const COMMAND_REGISTRY = {
 		resourcePositionals: {
 			plugin: [
 				{ name: "name", required: false },
+			] as const satisfies readonly PositionalDef[],
+		},
+	},
+
+	// ── BPMN tooling ─────────────────────────────────────────────────────
+
+	bpmn: {
+		description: "BPMN tooling — lint diagrams and apply element templates",
+		helpDescription:
+			"Lint BPMN diagrams and apply element templates (supports stdin piping)",
+		helpResource: "lint|apply-element-template",
+		mutating: false,
+		requiresResource: true,
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show bpmn usage",
+		helpExamples: [
+			{
+				command: "c8ctl bpmn lint process.bpmn",
+				description: "Lint a BPMN file with Camunda rules",
+			},
+			{
+				command:
+					"c8ctl bpmn apply-element-template template.json Task_1 process.bpmn",
+				description: "Apply an element template to a BPMN element",
+			},
+		],
+		resources: ["lint", "apply-element-template"],
+		flags: {
+			"in-place": {
+				type: "boolean",
+				description: "Modify the BPMN file in place (apply-element-template)",
+				short: "i",
+			},
+		},
+		resourceFlags: {
+			lint: {},
+			"apply-element-template": {
+				"in-place": {
+					type: "boolean",
+					description: "Modify the BPMN file in place",
+					short: "i",
+				},
+			},
+		},
+		resourcePositionals: {
+			lint: [
+				{ name: "file", required: false },
+			] as const satisfies readonly PositionalDef[],
+			"apply-element-template": [
+				{ name: "template", required: true },
+				{ name: "elementId", required: true },
+				{ name: "file", required: false },
 			] as const satisfies readonly PositionalDef[],
 		},
 	},

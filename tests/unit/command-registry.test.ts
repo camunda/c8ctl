@@ -66,6 +66,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"unassign",
 		"which",
 		"set",
+		"bpmn",
 	];
 
 	test("every expected verb has a registry entry", () => {

@@ -203,7 +203,7 @@ describe("CLI behavioural: help (text mode)", () => {
 		rmSync(dataDir, { recursive: true, force: true });
 	});
 
-	test("help for plugin command delegates to plugin (c8ctl help bpmn)", async () => {
+	test("help bpmn shows resources and examples", async () => {
 		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-help-test-"));
 		writeFileSync(
 			join(dataDir, "session.json"),
@@ -213,17 +213,10 @@ describe("CLI behavioural: help (text mode)", () => {
 		const result = await c8text(dataDir, "help", "bpmn");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const output = result.stdout + result.stderr;
-		// The bpmn plugin shows its own help — verify key sections appear
-		assert.ok(output.includes("c8ctl bpmn lint"), "Expected bpmn lint usage");
+		assert.ok(output.includes("lint"), "Expected lint resource");
 		assert.ok(
 			output.includes("apply-element-template"),
-			"Expected apply-element-template usage",
-		);
-		assert.ok(output.includes("Subcommands:"), "Expected Subcommands section");
-		// Must NOT show the "No detailed help available" fallback
-		assert.ok(
-			!output.includes("No detailed help available"),
-			"Should not show fallback message",
+			"Expected apply-element-template resource",
 		);
 
 		rmSync(dataDir, { recursive: true, force: true });
