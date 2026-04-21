@@ -138,7 +138,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	roles: "role",
 	groups: "group",
 	tenants: "tenant",
-	"apply-template": "apply-element-template",
+	props: "list-properties",
 };
 
 // ─── Global Flags ────────────────────────────────────────────────────────────
@@ -1497,51 +1497,90 @@ export const COMMAND_REGISTRY = {
 	// ── BPMN tooling ─────────────────────────────────────────────────────
 
 	bpmn: {
-		description: "BPMN tooling — lint diagrams and apply element templates",
-		helpDescription:
-			"Lint BPMN diagrams and apply element templates (supports stdin piping)",
-		helpResource: "lint|apply-element-template",
+		description: "Lint BPMN diagrams",
+		helpDescription: "Lint BPMN diagrams (supports stdin piping)",
+		helpResource: "lint",
 		mutating: false,
 		requiresResource: true,
-		hasDetailedHelp: true,
-		helpFooterLabel: "Show bpmn usage",
 		helpExamples: [
 			{
 				command: "c8ctl bpmn lint process.bpmn",
 				description: "Lint a BPMN file with Camunda rules",
 			},
+		],
+		resources: ["lint"],
+		flags: {},
+		resourcePositionals: {
+			lint: [
+				{ name: "file", required: false },
+			] as const satisfies readonly PositionalDef[],
+		},
+	},
+
+	// ── Element template tooling ─────────────────────────────────────────
+
+	"element-template": {
+		description: "Apply and inspect Camunda element templates",
+		helpResource: "apply|list-properties",
+		mutating: false,
+		requiresResource: true,
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show element-template usage",
+		aliases: ["et"],
+		helpExamples: [
 			{
 				command:
-					"c8ctl bpmn apply-element-template template.json Task_1 process.bpmn",
+					"c8ctl element-template apply template.json Task_1 process.bpmn",
 				description: "Apply an element template to a BPMN element",
 			},
+			{
+				command:
+					"c8ctl element-template apply template.json Task_1 process.bpmn --set method=POST --set url=https://example.com",
+				description: "Apply template and set input values",
+			},
+			{
+				command: "c8ctl element-template list-properties template.json",
+				description: "List settable properties from a template",
+			},
 		],
-		resources: ["lint", "apply-element-template"],
+		resources: ["apply", "list-properties"],
 		flags: {
 			"in-place": {
 				type: "boolean",
-				description: "Modify the BPMN file in place (apply-element-template)",
+				description: "Modify the BPMN file in place (apply)",
 				short: "i",
+			},
+			set: {
+				type: "string",
+				multiple: true,
+				description:
+					"Set a template property value (repeatable, e.g. --set method=POST)",
 			},
 		},
 		resourceFlags: {
-			lint: {},
-			"apply-element-template": {
+			apply: {
 				"in-place": {
 					type: "boolean",
 					description: "Modify the BPMN file in place",
 					short: "i",
 				},
+				set: {
+					type: "string",
+					multiple: true,
+					description:
+						"Set a template property value (repeatable, e.g. --set method=POST --set url=https://example.com)",
+				},
 			},
+			"list-properties": {},
 		},
 		resourcePositionals: {
-			lint: [
-				{ name: "file", required: false },
-			] as const satisfies readonly PositionalDef[],
-			"apply-element-template": [
+			apply: [
 				{ name: "template", required: true },
 				{ name: "elementId", required: true },
 				{ name: "file", required: false },
+			] as const satisfies readonly PositionalDef[],
+			"list-properties": [
+				{ name: "template", required: true },
 			] as const satisfies readonly PositionalDef[],
 		},
 	},

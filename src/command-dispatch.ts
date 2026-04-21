@@ -9,11 +9,12 @@
  */
 
 import type { AnyCommandHandler } from "./command-framework.ts";
+import { lintBpmnCommand } from "./commands/bpmn.ts";
+import { completionCommand } from "./commands/completion.ts";
 import {
 	applyElementTemplateCommand,
-	lintBpmnCommand,
-} from "./commands/bpmn.ts";
-import { completionCommand } from "./commands/completion.ts";
+	listPropertiesCommand,
+} from "./commands/element-template.ts";
 import { getFormCommand } from "./commands/forms.ts";
 import {
 	assignFallbackCommand,
@@ -265,5 +266,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 
 	// ── BPMN tooling ──────────────────────────────────────────────────
 	["bpmn:lint", lintBpmnCommand],
-	["bpmn:apply-element-template", applyElementTemplateCommand],
+
+	// ── Element template tooling ──────────────────────────────────────
+	["element-template:apply", applyElementTemplateCommand],
+	["element-template:list-properties", listPropertiesCommand],
 ]);

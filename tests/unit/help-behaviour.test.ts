@@ -203,7 +203,7 @@ describe("CLI behavioural: help (text mode)", () => {
 		rmSync(dataDir, { recursive: true, force: true });
 	});
 
-	test("help bpmn shows resources and examples", async () => {
+	test("help bpmn shows lint resource", async () => {
 		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-help-test-"));
 		writeFileSync(
 			join(dataDir, "session.json"),
@@ -214,10 +214,6 @@ describe("CLI behavioural: help (text mode)", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const output = result.stdout + result.stderr;
 		assert.ok(output.includes("lint"), "Expected lint resource");
-		assert.ok(
-			output.includes("apply-element-template"),
-			"Expected apply-element-template resource",
-		);
 
 		rmSync(dataDir, { recursive: true, force: true });
 	});
