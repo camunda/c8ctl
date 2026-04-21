@@ -1,5 +1,5 @@
 /**
- * BPMN tooling commands — lint diagrams and apply element templates.
+ * BPMN tooling commands — lint diagrams.
  */
 
 import {
@@ -8,7 +8,6 @@ import {
 	openSync,
 	readFileSync,
 	readSync,
-	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
@@ -24,7 +23,7 @@ const require = createRequire(import.meta.url);
 // Helpers
 // ---------------------------------------------------------------------------
 
-interface BpmnInput {
+export interface BpmnInput {
 	xml: string;
 	source: string;
 }
@@ -33,7 +32,7 @@ interface BpmnInput {
  * Read BPMN XML from a file path or stdin.
  * Returns null if no input is available.
  */
-function readBpmnInput(filePath: string | undefined): BpmnInput | null {
+export function readBpmnInput(filePath: string | undefined): BpmnInput | null {
 	if (filePath) {
 		const resolved = resolvePath(filePath);
 		if (!existsSync(resolved)) {
@@ -284,72 +283,5 @@ export const lintBpmnCommand = defineCommand(
 		}
 
 		return { kind: "none" };
-	},
-);
-
-export const applyElementTemplateCommand = defineCommand(
-	"bpmn",
-	"apply-element-template",
-	async (_ctx, flags, args): Promise<CommandResult> => {
-		const inPlace = flags["in-place"];
-		const templatePath = args.template;
-		const elementId = args.elementId;
-		// File can come from positional or stdin
-		const bpmnFilePath: string | undefined = args.file;
-
-		const input = readBpmnInput(bpmnFilePath);
-		if (!input) {
-			throw new Error(
-				"No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.",
-			);
-		}
-
-		if (inPlace && !bpmnFilePath) {
-			throw new Error("--in-place cannot be used with stdin input");
-		}
-
-		const resolvedTemplatePath = resolvePath(templatePath);
-		if (!existsSync(resolvedTemplatePath)) {
-			throw new Error(`Template file not found: ${templatePath}`);
-		}
-		const templateJson = readFileSync(resolvedTemplatePath, "utf-8");
-
-		// Apply template
-		// @ts-expect-error — element-templates-cli has no type declarations
-		const { applyTemplate } = await import("element-templates-cli");
-
-		// Suppress noisy internal "unhandled error in event listener" warnings
-		const originalConsoleError = console.error;
-		console.error = (...errorArgs: unknown[]) => {
-			if (
-				typeof errorArgs[0] === "string" &&
-				errorArgs[0].includes("unhandled error in event listener")
-			)
-				return;
-			originalConsoleError(...errorArgs);
-		};
-
-		let resultXml: string;
-		try {
-			resultXml = await applyTemplate(input.xml, templateJson, elementId);
-		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : String(error);
-			const hint = message.includes("Cannot read properties of undefined")
-				? `Element '${elementId}' not found in the BPMN diagram`
-				: message;
-			throw new Error(`Error applying template: ${hint}`);
-		} finally {
-			console.error = originalConsoleError;
-		}
-
-		if (inPlace && bpmnFilePath) {
-			writeFileSync(resolvePath(bpmnFilePath), resultXml, "utf-8");
-			return {
-				kind: "success",
-				message: `Updated ${bpmnFilePath}`,
-			};
-		}
-
-		return { kind: "raw", content: resultXml };
 	},
 );
