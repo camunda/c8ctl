@@ -28,6 +28,10 @@ export const metadata = {
   commands: {
     'bpmn': {
       description: 'BPMN tooling — lint diagrams and apply element templates',
+      subcommands: [
+        { name: 'lint', description: 'Lint a BPMN diagram against recommended and Camunda rules' },
+        { name: 'apply-element-template', description: 'Apply a Camunda element template to a BPMN element' },
+      ],
       examples: [
         { command: 'c8ctl bpmn lint process.bpmn', description: 'Lint a BPMN file with Camunda rules' },
         { command: 'cat process.bpmn | c8ctl bpmn lint', description: 'Lint from stdin' },
