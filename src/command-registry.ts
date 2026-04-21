@@ -30,6 +30,8 @@ export interface FlagDef {
 	short?: string;
 	/** When true, the flag must be supplied or the command exits with an error. */
 	required?: boolean;
+	/** When true, the flag can be repeated and values are collected into an array. */
+	multiple?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
@@ -1767,11 +1769,11 @@ export function isValidCommand(verb: string, resource: string): boolean {
  */
 export function deriveParseArgsOptions(): Record<
 	string,
-	{ type: "string" | "boolean"; short?: string }
+	{ type: "string" | "boolean"; short?: string; multiple?: boolean }
 > {
 	const options: Record<
 		string,
-		{ type: "string" | "boolean"; short?: string }
+		{ type: "string" | "boolean"; short?: string; multiple?: boolean }
 	> = {};
 
 	function addFlags(flags: Record<string, FlagDef>): void {
@@ -1781,11 +1783,13 @@ export function deriveParseArgsOptions(): Record<
 				options[name] = {
 					type: def.type,
 					...(def.short && { short: def.short }),
+					...(def.multiple && { multiple: true }),
 				};
 			} else {
 				// String is more permissive — upgrade when any usage is string
 				if (def.type === "string") existing.type = "string";
 				if (def.short && !existing.short) existing.short = def.short;
+				if (def.multiple) existing.multiple = true;
 			}
 		}
 	}
