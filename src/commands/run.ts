@@ -49,10 +49,9 @@ export async function run(
 	// Validate file extension unless --force is set
 	const ext = extname(path);
 	if (!options.force && ext && !DEPLOYABLE_EXTENSIONS.includes(ext)) {
-		logger.error(
+		throw new Error(
 			`Unsupported file extension "${ext}". Use --force to deploy any file type.`,
 		);
-		process.exit(1);
 	}
 
 	const client = createClient(options.profile);
@@ -64,8 +63,7 @@ export async function run(
 		const processId = extractProcessId(content);
 
 		if (!processId) {
-			logger.error("Could not extract process ID from BPMN file");
-			process.exit(1);
+			throw new Error("Could not extract process ID from BPMN file");
 		}
 
 		logger.info(`Deploying ${path}...`);

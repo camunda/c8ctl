@@ -8,6 +8,7 @@
 
 import {
 	AuthorizationKey,
+	ElementInstanceKey,
 	IncidentKey,
 	JobKey,
 	ProcessDefinitionId,
@@ -126,6 +127,7 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	msg: "message",
 	vars: "variable",
 	variables: "variable",
+	var: "variable",
 	profile: "profile",
 	profiles: "profile",
 	plugin: "plugin",
@@ -863,33 +865,6 @@ export const COMMAND_REGISTRY = {
 				description: "Tenant ID",
 				validate: TenantId.assumeExists,
 			},
-			// Identity authorization
-			ownerId: {
-				type: "string",
-				description: "Authorization owner ID",
-				required: true,
-			},
-			ownerType: {
-				type: "string",
-				description: "Authorization owner type",
-				required: true,
-			},
-			resourceType: {
-				type: "string",
-				description: "Authorization resource type",
-				required: true,
-			},
-			resourceId: {
-				type: "string",
-				description: "Authorization resource ID",
-				required: true,
-			},
-			permissions: {
-				type: "string",
-				description: "Comma-separated permissions",
-				required: true,
-				csv: true,
-			},
 			// Identity mapping rule
 			mappingRuleId: {
 				type: "string",
@@ -897,6 +872,40 @@ export const COMMAND_REGISTRY = {
 			},
 			claimName: { type: "string", description: "Claim name" },
 			claimValue: { type: "string", description: "Claim value" },
+		},
+		// Resource-scoped flags: the authorization-specific flags below are
+		// only required when creating an authorization. Declaring them at the
+		// verb level would force every `create <resource>` invocation to
+		// supply them (see #308 — required-flag enforcement).
+		resourceFlags: {
+			authorization: {
+				ownerId: {
+					type: "string",
+					description: "Authorization owner ID",
+					required: true,
+				},
+				ownerType: {
+					type: "string",
+					description: "Authorization owner type",
+					required: true,
+				},
+				resourceType: {
+					type: "string",
+					description: "Authorization resource type",
+					required: true,
+				},
+				resourceId: {
+					type: "string",
+					description: "Authorization resource ID",
+					required: true,
+				},
+				permissions: {
+					type: "string",
+					description: "Comma-separated permissions",
+					required: true,
+					csv: true,
+				},
+			},
 		},
 	},
 
@@ -1131,6 +1140,55 @@ export const COMMAND_REGISTRY = {
 		resourcePositionals: {
 			message: [
 				{ name: "name", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
+	},
+
+	set: {
+		description: "Set variables on an element instance",
+		helpDescription:
+			"Set variables on an element instance (process instance or flow element scope). Variables are propagated to the outermost scope by default; use --local to restrict to the specified scope.",
+		helpResource: "variable <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show set command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					'c8ctl set variable 2251799813685249 --variables=\'{"status":"approved"}\'',
+				description: "Set variables on a process instance",
+			},
+			{
+				command:
+					"c8ctl set variable 2251799813685249 --variables='{\"x\":1}' --local",
+				description: "Set variables in local scope only",
+			},
+		],
+		resources: ["variable"],
+		flags: {
+			variables: {
+				type: "string",
+				description: "JSON object of variables to set (required)",
+				required: true,
+				showInTopLevelHelp: true,
+				helpHint: "use with 'set variable'",
+			},
+			local: {
+				type: "boolean",
+				description:
+					"Set variables in local scope only (default: propagate to outermost scope)",
+				showInTopLevelHelp: true,
+				helpHint: "use with 'set variable'",
+			},
+		},
+		resourcePositionals: {
+			variable: [
+				{
+					name: "key",
+					required: true,
+					validate: ElementInstanceKey.assumeExists,
+				},
 			] as const satisfies readonly PositionalDef[],
 		},
 	},
@@ -1520,7 +1578,12 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		resources: ["bash", "zsh", "fish", "install"],
-		flags: {},
+		flags: {
+			shell: {
+				type: "string" as const,
+				description: "Shell to install completions for (bash, zsh, fish)",
+			},
+		},
 		resourceFlags: {
 			install: {
 				shell: {
@@ -1630,14 +1693,21 @@ export function getCommandDef(verb: string): CommandDef | undefined {
 }
 
 /**
- * Get all flags accepted for a given verb, including global flags.
+ * Get all flags accepted for a given verb, including global flags and any
+ * resource-scoped flags declared under `resourceFlags`.
  */
 export function getAcceptedFlags(
 	verb: string,
 ): Record<string, FlagDef> | undefined {
 	const def = getCommandDef(verb);
 	if (!def) return undefined;
-	return { ...GLOBAL_FLAGS, ...def.flags };
+	const merged: Record<string, FlagDef> = { ...GLOBAL_FLAGS, ...def.flags };
+	if (def.resourceFlags) {
+		for (const rFlags of Object.values(def.resourceFlags)) {
+			Object.assign(merged, rFlags);
+		}
+	}
+	return merged;
 }
 
 /**

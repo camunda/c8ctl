@@ -122,40 +122,36 @@ export function validateOpenAppOptions(
 	};
 }
 
+// ─── defineCommand ───────────────────────────────────────────────────────────
+
 /**
  * Open a Camunda web application in the default browser.
+ *
+ * Side-effectful: validates the app name, derives the URL from the cluster
+ * config, and spawns the platform browser opener. With `--dry-run`, logs
+ * the resolved URL but skips the spawn.
  */
-export async function openApp(options: OpenAppInput): Promise<void> {
-	const logger = getLogger();
-
-	const config = resolveClusterConfig(options.profile);
-	const url = deriveAppUrl(config.baseUrl, options.app);
-
-	if (!url) {
-		logger.error(
-			`Cannot derive ${options.app} URL from base URL: ${config.baseUrl}`,
-		);
-		logger.info(
-			"The open command is only supported for self-managed clusters whose base URL ends with /v<n> (e.g. http://localhost:8080/v2).",
-		);
-		process.exit(1);
-	}
-
-	logger.info(`Opening ${options.app} at: ${url}`);
-	if (!options.dryRun) {
-		openUrl(url);
-	}
-}
-
-// ─── defineCommand wrapper ───────────────────────────────────────────────────
-
-/** Side-effectful: validates app name, derives URL, and opens browser. */
 export const openAppCommand = defineCommand("open", "", async (ctx) => {
-	const validated = validateOpenAppOptions(ctx.resource, {
+	const { app, profile, dryRun } = validateOpenAppOptions(ctx.resource, {
 		profile: ctx.profile,
 		dryRun: ctx.dryRun,
 	});
-	await openApp(validated);
+
+	const config = resolveClusterConfig(profile);
+	const url = deriveAppUrl(config.baseUrl, app);
+
+	if (!url) {
+		throw new Error(
+			`Cannot derive ${app} URL from base URL: ${config.baseUrl}. ` +
+				"The open command is only supported for self-managed clusters " +
+				"whose base URL ends with /v<n> (e.g. http://localhost:8080/v2).",
+		);
+	}
+
+	ctx.logger.info(`Opening ${app} at: ${url}`);
+	if (!dryRun) {
+		openUrl(url);
+	}
 	return { kind: "none" };
 });
 

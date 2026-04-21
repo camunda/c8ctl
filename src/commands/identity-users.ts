@@ -120,15 +120,13 @@ export const createIdentityUserCommand = defineCommand(
 	"create",
 	"user",
 	async (ctx, flags, _args) => {
-		const { client, logger, profile } = ctx;
+		const { client, profile } = ctx;
 
 		if (!flags.username) {
-			logger.error("--username is required");
-			process.exit(1);
+			throw new Error("--username is required");
 		}
 		if (!flags.password) {
-			logger.error("--password is required");
-			process.exit(1);
+			throw new Error("--password is required");
 		}
 
 		const body = {

@@ -79,11 +79,14 @@ export type ResolvedPositionals<
 /**
  * Map a flag schema to typed handler parameters.
  *
- * - Flags with `validate` → the validator's return type (branded) | undefined
- * - Boolean flags → boolean | undefined
- * - Everything else → string | undefined
+ * - Flags with `validate` → the validator's return type
+ * - Boolean flags → boolean
+ * - Everything else → string
  *
- * All flags are optional because CLI users may omit any flag.
+ * A flag is non-optional in the handler's view iff it is declared
+ * `required: true` in the FlagDef. `required: true` is enforced at the
+ * framework boundary by validateFlags (#308), so the handler is guaranteed
+ * to see a value.
  *
  * The type parameter is unconstrained so conditional types like
  * `ResolvedFlags<V, R>` can be passed through without constraint errors.
@@ -91,10 +94,16 @@ export type ResolvedPositionals<
 // biome-ignore lint/suspicious/noExplicitAny: unconstrained to accept conditional types
 export type InferFlags<F extends Record<string, any>> = {
 	[K in keyof F]: F[K] extends { validate: (v: string) => infer R }
-		? R | undefined
+		? F[K] extends { required: true }
+			? R
+			: R | undefined
 		: F[K] extends { type: "boolean" }
-			? boolean | undefined
-			: string | undefined;
+			? F[K] extends { required: true }
+				? boolean
+				: boolean | undefined
+			: F[K] extends { required: true }
+				? string
+				: string | undefined;
 };
 
 // ─── InferPositionals ────────────────────────────────────────────────────────
@@ -243,6 +252,20 @@ export interface CommandContext {
 // ─── CommandHandler ──────────────────────────────────────────────────────────
 
 /**
+ * Brand symbol stamped on every value returned by `defineCommand`.
+ *
+ * This is the structural seam tested by `command-dispatch-structure.test.ts`
+ * (#290): every value in `COMMAND_DISPATCH` must carry this marker, which
+ * guarantees the entry was produced by the framework factory and therefore
+ * goes through flag deserialization, dry-run handling, result rendering, and
+ * the `handleCommandError` wrapper. A hand-rolled function with the right
+ * signature cannot satisfy this marker.
+ */
+export const DEFINE_COMMAND_MARKER: unique symbol = Symbol(
+	"c8ctl.defineCommand",
+);
+
+/**
  * Return type of `defineCommand`. Stores the verb, resource, and an
  * `execute` method that deserializes raw CLI input and calls the handler
  * with fully typed flags and positionals.
@@ -255,6 +278,21 @@ export interface CommandHandler<V extends keyof Registry, R extends string> {
 		rawValues: Record<string, unknown>,
 		rawArgs: string[],
 	) => Promise<void>;
+	/** Brand attached by `defineCommand`. See `DEFINE_COMMAND_MARKER`. */
+	readonly [DEFINE_COMMAND_MARKER]: true;
+}
+
+/**
+ * Test-time guard: returns true iff `value` was produced by `defineCommand`.
+ *
+ * Uses an own-property check so a forged marker on a prototype cannot satisfy
+ * the brand — only objects that explicitly carry the symbol on themselves
+ * (i.e. those produced by `defineCommand`) pass.
+ */
+export function isDefinedCommand(value: unknown): value is AnyCommandHandler {
+	if (typeof value !== "object" || value === null) return false;
+	if (!Object.hasOwn(value, DEFINE_COMMAND_MARKER)) return false;
+	return Reflect.get(value, DEFINE_COMMAND_MARKER) === true;
 }
 
 /**
@@ -298,35 +336,47 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 	const flagDefs = entry.resourceFlags?.[resource] ?? entry.flags;
 	const positionalDefs = entry.resourcePositionals?.[resource] ?? [];
 
-	return {
-		verb,
-		resource,
-		execute: async (ctx, rawValues, rawArgs) => {
-			const flags = deserializeFlags(rawValues, flagDefs);
-			const args = deserializePositionals(
-				rawArgs,
-				positionalDefs,
-				verb,
-				resource,
+	// Build the handler and stamp the brand as a non-enumerable own property
+	// so it doesn't appear in `Object.keys`, spreads, or JSON output but is
+	// still detectable by `isDefinedCommand` via `Object.hasOwn`.
+	const execute: CommandHandler<V, R>["execute"] = async (
+		ctx,
+		rawValues,
+		rawArgs,
+	) => {
+		const flags = deserializeFlags(rawValues, flagDefs);
+		const args = deserializePositionals(
+			rawArgs,
+			positionalDefs,
+			verb,
+			resource,
+		);
+		try {
+			const result = await handler(
+				ctx,
+				// biome-ignore lint/plugin: framework-internal assertion — flagDefs resolved from COMMAND_REGISTRY[V][R]
+				flags as InferFlags<ResolvedFlags<V, R>>,
+				// biome-ignore lint/plugin: framework-internal assertion — positionalDefs resolved from COMMAND_REGISTRY[V][R]
+				args as InferPositionals<ResolvedPositionals<V, R>>,
 			);
-			try {
-				const result = await handler(
-					ctx,
-					// biome-ignore lint/plugin: framework-internal assertion — flagDefs resolved from COMMAND_REGISTRY[V][R]
-					flags as InferFlags<ResolvedFlags<V, R>>,
-					// biome-ignore lint/plugin: framework-internal assertion — positionalDefs resolved from COMMAND_REGISTRY[V][R]
-					args as InferPositionals<ResolvedPositionals<V, R>>,
-				);
-				if (result) renderResult(result, ctx);
-			} catch (error) {
-				handleCommandError(
-					ctx.logger,
-					`Failed to ${verb} ${resource.replace(/-/g, " ")}`,
-					error,
-				);
-			}
-		},
+			if (result) renderResult(result, ctx);
+		} catch (error) {
+			handleCommandError(
+				ctx.logger,
+				`Failed to ${verb} ${resource.replace(/-/g, " ")}`,
+				error,
+			);
+		}
 	};
+	const handler_ = { verb, resource, execute };
+	Object.defineProperty(handler_, DEFINE_COMMAND_MARKER, {
+		value: true,
+		enumerable: false,
+		writable: false,
+		configurable: false,
+	});
+	// biome-ignore lint/plugin: framework-internal assertion — brand stamped via defineProperty above to satisfy CommandHandler's required marker
+	return handler_ as CommandHandler<V, R>;
 }
 
 // ─── deserializeFlags ────────────────────────────────────────────────────────

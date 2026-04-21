@@ -4,7 +4,7 @@
 
 import { fetchAllPages } from "../client.ts";
 import { defineCommand, dryRun } from "../command-framework.ts";
-import { getLogger, sortTableData } from "../logger.ts";
+import { sortTableData } from "../logger.ts";
 import { toStringFilter } from "./search.ts";
 
 /**
@@ -121,12 +121,10 @@ export const createIdentityGroupCommand = defineCommand(
 		const { client, profile } = ctx;
 
 		if (!flags.groupId) {
-			getLogger().error("--groupId is required");
-			process.exit(1);
+			throw new Error("--groupId is required");
 		}
 		if (!flags.name) {
-			getLogger().error("--name is required");
-			process.exit(1);
+			throw new Error("--name is required");
 		}
 
 		const body = { groupId: flags.groupId, name: flags.name };

@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { defineCommand } from "../command-framework.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
@@ -561,13 +562,16 @@ function escFish(s: string): string {
 
 /**
  * Show completion command
+ *
+ * Throws on missing/unknown shell; framework wrapper adds the
+ * `Failed to completion ...` prefix. Do NOT reintroduce `process.exit` —
+ * `tests/unit/no-process-exit-in-handlers.test.ts` enforces this.
  */
 export function showCompletion(shell?: string): void {
-	const logger = getLogger();
-
 	if (!shell) {
-		logger.error("Shell type required. Usage: c8 completion <bash|zsh|fish>");
-		process.exit(1);
+		throw new Error(
+			"Shell type required. Usage: c8 completion <bash|zsh|fish>",
+		);
 	}
 
 	const normalizedShell = shell.toLowerCase();
@@ -583,10 +587,9 @@ export function showCompletion(shell?: string): void {
 			console.log(generateFishCompletion());
 			break;
 		default:
-			logger.error(`Unknown shell: ${shell}`);
-			logger.info("Supported shells: bash, zsh, fish");
-			logger.info("Usage: c8 completion <bash|zsh|fish>");
-			process.exit(1);
+			throw new Error(
+				`Unknown shell: ${shell}. Supported shells: bash, zsh, fish. Usage: c8 completion <bash|zsh|fish>`,
+			);
 	}
 }
 
@@ -732,16 +735,15 @@ export function installCompletion(shellOverride?: string): void {
 	const shell = shellOverride?.toLowerCase() ?? detectShell();
 
 	if (!shell) {
-		logger.error(
+		throw new Error(
 			"Could not detect shell. Specify with: c8ctl completion install --shell <bash|zsh|fish>",
 		);
-		process.exit(1);
 	}
 
 	if (!["bash", "zsh", "fish"].includes(shell)) {
-		logger.error(`Unsupported shell: ${shell}`);
-		logger.info("Supported shells: bash, zsh, fish");
-		process.exit(1);
+		throw new Error(
+			`Unsupported shell: ${shell}. Supported shells: bash, zsh, fish`,
+		);
 	}
 
 	const completionFile = getCompletionFilePath(shell);
@@ -804,14 +806,13 @@ export function installCompletion(shellOverride?: string): void {
 		logger.info(`  ${buildSourceLine(completionFile)}`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		logger.error(`Failed to install completions: ${msg}`);
 		logger.info(`Target path: ${completionFile}`);
 		if (rcFile) {
 			logger.info(
 				`Add this line manually to your shell config:\n  ${buildSourceLine(completionFile)}`,
 			);
 		}
-		process.exit(1);
+		throw new Error(`Failed to install completions: ${msg}`);
 	}
 }
 
@@ -857,3 +858,35 @@ export function refreshCompletionsIfStale(): void {
 		}
 	}
 }
+
+// ─── defineCommand wrappers ──────────────────────────────────────────────────
+
+/**
+ * `completion` verb dispatcher.
+ *
+ * `completion` is modelled in the registry with `requiresResource: false`
+ * and enumerated resources `["bash", "zsh", "fish", "install"]`. The
+ * registry-driven dispatch in `src/index.ts` routes any completion
+ * invocation to `completion:` because `requiresResource` is false. This
+ * single handler branches on the incoming resource.
+ *
+ * All validation errors are raised via `throw` so the framework wrapper
+ * routes them through `handleCommandError`. The architectural guard in
+ * `tests/unit/no-process-exit-in-handlers.test.ts` forbids `process.exit`
+ * here.
+ */
+export const completionCommand = defineCommand(
+	"completion",
+	"",
+	async (ctx, flags) => {
+		const resource = ctx.resource;
+		if (resource === "install") {
+			const shellFlag = flags.shell;
+			installCompletion(typeof shellFlag === "string" ? shellFlag : undefined);
+			return undefined;
+		}
+		// Empty resource → show usage error consistent with prior behaviour.
+		showCompletion(resource || undefined);
+		return undefined;
+	},
+);

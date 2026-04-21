@@ -1,26 +1,26 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
-  "files": {
-    "includes": ["src/**/*.ts", "!src/templates", "tests/**/*.ts"]
-  },
-  "linter": {
-    "enabled": true,
-    "includes": ["src/**/*.ts", "!/src/templates/**", "tests/**/*.ts"],
-    "rules": {
-      "recommended": true,
-      "suspicious": {
-        "noExplicitAny": "error",
-        "noImplicitAnyLet": "error",
-        "noEvolvingTypes": "error"
-      }
-    },
-    "domains": {
-      "react": "none",
-      "solid": "none",
-      "next": "none",
-      "qwik": "none",
-      "vue": "none"
-    }
-  },
-  "plugins": ["./plugins/no-unsafe-type-assertion.grit"]
+	"$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
+	"files": {
+		"includes": ["src/**/*.ts", "!src/templates", "tests/**/*.ts"]
+	},
+	"linter": {
+		"enabled": true,
+		"includes": ["src/**/*.ts", "!/src/templates/**", "tests/**/*.ts"],
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "error",
+				"noImplicitAnyLet": "error",
+				"noEvolvingTypes": "error"
+			}
+		},
+		"domains": {
+			"react": "none",
+			"solid": "none",
+			"next": "none",
+			"qwik": "none",
+			"vue": "none"
+		}
+	},
+	"plugins": ["./plugins/no-unsafe-type-assertion.grit"]
 }

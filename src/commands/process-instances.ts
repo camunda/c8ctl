@@ -19,16 +19,7 @@ export const listProcessInstancesCommand = defineCommand(
 	"list",
 	"process-instance",
 	async (ctx, flags) => {
-		const {
-			client,
-			logger,
-			tenantId,
-			profile,
-			limit,
-			all,
-			between,
-			dateField,
-		} = ctx;
+		const { client, tenantId, profile, limit, all, between, dateField } = ctx;
 
 		const filter: { filter: Record<string, unknown> } = {
 			filter: {
@@ -70,10 +61,9 @@ export const listProcessInstancesCommand = defineCommand(
 				const field = dateField ?? "startDate";
 				filter.filter[field] = buildDateFilter(parsed.from, parsed.to);
 			} else {
-				logger.error(
+				throw new Error(
 					"Invalid --between value. Expected format: <from>..<to> (e.g. 2024-01-01..2024-12-31, ISO 8601 datetimes, or open-ended: ..2024-12-31 or 2024-01-01..)",
 				);
-				process.exit(1);
 			}
 		}
 
@@ -171,10 +161,9 @@ export const createProcessInstanceCommand = defineCommand(
 			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
 
 		if (!processDefinitionId) {
-			logger.error(
+			throw new Error(
 				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
 			);
-			process.exit(1);
 		}
 
 		const version = ctx.version;
@@ -206,8 +195,9 @@ export const createProcessInstanceCommand = defineCommand(
 
 		// Validate: fetchVariables requires awaitCompletion
 		if (fetchVariables && !awaitCompletion) {
-			logger.error("--fetchVariables can only be used with --awaitCompletion");
-			process.exit(1);
+			throw new Error(
+				"--fetchVariables can only be used with --awaitCompletion",
+			);
 		}
 
 		// Note: fetchVariables parameter is reserved for future API enhancement
@@ -276,10 +266,9 @@ export const awaitProcessInstanceCommand = defineCommand(
 			flags.id || flags.processDefinitionId || flags.bpmnProcessId;
 
 		if (!processDefinitionId) {
-			logger.error(
+			throw new Error(
 				"processDefinitionId is required. Use --processDefinitionId or --bpmnProcessId or --id flag",
 			);
-			process.exit(1);
 		}
 
 		const version = ctx.version;

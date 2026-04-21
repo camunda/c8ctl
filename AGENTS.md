@@ -147,6 +147,13 @@ Never skip the lint and type-check steps before pushing.
 - run `npm run build` before `npm test` — this enables the full test suite and prevents build-dependent tests from being skipped. It also catches compilation and type errors early.
 - on changes, make sure all tests pass and a build via `npm run build` works without errors
 
+#### Local checks
+
+- `npm run typecheck` — runs `tsc --noEmit -p tsconfig.check.json` over `src/` and `tests/`
+- `npx biome check --fix` — lints and formats `src/` and `tests/` per `biome.json` (includes the `no-unsafe-type-assertion` plugin)
+- `npm run test:unit` — fast unit tests (no live Camunda required)
+- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
+
 ### Implementation details
 
 - always make sure that CLI commands, resources and options are reflected in
@@ -176,9 +183,9 @@ Never skip the lint and type-check steps before pushing.
 
 - use modern TypeScript syntax and features
 - **never use `any`** — use `unknown` and narrow with type guards. Enforced by Biome (`noExplicitAny`, `noImplicitAnyLet`, `noEvolvingTypes` — all set to `error`)
-- **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`). Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
-- run `npx biome check src/` to verify — this runs as part of `npm run build` and CI. Zero diagnostics required
-- run `npx biome check --fix src/` before committing to auto-fix formatting and lint issues
+- **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`) that applies to both `src/` and `tests/`. Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
+- run `npx biome check` to verify — `biome.json` scopes this to `src/` and `tests/`. This runs as part of `npm run build`, CI, and the pre-commit hook (on staged files). Zero diagnostics required
+- run `npx biome check --fix` before committing to auto-fix formatting and lint issues
 - use modern Getter and Setter syntax for class properties. Examples:
 
 ```typescript
@@ -221,8 +228,44 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 
 ### Refactoring discipline
 
+- **red/green refactor for new behaviour and bug fixes** — write the failing test first, then the minimal production change that makes it pass. The test serves two roles simultaneously: it encodes the acceptance criteria for the change, and it becomes a permanent regression guard. Writing the test first proves it can actually detect the defect or the missing behaviour; if a test passes before the production change lands, it isn't guarding anything. For bug fixes, scope the test to the defect *class*, not just the instance, so the same category of bug can't recur in a sibling code path
 - behaviour tests are the regression guard — during behaviour-preserving refactors, do not modify behaviour tests. If a test fails, the production code is usually wrong, not the test. If a change intentionally modifies observable behaviour (for example CLI output, help text, or exit codes), update the affected behaviour tests and explicitly document and justify the intended behaviour change in the PR
-- between refactors, always run `npx tsc --noEmit`, `npx biome check src`, and `npx vitest run` to verify correctness
+- between refactors, always run `npm run typecheck` (`tsc --noEmit -p tsconfig.check.json`, covering `src/` and `tests/`), `npx biome check`, and `npm run test:unit` to verify correctness
+
+#### There are no flaky tests
+
+We do not acknowledge the existence of "flaky tests". A test that passes sometimes and fails other times is reporting one of two things:
+
+1. **A test defect** — the test contains a race, an unbounded timeout, an order-of-operation assumption, an unsynchronised readiness signal, or a dependency on wall-clock timing. Fix the test so its outcome is deterministic for the behaviour it claims to assert.
+2. **A product defect** — the production code has a race, a missed signal, an unhandled error path, or a resource it leaks under load. Fix the product.
+
+Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" in the PR description. "Re-run and hope" is a coping strategy, not engineering.
+
+When triaging an intermittent CI failure:
+
+- Reproduce locally if possible (loops, resource pressure, timeout reduction). If you cannot reproduce, reason from first principles about what *could* differ between local and CI (load, filesystem semantics, signal delivery latency, parallel test interaction).
+- Identify the specific race or assumption. Common shapes: polling for an output line that is printed *before* the relevant handler is registered; timeouts that double as correctness assertions; tests that share a temp directory across runs; tests that depend on event ordering across two processes.
+- Pick category 1 vs category 2 explicitly in the fix commit message, and explain which signal the test was previously relying on and which deterministic signal it now relies on.
+- If timeouts must be generous to absorb runner load, the timeout is a safety net — not a correctness signal. State this in a comment so future maintainers don't tighten it back into a race.
+
+#### Coverage analysis before a behaviour-preserving refactor
+
+Before starting any non-trivial refactor, **audit whether the surface you are about to change is sufficiently guarded**. A passing test suite is necessary but not sufficient — it only proves that *what is currently tested* still works. The risk of a refactor is the behaviour that nobody asserts.
+
+Produce a short coverage table in the planning step that maps each behaviour you intend to preserve to the test that locks it in. For each row, ask:
+
+- Does an existing test fail if this behaviour changes? If not, the behaviour is unguarded.
+- Is the test scoped to the defect *class* (e.g. "all long-running handlers exit 0 on SIGINT") or only to one instance? Class-scoped guards are durable; instance-scoped guards rot.
+- For lifecycle / signal / process-exit behaviours, does any test actually exercise the signal? `child.kill('SIGTERM')` does **not** exercise a `SIGINT` handler.
+
+For every gap, **write the missing guard test first, on the pre-refactor branch**, and prove it passes against the current implementation. This is the **green/green discipline**:
+
+1. **Green on the pre-refactor code** — proves the test encodes preserved behaviour, not aspirational behaviour.
+2. **Green on the refactored code** — proves the refactor preserved it.
+
+Land the guard tests in a separate PR off `main`, and merge that PR to `main` before the refactor PR merges. A guard test that lands together with the change it is supposed to guard is weaker — there is no recorded moment at which it passed against the old code, so reviewers cannot tell whether it would have caught a regression.
+
+If you find that the surface is genuinely unguardable without a major investment (for example, full end-to-end tests of `mcp-proxy` against a remote MCP server), record that gap in the PR description and shrink the refactor scope rather than proceeding without a net.
 
 ### Adding a new command
 

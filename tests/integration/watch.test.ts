@@ -4,7 +4,6 @@
  */
 
 import assert from "node:assert";
-import { spawn } from "node:child_process";
 import {
 	copyFileSync,
 	mkdtempSync,
@@ -16,11 +15,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { DEPLOY_COOLDOWN } from "../../src/commands/watch.ts";
-import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
+import { startWatchProcess } from "../utils/watch-process.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
-const CLI = join(PROJECT_ROOT, "src", "index.ts");
 const VALID_BPMN = join(PROJECT_ROOT, "tests", "fixtures", "simple.bpmn");
 const POLL_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
@@ -70,33 +68,7 @@ function startWatch(
 	dataDir: string,
 	extraArgs: string[] = [],
 ) {
-	const child = spawn(
-		"node",
-		["--experimental-strip-types", CLI, "watch", ...extraArgs, watchDir],
-		{
-			cwd: PROJECT_ROOT,
-			env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
-			stdio: ["ignore", "pipe", "pipe"],
-		},
-	);
-
-	let output = "";
-	child.stdout.on("data", (chunk: Buffer) => {
-		output += chunk.toString();
-	});
-	child.stderr.on("data", (chunk: Buffer) => {
-		output += chunk.toString();
-	});
-
-	return {
-		child,
-		getOutput: () => output,
-		kill: () => {
-			child.kill("SIGTERM");
-			// Give a moment for cleanup
-			return new Promise<void>((resolve) => setTimeout(resolve, 500));
-		},
-	};
+	return startWatchProcess({ watchDir, dataDir, extraArgs });
 }
 
 describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)", () => {
