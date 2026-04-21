@@ -7,8 +7,8 @@ import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { resolveClusterConfig, resolveTenantId } from "../config.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
+import { resolveTenantId } from "../config.ts";
 import { normalizeToError, SilentError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger, isRecord } from "../logger.ts";
@@ -253,9 +253,49 @@ function findDuplicateDefinitionIds(
 }
 
 /**
- * Deploy resources
+ * Collect deployable resources from the given paths, applying `.c8ignore`
+ * rules. Throws on the two pre-API guard failures so callers (deploy
+ * handler, watch, dry-run preview) all surface the same errors with the
+ * same wording.
+ *
+ * Shared between `deployCommand` (used for both the dry-run preview and
+ * the execute path via `deployResources`) and `deployResources` itself.
  */
-export async function deploy(
+function collectResourcesForPaths(paths: string[]): ResourceFile[] {
+	if (paths.length === 0) {
+		throw new Error(
+			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
+		);
+	}
+
+	// Load .c8ignore rules from the working directory
+	const ignoreBaseDir = resolve(process.cwd());
+	const ig = loadIgnoreRules(ignoreBaseDir);
+
+	const resources: ResourceFile[] = [];
+	paths.forEach((path) => {
+		collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir);
+	});
+
+	if (resources.length === 0) {
+		throw new Error("No BPMN/DMN/Form files found in the specified paths");
+	}
+
+	return resources;
+}
+
+/**
+ * Internal helper: deploy the given paths to the cluster and render the
+ * result table. Used by `deployCommand` (the standard CLI entry point)
+ * and by `watchCommand` (for change-triggered re-deploys).
+ *
+ * Does NOT consult `c8ctl.dryRun` — dry-run handling lives in the
+ * `deployCommand` handler so the framework's `dryRun()` helper owns
+ * preview emission. Watch never triggers a dry-run, so this split also
+ * removes a footgun where a stale dry-run flag could suppress a watch
+ * deploy.
+ */
+export async function deployResources(
 	paths: string[],
 	options: {
 		profile?: string;
@@ -265,8 +305,8 @@ export async function deploy(
 		 * Optional cancellation signal. When aborted, an in-flight
 		 * `createDeployment` HTTP request is cancelled via the SDK's
 		 * `CancelablePromise.cancel()`. Cancellation is handled internally:
-		 * if the signal is aborted, `deploy()` returns early without
-		 * surfacing the cancellation as a deploy failure (no
+		 * if the signal is aborted, `deployResources()` returns early
+		 * without surfacing the cancellation as a deploy failure (no
 		 * "Deployment failed" log, no rejection from the awaited promise).
 		 * Callers do not need their own try/catch to suppress aborts.
 		 */
@@ -275,7 +315,6 @@ export async function deploy(
 ): Promise<void> {
 	const logger = getLogger();
 	const tenantId = resolveTenantId(options.profile);
-	const resources: ResourceFile[] = [];
 
 	// ─── Pre-API-call validation and preparation ────────────────────────
 	// These steps run OUTSIDE any try/catch so validation errors bubble
@@ -283,44 +322,12 @@ export async function deploy(
 	// HTTP deploy call (further down) is wrapped in a catch that routes
 	// through `handleDeploymentError` for rich Problem-Detail rendering.
 
-	if (paths.length === 0) {
-		throw new Error(
-			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
-		);
-	}
+	const resources = collectResourcesForPaths(paths);
 
 	// Store the base paths for relative path calculation. Safe to assign
-	// directly now: the empty-paths guard above has already thrown.
+	// directly now: the empty-paths guard inside `collectResourcesForPaths`
+	// has already thrown.
 	const basePaths = paths;
-
-	// Load .c8ignore rules from the working directory
-	const ignoreBaseDir = resolve(process.cwd());
-	const ig = loadIgnoreRules(ignoreBaseDir);
-
-	// Collect all resource files (respecting .c8ignore)
-	paths.forEach((path) => {
-		collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir);
-	});
-
-	if (resources.length === 0) {
-		throw new Error("No BPMN/DMN/Form files found in the specified paths");
-	}
-
-	// Dry-run: emit the would-be API request without executing
-	if (c8ctl.dryRun) {
-		const config = resolveClusterConfig(options.profile);
-		logger.json({
-			dryRun: true,
-			command: "deploy",
-			method: "POST",
-			url: `${config.baseUrl}/deployments`,
-			body: {
-				tenantId,
-				resources: resources.map((r) => ({ name: r.name })),
-			},
-		});
-		return;
-	}
 
 	const client = createClient(options.profile);
 
@@ -775,15 +782,52 @@ function printDeploymentHints(
 	});
 }
 
-// ─── defineCommand wrapper ───────────────────────────────────────────────────
+// ─── defineCommand ───────────────────────────────────────────────────────────
 
-/** Side-effectful: collects files, validates, deploys, and renders its own table output. */
+/**
+ * Side-effectful: collects files, validates, deploys, and renders its own
+ * table output.
+ *
+ * The body lives directly in the handler (per #288): argument-shape
+ * resolution, dry-run preview via the framework's `dryRun()` helper,
+ * and the call into the shared `deployResources` helper that watch also
+ * uses for change-triggered re-deploys.
+ */
 export const deployCommand = defineCommand("deploy", "", async (ctx) => {
+	// Argument shape: `c8 deploy [path...]`. With no positional, default
+	// to cwd. Pinned by tests/unit/deploy-behaviour.test.ts.
 	const paths = ctx.resource
 		? [ctx.resource, ...ctx.positionals]
 		: ctx.positionals.length > 0
 			? ctx.positionals
 			: ["."];
-	await deploy(paths, { profile: ctx.profile });
+
+	// Dry-run preview. Collect resources first so the preview body
+	// reflects what would actually be sent — and so the empty-paths /
+	// no-files guards still surface as thrown errors before we emit.
+	// Uses `ctx.dryRun` and `ctx.tenantId` from the framework rather
+	// than reaching into the global runtime/config layer.
+	if (ctx.dryRun) {
+		const previewResources = collectResourcesForPaths(paths);
+		const dr = dryRun({
+			command: "deploy",
+			method: "POST",
+			endpoint: "/deployments",
+			profile: ctx.profile,
+			body: {
+				tenantId: ctx.tenantId,
+				resources: previewResources.map((r) => ({ name: r.name })),
+			},
+		});
+		if (dr) return dr;
+	}
+
+	// Execute path: only reached when not in dry-run mode (the branch
+	// above returns early). `deployResources` runs its own
+	// `collectResourcesForPaths` internally and renders the success
+	// table. Keeping the helper self-contained avoids threading
+	// pre-collected state between the handler and the shared helper
+	// used by `watch`.
+	await deployResources(paths, { profile: ctx.profile });
 	return { kind: "none" };
 });

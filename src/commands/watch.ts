@@ -7,7 +7,7 @@ import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
-import { deploy } from "./deployments.ts";
+import { deployResources } from "./deployments.ts";
 
 const WATCHED_EXTENSIONS = [".bpmn", ".dmn", ".form"];
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
@@ -124,15 +124,15 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 						const ac = new AbortController();
 						inflightDeploys.add(ac);
 						try {
-							await deploy([fullPath], {
+							await deployResources([fullPath], {
 								profile: ctx.profile,
 								continueOnError: flags.force,
 								continueOnUserError: true,
 								signal: ac.signal,
 							});
 						} catch (error) {
-							// `deploy()` normally returns early when its signal is
-							// aborted, so SIGINT cancellation is not expected to land
+							// `deployResources()` normally returns early when its signal
+							// is aborted, so SIGINT cancellation is not expected to land
 							// here. Keep this as a defensive fallback in case an
 							// aborted deploy ever re-throws — and never log it as a
 							// deploy failure, since the goodbye message is the
