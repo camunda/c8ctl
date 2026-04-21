@@ -16,15 +16,32 @@ import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("MCP Proxy Mock Server Integration Tests", () => {
 	let mockServer: Server;
-	let mockServerPort: number;
 	let mockServerUrl: string;
 	let mockLogger: Logger;
 
-	beforeEach(async () => {
-		// Find an available port and start mock server
-		mockServerPort = 9876 + Math.floor(Math.random() * 1000);
-		mockServerUrl = `http://localhost:${mockServerPort}`;
+	/**
+	 * Stand up a mock HTTP server bound to a kernel-assigned port on
+	 * 127.0.0.1 and publish its URL to `mockServerUrl`. See issue #316
+	 * for why hardcoded or randomly-derived ports are unsafe (port
+	 * collision → silent hang; landing on undici's restricted-ports
+	 * list — e.g. 10080 — → `fetch failed: bad port`). The class-of-defect
+	 * guard lives at `tests/unit/no-hardcoded-listen-port.test.ts`.
+	 */
+	async function startMockServer(
+		handler: (req: IncomingMessage, res: ServerResponse) => void,
+	): Promise<void> {
+		mockServer = createServer(handler);
+		await new Promise<void>((resolve) => {
+			mockServer.listen(0, "127.0.0.1", () => resolve());
+		});
+		const addr = mockServer.address();
+		if (!addr || typeof addr === "string") {
+			throw new Error("mock server did not bind to an inet address");
+		}
+		mockServerUrl = `http://127.0.0.1:${addr.port}`;
+	}
 
+	beforeEach(() => {
 		mockLogger = makeMockLogger();
 	});
 
@@ -39,14 +56,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	test("sends auth headers to remote server", async () => {
 		let capturedAuthHeader: string | string[] | undefined;
 
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((req: IncomingMessage, res: ServerResponse) => {
 			capturedAuthHeader = req.headers.authorization;
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ success: true }));
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -62,13 +75,9 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 404 response from server", async () => {
-		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(404, { "Content-Type": "text/plain" });
 			res.end("Not Found");
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -83,13 +92,9 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles 500 error from server", async () => {
-		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((_req: IncomingMessage, res: ServerResponse) => {
 			res.writeHead(500, { "Content-Type": "text/plain" });
 			res.end("Internal Server Error");
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -108,7 +113,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		let firstAuthHeader: string | string[] | undefined;
 		let secondAuthHeader: string | string[] | undefined;
 
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((req: IncomingMessage, res: ServerResponse) => {
 			if (requestCount === 0) {
 				firstAuthHeader = req.headers.authorization;
 				requestCount++;
@@ -119,10 +124,6 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(JSON.stringify({ success: true }));
 			}
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -173,7 +174,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles slow server response with timeout", async () => {
-		mockServer = createServer(
+		await startMockServer(
 			async (_req: IncomingMessage, res: ServerResponse) => {
 				// Simulate slow response (200ms)
 				await new Promise((resolve) => setTimeout(resolve, 200));
@@ -181,10 +182,6 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 				res.end(JSON.stringify({ success: true }));
 			},
 		);
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -204,14 +201,10 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("successfully completes request within timeout", async () => {
-		mockServer = createServer((_req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((_req: IncomingMessage, res: ServerResponse) => {
 			// Fast response
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ success: true }));
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -232,15 +225,11 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		let capturedContentType: string | string[] | undefined;
 		let capturedCustomHeader: string | string[] | undefined;
 
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((req: IncomingMessage, res: ServerResponse) => {
 			capturedContentType = req.headers["content-type"];
 			capturedCustomHeader = req.headers["x-custom-header"];
 			res.writeHead(200);
 			res.end();
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
@@ -264,7 +253,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		let capturedBody = "";
 		let capturedMethod: string | undefined;
 
-		mockServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+		await startMockServer((req: IncomingMessage, res: ServerResponse) => {
 			capturedMethod = req.method;
 			req.on("data", (chunk) => {
 				capturedBody += chunk.toString();
@@ -273,10 +262,6 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 				res.writeHead(200, { "Content-Type": "application/json" });
 				res.end(JSON.stringify({ received: true }));
 			});
-		});
-
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
 		});
 
 		const mockCamundaClient = makeMockClient({
