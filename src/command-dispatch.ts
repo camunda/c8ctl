@@ -9,6 +9,10 @@
  */
 
 import type { AnyCommandHandler } from "./command-framework.ts";
+import {
+	applyElementTemplateCommand,
+	lintBpmnCommand,
+} from "./commands/bpmn.ts";
 import { completionCommand } from "./commands/completion.ts";
 import { getFormCommand } from "./commands/forms.ts";
 import {
@@ -262,4 +266,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:optimize", openAppCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
+
+	// ── BPMN tooling ──────────────────────────────────────────────────
+	["bpmn:lint", lintBpmnCommand],
+	["bpmn:apply-element-template", applyElementTemplateCommand],
 ]);

@@ -168,9 +168,9 @@ describe("CLI behavioural: cluster plugin completions", () => {
 	});
 });
 
-// ─── bpmn plugin completions ────────────────────────────────────────────────
+// ─── bpmn completions ───────────────────────────────────────────────────────
 
-describe("CLI behavioural: bpmn plugin completions", () => {
+describe("CLI behavioural: bpmn completions", () => {
 	test("bash completion includes bpmn verb", async () => {
 		const result = await c8("completion", "bash");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
