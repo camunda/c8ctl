@@ -114,9 +114,18 @@ describe("CLI behavioural: run", () => {
 		const out = parseJson(result);
 		assert.strictEqual(out.dryRun, true);
 		assert.strictEqual(out.method, "POST");
+		// The URL must mention BOTH underlying API calls (deployment +
+		// process instance). Pre-#288 coverage guard: pins the
+		// composite-endpoint shape so the planned move of the body into
+		// the defineCommand handler cannot silently drop one of them.
+		const url = getUrl(out);
 		assert.ok(
-			getUrl(out).includes("/deployments"),
-			`Expected URL to contain /deployments, got "${out.url}"`,
+			url.includes("/deployments"),
+			`Expected URL to contain /deployments, got "${url}"`,
+		);
+		assert.ok(
+			url.includes("/process-instances"),
+			`Expected URL to contain /process-instances, got "${url}"`,
 		);
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.path, "test.bpmn");
