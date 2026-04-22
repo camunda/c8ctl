@@ -604,6 +604,19 @@ c8 deploy process-v2.bpmn
 
 The CLI will detect duplicate IDs and provide a helpful error message showing which files conflict.
 
+### Default Extensions
+
+When scanning directories, `deploy`, `run`, and `watch` only include files matching these extensions by default:
+
+`.bpmn`, `.dmn`, `.form`, `.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`
+
+Override with `--extensions`:
+
+```bash
+c8 deploy --extensions=.bpmn,.dmn
+c8 watch --extensions=.bpmn,.form
+```
+
 ### Ignoring Files (`.c8ignore`)
 
 When deploying or watching a directory, c8ctl ignores `node_modules/`, `target/`, and `.git/` by default. Add a `.c8ignore` file to your project root for custom patterns (uses `.gitignore` syntax):

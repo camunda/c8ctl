@@ -138,6 +138,14 @@ c8ctl open optimize                    # Open Camunda Optimize in browser
 c8ctl open operate --profile=prod      # Open Operate with a specific profile
 ```
 
+### Default Extensions
+
+When scanning directories, `deploy`, `run`, and `watch` only include files with these extensions:
+
+`.bpmn`, `.dmn`, `.form`, `.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`
+
+Use `--extensions` to override (e.g. `--extensions=.bpmn,.dmn`).
+
 ### Ignoring Files (`.c8ignore`)
 
 When scanning directories for deployment artifacts, c8ctl automatically ignores:
