@@ -237,6 +237,54 @@ async function readTemplate(templatePath: string): Promise<ElementTemplate> {
 	return JSON.parse(content);
 }
 
+/**
+ * Apply an element template to a BPMN element using bpmn-js-headless
+ * and bpmn-js-element-templates directly (same libraries as Web/Desktop Modeler).
+ *
+ * These libraries use extensionless ESM imports that Node.js cannot resolve
+ * without a bundler. We load a pre-built CJS vendor bundle instead
+ * (built via `npm run build:vendor`).
+ */
+async function applyElementTemplate(
+	xml: string,
+	template: ElementTemplate,
+	elementId: string,
+): Promise<string> {
+	const { createRequire } = await import("node:module");
+	const require = createRequire(import.meta.url);
+
+	// In dev (src/commands/) and dist (dist/commands/) the vendor bundle
+	// is always at dist/vendor/ relative to the project root.
+	const projectRoot = resolvePath(import.meta.dirname, "..", "..");
+	const vendorPath = resolvePath(
+		projectRoot,
+		"dist",
+		"vendor",
+		"bpmn-element-templates.cjs",
+	);
+	// biome-ignore lint/suspicious/noExplicitAny: untyped vendor bundle
+	const vendor: any = require(vendorPath);
+	const { Modeler, CloudElementTemplatesCoreModule, ZeebeModdleExtension } =
+		vendor;
+
+	const modeler = new Modeler({
+		additionalModules: [CloudElementTemplatesCoreModule],
+		moddleExtensions: { zeebe: ZeebeModdleExtension },
+	});
+
+	await modeler.importXML(xml);
+
+	const elementRegistry = modeler.get("elementRegistry");
+	const element = elementRegistry.get(elementId);
+
+	const elementTemplates = modeler.get("elementTemplates");
+	elementTemplates.set([template]);
+	elementTemplates.applyTemplate(element, template);
+
+	const result = await modeler.saveXML({ format: true });
+	return result.xml;
+}
+
 // ---------------------------------------------------------------------------
 // Apply command
 // ---------------------------------------------------------------------------
@@ -271,34 +319,15 @@ export const applyElementTemplateCommand = defineCommand(
 			setBindingNames = applySetOverrides(template.properties, setArgs);
 		}
 
-		const templateJson = JSON.stringify(template);
-
-		// Apply template
-		// @ts-expect-error — element-templates-cli has no type declarations
-		const { applyTemplate } = await import("element-templates-cli");
-
-		// Suppress noisy internal "unhandled error in event listener" warnings
-		const originalConsoleError = console.error;
-		console.error = (...errorArgs: unknown[]) => {
-			if (
-				typeof errorArgs[0] === "string" &&
-				errorArgs[0].includes("unhandled error in event listener")
-			)
-				return;
-			originalConsoleError(...errorArgs);
-		};
-
 		let resultXml: string;
 		try {
-			resultXml = await applyTemplate(input.xml, templateJson, elementId);
+			resultXml = await applyElementTemplate(input.xml, template, elementId);
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);
 			const hint = message.includes("Cannot read properties of undefined")
 				? `Element '${elementId}' not found in the BPMN diagram`
 				: message;
 			throw new Error(`Error applying template: ${hint}`);
-		} finally {
-			console.error = originalConsoleError;
 		}
 
 		// Warn about --set values that were dropped due to unmet conditions
