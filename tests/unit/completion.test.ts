@@ -95,7 +95,7 @@ describe("Completion Module", () => {
 		// Check for verbs with descriptions (derived from registry)
 		assert.ok(output.includes("'list:List resources"));
 		assert.ok(output.includes("'get:Get resource by key'"));
-		assert.ok(output.includes("'deploy:Deploy BPMN/DMN/forms'"));
+		assert.ok(output.includes("'deploy:Deploy resources'"));
 		assert.ok(output.includes("'upgrade:Upgrade a plugin'"));
 		assert.ok(output.includes("'downgrade:Downgrade a plugin"));
 		assert.ok(
@@ -139,7 +139,7 @@ describe("Completion Module", () => {
 
 		// Check for commands (descriptions from registry)
 		assert.ok(output.includes("'list' -d 'List resources"));
-		assert.ok(output.includes("'deploy' -d 'Deploy BPMN/DMN/forms'"));
+		assert.ok(output.includes("'deploy' -d 'Deploy resources'"));
 
 		// Check for flags
 		assert.ok(output.includes("-s h -l help"));

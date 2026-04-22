@@ -515,7 +515,7 @@ c8 deploy ./process1.bpmn ./process2.bpmn ./decision.dmn
 # Deploy current directory
 c8 deploy
 
-# Deploys all BPMN/DMN/Form files in specified directory and subdirectories
+# Deploys all files in specified directory and subdirectories
 c8 deploy ./my-project
 
 # Building block folders (containing _bb- in name) are prioritized and marked with 🧱
@@ -603,6 +603,19 @@ c8 deploy process-v2.bpmn
 ```
 
 The CLI will detect duplicate IDs and provide a helpful error message showing which files conflict.
+
+### Default Extensions
+
+When scanning directories, `deploy`, `run`, and `watch` only include files matching these extensions by default:
+
+`.bpmn`, `.dmn`, `.form`, `.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`
+
+Override with `--extensions`:
+
+```bash
+c8 deploy --extensions=.bpmn,.dmn
+c8 watch --extensions=.bpmn,.form
+```
 
 ### Ignoring Files (`.c8ignore`)
 

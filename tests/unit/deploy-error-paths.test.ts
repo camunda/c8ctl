@@ -93,7 +93,7 @@ describe("deploy: behavioural — error paths flow through the framework", () =>
 			`expected exit 1, got ${result.status}. stderr:\n${result.stderr}`,
 		);
 		assert.ok(
-			result.stderr.includes("No BPMN/DMN/Form files found"),
+			result.stderr.includes("No deployable files found"),
 			`expected original error message in stderr. stderr:\n${result.stderr}`,
 		);
 		assert.ok(

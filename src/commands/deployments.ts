@@ -13,8 +13,8 @@ import { normalizeToError, SilentError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { getLogger, isRecord } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
+import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
-const RESOURCE_EXTENSIONS = [".bpmn", ".dmn", ".form"];
 const PROCESS_APPLICATION_FILE = ".process-application";
 
 /**
@@ -127,6 +127,7 @@ function collectResourceFiles(
 	basePath?: string,
 	ig?: Ignore,
 	ignoreBaseDir?: string,
+	force?: boolean,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -143,18 +144,19 @@ function collectResourceFiles(
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
 			return collected;
 		}
-		const ext = extname(dirPath);
-		if (RESOURCE_EXTENSIONS.includes(ext)) {
-			const groupInfo = findGroupRoot(dirPath, basePath);
-			collected.push({
-				path: dirPath,
-				name: basename(dirPath),
-				content: readFileSync(dirPath),
-				isBuildingBlock: groupInfo.type === "bb",
-				isProcessApplication: groupInfo.type === "pa",
-				groupPath: groupInfo.root || undefined,
-			});
+		// Unless --force, reject files with unsupported extensions
+		if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(dirPath))) {
+			return collected;
 		}
+		const groupInfo = findGroupRoot(dirPath, basePath);
+		collected.push({
+			path: dirPath,
+			name: basename(dirPath),
+			content: readFileSync(dirPath),
+			isBuildingBlock: groupInfo.type === "bb",
+			isProcessApplication: groupInfo.type === "pa",
+			groupPath: groupInfo.root || undefined,
+		});
 		return collected;
 	}
 
@@ -190,8 +192,16 @@ function collectResourceFiles(
 					regularFolders.push(fullPath);
 				}
 			} else if (entryStat.isFile()) {
+				// Skip hidden files (e.g. .c8ignore, .process-application)
+				if (entry.startsWith(".")) {
+					return;
+				}
 				// Skip ignored files
 				if (ig && ignoreBaseDir && isIgnored(ig, fullPath, ignoreBaseDir)) {
+					return;
+				}
+				// Unless --force, only collect files with known deployable extensions
+				if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(fullPath))) {
 					return;
 				}
 				files.push(fullPath);
@@ -200,23 +210,27 @@ function collectResourceFiles(
 
 		// Process files in current directory first
 		files.forEach((file) => {
-			const ext = extname(file);
-			if (RESOURCE_EXTENSIONS.includes(ext)) {
-				const groupInfo = findGroupRoot(file, basePath);
-				collected.push({
-					path: file,
-					name: basename(file),
-					content: readFileSync(file),
-					isBuildingBlock: groupInfo.type === "bb",
-					isProcessApplication: groupInfo.type === "pa",
-					groupPath: groupInfo.root || undefined,
-				});
-			}
+			const groupInfo = findGroupRoot(file, basePath);
+			collected.push({
+				path: file,
+				name: basename(file),
+				content: readFileSync(file),
+				isBuildingBlock: groupInfo.type === "bb",
+				isProcessApplication: groupInfo.type === "pa",
+				groupPath: groupInfo.root || undefined,
+			});
 		});
 
 		// Process building block folders first (prioritized)
 		bbFolders.forEach((bbFolder) => {
-			collectResourceFiles(bbFolder, collected, basePath, ig, ignoreBaseDir);
+			collectResourceFiles(
+				bbFolder,
+				collected,
+				basePath,
+				ig,
+				ignoreBaseDir,
+				force,
+			);
 		});
 
 		// Then process regular folders
@@ -227,6 +241,7 @@ function collectResourceFiles(
 				basePath,
 				ig,
 				ignoreBaseDir,
+				force,
 			);
 		});
 	}
@@ -261,7 +276,10 @@ function findDuplicateDefinitionIds(
  * Shared between `deployCommand` (used for both the dry-run preview and
  * the execute path via `deployResources`) and `deployResources` itself.
  */
-function collectResourcesForPaths(paths: string[]): ResourceFile[] {
+function collectResourcesForPaths(
+	paths: string[],
+	force?: boolean,
+): ResourceFile[] {
 	if (paths.length === 0) {
 		throw new Error(
 			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
@@ -274,11 +292,11 @@ function collectResourcesForPaths(paths: string[]): ResourceFile[] {
 
 	const resources: ResourceFile[] = [];
 	paths.forEach((path) => {
-		collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir);
+		collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir, force);
 	});
 
 	if (resources.length === 0) {
-		throw new Error("No BPMN/DMN/Form files found in the specified paths");
+		throw new Error("No deployable files found in the specified paths");
 	}
 
 	return resources;
@@ -301,6 +319,7 @@ export async function deployResources(
 		profile?: string;
 		continueOnError?: boolean;
 		continueOnUserError?: boolean;
+		force?: boolean;
 		/**
 		 * Optional cancellation signal. When aborted, an in-flight
 		 * `createDeployment` HTTP request is cancelled via the SDK's
@@ -322,7 +341,7 @@ export async function deployResources(
 	// HTTP deploy call (further down) is wrapped in a catch that routes
 	// through `handleDeploymentError` for rich Problem-Detail rendering.
 
-	const resources = collectResourcesForPaths(paths);
+	const resources = collectResourcesForPaths(paths, options.force);
 
 	// Store the base paths for relative path calculation. Safe to assign
 	// directly now: the empty-paths guard inside `collectResourcesForPaths`
@@ -688,13 +707,8 @@ function formatDeploymentErrorDetail(detail: string): string {
 	let inFileError = false;
 
 	for (const line of lines) {
-		if (
-			line.startsWith("'") &&
-			(line.includes(".bpmn") ||
-				line.includes(".dmn") ||
-				line.includes(".form"))
-		) {
-			// This is a file-specific error
+		if (line.startsWith("'") && line.includes("':")) {
+			// This is a file-specific error (detected by 'filename': pattern)
 			inFileError = true;
 			result.push(`  📄 ${line}`);
 		} else if (line.startsWith("- Element:")) {
@@ -793,7 +807,7 @@ function printDeploymentHints(
  * and the call into the shared `deployResources` helper that watch also
  * uses for change-triggered re-deploys.
  */
-export const deployCommand = defineCommand("deploy", "", async (ctx) => {
+export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// Argument shape: `c8 deploy [path...]`. With no positional, default
 	// to cwd. Pinned by tests/unit/deploy-behaviour.test.ts.
 	const paths = ctx.resource
@@ -808,7 +822,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx) => {
 	// Uses `ctx.dryRun` and `ctx.tenantId` from the framework rather
 	// than reaching into the global runtime/config layer.
 	if (ctx.dryRun) {
-		const previewResources = collectResourcesForPaths(paths);
+		const previewResources = collectResourcesForPaths(paths, flags.force);
 		const dr = dryRun({
 			command: "deploy",
 			method: "POST",
@@ -828,6 +842,6 @@ export const deployCommand = defineCommand("deploy", "", async (ctx) => {
 	// table. Keeping the helper self-contained avoids threading
 	// pre-collected state between the handler and the shared helper
 	// used by `watch`.
-	await deployResources(paths, { profile: ctx.profile });
+	await deployResources(paths, { profile: ctx.profile, force: flags.force });
 	return { kind: "none" };
 });

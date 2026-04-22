@@ -8,8 +8,8 @@ import { defineCommand } from "../command-framework.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { deployResources } from "./deployments.ts";
+import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
-const WATCHED_EXTENSIONS = [".bpmn", ".dmn", ".form"];
 export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
@@ -26,6 +26,16 @@ const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
  */
 export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	const { logger } = ctx;
+
+	// Parse --extensions flag into an array of extensions
+	const watchedExtensions =
+		flags.extensions && String(flags.extensions).trim()
+			? String(flags.extensions)
+					.split(",")
+					.map((e) => e.trim())
+					.filter(Boolean)
+					.map((e) => (e.startsWith(".") ? e : `.${e}`))
+			: DEPLOYABLE_EXTENSIONS;
 
 	// watch treats resource + positionals as path varargs; default to "."
 	const rawPaths = ctx.resource
@@ -47,7 +57,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-	logger.info(`📋 Monitoring extensions: ${WATCHED_EXTENSIONS.join(", ")}`);
+	logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
 	if (flags.force) {
 		logger.info(
 			"🔒 Force mode: will continue watching after deployment errors",
@@ -80,7 +90,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const file = filename;
 
 				const ext = extname(filename);
-				if (!WATCHED_EXTENSIONS.includes(ext)) {
+				if (!watchedExtensions.includes(ext)) {
 					return;
 				}
 

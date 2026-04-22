@@ -338,9 +338,7 @@ describe("Help Module", () => {
 
 		const output = consoleLogSpy.join("\n");
 		assert.ok(output.includes("c8ctl deploy"));
-		assert.ok(output.includes("BPMN"));
-		assert.ok(output.includes("DMN"));
-		assert.ok(output.includes("form"));
+		assert.ok(output.includes("Deploy files"));
 	});
 
 	test("showCommandHelp shows run help", () => {

@@ -49,20 +49,6 @@ describe("Deploy Traversal", () => {
 		assert.ok(!regularFolder.includes("_bb-"));
 	});
 
-	test("file extensions are recognized correctly", () => {
-		const bpmnFile = "process.bpmn";
-		const dmnFile = "decision.dmn";
-		const formFile = "form.form";
-		const txtFile = "readme.txt";
-
-		const validExtensions = [".bpmn", ".dmn", ".form"];
-
-		assert.ok(validExtensions.some((ext) => bpmnFile.endsWith(ext)));
-		assert.ok(validExtensions.some((ext) => dmnFile.endsWith(ext)));
-		assert.ok(validExtensions.some((ext) => formFile.endsWith(ext)));
-		assert.ok(!validExtensions.some((ext) => txtFile.endsWith(ext)));
-	});
-
 	test("sorting prioritizes building blocks", () => {
 		const resources = [
 			{ path: "/regular/file1.bpmn", isBuildingBlock: false },

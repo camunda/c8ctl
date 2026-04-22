@@ -291,4 +291,56 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 			rmSync(testWatchDir, { recursive: true, force: true });
 		}
 	});
+
+	test("watch --extensions monitors only specified file types", async () => {
+		const testWatchDir = mkdtempSync(join(tmpdir(), "c8ctl-watch-ext-"));
+		// Only watch .xml files
+		const watch = startWatch(testWatchDir, dataDir, ["--extensions=.xml"]);
+
+		try {
+			const initialized = await pollUntil(
+				async () => watch.getOutput().includes("Monitoring extensions: .xml"),
+				5000,
+				POLL_INTERVAL_MS,
+			);
+			assert.ok(
+				initialized,
+				`Expected watcher to show .xml in monitored extensions.\nActual output:\n${watch.getOutput()}`,
+			);
+
+			// Step 1: copy a .bpmn file — this should be IGNORED by the watcher
+			copyFileSync(VALID_BPMN, join(testWatchDir, "ignored.bpmn"));
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+			assert.ok(
+				!watch.getOutput().includes("Change detected: ignored.bpmn"),
+				`Watcher should NOT detect .bpmn files when --extensions=.xml is set.\nActual output:\n${watch.getOutput()}`,
+			);
+
+			// Step 2: copy a valid BPMN as a .xml file — this SHOULD be detected and deployed
+			copyFileSync(VALID_BPMN, join(testWatchDir, "process.xml"));
+			const detected = await pollUntil(
+				async () => watch.getOutput().includes("Change detected: process.xml"),
+				POLL_TIMEOUT_MS,
+				POLL_INTERVAL_MS,
+			);
+			assert.ok(
+				detected,
+				`Expected watcher to detect .xml file change.\nActual output:\n${watch.getOutput()}`,
+			);
+
+			// Step 3: verify that the .xml file was successfully deployed
+			const deployed = await pollUntil(
+				async () => watch.getOutput().includes("Deployment successful"),
+				POLL_TIMEOUT_MS,
+				POLL_INTERVAL_MS,
+			);
+			assert.ok(
+				deployed,
+				`Expected successful deployment of .xml file.\nActual output:\n${watch.getOutput()}`,
+			);
+		} finally {
+			await watch.kill();
+			rmSync(testWatchDir, { recursive: true, force: true });
+		}
+	});
 });
