@@ -38,7 +38,9 @@
     "test:unit": "node --experimental-strip-types --test tests/unit/*.test.ts",
     "test:integration": "node --experimental-strip-types --test tests/integration/*.test.ts",
     "dev": "node src/index.ts",
-    "cli": "node src/index.ts"
+    "cli": "node src/index.ts",
+    "sync:readme": "node --experimental-strip-types scripts/sync-readme-commands.ts",
+    "sync:readme:check": "node --experimental-strip-types scripts/sync-readme-commands.ts --check"
   },
   "keywords": [
     "camunda",
