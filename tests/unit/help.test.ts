@@ -4,6 +4,7 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
 import {
 	getVersion,
 	showCommandHelp,
@@ -1209,44 +1210,30 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 		return tail.slice(0, end).join("\n");
 	}
 
-	test("Flags section contains only the six global flags", () => {
+	test("Flags section contains exactly the GLOBAL_FLAGS keys", () => {
 		showHelp();
 		const flagsSection = extractFlagsSection(consoleLogSpy.join("\n"));
 
-		// Must include every GLOBAL_FLAGS key.
-		for (const flag of [
-			"--help",
-			"--version",
-			"--profile",
-			"--dry-run",
-			"--verbose",
-			"--fields",
-		]) {
-			assert.ok(
-				flagsSection.includes(flag),
-				`top-level Flags section should include ${flag}`,
-			);
-		}
-
-		// Must NOT include any command-specific flag previously surfaced via
-		// FlagDef.showInTopLevelHelp. Class-scoped guard: any new opt-in would
-		// be caught by the `(use with '` substring check below; this list pins
-		// today's known leaks.
-		for (const flag of [
-			"--xml",
-			"--userTask",
-			"--processDefinition",
-			"--awaitCompletion",
-			"--fetchVariables",
-			"--requestTimeout",
-			"--from ",
-			"--local ",
-		]) {
-			assert.ok(
-				!flagsSection.includes(flag),
-				`top-level Flags section should NOT include command-specific ${flag.trim()}`,
-			);
-		}
+		// Strongest possible guard: extract every `--<name>` token that
+		// appears as a flag declaration in the section, then compare it
+		// against the registry. Any command-specific flag that leaks in
+		// (e.g. --xml, --id, --variables, --awaitCompletion, --from, --local)
+		// will fail this assertion regardless of which one it is.
+		const flagDeclarations = (
+			flagsSection.match(/^\s*(--[a-zA-Z][\w-]*)/gm) ?? []
+		)
+			.map((m) => m.trim())
+			.sort();
+		const expected = Object.keys(GLOBAL_FLAGS)
+			.map((name) => `--${name}`)
+			.sort();
+		assert.deepStrictEqual(
+			flagDeclarations,
+			expected,
+			"top-level Flags section must contain exactly the GLOBAL_FLAGS keys — " +
+				"any command-specific flag leaking in (e.g. --id, --variables, --xml, " +
+				"--awaitCompletion, --from, --local) is a regression of #321",
+		);
 	});
 
 	test("top-level help output contains no '(use with' context hints", () => {

@@ -295,8 +295,10 @@ function generateCommandLines(): string {
 }
 
 /**
- * Generate the Flags section from GLOBAL_FLAGS and select verb-specific flags.
- * Uses the curated descriptions from the registry.
+ * Generate the top-level Flags section.
+ *
+ * Per #321, this lists ONLY truly global flags (the keys in GLOBAL_FLAGS).
+ * Command-specific flags are surfaced via `c8ctl help <verb>` instead.
  */
 function generateFlagsSection(): string {
 	// Per #321, the top-level Flags section lists ONLY truly global flags.
