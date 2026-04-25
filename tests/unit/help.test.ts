@@ -1310,3 +1310,68 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 		});
 	}
 });
+
+// Reviewer follow-up on PR #322: SEARCH_FLAGS were duplicated under every
+// resource block in `c8ctl help list` / `c8ctl help search`. They are a
+// coherent shared shape across all list/search resources, so they belong in
+// a single dedicated section per verb — not repeated 13× per resource.
+describe("Search flags are consolidated into a single section per verb (#322 follow-up)", () => {
+	let consoleLogSpy: string[];
+	let originalLog: typeof console.log;
+
+	beforeEach(() => {
+		consoleLogSpy = [];
+		originalLog = console.log;
+		console.log = (...args: unknown[]) => {
+			consoleLogSpy.push(
+				args
+					.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+					.join(" "),
+			);
+		};
+	});
+
+	afterEach(() => {
+		console.log = originalLog;
+	});
+
+	const sharedSearchFlags = [
+		"--sortBy",
+		"--asc",
+		"--desc",
+		"--limit",
+		"--between",
+		"--dateField",
+	];
+
+	for (const verb of ["list", "search"] as const) {
+		for (const flag of sharedSearchFlags) {
+			test(`c8ctl help ${verb} emits ${flag} exactly once`, async () => {
+				await showCommandHelp(verb);
+				const output = consoleLogSpy.join("\n");
+				// Match the flag only when it appears as a flag declaration
+				// (start of a line, after indent) — not when it is referenced
+				// inside another flag's description text.
+				const flagLine = new RegExp(
+					`^\\s*${flag.replace(/-/g, "\\-")}\\b`,
+					"gm",
+				);
+				const occurrences = (output.match(flagLine) ?? []).length;
+				assert.strictEqual(
+					occurrences,
+					1,
+					`'c8ctl help ${verb}' must emit ${flag} once (consolidated section), got ${occurrences} occurrences`,
+				);
+			});
+		}
+
+		test(`c8ctl help ${verb} groups search flags under a dedicated header`, async () => {
+			await showCommandHelp(verb);
+			const output = consoleLogSpy.join("\n");
+			assert.ok(
+				/Search flags/i.test(output),
+				`'c8ctl help ${verb}' must include a 'Search flags' section header`,
+			);
+		});
+	}
+});

@@ -672,12 +672,9 @@ function showGenericVerbHelp(verb: string): void {
 				}
 			}
 
-			// SEARCH_FLAGS for list/search commands
-			if (verb === "list" || verb === "search") {
-				for (const [name, flagDef] of flagEntries(SEARCH_FLAGS)) {
-					lines.push(formatFlag(name, flagDef, FLAG_COL));
-				}
-			}
+			// SEARCH_FLAGS are NOT emitted per resource — they are a coherent
+			// shared shape across all list/search resources and are rendered
+			// once, below, under a dedicated "Search flags" section.
 
 			// --profile always applicable
 			lines.push(
@@ -703,7 +700,18 @@ function showGenericVerbHelp(verb: string): void {
 		}
 	}
 
-	// Verb-level flags (excluding search flags already shown per-resource)
+	// Consolidated Search flags section for list/search verbs.
+	// SEARCH_FLAGS describe a coherent shared shape that applies to every
+	// list/search resource — render once here instead of repeating per resource.
+	if (verb === "list" || verb === "search") {
+		lines.push("");
+		lines.push("Search flags (apply to all resources above):");
+		for (const [name, flagDef] of flagEntries(SEARCH_FLAGS)) {
+			lines.push(formatFlag(name, flagDef, FLAG_COL));
+		}
+	}
+
+	// Verb-level flags (excluding search flags already shown in their dedicated section)
 	const verbFlags = Object.entries(def.flags).filter(
 		([name]) => !(name in SEARCH_FLAGS),
 	);
