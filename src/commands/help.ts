@@ -134,7 +134,8 @@ function buildHelpJson(
 		}
 	}
 
-	// Derive global flags from GLOBAL_FLAGS + SEARCH_FLAGS
+	// Derive global flags from GLOBAL_FLAGS only.
+	// Per #321, SEARCH_FLAGS belong in `searchFlags`, not `globalFlags`.
 	const globalFlags: HelpFlag[] = [];
 	for (const [name, def] of flagEntries(GLOBAL_FLAGS)) {
 		globalFlags.push({
@@ -144,17 +145,18 @@ function buildHelpJson(
 			...(def.short ? { short: `-${def.short}` } : {}),
 		});
 	}
+
+	// Derive search flags from SEARCH_FLAGS plus list/search resourceFlags
+	const searchFlags: HelpFlag[] = [];
+	const seenSearchFlags = new Set<string>();
 	for (const [name, def] of Object.entries(SEARCH_FLAGS)) {
-		globalFlags.push({
+		seenSearchFlags.add(name);
+		searchFlags.push({
 			flag: `--${name}`,
 			type: def.type,
 			description: def.description,
 		});
 	}
-
-	// Derive search flags from list/search resourceFlags
-	const searchFlags: HelpFlag[] = [];
-	const seenSearchFlags = new Set<string>();
 	for (const verb of ["list", "search"] as const) {
 		const cmdDef = lookupVerb(verb);
 		if (cmdDef?.resourceFlags) {
@@ -297,43 +299,15 @@ function generateCommandLines(): string {
  * Uses the curated descriptions from the registry.
  */
 function generateFlagsSection(): string {
+	// Per #321, the top-level Flags section lists ONLY truly global flags.
+	// Command-specific flags belong in `c8ctl help <verb>`.
 	const lines: string[] = [];
 	const FLAG_COL = 36;
-
-	// Global flags first
 	for (const [name, def] of flagEntries(GLOBAL_FLAGS)) {
 		const flag = def.short ? `--${name}, -${def.short}` : `--${name}`;
 		const typeHint = def.type === "string" ? ` <${name}>` : "";
 		lines.push(`  ${(flag + typeHint).padEnd(FLAG_COL)}${def.description}`);
 	}
-
-	// Collect notable verb-specific flags marked with showInTopLevelHelp
-	const seen = new Set<string>(Object.keys(GLOBAL_FLAGS));
-
-	function addFlag(name: string, flagDef: FlagDef): void {
-		if (!flagDef.showInTopLevelHelp || seen.has(name)) return;
-		seen.add(name);
-		const flag = flagDef.short ? `--${name}, --${flagDef.short}` : `--${name}`;
-		const typeHint = flagDef.type === "string" ? ` <${name}>` : "";
-		const hint = flagDef.helpHint ? ` (${flagDef.helpHint})` : "";
-		lines.push(
-			`  ${(flag + typeHint).padEnd(FLAG_COL)}${flagDef.description}${hint}`,
-		);
-	}
-
-	for (const [, cmd] of registryEntries()) {
-		for (const [name, flagDef] of flagEntries(cmd.flags)) {
-			addFlag(name, flagDef);
-		}
-		if (cmd.resourceFlags) {
-			for (const resourceFlags of Object.values(cmd.resourceFlags)) {
-				for (const [name, flagDef] of flagEntries(resourceFlags)) {
-					addFlag(name, flagDef);
-				}
-			}
-		}
-	}
-
 	return lines.join("\n");
 }
 
