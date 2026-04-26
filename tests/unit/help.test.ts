@@ -4,6 +4,7 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
 import {
 	getVersion,
 	showCommandHelp,
@@ -75,18 +76,19 @@ describe("Help Module", () => {
 		assert.ok(output.includes("inc"));
 		assert.ok(output.includes("msg"));
 
-		// Check for flags
+		// Check for global flags only (per #321 — command-specific flags belong
+		// in `c8ctl help <verb>`, not the top-level Flags section).
 		assert.ok(output.includes("--profile"));
-		assert.ok(output.includes("--variables"));
-		assert.ok(output.includes("--awaitCompletion"));
-		assert.ok(output.includes("--fetchVariables"));
-		assert.ok(output.includes("--requestTimeout"));
+		assert.ok(output.includes("--version"));
+		assert.ok(output.includes("--help"));
+		assert.ok(output.includes("--dry-run"));
+		assert.ok(output.includes("--verbose"));
+		assert.ok(output.includes("--fields"));
+		// Search flags still render in their dedicated Search Flags section.
 		assert.ok(output.includes("--sortBy"));
 		assert.ok(output.includes("--asc"));
 		assert.ok(output.includes("--desc"));
 		assert.ok(output.includes("--limit"));
-		assert.ok(output.includes("--version"));
-		assert.ok(output.includes("--help"));
 
 		// Check for case-insensitive search flags
 		assert.ok(output.includes("--iname"));
@@ -1160,4 +1162,214 @@ describe("Help Module", () => {
 		assert.ok(deleteCmd, "commands should include delete");
 		assert.strictEqual(deleteCmd.mutating, true, "delete should be mutating");
 	});
+});
+
+// ─── #321: top-level Flags scoped to GLOBAL_FLAGS only ──────────────────────
+//
+// Class-scoped regression guard for camunda/c8ctl#321. The top-level
+// `c8ctl --help` Flags section must list only truly global flags. Every
+// command-specific flag must continue to be reachable via `c8ctl help <verb>`.
+// Tests in this block were written red-first against the pre-fix code path;
+// they pin the contract so the same category of leak cannot recur.
+
+describe("Top-level help is scoped to global flags (#321)", () => {
+	let consoleLogSpy: string[];
+	let originalLog: typeof console.log;
+	let originalOutputMode: typeof c8ctl.outputMode;
+
+	beforeEach(() => {
+		consoleLogSpy = [];
+		originalLog = console.log;
+		originalOutputMode = c8ctl.outputMode;
+		c8ctl.outputMode = "text";
+		console.log = (...args: unknown[]) => {
+			consoleLogSpy.push(args.join(" "));
+		};
+	});
+
+	afterEach(() => {
+		console.log = originalLog;
+		c8ctl.outputMode = originalOutputMode;
+	});
+
+	/** Extract the `Flags:` section (between the `Flags:` heading and the next blank-line-then-heading). */
+	function extractFlagsSection(output: string): string {
+		const lines = output.split("\n");
+		const start = lines.findIndex((l) => l.trim() === "Flags:");
+		assert.ok(start >= 0, "expected a Flags: section in help output");
+		const tail = lines.slice(start + 1);
+		// Section ends at the first blank line followed by another heading
+		// (e.g. "Search Flags:"), or at end of output.
+		let end = tail.length;
+		for (let i = 0; i < tail.length - 1; i++) {
+			if (tail[i].trim() === "" && /^[A-Z][^\n]*:$/.test(tail[i + 1])) {
+				end = i;
+				break;
+			}
+		}
+		return tail.slice(0, end).join("\n");
+	}
+
+	test("Flags section contains exactly the GLOBAL_FLAGS keys", () => {
+		showHelp();
+		const flagsSection = extractFlagsSection(consoleLogSpy.join("\n"));
+
+		// Strongest possible guard: extract every `--<name>` token that
+		// appears as a flag declaration in the section, then compare it
+		// against the registry. Any command-specific flag that leaks in
+		// (e.g. --xml, --id, --variables, --awaitCompletion, --from, --local)
+		// will fail this assertion regardless of which one it is.
+		const flagDeclarations = (
+			flagsSection.match(/^\s*(--[a-zA-Z][\w-]*)/gm) ?? []
+		)
+			.map((m) => m.trim())
+			.sort();
+		const expected = Object.keys(GLOBAL_FLAGS)
+			.map((name) => `--${name}`)
+			.sort();
+		assert.deepStrictEqual(
+			flagDeclarations,
+			expected,
+			"top-level Flags section must contain exactly the GLOBAL_FLAGS keys — " +
+				"any command-specific flag leaking in (e.g. --id, --variables, --xml, " +
+				"--awaitCompletion, --from, --local) is a regression of #321",
+		);
+	});
+
+	test("top-level help output contains no '(use with' context hints", () => {
+		showHelp();
+		const output = consoleLogSpy.join("\n");
+		assert.ok(
+			!output.includes("(use with '"),
+			"per #321, the '(use with ...)' parenthetical workaround must not appear in top-level help",
+		);
+	});
+
+	test("JSON help payload globalFlags contains exactly the GLOBAL_FLAGS keys", () => {
+		c8ctl.outputMode = "json";
+		// The existing console.log spy from beforeEach continues to capture
+		// logger.json output in this test harness after the mode switch.
+		showHelp();
+		const raw = consoleLogSpy.join("\n");
+		const parsed: { globalFlags: Array<{ flag: string }> } = JSON.parse(raw);
+		const flagNames = parsed.globalFlags.map((f) => f.flag).sort();
+		const expected = Object.keys(GLOBAL_FLAGS)
+			.map((name) => `--${name}`)
+			.sort();
+		assert.deepStrictEqual(
+			flagNames,
+			expected,
+			"JSON globalFlags must equal the GLOBAL_FLAGS keys (no command-specific leak)",
+		);
+	});
+
+	// Class-scoped guard: every flag previously opted in via showInTopLevelHelp
+	// must remain reachable through `c8ctl help <verb>`. Iterating the list
+	// proves the per-resource help surface covers the whole class, not just
+	// one instance — so a future addition to that list is automatically tested
+	// once it's also added here.
+	const perVerbFlagCoverage: Array<[verb: string, flag: string]> = [
+		["get", "--xml"],
+		["get", "--userTask"],
+		["get", "--processDefinition"],
+		["get", "--variables"],
+		["create", "--id"],
+		["create", "--awaitCompletion"],
+		["create", "--fetchVariables"],
+		["create", "--requestTimeout"],
+		["set", "--variables"],
+		["set", "--local"],
+		["load", "--from"],
+	];
+
+	for (const [verb, flag] of perVerbFlagCoverage) {
+		test(`c8ctl help ${verb} surfaces ${flag} (was previously top-level)`, async () => {
+			await showCommandHelp(verb);
+			const output = consoleLogSpy.join("\n");
+			// Match the flag as a declaration at the start of a line so short
+			// flag names (e.g. --id) are not satisfied by longer flags that
+			// happen to contain them as a substring (e.g. --iid, --identityType).
+			const flagDecl = new RegExp(
+				`^\\s*${flag.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`,
+				"m",
+			);
+			assert.ok(
+				flagDecl.test(output),
+				`'c8ctl help ${verb}' must surface ${flag}; otherwise removing it from top-level help loses discoverability`,
+			);
+		});
+	}
+});
+
+// Reviewer follow-up on PR #322: SEARCH_FLAGS were duplicated under every
+// resource block in `c8ctl help list` / `c8ctl help search`. They are a
+// coherent shared shape across all list/search resources, so they belong in
+// a single dedicated section per verb — not repeated 13× per resource.
+describe("Search flags are consolidated into a single section per verb (#322 follow-up)", () => {
+	let consoleLogSpy: string[];
+	let originalLog: typeof console.log;
+	let originalOutputMode: typeof c8ctl.outputMode;
+
+	beforeEach(() => {
+		consoleLogSpy = [];
+		originalLog = console.log;
+		originalOutputMode = c8ctl.outputMode;
+		// Force text mode — other suites may flip outputMode to 'json' and the
+		// runtime mutation would otherwise leak into this suite (order-dependent).
+		c8ctl.outputMode = "text";
+		console.log = (...args: unknown[]) => {
+			consoleLogSpy.push(
+				args
+					.map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+					.join(" "),
+			);
+		};
+	});
+
+	afterEach(() => {
+		console.log = originalLog;
+		c8ctl.outputMode = originalOutputMode;
+	});
+
+	const sharedSearchFlags = [
+		"--sortBy",
+		"--asc",
+		"--desc",
+		"--limit",
+		"--between",
+		"--dateField",
+	];
+
+	for (const verb of ["list", "search"] as const) {
+		for (const flag of sharedSearchFlags) {
+			test(`c8ctl help ${verb} emits ${flag} exactly once`, async () => {
+				await showCommandHelp(verb);
+				const output = consoleLogSpy.join("\n");
+				// Match the flag only when it appears as a flag declaration
+				// (start of a line, after indent) — not when it is referenced
+				// inside another flag's description text. Escape regex metachars
+				// (including backslash) defensively, even though SEARCH_FLAGS
+				// names contain none today.
+				const flagLine = new RegExp(
+					`^\\s*${flag.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`,
+					"gm",
+				);
+				const occurrences = (output.match(flagLine) ?? []).length;
+				assert.strictEqual(
+					occurrences,
+					1,
+					`'c8ctl help ${verb}' must emit ${flag} once (consolidated section), got ${occurrences} occurrences`,
+				);
+			});
+		}
+
+		test(`c8ctl help ${verb} groups search flags under a dedicated header`, async () => {
+			await showCommandHelp(verb);
+			const output = consoleLogSpy.join("\n");
+			assert.ok(
+				/Search flags/i.test(output),
+				`'c8ctl help ${verb}' must include a 'Search flags' section header`,
+			);
+		});
+	}
 });

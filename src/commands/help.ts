@@ -134,7 +134,8 @@ function buildHelpJson(
 		}
 	}
 
-	// Derive global flags from GLOBAL_FLAGS + SEARCH_FLAGS
+	// Derive global flags from GLOBAL_FLAGS only.
+	// Per #321, SEARCH_FLAGS belong in `searchFlags`, not `globalFlags`.
 	const globalFlags: HelpFlag[] = [];
 	for (const [name, def] of flagEntries(GLOBAL_FLAGS)) {
 		globalFlags.push({
@@ -144,17 +145,18 @@ function buildHelpJson(
 			...(def.short ? { short: `-${def.short}` } : {}),
 		});
 	}
+
+	// Derive search flags from SEARCH_FLAGS plus list/search resourceFlags
+	const searchFlags: HelpFlag[] = [];
+	const seenSearchFlags = new Set<string>();
 	for (const [name, def] of Object.entries(SEARCH_FLAGS)) {
-		globalFlags.push({
+		seenSearchFlags.add(name);
+		searchFlags.push({
 			flag: `--${name}`,
 			type: def.type,
 			description: def.description,
 		});
 	}
-
-	// Derive search flags from list/search resourceFlags
-	const searchFlags: HelpFlag[] = [];
-	const seenSearchFlags = new Set<string>();
 	for (const verb of ["list", "search"] as const) {
 		const cmdDef = lookupVerb(verb);
 		if (cmdDef?.resourceFlags) {
@@ -293,47 +295,21 @@ function generateCommandLines(): string {
 }
 
 /**
- * Generate the Flags section from GLOBAL_FLAGS and select verb-specific flags.
- * Uses the curated descriptions from the registry.
+ * Generate the top-level Flags section.
+ *
+ * Per #321, this lists ONLY truly global flags (the keys in GLOBAL_FLAGS).
+ * Command-specific flags are surfaced via `c8ctl help <verb>` instead.
  */
 function generateFlagsSection(): string {
+	// Per #321, the top-level Flags section lists ONLY truly global flags.
+	// Command-specific flags belong in `c8ctl help <verb>`.
 	const lines: string[] = [];
 	const FLAG_COL = 36;
-
-	// Global flags first
 	for (const [name, def] of flagEntries(GLOBAL_FLAGS)) {
 		const flag = def.short ? `--${name}, -${def.short}` : `--${name}`;
 		const typeHint = def.type === "string" ? ` <${name}>` : "";
 		lines.push(`  ${(flag + typeHint).padEnd(FLAG_COL)}${def.description}`);
 	}
-
-	// Collect notable verb-specific flags marked with showInTopLevelHelp
-	const seen = new Set<string>(Object.keys(GLOBAL_FLAGS));
-
-	function addFlag(name: string, flagDef: FlagDef): void {
-		if (!flagDef.showInTopLevelHelp || seen.has(name)) return;
-		seen.add(name);
-		const flag = flagDef.short ? `--${name}, --${flagDef.short}` : `--${name}`;
-		const typeHint = flagDef.type === "string" ? ` <${name}>` : "";
-		const hint = flagDef.helpHint ? ` (${flagDef.helpHint})` : "";
-		lines.push(
-			`  ${(flag + typeHint).padEnd(FLAG_COL)}${flagDef.description}${hint}`,
-		);
-	}
-
-	for (const [, cmd] of registryEntries()) {
-		for (const [name, flagDef] of flagEntries(cmd.flags)) {
-			addFlag(name, flagDef);
-		}
-		if (cmd.resourceFlags) {
-			for (const resourceFlags of Object.values(cmd.resourceFlags)) {
-				for (const [name, flagDef] of flagEntries(resourceFlags)) {
-					addFlag(name, flagDef);
-				}
-			}
-		}
-	}
-
 	return lines.join("\n");
 }
 
@@ -698,12 +674,9 @@ function showGenericVerbHelp(verb: string): void {
 				}
 			}
 
-			// SEARCH_FLAGS for list/search commands
-			if (verb === "list" || verb === "search") {
-				for (const [name, flagDef] of flagEntries(SEARCH_FLAGS)) {
-					lines.push(formatFlag(name, flagDef, FLAG_COL));
-				}
-			}
+			// SEARCH_FLAGS are NOT emitted per resource — they are a coherent
+			// shared shape across all list/search resources and are rendered
+			// once, below, under a dedicated "Search flags" section.
 
 			// --profile always applicable
 			lines.push(
@@ -729,9 +702,31 @@ function showGenericVerbHelp(verb: string): void {
 		}
 	}
 
-	// Verb-level flags (excluding search flags already shown per-resource)
+	// Consolidated Search flags section for list/search verbs.
+	// SEARCH_FLAGS describe a coherent shared shape that applies to every
+	// list/search resource — render once here instead of repeating per resource.
+	if (verb === "list" || verb === "search") {
+		lines.push("");
+		lines.push("Search flags (apply to all resources above):");
+		for (const [name, flagDef] of flagEntries(SEARCH_FLAGS)) {
+			lines.push(formatFlag(name, flagDef, FLAG_COL));
+		}
+	}
+
+	// Verb-level flags: exclude SEARCH_FLAGS (rendered above in their dedicated
+	// section) and any flag names already rendered under a per-resource block
+	// via def.resourceFlags. Without this filter, verbs like list/search would
+	// repeat every per-resource flag here, making the section extremely noisy.
+	const excludedVerbFlagNames = new Set(Object.keys(SEARCH_FLAGS));
+	if (def.resourceFlags) {
+		for (const resourceFlags of Object.values(def.resourceFlags)) {
+			for (const name of Object.keys(resourceFlags)) {
+				excludedVerbFlagNames.add(name);
+			}
+		}
+	}
 	const verbFlags = Object.entries(def.flags).filter(
-		([name]) => !(name in SEARCH_FLAGS),
+		([name]) => !excludedVerbFlagNames.has(name),
 	);
 	if (verbFlags.length > 0) {
 		lines.push("");

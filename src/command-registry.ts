@@ -43,10 +43,6 @@ export interface FlagDef {
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: validators return branded types that vary per flag
 	validate?: (value: string) => any;
-	/** When true, this flag appears in the top-level `c8ctl help` Flags section. */
-	showInTopLevelHelp?: boolean;
-	/** Context hint shown in the top-level help (e.g. "use with 'get pd'"). */
-	helpHint?: string;
 	/** Rich description for agent-facing help (AI/programmatic consumers). Shown in Agent Flags section. */
 	agentDescription?: string;
 	/** Scope hint for agent-facing help (e.g. "all commands", "all list/search/get commands"). */
@@ -435,8 +431,6 @@ export const GET_PD_FLAGS = {
 	xml: {
 		type: "boolean",
 		description: "Get BPMN XML (process definitions)",
-		showInTopLevelHelp: true,
-		helpHint: "use with 'get pd'",
 	},
 } as const satisfies Record<string, FlagDef>;
 
@@ -444,8 +438,6 @@ const GET_FORM_FLAGS = {
 	userTask: {
 		type: "boolean",
 		description: "Get form for user task",
-		showInTopLevelHelp: true,
-		helpHint: "use with 'get form'",
 	},
 	ut: {
 		type: "boolean",
@@ -454,8 +446,6 @@ const GET_FORM_FLAGS = {
 	processDefinition: {
 		type: "boolean",
 		description: "Get form for process definition",
-		showInTopLevelHelp: true,
-		helpHint: "use with 'get form'",
 	},
 	pd: {
 		type: "boolean",
@@ -467,8 +457,6 @@ const GET_PI_FLAGS = {
 	variables: {
 		type: "boolean",
 		description: "Include variables in output",
-		showInTopLevelHelp: true,
-		helpHint: "use with 'get pi'",
 	},
 } as const satisfies Record<string, FlagDef>;
 
@@ -821,8 +809,6 @@ export const COMMAND_REGISTRY = {
 			id: {
 				type: "string",
 				description: "Process definition ID (alias for --processDefinitionId)",
-				showInTopLevelHelp: true,
-				helpHint: "alias for --bpmnProcessId",
 			},
 			bpmnProcessId: {
 				type: "string",
@@ -832,19 +818,14 @@ export const COMMAND_REGISTRY = {
 			awaitCompletion: {
 				type: "boolean",
 				description: "Wait for process to complete",
-				showInTopLevelHelp: true,
-				helpHint: "use with 'create pi'",
 			},
 			fetchVariables: {
 				type: "boolean",
 				description: "Fetch result variables on completion",
-				showInTopLevelHelp: true,
 			},
 			requestTimeout: {
 				type: "string",
 				description: "Await timeout in milliseconds",
-				showInTopLevelHelp: true,
-				helpHint: "use with --awaitCompletion",
 			},
 			// Identity user
 			username: {
@@ -1171,15 +1152,11 @@ export const COMMAND_REGISTRY = {
 				type: "string",
 				description: "JSON object of variables to set (required)",
 				required: true,
-				showInTopLevelHelp: true,
-				helpHint: "use with 'set variable'",
 			},
 			local: {
 				type: "boolean",
 				description:
 					"Set variables in local scope only (default: propagate to outermost scope)",
-				showInTopLevelHelp: true,
-				helpHint: "use with 'set variable'",
 			},
 		},
 		resourcePositionals: {
@@ -1412,8 +1389,6 @@ export const COMMAND_REGISTRY = {
 			from: {
 				type: "string",
 				description: "Load plugin from URL",
-				showInTopLevelHelp: true,
-				helpHint: "use with 'load plugin'",
 			},
 		},
 		resourcePositionals: {
