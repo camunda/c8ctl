@@ -1245,7 +1245,7 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 		);
 	});
 
-	test("JSON help payload globalFlags contains only GLOBAL_FLAGS keys", () => {
+	test("JSON help payload globalFlags contains exactly the GLOBAL_FLAGS keys", () => {
 		c8ctl.outputMode = "json";
 		// Re-spy after mode flip — the runtime helper uses logger.json which
 		// also writes via console.log in this test harness.
@@ -1253,16 +1253,12 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 		const raw = consoleLogSpy.join("\n");
 		const parsed: { globalFlags: Array<{ flag: string }> } = JSON.parse(raw);
 		const flagNames = parsed.globalFlags.map((f) => f.flag).sort();
+		const expected = Object.keys(GLOBAL_FLAGS)
+			.map((name) => `--${name}`)
+			.sort();
 		assert.deepStrictEqual(
 			flagNames,
-			[
-				"--dry-run",
-				"--fields",
-				"--help",
-				"--profile",
-				"--verbose",
-				"--version",
-			],
+			expected,
 			"JSON globalFlags must equal the GLOBAL_FLAGS keys (no command-specific leak)",
 		);
 	});
@@ -1290,8 +1286,15 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 		test(`c8ctl help ${verb} surfaces ${flag} (was previously top-level)`, async () => {
 			await showCommandHelp(verb);
 			const output = consoleLogSpy.join("\n");
+			// Match the flag as a declaration at the start of a line so short
+			// flag names (e.g. --id) are not satisfied by longer flags that
+			// happen to contain them as a substring (e.g. --iid, --identityType).
+			const flagDecl = new RegExp(
+				`^\\s*${flag.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`,
+				"m",
+			);
 			assert.ok(
-				output.includes(flag),
+				flagDecl.test(output),
 				`'c8ctl help ${verb}' must surface ${flag}; otherwise removing it from top-level help loses discoverability`,
 			);
 		});
@@ -1305,10 +1308,15 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 describe("Search flags are consolidated into a single section per verb (#322 follow-up)", () => {
 	let consoleLogSpy: string[];
 	let originalLog: typeof console.log;
+	let originalOutputMode: typeof c8ctl.outputMode;
 
 	beforeEach(() => {
 		consoleLogSpy = [];
 		originalLog = console.log;
+		originalOutputMode = c8ctl.outputMode;
+		// Force text mode — other suites may flip outputMode to 'json' and the
+		// runtime mutation would otherwise leak into this suite (order-dependent).
+		c8ctl.outputMode = "text";
 		console.log = (...args: unknown[]) => {
 			consoleLogSpy.push(
 				args
@@ -1320,6 +1328,7 @@ describe("Search flags are consolidated into a single section per verb (#322 fol
 
 	afterEach(() => {
 		console.log = originalLog;
+		c8ctl.outputMode = originalOutputMode;
 	});
 
 	const sharedSearchFlags = [
@@ -1338,9 +1347,11 @@ describe("Search flags are consolidated into a single section per verb (#322 fol
 				const output = consoleLogSpy.join("\n");
 				// Match the flag only when it appears as a flag declaration
 				// (start of a line, after indent) — not when it is referenced
-				// inside another flag's description text.
+				// inside another flag's description text. Escape regex metachars
+				// (including backslash) defensively, even though SEARCH_FLAGS
+				// names contain none today.
 				const flagLine = new RegExp(
-					`^\\s*${flag.replace(/-/g, "\\-")}\\b`,
+					`^\\s*${flag.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`,
 					"gm",
 				);
 				const occurrences = (output.match(flagLine) ?? []).length;

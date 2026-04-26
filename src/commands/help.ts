@@ -713,9 +713,20 @@ function showGenericVerbHelp(verb: string): void {
 		}
 	}
 
-	// Verb-level flags (excluding search flags already shown in their dedicated section)
+	// Verb-level flags: exclude SEARCH_FLAGS (rendered above in their dedicated
+	// section) and any flag names already rendered under a per-resource block
+	// via def.resourceFlags. Without this filter, verbs like list/search would
+	// repeat every per-resource flag here, making the section extremely noisy.
+	const excludedVerbFlagNames = new Set(Object.keys(SEARCH_FLAGS));
+	if (def.resourceFlags) {
+		for (const resourceFlags of Object.values(def.resourceFlags)) {
+			for (const name of Object.keys(resourceFlags)) {
+				excludedVerbFlagNames.add(name);
+			}
+		}
+	}
 	const verbFlags = Object.entries(def.flags).filter(
-		([name]) => !(name in SEARCH_FLAGS),
+		([name]) => !excludedVerbFlagNames.has(name),
 	);
 	if (verbFlags.length > 0) {
 		lines.push("");
