@@ -1247,8 +1247,8 @@ describe("Top-level help is scoped to global flags (#321)", () => {
 
 	test("JSON help payload globalFlags contains exactly the GLOBAL_FLAGS keys", () => {
 		c8ctl.outputMode = "json";
-		// Re-spy after mode flip — the runtime helper uses logger.json which
-		// also writes via console.log in this test harness.
+		// The existing console.log spy from beforeEach continues to capture
+		// logger.json output in this test harness after the mode switch.
 		showHelp();
 		const raw = consoleLogSpy.join("\n");
 		const parsed: { globalFlags: Array<{ flag: string }> } = JSON.parse(raw);
