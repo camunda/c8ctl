@@ -22,5 +22,11 @@
 			"vue": "none"
 		}
 	},
-	"plugins": ["./plugins/no-unsafe-type-assertion.grit"]
+	"plugins": ["./plugins/no-unsafe-type-assertion.grit"],
+	"overrides": [
+		{
+			"includes": ["src/commands/**/*.ts"],
+			"plugins": ["./plugins/no-process-exit-in-commands.grit"]
+		}
+	]
 }
