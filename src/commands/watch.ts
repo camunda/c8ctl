@@ -56,15 +56,6 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	const ignoreBaseDir = resolve(process.cwd());
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
-	logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-	logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
-	if (flags.force) {
-		logger.info(
-			"🔒 Force mode: will continue watching after deployment errors",
-		);
-	}
-	logger.info("Press Ctrl+C to stop watching\n");
-
 	// Keep track of recently deployed files to avoid duplicate deploys
 	const recentlyDeployed = new Map<string, number>();
 	// Debounce timers per file to let writes settle before deploying
@@ -193,6 +184,23 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			inflightDeploys.clear();
 			resolveSignal();
 		});
+
+		// Emit the readiness banner ONLY AFTER both the fs watchers and the
+		// SIGINT handler are registered. Tests poll the "Watching for
+		// changes" line as a readiness signal before dropping a file or
+		// sending SIGINT; emitting it earlier (before fs.watch() returns)
+		// races the file-system watcher registration on slow CI runners
+		// (fs.watch backends differ per platform — inotify on Linux,
+		// FSEvents on macOS, ReadDirectoryChangesW on Windows) and the
+		// file event is silently lost.
+		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
+		logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
+		if (flags.force) {
+			logger.info(
+				"🔒 Force mode: will continue watching after deployment errors",
+			);
+		}
+		logger.info("Press Ctrl+C to stop watching\n");
 	});
 
 	return { kind: "never" };
