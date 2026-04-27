@@ -7,32 +7,31 @@
 
 import assert from "node:assert";
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
-	COMMAND_REGISTRY,
-	GLOBAL_FLAGS,
-	RESOURCE_ALIASES,
-	SEARCH_FLAGS,
-} from "../../src/command-registry.ts";
+	END_MARKER,
+	filterVerbSpecificFlags,
+	formatFlag,
+	generate,
+	renderFlagsTable,
+	renderPositionals,
+	resourceDisplay,
+	START_MARKER,
+	uniqueAliases,
+} from "../../scripts/sync-readme-commands.ts";
 import type {
 	CommandDef,
 	FlagDef,
 	PositionalDef,
 } from "../../src/command-registry.ts";
 import {
-	generate,
-	formatFlag,
-	renderFlagsTable,
-	renderPositionals,
-	resourceDisplay,
-	uniqueAliases,
-	filterVerbSpecificFlags,
-	START_MARKER,
-	END_MARKER,
-} from "../../scripts/sync-readme-commands.ts";
+	COMMAND_REGISTRY,
+	GLOBAL_FLAGS,
+	SEARCH_FLAGS,
+} from "../../src/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -198,6 +197,7 @@ describe("generate() includes positional arguments", () => {
 		for (const [resource, positionals] of Object.entries(
 			def.resourcePositionals,
 		)) {
+			// biome-ignore lint/plugin: positionals are readonly PositionalDef[] from the registry but typed as unknown via Object.entries
 			const pos = positionals as readonly PositionalDef[];
 			for (const p of pos) {
 				test(`verb "${verb}" resource "${resource}" shows positional "<${p.name}>"`, () => {
@@ -219,6 +219,7 @@ describe("generate() includes resource-specific flags", () => {
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (!def.resourceFlags) continue;
 		for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
+			// biome-ignore lint/plugin: rFlags are Record<string, FlagDef> from the registry but typed as unknown via Object.entries
 			const flags = rFlags as Record<string, FlagDef>;
 			if (Object.keys(flags).length === 0) continue;
 			test(`verb "${verb}" shows resource "${resource}" flags section`, () => {
@@ -251,10 +252,7 @@ describe("filterVerbSpecificFlags()", () => {
 
 		const result = filterVerbSpecificFlags(mockDef);
 		assert.ok(!("help" in result), "help should be excluded (global flag)");
-		assert.ok(
-			"customFlag" in result,
-			"customFlag should be included",
-		);
+		assert.ok("customFlag" in result, "customFlag should be included");
 	});
 
 	test("excludes search flags", () => {
@@ -351,10 +349,7 @@ describe("renderFlagsTable()", () => {
 			verbose: { type: "boolean", description: "Verbose mode" },
 		});
 		assert.strictEqual(result[0], "| Flag | Type | Required | Description |");
-		assert.strictEqual(
-			result[1],
-			"|------|------|----------|-------------|",
-		);
+		assert.strictEqual(result[1], "|------|------|----------|-------------|");
 		assert.ok(result[2]?.includes("Yes"));
 		assert.ok(result[2]?.includes("The name"));
 		assert.ok(result[3]?.includes("Verbose mode"));
@@ -366,9 +361,7 @@ describe("renderFlagsTable()", () => {
 
 describe("renderPositionals()", () => {
 	test("renders required positional", () => {
-		const result = renderPositionals([
-			{ name: "key", required: true },
-		]);
+		const result = renderPositionals([{ name: "key", required: true }]);
 		assert.strictEqual(result, "`<key>` (required)");
 	});
 
@@ -455,10 +448,7 @@ describe("README.md markers", () => {
 	test("start marker appears before end marker", () => {
 		const startIdx = readme.indexOf(START_MARKER);
 		const endIdx = readme.indexOf(END_MARKER);
-		assert.ok(
-			startIdx < endIdx,
-			"Start marker must appear before end marker",
-		);
+		assert.ok(startIdx < endIdx, "Start marker must appear before end marker");
 	});
 });
 
