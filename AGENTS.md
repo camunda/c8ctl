@@ -160,7 +160,7 @@ Never skip the lint and type-check steps before pushing.
 
 This is **not** a performance choice — it is a correctness choice. Do not remove the flag from `test:integration` without reading [#312](https://github.com/camunda/c8ctl/issues/312) and [#182](https://github.com/camunda/c8ctl/issues/182) first.
 
-Background: per-file isolation spawns one subprocess per test file and structure-clones results back to the parent. This trips [nodejs/node#56802](https://github.com/nodejs/node/issues/56802) intermittently, surfacing as `Error: Unable to deserialize cloned data due to invalid or unsupported version.` The defect is in the IPC channel itself, so reducing parallelism (`--concurrency=1`, serialising files) does not fix it — only removing the IPC channel does.
+Background: per-file isolation spawns one subprocess per test file and structure-clones results back to the parent. This trips [nodejs/node#56802](https://github.com/nodejs/node/issues/56802) intermittently, surfacing as `Error: Unable to deserialize cloned data due to invalid or unsupported version.` The defect is in the IPC channel itself, so reducing parallelism (`--test-concurrency=1`, serialising files) does not fix it — only removing the IPC channel does.
 
 The flag was originally added in [#189](https://github.com/camunda/c8ctl/pull/189), removed in `2bae796` (PR #282) on the assumption that Node 24.12.0 had fixed the underlying bug, and reinstated for the integration suite after the failure recurred. The Node bug is still open — verify with the upstream issue before removing the flag again.
 
