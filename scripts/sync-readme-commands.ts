@@ -111,10 +111,10 @@ export function generate(): string {
 	lines.push("## Command Reference");
 	lines.push("");
 	lines.push(
-		"> Auto-generated from [`COMMAND_REGISTRY`](https://github.com/camunda/c8ctl/blob/main/src/command-registry.ts). Do not edit manually.",
+		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
 	);
 	lines.push(
-		`> Run \`node --experimental-strip-types scripts/sync-readme-commands.ts\` to update.`,
+		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
 	);
 	lines.push("");
 

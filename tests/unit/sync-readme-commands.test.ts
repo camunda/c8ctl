@@ -50,9 +50,9 @@ describe("generate() output structure", () => {
 		assert.ok(output.startsWith("## Command Reference"));
 	});
 
-	test("contains auto-generated notice", () => {
-		assert.ok(output.includes("Auto-generated from"));
-		assert.ok(output.includes("COMMAND_REGISTRY"));
+	test("contains auto-generated notice as HTML comment", () => {
+		assert.ok(output.includes("<!-- Auto-generated from COMMAND_REGISTRY"));
+		assert.ok(output.includes("-->"));
 	});
 
 	test("contains Global Flags section", () => {
