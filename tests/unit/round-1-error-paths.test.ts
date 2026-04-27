@@ -131,14 +131,15 @@ describe("run: behavioural — unextractable process id flows through the framew
 			result.stderr.includes("Could not extract process ID from BPMN file"),
 			`expected original error message in stderr. stderr:\n${result.stderr}`,
 		);
-		// `run.ts` has its own try/catch wrapping the inner async function; the
-		// inner `handleCommandError(logger, "Failed to run process", error)`
-		// fires first. Its presence in stderr proves the throw replaced the
-		// previous `process.exit(1)` (which would have killed the process
-		// before the inner catch could format anything).
+		// Post-#288: the run handler throws plain `Error` and the
+		// framework's `handleCommandError` wrapper renders the prefix
+		// using the verb (resource is empty for the resourceless `run`
+		// command), so the prefix is "Failed to run". This proves the
+		// error flowed through the centralised framework wrapper rather
+		// than terminating the process directly via `process.exit(1)`.
 		assert.ok(
-			result.stderr.includes("Failed to run process"),
-			`expected framework prefix 'Failed to run process' in stderr, proving the error flowed through handleCommandError instead of process.exit(1). stderr:\n${result.stderr}`,
+			result.stderr.includes("Failed to run"),
+			`expected framework prefix 'Failed to run' in stderr, proving the error flowed through handleCommandError instead of process.exit(1). stderr:\n${result.stderr}`,
 		);
 	});
 });

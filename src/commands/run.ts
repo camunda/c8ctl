@@ -1,5 +1,10 @@
 /**
- * Run command - Deploy and create process instance in one step
+ * Run command — deploy a BPMN file and start a process instance in one step.
+ *
+ * Per #288, the body lives directly in the `defineCommand` handler:
+ * dry-run preview via the framework's `dryRun()` helper, validation
+ * up-front, and `throw` on every error path so the framework's
+ * `handleCommandError` wrapper owns process termination.
  */
 
 import { readFileSync } from "node:fs";
@@ -8,110 +13,97 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { createClient, emitDryRun } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
+import { defineCommand, dryRun } from "../command-framework.ts";
 import { resolveTenantId } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger } from "../logger.ts";
 import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
 /**
- * Extract process ID from BPMN file
+ * Extract process ID from BPMN file content.
  */
 function extractProcessId(bpmnContent: string): string | null {
 	const match = bpmnContent.match(/process[^>]+id="([^"]+)"/);
 	return match ? match[1] : null;
 }
 
-/**
- * Run - deploy and start process instance
- */
-export async function run(
-	path: string,
-	options: {
-		profile?: string;
-		variables?: string;
-		force?: boolean;
-	},
-): Promise<void> {
-	if (
-		emitDryRun({
-			command: "run",
-			method: "POST",
-			endpoint: "/deployments + /process-instances",
-			profile: options.profile,
-			body: { path, variables: options.variables },
-		})
-	)
-		return;
-	const logger = getLogger();
+// ─── defineCommand ───────────────────────────────────────────────────────────
 
-	// Validate file extension unless --force is set
+/**
+ * Side-effectful: deploys a BPMN file and creates a process instance,
+ * logging progress inline. Self-rendering, so returns `{ kind: "none" }`.
+ */
+export const runCommand = defineCommand("run", "", async (ctx, flags) => {
+	const path = ctx.resource;
+
+	// Dry-run preview comes first, mirroring the pre-#288 order pinned by
+	// `tests/unit/form-topology-run-behaviour.test.ts`. The body shape
+	// `{ path, variables }` is part of that contract.
+	const dr = dryRun({
+		command: "run",
+		method: "POST",
+		endpoint: "/deployments + /process-instances",
+		profile: ctx.profile,
+		body: { path, variables: flags.variables },
+	});
+	if (dr) return dr;
+
+	// Validate file extension unless --force is set.
 	const ext = extname(path);
-	if (!options.force && ext && !DEPLOYABLE_EXTENSIONS.includes(ext)) {
+	if (!flags.force && ext && !DEPLOYABLE_EXTENSIONS.includes(ext)) {
 		throw new Error(
 			`Unsupported file extension "${ext}". Use --force to deploy any file type.`,
 		);
 	}
 
-	const client = createClient(options.profile);
-	const tenantId = resolveTenantId(options.profile);
-
-	try {
-		// Read BPMN file
-		const content = readFileSync(path, "utf-8");
-		const processId = extractProcessId(content);
-
-		if (!processId) {
-			throw new Error("Could not extract process ID from BPMN file");
+	// Parse --variables up-front, before any I/O. Pre-#288 this happened
+	// after the deploy network call, which made the bad-JSON path
+	// untestable in unit tests and wasted a deploy round-trip on a
+	// user-fixable input error. Validate at the boundary, where it
+	// belongs.
+	let variables: Record<string, unknown> | undefined;
+	if (flags.variables !== undefined) {
+		try {
+			variables = JSON.parse(flags.variables);
+		} catch (error) {
+			throw new Error(
+				`Invalid JSON for variables: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
-
-		logger.info(`Deploying ${path}...`);
-
-		// Deploy the BPMN file - convert to File object with proper MIME type
-		const fileName = basename(path) || "process.bpmn";
-		const deployResult = await client.createDeployment({
-			tenantId: TenantId.assumeExists(tenantId),
-			resources: [
-				new File([Buffer.from(content)], fileName, { type: "application/xml" }),
-			],
-		});
-		logger.success(
-			"Deployment successful",
-			deployResult.deploymentKey.toString(),
-		);
-
-		// Create process instance
-		logger.info(`Creating process instance for ${processId}...`);
-
-		let variables: Record<string, unknown> | undefined;
-		if (options.variables) {
-			try {
-				variables = JSON.parse(options.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-			}
-		}
-
-		const createResult = await client.createProcessInstance({
-			processDefinitionId: ProcessDefinitionId.assumeExists(processId),
-			tenantId: TenantId.assumeExists(tenantId),
-			...(variables !== undefined && { variables }),
-		});
-		logger.success("Process instance created", createResult.processInstanceKey);
-	} catch (error) {
-		handleCommandError(logger, "Failed to run process", error);
 	}
-}
 
-// ─── defineCommand wrapper ───────────────────────────────────────────────────
+	// Read BPMN file and extract process ID.
+	const content = readFileSync(path, "utf-8");
+	const processId = extractProcessId(content);
+	if (!processId) {
+		throw new Error("Could not extract process ID from BPMN file");
+	}
 
-/** Side-effectful: deploys a file and creates a process instance, logging progress inline. */
-export const runCommand = defineCommand("run", "", async (ctx, flags) => {
-	await run(ctx.resource, {
-		profile: ctx.profile,
-		variables: flags.variables,
-		force: flags.force,
+	const { client, logger } = ctx;
+	const tenantId = resolveTenantId(ctx.profile);
+
+	logger.info(`Deploying ${path}...`);
+
+	// Deploy the BPMN file. Convert to a File object with the correct
+	// MIME type so the multipart boundary the SDK builds is well-formed.
+	const fileName = basename(path) || "process.bpmn";
+	const deployResult = await client.createDeployment({
+		tenantId: TenantId.assumeExists(tenantId),
+		resources: [
+			new File([Buffer.from(content)], fileName, { type: "application/xml" }),
+		],
 	});
+	logger.success(
+		"Deployment successful",
+		deployResult.deploymentKey.toString(),
+	);
+
+	// Create process instance.
+	logger.info(`Creating process instance for ${processId}...`);
+	const createResult = await client.createProcessInstance({
+		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
+		tenantId: TenantId.assumeExists(tenantId),
+		...(variables !== undefined && { variables }),
+	});
+	logger.success("Process instance created", createResult.processInstanceKey);
+
 	return { kind: "none" };
 });
