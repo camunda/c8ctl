@@ -154,6 +154,18 @@ Never skip the lint and type-check steps before pushing.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
 - `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
 
+#### Test process isolation — `--experimental-test-isolation=none` for integration tests
+
+`tests/unit/*.test.ts` runs with the default per-file process isolation of `node:test`. `tests/integration/*.test.ts` runs with `--experimental-test-isolation=none` (single process for all integration files).
+
+This is **not** a performance choice — it is a correctness choice. Do not remove the flag from `test:integration` without reading [#312](https://github.com/camunda/c8ctl/issues/312) and [#182](https://github.com/camunda/c8ctl/issues/182) first.
+
+Background: per-file isolation spawns one subprocess per test file and structure-clones results back to the parent. This trips [nodejs/node#56802](https://github.com/nodejs/node/issues/56802) intermittently, surfacing as `Error: Unable to deserialize cloned data due to invalid or unsupported version.` The defect is in the IPC channel itself, so reducing parallelism (`--test-concurrency=1`, serialising files) does not fix it — only removing the IPC channel does.
+
+The flag was originally added in [#189](https://github.com/camunda/c8ctl/pull/189), removed in `2bae796` (PR #282) on the assumption that Node 24.12.0 had fixed the underlying bug, and reinstated for the integration suite after the failure recurred. The Node bug is still open — verify with the upstream issue before removing the flag again.
+
+The flag is **not** applied to `test:unit` because the unit suite has 66 files and isolation gives a 22s vs 10m+ wall-clock win. The IPC bug fires there too in principle, but the unit suite has been observed to be stable in practice and the perf delta is too large to give up. If `test:unit` ever starts hitting the same error, apply the same flag to it as well.
+
 ### Implementation details
 
 - always make sure that CLI commands, resources and options are reflected in
