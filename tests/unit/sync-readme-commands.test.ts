@@ -22,11 +22,7 @@ import {
 	START_MARKER,
 	uniqueAliases,
 } from "../../scripts/sync-readme-commands.ts";
-import type {
-	CommandDef,
-	FlagDef,
-	PositionalDef,
-} from "../../src/command-registry.ts";
+import type { CommandDef } from "../../src/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
@@ -37,6 +33,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, "../..");
 const README_PATH = resolve(ROOT, "README.md");
+
+/** Extract the generated output section for a specific verb heading */
+function verbSection(output: string, verb: string): string {
+	const heading = `#### \`${verb}\``;
+	const start = output.indexOf(heading);
+	if (start === -1) return "";
+	const nextHeading = output.indexOf("\n#### ", start + heading.length);
+	return nextHeading === -1
+		? output.slice(start)
+		: output.slice(start, nextHeading);
+}
 
 /** Widened registry for iteration */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
@@ -217,19 +224,16 @@ describe("generate() includes positional arguments", () => {
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (!def.resourcePositionals) continue;
-		for (const [resource, positionals] of Object.entries(
-			def.resourcePositionals,
-		)) {
-			// biome-ignore lint/plugin: positionals are readonly PositionalDef[] from the registry but typed as unknown via Object.entries
-			const pos = positionals as readonly PositionalDef[];
-			for (const p of pos) {
-				test(`verb "${verb}" resource "${resource}" shows positional "<${p.name}>"`, () => {
-					assert.ok(
-						output.includes(`<${p.name}>`),
-						`Missing positional "<${p.name}>" for ${verb}/${resource}`,
-					);
-				});
-			}
+		for (const resource of Object.keys(def.resourcePositionals)) {
+			const pos = def.resourcePositionals[resource];
+			const expectedLine = `- **${resource}:** ${renderPositionals(pos)}`;
+			test(`verb "${verb}" resource "${resource}" shows its positional arguments line`, () => {
+				const section = verbSection(output, verb);
+				assert.ok(
+					section.includes(expectedLine),
+					`Missing positional arguments line "${expectedLine}" for ${verb}/${resource}`,
+				);
+			});
 		}
 	}
 });
@@ -241,13 +245,13 @@ describe("generate() includes resource-specific flags", () => {
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		if (!def.resourceFlags) continue;
-		for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
-			// biome-ignore lint/plugin: rFlags are Record<string, FlagDef> from the registry but typed as unknown via Object.entries
-			const flags = rFlags as Record<string, FlagDef>;
+		for (const resource of Object.keys(def.resourceFlags)) {
+			const flags = def.resourceFlags[resource];
 			if (Object.keys(flags).length === 0) continue;
 			test(`verb "${verb}" shows resource "${resource}" flags section`, () => {
+				const section = verbSection(output, verb);
 				assert.ok(
-					output.includes(`<code>${resource}</code>`),
+					section.includes(`<code>${resource}</code>`),
 					`Missing resource flag section for "${resource}" in verb "${verb}"`,
 				);
 			});
