@@ -304,7 +304,7 @@ export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flag
   const { client, profile, logger } = ctx;
 
   // 1. Dry-run check — must come BEFORE any I/O. Returns a DryRunResult
-  //    if `--dry-run` was passed, or undefined to continue.
+  //    if `--dry-run` was passed, or `null` to continue.
   const dr = dryRun({
     command: "myverb my-resource",
     method: "POST",
@@ -323,8 +323,13 @@ export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flag
   const result = await client.doSomething({ key: args.key });
 
   // 5. Return a CommandResult — the framework renders it (text, JSON,
-  //    field filtering). Never call logger.success / logger.json
-  //    inline as the terminal output.
+  //    field filtering). For commands that flow through framework
+  //    rendering, prefer the typed kinds (`list`, `get`, `success`, …)
+  //    over inline `logger.success` / `logger.json`. Side-effectful
+  //    commands that handle their own output (e.g. `deploy`, `run`,
+  //    `open` — multi-step progress + final summary) may return
+  //    `{ kind: "none" }` and emit directly via `logger`. Long-running
+  //    handlers return `{ kind: "never" }` (see below).
   return { kind: "get", data: result };
 });
 ```
@@ -369,15 +374,15 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 
 #### Enforcement (don't drift back)
 
-Three lints/tests enforce the shape:
+The shape is enforced by three lints/tests. Some of these are scaffolded under follow-up PRs (#334, #336) — once those land alongside this doc, all references below resolve to files on `main`.
 
 1. **No `process.exit` under `src/commands/**`** — issue [#289](https://github.com/camunda/c8ctl/issues/289). Stable refs:
-   - Editor-time GritQL plugin: [`plugins/no-process-exit-in-commands.grit`](plugins/no-process-exit-in-commands.grit), wired through `biome.json` `overrides`.
-   - CI AST guard: [`tests/unit/no-process-exit-in-handlers.test.ts`](tests/unit/no-process-exit-in-handlers.test.ts).
-   - Per-command structural guards: `tests/unit/{deploy,run,open,mcp-proxy,watch}-error-paths.test.ts`.
+   - CI AST guard (live on `main`): [`tests/unit/no-process-exit-in-handlers.test.ts`](tests/unit/no-process-exit-in-handlers.test.ts).
+   - Per-command structural guards (live on `main`): `tests/unit/{deploy,run,open,mcp-proxy,watch}-error-paths.test.ts`.
+   - Editor-time GritQL plugin (shipped in PR [#334](https://github.com/camunda/c8ctl/pull/334)): [`plugins/no-process-exit-in-commands.grit`](plugins/no-process-exit-in-commands.grit), wired through `biome.json` `overrides`.
    - Underlying scanner: [`tests/utils/no-process-exit.ts`](tests/utils/no-process-exit.ts) (AST-based; correctly distinguishes `process.exit(...)` from `process.exitCode = N` — the latter is permitted because it lets the event loop drain naturally).
-2. **All `COMMAND_DISPATCH` entries come from `defineCommand()`** — issue [#290](https://github.com/camunda/c8ctl/issues/290) (closed). Tests in `tests/unit/command-registry.test.ts` walk the dispatch map and reject any entry that is not the marked output of `defineCommand`.
-3. **Tests don't import handlers from `src/commands/**` (except type-only)** — issue [#291](https://github.com/camunda/c8ctl/issues/291). Tests must drive commands via the `c8()` subprocess helper instead of importing handler internals.
+2. **All `COMMAND_DISPATCH` entries come from `defineCommand()`** — issue [#290](https://github.com/camunda/c8ctl/issues/290) (closed). [`tests/unit/command-dispatch-structure.test.ts`](tests/unit/command-dispatch-structure.test.ts) walks `COMMAND_DISPATCH` and rejects any entry that is not the marked output of `defineCommand` (via `DEFINE_COMMAND_MARKER`).
+3. **Tests don't import handlers from `src/commands/**` (except type-only)** — issue [#291](https://github.com/camunda/c8ctl/issues/291). Staged guard shipped in PR [#336](https://github.com/camunda/c8ctl/pull/336) at [`tests/unit/test-import-boundary.test.ts`](tests/unit/test-import-boundary.test.ts) — uses a closed `PENDING_MIGRATION` allow-list (current violators) that can only shrink. Tests must drive commands via the `c8()` subprocess helper instead of importing handler internals.
 
 #### When `{ kind: "never" }` applies
 
