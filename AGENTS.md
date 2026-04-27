@@ -166,6 +166,18 @@ Never skip the lint and type-check steps before pushing.
 
 - don't use Promises in tests to wait for the overall system status to settle. Instead, use the polling helper from [tests/utils/polling.ts](tests/utils/polling.ts) to wait for specific conditions to be met.
 
+### Help output: flag scoping rule
+
+`c8ctl --help` (top-level) lists **only** the flags in `GLOBAL_FLAGS` (`src/command-registry.ts`). Verb- and resource-specific flags appear under `c8ctl help <verb>` only.
+
+There is **no opt-in mechanism** for promoting a verb-specific flag into the top-level Flags section. The previous `FlagDef.showInTopLevelHelp` field and the `(use with 'verb resource')` parenthetical workaround were removed in [#321](https://github.com/camunda/c8ctl/issues/321) / [#322](https://github.com/camunda/c8ctl/pull/322) because they produced misleading output: a flag listed at the root looks like it applies to every command.
+
+If you find yourself wanting to promote a flag into the top-level Flags section:
+
+- **If the flag genuinely applies to every (or nearly every) command** — add it to `GLOBAL_FLAGS`. It is now global.
+- **If the flag is verb-specific but you want it discoverable** — keep it verb-specific. If an example would help, add an entry to the verb's `helpExamples` in `COMMAND_REGISTRY`; those examples are aggregated into the top-level `c8ctl --help` output under the global `Examples:` section, not into `c8ctl help <verb>`.
+- **Do not** reintroduce a per-flag opt-in field on `FlagDef`. Class-scoped guards in `tests/unit/help.test.ts` (`Top-level help is scoped to global flags (#321)`) compare the rendered top-level Flags section against `Object.keys(GLOBAL_FLAGS)` and will fail if anything else leaks in.
+
 ### Work environment
 
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
