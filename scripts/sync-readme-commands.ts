@@ -22,13 +22,13 @@ const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, "..");
 const README_PATH = resolve(ROOT, "README.md");
 
-const START_MARKER = "<!-- command-reference:start -->";
-const END_MARKER = "<!-- command-reference:end -->";
+export const START_MARKER = "<!-- command-reference:start -->";
+export const END_MARKER = "<!-- command-reference:end -->";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Build a reverse map: canonical resource → shortest alias */
-function buildAliasLookup(): Map<string, string> {
+export function buildAliasLookup(): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const [alias, canonical] of Object.entries(RESOURCE_ALIASES)) {
 		const existing = map.get(canonical);
@@ -40,7 +40,7 @@ function buildAliasLookup(): Map<string, string> {
 }
 
 /** Deduplicate resource aliases: collapse entries where the alias is just the plural form of the canonical. */
-function uniqueAliases(): Array<{ alias: string; canonical: string }> {
+export function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 	const seen = new Map<string, string[]>();
 	for (const [alias, canonical] of Object.entries(RESOURCE_ALIASES)) {
 		// Skip plural/singular forms that match the canonical name itself
@@ -63,13 +63,13 @@ function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 }
 
 /** Format a flag name for display: `--name` or `--name, -s` */
-function formatFlag(name: string, def: FlagDef): string {
+export function formatFlag(name: string, def: FlagDef): string {
 	const long = `\`--${name}\``;
 	return def.short ? `${long} / \`-${def.short}\`` : long;
 }
 
 /** Render a flags table */
-function renderFlagsTable(flags: Record<string, FlagDef>): string[] {
+export function renderFlagsTable(flags: Record<string, FlagDef>): string[] {
 	const entries = Object.entries(flags);
 	if (entries.length === 0) return [];
 
@@ -84,7 +84,7 @@ function renderFlagsTable(flags: Record<string, FlagDef>): string[] {
 }
 
 /** Render positionals for a resource */
-function renderPositionals(positionals: readonly PositionalDef[]): string {
+export function renderPositionals(positionals: readonly PositionalDef[]): string {
 	return positionals
 		.map((p) => {
 			const req = p.required ? "required" : "optional";
@@ -99,7 +99,7 @@ function verbDescription(def: CommandDef): string {
 }
 
 /** Resolve resource short name to canonical, returning the display form */
-function resourceDisplay(resource: string): string {
+export function resourceDisplay(resource: string): string {
 	// If the resource is already canonical (contains hyphen or is a known long form), return as-is
 	const canonical = RESOURCE_ALIASES[resource];
 	return canonical ? `${resource} (${canonical})` : resource;
@@ -107,7 +107,7 @@ function resourceDisplay(resource: string): string {
 
 // ─── Generation ──────────────────────────────────────────────────────────────
 
-function generate(): string {
+export function generate(): string {
 	const lines: string[] = [];
 
 	lines.push("## Command Reference");
@@ -249,7 +249,7 @@ function generate(): string {
  * Filter out flags that are already shown in the Global Flags or Search Flags sections.
  * Returns only verb-specific flags.
  */
-function filterVerbSpecificFlags(def: CommandDef): Record<string, FlagDef> {
+export function filterVerbSpecificFlags(def: CommandDef): Record<string, FlagDef> {
 	const globalKeys = new Set(Object.keys(GLOBAL_FLAGS));
 	const searchKeys = new Set(Object.keys(SEARCH_FLAGS));
 
@@ -313,4 +313,11 @@ function main(): void {
 	console.log("README.md command reference updated.");
 }
 
-main();
+// Only run when executed directly (not when imported by tests)
+const isDirectExecution =
+	process.argv[1] &&
+	(resolve(process.argv[1]) === __filename ||
+		resolve(process.argv[1]).replace(/\.ts$/, "") === __filename.replace(/\.ts$/, ""));
+if (isDirectExecution) {
+	main();
+}
