@@ -16,15 +16,29 @@ import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("MCP Proxy Mock Server Integration Tests", () => {
 	let mockServer: Server;
-	let mockServerPort: number;
 	let mockServerUrl: string;
 	let mockLogger: Logger;
 
-	beforeEach(async () => {
-		// Find an available port and start mock server
-		mockServerPort = 9876 + Math.floor(Math.random() * 1000);
-		mockServerUrl = `http://localhost:${mockServerPort}`;
+	/**
+	 * Bind `mockServer` to a kernel-assigned port on 127.0.0.1 and set
+	 * `mockServerUrl` to the resulting URL. See issue #316: hardcoded
+	 * numeric ports and `Math.random()`-derived port ranges are vulnerable
+	 * to undici's "bad port" rejection list (e.g. port 10080) and to
+	 * EADDRINUSE collisions when integration suites run in parallel.
+	 * Binding to port 0 lets the kernel pick a guaranteed-free, valid port.
+	 */
+	async function bindMockServer(): Promise<void> {
+		await new Promise<void>((resolve) => {
+			mockServer.listen(0, "127.0.0.1", () => resolve());
+		});
+		const addr = mockServer.address();
+		if (!addr || typeof addr === "string") {
+			throw new Error("mock server did not bind to an inet address");
+		}
+		mockServerUrl = `http://127.0.0.1:${addr.port}`;
+	}
 
+	beforeEach(async () => {
 		mockLogger = makeMockLogger();
 	});
 
@@ -45,9 +59,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			res.end(JSON.stringify({ success: true }));
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({ Authorization: "Bearer test-token-123" }),
@@ -67,9 +79,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			res.end("Not Found");
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -88,9 +98,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			res.end("Internal Server Error");
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -121,9 +129,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			}
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({
@@ -143,13 +149,30 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 	});
 
 	test("handles connection refused error", async () => {
-		// Don't start server - connection will be refused
-		const unreachablePort = 9999;
+		// Bind a transient server to a kernel-assigned port, capture the
+		// port, then immediately close it. The captured port is now both
+		// (a) guaranteed to have been a valid port the kernel was willing
+		// to hand out (so it can't be on undici's "bad ports" list) and
+		// (b) almost certainly free again — so a connect attempt will be
+		// refused with ECONNREFUSED rather than succeeding against a
+		// stranger's process. See issue #316: hardcoded test ports
+		// (here, the previous `9999`) are vulnerable to undici's bad-port
+		// list and to colliding with whatever else happens to be bound.
+		const probe = createServer();
+		await new Promise<void>((resolve) => {
+			probe.listen(0, "127.0.0.1", () => resolve());
+		});
+		const probeAddr = probe.address();
+		if (!probeAddr || typeof probeAddr === "string") {
+			throw new Error("probe server did not bind to an inet address");
+		}
+		const unreachablePort = probeAddr.port;
+		await new Promise<void>((resolve) => probe.close(() => resolve()));
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
 			getConfig: () => ({
-				restAddress: `http://localhost:${unreachablePort}`,
+				restAddress: `http://127.0.0.1:${unreachablePort}`,
 			}),
 		});
 
@@ -158,14 +181,14 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 		await assert.rejects(
 			async () =>
 				await customFetch(
-					`http://localhost:${unreachablePort}/mcp/cluster`,
+					`http://127.0.0.1:${unreachablePort}/mcp/cluster`,
 					{},
 				),
 			(error: Error) => {
 				assert.match(error.message, /Connection refused/);
 				assert.match(
 					error.message,
-					new RegExp(`http://localhost:${unreachablePort}`),
+					new RegExp(`http://127.0.0.1:${unreachablePort}`),
 				);
 				return true;
 			},
@@ -182,9 +205,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			},
 		);
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -210,9 +231,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			res.end(JSON.stringify({ success: true }));
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -239,9 +258,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			res.end();
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
@@ -275,9 +292,7 @@ describe("MCP Proxy Mock Server Integration Tests", () => {
 			});
 		});
 
-		await new Promise<void>((resolve) => {
-			mockServer.listen(mockServerPort, () => resolve());
-		});
+		await bindMockServer();
 
 		const mockCamundaClient = makeMockClient({
 			getAuthHeaders: async () => ({}),
