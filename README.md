@@ -75,12 +75,12 @@ c8ctl --version
 
 <!-- command-reference:start -->
 
-## Command Reference
+### Command Reference
 
 > Auto-generated from [`COMMAND_REGISTRY`](src/command-registry.ts). Do not edit manually.
 > Run `node --experimental-strip-types scripts/sync-readme-commands.ts` to update.
 
-### Global Flags
+#### Global Flags
 
 These flags are accepted by every command.
 
@@ -93,7 +93,7 @@ These flags are accepted by every command.
 | `--verbose` | boolean |  | Show verbose output |
 | `--fields` | string |  | Comma-separated list of fields to display |
 
-### Resource Aliases
+#### Resource Aliases
 
 | Alias | Resource |
 |-------|----------|
@@ -107,7 +107,7 @@ These flags are accepted by every command.
 | `vars` | `variable` |
 | `var` | `variable` |
 
-### Search Flags
+#### Search Flags
 
 These flags are available on `list` and `search` commands.
 
@@ -120,9 +120,9 @@ These flags are available on `list` and `search` commands.
 | `--between` | string |  | Date range filter (e.g. 7d, 30d, 2024-01-01..2024-12-31) |
 | `--dateField` | string |  | Date field for --between filter |
 
-### Commands
+#### Commands
 
-#### `list`
+##### `list`
 
 List resources
 
@@ -287,7 +287,7 @@ c8ctl list users                                            # List users
 
 ---
 
-#### `search`
+##### `search`
 
 Search resources with filters (wildcards, date ranges, case-insensitive)
 
@@ -470,7 +470,7 @@ c8ctl search ut --iassignee=John                            # Case-insensitive s
 
 ---
 
-#### `get`
+##### `get`
 
 Get a resource by key
 
@@ -536,7 +536,7 @@ c8ctl get user john                                         # Get user by userna
 
 ---
 
-#### `create`
+##### `create`
 
 Create a resource (process instance, identity)
 
@@ -589,7 +589,7 @@ c8ctl create user --username=john --name='John Doe' --email=john@example.com --p
 
 ---
 
-#### `delete`
+##### `delete`
 
 Delete a resource by key
 
@@ -614,7 +614,7 @@ c8ctl delete user john                                      # Delete user
 
 ---
 
-#### `cancel`
+##### `cancel`
 
 Cancel a process instance
 
@@ -628,7 +628,7 @@ Cancel a process instance
 
 ---
 
-#### `await`
+##### `await`
 
 Create and await process instance completion (server-side waiting)
 
@@ -655,7 +655,7 @@ c8ctl await pi --id=myProcess                               # Create and wait fo
 
 ---
 
-#### `complete`
+##### `complete`
 
 Complete a user task or job
 
@@ -676,7 +676,7 @@ Complete a user task or job
 
 ---
 
-#### `fail`
+##### `fail`
 
 Mark a job as failed with optional error message and retry count
 
@@ -695,7 +695,7 @@ Mark a job as failed with optional error message and retry count
 
 ---
 
-#### `activate`
+##### `activate`
 
 Activate jobs of a specific type for processing
 
@@ -715,7 +715,7 @@ Activate jobs of a specific type for processing
 
 ---
 
-#### `resolve`
+##### `resolve`
 
 Resolve an incident (marks resolved, allows process to continue)
 
@@ -727,7 +727,7 @@ Resolve an incident (marks resolved, allows process to continue)
 
 ---
 
-#### `publish`
+##### `publish`
 
 Publish a message for message correlation
 
@@ -747,7 +747,7 @@ Publish a message for message correlation
 
 ---
 
-#### `correlate`
+##### `correlate`
 
 Correlate a message to a specific process instance
 
@@ -767,7 +767,7 @@ Correlate a message to a specific process instance
 
 ---
 
-#### `set`
+##### `set`
 
 Set variables on an element instance (process instance or flow element scope). Variables are propagated to the outermost scope by default; use --local to restrict to the specified scope.
 
@@ -795,7 +795,7 @@ c8ctl set variable 2251799813685249 --variables='{"x":1}' --local  # Set variabl
 
 ---
 
-#### `deploy`
+##### `deploy`
 
 Deploy files to Camunda (auto-discovers deployable files in directories)
 
@@ -815,7 +815,7 @@ c8ctl deploy ./my-process.bpmn                              # Deploy a BPMN file
 
 ---
 
-#### `run`
+##### `run`
 
 Deploy and start a process instance from a BPMN file
 
@@ -836,7 +836,7 @@ c8ctl run ./my-process.bpmn                                 # Deploy and start p
 
 ---
 
-#### `assign`
+##### `assign`
 
 Assign a resource to a target (--to-user, --to-group, etc.)
 
@@ -868,7 +868,7 @@ c8ctl assign role admin --to-user=john                      # Assign role to use
 
 ---
 
-#### `unassign`
+##### `unassign`
 
 Unassign a resource from a target (--from-user, --from-group, etc.)
 
@@ -900,7 +900,7 @@ c8ctl unassign role admin --from-user=john                  # Unassign role from
 
 ---
 
-#### `watch`
+##### `watch`
 
 Watch files for changes and auto-deploy
 
@@ -923,7 +923,7 @@ c8ctl watch ./src                                           # Watch directory fo
 
 ---
 
-#### `open`
+##### `open`
 
 Open Camunda web app in browser
 
@@ -941,7 +941,7 @@ c8ctl open operate --profile=prod                           # Open Operate using
 
 ---
 
-#### `add`
+##### `add`
 
 Add a profile
 
@@ -968,7 +968,7 @@ Add a profile
 
 ---
 
-#### `remove`
+##### `remove`
 
 Remove a profile (alias: rm)
 
@@ -991,7 +991,7 @@ Remove a profile (alias: rm)
 
 ---
 
-#### `load`
+##### `load`
 
 Load a c8ctl plugin (npm registry or URL)
 
@@ -1018,7 +1018,7 @@ c8ctl load plugin --from https://github.com/org/plugin      # Load plugin from U
 
 ---
 
-#### `unload`
+##### `unload`
 
 Unload a c8ctl plugin (npm uninstall wrapper)
 
@@ -1040,7 +1040,7 @@ Unload a c8ctl plugin (npm uninstall wrapper)
 
 ---
 
-#### `upgrade`
+##### `upgrade`
 
 Upgrade a plugin (respects source type)
 
@@ -1061,7 +1061,7 @@ c8ctl upgrade plugin my-plugin 1.2.3                        # Upgrade plugin to 
 
 ---
 
-#### `downgrade`
+##### `downgrade`
 
 Downgrade a plugin to a specific version
 
@@ -1075,7 +1075,7 @@ Downgrade a plugin to a specific version
 
 ---
 
-#### `sync`
+##### `sync`
 
 Synchronize plugins from registry (rebuild/reinstall)
 
@@ -1089,7 +1089,7 @@ c8ctl sync plugin                                           # Synchronize plugin
 
 ---
 
-#### `init`
+##### `init`
 
 Create a new plugin from TypeScript template
 
@@ -1107,7 +1107,7 @@ c8ctl init plugin my-plugin                                 # Create new plugin 
 
 ---
 
-#### `use`
+##### `use`
 
 Set active profile or tenant
 
@@ -1134,7 +1134,7 @@ c8ctl use profile prod                                      # Set active profile
 
 ---
 
-#### `output`
+##### `output`
 
 Show or set output format
 
@@ -1150,7 +1150,7 @@ c8ctl output json                                           # Switch to JSON out
 
 ---
 
-#### `completion`
+##### `completion`
 
 Generate shell completion script
 
@@ -1179,7 +1179,7 @@ c8ctl completion install --shell zsh                        # Install completion
 
 ---
 
-#### `mcp-proxy`
+##### `mcp-proxy`
 
 Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
@@ -1187,13 +1187,13 @@ Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
 ---
 
-#### `feedback`
+##### `feedback`
 
 Open the feedback page to report issues or request features
 
 ---
 
-#### `help`
+##### `help`
 
 Show help (run 'c8ctl help <command>' for details)
 
@@ -1203,7 +1203,7 @@ Show help (run 'c8ctl help <command>' for details)
 
 ---
 
-#### `which`
+##### `which`
 
 Show active profile
 

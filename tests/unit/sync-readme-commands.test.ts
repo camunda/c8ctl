@@ -47,7 +47,7 @@ describe("generate() output structure", () => {
 	const output = generate();
 
 	test("starts with Command Reference heading", () => {
-		assert.ok(output.startsWith("## Command Reference"));
+		assert.ok(output.startsWith("### Command Reference"));
 	});
 
 	test("contains auto-generated notice", () => {
@@ -56,19 +56,19 @@ describe("generate() output structure", () => {
 	});
 
 	test("contains Global Flags section", () => {
-		assert.ok(output.includes("### Global Flags"));
+		assert.ok(output.includes("#### Global Flags"));
 	});
 
 	test("contains Resource Aliases section", () => {
-		assert.ok(output.includes("### Resource Aliases"));
+		assert.ok(output.includes("#### Resource Aliases"));
 	});
 
 	test("contains Search Flags section", () => {
-		assert.ok(output.includes("### Search Flags"));
+		assert.ok(output.includes("#### Search Flags"));
 	});
 
 	test("contains Commands section", () => {
-		assert.ok(output.includes("### Commands"));
+		assert.ok(output.includes("#### Commands"));
 	});
 
 	test("renders Resources for verbs that support optional resources", () => {
@@ -85,7 +85,7 @@ describe("generate() output structure", () => {
 		const expectedResources = def.resources.map(resourceDisplay).join(", ");
 
 		assert.ok(
-			output.includes(`#### \`${verb}\``),
+			output.includes(`##### \`${verb}\``),
 			`Missing heading for verb "${verb}"`,
 		);
 		assert.ok(
@@ -103,7 +103,7 @@ describe("generate() includes all registry verbs", () => {
 	for (const verb of Object.keys(REGISTRY)) {
 		test(`verb "${verb}" appears as a heading`, () => {
 			assert.ok(
-				output.includes(`#### \`${verb}\``),
+				output.includes(`##### \`${verb}\``),
 				`Missing heading for verb "${verb}"`,
 			);
 		});
@@ -500,7 +500,7 @@ describe("README.md sync check", () => {
 
 describe("generate() completeness guard", () => {
 	const output = generate();
-	const verbHeadings = [...output.matchAll(/^#### `(\S+)`$/gm)].map(
+	const verbHeadings = [...output.matchAll(/^##### `(\S+)`$/gm)].map(
 		(m) => m[1],
 	);
 

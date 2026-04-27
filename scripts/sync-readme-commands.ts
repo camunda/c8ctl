@@ -54,7 +54,7 @@ export function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 	return result.sort((a, b) => a.canonical.localeCompare(b.canonical));
 }
 
-/** Format a flag name for display: `--name` or `--name, -s` */
+/** Format a flag name for display: `--name` or `--name` / `-s` */
 export function formatFlag(name: string, def: FlagDef): string {
 	const long = `\`--${name}\``;
 	return def.short ? `${long} / \`-${def.short}\`` : long;
@@ -108,7 +108,7 @@ export function resourceDisplay(resource: string): string {
 export function generate(): string {
 	const lines: string[] = [];
 
-	lines.push("## Command Reference");
+	lines.push("### Command Reference");
 	lines.push("");
 	lines.push(
 		"> Auto-generated from [`COMMAND_REGISTRY`](src/command-registry.ts). Do not edit manually.",
@@ -119,7 +119,7 @@ export function generate(): string {
 	lines.push("");
 
 	// ── Global Flags ──
-	lines.push("### Global Flags");
+	lines.push("#### Global Flags");
 	lines.push("");
 	lines.push("These flags are accepted by every command.");
 	lines.push("");
@@ -129,7 +129,7 @@ export function generate(): string {
 	// ── Resource Aliases ──
 	const aliases = uniqueAliases();
 	if (aliases.length > 0) {
-		lines.push("### Resource Aliases");
+		lines.push("#### Resource Aliases");
 		lines.push("");
 		lines.push("| Alias | Resource |");
 		lines.push("|-------|----------|");
@@ -142,7 +142,7 @@ export function generate(): string {
 	// ── Search Flags ──
 	const searchFlagEntries = Object.entries(SEARCH_FLAGS);
 	if (searchFlagEntries.length > 0) {
-		lines.push("### Search Flags");
+		lines.push("#### Search Flags");
 		lines.push("");
 		lines.push("These flags are available on `list` and `search` commands.");
 		lines.push("");
@@ -151,13 +151,13 @@ export function generate(): string {
 	}
 
 	// ── Commands ──
-	lines.push("### Commands");
+	lines.push("#### Commands");
 	lines.push("");
 
 	const registry: Record<string, CommandDef> = COMMAND_REGISTRY;
 
 	for (const [verb, def] of Object.entries(registry)) {
-		lines.push(`#### \`${verb}\``);
+		lines.push(`##### \`${verb}\``);
 		lines.push("");
 		lines.push(verbDescription(def));
 		lines.push("");
