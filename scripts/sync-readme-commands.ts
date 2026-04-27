@@ -7,15 +7,19 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+	CommandDef,
+	FlagDef,
+	PositionalDef,
+} from "../src/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
 } from "../src/command-registry.ts";
-import type { FlagDef, CommandDef, PositionalDef } from "../src/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -66,13 +70,17 @@ export function renderFlagsTable(flags: Record<string, FlagDef>): string[] {
 	lines.push("|------|------|----------|-------------|");
 	for (const [name, def] of entries) {
 		const req = def.required ? "Yes" : "";
-		lines.push(`| ${formatFlag(name, def)} | ${def.type} | ${req} | ${def.description} |`);
+		lines.push(
+			`| ${formatFlag(name, def)} | ${def.type} | ${req} | ${def.description} |`,
+		);
 	}
 	return lines;
 }
 
 /** Render positionals for a resource */
-export function renderPositionals(positionals: readonly PositionalDef[]): string {
+export function renderPositionals(
+	positionals: readonly PositionalDef[],
+): string {
 	return positionals
 		.map((p) => {
 			const req = p.required ? "required" : "optional";
@@ -90,7 +98,9 @@ function verbDescription(def: CommandDef): string {
 export function resourceDisplay(resource: string): string {
 	// Only show the canonical form when it differs from the requested resource.
 	const canonical = RESOURCE_ALIASES[resource];
-	return canonical && canonical !== resource ? `${resource} (${canonical})` : resource;
+	return canonical && canonical !== resource
+		? `${resource} (${canonical})`
+		: resource;
 }
 
 // ─── Generation ──────────────────────────────────────────────────────────────
@@ -100,8 +110,12 @@ export function generate(): string {
 
 	lines.push("## Command Reference");
 	lines.push("");
-	lines.push("> Auto-generated from [`COMMAND_REGISTRY`](src/command-registry.ts). Do not edit manually.");
-	lines.push(`> Run \`node --experimental-strip-types scripts/sync-readme-commands.ts\` to update.`);
+	lines.push(
+		"> Auto-generated from [`COMMAND_REGISTRY`](src/command-registry.ts). Do not edit manually.",
+	);
+	lines.push(
+		`> Run \`node --experimental-strip-types scripts/sync-readme-commands.ts\` to update.`,
+	);
 	lines.push("");
 
 	// ── Global Flags ──
@@ -140,7 +154,7 @@ export function generate(): string {
 	lines.push("### Commands");
 	lines.push("");
 
-	const registry = COMMAND_REGISTRY as unknown as Record<string, CommandDef>;
+	const registry: Record<string, CommandDef> = COMMAND_REGISTRY;
 
 	for (const [verb, def] of Object.entries(registry)) {
 		lines.push(`#### \`${verb}\``);
@@ -148,15 +162,25 @@ export function generate(): string {
 		lines.push(verbDescription(def));
 		lines.push("");
 
+		// Usage (from helpResource)
+		if (def.helpResource) {
+			lines.push(`**Usage:** \`c8ctl ${verb} ${def.helpResource}\``);
+			lines.push("");
+		}
+
 		// Aliases
 		if (def.aliases && def.aliases.length > 0) {
-			lines.push(`**Aliases:** ${def.aliases.map((a) => `\`${a}\``).join(", ")}`);
+			lines.push(
+				`**Aliases:** ${def.aliases.map((a) => `\`${a}\``).join(", ")}`,
+			);
 			lines.push("");
 		}
 
 		// Resources
 		if (def.resources.length > 0) {
-			const resourceList = def.resources.map((r) => resourceDisplay(r)).join(", ");
+			const resourceList = def.resources
+				.map((r) => resourceDisplay(r))
+				.join(", ");
 			lines.push(`**Resources:** ${resourceList}`);
 			lines.push("");
 		}
@@ -168,6 +192,7 @@ export function generate(): string {
 				lines.push("**Positional arguments:**");
 				lines.push("");
 				for (const [resource, positionals] of positionalEntries) {
+					// biome-ignore lint/plugin: Object.entries loses readonly tuple type from CommandDef.resourcePositionals
 					const pos = positionals as readonly PositionalDef[];
 					lines.push(`- **${resource}:** ${renderPositionals(pos)}`);
 				}
@@ -190,6 +215,7 @@ export function generate(): string {
 			lines.push("**Resource-specific flags:**");
 			lines.push("");
 			for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
+				// biome-ignore lint/plugin: Object.entries loses Record<string, FlagDef> type from CommandDef.resourceFlags
 				const typedFlags = rFlags as Record<string, FlagDef>;
 				if (Object.keys(typedFlags).length === 0) continue;
 				lines.push(`<details>`);
@@ -237,7 +263,9 @@ export function generate(): string {
  * Filter out flags that are already shown in the Global Flags or Search Flags sections.
  * Returns only verb-specific flags.
  */
-export function filterVerbSpecificFlags(def: CommandDef): Record<string, FlagDef> {
+export function filterVerbSpecificFlags(
+	def: CommandDef,
+): Record<string, FlagDef> {
 	const globalKeys = new Set(Object.keys(GLOBAL_FLAGS));
 	const searchKeys = new Set(Object.keys(SEARCH_FLAGS));
 
@@ -245,6 +273,7 @@ export function filterVerbSpecificFlags(def: CommandDef): Record<string, FlagDef
 	const resourceFlagKeys = new Set<string>();
 	if (def.resourceFlags) {
 		for (const rFlags of Object.values(def.resourceFlags)) {
+			// biome-ignore lint/plugin: Object.values loses Record<string, FlagDef> type from CommandDef.resourceFlags
 			for (const key of Object.keys(rFlags as Record<string, FlagDef>)) {
 				resourceFlagKeys.add(key);
 			}
@@ -312,7 +341,8 @@ function main(): void {
 const isDirectExecution =
 	process.argv[1] &&
 	(resolve(process.argv[1]) === __filename ||
-		resolve(process.argv[1]).replace(/\.ts$/, "") === __filename.replace(/\.ts$/, ""));
+		resolve(process.argv[1]).replace(/\.ts$/, "") ===
+			__filename.replace(/\.ts$/, ""));
 if (isDirectExecution) {
 	main();
 }

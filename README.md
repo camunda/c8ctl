@@ -593,6 +593,8 @@ c8ctl create user --username=john --name='John Doe' --email=john@example.com --p
 
 Delete a resource by key
 
+**Usage:** `c8ctl delete <resource> <key>`
+
 **Resources:** user, role, group, tenant, auth (authorization), mapping-rule
 
 **Positional arguments:**
@@ -616,6 +618,8 @@ c8ctl delete user john                                      # Delete user
 
 Cancel a process instance
 
+**Usage:** `c8ctl cancel <resource> <key>`
+
 **Resources:** pi (process-instance)
 
 **Positional arguments:**
@@ -627,6 +631,8 @@ Cancel a process instance
 #### `await`
 
 Create and await process instance completion (server-side waiting)
+
+**Usage:** `c8ctl await <resource>`
 
 **Resources:** pi (process-instance)
 
@@ -652,6 +658,8 @@ c8ctl await pi --id=myProcess                               # Create and wait fo
 #### `complete`
 
 Complete a user task or job
+
+**Usage:** `c8ctl complete <resource> <key>`
 
 **Resources:** ut (user-task), job
 
@@ -763,6 +771,8 @@ Correlate a message to a specific process instance
 
 Set variables on an element instance (process instance or flow element scope). Variables are propagated to the outermost scope by default; use --local to restrict to the specified scope.
 
+**Usage:** `c8ctl set variable <key>`
+
 **Resources:** variable
 
 **Positional arguments:**
@@ -789,6 +799,8 @@ c8ctl set variable 2251799813685249 --variables='{"x":1}' --local  # Set variabl
 
 Deploy files to Camunda (auto-discovers deployable files in directories)
 
+**Usage:** `c8ctl deploy [path...]`
+
 **Flags:**
 
 | Flag | Type | Required | Description |
@@ -806,6 +818,8 @@ c8ctl deploy ./my-process.bpmn                              # Deploy a BPMN file
 #### `run`
 
 Deploy and start a process instance from a BPMN file
+
+**Usage:** `c8ctl run <path>`
 
 **Flags:**
 
@@ -825,6 +839,8 @@ c8ctl run ./my-process.bpmn                                 # Deploy and start p
 #### `assign`
 
 Assign a resource to a target (--to-user, --to-group, etc.)
+
+**Usage:** `c8ctl assign <resource> <id>`
 
 **Resources:** role, user, group, mapping-rule
 
@@ -856,6 +872,8 @@ c8ctl assign role admin --to-user=john                      # Assign role to use
 
 Unassign a resource from a target (--from-user, --from-group, etc.)
 
+**Usage:** `c8ctl unassign <resource> <id>`
+
 **Resources:** role, user, group, mapping-rule
 
 **Positional arguments:**
@@ -886,6 +904,8 @@ c8ctl unassign role admin --from-user=john                  # Unassign role from
 
 Watch files for changes and auto-deploy
 
+**Usage:** `c8ctl watch [path...]`
+
 **Aliases:** `w`
 
 **Flags:**
@@ -906,6 +926,8 @@ c8ctl watch ./src                                           # Watch directory fo
 #### `open`
 
 Open Camunda web app in browser
+
+**Usage:** `c8ctl open <app>`
 
 **Resources:** operate, tasklist, modeler, optimize
 
@@ -950,6 +972,8 @@ Add a profile
 
 Remove a profile (alias: rm)
 
+**Usage:** `c8ctl remove profile <name>`
+
 **Aliases:** `rm`
 
 **Resources:** profile, plugin
@@ -970,6 +994,8 @@ Remove a profile (alias: rm)
 #### `load`
 
 Load a c8ctl plugin (npm registry or URL)
+
+**Usage:** `c8ctl load plugin [name|--from url]`
 
 **Resources:** plugin
 
@@ -996,6 +1022,8 @@ c8ctl load plugin --from https://github.com/org/plugin      # Load plugin from U
 
 Unload a c8ctl plugin (npm uninstall wrapper)
 
+**Usage:** `c8ctl unload plugin <name>`
+
 **Aliases:** `rm`
 
 **Resources:** plugin
@@ -1016,6 +1044,8 @@ Unload a c8ctl plugin (npm uninstall wrapper)
 
 Upgrade a plugin (respects source type)
 
+**Usage:** `c8ctl upgrade plugin <name> [version]`
+
 **Resources:** plugin
 
 **Positional arguments:**
@@ -1034,6 +1064,8 @@ c8ctl upgrade plugin my-plugin 1.2.3                        # Upgrade plugin to 
 #### `downgrade`
 
 Downgrade a plugin to a specific version
+
+**Usage:** `c8ctl downgrade plugin <name> <version>`
 
 **Resources:** plugin
 
@@ -1079,6 +1111,8 @@ c8ctl init plugin my-plugin                                 # Create new plugin 
 
 Set active profile or tenant
 
+**Usage:** `c8ctl use profile|tenant`
+
 **Resources:** profile, tenant
 
 **Positional arguments:**
@@ -1104,6 +1138,8 @@ c8ctl use profile prod                                      # Set active profile
 
 Show or set output format
 
+**Usage:** `c8ctl output [json|text]`
+
 **Resources:** json, text
 
 **Examples:**
@@ -1117,6 +1153,8 @@ c8ctl output json                                           # Switch to JSON out
 #### `completion`
 
 Generate shell completion script
+
+**Usage:** `c8ctl completion bash|zsh|fish|install`
 
 **Resources:** bash, zsh, fish, install
 
@@ -1145,6 +1183,8 @@ c8ctl completion install --shell zsh                        # Install completion
 
 Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
+**Usage:** `c8ctl mcp-proxy [mcp-path]`
+
 ---
 
 #### `feedback`
@@ -1156,6 +1196,8 @@ Open the feedback page to report issues or request features
 #### `help`
 
 Show help (run 'c8ctl help <command>' for details)
+
+**Usage:** `c8ctl help [command]`
 
 **Aliases:** `menu`
 
