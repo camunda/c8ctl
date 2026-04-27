@@ -22,18 +22,20 @@
  *
  * Strong existing behavioural coverage on main (don't duplicate here):
  *
- *   - `tests/unit/watch.test.ts` — file detection, debounce, cooldown,
- *     ignore rules, extension filtering, banner ordering.
- *   - `tests/unit/watch-lifecycle.test.ts` — readiness banner ordering
- *     vs SIGINT handler / fs.watch registration (the #325 race fix:
- *     banner is emitted ONLY AFTER both watchers and the SIGINT
- *     handler are registered, so test polling on the banner is a
- *     valid readiness signal).
- *   - `tests/unit/watch-cancellation.test.ts` — SIGINT cancels pending
- *     debounce timers, aborts in-flight deploys via AbortController,
- *     and the framework returns naturally with exit code 0.
- *   - `tests/integration/watch-force.test.ts` — `--force` continues
- *     watching after deployment errors.
+ *   - `tests/integration/watch.test.ts` — file detection, debounce,
+ *     cooldown, ignore rules, extension filtering, banner ordering.
+ *   - `tests/integration/watch-lifecycle.test.ts` — readiness banner
+ *     ordering vs SIGINT handler / fs.watch registration (the #325
+ *     race fix: banner is emitted ONLY AFTER both watchers and the
+ *     SIGINT handler are registered, so test polling on the banner
+ *     is a valid readiness signal).
+ *   - `tests/integration/watch-cancellation.test.ts` — SIGINT cancels
+ *     pending debounce timers, aborts in-flight deploys via
+ *     AbortController, and the framework returns naturally with exit
+ *     code 0.
+ *   - `tests/unit/watch-force.test.ts` — `--force` flag unit coverage,
+ *     plus the force-mode case in `tests/integration/watch.test.ts`
+ *     for end-to-end "continue watching after deployment errors".
  *
  * Guard in this file:
  *
