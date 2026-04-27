@@ -1,0 +1,27 @@
+engine biome(1.0)
+language js(typescript)
+
+// Forbids `process.exit(...)` calls under `src/commands/**`.
+// Enforcement target for issue #289 (follow-up to #288 — normalise
+// command handler architecture). All failure paths in command handlers
+// must throw typed errors; the framework's `handleCommandError`
+// pipeline owns process termination so:
+//
+//   - `--verbose` can rethrow to surface a stack trace,
+//   - failures format consistently (`Failed to <verb> <resource>: ...`),
+//   - `finally` blocks (test cleanup, logger flushes) run.
+//
+// The architectural CI guard at `tests/unit/no-process-exit-in-handlers.test.ts`
+// performs the same check via AST scan in CI; this Biome plugin adds
+// **editor-time** feedback so violations surface in the IDE before the
+// commit. `process.exit` remains legal in `src/index.ts` and
+// `src/errors.ts` — those files are outside the plugin's scope (Biome
+// `overrides.includes`).
+
+`process.exit($_)` as $exit where {
+    register_diagnostic(
+        span = $exit,
+        message = "Command handlers must not call `process.exit(...)` (#288 / #289). Throw a typed `Error` instead — the framework's `handleCommandError` pipeline will format and terminate. See AGENTS.md and `tests/unit/no-process-exit-in-handlers.test.ts`.",
+        severity = "error"
+    )
+}
