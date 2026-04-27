@@ -77,7 +77,7 @@ c8ctl --version
 
 ### Command Reference
 
-> Auto-generated from [`COMMAND_REGISTRY`](src/command-registry.ts). Do not edit manually.
+> Auto-generated from [`COMMAND_REGISTRY`](https://github.com/camunda/c8ctl/blob/main/src/command-registry.ts). Do not edit manually.
 > Run `node --experimental-strip-types scripts/sync-readme-commands.ts` to update.
 
 #### Global Flags
