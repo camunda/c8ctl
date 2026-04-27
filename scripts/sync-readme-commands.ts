@@ -27,18 +27,6 @@ export const END_MARKER = "<!-- command-reference:end -->";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Build a reverse map: canonical resource → shortest alias */
-export function buildAliasLookup(): Map<string, string> {
-	const map = new Map<string, string>();
-	for (const [alias, canonical] of Object.entries(RESOURCE_ALIASES)) {
-		const existing = map.get(canonical);
-		if (!existing || alias.length < existing.length) {
-			map.set(canonical, alias);
-		}
-	}
-	return map;
-}
-
 /** Deduplicate resource aliases: collapse entries where the alias is just the plural form of the canonical. */
 export function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 	const seen = new Map<string, string[]>();
@@ -100,9 +88,9 @@ function verbDescription(def: CommandDef): string {
 
 /** Resolve resource short name to canonical, returning the display form */
 export function resourceDisplay(resource: string): string {
-	// If the resource is already canonical (contains hyphen or is a known long form), return as-is
+	// Only show the canonical form when it differs from the requested resource.
 	const canonical = RESOURCE_ALIASES[resource];
-	return canonical ? `${resource} (${canonical})` : resource;
+	return canonical && canonical !== resource ? `${resource} (${canonical})` : resource;
 }
 
 // ─── Generation ──────────────────────────────────────────────────────────────
@@ -167,7 +155,7 @@ export function generate(): string {
 		}
 
 		// Resources
-		if (def.requiresResource && def.resources.length > 0) {
+		if (def.resources.length > 0) {
 			const resourceList = def.resources.map((r) => resourceDisplay(r)).join(", ");
 			lines.push(`**Resources:** ${resourceList}`);
 			lines.push("");
@@ -286,6 +274,13 @@ function main(): void {
 	if (startIdx === -1 || endIdx === -1) {
 		console.error(
 			`ERROR: README.md is missing ${START_MARKER} and/or ${END_MARKER} markers.`,
+		);
+		process.exit(1);
+	}
+
+	if (startIdx >= endIdx) {
+		console.error(
+			`ERROR: ${START_MARKER} must appear before ${END_MARKER} in README.md.`,
 		);
 		process.exit(1);
 	}

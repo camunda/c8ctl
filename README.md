@@ -923,7 +923,7 @@ c8ctl open operate --profile=prod                           # Open Operate using
 
 Add a profile
 
-**Resources:** profile (profile)
+**Resources:** profile
 
 **Positional arguments:**
 
@@ -952,7 +952,7 @@ Remove a profile (alias: rm)
 
 **Aliases:** `rm`
 
-**Resources:** profile (profile), plugin (plugin)
+**Resources:** profile, plugin
 
 **Positional arguments:**
 
@@ -971,7 +971,7 @@ Remove a profile (alias: rm)
 
 Load a c8ctl plugin (npm registry or URL)
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Positional arguments:**
 
@@ -998,7 +998,7 @@ Unload a c8ctl plugin (npm uninstall wrapper)
 
 **Aliases:** `rm`
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Positional arguments:**
 
@@ -1016,7 +1016,7 @@ Unload a c8ctl plugin (npm uninstall wrapper)
 
 Upgrade a plugin (respects source type)
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Positional arguments:**
 
@@ -1035,7 +1035,7 @@ c8ctl upgrade plugin my-plugin 1.2.3                        # Upgrade plugin to 
 
 Downgrade a plugin to a specific version
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Positional arguments:**
 
@@ -1047,7 +1047,7 @@ Downgrade a plugin to a specific version
 
 Synchronize plugins from registry (rebuild/reinstall)
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Examples:**
 
@@ -1061,7 +1061,7 @@ c8ctl sync plugin                                           # Synchronize plugin
 
 Create a new plugin from TypeScript template
 
-**Resources:** plugin (plugin)
+**Resources:** plugin
 
 **Positional arguments:**
 
@@ -1079,7 +1079,7 @@ c8ctl init plugin my-plugin                                 # Create new plugin 
 
 Set active profile or tenant
 
-**Resources:** profile (profile), tenant
+**Resources:** profile, tenant
 
 **Positional arguments:**
 
@@ -1104,6 +1104,8 @@ c8ctl use profile prod                                      # Set active profile
 
 Show or set output format
 
+**Resources:** json, text
+
 **Examples:**
 
 ```bash
@@ -1115,6 +1117,8 @@ c8ctl output json                                           # Switch to JSON out
 #### `completion`
 
 Generate shell completion script
+
+**Resources:** bash, zsh, fish, install
 
 **Resource-specific flags:**
 
@@ -1161,7 +1165,7 @@ Show help (run 'c8ctl help <command>' for details)
 
 Show active profile
 
-**Resources:** profile (profile)
+**Resources:** profile
 
 **Examples:**
 

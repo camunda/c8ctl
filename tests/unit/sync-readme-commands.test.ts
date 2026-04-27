@@ -70,6 +70,29 @@ describe("generate() output structure", () => {
 	test("contains Commands section", () => {
 		assert.ok(output.includes("### Commands"));
 	});
+
+	test("renders Resources for verbs that support optional resources", () => {
+		const optionalResourceVerb = Object.entries(REGISTRY).find(
+			([, def]) => def.requiresResource === false && def.resources.length > 0,
+		);
+
+		assert.ok(
+			optionalResourceVerb,
+			"Expected at least one verb with optional resources in COMMAND_REGISTRY",
+		);
+
+		const [verb, def] = optionalResourceVerb;
+		const expectedResources = def.resources.map(resourceDisplay).join(", ");
+
+		assert.ok(
+			output.includes(`#### \`${verb}\``),
+			`Missing heading for verb "${verb}"`,
+		);
+		assert.ok(
+			output.includes(`**Resources:** ${expectedResources}`),
+			`Missing Resources line for optional-resource verb "${verb}"`,
+		);
+	});
 });
 
 // ─── Every verb in the registry appears in generated output ──────────────────
