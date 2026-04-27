@@ -31,10 +31,25 @@ import { findHardcodedListenPorts } from "../utils/no-hardcoded-listen-ports.ts"
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const INTEGRATION_DIR = join(PROJECT_ROOT, "tests", "integration");
 
-function listIntegrationTestFiles(): string[] {
-	return readdirSync(INTEGRATION_DIR)
-		.filter((name) => name.endsWith(".test.ts"))
-		.map((name) => join(INTEGRATION_DIR, name));
+function listIntegrationTestFiles(dir: string = INTEGRATION_DIR): string[] {
+	// Recursive `.ts` scan rather than `readdirSync` + `*.test.ts`. The
+	// guard's intent is to cover every TS file under tests/integration —
+	// not just the top-level `*.test.ts` files. A hardcoded port in a
+	// helper module like `tests/integration/helpers/mock-server.ts`
+	// would be the same defect class, and a flat top-level scan would
+	// silently let it through.
+	const files: string[] = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const absPath = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...listIntegrationTestFiles(absPath));
+			continue;
+		}
+		if (entry.isFile() && entry.name.endsWith(".ts")) {
+			files.push(absPath);
+		}
+	}
+	return files;
 }
 
 function toRelative(absPath: string): string {
