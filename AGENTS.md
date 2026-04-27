@@ -174,8 +174,8 @@ There is **no opt-in mechanism** for promoting a verb-specific flag into the top
 
 If you find yourself wanting to promote a flag into the top-level Flags section:
 
-- **If the flag genuinely applies to every (or nearly every) command** — add it to `GLOBAL_FLAGS`. It now is global.
-- **If the flag is verb-specific but you want it discoverable** — that's what `c8ctl help <verb>` is for. Add an entry to the verb's `helpExamples` in `COMMAND_REGISTRY` so the example surfaces in the per-verb help.
+- **If the flag genuinely applies to every (or nearly every) command** — add it to `GLOBAL_FLAGS`. It is now global.
+- **If the flag is verb-specific but you want it discoverable** — keep it verb-specific. If an example would help, add an entry to the verb's `helpExamples` in `COMMAND_REGISTRY`; those examples are aggregated into the top-level `c8ctl --help` output under the global `Examples:` section, not into `c8ctl help <verb>`.
 - **Do not** reintroduce a per-flag opt-in field on `FlagDef`. Class-scoped guards in `tests/unit/help.test.ts` (`Top-level help is scoped to global flags (#321)`) compare the rendered top-level Flags section against `Object.keys(GLOBAL_FLAGS)` and will fail if anything else leaks in.
 
 ### Work environment
