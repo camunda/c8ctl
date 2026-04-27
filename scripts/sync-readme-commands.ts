@@ -192,9 +192,7 @@ export function generate(): string {
 				lines.push("**Positional arguments:**");
 				lines.push("");
 				for (const [resource, positionals] of positionalEntries) {
-					// biome-ignore lint/plugin: Object.entries loses readonly tuple type from CommandDef.resourcePositionals
-					const pos = positionals as readonly PositionalDef[];
-					lines.push(`- **${resource}:** ${renderPositionals(pos)}`);
+					lines.push(`- **${resource}:** ${renderPositionals(positionals)}`);
 				}
 				lines.push("");
 			}
@@ -215,13 +213,11 @@ export function generate(): string {
 			lines.push("**Resource-specific flags:**");
 			lines.push("");
 			for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
-				// biome-ignore lint/plugin: Object.entries loses Record<string, FlagDef> type from CommandDef.resourceFlags
-				const typedFlags = rFlags as Record<string, FlagDef>;
-				if (Object.keys(typedFlags).length === 0) continue;
+				if (Object.keys(rFlags).length === 0) continue;
 				lines.push(`<details>`);
 				lines.push(`<summary><code>${resource}</code></summary>`);
 				lines.push("");
-				lines.push(...renderFlagsTable(typedFlags));
+				lines.push(...renderFlagsTable(rFlags));
 				lines.push("");
 				lines.push(`</details>`);
 				lines.push("");
@@ -273,8 +269,7 @@ export function filterVerbSpecificFlags(
 	const resourceFlagKeys = new Set<string>();
 	if (def.resourceFlags) {
 		for (const rFlags of Object.values(def.resourceFlags)) {
-			// biome-ignore lint/plugin: Object.values loses Record<string, FlagDef> type from CommandDef.resourceFlags
-			for (const key of Object.keys(rFlags as Record<string, FlagDef>)) {
+			for (const key of Object.keys(rFlags)) {
 				resourceFlagKeys.add(key);
 			}
 		}
