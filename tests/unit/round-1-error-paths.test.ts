@@ -112,7 +112,7 @@ describe("run: behavioural — unextractable process id flows through the framew
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	test("BPMN file with no <process id=…>: 'Failed to run process' prefix appears", async () => {
+	test("BPMN file with no <process id=…>: 'Failed to run' framework prefix appears", async () => {
 		// BPMN with definitions but no <process> — extractProcessId returns null.
 		const bpmnPath = join(tempDir, "no-process-id.bpmn");
 		writeFileSync(
