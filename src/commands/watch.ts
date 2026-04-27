@@ -189,8 +189,10 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// SIGINT handler are registered. Tests poll the "Watching for
 		// changes" line as a readiness signal before dropping a file or
 		// sending SIGINT; emitting it earlier (before fs.watch() returns)
-		// races the inotify subscription on slow CI runners and the file
-		// event is silently lost.
+		// races the file-system watcher registration on slow CI runners
+		// (fs.watch backends differ per platform — inotify on Linux,
+		// FSEvents on macOS, ReadDirectoryChangesW on Windows) and the
+		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
 		logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
 		if (flags.force) {
