@@ -1,9 +1,11 @@
 /**
- * Generates the Command Reference section of README.md from COMMAND_REGISTRY.
+ * Generates the Command Reference section of README.md from COMMAND_REGISTRY,
+ * and optionally a standalone Docusaurus-compatible markdown page.
  *
  * Usage:
  *   node --experimental-strip-types scripts/sync-readme-commands.ts          # update README
  *   node --experimental-strip-types scripts/sync-readme-commands.ts --check  # CI check (exit 1 if stale)
+ *   node --experimental-strip-types scripts/sync-readme-commands.ts --docs   # generate docs/command-reference.md
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -25,6 +27,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const ROOT = resolve(__dirname, "..");
 const README_PATH = resolve(ROOT, "README.md");
+const DOCS_PATH = resolve(ROOT, "docs", "command-reference.md");
 
 export const START_MARKER = "<!-- command-reference:start -->";
 export const END_MARKER = "<!-- command-reference:end -->";
@@ -105,21 +108,18 @@ export function resourceDisplay(resource: string): string {
 
 // ─── Generation ──────────────────────────────────────────────────────────────
 
-export function generate(): string {
+/**
+ * Generate the shared command reference body (sections + verb entries).
+ * The `headingBase` parameter sets the markdown heading level for top sections:
+ *   - headingBase=3 → ### Global Flags, #### verb (README, nested under ## Command Reference)
+ *   - headingBase=2 → ## Global Flags, ### verb (standalone docs page, title is h1)
+ */
+export function generateCommandContent(headingBase: number): string[] {
+	const h = (level: number) => "#".repeat(headingBase + level);
 	const lines: string[] = [];
 
-	lines.push("## Command Reference");
-	lines.push("");
-	lines.push(
-		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
-	);
-	lines.push(
-		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
-	);
-	lines.push("");
-
 	// ── Global Flags ──
-	lines.push("### Global Flags");
+	lines.push(`${h(0)} Global Flags`);
 	lines.push("");
 	lines.push("These flags are accepted by every command.");
 	lines.push("");
@@ -129,7 +129,7 @@ export function generate(): string {
 	// ── Resource Aliases ──
 	const aliases = uniqueAliases();
 	if (aliases.length > 0) {
-		lines.push("### Resource Aliases");
+		lines.push(`${h(0)} Resource Aliases`);
 		lines.push("");
 		lines.push("| Alias | Resource |");
 		lines.push("|-------|----------|");
@@ -142,7 +142,7 @@ export function generate(): string {
 	// ── Search Flags ──
 	const searchFlagEntries = Object.entries(SEARCH_FLAGS);
 	if (searchFlagEntries.length > 0) {
-		lines.push("### Search Flags");
+		lines.push(`${h(0)} Search Flags`);
 		lines.push("");
 		lines.push("These flags are available on `list` and `search` commands.");
 		lines.push("");
@@ -151,13 +151,13 @@ export function generate(): string {
 	}
 
 	// ── Commands ──
-	lines.push("### Commands");
+	lines.push(`${h(0)} Commands`);
 	lines.push("");
 
 	const registry: Record<string, CommandDef> = COMMAND_REGISTRY;
 
 	for (const [verb, def] of Object.entries(registry)) {
-		lines.push(`#### \`${verb}\``);
+		lines.push(`${h(1)} \`${verb}\``);
 		lines.push("");
 		lines.push(verbDescription(def));
 		lines.push("");
@@ -252,7 +252,57 @@ export function generate(): string {
 		lines.splice(lines.length - 2, 2);
 	}
 
+	return lines;
+}
+
+/** Generate the README command reference section (nested under ## Command Reference). */
+export function generate(): string {
+	const lines: string[] = [];
+
+	lines.push("## Command Reference");
+	lines.push("");
+	lines.push(
+		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	);
+	lines.push(
+		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
+	);
+	lines.push("");
+
+	lines.push(...generateCommandContent(3));
+
 	return lines.join("\n");
+}
+
+export const DOCS_FRONTMATTER = [
+	"---",
+	"id: command-reference",
+	'title: "Command reference"',
+	'sidebar_label: "Command reference"',
+	'description: "Complete reference of all c8ctl CLI commands, flags, resources, and aliases — auto-generated from the command registry."',
+	"---",
+].join("\n");
+
+export const DOCS_PREAMBLE = [
+	"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts --docs -->",
+	"",
+	":::warning Alpha feature",
+	"`c8ctl` is in alpha and is not intended for production use. Commands and flags may change without notice between releases. See [Getting started](getting-started.md) for details.",
+	":::",
+].join("\n");
+
+/** Generate a standalone Docusaurus-compatible command reference page. */
+export function generateDocs(): string {
+	const lines: string[] = [];
+
+	lines.push(DOCS_FRONTMATTER);
+	lines.push("");
+	lines.push(DOCS_PREAMBLE);
+	lines.push("");
+	lines.push(...generateCommandContent(2));
+
+	return `${lines.join("\n")}\n`;
 }
 
 /**
@@ -290,6 +340,34 @@ export function filterVerbSpecificFlags(
 
 function main(): void {
 	const checkMode = process.argv.includes("--check");
+	const docsMode = process.argv.includes("--docs");
+
+	if (docsMode) {
+		const generated = generateDocs();
+		if (checkMode) {
+			let existing = "";
+			try {
+				existing = readFileSync(DOCS_PATH, "utf-8");
+			} catch {
+				// File doesn't exist yet — always out of sync
+			}
+			if (generated !== existing) {
+				console.error(
+					"docs/command-reference.md is out of sync with COMMAND_REGISTRY.",
+				);
+				console.error(
+					"Run: node --experimental-strip-types scripts/sync-readme-commands.ts --docs",
+				);
+				process.exit(1);
+			}
+			console.log("docs/command-reference.md is up to date.");
+			return;
+		}
+		writeFileSync(DOCS_PATH, generated, "utf-8");
+		console.log("docs/command-reference.md updated.");
+		return;
+	}
+
 	const readme = readFileSync(README_PATH, "utf-8");
 
 	const startIdx = readme.indexOf(START_MARKER);

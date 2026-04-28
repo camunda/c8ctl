@@ -40,7 +40,9 @@
     "dev": "node src/index.ts",
     "cli": "node src/index.ts",
     "sync:readme": "node --experimental-strip-types scripts/sync-readme-commands.ts",
-    "sync:readme:check": "node --experimental-strip-types scripts/sync-readme-commands.ts --check"
+    "sync:readme:check": "node --experimental-strip-types scripts/sync-readme-commands.ts --check",
+    "sync:docs": "node --experimental-strip-types scripts/sync-readme-commands.ts --docs",
+    "sync:docs:check": "node --experimental-strip-types scripts/sync-readme-commands.ts --docs --check"
   },
   "keywords": [
     "camunda",
