@@ -57,6 +57,21 @@ export function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 	return result.sort((a, b) => a.canonical.localeCompare(b.canonical));
 }
 
+/** Get all short aliases for a canonical resource name. */
+function aliasesForResource(canonical: string): string[] {
+	const aliases: string[] = [];
+	for (const [alias, target] of Object.entries(RESOURCE_ALIASES)) {
+		if (
+			target === canonical &&
+			alias !== canonical &&
+			alias !== `${canonical}s`
+		) {
+			aliases.push(alias);
+		}
+	}
+	return aliases.sort();
+}
+
 /** Format a flag name for display: `--name` or `--name` / `-s` */
 export function formatFlag(name: string, def: FlagDef): string {
 	const long = `\`--${name}\``;
@@ -92,9 +107,12 @@ export function renderPositionals(
 		.join(", ");
 }
 
-/** Get the display description for a verb */
+/** Get the display description for a verb (escapes bare angle brackets for MDX compatibility) */
 function verbDescription(def: CommandDef): string {
-	return def.helpDescription ?? def.description;
+	const desc = def.helpDescription ?? def.description;
+	// Escape < that are NOT inside backtick spans (MDX treats them as JSX tags).
+	// Replace < only when not preceded by a backtick context.
+	return desc.replace(/`[^`]*`|(<)/g, (match, lt) => (lt ? "\\<" : match));
 }
 
 /** Resolve resource short name to canonical, returning the display form */
@@ -223,8 +241,13 @@ export function generateCommandContent(
 			lines.push("");
 			for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
 				if (Object.keys(rFlags).length === 0) continue;
+				const aliases = aliasesForResource(resource);
+				const aliasSuffix =
+					aliases.length > 0
+						? ` (${aliases.map((a) => `<code>${a}</code>`).join(", ")})`
+						: "";
 				lines.push(`<details>`);
-				lines.push(`<summary><code>${resource}</code></summary>`);
+				lines.push(`<summary><code>${resource}</code>${aliasSuffix}</summary>`);
 				lines.push("");
 				lines.push(...renderFlagsTable(rFlags));
 				lines.push("");

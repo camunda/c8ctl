@@ -128,13 +128,50 @@ describe("generate() includes verb descriptions", () => {
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		test(`verb "${verb}" shows its description`, () => {
-			const expected = def.helpDescription ?? def.description;
+			const raw = def.helpDescription ?? def.description;
 			assert.ok(
-				output.includes(expected),
-				`Missing description for "${verb}": expected "${expected}"`,
+				output.includes(raw) ||
+					// If the raw description has bare <, it will be escaped
+					(raw.includes("<") && output.includes(raw.replaceAll("<", "\\<"))),
+				`Missing description for "${verb}": expected "${raw}"`,
 			);
 		});
 	}
+});
+
+// ─── MDX angle bracket escaping ──────────────────────────────────────────────
+
+describe("verbDescription escapes bare angle brackets for MDX", () => {
+	const output = generate();
+
+	test("help verb description escapes bare <command> to \\<command>", () => {
+		assert.ok(
+			output.includes("\\<command>"),
+			"Expected escaped \\<command> in help description",
+		);
+		// The unescaped form (without preceding backslash) should NOT appear
+		// outside backtick spans
+		const helpSection = verbSection(output, "help");
+		const withoutCodeSpans = helpSection.replace(/`[^`]*`/g, "");
+		const hasBareAngleBracket = /(?<!\\)<command>/.test(withoutCodeSpans);
+		assert.ok(
+			!hasBareAngleBracket,
+			"Bare <command> should not appear outside backtick spans",
+		);
+	});
+
+	test("angle brackets inside backtick spans are not escaped", () => {
+		// Usage lines like `c8ctl delete <resource> <key>` should keep < unescaped
+		assert.ok(
+			output.includes("`c8ctl delete <resource> <key>`"),
+			"Expected unescaped <resource> <key> inside backtick usage span",
+		);
+		// The escaped form should NOT appear inside backtick spans
+		assert.ok(
+			!output.includes("`c8ctl delete \\<resource>"),
+			"Escaped \\<resource> should not appear inside backtick spans",
+		);
+	});
 });
 
 // ─── Global flags all appear ─────────────────────────────────────────────────
@@ -261,6 +298,42 @@ describe("generate() includes resource-specific flags", () => {
 			});
 		}
 	}
+});
+
+// ─── Resource alias display in resource-specific flag summaries ──────────────
+
+describe("resource-specific flag summaries include aliases", () => {
+	const output = generate();
+
+	test('process-instance summary shows alias "pi"', () => {
+		assert.ok(
+			output.includes("<code>process-instance</code> (<code>pi</code>)"),
+			'Expected process-instance summary to include alias "pi"',
+		);
+	});
+
+	test('variable summary shows aliases "var" and "vars"', () => {
+		assert.ok(
+			output.includes(
+				"<code>variable</code> (<code>var</code>, <code>vars</code>)",
+			),
+			'Expected variable summary to include aliases "var" and "vars"',
+		);
+	});
+
+	test("resources with no short aliases have no parenthetical", () => {
+		// "jobs" is a canonical resource with no short aliases
+		const jobsSummary = output.includes("<code>jobs</code> (");
+		assert.ok(
+			!jobsSummary,
+			'"jobs" should have no alias parenthetical in its summary',
+		);
+		// But the resource itself should still appear
+		assert.ok(
+			output.includes("<code>jobs</code>"),
+			'"jobs" should still appear as a resource',
+		);
+	});
 });
 
 // ─── filterVerbSpecificFlags ─────────────────────────────────────────────────
