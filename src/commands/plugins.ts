@@ -18,6 +18,12 @@ import {
 	isPluginRegistered,
 	removePluginFromRegistry,
 } from "../plugin-registry.ts";
+import {
+	getInstalledPluginVersion,
+	getVersionFromSource,
+} from "../plugin-version.ts";
+
+export { getInstalledPluginVersion, getVersionFromSource };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -486,16 +492,6 @@ function scanInstalledPlugins(nodeModulesPath: string): Set<string> {
 
 	return installedPlugins;
 }
-
-/**
- * Get installed plugin version from package.json
- */
-import {
-	getInstalledPluginVersion,
-	getVersionFromSource,
-} from "../plugin-version.ts";
-
-export { getInstalledPluginVersion, getVersionFromSource };
 
 /**
  * Check if plugin source points to URL/git-style location

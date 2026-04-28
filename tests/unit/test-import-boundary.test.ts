@@ -73,7 +73,6 @@ const TESTS_DIR = join(PROJECT_ROOT, "tests");
  * Paths are workspace-relative POSIX paths under `tests/`.
  */
 const PENDING_MIGRATION: ReadonlySet<string> = new Set([
-	"integration/profile-switching.test.ts",
 	"unit/identity.test.ts",
 ]);
 
