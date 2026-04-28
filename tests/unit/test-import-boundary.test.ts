@@ -48,6 +48,10 @@
  *     and commented-out imports do not produce false positives.
  *   - Both `../../src/commands/...` and `../../../src/commands/...`
  *     forms (any depth of `..`) are caught.
+ *   - **Dynamic imports** (`await import("../../src/commands/...")`)
+ *     and CommonJS `require("../../src/commands/...")` calls are
+ *     also caught — the AST is walked recursively, not just the
+ *     top-level statement list.
  */
 
 import assert from "node:assert";
@@ -72,6 +76,7 @@ const PENDING_MIGRATION: ReadonlySet<string> = new Set([
 	"integration/deploy.test.ts",
 	"integration/mcp-proxy-mock.test.ts",
 	"integration/process-instances.test.ts",
+	"integration/profile-switching.test.ts",
 	"integration/watch.test.ts",
 	"unit/completion-install.test.ts",
 	"unit/completion.test.ts",
@@ -118,8 +123,7 @@ function isRuntimeCommandsImport(node: ts.ImportDeclaration): boolean {
 	const moduleSpec = node.moduleSpecifier;
 	if (!ts.isStringLiteral(moduleSpec)) return false;
 	const spec = moduleSpec.text;
-	// Match relative paths into src/commands/, regardless of `..` depth.
-	if (!/^(?:\.\.\/)+src\/commands\//.test(spec)) return false;
+	if (!isCommandsSpecifier(spec)) return false;
 
 	const clause = node.importClause;
 	if (!clause) {
@@ -143,6 +147,35 @@ function isRuntimeCommandsImport(node: ts.ImportDeclaration): boolean {
 	return true;
 }
 
+/** True iff `spec` is a relative path into `src/commands/`. */
+function isCommandsSpecifier(spec: string): boolean {
+	// Match relative paths into src/commands/, regardless of `..` depth.
+	return /^(?:\.\.\/)+src\/commands\//.test(spec);
+}
+
+/**
+ * True iff `node` is a dynamic `import("...")` or CommonJS
+ * `require("...")` call whose argument is a string literal pointing
+ * into `src/commands/**`. Both are runtime couplings — no equivalent
+ * of `import type` exists for either form.
+ */
+function isRuntimeCommandsCall(node: ts.CallExpression): boolean {
+	const arg0 = node.arguments[0];
+	if (!arg0 || !ts.isStringLiteral(arg0)) return false;
+	if (!isCommandsSpecifier(arg0.text)) return false;
+
+	// Dynamic import: `import(...)` parses to a CallExpression whose
+	// expression has SyntaxKind.ImportKeyword.
+	if (node.expression.kind === ts.SyntaxKind.ImportKeyword) return true;
+
+	// CommonJS `require(...)`.
+	if (ts.isIdentifier(node.expression) && node.expression.text === "require") {
+		return true;
+	}
+
+	return false;
+}
+
 interface Violation {
 	file: string;
 	line: number;
@@ -159,17 +192,30 @@ function findViolations(absPath: string): Violation[] {
 		ts.ScriptKind.TS,
 	);
 	const out: Violation[] = [];
-	for (const stmt of sf.statements) {
-		if (!ts.isImportDeclaration(stmt)) continue;
-		if (!isRuntimeCommandsImport(stmt)) continue;
-		const moduleSpec = stmt.moduleSpecifier;
-		const { line } = sf.getLineAndCharacterOfPosition(moduleSpec.getStart(sf));
+
+	const record = (specNode: ts.Node, specText: string): void => {
+		const { line } = sf.getLineAndCharacterOfPosition(specNode.getStart(sf));
 		out.push({
 			file: toTestsRelative(absPath),
 			line: line + 1,
-			specifier: ts.isStringLiteral(moduleSpec) ? moduleSpec.text : "",
+			specifier: specText,
 		});
-	}
+	};
+
+	const visit = (node: ts.Node): void => {
+		// Static `import` declarations only appear at the top level of a
+		// source file, but visit them via the same walk for symmetry.
+		if (ts.isImportDeclaration(node) && isRuntimeCommandsImport(node)) {
+			const moduleSpec = node.moduleSpecifier;
+			record(moduleSpec, ts.isStringLiteral(moduleSpec) ? moduleSpec.text : "");
+		} else if (ts.isCallExpression(node) && isRuntimeCommandsCall(node)) {
+			const arg0 = node.arguments[0];
+			if (ts.isStringLiteral(arg0)) record(arg0, arg0.text);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(sf);
+
 	return out;
 }
 
