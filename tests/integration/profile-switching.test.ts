@@ -154,12 +154,27 @@ describe("Profile Switching Integration Tests", () => {
 	});
 
 	test("switching profiles affects cluster resolution", async () => {
-		const { useProfile } = await import("../../src/commands/session.ts");
-		const { resolveClusterConfig } = await import("../../src/config.ts");
+		const { loadSessionState, resolveClusterConfig } = await import(
+			"../../src/config.ts"
+		);
 		const { c8ctl } = await import("../../src/runtime.ts");
 
+		// Drive profile switches via the CLI (writes session state to disk),
+		// then reload session state in-process so resolveClusterConfig() and
+		// c8ctl.activeProfile reflect the change. This avoids importing the
+		// `useProfile` handler from src/commands/** (#291 boundary).
+		const useViaCli = async (name: string): Promise<void> => {
+			const r = await cli(testDir, "use", "profile", name);
+			assert.strictEqual(
+				r.status,
+				0,
+				`'use profile ${name}' should succeed. stderr: ${r.stderr}`,
+			);
+			loadSessionState();
+		};
+
 		// Use profile "one"
-		useProfile("one");
+		await useViaCli("one");
 		let config = resolveClusterConfig();
 		assert.strictEqual(
 			config.baseUrl,
@@ -173,7 +188,7 @@ describe("Profile Switching Integration Tests", () => {
 		);
 
 		// Switch to profile "two"
-		useProfile("two");
+		await useViaCli("two");
 		config = resolveClusterConfig();
 		assert.strictEqual(
 			config.baseUrl,
@@ -192,7 +207,7 @@ describe("Profile Switching Integration Tests", () => {
 		);
 
 		// Switch to invalid profile
-		useProfile("invalid");
+		await useViaCli("invalid");
 		config = resolveClusterConfig();
 		assert.strictEqual(
 			config.baseUrl,

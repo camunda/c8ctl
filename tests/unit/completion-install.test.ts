@@ -22,7 +22,7 @@ import {
 	getShellRcFile,
 	installCompletion,
 	refreshCompletionsIfStale,
-} from "../../src/commands/completion.ts";
+} from "../../src/completion.ts";
 import { c8ctl } from "../../src/runtime.ts";
 
 // ─── detectShell ─────────────────────────────────────────────────────────────

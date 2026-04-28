@@ -6,14 +6,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
-import { createClient } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { resolveTenantId } from "../config.ts";
-import { normalizeToError, SilentError } from "../errors.ts";
-import { isIgnored, loadIgnoreRules } from "../ignore.ts";
-import { getLogger, isRecord } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
-import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
+import { createClient } from "./client.ts";
+import { defineCommand, dryRun } from "./command-framework.ts";
+import { DEPLOYABLE_EXTENSIONS } from "./commands/resource-extensions.ts";
+import { resolveTenantId } from "./config.ts";
+import { normalizeToError, SilentError } from "./errors.ts";
+import { isIgnored, loadIgnoreRules } from "./ignore.ts";
+import { getLogger, isRecord } from "./logger.ts";
+import { c8ctl } from "./runtime.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
 

@@ -18,7 +18,7 @@
  * The baseline assertions in THIS file remain green throughout.
  *
  * Sites in the Round 3 allow-list (47 total across 4 files):
- *   - src/commands/completion.ts (5 sites)
+ *   - src/completion.ts (5 sites)
  *   - src/commands/identity.ts   (18 sites)
  *   - src/commands/plugins.ts    (16 sites)
  *   - src/commands/profiles.ts   (8 sites)

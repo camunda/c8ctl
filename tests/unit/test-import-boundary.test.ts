@@ -73,21 +73,7 @@ const TESTS_DIR = join(PROJECT_ROOT, "tests");
  * Paths are workspace-relative POSIX paths under `tests/`.
  */
 const PENDING_MIGRATION: ReadonlySet<string> = new Set([
-	"integration/deploy.test.ts",
-	"integration/mcp-proxy-mock.test.ts",
-	"integration/process-instances.test.ts",
-	"integration/profile-switching.test.ts",
-	"integration/watch.test.ts",
-	"unit/completion-install.test.ts",
-	"unit/completion.test.ts",
-	"unit/help.test.ts",
 	"unit/identity.test.ts",
-	"unit/mcp-proxy-auth.test.ts",
-	"unit/mcp-proxy.test.ts",
-	"unit/open.test.ts",
-	"unit/plugins-version.test.ts",
-	"unit/search-feedback.test.ts",
-	"unit/search-wildcard.test.ts",
 ]);
 
 function listTestFiles(): string[] {

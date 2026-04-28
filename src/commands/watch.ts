@@ -5,12 +5,14 @@
 import { existsSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
+import { deployResources } from "../deployments.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
-import { deployResources } from "./deployments.ts";
+import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
 import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
-export const DEPLOY_COOLDOWN = 1000; // 1 second cooldown
+export { DEPLOY_COOLDOWN };
+
 const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 
 // ─── defineCommand ───────────────────────────────────────────────────────────

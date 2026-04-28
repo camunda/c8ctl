@@ -18,6 +18,12 @@ import {
 	isPluginRegistered,
 	removePluginFromRegistry,
 } from "../plugin-registry.ts";
+import {
+	getInstalledPluginVersion,
+	getVersionFromSource,
+} from "../plugin-version.ts";
+
+export { getInstalledPluginVersion, getVersionFromSource };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -485,44 +491,6 @@ function scanInstalledPlugins(nodeModulesPath: string): Set<string> {
 	}
 
 	return installedPlugins;
-}
-
-/**
- * Get installed plugin version from package.json
- */
-export function getInstalledPluginVersion(
-	nodeModulesPath: string,
-	packageName: string,
-): string | null {
-	const packagePath = join(nodeModulesPath, ...packageName.split("/"));
-	const packageJsonPath = join(packagePath, "package.json");
-
-	if (!existsSync(packageJsonPath)) {
-		return null;
-	}
-
-	try {
-		const pkgJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-		return typeof pkgJson.version === "string" ? pkgJson.version : null;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Extract version from a registry source like package@version
- */
-export function getVersionFromSource(
-	source: string,
-	packageName: string,
-): string | null {
-	const packagePrefix = `${packageName}@`;
-	if (!source.startsWith(packagePrefix)) {
-		return null;
-	}
-
-	const version = source.slice(packagePrefix.length).trim();
-	return version.length > 0 ? version : null;
 }
 
 /**

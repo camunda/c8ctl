@@ -12,7 +12,7 @@ import {
 	getBrowserCommand,
 	OPEN_APPS,
 	validateOpenAppOptions,
-} from "../../src/commands/open.ts";
+} from "../../src/open-helpers.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");

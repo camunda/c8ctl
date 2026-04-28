@@ -10,8 +10,8 @@ import {
 	type ServerResponse,
 } from "node:http";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { createCamundaFetch } from "../../src/commands/mcp-proxy.ts";
 import type { Logger } from "../../src/logger.ts";
+import { createCamundaFetch } from "../../src/mcp-proxy-helpers.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("MCP Proxy Mock Server Integration Tests", () => {

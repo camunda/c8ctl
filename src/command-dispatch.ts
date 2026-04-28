@@ -10,7 +10,6 @@
 
 import type { AnyCommandHandler } from "./command-framework.ts";
 import { completionCommand } from "./commands/completion.ts";
-import { deployCommand } from "./commands/deployments.ts";
 import { getFormCommand } from "./commands/forms.ts";
 import {
 	assignFallbackCommand,
@@ -118,6 +117,7 @@ import {
 } from "./commands/user-tasks.ts";
 import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
+import { deployCommand } from "./deployments.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".
