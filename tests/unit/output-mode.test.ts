@@ -91,3 +91,28 @@ describe("c8 output", () => {
 		);
 	});
 });
+
+describe("c8 which output", () => {
+	beforeEach(() => {
+		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-which-output-test-"));
+	});
+
+	afterEach(() => {
+		rmSync(dataDir, { recursive: true, force: true });
+	});
+
+	test("shows current output mode", async () => {
+		const result = await cli("which", "output");
+		const output = result.stdout + result.stderr;
+
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			output.includes("text"),
+			`Expected output mode in output, got: ${output}`,
+		);
+	});
+});

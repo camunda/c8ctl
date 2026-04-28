@@ -115,3 +115,9 @@ export const useTenantCommand = defineCommand(
 		return { kind: "none" };
 	},
 );
+
+export const whichOutputCommand = defineCommand("which", "output", async () => {
+	const logger = getLogger();
+	logger.info(c8ctl.outputMode);
+	return { kind: "none" };
+});
