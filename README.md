@@ -1,4 +1,4 @@
-# Cocktail (c8ctl) - Camunda 8 CLI
+﻿# Cocktail (c8ctl) - Camunda 8 CLI
 
 c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 operations built on top of [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api).
 
@@ -801,7 +801,7 @@ List resources
 **Resource-specific flags:**
 
 <details>
-<summary><code>process-definition</code></summary>
+<summary><code>process-definition</code> (<code>pd</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -816,7 +816,7 @@ List resources
 </details>
 
 <details>
-<summary><code>process-instance</code></summary>
+<summary><code>process-instance</code> (<code>pi</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -832,7 +832,7 @@ List resources
 </details>
 
 <details>
-<summary><code>user-task</code></summary>
+<summary><code>user-task</code> (<code>ut</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -846,7 +846,7 @@ List resources
 </details>
 
 <details>
-<summary><code>incident</code></summary>
+<summary><code>incident</code> (<code>inc</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -918,7 +918,7 @@ List resources
 </details>
 
 <details>
-<summary><code>authorization</code></summary>
+<summary><code>authorization</code> (<code>auth</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -930,7 +930,7 @@ List resources
 </details>
 
 <details>
-<summary><code>mapping-rule</code></summary>
+<summary><code>mapping-rule</code> (<code>mr</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -960,7 +960,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 **Resource-specific flags:**
 
 <details>
-<summary><code>process-definition</code></summary>
+<summary><code>process-definition</code> (<code>pd</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -975,7 +975,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>process-instance</code></summary>
+<summary><code>process-instance</code> (<code>pi</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -991,7 +991,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>user-task</code></summary>
+<summary><code>user-task</code> (<code>ut</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1005,7 +1005,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>incident</code></summary>
+<summary><code>incident</code> (<code>inc</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1036,7 +1036,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>variable</code></summary>
+<summary><code>variable</code> (<code>var</code>, <code>vars</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1092,7 +1092,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>authorization</code></summary>
+<summary><code>authorization</code> (<code>auth</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1104,7 +1104,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 </details>
 
 <details>
-<summary><code>mapping-rule</code></summary>
+<summary><code>mapping-rule</code> (<code>mr</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1156,7 +1156,7 @@ Get a resource by key
 **Resource-specific flags:**
 
 <details>
-<summary><code>process-definition</code></summary>
+<summary><code>process-definition</code> (<code>pd</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1177,7 +1177,7 @@ Get a resource by key
 </details>
 
 <details>
-<summary><code>process-instance</code></summary>
+<summary><code>process-instance</code> (<code>pi</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1231,7 +1231,7 @@ Create a resource (process instance, identity)
 **Resource-specific flags:**
 
 <details>
-<summary><code>authorization</code></summary>
+<summary><code>authorization</code> (<code>auth</code>)</summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -1859,7 +1859,7 @@ Open the feedback page to report issues or request features
 
 #### `help`
 
-Show help (run 'c8ctl help <command>' for details)
+Show help (run 'c8ctl help \<command>' for details)
 
 **Usage:** `c8ctl help [command]`
 

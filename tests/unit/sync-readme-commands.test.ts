@@ -128,7 +128,11 @@ describe("generate() includes verb descriptions", () => {
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
 		test(`verb "${verb}" shows its description`, () => {
-			const expected = def.helpDescription ?? def.description;
+			const raw = def.helpDescription ?? def.description;
+			// verbDescription() escapes bare angle brackets for MDX compatibility
+			const expected = raw.replace(/`[^`]*`|(<)/g, (m, lt) =>
+				lt ? "\\<" : m,
+			);
 			assert.ok(
 				output.includes(expected),
 				`Missing description for "${verb}": expected "${expected}"`,
