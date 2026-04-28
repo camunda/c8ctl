@@ -25,17 +25,11 @@
  *   > calls in tests, as this can lead to brittle tests that are
  *   > tightly coupled to the implementation.
  *
- * Staged rollout
- * --------------
- *
- * The `PENDING_MIGRATION` allow-list below names every test file that
- * currently violates the boundary. The list is **closed** — it cannot
- * grow. Adding a new test that imports from `src/commands/**` will
- * fail this guard. Each entry is removed as the file is migrated to
- * the `c8()` subprocess pattern; once empty, the rule becomes
- * unconditional and this comment block can be retired (mirroring the
- * pattern that `tests/unit/no-process-exit-in-handlers.test.ts` used
- * during the #288 rollout).
+ * The staged-rollout allow-list (`PENDING_MIGRATION`) was retired in
+ * #341 once the final entry — `tests/unit/identity.test.ts` — was
+ * migrated to the `c8()` subprocess pattern. The rule is now
+ * unconditional: any test file that imports a runtime value from
+ * `src/commands/**` fails this guard.
  *
  * Detection
  * ---------
@@ -62,19 +56,6 @@ import ts from "typescript";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const TESTS_DIR = join(PROJECT_ROOT, "tests");
-
-/**
- * Closed allow-list of test files that currently import runtime
- * values from `src/commands/**`. New violations are rejected. This
- * list shrinks as files are migrated to the `c8()` subprocess
- * pattern; when it reaches zero, delete the allow-list entirely
- * and let the rule be unconditional.
- *
- * Paths are workspace-relative POSIX paths under `tests/`.
- */
-const PENDING_MIGRATION: ReadonlySet<string> = new Set([
-	"unit/identity.test.ts",
-]);
 
 function listTestFiles(): string[] {
 	const out: string[] = [];
@@ -216,46 +197,23 @@ function findViolations(absPath: string): Violation[] {
 describe("architectural guard: tests must not import handlers from src/commands/** (#291)", () => {
 	const files = listTestFiles();
 
-	test("no test file imports runtime values from src/commands/** (except those on the closed PENDING_MIGRATION allow-list)", () => {
-		const newViolations: Violation[] = [];
-		const seenAllowlisted = new Set<string>();
+	test("no test file imports runtime values from src/commands/**", () => {
+		const violations: Violation[] = [];
 
 		for (const abs of files) {
-			const rel = toTestsRelative(abs);
-			const v = findViolations(abs);
-			if (v.length === 0) continue;
-			if (PENDING_MIGRATION.has(rel)) {
-				seenAllowlisted.add(rel);
-				continue;
-			}
-			newViolations.push(...v);
+			violations.push(...findViolations(abs));
 		}
 
 		assert.strictEqual(
-			newViolations.length,
+			violations.length,
 			0,
 			`Test files must not import runtime values from src/commands/**. ` +
 				`Drive commands via the \`c8()\` subprocess helper instead. ` +
-				`Found ${newViolations.length} new violation(s):\n` +
-				newViolations
+				`Found ${violations.length} violation(s):\n` +
+				violations
 					.map((v) => `  - tests/${v.file}:${v.line} — from "${v.specifier}"`)
 					.join("\n") +
-				`\n\nIf you have intentionally migrated a file off the allow-list, ` +
-				`remove it from PENDING_MIGRATION in this file. ` +
-				`See AGENTS.md → "Command handler shape" for the canonical pattern.`,
-		);
-
-		// Pin the allow-list shape: every entry must currently violate.
-		// If an entry no longer violates, the maintainer should remove
-		// it from PENDING_MIGRATION (this is how the list shrinks to
-		// zero).
-		const stale = [...PENDING_MIGRATION].filter((f) => !seenAllowlisted.has(f));
-		assert.strictEqual(
-			stale.length,
-			0,
-			`PENDING_MIGRATION contains entries that no longer violate the ` +
-				`import boundary. Remove them so the allow-list keeps shrinking:\n` +
-				stale.map((f) => `  - ${f}`).join("\n"),
+				`\n\nSee AGENTS.md → "Command handler shape" for the canonical pattern.`,
 		);
 	});
 });

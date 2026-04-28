@@ -37,10 +37,13 @@ describe("CLI behavioural: create user", () => {
 
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.username, "alice");
-		// password is redacted by sanitizeForLogging
-		assert.ok(
-			body.password !== undefined,
-			"body should include password field",
+		// password is redacted by sanitizeForLogging — assert the actual
+		// redaction marker, not just presence (a regression that emits the
+		// raw secret would otherwise pass the weaker check).
+		assert.strictEqual(
+			body.password,
+			"[REDACTED]",
+			"password must be redacted in dry-run output",
 		);
 	});
 
@@ -518,4 +521,275 @@ describe("CLI behavioural: unassign", () => {
 			`stderr: ${result.stderr}`,
 		);
 	});
+});
+
+// ─── assign / unassign — additional dispatcher behaviour ─────────────────────
+//
+// These tests cover error and edge-case paths that previously lived in
+// `tests/unit/identity.test.ts` as direct-call tests against `handleAssign` /
+// `handleUnassign`. Migrated to the `c8()` subprocess pattern as part of
+// #341 to remove the last `tests/** → src/commands/**` import boundary
+// violation (#291). The `Failed to assign|unassign <resource>:` prefix is
+// added by the framework wrapper in `command-framework.ts`.
+
+describe("CLI behavioural: assign — error and encoding paths", () => {
+	test("rejects when multiple --to-* flags are provided", async () => {
+		const result = await c8(
+			"assign",
+			"role",
+			"admin",
+			"--to-user",
+			"alice",
+			"--to-group",
+			"ops",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--to-user") &&
+				result.stderr.includes("--to-group"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("--dry-run with multiple --to-* flags errors before emitting JSON", async () => {
+		const result = await c8(
+			"assign",
+			"role",
+			"admin",
+			"--dry-run",
+			"--to-user",
+			"alice",
+			"--to-group",
+			"ops",
+			"--to-tenant",
+			"t1",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Exactly one target flag"),
+			`stderr: ${result.stderr}`,
+		);
+		// stdout must NOT contain the JSON payload that a successful dry-run
+		// would emit — validation must short-circuit before the logger.json call.
+		assert.strictEqual(
+			result.stdout.trim(),
+			"",
+			`stdout should be empty on validation failure, got: ${result.stdout}`,
+		);
+	});
+
+	test("--dry-run encodes special characters in path segments", async () => {
+		const result = await c8(
+			"assign",
+			"user",
+			"alice@example.com",
+			"--dry-run",
+			"--to-group",
+			"my group",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const url = getUrl(out);
+		assert.ok(
+			url.includes(encodeURIComponent("alice@example.com")),
+			`expected URL to contain encoded id, got: ${url}`,
+		);
+		assert.ok(
+			url.includes(encodeURIComponent("my group")),
+			`expected URL to contain encoded target value, got: ${url}`,
+		);
+	});
+
+	test("rejects unsupported assign resource type", async () => {
+		const result = await c8("assign", "bogus", "id", "--to-user", "alice");
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Cannot assign resource type: bogus"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects unsupported target flag for the resource (user --to-user)", async () => {
+		// The `user` resource permits --to-group / --to-tenant only;
+		// --to-user is rejected because you can't assign a user to another user.
+		const result = await c8("assign", "user", "alice", "--to-user", "bob");
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Unsupported target flag"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+});
+
+describe("CLI behavioural: unassign — error paths", () => {
+	test("rejects when multiple --from-* flags are provided", async () => {
+		const result = await c8(
+			"unassign",
+			"user",
+			"alice",
+			"--from-group",
+			"ops",
+			"--from-tenant",
+			"t1",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--from-group") &&
+				result.stderr.includes("--from-tenant"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+});
+
+// ─── Defect class: dry-run schema consistency ────────────────────────────────
+//
+// Every mutating identity command's `--dry-run` output must include
+// { dryRun, command, method, url, body }. Class-scoped (not per-command) so a
+// new `create|delete <identity-resource>` handler that forgets the `body`
+// field is rejected by this guard rather than slipping through.
+
+describe("Defect class: identity --dry-run output includes body field", () => {
+	const REQUIRED_DRY_RUN_KEYS = [
+		"dryRun",
+		"command",
+		"method",
+		"url",
+		"body",
+	] as const;
+
+	function assertDryRunSchema(out: Record<string, unknown>, label: string) {
+		for (const key of REQUIRED_DRY_RUN_KEYS) {
+			assert.ok(
+				key in out,
+				`${label}: dry-run output missing required key '${key}'. Got keys: ${Object.keys(out).join(", ")}`,
+			);
+		}
+	}
+
+	// DELETE commands — body must be present and equal to null
+	const DELETE_CASES: Array<{ resource: string; positional: string }> = [
+		{ resource: "user", positional: "alice" },
+		{ resource: "role", positional: "admin" },
+		{ resource: "group", positional: "ops" },
+		{ resource: "tenant", positional: "t1" },
+		{ resource: "mapping-rule", positional: "rule-1" },
+		{ resource: "authorization", positional: "42" },
+	];
+	for (const { resource, positional } of DELETE_CASES) {
+		test(`delete ${resource} --dry-run includes body: null`, async () => {
+			const result = await c8("delete", resource, "--dry-run", positional);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = parseJson(result);
+			assertDryRunSchema(out, `delete ${resource}`);
+			assert.strictEqual(out.body, null);
+		});
+	}
+
+	// CREATE commands — body must be present and an object
+	const CREATE_CASES: Array<{ resource: string; flags: string[] }> = [
+		{
+			resource: "user",
+			flags: ["--username", "alice", "--password", "pw"],
+		},
+		{
+			resource: "role",
+			flags: ["--roleId", "admin-role", "--name", "admin"],
+		},
+		{
+			resource: "group",
+			flags: ["--groupId", "devs", "--name", "Developers"],
+		},
+		{
+			resource: "tenant",
+			flags: ["--tenantId", "acme", "--name", "ACME"],
+		},
+		{
+			resource: "mapping-rule",
+			flags: [
+				"--mappingRuleId",
+				"rule-1",
+				"--name",
+				"Rule",
+				"--claimName",
+				"groups",
+				"--claimValue",
+				"admin",
+			],
+		},
+		{
+			resource: "authorization",
+			flags: [
+				"--ownerId",
+				"alice",
+				"--ownerType",
+				"USER",
+				"--resourceType",
+				"PROCESS_DEFINITION",
+				"--resourceId",
+				"my-process",
+				"--permissions",
+				"READ",
+			],
+		},
+	];
+	for (const { resource, flags } of CREATE_CASES) {
+		test(`create ${resource} --dry-run includes body object`, async () => {
+			const result = await c8("create", resource, "--dry-run", ...flags);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = parseJson(result);
+			assertDryRunSchema(out, `create ${resource}`);
+			assert.ok(
+				typeof out.body === "object" && out.body !== null,
+				`create ${resource}: body must be a non-null object, got ${JSON.stringify(out.body)}`,
+			);
+		});
+	}
+});
+
+// ─── Defect class: assign target-map ↔ switch consistency ────────────────────
+//
+// Every (resource, --to-*) combo declared by the assign dispatcher must
+// produce a valid dry-run. If a combo appears in the allowed-targets map but
+// has no corresponding switch arm in the non-dry-run path, the combo will
+// fail end-to-end. Class-scoped so a future map entry without a wired-up
+// implementation is caught immediately.
+
+describe("Defect class: assign — every allowed (resource, target) combo dry-runs", () => {
+	const VALID_ASSIGN_COMBOS: Array<{
+		resource: string;
+		flag: string;
+		value: string;
+	}> = [
+		{ resource: "role", flag: "--to-user", value: "alice" },
+		{ resource: "role", flag: "--to-group", value: "ops" },
+		{ resource: "role", flag: "--to-tenant", value: "t1" },
+		{ resource: "role", flag: "--to-mapping-rule", value: "mr1" },
+		{ resource: "user", flag: "--to-group", value: "ops" },
+		{ resource: "user", flag: "--to-tenant", value: "t1" },
+		{ resource: "group", flag: "--to-tenant", value: "t1" },
+		{ resource: "mapping-rule", flag: "--to-group", value: "ops" },
+		{ resource: "mapping-rule", flag: "--to-tenant", value: "t1" },
+	];
+
+	for (const { resource, flag, value } of VALID_ASSIGN_COMBOS) {
+		test(`assign ${resource} ${flag}=${value} produces valid dry-run output`, async () => {
+			const result = await c8(
+				"assign",
+				resource,
+				"test-id",
+				"--dry-run",
+				flag,
+				value,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = parseJson(result);
+			assert.strictEqual(out.dryRun, true);
+			assert.strictEqual(out.command, "assign");
+			assert.strictEqual(out.method, "POST");
+			assert.ok(
+				typeof out.url === "string" && out.url.length > 0,
+				`expected non-empty url, got: ${JSON.stringify(out.url)}`,
+			);
+		});
+	}
 });
