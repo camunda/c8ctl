@@ -295,8 +295,23 @@ async function main() {
 		return;
 	}
 
-	// Try to execute plugin command (before unknown-command error)
-	if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
+	// Try to execute plugin command (before unknown-command error).
+	//
+	// Plugins parse their own flags. We pass the raw argv slice after the
+	// verb so they can see flags as written by the user. Going through the
+	// already-parsed `positionals` would lose unknown flags, because
+	// `parseArgs({ strict: false })` consumes them into `values` as booleans
+	// and lets their would-be values leak through as positionals. The end
+	// result is that plugin-specific flags like `--debug` (cluster) or
+	// `--set key=value` (element-template) never reach the plugin handler.
+	const verbIdx = process.argv.indexOf(verb, 2);
+	const pluginArgs =
+		verbIdx >= 0
+			? process.argv.slice(verbIdx + 1)
+			: resource
+				? [resource, ...args]
+				: args;
+	if (await executePluginCommand(verb, pluginArgs)) {
 		return;
 	}
 
