@@ -71,20 +71,44 @@ export interface CommandDef {
 	/** Valid resource names (canonical short forms used in help). */
 	resources: string[];
 	/**
-	 * Flags shared across every resource for this verb (in addition to
-	 * global flags). Per-resource flags must live exclusively in
+	 * Verb-level flag schema. Per-resource flags must live exclusively in
 	 * `resourceFlags` — they are *not* duplicated here. Mixing a flag into
 	 * both buckets defeats unknown-flag detection (#256), and the
 	 * structural disjointness invariant in
 	 * `tests/unit/command-registry.test.ts` will fail.
+	 *
+	 * **Effective-resolution semantics** (see `ResolvedFlags` in
+	 * `src/command-framework.ts` and `validateFlags` in `src/index.ts`):
+	 * the handler's typed `flags` parameter and `validateFlags`'s
+	 * required-field/validator checks resolve to
+	 * `resourceFlags[resource] ?? flags`. So for a verb that declares
+	 * **both** `flags` and `resourceFlags[r]`, the verb-level `flags` are
+	 * **not** seen by the handler or by `validateFlags` when dispatching to
+	 * resource `r` — only `resourceFlags[r]` is. Verb-level `flags` are
+	 * still treated as valid by `detectUnknownFlags` (so `parseArgs` won't
+	 * warn on them) and by `deriveParseArgsOptions` (so they parse), but
+	 * they will not flow into the handler's typed parameter for any
+	 * resource that has its own bucket.
+	 *
+	 * Practical guidance: if a flag must be visible to the handler for a
+	 * given resource, declare it in that resource's `resourceFlags` bucket
+	 * (typically by spreading a shared constant such as `SEARCH_FLAGS`
+	 * into each per-resource bucket). Reserve verb-level `flags` for verbs
+	 * with no `resourceFlags` at all, or for flags that are deliberately
+	 * parse-only on resources with their own bucket.
 	 */
 	flags: Record<string, FlagDef>;
 	/**
 	 * Per-resource flag scoping. Keys are canonical resource names.
 	 * Flags declared here must not also appear in `flags` (see above).
-	 * `parseArgs` still sees these via `deriveParseArgsOptions`, but the
+	 *
+	 * When a resource has an entry here, the framework resolves the
+	 * effective flag schema as `resourceFlags[resource]` and **ignores**
+	 * the verb-level `flags` for handler typing and `validateFlags`.
+	 * `parseArgs` still sees both via `deriveParseArgsOptions`, and the
 	 * scoping lets `warnUnknownFlags` warn when a flag is passed against a
-	 * resource that does not declare it.
+	 * resource that does not declare it. See the doc on `flags` above for
+	 * the full effective-resolution semantics.
 	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
 	/** Per-resource positional argument schemas. Keys are canonical resource names. */
