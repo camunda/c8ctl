@@ -229,7 +229,7 @@ describe("CLI behavioural: bpmn completions", () => {
 	});
 });
 
-// ─── element-template completions ──────────────────���────────────────────────
+// ─── element-template completions ────────────────────────────────────────────
 
 describe("CLI behavioural: element-template completions", () => {
 	test("bash completion includes element-template verb", async () => {

@@ -227,7 +227,7 @@ async function lintSubcommand(args) {
   const problemCount = errorCount + warningCount;
   if (problemCount > 0) {
     logger.output('');
-    logger.output(resolvePath(input.source));
+    logger.output(input.source === 'stdin' ? 'stdin' : resolvePath(input.source));
     for (const line of lines) logger.output(line);
 
     const pluralize = (word, count) => (count === 1 ? word : `${word}s`);
