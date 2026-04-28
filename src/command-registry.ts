@@ -70,9 +70,22 @@ export interface CommandDef {
 	requiresResource: boolean;
 	/** Valid resource names (canonical short forms used in help). */
 	resources: string[];
-	/** Flags specific to this verb (beyond global flags). Superset of all resource-specific flags. */
+	/**
+	 * Flags shared across every resource for this verb (in addition to
+	 * global flags). Per-resource flags must live exclusively in
+	 * `resourceFlags` — they are *not* duplicated here. Mixing a flag into
+	 * both buckets defeats unknown-flag detection (#256), and the
+	 * structural disjointness invariant in
+	 * `tests/unit/command-registry.test.ts` will fail.
+	 */
 	flags: Record<string, FlagDef>;
-	/** Per-resource flag scoping. Keys are canonical resource names. */
+	/**
+	 * Per-resource flag scoping. Keys are canonical resource names.
+	 * Flags declared here must not also appear in `flags` (see above).
+	 * `parseArgs` still sees these via `deriveParseArgsOptions`, but the
+	 * scoping lets `warnUnknownFlags` warn when a flag is passed against a
+	 * resource that does not declare it.
+	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
 	/** Per-resource positional argument schemas. Keys are canonical resource names. */
 	resourcePositionals?: Record<string, readonly PositionalDef[]>;
