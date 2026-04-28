@@ -130,9 +130,7 @@ describe("generate() includes verb descriptions", () => {
 		test(`verb "${verb}" shows its description`, () => {
 			const raw = def.helpDescription ?? def.description;
 			// verbDescription() escapes bare angle brackets for MDX compatibility
-			const expected = raw.replace(/`[^`]*`|(<)/g, (m, lt) =>
-				lt ? "\\<" : m,
-			);
+			const expected = raw.replace(/`[^`]*`|(<)/g, (m, lt) => (lt ? "\\<" : m));
 			assert.ok(
 				output.includes(expected),
 				`Missing description for "${verb}": expected "${expected}"`,

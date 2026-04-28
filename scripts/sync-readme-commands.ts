@@ -61,7 +61,11 @@ export function uniqueAliases(): Array<{ alias: string; canonical: string }> {
 function aliasesForResource(canonical: string): string[] {
 	const aliases: string[] = [];
 	for (const [alias, target] of Object.entries(RESOURCE_ALIASES)) {
-		if (target === canonical && alias !== canonical && alias !== `${canonical}s`) {
+		if (
+			target === canonical &&
+			alias !== canonical &&
+			alias !== `${canonical}s`
+		) {
 			aliases.push(alias);
 		}
 	}
@@ -243,9 +247,7 @@ export function generateCommandContent(
 						? ` (${aliases.map((a) => `<code>${a}</code>`).join(", ")})`
 						: "";
 				lines.push(`<details>`);
-				lines.push(
-					`<summary><code>${resource}</code>${aliasSuffix}</summary>`,
-				);
+				lines.push(`<summary><code>${resource}</code>${aliasSuffix}</summary>`);
 				lines.push("");
 				lines.push(...renderFlagsTable(rFlags));
 				lines.push("");
