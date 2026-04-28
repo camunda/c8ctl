@@ -361,11 +361,17 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 			);
 			if (result) renderResult(result, ctx);
 		} catch (error) {
-			handleCommandError(
-				ctx.logger,
-				`Failed to ${verb} ${resource.replace(/-/g, " ")}`,
-				error,
-			);
+			// Use ctx.resource (the runtime resource) for the error prefix so
+			// verbs like `completion` — which register against one resource
+			// ("install") for typing convenience but dispatch against many
+			// (bash/zsh/fish/install) — report the actual user-facing
+			// resource. Falls back to the registration resource when the
+			// runtime resource is empty (e.g. resourceless verbs).
+			const errorResource = (ctx.resource || resource).replace(/-/g, " ");
+			const errorPrefix = errorResource
+				? `Failed to ${verb} ${errorResource}`
+				: `Failed to ${verb}`;
+			handleCommandError(ctx.logger, errorPrefix, error);
 		}
 	};
 	const handler_ = { verb, resource, execute };

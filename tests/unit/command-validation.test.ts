@@ -251,7 +251,7 @@ describe("requireOneOf", () => {
 
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
-import type { CommandDef } from "../../src/command-registry.ts";
+import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
@@ -293,17 +293,38 @@ function isBrandedInContext(
 }
 
 describe("validateFlags structural invariants", () => {
+	// Iterate both verb-level `flags` and every `resourceFlags[*]` bucket so
+	// these guards remain effective after the #256 refactor moved per-resource
+	// flags out of verb-level `flags`. Without iterating `resourceFlags`, the
+	// branded-type and validator checks would silently skip flags like
+	// `processDefinitionKey` (now in `search.resourceFlags["process-instance"]`)
+	// and miss the same defect class they were written to catch.
+	function* allFlagEntries(
+		def: CommandDef,
+	): IterableIterator<[string, string, FlagDef]> {
+		for (const [name, flagDef] of Object.entries(def.flags)) {
+			yield ["flags", name, flagDef];
+		}
+		if (def.resourceFlags) {
+			for (const [resource, rFlags] of Object.entries(def.resourceFlags)) {
+				for (const [name, flagDef] of Object.entries(rFlags)) {
+					yield [`resourceFlags.${resource}`, name, flagDef];
+				}
+			}
+		}
+	}
+
 	test("every branded-type flag in the registry has a validate function", () => {
 		const missing: string[] = [];
 
 		for (const [verb, def] of Object.entries(REGISTRY)) {
-			for (const [flagName, flagDef] of Object.entries(def.flags)) {
+			for (const [bucket, flagName, flagDef] of allFlagEntries(def)) {
 				if (
 					BRANDED_FLAG_NAMES.has(flagName) &&
 					isBrandedInContext(flagName, def) &&
 					!flagDef.validate
 				) {
-					missing.push(`${verb}.flags.${flagName}`);
+					missing.push(`${verb}.${bucket}.${flagName}`);
 				}
 			}
 		}
@@ -317,14 +338,14 @@ describe("validateFlags structural invariants", () => {
 
 	test("validate functions throw on invalid input for key-type flags", () => {
 		for (const [verb, def] of Object.entries(REGISTRY)) {
-			for (const [flagName, flagDef] of Object.entries(def.flags)) {
+			for (const [bucket, flagName, flagDef] of allFlagEntries(def)) {
 				if (!flagDef.validate) continue;
 
 				// Key-type fields (numeric pattern) reject non-numeric strings
 				if (flagName.endsWith("Key")) {
 					assert.throws(
 						() => flagDef.validate?.("not-a-number"),
-						`${verb}.flags.${flagName}.validate should throw on invalid input`,
+						`${verb}.${bucket}.${flagName}.validate should throw on invalid input`,
 					);
 				}
 			}
@@ -333,7 +354,7 @@ describe("validateFlags structural invariants", () => {
 
 	test("validate functions return the input for valid values", () => {
 		for (const [verb, def] of Object.entries(REGISTRY)) {
-			for (const [flagName, flagDef] of Object.entries(def.flags)) {
+			for (const [bucket, flagName, flagDef] of allFlagEntries(def)) {
 				if (!flagDef.validate) continue;
 
 				// Key-type fields accept numeric strings
@@ -342,7 +363,7 @@ describe("validateFlags structural invariants", () => {
 					assert.strictEqual(
 						String(result),
 						"12345",
-						`${verb}.flags.${flagName}.validate("12345") should return "12345"`,
+						`${verb}.${bucket}.${flagName}.validate("12345") should return "12345"`,
 					);
 				}
 
@@ -354,7 +375,7 @@ describe("validateFlags structural invariants", () => {
 					assert.strictEqual(
 						String(result),
 						"test-value",
-						`${verb}.flags.${flagName}.validate("test-value") should return "test-value"`,
+						`${verb}.${bucket}.${flagName}.validate("test-value") should return "test-value"`,
 					);
 				}
 			}

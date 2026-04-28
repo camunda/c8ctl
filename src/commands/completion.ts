@@ -25,7 +25,9 @@ import { installCompletion, showCompletion } from "../completion.ts";
  * in `resourceFlags.install` per the verb/resource flag-bucket
  * disjointness invariant (#256). The dispatch key is still `completion:`
  * because dispatch is derived from `requiresResource`, not from the
- * registration resource.
+ * registration resource. The framework uses `ctx.resource` for error
+ * messages so failures on non-install branches are not mislabelled
+ * "Failed to completion install".
  *
  * All validation errors are raised via `throw` so the framework wrapper
  * routes them through `handleCommandError`. The architectural guard in
@@ -43,8 +45,13 @@ export const completionCommand = defineCommand(
 			return undefined;
 		}
 		// Non-install resource → render the requested shell's completion script.
-		// `--shell` is unknown-flag-rejected for non-install resources by
-		// `detectUnknownFlags`, so it is never set on this branch.
+		// Note: `flags.shell` may still be populated here because dispatch is
+		// `completion:` regardless of resource and the install schema is in
+		// effect — `parseArgs` will accept `--shell` and `deserializeFlags`
+		// will populate it. `detectUnknownFlags` (src/command-validation.ts)
+		// emits a warning that `--shell` is not valid for non-install
+		// resources, but the value is not stripped. This branch deliberately
+		// ignores `flags.shell`; the warning is the user-facing signal.
 		showCompletion(resource || undefined);
 		return undefined;
 	},

@@ -560,9 +560,10 @@ export const COMMAND_REGISTRY = {
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
-		// can reject `--processDefinitionId` against a non-PD resource (#256).
-		// `parseArgs` still accepts every per-resource flag — see
-		// `deriveParseArgsOptions` which iterates `resourceFlags` too.
+		// warns when (e.g.) `--processDefinitionId` is passed against a
+		// non-PD resource (#256). The flag is still parsed by `parseArgs`
+		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
+		// and the value is ignored — the warning is the user-facing signal.
 		flags: {
 			all: {
 				type: "boolean",
@@ -659,9 +660,10 @@ export const COMMAND_REGISTRY = {
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
-		// can reject `--processDefinitionId` against a non-PD resource (#256).
-		// `parseArgs` still accepts every per-resource flag — see
-		// `deriveParseArgsOptions` which iterates `resourceFlags` too.
+		// warns when (e.g.) `--processDefinitionId` is passed against a
+		// non-PD resource (#256). The flag is still parsed by `parseArgs`
+		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
+		// and the value is ignored — the warning is the user-facing signal.
 		flags: {
 			...SEARCH_FLAGS,
 		},
@@ -735,9 +737,10 @@ export const COMMAND_REGISTRY = {
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
-		// can reject `--xml` against a non-PD resource (#256). `parseArgs`
-		// still accepts every per-resource flag — see `deriveParseArgsOptions`
-		// which iterates `resourceFlags` too.
+		// warns when (e.g.) `--xml` is passed against a non-PD resource
+		// (#256). The flag is still parsed by `parseArgs` (see
+		// `deriveParseArgsOptions`, which iterates `resourceFlags` too) and
+		// the value is ignored — the warning is the user-facing signal.
 		flags: {},
 		resourceFlags: {
 			"process-definition": GET_PD_FLAGS,
@@ -1546,10 +1549,12 @@ export const COMMAND_REGISTRY = {
 		],
 		resources: ["bash", "zsh", "fish", "install"],
 		// `--shell` only applies to `completion install` — declared once in
-		// `resourceFlags.install` so it's rejected with a useful warning when
-		// passed to other resources (e.g. `completion zsh --shell bash`). This
-		// is the original #256 defect class. `parseArgs` still accepts the
-		// flag globally via `deriveParseArgsOptions` iterating `resourceFlags`.
+		// `resourceFlags.install` so it triggers an unknown-flag warning when
+		// passed to other resources (e.g. `completion zsh --shell bash`).
+		// This is the original #256 defect class. `parseArgs` still accepts
+		// the flag globally via `deriveParseArgsOptions` iterating
+		// `resourceFlags`, and the value is ignored on non-install branches
+		// of `completionCommand` — the warning is the user-facing signal.
 		flags: {},
 		resourceFlags: {
 			install: {
