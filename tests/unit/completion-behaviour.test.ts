@@ -167,3 +167,105 @@ describe("CLI behavioural: cluster plugin completions", () => {
 		}
 	});
 });
+
+// ─── bpmn completions ───────────────────────────────────────────────────────
+
+describe("CLI behavioural: bpmn completions", () => {
+	test("bash completion includes bpmn verb", async () => {
+		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("bpmn"),
+			"Expected bpmn verb in bash completions",
+		);
+	});
+
+	test("bash completion includes bpmn subcommands", async () => {
+		const result = await c8("completion", "bash");
+		for (const sub of ["lint"]) {
+			assert.ok(
+				result.stdout.includes(sub),
+				`Expected bpmn subcommand "${sub}" in bash completions`,
+			);
+		}
+	});
+
+	test("zsh completion includes bpmn verb with description", async () => {
+		const result = await c8("completion", "zsh");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("bpmn"),
+			"Expected bpmn verb in zsh completions",
+		);
+	});
+
+	test("zsh completion includes bpmn subcommands", async () => {
+		const result = await c8("completion", "zsh");
+		for (const sub of ["lint"]) {
+			assert.ok(
+				result.stdout.includes(sub),
+				`Expected bpmn subcommand "${sub}" in zsh completions`,
+			);
+		}
+	});
+
+	test("fish completion includes bpmn verb", async () => {
+		const result = await c8("completion", "fish");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("bpmn"),
+			"Expected bpmn verb in fish completions",
+		);
+	});
+
+	test("fish completion includes bpmn subcommands", async () => {
+		const result = await c8("completion", "fish");
+		for (const sub of ["lint"]) {
+			assert.ok(
+				result.stdout.includes(sub),
+				`Expected bpmn subcommand "${sub}" in fish completions`,
+			);
+		}
+	});
+});
+
+// ─── element-template completions ──────────────────���────────────────────────
+
+describe("CLI behavioural: element-template completions", () => {
+	test("bash completion includes element-template verb", async () => {
+		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("element-template"),
+			"Expected element-template verb in bash completions",
+		);
+	});
+
+	test("bash completion includes element-template resources", async () => {
+		const result = await c8("completion", "bash");
+		for (const sub of ["apply", "list-properties"]) {
+			assert.ok(
+				result.stdout.includes(sub),
+				`Expected element-template resource "${sub}" in bash completions`,
+			);
+		}
+	});
+
+	test("zsh completion includes element-template verb", async () => {
+		const result = await c8("completion", "zsh");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("element-template"),
+			"Expected element-template verb in zsh completions",
+		);
+	});
+
+	test("fish completion includes element-template verb", async () => {
+		const result = await c8("completion", "fish");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("element-template"),
+			"Expected element-template verb in fish completions",
+		);
+	});
+});
