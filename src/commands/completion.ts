@@ -44,7 +44,12 @@ export const completionCommand = defineCommand(
 			installCompletion(typeof shellFlag === "string" ? shellFlag : undefined);
 			return undefined;
 		}
-		// Non-install resource → render the requested shell's completion script.
+		// Non-install resource → render the requested shell's completion
+		// script when `resource` is one of bash/zsh/fish. When `resource`
+		// is empty (`c8ctl completion` with no positional), `showCompletion`
+		// throws a usage error listing the supported shells; the framework
+		// wrapper routes that through `handleCommandError`.
+		//
 		// Note: `flags.shell` may still be populated here because dispatch is
 		// `completion:` regardless of resource and the install schema is in
 		// effect — `parseArgs` will accept `--shell` and `deserializeFlags`
