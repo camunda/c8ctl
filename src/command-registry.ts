@@ -85,10 +85,11 @@ export interface CommandDef {
 	 * **both** `flags` and `resourceFlags[r]`, the verb-level `flags` are
 	 * **not** seen by the handler or by `validateFlags` when dispatching to
 	 * resource `r` — only `resourceFlags[r]` is. Verb-level `flags` are
-	 * still treated as valid by `detectUnknownFlags` (so `parseArgs` won't
-	 * warn on them) and by `deriveParseArgsOptions` (so they parse), but
-	 * they will not flow into the handler's typed parameter for any
-	 * resource that has its own bucket.
+	 * still treated as valid by `detectUnknownFlags`, so
+	 * `detectUnknownFlags`/`warnUnknownFlags` will not emit an
+	 * unknown-flag warning for them, and `deriveParseArgsOptions` still
+	 * includes them so they parse, but they will not flow into the
+	 * handler's typed parameter for any resource that has its own bucket.
 	 *
 	 * Practical guidance: if a flag must be visible to the handler for a
 	 * given resource, declare it in that resource's `resourceFlags` bucket
@@ -105,10 +106,10 @@ export interface CommandDef {
 	 * When a resource has an entry here, the framework resolves the
 	 * effective flag schema as `resourceFlags[resource]` and **ignores**
 	 * the verb-level `flags` for handler typing and `validateFlags`.
-	 * `parseArgs` still sees both via `deriveParseArgsOptions`, and the
-	 * scoping lets `warnUnknownFlags` warn when a flag is passed against a
-	 * resource that does not declare it. See the doc on `flags` above for
-	 * the full effective-resolution semantics.
+	 * `deriveParseArgsOptions` still includes both buckets so they parse,
+	 * and the scoping lets `warnUnknownFlags` warn when a flag is passed
+	 * against a resource that does not declare it. See the doc on `flags`
+	 * above for the full effective-resolution semantics.
 	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
 	/** Per-resource positional argument schemas. Keys are canonical resource names. */
