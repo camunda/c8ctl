@@ -93,19 +93,17 @@ export type ResolvedPositionals<
  */
 // biome-ignore lint/suspicious/noExplicitAny: unconstrained to accept conditional types
 export type InferFlags<F extends Record<string, any>> = {
-	[K in keyof F]: F[K] extends { multiple: true }
-		? string[] | undefined
-		: F[K] extends { validate: (v: string) => infer R }
+	[K in keyof F]: F[K] extends { validate: (v: string) => infer R }
+		? F[K] extends { required: true }
+			? R
+			: R | undefined
+		: F[K] extends { type: "boolean" }
 			? F[K] extends { required: true }
-				? R
-				: R | undefined
-			: F[K] extends { type: "boolean" }
-				? F[K] extends { required: true }
-					? boolean
-					: boolean | undefined
-				: F[K] extends { required: true }
-					? string
-					: string | undefined;
+				? boolean
+				: boolean | undefined
+			: F[K] extends { required: true }
+				? string
+				: string | undefined;
 };
 
 // ─── InferPositionals ────────────────────────────────────────────────────────
@@ -406,14 +404,6 @@ export function deserializeFlags<F extends Record<string, FlagDef>>(
 
 		if (raw === undefined || raw === false) {
 			result[key] = undefined;
-			continue;
-		}
-
-		// Multiple-value flags: parseArgs returns an array of strings
-		if (def.multiple && Array.isArray(raw)) {
-			result[key] = raw.filter(
-				(v): v is string => typeof v === "string" && v !== "",
-			);
 			continue;
 		}
 

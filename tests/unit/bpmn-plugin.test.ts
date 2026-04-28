@@ -42,13 +42,12 @@ async function c8text(...args: string[]) {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: bpmn verb", () => {
-	test("bpmn with no resource shows available resources", async () => {
+	test("bpmn with no subcommand shows usage", async () => {
 		const result = await c8text("bpmn");
-		assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
 		const output = result.stdout + result.stderr;
 		assert.ok(
 			output.includes("lint"),
-			"Should list lint as available resource",
+			"Should list lint as available subcommand",
 		);
 	});
 });

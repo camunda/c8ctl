@@ -66,9 +66,8 @@ function getTaskDefinitionType(xml: string): string | null {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: element-template verb", () => {
-	test("element-template with no resource shows available resources", async () => {
+	test("element-template with no subcommand shows usage", async () => {
 		const result = await c8text("element-template");
-		assert.strictEqual(result.status, 1);
 		const output = result.stdout + result.stderr;
 		assert.ok(output.includes("apply"), "Should list apply");
 		assert.ok(

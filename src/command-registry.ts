@@ -30,8 +30,6 @@ export interface FlagDef {
 	short?: string;
 	/** When true, the flag must be supplied or the command exits with an error. */
 	required?: boolean;
-	/** When true, the flag can be repeated and values are collected into an array. */
-	multiple?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
@@ -138,7 +136,6 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	roles: "role",
 	groups: "group",
 	tenants: "tenant",
-	props: "list-properties",
 };
 
 // ─── Global Flags ────────────────────────────────────────────────────────────
@@ -1494,97 +1491,6 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
-	// ── BPMN tooling ─────────────────────────────────────────────────────
-
-	bpmn: {
-		description: "Lint BPMN diagrams",
-		helpDescription: "Lint BPMN diagrams (supports stdin piping)",
-		helpResource: "lint",
-		mutating: false,
-		requiresResource: true,
-		helpExamples: [
-			{
-				command: "c8ctl bpmn lint process.bpmn",
-				description: "Lint a BPMN file with Camunda rules",
-			},
-		],
-		resources: ["lint"],
-		flags: {},
-		resourcePositionals: {
-			lint: [
-				{ name: "file", required: false },
-			] as const satisfies readonly PositionalDef[],
-		},
-	},
-
-	// ── Element template tooling ─────────────────────────────────────────
-
-	"element-template": {
-		description: "Apply and inspect Camunda element templates",
-		helpResource: "apply|list-properties",
-		mutating: false,
-		requiresResource: true,
-		hasDetailedHelp: true,
-		helpFooterLabel: "Show element-template usage",
-		aliases: ["et"],
-		helpExamples: [
-			{
-				command:
-					"c8ctl element-template apply template.json Task_1 process.bpmn",
-				description: "Apply an element template to a BPMN element",
-			},
-			{
-				command:
-					"c8ctl element-template apply template.json Task_1 process.bpmn --set method=POST --set url=https://example.com",
-				description: "Apply template and set input values",
-			},
-			{
-				command: "c8ctl element-template list-properties template.json",
-				description: "List settable properties from a template",
-			},
-		],
-		resources: ["apply", "list-properties"],
-		flags: {
-			"in-place": {
-				type: "boolean",
-				description: "Modify the BPMN file in place (apply)",
-				short: "i",
-			},
-			set: {
-				type: "string",
-				multiple: true,
-				description:
-					"Set a template property value (repeatable, e.g. --set method=POST)",
-			},
-		},
-		resourceFlags: {
-			apply: {
-				"in-place": {
-					type: "boolean",
-					description: "Modify the BPMN file in place",
-					short: "i",
-				},
-				set: {
-					type: "string",
-					multiple: true,
-					description:
-						"Set a template property value (repeatable, e.g. --set method=POST --set url=https://example.com)",
-				},
-			},
-			"list-properties": {},
-		},
-		resourcePositionals: {
-			apply: [
-				{ name: "template", required: true },
-				{ name: "elementId", required: true },
-				{ name: "file", required: false },
-			] as const satisfies readonly PositionalDef[],
-			"list-properties": [
-				{ name: "template", required: true },
-			] as const satisfies readonly PositionalDef[],
-		},
-	},
-
 	// ── Session commands ───────────────────────────────────────────────────
 
 	use: {
@@ -1808,11 +1714,11 @@ export function isValidCommand(verb: string, resource: string): boolean {
  */
 export function deriveParseArgsOptions(): Record<
 	string,
-	{ type: "string" | "boolean"; short?: string; multiple?: boolean }
+	{ type: "string" | "boolean"; short?: string }
 > {
 	const options: Record<
 		string,
-		{ type: "string" | "boolean"; short?: string; multiple?: boolean }
+		{ type: "string" | "boolean"; short?: string }
 	> = {};
 
 	function addFlags(flags: Record<string, FlagDef>): void {
@@ -1822,13 +1728,11 @@ export function deriveParseArgsOptions(): Record<
 				options[name] = {
 					type: def.type,
 					...(def.short && { short: def.short }),
-					...(def.multiple && { multiple: true }),
 				};
 			} else {
 				// String is more permissive — upgrade when any usage is string
 				if (def.type === "string") existing.type = "string";
 				if (def.short && !existing.short) existing.short = def.short;
-				if (def.multiple) existing.multiple = true;
 			}
 		}
 	}

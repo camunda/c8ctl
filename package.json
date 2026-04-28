@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "prepare": "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && sh -c 'hp=$(git config --local --get core.hooksPath 2>/dev/null || true); if [ -z \"$hp\" ] || [ \"$hp\" = \".githooks\" ]; then git config --local core.hooksPath .githooks; else echo \"prepare: leaving existing core.hooksPath=$hp\"; fi' || true",
-    "build:vendor": "esbuild src/vendor/bpmn-element-templates.js --bundle --format=cjs --platform=node --outfile=dist/vendor/bpmn-element-templates.cjs",
+    "build:vendor": "esbuild default-plugins/element-template/vendor-src/bundle-entry.js --bundle --format=cjs --platform=node --outfile=dist/vendor/bpmn-element-templates.cjs",
     "build": "npm run lint && npm run sync:readme && npm run sync:docs && npm run clean && tsc && npm run build:vendor && npm run copy-plugins && npm run copy-templates",
     "lint": "biome check src/ tests/ scripts/",
     "lint:src": "biome check src/ scripts/",
