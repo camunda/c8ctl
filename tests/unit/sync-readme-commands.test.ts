@@ -12,10 +12,14 @@ import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+	DOCS_FRONTMATTER,
+	DOCS_PREAMBLE,
 	END_MARKER,
 	filterVerbSpecificFlags,
 	formatFlag,
 	generate,
+	generateCommandContent,
+	generateDocs,
 	renderFlagsTable,
 	renderPositionals,
 	resourceDisplay,
@@ -534,5 +538,108 @@ describe("generate() completeness guard", () => {
 				`Generated heading "${heading}" does not correspond to any registry verb`,
 			);
 		}
+	});
+});
+
+// ─── generateCommandContent() ────────────────────────────────────────────────
+
+describe("generateCommandContent() heading levels", () => {
+	test("headingBase=3 produces ### top sections and #### verbs", () => {
+		const content = generateCommandContent(3).join("\n");
+		assert.ok(content.includes("### Global Flags"));
+		assert.ok(content.includes("### Commands"));
+		for (const verb of Object.keys(REGISTRY)) {
+			assert.ok(
+				content.includes(`#### \`${verb}\``),
+				`Missing #### heading for verb "${verb}" at headingBase=3`,
+			);
+		}
+	});
+
+	test("headingBase=2 produces ## top sections and ### verbs", () => {
+		const content = generateCommandContent(2).join("\n");
+		assert.ok(content.includes("## Global Flags"));
+		assert.ok(content.includes("## Commands"));
+		for (const verb of Object.keys(REGISTRY)) {
+			assert.ok(
+				content.includes(`### \`${verb}\``),
+				`Missing ### heading for verb "${verb}" at headingBase=2`,
+			);
+		}
+	});
+
+	test("content is identical regardless of heading level", () => {
+		const base2 = generateCommandContent(2).join("\n");
+		const base3 = generateCommandContent(3).join("\n");
+		// Strip heading markers and compare — content should be the same
+		const stripHeadings = (s: string) => s.replace(/^#{2,5}\s/gm, "");
+		assert.strictEqual(stripHeadings(base2), stripHeadings(base3));
+	});
+});
+
+// ─── generateDocs() output structure ─────────────────────────────────────────
+
+describe("generateDocs() output structure", () => {
+	const output = generateDocs();
+
+	test("starts with YAML frontmatter", () => {
+		assert.ok(output.startsWith("---\n"));
+		assert.ok(output.includes("id: command-reference"));
+		assert.ok(output.includes('title: "Command reference"'));
+		assert.ok(output.includes('sidebar_label: "Command reference"'));
+		assert.ok(output.includes("description:"));
+	});
+
+	test("contains DOCS_FRONTMATTER verbatim", () => {
+		assert.ok(output.includes(DOCS_FRONTMATTER));
+	});
+
+	test("contains DOCS_PREAMBLE verbatim", () => {
+		assert.ok(output.includes(DOCS_PREAMBLE));
+	});
+
+	test("includes alpha warning admonition", () => {
+		assert.ok(output.includes(":::warning Alpha feature"));
+		assert.ok(output.includes(":::"));
+	});
+
+	test("uses ## for top-level sections (not ###)", () => {
+		assert.ok(output.includes("## Global Flags"));
+		assert.ok(output.includes("## Commands"));
+		// Must NOT have ### Global Flags (that's the README level)
+		assert.ok(!output.includes("### Global Flags"));
+	});
+
+	test("uses ### for verb headings (not ####)", () => {
+		const firstVerb = Object.keys(REGISTRY)[0];
+		assert.ok(firstVerb);
+		assert.ok(output.includes(`### \`${firstVerb}\``));
+		assert.ok(!output.includes(`#### \`${firstVerb}\``));
+	});
+
+	test("does not contain the README-level ## Command Reference heading", () => {
+		assert.ok(!output.includes("## Command Reference"));
+	});
+
+	test("ends with a trailing newline", () => {
+		assert.ok(output.endsWith("\n"));
+	});
+
+	test("includes all registry verbs", () => {
+		for (const verb of Object.keys(REGISTRY)) {
+			assert.ok(
+				output.includes(`### \`${verb}\``),
+				`Missing verb "${verb}" in docs output`,
+			);
+		}
+	});
+
+	test("does not contain README markers", () => {
+		assert.ok(!output.includes(START_MARKER));
+		assert.ok(!output.includes(END_MARKER));
+	});
+
+	test("links to getting-started.md in alpha warning", () => {
+		assert.ok(output.includes("[Getting started](getting-started.md)"));
 	});
 });
