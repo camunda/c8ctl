@@ -18,14 +18,14 @@ import {
 	resolveAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
-import { refreshCompletionsIfStale } from "./commands/completion.ts";
+import { refreshCompletionsIfStale } from "./completion.ts";
+import { loadSessionState, resolveTenantId } from "./config.ts";
 import {
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "./commands/help.ts";
-import { loadSessionState, resolveTenantId } from "./config.ts";
+} from "./help.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
 import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";

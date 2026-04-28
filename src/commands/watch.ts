@@ -5,10 +5,10 @@
 import { existsSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
+import { deployResources } from "../deployments.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
-import { deployResources } from "./deployments.ts";
 import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
 export { DEPLOY_COOLDOWN };

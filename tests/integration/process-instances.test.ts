@@ -3,7 +3,7 @@
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  *
  * These tests primarily validate end-to-end CLI behaviour. The setup phase
- * imports the internal `deployResources` helper from `src/commands/deployments.ts`
+ * imports the internal `deployResources` helper from `src/deployments.ts`
  * to seed process definitions before each test, but every assertion exercises
  * the CLI subprocess.
  */
@@ -21,7 +21,7 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/client.ts";
-import { deployResources as deploy } from "../../src/commands/deployments.ts";
+import { deployResources as deploy } from "../../src/deployments.ts";
 import { todayRange } from "../utils/date-helpers.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";

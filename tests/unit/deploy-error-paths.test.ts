@@ -1,7 +1,7 @@
 /**
  * Class-of-defect regression guards for `c8 deploy` error paths.
  *
- * Issue #288: every error path in `src/commands/deployments.ts` must
+ * Issue #288: every error path in `src/deployments.ts` must
  * `throw`, never `process.exit()`. Bypassing the framework's
  * `handleCommandError` pipeline breaks two invariants:
  *   1. `--verbose` cannot rethrow the error to surface a stack trace.
@@ -10,7 +10,7 @@
  *
  * This file pairs a STRUCTURAL guard with BEHAVIOURAL guards:
  *
- *   - Structural: parse `src/commands/deployments.ts` with the
+ *   - Structural: parse `src/deployments.ts` with the
  *     TypeScript compiler and walk the AST for any
  *     `process.exit(...)` CallExpression. Any future regression that
  *     adds a `process.exit(...)` call into the deploy logic fails
@@ -37,7 +37,7 @@ import { c8 } from "../utils/cli.ts";
 import { findProcessExitCalls } from "../utils/no-process-exit.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
-const DEPLOYMENTS_TS = join(PROJECT_ROOT, "src", "commands", "deployments.ts");
+const DEPLOYMENTS_TS = join(PROJECT_ROOT, "src", "deployments.ts");
 
 const DUP_BPMN_TEMPLATE = (
 	id: string,
@@ -56,7 +56,7 @@ const DUP_BPMN_TEMPLATE = (
 const FRAMEWORK_PREFIX = "Failed to deploy";
 
 describe("deploy: structural guard — no process.exit in deployments.ts", () => {
-	test("src/commands/deployments.ts contains no `process.exit(...)` calls", () => {
+	test("src/deployments.ts contains no `process.exit(...)` calls", () => {
 		const calls = findProcessExitCalls(DEPLOYMENTS_TS);
 		assert.strictEqual(
 			calls.length,

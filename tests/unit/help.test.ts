@@ -11,7 +11,7 @@ import {
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "../../src/commands/help.ts";
+} from "../../src/help.ts";
 import { c8ctl } from "../../src/runtime.ts";
 
 describe("Help Module", () => {

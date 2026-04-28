@@ -13,13 +13,13 @@ import {
 import { createClient } from "../client.ts";
 import { defineCommand } from "../command-framework.ts";
 import { normalizeToError } from "../errors.ts";
-import { isRecord, Logger, type LogWriter } from "../logger.ts";
+import { getVersion } from "../help.ts";
+import { Logger, type LogWriter } from "../logger.ts";
 import {
 	createCamundaFetch,
 	normalizeRemoteMcpUrl,
 } from "../mcp-proxy-helpers.ts";
 import { c8ctl } from "../runtime.ts";
-import { getVersion } from "./help.ts";
 
 /**
  * MCP Proxy that bridges STDIO (local) to HTTP (remote) with Camunda authentication.
