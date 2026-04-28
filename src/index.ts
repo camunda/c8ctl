@@ -20,7 +20,7 @@ import {
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { refreshCompletionsIfStale } from "./completion.ts";
-import { loadSessionState, resolveTenantId } from "./config.ts";
+import { getUserDataDir, loadSessionState, resolveTenantId } from "./config.ts";
 import {
 	showCommandHelp,
 	showHelp,
@@ -375,7 +375,12 @@ async function main() {
 	}
 
 	// Inject dependencies into the runtime (breaks circular imports)
-	c8ctl.init({ createClient, resolveTenantId, getLogger });
+	c8ctl.init({
+		createClient,
+		resolveTenantId,
+		getLogger,
+		getUserDataDir,
+	});
 
 	// Load installed plugins
 	await loadInstalledPlugins();
