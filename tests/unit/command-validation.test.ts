@@ -366,24 +366,21 @@ describe("validateFlags behaviour", () => {
 	beforeEach(setup);
 	afterEach(teardown);
 
+	// processDefinitionKey lives in `search.resourceFlags["process-instance"]`,
+	// not at the verb level (#256 — per-resource flags must not be duplicated
+	// in the verb-level `flags` bucket).
+	const piFlags = COMMAND_REGISTRY.search.resourceFlags?.["process-instance"];
+	assert.ok(piFlags, "search.resourceFlags['process-instance'] must exist");
+
 	test("exits on invalid flag value", () => {
-		const searchDef = COMMAND_REGISTRY.search;
 		assert.throws(
-			() =>
-				validateFlags(
-					{ processDefinitionKey: "not-a-number" },
-					searchDef.flags,
-				),
+			() => validateFlags({ processDefinitionKey: "not-a-number" }, piFlags),
 			/process\.exit\(1\)/,
 		);
 	});
 
 	test("passes valid values through", () => {
-		const searchDef = COMMAND_REGISTRY.search;
-		const result = validateFlags(
-			{ processDefinitionKey: "12345" },
-			searchDef.flags,
-		);
+		const result = validateFlags({ processDefinitionKey: "12345" }, piFlags);
 		assert.ok(result.has("processDefinitionKey"));
 		assert.strictEqual(String(result.get("processDefinitionKey")), "12345");
 	});
@@ -398,18 +395,13 @@ describe("validateFlags behaviour", () => {
 	});
 
 	test("skips flags not present in values", () => {
-		const searchDef = COMMAND_REGISTRY.search;
-		const result = validateFlags({}, searchDef.flags);
+		const result = validateFlags({}, piFlags);
 		assert.strictEqual(result.size, 0);
 	});
 
 	test("skips boolean flag values", () => {
-		const searchDef = COMMAND_REGISTRY.search;
 		// processDefinitionKey as boolean should be skipped (not validated)
-		const result = validateFlags(
-			{ processDefinitionKey: true },
-			searchDef.flags,
-		);
+		const result = validateFlags({ processDefinitionKey: true }, piFlags);
 		assert.strictEqual(result.size, 0);
 	});
 });

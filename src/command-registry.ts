@@ -558,23 +558,17 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 		],
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// can reject `--processDefinitionId` against a non-PD resource (#256).
+		// `parseArgs` still accepts every per-resource flag — see
+		// `deriveParseArgsOptions` which iterates `resourceFlags` too.
 		flags: {
 			all: {
 				type: "boolean",
 				description: "List all (disable pagination limit)",
 			},
 			...SEARCH_FLAGS,
-			...PI_SEARCH_FLAGS,
-			...PD_SEARCH_FLAGS,
-			...UT_SEARCH_FLAGS,
-			...INC_SEARCH_FLAGS,
-			...JOB_SEARCH_FLAGS,
-			...USER_SEARCH_FLAGS,
-			...ROLE_SEARCH_FLAGS,
-			...GROUP_SEARCH_FLAGS,
-			...TENANT_SEARCH_FLAGS,
-			...AUTH_SEARCH_FLAGS,
-			...MR_SEARCH_FLAGS,
 		},
 		resourceFlags: {
 			"process-definition": PD_SEARCH_FLAGS,
@@ -663,20 +657,13 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 		],
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// can reject `--processDefinitionId` against a non-PD resource (#256).
+		// `parseArgs` still accepts every per-resource flag — see
+		// `deriveParseArgsOptions` which iterates `resourceFlags` too.
 		flags: {
 			...SEARCH_FLAGS,
-			...PI_SEARCH_FLAGS,
-			...PD_SEARCH_FLAGS,
-			...UT_SEARCH_FLAGS,
-			...INC_SEARCH_FLAGS,
-			...JOB_SEARCH_FLAGS,
-			...VAR_SEARCH_FLAGS,
-			...USER_SEARCH_FLAGS,
-			...ROLE_SEARCH_FLAGS,
-			...GROUP_SEARCH_FLAGS,
-			...TENANT_SEARCH_FLAGS,
-			...AUTH_SEARCH_FLAGS,
-			...MR_SEARCH_FLAGS,
 		},
 		resourceFlags: {
 			"process-definition": PD_SEARCH_FLAGS,
@@ -746,7 +733,12 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rule",
 		],
-		flags: { ...GET_PD_FLAGS, ...GET_FORM_FLAGS, ...GET_PI_FLAGS },
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// can reject `--xml` against a non-PD resource (#256). `parseArgs`
+		// still accepts every per-resource flag — see `deriveParseArgsOptions`
+		// which iterates `resourceFlags` too.
+		flags: {},
 		resourceFlags: {
 			"process-definition": GET_PD_FLAGS,
 			form: GET_FORM_FLAGS,
@@ -1553,12 +1545,12 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		resources: ["bash", "zsh", "fish", "install"],
-		flags: {
-			shell: {
-				type: "string" as const,
-				description: "Shell to install completions for (bash, zsh, fish)",
-			},
-		},
+		// `--shell` only applies to `completion install` — declared once in
+		// `resourceFlags.install` so it's rejected with a useful warning when
+		// passed to other resources (e.g. `completion zsh --shell bash`). This
+		// is the original #256 defect class. `parseArgs` still accepts the
+		// flag globally via `deriveParseArgsOptions` iterating `resourceFlags`.
+		flags: {},
 		resourceFlags: {
 			install: {
 				shell: {
