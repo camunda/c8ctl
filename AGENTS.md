@@ -291,6 +291,105 @@ Land the guard tests in a separate PR off `main`, and merge that PR to `main` be
 
 If you find that the surface is genuinely unguardable without a major investment (for example, full end-to-end tests of `mcp-proxy` against a remote MCP server), record that gap in the PR description and shrink the refactor scope rather than proceeding without a net.
 
+### Command handler shape
+
+Every command handler in `src/commands/**` follows the same shape. Pattern-matching on a nearby file is reliable **only** when every nearby file follows the canonical shape, so this section pins the invariants and lists the enforcement lints that protect them.
+
+#### Canonical shape
+
+```ts
+import { defineCommand, dryRun } from "../command-framework.ts";
+
+export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flags, args) => {
+  const { client, profile, logger } = ctx;
+
+  // 1. Dry-run check — must come BEFORE any I/O. Returns a DryRunResult
+  //    if `--dry-run` was passed, or `null` to continue.
+  const dr = dryRun({
+    command: "myverb my-resource",
+    method: "POST",
+    endpoint: "/my-resources",
+    profile,
+  });
+  if (dr) return dr;
+
+  // 2. Validate inputs — throw typed errors. Never `process.exit(1)`.
+  if (!args.key) throw new Error("Missing required argument: key");
+
+  // 3. Optional intermediate progress for multi-step operations.
+  logger.info(`Doing thing for ${args.key}…`);
+
+  // 4. Do the work.
+  const result = await client.doSomething({ key: args.key });
+
+  // 5. Return a CommandResult — the framework renders it (text, JSON,
+  //    field filtering). For commands that flow through framework
+  //    rendering, prefer the typed kinds (`list`, `get`, `success`, …)
+  //    over inline `logger.success` / `logger.json`. Side-effectful
+  //    commands that handle their own output (e.g. `deploy`, `run`,
+  //    `open` — multi-step progress + final summary) may return
+  //    `{ kind: "none" }` and emit directly via `logger`. Long-running
+  //    handlers return `{ kind: "never" }` (see below).
+  return { kind: "get", data: result };
+});
+```
+
+Long-running handlers (`watch`, `mcp-proxy`) return `{ kind: "never" }` and resolve a lifecycle promise on SIGINT instead of returning a payload. They still throw on validation errors and let the framework own the exit code.
+
+#### Before / after
+
+```ts
+// ❌ Legacy shape — bypasses framework error rendering and dry-run helper.
+export async function deploy(paths: string[], options: DeployOptions) {
+  if (options.dryRun) {
+    emitDryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: options.profile });
+    return;
+  }
+  if (paths.length === 0) {
+    logger.error("At least one path is required");
+    process.exit(1); // ⛔ skips finally, breaks --verbose stack traces
+  }
+  // …
+}
+
+export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
+  await deploy(ctx.positionals, { profile: ctx.profile, dryRun: flags.dryRun });
+});
+```
+
+```ts
+// ✅ Canonical shape — body inline, dryRun() helper, throws on failure,
+//    returns a CommandResult.
+export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
+  const dr = dryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: ctx.profile });
+  if (dr) return dr;
+
+  if (ctx.positionals.length === 0) {
+    throw new Error("At least one path is required");
+  }
+  const summary = await deployResources(ctx.positionals, { profile: ctx.profile });
+  return { kind: "success", message: `Deployed ${summary.count} resources` };
+});
+```
+
+#### Enforcement (don't drift back)
+
+The shape is enforced by three lints/tests. Some of these are scaffolded under follow-up PRs (#334, #336) — once those land alongside this doc, all references below resolve to files on `main`.
+
+1. **No `process.exit` under `src/commands/**`** — issue [#289](https://github.com/camunda/c8ctl/issues/289). Stable refs:
+   - CI AST guard (live on `main`): [`tests/unit/no-process-exit-in-handlers.test.ts`](tests/unit/no-process-exit-in-handlers.test.ts).
+   - Per-command structural guards (live on `main`): `tests/unit/{deploy,run,open,mcp-proxy,watch}-error-paths.test.ts`.
+   - Editor-time GritQL plugin (shipped in PR [#334](https://github.com/camunda/c8ctl/pull/334)): [`plugins/no-process-exit-in-commands.grit`](plugins/no-process-exit-in-commands.grit), wired through `biome.json` `overrides`.
+   - Underlying scanner: [`tests/utils/no-process-exit.ts`](tests/utils/no-process-exit.ts) (AST-based; correctly distinguishes `process.exit(...)` from `process.exitCode = N` — the latter is permitted because it lets the event loop drain naturally).
+2. **All `COMMAND_DISPATCH` entries come from `defineCommand()`** — issue [#290](https://github.com/camunda/c8ctl/issues/290) (closed). [`tests/unit/command-dispatch-structure.test.ts`](tests/unit/command-dispatch-structure.test.ts) walks `COMMAND_DISPATCH` and rejects any entry that is not the marked output of `defineCommand` (via `DEFINE_COMMAND_MARKER`).
+3. **Tests don't import handlers from `src/commands/**` (except type-only)** — issue [#291](https://github.com/camunda/c8ctl/issues/291). Staged guard shipped in PR [#336](https://github.com/camunda/c8ctl/pull/336) at [`tests/unit/test-import-boundary.test.ts`](tests/unit/test-import-boundary.test.ts) — uses a closed `PENDING_MIGRATION` allow-list (current violators) that can only shrink. Tests must drive commands via the `c8()` subprocess helper instead of importing handler internals.
+
+#### When `{ kind: "never" }` applies
+
+Long-running handlers — currently `watch` and `mcp-proxy` — correctly return `{ kind: "never" }`. The handler resolves a lifecycle promise on SIGINT after draining the event loop (closing watchers / sockets, aborting in-flight requests via `AbortController`, clearing pending timers) and the framework returns naturally with exit code 0. Do **not** call `process.exit()` from the SIGINT handler — let the event loop drain.
+
+`mcp-proxy` additionally catches its own startup/shutdown errors and sets `process.exitCode = 1` (rather than `throw`) because STDIO is the MCP protocol channel and re-entering the framework's stdout-emitting error path would corrupt the stream. This deviation is documented in [`src/commands/mcp-proxy.ts`](src/commands/mcp-proxy.ts) and pinned by [`tests/unit/mcp-proxy-error-paths.test.ts`](tests/unit/mcp-proxy-error-paths.test.ts).
+
 ### Adding a new command
 
 Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
