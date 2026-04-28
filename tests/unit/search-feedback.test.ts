@@ -15,8 +15,8 @@ import {
 	SEARCH_FLAGS,
 } from "../../src/command-registry.ts";
 import { detectUnknownFlags } from "../../src/command-validation.ts";
-import { logNoResults, logResultCount } from "../../src/commands/search.ts";
 import { Logger, type LogWriter } from "../../src/logger.ts";
+import { logNoResults, logResultCount } from "../../src/search-helpers.ts";
 
 /** Create a Logger whose output is captured into arrays for assertions. */
 function createTestLogger(): {

@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { DEPLOY_COOLDOWN } from "../../src/commands/watch.ts";
+import { DEPLOY_COOLDOWN } from "../../src/watch-constants.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { startWatchProcess } from "../utils/watch-process.ts";
 

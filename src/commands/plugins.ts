@@ -490,40 +490,12 @@ function scanInstalledPlugins(nodeModulesPath: string): Set<string> {
 /**
  * Get installed plugin version from package.json
  */
-export function getInstalledPluginVersion(
-	nodeModulesPath: string,
-	packageName: string,
-): string | null {
-	const packagePath = join(nodeModulesPath, ...packageName.split("/"));
-	const packageJsonPath = join(packagePath, "package.json");
+import {
+	getInstalledPluginVersion,
+	getVersionFromSource,
+} from "../plugin-version.ts";
 
-	if (!existsSync(packageJsonPath)) {
-		return null;
-	}
-
-	try {
-		const pkgJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-		return typeof pkgJson.version === "string" ? pkgJson.version : null;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Extract version from a registry source like package@version
- */
-export function getVersionFromSource(
-	source: string,
-	packageName: string,
-): string | null {
-	const packagePrefix = `${packageName}@`;
-	if (!source.startsWith(packagePrefix)) {
-		return null;
-	}
-
-	const version = source.slice(packagePrefix.length).trim();
-	return version.length > 0 ? version : null;
-}
+export { getInstalledPluginVersion, getVersionFromSource };
 
 /**
  * Check if plugin source points to URL/git-style location

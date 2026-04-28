@@ -10,7 +10,7 @@ import {
 	matchesCaseSensitive,
 	toStringFilter,
 	wildcardToRegex,
-} from "../../src/commands/search.ts";
+} from "../../src/search-helpers.ts";
 
 describe("toStringFilter — wildcard detection", () => {
 	test("plain string returns the string as-is", () => {
