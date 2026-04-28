@@ -361,13 +361,24 @@ export function defineCommand<V extends keyof Registry, R extends string>(
 			);
 			if (result) renderResult(result, ctx);
 		} catch (error) {
-			// Use ctx.resource (the runtime resource) for the error prefix so
-			// verbs like `completion` — which register against one resource
-			// ("install") for typing convenience but dispatch against many
-			// (bash/zsh/fish/install) — report the actual user-facing
-			// resource. Falls back to the registration resource when the
-			// runtime resource is empty (e.g. resourceless verbs).
-			const errorResource = (ctx.resource || resource).replace(/-/g, " ");
+			// Build the framework error prefix.
+			//
+			// `ctx.resource` is meaningful only for verbs that declare
+			// enumerated resources in the registry (e.g. `list process-instance`,
+			// `completion bash|zsh|fish|install`). For verbs WITHOUT enumerated
+			// resources (deploy/run/watch/…), `ctx.resource` holds the FIRST
+			// POSITIONAL argument (e.g. a `.bpmn` file path) per `src/index.ts`,
+			// not a resource identifier. Using it in the prefix would leak user
+			// input — `Failed to deploy /tmp/foo.bpmn` instead of `Failed to deploy`.
+			//
+			// Rule:
+			//   - enumerated-resource verb → use `ctx.resource` (the actual
+			//     user-facing resource, which may differ from the registration
+			//     resource for verbs like `completion` that register against
+			//     "install" for typing convenience but dispatch many resources).
+			//   - resourceless verb → omit the resource segment entirely.
+			const enumerated = (entry.resources?.length ?? 0) > 0;
+			const errorResource = enumerated ? ctx.resource.replace(/-/g, " ") : "";
 			const errorPrefix = errorResource
 				? `Failed to ${verb} ${errorResource}`
 				: `Failed to ${verb}`;

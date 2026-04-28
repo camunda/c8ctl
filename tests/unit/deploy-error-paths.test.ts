@@ -135,4 +135,48 @@ describe("deploy: behavioural — error paths flow through the framework", () =>
 			`SilentError must suppress the framework's '${FRAMEWORK_PREFIX}' summary on top of the pre-rendered rich error. stderr:\n${result.stderr}`,
 		);
 	});
+
+	// Class-of-defect regression for PR #343 review comment:
+	// For verbs without enumerated resources (deploy/run/watch/…), `ctx.resource`
+	// in `defineCommand` holds the FIRST POSITIONAL argument (e.g. a file path),
+	// not a resource identifier. Using it in the framework error prefix produces
+	// misleading messages like "Failed to deploy /tmp/xyz/empty" that leak user
+	// input into the diagnostic prefix. The framework prefix message for
+	// resourceless verbs must be exactly "Failed to deploy" — no trailing
+	// positional. (Note: the framework also runs `replace(/-/g, " ")` on the
+	// resource segment, so a literal substring search for the leaked path can
+	// false-negative; this test parses the JSON error record and asserts the
+	// `message` field equals "Failed to deploy" exactly.)
+	test("resourceless verbs: framework prefix must not leak the first positional", async () => {
+		const emptyDir = join(tempDir, "leak-check");
+		mkdirSync(emptyDir, { recursive: true });
+
+		const result = await c8("deploy", emptyDir);
+
+		assert.strictEqual(result.status, 1);
+		// In JSON output mode (test default), each logger.error call emits
+		// a single-line JSON object on stderr. Find the error record.
+		const errorLine = result.stderr
+			.split("\n")
+			.map((l) => l.trim())
+			.find((l) => l.startsWith("{") && l.includes('"status":"error"'));
+		assert.ok(
+			errorLine,
+			`expected a JSON error record on stderr. stderr:\n${result.stderr}`,
+		);
+		const errorRecord: unknown = JSON.parse(errorLine);
+		assert.ok(
+			typeof errorRecord === "object" &&
+				errorRecord !== null &&
+				"message" in errorRecord &&
+				typeof errorRecord.message === "string",
+			`expected JSON error record with a string 'message' field. Got: ${errorLine}`,
+		);
+		assert.strictEqual(
+			errorRecord.message,
+			"Failed to deploy",
+			`framework prefix must be exactly 'Failed to deploy' for the resourceless deploy verb — ` +
+				`first-positional path arguments must NOT be appended. Got: ${JSON.stringify(errorRecord.message)}`,
+		);
+	});
 });
