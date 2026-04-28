@@ -114,7 +114,16 @@ export function resourceDisplay(resource: string): string {
  *   - headingBase=3 → ### Global Flags, #### verb (README, nested under ## Command Reference)
  *   - headingBase=2 → ## Global Flags, ### verb (standalone docs page, title is h1)
  */
-export function generateCommandContent(headingBase: number): string[] {
+export type CommandContentHeadingBase = 2 | 3;
+
+export function generateCommandContent(
+	headingBase: CommandContentHeadingBase,
+): string[] {
+	if (headingBase !== 2 && headingBase !== 3) {
+		throw new RangeError(
+			`Unsupported headingBase: ${headingBase}. Expected 2 or 3.`,
+		);
+	}
 	const h = (level: number) => "#".repeat(headingBase + level);
 	const lines: string[] = [];
 
