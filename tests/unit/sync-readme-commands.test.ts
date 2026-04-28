@@ -163,8 +163,13 @@ describe("verbDescription escapes bare angle brackets for MDX", () => {
 	test("angle brackets inside backtick spans are not escaped", () => {
 		// Usage lines like `c8ctl delete <resource> <key>` should keep < unescaped
 		assert.ok(
-			output.includes("`c8ctl help"),
-			"Expected backtick-wrapped usage line for help",
+			output.includes("`c8ctl delete <resource> <key>`"),
+			"Expected unescaped <resource> <key> inside backtick usage span",
+		);
+		// The escaped form should NOT appear inside backtick spans
+		assert.ok(
+			!output.includes("`c8ctl delete \\<resource>"),
+			"Escaped \\<resource> should not appear inside backtick spans",
 		);
 	});
 });
