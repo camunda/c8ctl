@@ -70,9 +70,22 @@ export interface CommandDef {
 	requiresResource: boolean;
 	/** Valid resource names (canonical short forms used in help). */
 	resources: string[];
-	/** Flags specific to this verb (beyond global flags). Superset of all resource-specific flags. */
+	/**
+	 * Flags shared across every resource for this verb (in addition to
+	 * global flags). Per-resource flags must live exclusively in
+	 * `resourceFlags` — they are *not* duplicated here. Mixing a flag into
+	 * both buckets defeats unknown-flag detection (#256), and the
+	 * structural disjointness invariant in
+	 * `tests/unit/command-registry.test.ts` will fail.
+	 */
 	flags: Record<string, FlagDef>;
-	/** Per-resource flag scoping. Keys are canonical resource names. */
+	/**
+	 * Per-resource flag scoping. Keys are canonical resource names.
+	 * Flags declared here must not also appear in `flags` (see above).
+	 * `parseArgs` still sees these via `deriveParseArgsOptions`, but the
+	 * scoping lets `warnUnknownFlags` warn when a flag is passed against a
+	 * resource that does not declare it.
+	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
 	/** Per-resource positional argument schemas. Keys are canonical resource names. */
 	resourcePositionals?: Record<string, readonly PositionalDef[]>;
@@ -558,23 +571,18 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 		],
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// warns when (e.g.) `--processDefinitionId` is passed against a
+		// non-PD resource (#256). The flag is still parsed by `parseArgs`
+		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
+		// and the value is ignored — the warning is the user-facing signal.
 		flags: {
 			all: {
 				type: "boolean",
 				description: "List all (disable pagination limit)",
 			},
 			...SEARCH_FLAGS,
-			...PI_SEARCH_FLAGS,
-			...PD_SEARCH_FLAGS,
-			...UT_SEARCH_FLAGS,
-			...INC_SEARCH_FLAGS,
-			...JOB_SEARCH_FLAGS,
-			...USER_SEARCH_FLAGS,
-			...ROLE_SEARCH_FLAGS,
-			...GROUP_SEARCH_FLAGS,
-			...TENANT_SEARCH_FLAGS,
-			...AUTH_SEARCH_FLAGS,
-			...MR_SEARCH_FLAGS,
 		},
 		resourceFlags: {
 			"process-definition": PD_SEARCH_FLAGS,
@@ -663,20 +671,14 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rules",
 		],
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// warns when (e.g.) `--processDefinitionId` is passed against a
+		// non-PD resource (#256). The flag is still parsed by `parseArgs`
+		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
+		// and the value is ignored — the warning is the user-facing signal.
 		flags: {
 			...SEARCH_FLAGS,
-			...PI_SEARCH_FLAGS,
-			...PD_SEARCH_FLAGS,
-			...UT_SEARCH_FLAGS,
-			...INC_SEARCH_FLAGS,
-			...JOB_SEARCH_FLAGS,
-			...VAR_SEARCH_FLAGS,
-			...USER_SEARCH_FLAGS,
-			...ROLE_SEARCH_FLAGS,
-			...GROUP_SEARCH_FLAGS,
-			...TENANT_SEARCH_FLAGS,
-			...AUTH_SEARCH_FLAGS,
-			...MR_SEARCH_FLAGS,
 		},
 		resourceFlags: {
 			"process-definition": PD_SEARCH_FLAGS,
@@ -746,7 +748,13 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rule",
 		],
-		flags: { ...GET_PD_FLAGS, ...GET_FORM_FLAGS, ...GET_PI_FLAGS },
+		// Verb-level `flags` holds only genuinely shared flags. Per-resource
+		// flags live exclusively in `resourceFlags` so unknown-flag detection
+		// warns when (e.g.) `--xml` is passed against a non-PD resource
+		// (#256). The flag is still parsed by `parseArgs` (see
+		// `deriveParseArgsOptions`, which iterates `resourceFlags` too) and
+		// the value is ignored — the warning is the user-facing signal.
+		flags: {},
 		resourceFlags: {
 			"process-definition": GET_PD_FLAGS,
 			form: GET_FORM_FLAGS,
@@ -1553,12 +1561,14 @@ export const COMMAND_REGISTRY = {
 			},
 		],
 		resources: ["bash", "zsh", "fish", "install"],
-		flags: {
-			shell: {
-				type: "string" as const,
-				description: "Shell to install completions for (bash, zsh, fish)",
-			},
-		},
+		// `--shell` only applies to `completion install` — declared once in
+		// `resourceFlags.install` so it triggers an unknown-flag warning when
+		// passed to other resources (e.g. `completion zsh --shell bash`).
+		// This is the original #256 defect class. `parseArgs` still accepts
+		// the flag globally via `deriveParseArgsOptions` iterating
+		// `resourceFlags`, and the value is ignored on non-install branches
+		// of `completionCommand` — the warning is the user-facing signal.
+		flags: {},
 		resourceFlags: {
 			install: {
 				shell: {
