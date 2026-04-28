@@ -109,6 +109,7 @@ import {
 	outputCommand,
 	useProfileCommand,
 	useTenantCommand,
+	whichOutputCommand,
 } from "./commands/session.ts";
 import { getTopologyCommand } from "./commands/topology.ts";
 import {
@@ -135,6 +136,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["add:profile", addProfileCommand],
 	["remove:profile", removeProfileCommand],
 	["which:profile", whichProfileCommand],
+	["which:output", whichOutputCommand],
 
 	// ── Plugins ────────────────────────────────────────────────────────
 	["list:plugin", listPluginsCommand],

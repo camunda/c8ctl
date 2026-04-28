@@ -1869,14 +1869,15 @@ Show help (run 'c8ctl help <command>' for details)
 
 #### `which`
 
-Show active profile
+Show active profile or output mode
 
-**Resources:** profile
+**Resources:** profile, output
 
 **Examples:**
 
 ```bash
 c8ctl which profile                                         # Show currently active profile
+c8ctl which output                                          # Show current output mode
 ```
 
 

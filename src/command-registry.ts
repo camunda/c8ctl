@@ -1602,7 +1602,7 @@ export const COMMAND_REGISTRY = {
 	},
 
 	which: {
-		description: "Show active profile",
+		description: "Show active profile or output mode",
 		mutating: false,
 		requiresResource: true,
 		helpExamples: [
@@ -1610,8 +1610,12 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl which profile",
 				description: "Show currently active profile",
 			},
+			{
+				command: "c8ctl which output",
+				description: "Show current output mode",
+			},
 		],
-		resources: ["profile"],
+		resources: ["profile", "output"],
 		flags: {},
 	},
 } satisfies Record<string, CommandDef>;
