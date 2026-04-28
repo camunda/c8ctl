@@ -73,6 +73,7 @@
     "bpmnlint": "^11.6.1",
     "bpmnlint-plugin-camunda-compat": "^2.43.1",
     "ignore": "^7.0.5",
+    "semver": "^7.6.3",
     "zeebe-bpmn-moddle": "^1.11.0"
   },
   "devDependencies": {

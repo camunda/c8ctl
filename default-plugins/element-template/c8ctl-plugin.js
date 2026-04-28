@@ -6,8 +6,11 @@
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
  *   c8ctl element-template list-properties <template>
+ *   c8ctl element-template search <query>
+ *   c8ctl element-template sync [--prune]
  *
- * <template> can be a local path or an https:// URL.
+ * <template> can be a local path, an https:// URL, or an OOTB template id
+ * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13).
  * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
  */
 
@@ -25,6 +28,14 @@ import {
   readFileOrUrl,
   warnUnmetConditions,
 } from './helpers.js';
+import {
+  bootstrapIfNeeded,
+  findById,
+  nudgeIfStale,
+  pickVersion,
+  searchTemplates,
+  syncTemplates,
+} from './marketplace.js';
 
 const require = createRequire(import.meta.url);
 
@@ -41,24 +52,33 @@ export const metadata = {
       subcommands: [
         { name: 'apply', description: 'Apply a Camunda element template to a BPMN element' },
         { name: 'list-properties', description: 'List settable properties of an element template' },
+        { name: 'search', description: 'Search out-of-the-box element templates' },
+        { name: 'sync', description: 'Refresh the local OOTB element template cache' },
       ],
       examples: [
         {
+          command: 'c8ctl element-template search "AWS S3"',
+          description: 'Search OOTB templates by name',
+        },
+        {
+          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn',
+          description: 'Apply an OOTB template (latest compatible with the BPMN engine version)',
+        },
+        {
+          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn',
+          description: 'Apply a specific OOTB template version',
+        },
+        {
           command: 'c8ctl element-template apply template.json Task_1 process.bpmn',
-          description: 'Apply an element template to a BPMN element',
+          description: 'Apply a template from a local file or URL',
         },
         {
-          command:
-            'c8ctl element-template apply template.json Task_1 process.bpmn --set method=POST --set url=https://example.com',
-          description: 'Apply template and set input values',
+          command: 'c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2',
+          description: 'List settable properties of an OOTB template',
         },
         {
-          command: 'c8ctl element-template apply -i template.json Task_1 process.bpmn',
-          description: 'Apply in-place (modifies the BPMN file)',
-        },
-        {
-          command: 'c8ctl element-template list-properties template.json',
-          description: 'List settable properties from a template',
+          command: 'c8ctl element-template sync',
+          description: 'Refresh the local OOTB element template cache',
         },
       ],
     },
@@ -110,9 +130,84 @@ function readBpmnInput(filePath) {
   return null;
 }
 
-async function readTemplate(templatePath) {
-  const content = await readFileOrUrl(templatePath);
+/**
+ * Classify a template argument as one of:
+ *   - { kind: 'url', value }
+ *   - { kind: 'path', value }
+ *   - { kind: 'id', id, version? }
+ *
+ * Detection rules (in order):
+ *   1. starts with http:// or https://  → URL
+ *   2. contains / or \, starts with `.`, or ends with .json → path
+ *   3. matches `<id>` or `<id>@<n>`  → id
+ */
+function parseTemplateRef(arg) {
+  if (!arg) return null;
+  if (/^https?:\/\//.test(arg)) return { kind: 'url', value: arg };
+  if (
+    arg.includes('/') ||
+    arg.includes('\\') ||
+    arg.startsWith('.') ||
+    arg.toLowerCase().endsWith('.json')
+  ) {
+    return { kind: 'path', value: arg };
+  }
+  const match = arg.match(/^([^@\s]+?)(?:@(\d+))?$/);
+  if (!match) return { kind: 'path', value: arg };
+  return {
+    kind: 'id',
+    id: match[1],
+    version: match[2] !== undefined ? Number(match[2]) : undefined,
+  };
+}
+
+function getExecutionPlatformVersion(xml) {
+  const match = xml.match(/modeler:executionPlatformVersion\s*=\s*["']([^"']+)["']/);
+  return match ? match[1] : null;
+}
+
+async function readTemplateFromPathOrUrl(input) {
+  const content = await readFileOrUrl(input);
   return JSON.parse(content);
+}
+
+/**
+ * Resolve an `<id>[@<v>]` reference to a single template object using the
+ * local cache, bootstrapping if needed. `executionPlatformVersion` (from the
+ * BPMN file) drives version selection when no explicit version is pinned.
+ */
+async function resolveOotbTemplate(ref, { executionPlatformVersion } = {}) {
+  const logger = getLogger();
+  await bootstrapIfNeeded({ logger });
+  nudgeIfStale(logger);
+
+  const candidates = findById(ref.id);
+  if (candidates.length === 0) {
+    throw new Error(
+      `Template '${ref.id}' not found. Run 'c8ctl element-template sync' to refresh the cache, ` +
+        `or use 'c8ctl element-template search <query>' to find an id.`,
+    );
+  }
+
+  const picked = pickVersion(candidates, {
+    version: ref.version,
+    executionPlatformVersion,
+  });
+  if (!picked) {
+    if (ref.version !== undefined) {
+      const known = candidates.map((t) => t.version).sort((a, b) => Number(a) - Number(b));
+      throw new Error(
+        `Template '${ref.id}' has no version ${ref.version}. Available: ${known.join(', ')}.`,
+      );
+    }
+    throw new Error(
+      `Template '${ref.id}' has no version compatible with execution platform ` +
+        `${executionPlatformVersion}. Available: ${candidates
+          .map((t) => `${t.version} (${t.engines?.camunda || 'any'})`)
+          .join(', ')}.`,
+    );
+  }
+  return picked;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,9 +279,9 @@ async function applySubcommand(args) {
     throw new Error(parsed.error);
   }
 
-  const [templatePath, elementId, bpmnFilePath] = parsed.positionals;
+  const [templateArg, elementId, bpmnFilePath] = parsed.positionals;
 
-  if (!templatePath) {
+  if (!templateArg) {
     throw new Error('Missing template argument. Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>]');
   }
   if (!elementId) {
@@ -202,7 +297,20 @@ async function applySubcommand(args) {
     throw new Error('--in-place cannot be used with stdin input');
   }
 
-  const template = await readTemplate(templatePath);
+  const ref = parseTemplateRef(templateArg);
+  let template;
+  if (ref.kind === 'id') {
+    const executionPlatformVersion = getExecutionPlatformVersion(input.xml);
+    template = await resolveOotbTemplate(ref, { executionPlatformVersion });
+    if (!ref.version && !executionPlatformVersion) {
+      logger.warn(
+        `BPMN has no modeler:executionPlatformVersion — applying latest version ` +
+          `(${template.version}) of ${ref.id}.`,
+      );
+    }
+  } else {
+    template = await readTemplateFromPathOrUrl(ref.value);
+  }
 
   let setBindingNames = [];
   if (parsed.setArgs.length > 0) {
@@ -239,13 +347,26 @@ async function applySubcommand(args) {
 
 async function listPropertiesSubcommand(args) {
   const logger = getLogger();
-  const templatePath = args[0];
+  const templateArg = args[0];
 
-  if (!templatePath) {
+  if (!templateArg) {
     throw new Error('Missing template argument. Usage: c8ctl element-template list-properties <template>');
   }
 
-  const template = await readTemplate(templatePath);
+  const ref = parseTemplateRef(templateArg);
+  let template;
+  if (ref.kind === 'id') {
+    template = await resolveOotbTemplate(ref);
+    if (!ref.version) {
+      logger.warn(
+        `Showing latest version (${template.version}) of ${ref.id}. ` +
+          `Pin a version with ${ref.id}@<n> if needed.`,
+      );
+    }
+  } else {
+    template = await readTemplateFromPathOrUrl(ref.value);
+  }
+
   const settable = getSettableProperties(template.properties);
   const groupLabelMap = new Map((template.groups ?? []).map((g) => [g.id, g.label]));
 
@@ -266,6 +387,7 @@ async function listPropertiesSubcommand(args) {
     logger.json({
       name: template.name,
       id: template.id,
+      version: template.version,
       properties,
     });
     return;
@@ -284,8 +406,10 @@ async function listPropertiesSubcommand(args) {
   }
 
   const templateLabel = template.name
-    ? `${template.name}${template.id ? ` (${template.id})` : ''}`
-    : templatePath;
+    ? `${template.name}${template.id ? ` (${template.id})` : ''}${
+        template.version !== undefined ? ` v${template.version}` : ''
+      }`
+    : templateArg;
   logger.output(templateLabel);
   logger.output('');
 
@@ -329,29 +453,116 @@ async function listPropertiesSubcommand(args) {
 }
 
 // ---------------------------------------------------------------------------
+// Subcommand: search
+// ---------------------------------------------------------------------------
+
+async function searchSubcommand(args) {
+  const logger = getLogger();
+  const query = args.filter((a) => !a.startsWith('-')).join(' ').trim();
+  if (!query) {
+    throw new Error('Missing query. Usage: c8ctl element-template search <query>');
+  }
+
+  await bootstrapIfNeeded({ logger });
+  nudgeIfStale(logger);
+
+  const matches = searchTemplates(query);
+
+  if (isJsonMode()) {
+    logger.json(
+      matches.map((t) => ({
+        id: t.id,
+        name: t.name,
+        version: t.version,
+        description: t.description,
+        engineConstraint: t.engines?.camunda,
+        category: t.category?.name,
+      })),
+    );
+    return;
+  }
+
+  if (matches.length === 0) {
+    logger.output(`No element templates match '${query}'.`);
+    return;
+  }
+
+  // Group by category.name (Modeler-style).
+  const byCategory = new Map();
+  for (const t of matches) {
+    const category = t.category?.name || 'Uncategorized';
+    const list = byCategory.get(category) ?? [];
+    list.push(t);
+    byCategory.set(category, list);
+  }
+
+  const categories = [...byCategory.keys()].sort();
+  for (const category of categories) {
+    logger.output(category);
+    const items = byCategory.get(category).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    for (const t of items) {
+      const nameCol = (t.name || '(unnamed)').padEnd(40);
+      const idCol = t.id.padEnd(50);
+      const version = t.version !== undefined ? `v${t.version}` : '';
+      logger.output(`  ${nameCol}  ${idCol}  ${version}`);
+      if (t.description) {
+        logger.output(`    ${t.description}`);
+      }
+    }
+    logger.output('');
+  }
+  logger.output(`${matches.length} match${matches.length === 1 ? '' : 'es'}.`);
+}
+
+// ---------------------------------------------------------------------------
+// Subcommand: sync
+// ---------------------------------------------------------------------------
+
+async function syncSubcommand(args) {
+  const logger = getLogger();
+  const prune = args.includes('--prune');
+
+  const summary = await syncTemplates({ logger, prune });
+
+  if (isJsonMode()) {
+    logger.json(summary);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ['apply', 'list-properties'];
+const VALID_SUBCOMMANDS = ['apply', 'list-properties', 'search', 'sync'];
 const SUBCOMMAND_ALIASES = { props: 'list-properties' };
 
 function printUsage() {
   console.log('Usage:');
   console.log('  c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]');
   console.log('  c8ctl element-template list-properties <template>');
+  console.log('  c8ctl element-template search <query>');
+  console.log('  c8ctl element-template sync [--prune]');
+  console.log('');
+  console.log('<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).');
   console.log('');
   console.log('Subcommands:');
   console.log('  apply             Apply a Camunda element template to a BPMN element');
-  console.log('  list-properties   List settable properties of an element template (alias: props)');
+  console.log('  list-properties   List settable properties (alias: props)');
+  console.log('  search            Search OOTB templates by name, id, or description');
+  console.log('  sync              Refresh the local OOTB element template cache');
   console.log('');
   console.log('Options:');
   console.log('  -i, --in-place    Modify the BPMN file in place (apply only)');
-  console.log('  --set key=value   Set a template property value (repeatable)');
+  console.log('  --set key=value   Set a template property value (repeatable, apply only)');
+  console.log('  --prune           Drop cached entries no longer in the index (sync only)');
   console.log('');
   console.log('Examples:');
-  console.log('  c8ctl element-template apply template.json Task_1 process.bpmn');
+  console.log('  c8ctl element-template search "AWS S3"');
+  console.log('  c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn');
+  console.log('  c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn');
   console.log('  c8ctl element-template apply template.json Task_1 process.bpmn --set method=POST');
-  console.log('  c8ctl element-template list-properties template.json');
+  console.log('  c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2');
+  console.log('  c8ctl element-template sync');
 }
 
 export const commands = {
@@ -375,6 +586,10 @@ export const commands = {
         await applySubcommand(subArgs);
       } else if (subcommand === 'list-properties') {
         await listPropertiesSubcommand(subArgs);
+      } else if (subcommand === 'search') {
+        await searchSubcommand(subArgs);
+      } else if (subcommand === 'sync') {
+        await syncSubcommand(subArgs);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
