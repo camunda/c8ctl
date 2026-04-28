@@ -16,13 +16,13 @@ export function isUrl(input) {
 /**
  * Rewrite a GitHub blob URL to the raw content URL.
  *   https://github.com/<owner>/<repo>/blob/<ref>/<path>
- * → https://raw.githubusercontent.com/<owner>/<repo>/refs/heads/<ref>/<path>
+ * → https://raw.githubusercontent.com/<owner>/<repo>/<ref>/<path>
  */
 export function toRawGitHubUrl(url) {
   const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/);
   if (match) {
     const [, owner, repo, rest] = match;
-    return `https://raw.githubusercontent.com/${owner}/${repo}/refs/heads/${rest}`;
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${rest}`;
   }
   return url;
 }

@@ -213,7 +213,6 @@ export async function syncTemplates({ logger, prune = false } = {}) {
   }
   next.push(...fetchedTemplates);
 
-  const prunedCount = prune ? 0 : existing.length - next.length + fetchedTemplates.length;
   let pruned = 0;
   if (prune) {
     pruned = existing.length - next.filter((t) => byUpstreamRef.has(t?.metadata?.upstreamRef)).length;

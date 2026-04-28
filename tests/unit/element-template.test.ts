@@ -46,7 +46,7 @@ async function c8text(...args: string[]) {
 
 function getInputValue(xml: string, target: string): string | null {
 	const re = new RegExp(
-		`<zeebe:input\\s+source="([^"]*)"\\s+target="${target}"`,
+		`<zeebe:input\\s+(?=.*target="${target}")(?=.*source="([^"]*)")`,
 	);
 	const match = xml.match(re);
 	return match ? match[1] : null;
