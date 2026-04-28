@@ -93,7 +93,12 @@ const PENDING_MIGRATION: ReadonlySet<string> = new Set([
 function listTestFiles(): string[] {
 	const out: string[] = [];
 	function walk(dir: string): void {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		// Sort entries so diagnostics order is stable across OS/filesystems
+		// (CI runs on both Ubuntu and macOS, which differ in readdir order).
+		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+			a.name.localeCompare(b.name),
+		);
+		for (const entry of entries) {
 			const abs = join(dir, entry.name);
 			if (entry.isDirectory()) {
 				walk(abs);
@@ -147,10 +152,13 @@ function isRuntimeCommandsImport(node: ts.ImportDeclaration): boolean {
 	return true;
 }
 
-/** True iff `spec` is a relative path into `src/commands/`. */
+/** True iff `spec` is a relative path into `src/commands` or a descendant. */
 function isCommandsSpecifier(spec: string): boolean {
-	// Match relative paths into src/commands/, regardless of `..` depth.
-	return /^(?:\.\.\/)+src\/commands\//.test(spec);
+	// Match relative paths into src/commands, regardless of `..` depth,
+	// allowing an optional leading `./` and either the directory itself
+	// (`../../src/commands`) or any child path beneath it
+	// (`../../src/commands/foo.ts`).
+	return /^(?:\.\/)?(?:\.\.\/)+src\/commands(?:\/|$)/.test(spec);
 }
 
 /**
