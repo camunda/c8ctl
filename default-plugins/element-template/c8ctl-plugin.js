@@ -278,6 +278,13 @@ async function applySubcommand(args) {
   const logger = getLogger();
   const parsed = parseArgs(args);
 
+  if (parsed.help) {
+    console.log(
+      'Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]',
+    );
+    return;
+  }
+
   if (parsed.error) {
     throw new Error(parsed.error);
   }
@@ -350,7 +357,20 @@ async function applySubcommand(args) {
 
 async function listPropertiesSubcommand(args) {
   const logger = getLogger();
-  const templateArg = args[0];
+
+  // Handle --help/-h and skip global flags before interpreting the template arg
+  let templateArg;
+  for (const arg of args) {
+    if (arg === '--help' || arg === '-h') {
+      console.log('Usage: c8ctl element-template list-properties <template>');
+      return;
+    }
+    if (arg.startsWith('-')) {
+      continue;
+    }
+    templateArg = arg;
+    break;
+  }
 
   if (!templateArg) {
     throw new Error('Missing template argument. Usage: c8ctl element-template list-properties <template>');

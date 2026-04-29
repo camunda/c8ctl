@@ -244,6 +244,17 @@ export function parseArgs(args) {
       continue;
     }
 
+    // Skip known global flags (--profile, --verbose, --dry-run, --fields, --version)
+    // so plugins don't reject them when the user places them after the verb.
+    if (arg === '--profile' || arg === '--fields' || arg === '--version' || arg === '-v') {
+      // These are string-type global flags — skip the next arg (their value)
+      i++;
+      continue;
+    }
+    if (arg === '--verbose' || arg === '--dry-run') {
+      continue;
+    }
+
     if (arg.startsWith('-')) {
       result.error = `Unknown flag: ${arg}`;
       return result;

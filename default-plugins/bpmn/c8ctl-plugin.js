@@ -151,6 +151,7 @@ function formatLintResults(results) {
   let warningCount = 0;
   const lines = [];
   const issues = [];
+  const { pathStringify } = require('@bpmn-io/moddle-utils');
 
   for (const [ruleName, reports] of Object.entries(results)) {
     for (const report of reports) {
@@ -158,7 +159,6 @@ function formatLintResults(results) {
 
       let elementRef = id;
       if (path) {
-        const { pathStringify } = require('@bpmn-io/moddle-utils');
         elementRef = `${id}#${pathStringify(path)}`;
       }
 
@@ -188,7 +188,14 @@ function formatLintResults(results) {
 
 async function lintSubcommand(args) {
   const logger = getLogger();
-  const filePath = args[0];
+
+  // Handle --help/-h before interpreting args as file paths
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log('Usage: c8ctl bpmn lint [<file.bpmn>]');
+    return;
+  }
+
+  const filePath = args.find((a) => !a.startsWith('-'));
 
   const input = readBpmnInput(filePath);
   if (!input) {
