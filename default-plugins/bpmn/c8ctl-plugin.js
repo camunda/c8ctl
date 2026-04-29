@@ -301,7 +301,7 @@ export const commands = {
     const subcommand = args?.[0];
     const subArgs = args?.slice(1) ?? [];
 
-    if (!subcommand) {
+    if (!subcommand || subcommand === '--help' || subcommand === '-h') {
       printUsage();
       return;
     }
