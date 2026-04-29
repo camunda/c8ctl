@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-feel",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "c8ctl plugin to evaluate FEEL expressions against a Camunda cluster or locally via feelin",
+  "keywords": ["c8ctl", "c8ctl-plugin", "feel", "expression"],
+  "main": "c8ctl-plugin.js"
+}
