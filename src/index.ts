@@ -14,6 +14,7 @@ import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	deriveParseArgsOptions,
+	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
@@ -339,12 +340,47 @@ async function main() {
 			break;
 		}
 	}
-	const pluginArgs =
+	const rawPluginArgs =
 		verbIdx >= 0
 			? process.argv.slice(verbIdx + 1)
 			: resource
 				? [resource, ...args]
 				: args;
+
+	// Strip known global flags (and their values) so plugins don't choke
+	// on flags like --profile, --verbose, --dry-run, etc.
+	const pluginArgs: string[] = [];
+	for (let i = 0; i < rawPluginArgs.length; i++) {
+		const a = rawPluginArgs[i];
+		if (a === "--") {
+			pluginArgs.push(...rawPluginArgs.slice(i));
+			break;
+		}
+		const flagName = a.startsWith("--") ? a.split("=")[0].slice(2) : undefined;
+		if (flagName && flagName in GLOBAL_FLAGS) {
+			// If it's a string-type flag in --flag value form, skip the next arg too
+			const def = Object.entries(GLOBAL_FLAGS).find(
+				([k]) => k === flagName,
+			)?.[1];
+			if (def?.type === "string" && !a.includes("=")) i++;
+			continue;
+		}
+		// Handle short flags (-h, -v)
+		if (
+			a.length === 2 &&
+			a[0] === "-" &&
+			a[1] !== "-" &&
+			Object.values(GLOBAL_FLAGS).some((f) => "short" in f && f.short === a[1])
+		) {
+			const matchedDef = Object.values(GLOBAL_FLAGS).find(
+				(f) => "short" in f && f.short === a[1],
+			);
+			if (matchedDef?.type === "string") i++;
+			continue;
+		}
+		pluginArgs.push(a);
+	}
+
 	if (await executePluginCommand(verb, pluginArgs)) {
 		return;
 	}

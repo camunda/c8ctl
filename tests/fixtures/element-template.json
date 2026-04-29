@@ -7,7 +7,7 @@
     {
       "label": "Task Type",
       "type": "String",
-      "binding": { "type": "zeebe:taskDefinition:type" },
+      "binding": { "type": "zeebe:taskDefinition", "property": "type" },
       "value": "test-type"
     }
   ]
