@@ -414,7 +414,7 @@ async function listPropertiesSubcommand(args) {
       continue;
     }
     if (!afterDoubleDash && arg.startsWith('-')) {
-      continue;
+      throw new Error(`Unknown flag: ${arg}. Usage: c8ctl element-template list-properties <template>`);
     }
     templateArg = arg;
     break;
@@ -529,7 +529,25 @@ async function listPropertiesSubcommand(args) {
 
 async function searchSubcommand(args) {
   const logger = getLogger();
-  const query = args.filter((a) => !a.startsWith('-')).join(' ').trim();
+
+  const queryParts = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--help' || arg === '-h') {
+      logger.output('Usage: c8ctl element-template search <query>');
+      return;
+    }
+    if (arg === '--') {
+      queryParts.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown flag: ${arg}. Usage: c8ctl element-template search <query>`);
+    }
+    queryParts.push(arg);
+  }
+
+  const query = queryParts.join(' ').trim();
   if (!query) {
     throw new Error('Missing query. Usage: c8ctl element-template search <query>');
   }
