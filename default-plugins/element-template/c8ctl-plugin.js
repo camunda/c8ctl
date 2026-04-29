@@ -204,16 +204,26 @@ async function resolveOotbTemplate(ref, { executionPlatformVersion } = {}) {
   });
   if (!picked) {
     if (ref.version !== undefined) {
-      const known = candidates.map((t) => t.version).sort((a, b) => Number(a) - Number(b));
+      const known = candidates
+        .map((t) => t.version)
+        .filter((v) => Number.isFinite(Number(v)))
+        .sort((a, b) => Number(a) - Number(b));
+      const available = known.length > 0 ? `Available: ${known.join(', ')}.` : 'No known versions in cache.';
       throw new Error(
-        `Template '${ref.id}' has no version ${ref.version}. Available: ${known.join(', ')}.`,
+        `Template '${ref.id}' has no version ${ref.version}. ${available}`,
       );
     }
+    const available = candidates
+      .map((t) => {
+        const versionLabel = Number.isFinite(Number(t.version))
+          ? String(t.version)
+          : 'unversioned';
+        return `${versionLabel} (${t.engines?.camunda || 'any'})`;
+      })
+      .join(', ');
     throw new Error(
       `Template '${ref.id}' has no version compatible with execution platform ` +
-        `${executionPlatformVersion}. Available: ${candidates
-          .map((t) => `${t.version} (${t.engines?.camunda || 'any'})`)
-          .join(', ')}.`,
+        `${executionPlatformVersion}. Available: ${available}.`,
     );
   }
   return picked;
@@ -393,14 +403,20 @@ async function applySubcommand(args) {
 async function listPropertiesSubcommand(args) {
   const logger = getLogger();
 
-  // Handle --help/-h and skip global flags before interpreting the template arg
+  // Handle --help/-h and skip global flags before interpreting the template arg.
+  // Honor `--` so subsequent args are treated as positional, even if they start with `-`.
   let templateArg;
+  let afterDoubleDash = false;
   for (const arg of args) {
-    if (arg === '--help' || arg === '-h') {
+    if (!afterDoubleDash && (arg === '--help' || arg === '-h')) {
       logger.output('Usage: c8ctl element-template list-properties <template>');
       return;
     }
-    if (arg.startsWith('-')) {
+    if (!afterDoubleDash && arg === '--') {
+      afterDoubleDash = true;
+      continue;
+    }
+    if (!afterDoubleDash && arg.startsWith('-')) {
       continue;
     }
     templateArg = arg;

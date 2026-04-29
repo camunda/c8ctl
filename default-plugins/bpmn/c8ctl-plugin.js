@@ -193,13 +193,19 @@ function formatLintResults(results) {
 async function lintSubcommand(args) {
   const logger = getLogger();
 
+  const endOfOpts = args.indexOf('--');
+  const optionArgs = endOfOpts === -1 ? args : args.slice(0, endOfOpts);
+  const positionalArgs = endOfOpts === -1 ? [] : args.slice(endOfOpts + 1);
+
   // Handle --help/-h before interpreting args as file paths
-  if (args.includes('--help') || args.includes('-h')) {
+  if (optionArgs.includes('--help') || optionArgs.includes('-h')) {
     logger.output('Usage: c8ctl bpmn lint [<file.bpmn>]');
     return;
   }
 
-  const filePath = args.find((a) => !a.startsWith('-'));
+  const filePath = endOfOpts === -1
+    ? args.find((a) => !a.startsWith('-'))
+    : positionalArgs[0];
 
   const input = readBpmnInput(filePath);
   if (!input) {

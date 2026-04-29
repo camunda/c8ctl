@@ -218,6 +218,11 @@ export function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
+    if (arg === '--') {
+      result.positionals.push(...args.slice(i + 1));
+      break;
+    }
+
     if (arg === '--in-place' || arg === '-i') {
       result.inPlace = true;
       continue;
