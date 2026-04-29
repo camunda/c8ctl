@@ -49,12 +49,21 @@ export const metadata = {
   commands: {
     'element-template': {
       description: 'Apply Camunda element templates and inspect template properties',
+      helpDescription:
+        'Apply Camunda element templates to BPMN elements, list settable properties, ' +
+        'search the out-of-the-box template catalogue, and manage the local template cache.\n\n' +
+        '<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).',
       subcommands: [
         { name: 'apply', description: 'Apply a Camunda element template to a BPMN element' },
-        { name: 'list-properties', description: 'List settable properties of an element template' },
+        { name: 'list-properties', description: 'List settable properties of an element template', aliases: ['props'] },
         { name: 'search', description: 'Search out-of-the-box element templates' },
         { name: 'sync', description: 'Refresh the local OOTB element template cache' },
       ],
+      flags: {
+        'in-place': { type: 'boolean', short: 'i', description: 'Modify the BPMN file in place (apply only)' },
+        set: { type: 'string', description: 'Set a template property value (repeatable, apply only)' },
+        prune: { type: 'boolean', description: 'Drop cached entries no longer in the index (sync only)' },
+      },
       examples: [
         {
           command: 'c8ctl element-template search "AWS S3"',
@@ -279,7 +288,8 @@ async function applySubcommand(args) {
   const parsed = parseArgs(args);
 
   if (parsed.help) {
-    console.log(
+    const logger = getLogger();
+    logger.output(
       'Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]',
     );
     return;
@@ -362,7 +372,7 @@ async function listPropertiesSubcommand(args) {
   let templateArg;
   for (const arg of args) {
     if (arg === '--help' || arg === '-h') {
-      console.log('Usage: c8ctl element-template list-properties <template>');
+      logger.output('Usage: c8ctl element-template list-properties <template>');
       return;
     }
     if (arg.startsWith('-')) {
@@ -560,32 +570,34 @@ const VALID_SUBCOMMANDS = ['apply', 'list-properties', 'search', 'sync'];
 const SUBCOMMAND_ALIASES = { props: 'list-properties' };
 
 function printUsage() {
-  console.log('Usage:');
-  console.log('  c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]');
-  console.log('  c8ctl element-template list-properties <template>');
-  console.log('  c8ctl element-template search <query>');
-  console.log('  c8ctl element-template sync [--prune]');
-  console.log('');
-  console.log('<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).');
-  console.log('');
-  console.log('Subcommands:');
-  console.log('  apply             Apply a Camunda element template to a BPMN element');
-  console.log('  list-properties   List settable properties (alias: props)');
-  console.log('  search            Search OOTB templates by name, id, or description');
-  console.log('  sync              Refresh the local OOTB element template cache');
-  console.log('');
-  console.log('Options:');
-  console.log('  -i, --in-place    Modify the BPMN file in place (apply only)');
-  console.log('  --set key=value   Set a template property value (repeatable, apply only)');
-  console.log('  --prune           Drop cached entries no longer in the index (sync only)');
-  console.log('');
-  console.log('Examples:');
-  console.log('  c8ctl element-template search "AWS S3"');
-  console.log('  c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn');
-  console.log('  c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn');
-  console.log('  c8ctl element-template apply template.json Task_1 process.bpmn --set method=POST');
-  console.log('  c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2');
-  console.log('  c8ctl element-template sync');
+  const logger = getLogger();
+  const cmd = metadata.commands['element-template'];
+  logger.output('Usage: c8ctl element-template <subcommand> [options]');
+  logger.output('');
+  if (cmd.helpDescription) {
+    for (const line of cmd.helpDescription.split('\n')) {
+      logger.output(line);
+    }
+    logger.output('');
+  }
+  logger.output('Subcommands:');
+  for (const sub of cmd.subcommands) {
+    const aliasNote = sub.aliases?.length ? ` (alias: ${sub.aliases.join(', ')})` : '';
+    logger.output(`  ${sub.name.padEnd(20)} ${sub.description}${aliasNote}`);
+  }
+  logger.output('');
+  if (cmd.flags) {
+    logger.output('Options:');
+    for (const [name, def] of Object.entries(cmd.flags)) {
+      const shortStr = def.short ? `-${def.short}, ` : '    ';
+      logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
+    }
+    logger.output('');
+  }
+  logger.output('Examples:');
+  for (const ex of cmd.examples) {
+    logger.output(`  ${ex.command}`);
+  }
 }
 
 export const commands = {

@@ -24,6 +24,10 @@ export const metadata = {
   commands: {
     bpmn: {
       description: 'BPMN tooling — lint diagrams (supports stdin piping)',
+      helpDescription:
+        'Lint BPMN diagrams against bpmnlint recommended rules and Camunda-specific rules. ' +
+        'Supports file paths and stdin piping. Uses .bpmnlintrc if present, otherwise auto-detects ' +
+        'the Camunda execution platform version from the BPMN file.',
       subcommands: [
         { name: 'lint', description: 'Lint a BPMN diagram against recommended and Camunda rules' },
       ],
@@ -191,7 +195,7 @@ async function lintSubcommand(args) {
 
   // Handle --help/-h before interpreting args as file paths
   if (args.includes('--help') || args.includes('-h')) {
-    console.log('Usage: c8ctl bpmn lint [<file.bpmn>]');
+    logger.output('Usage: c8ctl bpmn lint [<file.bpmn>]');
     return;
   }
 
@@ -267,16 +271,23 @@ async function lintSubcommand(args) {
 const VALID_SUBCOMMANDS = ['lint'];
 
 function printUsage() {
-  console.log('Usage:');
-  console.log('  c8ctl bpmn lint <file.bpmn>');
-  console.log('  cat file.bpmn | c8ctl bpmn lint');
-  console.log('');
-  console.log('Subcommands:');
-  console.log('  lint  Lint a BPMN diagram against recommended and Camunda rules');
-  console.log('');
-  console.log('Examples:');
-  console.log('  c8ctl bpmn lint process.bpmn');
-  console.log('  cat process.bpmn | c8ctl bpmn lint');
+  const logger = getLogger();
+  const cmd = metadata.commands.bpmn;
+  logger.output('Usage: c8ctl bpmn <subcommand> [options]');
+  logger.output('');
+  if (cmd.helpDescription) {
+    logger.output(cmd.helpDescription);
+    logger.output('');
+  }
+  logger.output('Subcommands:');
+  for (const sub of cmd.subcommands) {
+    logger.output(`  ${sub.name.padEnd(16)} ${sub.description}`);
+  }
+  logger.output('');
+  logger.output('Examples:');
+  for (const ex of cmd.examples) {
+    logger.output(`  ${ex.command}`);
+  }
 }
 
 export const commands = {
