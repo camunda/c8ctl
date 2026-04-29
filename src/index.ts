@@ -357,7 +357,7 @@ async function main() {
 			break;
 		}
 		const flagName = a.startsWith("--") ? a.split("=")[0].slice(2) : undefined;
-		if (flagName && flagName in GLOBAL_FLAGS) {
+		if (flagName && flagName !== "help" && flagName in GLOBAL_FLAGS) {
 			// If it's a string-type flag in --flag value form, skip the next arg too
 			const def = Object.entries(GLOBAL_FLAGS).find(
 				([k]) => k === flagName,
@@ -365,11 +365,12 @@ async function main() {
 			if (def?.type === "string" && !a.includes("=")) i++;
 			continue;
 		}
-		// Handle short flags (-h, -v)
+		// Handle short flags (-v) but preserve -h for plugin help
 		if (
 			a.length === 2 &&
 			a[0] === "-" &&
 			a[1] !== "-" &&
+			a[1] !== "h" &&
 			Object.values(GLOBAL_FLAGS).some((f) => "short" in f && f.short === a[1])
 		) {
 			const matchedDef = Object.values(GLOBAL_FLAGS).find(
