@@ -111,7 +111,16 @@ function resolveCamundaCompatConfig(version) {
 
   const cloudConfigs = Object.keys(configs)
     .filter((k) => k.startsWith('camunda-cloud-'))
-    .sort();
+    .sort((a, b) => {
+      const parse = (s) => s.replace('camunda-cloud-', '').split('-').map(Number);
+      const va = parse(a);
+      const vb = parse(b);
+      for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+        const diff = (va[i] || 0) - (vb[i] || 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    });
 
   if (cloudConfigs.length > 0) {
     return `plugin:camunda-compat/${cloudConfigs[cloudConfigs.length - 1]}`;

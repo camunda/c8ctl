@@ -1,6 +1,6 @@
 /**
  * Behavioural tests for the element-template commands
- * (src/commands/element-template.ts)
+ * (default-plugins/element-template/)
  */
 
 import assert from "node:assert";

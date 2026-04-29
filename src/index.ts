@@ -309,7 +309,36 @@ async function main() {
 	// and lets their would-be values leak through as positionals. The end
 	// result is that plugin-specific flags like `--debug` (cluster) or
 	// `--set key=value` (element-template) never reach the plugin handler.
-	const verbIdx = process.argv.indexOf(verb, 2);
+	// Find the verb's index in process.argv by skipping flags and their
+	// values, avoiding false matches on flag values (e.g. --profile bpmn).
+	let verbIdx = -1;
+	{
+		const cliOpts = deriveParseArgsOptions();
+		for (let i = 2; i < process.argv.length; i++) {
+			const arg = process.argv[i];
+			if (arg === "--") {
+				verbIdx = i + 1 < process.argv.length ? i + 1 : -1;
+				break;
+			}
+			if (arg.startsWith("-")) {
+				// Skip the value of string-type flags (--flag value form)
+				if (!arg.includes("=")) {
+					const name = arg.startsWith("--") ? arg.slice(2) : undefined;
+					const short = !name && arg.length === 2 ? arg[1] : undefined;
+					const isString = name
+						? cliOpts[name]?.type === "string"
+						: short != null &&
+							Object.values(cliOpts).some(
+								(o) => o.short === short && o.type === "string",
+							);
+					if (isString) i++;
+				}
+				continue;
+			}
+			verbIdx = i;
+			break;
+		}
+	}
 	const pluginArgs =
 		verbIdx >= 0
 			? process.argv.slice(verbIdx + 1)
