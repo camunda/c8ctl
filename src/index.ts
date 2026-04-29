@@ -349,6 +349,8 @@ async function main() {
 
 	// Strip known global flags (and their values) so plugins don't choke
 	// on flags like --profile, --verbose, --dry-run, etc.
+	// Verb-specific flags (SEARCH_FLAGS, etc.) are intentionally NOT stripped
+	// here — plugins reject unknown flags with clear error messages.
 	const pluginArgs: string[] = [];
 	for (let i = 0; i < rawPluginArgs.length; i++) {
 		const a = rawPluginArgs[i];

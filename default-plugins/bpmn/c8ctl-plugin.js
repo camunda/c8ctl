@@ -203,8 +203,14 @@ async function lintSubcommand(args) {
     return;
   }
 
+  // Reject unknown flags
+  const unknownFlag = optionArgs.find((a) => a.startsWith('-'));
+  if (unknownFlag) {
+    throw new Error(`Unknown flag: ${unknownFlag}. Usage: c8ctl bpmn lint [<file.bpmn>]`);
+  }
+
   const filePath = endOfOpts === -1
-    ? args.find((a) => !a.startsWith('-'))
+    ? optionArgs[0]
     : positionalArgs[0];
 
   const input = readBpmnInput(filePath);
