@@ -517,3 +517,54 @@ describe("mutating flag correctness", () => {
 		}
 	});
 });
+
+// ─── Verb-level vs resource-level flag bucket disjointness (#256) ───────────
+//
+// Class-scoped guard: for any verb that declares `resourceFlags`, no flag
+// name may appear in BOTH the verb-level `flags` bucket and any
+// `resourceFlags[*]` bucket.
+//
+// Why
+// ---
+// `detectUnknownFlags` (src/command-validation.ts) treats a verb-level flag
+// that ALSO appears in any `resourceFlags` entry as resource-specific —
+// the verb-level declaration is silently dead metadata. This is the exact
+// shape that produced the `--shell` defect class in #255 / #256: a flag
+// looked verb-wide in the registry but was actually only honoured for one
+// resource. Forbidding the duplication structurally makes the misleading
+// shape unrepresentable, so the next contributor can't reintroduce the
+// same defect by copying the existing `completion` pattern.
+//
+// Rule
+// ----
+// If a flag is shared across all resources of a verb, declare it once in
+// verb-level `flags` and leave it out of every `resourceFlags` bucket.
+// If a flag is resource-specific, declare it only in the relevant
+// `resourceFlags[resource]` bucket.
+describe("verb-level flags must not duplicate resourceFlags entries (#256)", () => {
+	test("no flag name appears in both verb-level flags and any resourceFlags bucket", () => {
+		const violations: string[] = [];
+		for (const [verb, def] of Object.entries(REGISTRY)) {
+			if (!def.resourceFlags) continue;
+			const verbFlagNames = new Set(Object.keys(def.flags ?? {}));
+			if (verbFlagNames.size === 0) continue;
+			for (const [resource, resFlags] of Object.entries(def.resourceFlags)) {
+				for (const flagName of Object.keys(resFlags)) {
+					if (verbFlagNames.has(flagName)) {
+						violations.push(
+							`${verb}: --${flagName} declared in both verb-level flags ` +
+								`AND resourceFlags.${resource}. Pick one bucket: ` +
+								`shared verb flags go in 'flags' only; resource-specific ` +
+								`flags go in 'resourceFlags' only.`,
+						);
+					}
+				}
+			}
+		}
+		assert.deepStrictEqual(
+			violations,
+			[],
+			`Found verb/resource flag duplication:\n  - ${violations.join("\n  - ")}`,
+		);
+	});
+});
