@@ -90,8 +90,9 @@ export function nudgeIfStale(logger) {
   if (!existsSync(getCachePath())) return;
   if (!isCacheStale()) return;
   const days = getCacheAgeDays();
+  const ageText = days === null ? 'stale' : `${days} day${days === 1 ? '' : 's'} old`;
   logger.warn(
-    `Element template cache is ${days} day${days === 1 ? '' : 's'} old. ` +
+    `Element template cache is ${ageText}. ` +
       `Run 'c8ctl element-template sync' to refresh.`,
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Behavioural tests for the bpmn commands (src/commands/bpmn.ts)
+ * Behavioural tests for the BPMN default plugin (default-plugins/bpmn/)
  */
 
 import assert from "node:assert";

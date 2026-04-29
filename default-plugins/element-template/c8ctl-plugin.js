@@ -258,6 +258,9 @@ async function applyElementTemplate(xml, template, elementId) {
 
   const elementRegistry = modeler.get('elementRegistry');
   const element = elementRegistry.get(elementId);
+  if (!element) {
+    throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
+  }
 
   const elementTemplates = modeler.get('elementTemplates');
   elementTemplates.set([template]);
