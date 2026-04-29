@@ -182,6 +182,7 @@ describe("CLI behavioural: bpmn completions", () => {
 
 	test("bash completion includes bpmn subcommands", async () => {
 		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		for (const sub of ["lint"]) {
 			assert.ok(
 				result.stdout.includes(sub),
@@ -201,6 +202,7 @@ describe("CLI behavioural: bpmn completions", () => {
 
 	test("zsh completion includes bpmn subcommands", async () => {
 		const result = await c8("completion", "zsh");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		for (const sub of ["lint"]) {
 			assert.ok(
 				result.stdout.includes(sub),
@@ -220,6 +222,7 @@ describe("CLI behavioural: bpmn completions", () => {
 
 	test("fish completion includes bpmn subcommands", async () => {
 		const result = await c8("completion", "fish");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		for (const sub of ["lint"]) {
 			assert.ok(
 				result.stdout.includes(sub),
@@ -243,6 +246,7 @@ describe("CLI behavioural: element-template completions", () => {
 
 	test("bash completion includes element-template resources", async () => {
 		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		for (const sub of ["apply", "list-properties"]) {
 			assert.ok(
 				result.stdout.includes(sub),

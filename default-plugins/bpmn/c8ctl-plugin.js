@@ -209,9 +209,7 @@ async function lintSubcommand(args) {
     throw new Error(`Unknown flag: ${unknownFlag}. Usage: c8ctl bpmn lint [<file.bpmn>]`);
   }
 
-  const filePath = endOfOpts === -1
-    ? optionArgs[0]
-    : positionalArgs[0];
+  const filePath = positionalArgs[0] ?? optionArgs[0];
 
   const input = readBpmnInput(filePath);
   if (!input) {
