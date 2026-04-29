@@ -332,6 +332,31 @@ async function applySubcommand(args) {
     template = await readTemplateFromPathOrUrl(ref.value);
   }
 
+  // Dry-run: describe what would happen without mutating anything
+  if (globalThis.c8ctl?.dryRun) {
+    const info = {
+      dryRun: true,
+      command: 'element-template apply',
+      template: { id: template.id ?? ref.value, name: template.name, version: template.version },
+      elementId,
+      source: input.source,
+      inPlace: parsed.inPlace && !!bpmnFilePath,
+      setOverrides: parsed.setArgs,
+    };
+    if (isJsonMode()) {
+      logger.json(info);
+    } else {
+      logger.output('Dry run — no changes applied.');
+      logger.output(`  Template: ${info.template.name ?? info.template.id}${info.template.version != null ? ` v${info.template.version}` : ''}`);
+      logger.output(`  Element:  ${elementId}`);
+      logger.output(`  Source:   ${input.source}`);
+      if (info.inPlace) logger.output(`  Mode:     in-place (would overwrite ${bpmnFilePath})`);
+      else logger.output('  Mode:     stdout (would print transformed XML)');
+      if (parsed.setArgs.length > 0) logger.output(`  --set:    ${parsed.setArgs.join(', ')}`);
+    }
+    return;
+  }
+
   let setBindingNames = [];
   if (parsed.setArgs.length > 0) {
     setBindingNames = applySetOverrides(template.properties, parsed.setArgs);
