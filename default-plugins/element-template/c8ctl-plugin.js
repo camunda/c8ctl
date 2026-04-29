@@ -377,10 +377,7 @@ async function applySubcommand(args) {
     resultXml = await applyElementTemplate(input.xml, template, elementId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const hint = message.includes('Cannot read properties of undefined')
-      ? `Element '${elementId}' not found in the BPMN diagram`
-      : message;
-    throw new Error(`Error applying template: ${hint}`);
+    throw new Error(`Error applying template: ${message}`);
   }
 
   if (setBindingNames.length > 0) {
@@ -647,7 +644,7 @@ export const commands = {
     const subcommand = SUBCOMMAND_ALIASES[rawSubcommand] ?? rawSubcommand;
     const subArgs = args?.slice(1) ?? [];
 
-    if (!subcommand) {
+    if (!subcommand || subcommand === '--help' || subcommand === '-h') {
       printUsage();
       return;
     }
