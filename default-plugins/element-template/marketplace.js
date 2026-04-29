@@ -53,7 +53,13 @@ export function loadCache() {
   const path = getCachePath();
   if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    const cache = JSON.parse(readFileSync(path, 'utf-8'));
+
+    if (!Array.isArray(cache)) {
+      throw new Error('expected an array');
+    }
+
+    return cache;
   } catch (error) {
     throw new Error(`Element template cache is corrupt at ${path}: ${error.message}`);
   }
