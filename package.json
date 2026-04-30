@@ -84,6 +84,7 @@
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.0",
     "@types/node": "^25.5.0",
+    "@types/semver": "^7.7.1",
     "bpmn-js-element-templates": "^2.23.1",
     "bpmn-js-headless": "^0.1.0",
     "esbuild": "^0.28.0",
