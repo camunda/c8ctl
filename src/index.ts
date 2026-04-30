@@ -73,8 +73,9 @@ function normalizeResource(resource: string): string {
  */
 function parseCliArgs() {
   try {
-    const { values, positionals } = parseArgs({
+    const { values, positionals, tokens } = parseArgs({
       args: process.argv.slice(2),
+      tokens: true,
       options: {
         help: { type: 'boolean', short: 'h' },
         version: { type: 'string', short: 'v' },
@@ -134,7 +135,7 @@ function parseCliArgs() {
       strict: false,
     });
 
-    return { values, positionals };
+    return { values, positionals, tokens };
   } catch (error: any) {
     console.error(`Error parsing arguments: ${error.message}`);
     process.exit(1);
@@ -166,7 +167,7 @@ async function main() {
   // Load session state from disk at startup
   loadSessionState();
   
-  const { values, positionals } = parseCliArgs();
+  const { values, positionals, tokens } = parseCliArgs()!;
 
   // Initialize logger with current output mode from c8ctl runtime
   const logger = getLogger(c8ctl.outputMode);
@@ -784,7 +785,12 @@ async function main() {
   }
 
   // Try to execute plugin command (before verb-only check)
-  if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
+  // Use raw argv slice so flags (e.g. --from) are forwarded to the plugin, not just positionals.
+  const verbToken = (tokens as Array<{ kind: string; index: number }>).find(t => t.kind === 'positional');
+  const pluginArgs = verbToken !== undefined
+    ? process.argv.slice(2 + verbToken.index + 1)
+    : (resource ? [resource, ...args] : args);
+  if (await executePluginCommand(verb, pluginArgs)) {
     return;
   }
 
