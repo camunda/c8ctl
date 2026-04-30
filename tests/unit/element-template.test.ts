@@ -9,9 +9,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { c8 } from "../utils/cli.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
+import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const FIXTURES_DIR = resolve(import.meta.dirname, "..", "fixtures");
+const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = "src/index.ts";
 const BPMN_FILE = join(FIXTURES_DIR, "simple.bpmn");
 const TEMPLATE_FILE = join(FIXTURES_DIR, "http-json-connector.json");
@@ -432,6 +433,98 @@ describe("CLI behavioural: element-template help", () => {
 		assert.ok(
 			output.includes("list-properties"),
 			"Should mention list-properties",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template apply — headless BPMN import (no DOM warnings)
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: element-template apply headless import", () => {
+	test("imports a diagram with named events without 'document is not defined' noise", async () => {
+		// simple.bpmn has named StartEvent and EndEvent; bpmn-js's importer
+		// would call TextRenderer.getExternalLabelBounds for those, which
+		// requires `document` and throws in Node unless the textRenderer
+		// module is overridden by the plugin.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			!result.stderr.includes("document is not defined"),
+			`stderr should not contain DOM errors. Got: ${result.stderr.slice(0, 500)}`,
+		);
+		assert.ok(
+			!result.stderr.includes("failed to import"),
+			"stderr should not contain bpmn-js importer warnings",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template apply — piped stdin
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: element-template apply stdin", () => {
+	test("reads piped BPMN from a fast stdin writer and prints to stdout", async () => {
+		const xml = readFileSync(BPMN_FILE, "utf-8");
+		const result = await asyncSpawnWithStdin(
+			"node",
+			[
+				"--experimental-strip-types",
+				CLI,
+				"element-template",
+				"apply",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+			],
+			(stdin) => {
+				stdin.write(xml);
+			},
+			{ cwd: REPO_ROOT, env: process.env },
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("zeebe:modelerTemplate="),
+			"stdout should contain the applied template binding",
+		);
+	});
+
+	test("waits for a slow stdin writer (regression: EAGAIN race)", async () => {
+		const xml = readFileSync(BPMN_FILE, "utf-8");
+		const result = await asyncSpawnWithStdin(
+			"node",
+			[
+				"--experimental-strip-types",
+				CLI,
+				"element-template",
+				"apply",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+			],
+			async (stdin) => {
+				await new Promise((r) => setTimeout(r, 200));
+				stdin.write(xml);
+			},
+			{ cwd: REPO_ROOT, env: process.env },
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`Expected apply to wait for slow producer. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			!result.stderr.includes("No BPMN input provided"),
+			"Should not bail with 'No BPMN input' when writer is slow",
+		);
+		assert.ok(
+			result.stdout.includes("zeebe:modelerTemplate="),
+			"stdout should contain the applied template binding",
 		);
 	});
 });
