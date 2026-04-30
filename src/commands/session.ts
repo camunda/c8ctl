@@ -83,6 +83,8 @@ export function showSessionState(): void {
  */
 function showOutputMode(logger: Logger): void {
 	logger.info(`Current output mode: ${c8ctl.outputMode}`);
+	// In text mode, add a blank line for readability before the available modes line.
+	// JSON mode omits it because consumers parse the structured output, not visual spacing.
 	if (c8ctl.outputMode === "text") {
 		logger.info("");
 	}
