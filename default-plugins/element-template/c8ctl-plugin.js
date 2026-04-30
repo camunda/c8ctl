@@ -266,10 +266,19 @@ function resolveVendorBundle() {
 async function applyElementTemplate(xml, template, elementId) {
   const vendorPath = resolveVendorBundle();
   const vendor = require(vendorPath);
-  const { Modeler, CloudElementTemplatesCoreModule, ZeebeModdleExtension } = vendor;
+  const {
+    Modeler,
+    CloudElementTemplatesCoreModule,
+    ZeebeModdleExtension,
+    HeadlessTextRendererModule,
+  } = vendor;
 
+  // HeadlessTextRendererModule overrides bpmn-js's default textRenderer,
+  // which would otherwise call document.createElementNS during importXML
+  // (to measure external label bounds) and throw "document is not defined"
+  // in Node. The errors are non-fatal but produce noisy stack traces.
   const modeler = new Modeler({
-    additionalModules: [CloudElementTemplatesCoreModule],
+    additionalModules: [HeadlessTextRendererModule, CloudElementTemplatesCoreModule],
     moddleExtensions: { zeebe: ZeebeModdleExtension },
   });
 
