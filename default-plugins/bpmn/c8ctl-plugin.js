@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve as resolvePath } from 'node:path';
+import { styleText } from 'node:util';
 
 const require = createRequire(import.meta.url);
 
@@ -153,8 +154,8 @@ function buildLintConfig(rootElement) {
 function formatLintResults(results) {
   let errorCount = 0;
   let warningCount = 0;
-  const lines = [];
   const issues = [];
+  const rows = [];
   const { pathStringify } = require('@bpmn-io/moddle-utils');
 
   for (const [ruleName, reports] of Object.entries(results)) {
@@ -167,8 +168,8 @@ function formatLintResults(results) {
       }
 
       const displayName = reportName ?? ruleName;
-      const prefix = category === 'error' ? 'error' : 'warning';
-      lines.push(`  ${elementRef}  ${prefix}  ${message}  ${displayName}`);
+      const severity = category === 'error' ? 'error' : 'warning';
+      rows.push({ elementRef, severity, message, displayName, category });
 
       issues.push({
         rule: reportName ?? ruleName,
@@ -182,6 +183,31 @@ function formatLintResults(results) {
       else warningCount++;
     }
   }
+
+  // Compute column widths from the uncolored values so padding lines up
+  // regardless of terminal color support.
+  const widths = rows.reduce(
+    (acc, r) => ({
+      elementRef: Math.max(acc.elementRef, r.elementRef.length),
+      severity: Math.max(acc.severity, r.severity.length),
+      message: Math.max(acc.message, r.message.length),
+    }),
+    { elementRef: 0, severity: 0, message: 0 },
+  );
+
+  const padEnd = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+
+  const lines = rows.map((r) => {
+    const severityColor = r.category === 'error' ? 'red' : 'yellow';
+    const severityCell = styleText(severityColor, padEnd(r.severity, widths.severity));
+    return [
+      ' ',
+      padEnd(r.elementRef, widths.elementRef),
+      severityCell,
+      padEnd(r.message, widths.message),
+      r.displayName,
+    ].join('  ');
+  });
 
   return { lines, errorCount, warningCount, issues };
 }
@@ -260,17 +286,19 @@ async function lintSubcommand(args) {
 
   const problemCount = errorCount + warningCount;
   if (problemCount > 0) {
+    const sourceLabel = input.source === 'stdin' ? 'stdin' : resolvePath(input.source);
     logger.output('');
-    logger.output(input.source === 'stdin' ? 'stdin' : resolvePath(input.source));
+    logger.output(styleText('underline', sourceLabel));
     for (const line of lines) logger.output(line);
 
     const pluralize = (word, count) => (count === 1 ? word : `${word}s`);
-    logger.output('');
-    logger.output(
+    const summary =
       `✖ ${problemCount} ${pluralize('problem', problemCount)} ` +
-        `(${errorCount} ${pluralize('error', errorCount)}, ` +
-        `${warningCount} ${pluralize('warning', warningCount)})`,
-    );
+      `(${errorCount} ${pluralize('error', errorCount)}, ` +
+      `${warningCount} ${pluralize('warning', warningCount)})`;
+    const summaryColor = errorCount > 0 ? ['bold', 'red'] : ['bold', 'yellow'];
+    logger.output('');
+    logger.output(styleText(summaryColor, summary));
   }
 
   if (errorCount > 0) {
