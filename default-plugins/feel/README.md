@@ -10,33 +10,33 @@ via the 8.9+ REST API; falls back to in-process
 
 ```bash
 # Evaluate a simple expression on the cluster (default)
-c8ctl feel eval '1 + 2'
+c8ctl feel evaluate '1 + 2'
 # → 3
 
 # Leading '=' is optional — both forms work
-c8ctl feel eval '=1 + 2'
+c8ctl feel evaluate '=1 + 2'
 
 # Pass variables individually
-c8ctl feel eval 'a + b' --var a=1 --var b=2
+c8ctl feel evaluate 'a + b' --var a=1 --var b=2
 # → 3
 
 # Tenant-scoped cluster variables
-c8ctl feel eval 'camunda.vars.env.API_BASE' --tenant my-tenant
+c8ctl feel evaluate 'camunda.vars.env.API_BASE' --tenant my-tenant
 
 # Compose with other tools — bulk JSON via stdin/file
-c8ctl feel eval 'sum(items)' --vars "$(jq -c '{items: .data}' input.json)"
+c8ctl feel evaluate 'sum(items)' --vars "$(jq -c '{items: .data}' input.json)"
 
 # Evaluate offline via feelin (no cluster needed)
-c8ctl feel eval '1 + 2' --engine local
+c8ctl feel evaluate '1 + 2' --engine local
 ```
 
 ## JSON output
 
-`feel eval` honours c8ctl's session output mode. Set it once:
+`feel evaluate` honours c8ctl's session output mode. Set it once:
 
 ```bash
 c8ctl output json
-c8ctl feel eval 'sum([1, 2, 3])'
+c8ctl feel evaluate 'sum([1, 2, 3])'
 # → {"expression":"sum([1, 2, 3])","result":6,"warnings":[]}
 ```
 
@@ -50,7 +50,7 @@ JSON consumers don't have to branch on engine.
 | `cluster` (default) | Connected to a Camunda 8.9+ cluster | Uses `POST /v2/expression/evaluation`. Real Zeebe FEEL semantics, full Camunda extensions, supports tenant-scoped cluster variables. |
 | `local` | Offline or no cluster configured | Uses [feelin](https://github.com/nikku/feelin) in-process. Fast, but **does not support all Camunda FEEL extensions** — result may differ from the cluster engine. A warning is emitted on first use per process. |
 
-`feel eval` exits non-zero when the expression fails to parse.
+`feel evaluate` exits non-zero when the expression fails to parse.
 Runtime issues (unknown variables, type mismatches) come back as
 `result: null` plus warnings — not an error — because they're
 properly the engine's diagnostic output, not a CLI failure.
@@ -89,31 +89,31 @@ on top. Within `--var`, last write wins.
 
 ```bash
 # Simple values
-c8ctl feel eval 'a + b' --var a=10 --var b=5
+c8ctl feel evaluate 'a + b' --var a=10 --var b=5
 # → 15
 
 # Strings (no JSON quoting needed)
-c8ctl feel eval 'name' --var name=Alice
+c8ctl feel evaluate 'name' --var name=Alice
 # → Alice
 
 # Booleans, null, numbers — parsed as JSON
-c8ctl feel eval 'if active then "yes" else "no"' --var active=true
+c8ctl feel evaluate 'if active then "yes" else "no"' --var active=true
 # → yes
 
 # Arrays — quote for the shell so '[' isn't globbed
-c8ctl feel eval 'sum(items)' --var 'items=[1,2,3,4]'
+c8ctl feel evaluate 'sum(items)' --var 'items=[1,2,3,4]'
 # → 10
 
 # Nested via dot path
-c8ctl feel eval 'person.name' --var person.name=Alice --var person.age=30
+c8ctl feel evaluate 'person.name' --var person.name=Alice --var person.age=30
 # → Alice
 
 # Mix --vars (bulk) with --var (override)
-c8ctl feel eval 'a + b' --vars '{"a": 1, "b": 2}' --var b=99
+c8ctl feel evaluate 'a + b' --vars '{"a": 1, "b": 2}' --var b=99
 # → 100
 
 # Or load --vars from a file
-c8ctl feel eval 'sum(items)' --vars "$(cat payload.json)"
+c8ctl feel evaluate 'sum(items)' --vars "$(cat payload.json)"
 ```
 
 ### Conflict detection
@@ -122,8 +122,8 @@ You can't nest a property under a value that's already a
 non-object — the CLI fails with the offending path:
 
 ```
-$ c8ctl feel eval 'foo.bar' --var foo=hello --var foo.bar=nested
-✗ Failed to feel eval: Cannot set --var foo.bar: 'foo' is of type string; cannot nest a property under it.
+$ c8ctl feel evaluate 'foo.bar' --var foo=hello --var foo.bar=nested
+✗ Failed to feel evaluate: Cannot set --var foo.bar: 'foo' is of type string; cannot nest a property under it.
 ```
 
 The reverse direction (a `--var` overwriting an existing object

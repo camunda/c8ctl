@@ -5,7 +5,7 @@
  * locally via feelin (--engine local).
  *
  * Usage:
- *   c8ctl feel eval '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]
+ *   c8ctl feel evaluate '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]
  */
 
 import { evaluate as feelinEvaluate } from 'feelin';
@@ -26,7 +26,7 @@ export const metadata = {
         '--engine local to evaluate offline via feelin (note: feelin does not support ' +
         'all Camunda FEEL extensions; result may differ from cluster).',
       subcommands: [
-        { name: 'eval', description: 'Evaluate a FEEL expression' },
+        { name: 'evaluate', description: 'Evaluate a FEEL expression' },
       ],
       flags: {
         engine: {
@@ -48,26 +48,26 @@ export const metadata = {
         },
       },
       examples: [
-        { command: "c8ctl feel eval '1 + 2'", description: 'Evaluate a simple expression' },
-        { command: "c8ctl feel eval '=1 + 2'", description: "Same — leading '=' is optional" },
+        { command: "c8ctl feel evaluate '1 + 2'", description: 'Evaluate a simple expression' },
+        { command: "c8ctl feel evaluate '=1 + 2'", description: "Same — leading '=' is optional" },
         {
-          command: "c8ctl feel eval 'a + b' --var a=1 --var b=2",
+          command: "c8ctl feel evaluate 'a + b' --var a=1 --var b=2",
           description: 'Set individual variables',
         },
         {
-          command: "c8ctl feel eval 'person.name' --var person.name=Alice",
+          command: "c8ctl feel evaluate 'person.name' --var person.name=Alice",
           description: 'Dot-path nesting',
         },
         {
-          command: "c8ctl feel eval 'sum(items)' --var 'items=[1,2,3]'",
+          command: "c8ctl feel evaluate 'sum(items)' --var 'items=[1,2,3]'",
           description: 'JSON values (arrays, numbers, booleans, null)',
         },
         {
-          command: "c8ctl feel eval 'a + b' --vars '{\"a\": 1, \"b\": 2}'",
+          command: "c8ctl feel evaluate 'a + b' --vars '{\"a\": 1, \"b\": 2}'",
           description: 'Bulk variables as JSON',
         },
         {
-          command: "c8ctl feel eval '1 + 2' --engine local",
+          command: "c8ctl feel evaluate '1 + 2' --engine local",
           description: 'Evaluate offline via feelin',
         },
       ],
@@ -409,7 +409,7 @@ function classifyClusterError(error) {
   return null;
 }
 
-async function evalCluster({ expression, variables, tenantId }) {
+async function evaluateCluster({ expression, variables, tenantId }) {
   if (!globalThis.c8ctl) {
     throw new Error(
       `c8ctl runtime is not available. ${LOCAL_HINT}.`,
@@ -454,17 +454,6 @@ async function evalCluster({ expression, variables, tenantId }) {
 // Local engine (feelin)
 // ---------------------------------------------------------------------------
 
-let feelinExtensionsWarned = false;
-
-function maybeWarnAboutFeelinExtensions() {
-  if (feelinExtensionsWarned) return;
-  feelinExtensionsWarned = true;
-  if (isJsonMode()) return;
-  getLogger().warn(
-    "feelin does not support all Camunda FEEL extensions; result may differ from the cluster engine",
-  );
-}
-
 /**
  * Normalize feelin's warnings (unknown shape per release) to `{ message }`.
  */
@@ -481,9 +470,7 @@ function normalizeFeelinWarnings(warnings) {
   });
 }
 
-function evalLocal({ expression, variables }) {
-  maybeWarnAboutFeelinExtensions();
-
+function evaluateLocal({ expression, variables }) {
   // feelin's `evaluate` expects the expression without the leading `=`.
   // Normalize first so we accept both forms identically across engines.
   const normalized = normalizeExpression(expression);
@@ -534,16 +521,16 @@ function renderJson(logger, normalized) {
 }
 
 // ---------------------------------------------------------------------------
-// Subcommand: eval
+// Subcommand: evaluate
 // ---------------------------------------------------------------------------
 
-async function evalSubcommand(args) {
+async function evaluateSubcommand(args) {
   const logger = getLogger();
   const parsed = parseArgs(args);
 
   if (parsed.help) {
     logger.output(
-      "Usage: c8ctl feel eval '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]",
+      "Usage: c8ctl feel evaluate '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]",
     );
     return;
   }
@@ -554,7 +541,7 @@ async function evalSubcommand(args) {
 
   const expression = parsed.positionals[0];
   if (!expression) {
-    throw new Error("Missing expression. Usage: c8ctl feel eval '<expression>' [...]");
+    throw new Error("Missing expression. Usage: c8ctl feel evaluate '<expression>' [...]");
   }
   if (parsed.positionals.length > 1) {
     throw new Error(
@@ -570,8 +557,8 @@ async function evalSubcommand(args) {
 
   const normalized =
     parsed.engine === 'cluster'
-      ? await evalCluster({ expression, variables, tenantId: parsed.tenant })
-      : evalLocal({ expression, variables });
+      ? await evaluateCluster({ expression, variables, tenantId: parsed.tenant })
+      : evaluateLocal({ expression, variables });
 
   if (isJsonMode()) {
     renderJson(logger, normalized);
@@ -584,7 +571,7 @@ async function evalSubcommand(args) {
 // Command export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ['eval'];
+const VALID_SUBCOMMANDS = ['evaluate'];
 
 function printUsage() {
   const logger = getLogger();
@@ -622,8 +609,8 @@ export const commands = {
     }
 
     try {
-      if (subcommand === 'eval') {
-        await evalSubcommand(subArgs);
+      if (subcommand === 'evaluate') {
+        await evaluateSubcommand(subArgs);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
