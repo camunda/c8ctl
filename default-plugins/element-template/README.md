@@ -54,6 +54,11 @@ cat process.bpmn | c8ctl element-template apply io.camunda.connectors.HttpJson.v
 c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
   | c8ctl bpmn lint
 
+# Save a template's raw JSON to a file (works for ids, URLs, and local paths)
+c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json
+c8ctl element-template get https://example.com/template.json > template.json
+c8ctl element-template get ./template.json > copy.json    # passthrough — bytes preserved
+
 # Refresh the local OOTB template cache
 c8ctl element-template sync
 c8ctl element-template sync --prune    # also drop entries no longer in the index
