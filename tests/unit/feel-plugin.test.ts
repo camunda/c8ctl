@@ -64,23 +64,23 @@ async function feelJson(...args: string[]) {
 }
 
 // ---------------------------------------------------------------------------
-// feel eval — local engine (text mode)
+// feel evaluate — local engine (text mode)
 // ---------------------------------------------------------------------------
 
-describe("CLI behavioural: feel eval (local engine)", () => {
+describe("CLI behavioural: feel evaluate (local engine)", () => {
 	test("simple expression, leading = is optional", async () => {
-		const a = await feelText("eval", "1 + 2", "--engine", "local");
+		const a = await feelText("evaluate", "1 + 2", "--engine", "local");
 		assert.strictEqual(a.status, 0, `stderr: ${a.stderr}`);
 		assert.match(a.stdout, /^3\s*$/);
 
-		const b = await feelText("eval", "=1 + 2", "--engine", "local");
+		const b = await feelText("evaluate", "=1 + 2", "--engine", "local");
 		assert.strictEqual(b.status, 0);
 		assert.match(b.stdout, /^3\s*$/);
 	});
 
 	test("evaluates with --var (number values, JSON-parsed)", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"a + b",
 			"--var",
 			"a=10",
@@ -95,7 +95,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("treats non-JSON --var values as string literals", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"name",
 			"--var",
 			"name=Alice",
@@ -108,7 +108,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("dot-path --var nests under the path", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"person.name",
 			"--var",
 			"person.name=Alice",
@@ -123,7 +123,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("--vars provides a base, --var overrides", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"a + b",
 			"--vars",
 			'{"a":1,"b":2}',
@@ -138,7 +138,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("rejects --var that nests under a non-object", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"foo.bar",
 			"--var",
 			"foo=hello",
@@ -158,7 +158,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("rejects --var with empty path", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"1",
 			"--var",
 			"=hello",
@@ -171,7 +171,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("rejects --var without =", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"1",
 			"--var",
 			"foo",
@@ -184,7 +184,7 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 
 	test("rejects invalid --vars JSON", async () => {
 		const result = await feelText(
-			"eval",
+			"evaluate",
 			"a",
 			"--vars",
 			"not-json",
@@ -196,20 +196,20 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 	});
 
 	test("parse error exits 1 with cleaned message", async () => {
-		const result = await feelText("eval", "1 +", "--engine", "local");
+		const result = await feelText("evaluate", "1 +", "--engine", "local");
 		assert.strictEqual(result.status, 1);
 		const output = result.stdout + result.stderr;
 		assert.ok(output.includes("Failed to parse expression"), `Got: ${output}`);
 	});
 
 	test("missing expression exits 1", async () => {
-		const result = await feelText("eval", "--engine", "local");
+		const result = await feelText("evaluate", "--engine", "local");
 		assert.strictEqual(result.status, 1);
 		assert.ok((result.stdout + result.stderr).includes("Missing expression"));
 	});
 
 	test("rejects invalid --engine value", async () => {
-		const result = await feelText("eval", "1", "--engine", "invalid");
+		const result = await feelText("evaluate", "1", "--engine", "invalid");
 		assert.strictEqual(result.status, 1);
 		assert.ok(
 			(result.stdout + result.stderr).includes("Invalid --engine value"),
@@ -218,13 +218,13 @@ describe("CLI behavioural: feel eval (local engine)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// feel eval — JSON output shape (engine-agnostic)
+// feel evaluate — JSON output shape (engine-agnostic)
 // ---------------------------------------------------------------------------
 
-describe("CLI behavioural: feel eval JSON output shape", () => {
+describe("CLI behavioural: feel evaluate JSON output shape", () => {
 	test("local engine emits { expression, result, warnings: [] }", async () => {
 		const result = await feelJson(
-			"eval",
+			"evaluate",
 			"a + b",
 			"--var",
 			"a=10",
@@ -245,7 +245,12 @@ describe("CLI behavioural: feel eval JSON output shape", () => {
 	});
 
 	test("local engine surfaces runtime warning for unknown var with result null", async () => {
-		const result = await feelJson("eval", "unknownVar", "--engine", "local");
+		const result = await feelJson(
+			"evaluate",
+			"unknownVar",
+			"--engine",
+			"local",
+		);
 		assert.strictEqual(result.status, 0);
 		const parsed = JSON.parse(result.stdout);
 		assert.strictEqual(parsed.result, null);
@@ -255,10 +260,10 @@ describe("CLI behavioural: feel eval JSON output shape", () => {
 });
 
 // ---------------------------------------------------------------------------
-// feel eval — cluster engine error classification
+// feel evaluate — cluster engine error classification
 // ---------------------------------------------------------------------------
 
-describe("CLI behavioural: feel eval cluster errors", () => {
+describe("CLI behavioural: feel evaluate cluster errors", () => {
 	test("unreachable cluster surfaces 'connection refused' with local-engine hint", async () => {
 		// Connect attempts to a high-numbered closed port on loopback get
 		// refused immediately on macOS/Linux without any DNS lookup,
@@ -272,7 +277,7 @@ describe("CLI behavioural: feel eval cluster errors", () => {
 		try {
 			const result = await asyncSpawn(
 				"node",
-				["--experimental-strip-types", CLI, "feel", "eval", "1 + 2"],
+				["--experimental-strip-types", CLI, "feel", "evaluate", "1 + 2"],
 				{
 					env: {
 						...process.env,

@@ -86,7 +86,7 @@ plugin if it outgrows BPMN):
   wants to verify before inserting). *Distinct from* the bpmnlint
   `feel` rule, which validates every expression inside a whole BPMN
   file.
-- **`feel eval '<expr>' --vars '{…}'`** — evaluate with a payload.
+- **`feel evaluate '<expr>' --vars '{…}'`** — evaluate with a payload.
   Lets the agent test a condition without spinning up an engine.
 - **`feel list <file.bpmn>`** — extract every FEEL expression with
   location (`<id>:<binding>` → expression). Inventory for refactoring
