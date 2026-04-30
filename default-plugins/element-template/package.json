@@ -4,5 +4,5 @@
   "type": "module",
   "description": "c8ctl plugin to apply and inspect Camunda element templates",
   "keywords": ["c8ctl", "c8ctl-plugin", "element-template", "camunda"],
-  "main": "c8ctl-plugin.js"
+  "main": "c8ctl-plugin.ts"
 }
