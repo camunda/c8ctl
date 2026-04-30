@@ -5,7 +5,13 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { isRecord, type Logger } from "../../src/logger.ts";
+
+// Plugins must stay self-contained — they cannot reach into c8ctl's
+// internals via relative imports because the dist layout differs from
+// the source layout (src/logger.ts → dist/logger.js).
+export function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
 
 // ---------------------------------------------------------------------------
 // Shared element-template schema types
@@ -105,13 +111,16 @@ export type ParsedPluginArgs = {
 	error: string | null;
 };
 
-// The plugin only uses a small slice of the host Logger surface. Picking
-// makes the fallback shim's structural shape explicit and future-proof
-// against new methods landing on Logger.
-export type PluginLogger = Pick<
-	Logger,
-	"info" | "warn" | "error" | "debug" | "output" | "json"
->;
+// Structural slice of the host Logger surface this plugin uses. The
+// host Logger satisfies this implicitly via duck typing.
+export type PluginLogger = {
+	info(message: string): void;
+	warn(message: string): void;
+	error(message: string, error?: Error): void;
+	debug(message: string, ...args: unknown[]): void;
+	output(content: string): void;
+	json(data: unknown): void;
+};
 
 // ---------------------------------------------------------------------------
 // File / URL fetching
