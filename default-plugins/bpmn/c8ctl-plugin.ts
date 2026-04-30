@@ -14,7 +14,10 @@ import { resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-import { isRecord, type Logger } from "../../src/logger.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
 
 // Ambient module declarations for the untyped bpmn-io ecosystem live in
 // ./bpmn-io.d.ts (TS does not allow `declare module` inside module files
@@ -24,10 +27,15 @@ import { isRecord, type Logger } from "../../src/logger.ts";
 // Local types
 // ---------------------------------------------------------------------------
 
-type PluginLogger = Pick<
-	Logger,
-	"info" | "warn" | "error" | "debug" | "output" | "json"
->;
+// Structural slice of the host Logger surface this plugin uses.
+type PluginLogger = {
+	info(message: string): void;
+	warn(message: string): void;
+	error(message: string, error?: Error): void;
+	debug(message: string, ...args: unknown[]): void;
+	output(content: string): void;
+	json(data: unknown): void;
+};
 
 type BpmnInput = { xml: string; source: string };
 

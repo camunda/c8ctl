@@ -13,13 +13,19 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
-import { isRecord, type Logger } from "../../src/logger.ts";
 
 // ---------------------------------------------------------------------------
 // Local types
+//
+// Plugins must stay self-contained — they're loaded from their own location
+// in dist and cannot rely on relative imports into c8ctl's internals.
 // ---------------------------------------------------------------------------
 
 type Engine = "cluster" | "local";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
 
 type ParsedArgs = {
 	help: boolean;
@@ -45,13 +51,16 @@ type ClusterErrorClassification = {
 	terminal: boolean;
 };
 
-// The plugin only uses a small slice of the host Logger surface. Picking
-// makes the fallback shim's structural shape explicit and future-proof
-// against new methods landing on Logger.
-type PluginLogger = Pick<
-	Logger,
-	"info" | "warn" | "error" | "debug" | "output" | "json"
->;
+// Structural slice of the host Logger surface this plugin uses. The
+// host Logger satisfies this implicitly via duck typing.
+type PluginLogger = {
+	info(message: string): void;
+	warn(message: string): void;
+	error(message: string, error?: Error): void;
+	debug(message: string, ...args: unknown[]): void;
+	output(content: string): void;
+	json(data: unknown): void;
+};
 
 // Plugin metadata shape — the loader only reads `description`, `examples`,
 // and `subcommands`, so extra fields here are inert. They drive our
