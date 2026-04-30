@@ -14,6 +14,7 @@ import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	deriveParseArgsOptions,
+	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
@@ -90,6 +91,62 @@ export function resolveProcessDefinitionId(
 		str(values.processDefinitionId) ||
 		str(values.bpmnProcessId)
 	);
+}
+
+/**
+ * Remove GLOBAL_FLAGS (and their values for string-type flags) from a raw argv
+ * token array before forwarding it to a plugin command handler.
+ * Plugins have their own argument parsers and should not receive c8ctl's
+ * internal flags (--profile, --dry-run, --verbose, --fields, --help).
+ */
+export function stripGlobalFlags(argv: string[]): string[] {
+	const booleanFlags = new Set<string>();
+	const stringFlags = new Set<string>();
+	const booleanShorts = new Set<string>();
+	const stringShorts = new Set<string>();
+
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		if (def.type === "boolean") {
+			booleanFlags.add(name);
+			if (def.short) booleanShorts.add(def.short);
+		} else {
+			stringFlags.add(name);
+			if (def.short) stringShorts.add(def.short);
+		}
+	}
+
+	const result: string[] = [];
+	let skipNext = false;
+
+	for (const token of argv) {
+		if (skipNext) {
+			skipNext = false;
+			continue;
+		}
+
+		if (token.startsWith("--")) {
+			const eqIndex = token.indexOf("=");
+			const name = eqIndex !== -1 ? token.slice(2, eqIndex) : token.slice(2);
+			if (booleanFlags.has(name) || stringFlags.has(name)) {
+				// For string flags without =value, the next token is the value — skip it too.
+				if (eqIndex === -1 && stringFlags.has(name)) {
+					skipNext = true;
+				}
+				continue;
+			}
+		} else if (token.startsWith("-") && token.length === 2) {
+			const short = token.slice(1);
+			if (booleanShorts.has(short)) continue;
+			if (stringShorts.has(short)) {
+				skipNext = true;
+				continue;
+			}
+		}
+
+		result.push(token);
+	}
+
+	return result;
 }
 
 /**
@@ -299,12 +356,14 @@ async function main() {
 
 	// Try to execute plugin command (before unknown-command error)
 	// Use raw argv slice so flags (e.g. --from) are forwarded to the plugin, not just positionals.
-	const pluginArgs =
+	// Strip GLOBAL_FLAGS so c8ctl-internal flags don't leak into the plugin's arg parser.
+	const rawPluginArgs =
 		verbTokenIndex !== undefined
 			? process.argv.slice(2 + verbTokenIndex + 1)
 			: resource
 				? [resource, ...args]
 				: args;
+	const pluginArgs = stripGlobalFlags(rawPluginArgs);
 	if (await executePluginCommand(verb, pluginArgs)) {
 		return;
 	}
