@@ -18,13 +18,27 @@ cat process.bpmn | c8ctl bpmn lint
 # Compose with other tools — apply a template, then lint the result
 c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
   | c8ctl bpmn lint
-
-# JSON output for scripts/agents
-c8ctl --output json bpmn lint process.bpmn
 ```
 
 Exit code is `0` when there are no errors, `1` otherwise. Warnings do
 not change the exit code.
+
+## Output
+
+Issues are rendered in an aligned table that mirrors the upstream
+[bpmnlint](https://github.com/bpmn-io/bpmnlint) CLI: element ID,
+severity, message, rule. `error` cells are colored red, `warning`
+yellow, the file path is underlined, and the summary is bold red (or
+yellow if there are only warnings). Color is auto-disabled when stdout
+isn't a TTY, so `c8ctl bpmn lint … | tee log` produces clean text.
+
+For machine-readable output, switch the session into JSON mode:
+
+```bash
+c8ctl output json
+c8ctl bpmn lint process.bpmn
+# → {"file":"…","issues":[…],"errorCount":3,"warningCount":0}
+```
 
 ## Rule selection
 

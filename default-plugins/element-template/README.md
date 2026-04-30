@@ -40,9 +40,15 @@ c8ctl element-template apply \
 c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
   ServiceTask_1 process.bpmn
 
-# Stream BPMN through stdin, get the modified BPMN on stdout
+# Stream BPMN through stdin, get the modified BPMN on stdout. Works
+# with slow upstream producers (lint, apply chained together, etc.) —
+# stdin is consumed asynchronously and waits for the writer to finish.
 cat process.bpmn | c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 \
   > out.bpmn
+
+# Chain with bpmn lint
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
+  | c8ctl bpmn lint
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
