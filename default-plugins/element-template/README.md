@@ -1,10 +1,27 @@
 # c8ctl-plugin-element-template
 
 A default [c8ctl](https://github.com/camunda/c8ctl) plugin for applying
-Camunda element templates to BPMN diagrams and inspecting their
-properties. Supports out-of-the-box (OOTB) connector templates by id
-(downloaded on demand from the Camunda marketplace), plus arbitrary
-local paths and URLs.
+Camunda element templates to BPMN diagrams, inspecting their properties,
+and exporting raw template JSON. Supports out-of-the-box (OOTB)
+connector templates by id (downloaded on demand from the Camunda
+marketplace), plus arbitrary local paths and URLs.
+
+## Subcommands
+
+The verb is organized as a workflow: discover → inspect → act → export → maintain.
+
+| Subcommand | Purpose |
+|------------|---------|
+| `search <query>` | Find OOTB templates by keyword (deprecated entries hidden). |
+| `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). |
+| `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. |
+| `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
+| `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
+| `sync` | Refresh the local OOTB template cache. |
+
+`<template>` is a local path, an `https://` URL, or an OOTB template id
+(optionally pinned: `<id>@<version>`). GitHub blob URLs are
+auto-rewritten to raw content URLs — paste straight from the address bar.
 
 ## Usage
 
@@ -13,13 +30,23 @@ local paths and URLs.
 c8ctl element-template search "AWS S3"
 c8ctl element-template search "http"
 
-# Inspect a template's settable properties (id, local file, or URL)
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2
-c8ctl element-template list-properties ./my-template.json
+# Show the template metadata card
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
 
-# Drill into one property — name only or `binding-type:name` to disambiguate
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 url
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 header:correlationKey
+# List every settable property as a condensed name + description row
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+
+# Filter by name (positional, supports shell-style globs — quote them)
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url method
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 'authentication.*'
+
+# Filter by group id (repeatable; ids come from the `info` card / group headings)
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --group authentication --group endpoint
+
+# Drill into specific properties as full detail cards
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token url
 
 # Apply by OOTB id — version is auto-resolved against the BPMN's
 # modeler:executionPlatformVersion (highest compatible version wins)
@@ -34,8 +61,7 @@ c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 \
 c8ctl element-template apply ./templates/my-task.json ServiceTask_1 process.bpmn
 c8ctl element-template apply https://example.com/template.json ServiceTask_1 process.bpmn
 
-# GitHub blob URLs are auto-rewritten to the raw content URL — paste
-# straight from the browser address bar.
+# GitHub blob URLs are auto-rewritten to the raw content URL
 c8ctl element-template apply \
   https://github.com/camunda/connectors/blob/main/connectors/http/rest/element-templates/http-json-connector.json \
   ServiceTask_1 process.bpmn
@@ -64,6 +90,132 @@ c8ctl element-template sync
 c8ctl element-template sync --prune    # also drop entries no longer in the index
 ```
 
+## Inspecting a template
+
+`info` and `get-properties` separate the two questions an agent or human
+typically asks of a template — *what is this thing?* (metadata) and
+*what knobs can I turn?* (properties).
+
+### `info` — metadata card
+
+```bash
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
+```
+
+```
+REST Outbound Connector
+  ID           io.camunda.connectors.HttpJson.v2
+  Version      13  (latest; @<n> to pin)
+  Applies to   bpmn:Task → bpmn:ServiceTask
+  Engines      ^8.9
+  Description  Invoke REST API
+  Docs         https://docs.camunda.io/docs/components/connectors/protocol/rest/
+
+For settable properties, run:
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+```
+
+When you give an OOTB id without `@<version>`, the auto-resolved version
+is annotated with a dim `(latest; @<n> to pin)` parenthetical so you
+know what was picked.
+
+### `get-properties` — condensed listing
+
+The default density is one row per property: name + description, grouped
+by template group. Group headings include the `id` for use with `--group`.
+
+```bash
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+```
+
+```
+Showing 28 of 28 properties.
+
+Authentication (authentication)
+  authentication.type                  Choose the authentication type. Select 'None' if no authentication is necessary
+  authentication.token                 Bearer token
+  ...
+
+HTTP endpoint (endpoint)
+  method                               Method
+  url                                  URL
+  ...
+
+Filter by name (supports globs):
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 'auth*' url
+For full details on each property:
+  c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --detailed
+```
+
+Positional names filter the listing — pass one or more names, with
+optional shell-style globs. `--group <id>` (repeatable) intersects with
+the name filter. Both filters error on no-match instead of silently
+empty so typos surface.
+
+### `get-properties --detailed` — full cards
+
+Same filter semantics, but every property is rendered as a keyed card
+with its full descriptor:
+
+```bash
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token
+```
+
+```
+Showing 1 of 28 properties.
+
+authentication.token (Authentication)
+  Id           authentication.token
+  Type         String
+  Required     yes
+  FEEL         optional
+  Binding      zeebe:input
+  Description  Bearer token
+  Active when  authentication.type = "bearer"
+```
+
+Cards surface everything `--set` needs to pick a value — type, required,
+FEEL support, binding, full active-when expression, pattern + error
+message, and the choice list for dropdowns.
+
+### Machine-readable output
+
+Switch the session into JSON mode and the same commands emit shapes
+that mirror the text output (and use upstream
+[element-templates JSON schema](https://unpkg.com/@camunda/zeebe-element-templates-json-schema)
+field names verbatim — no invented names like `bindingType` or
+`required`):
+
+```bash
+c8ctl output json
+c8ctl element-template info io.camunda.connectors.HttpJson.v2
+# → {"name":"REST Outbound Connector","id":"io.camunda.connectors.HttpJson.v2",
+#    "version":13,"description":"Invoke REST API",
+#    "documentationRef":"https://docs.camunda.io/...",
+#    "appliesTo":["bpmn:Task"],"elementType":{"value":"bpmn:ServiceTask"},
+#    "engines":{"camunda":"^8.9"}}
+
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url
+# → {"count":1,"total":28,"groups":[{"id":"authentication","label":"Authentication"}, ...],
+#    "properties":[{"id":"url","binding":{"name":"url","type":"zeebe:input"},
+#      "label":"URL","group":"endpoint"}]}
+
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
+  --detailed authentication.token
+# → {"count":1,"total":28,"groups":[...],
+#    "properties":[{"id":"authentication.token",
+#      "binding":{"name":"authentication.token","type":"zeebe:input"},
+#      "type":"String","optional":false,"feel":"optional","group":"authentication",
+#      "condition":{"property":"authentication.type","equals":"bearer","type":"simple"},
+#      "label":"Bearer token","constraints":{"notEmpty":true}}]}
+```
+
+`get-properties` JSON keeps the same `{ count, total, groups, properties }`
+envelope across both density modes — `count` is rendered properties,
+`total` is the unfiltered count, `groups` is the full group table so
+consumers can resolve any group id (not just those of rendered properties).
+
 ## Setting input mappings with `--set`
 
 `apply` supports repeatable `--set key=value` flags to populate
@@ -86,102 +238,8 @@ c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
 
 `key` is matched against the template's settable property
 **binding names** (the field a template property writes to in the
-resulting BPMN). Discover them with `list-properties`:
-
-```bash
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2
-```
-
-```
-REST Outbound Connector (io.camunda.connectors.HttpJson.v2) v13
-Invoke REST API. Applies to bpmn:Task → bpmn:ServiceTask. Engines: ^8.9.
-https://docs.camunda.io/docs/components/connectors/protocol/rest/
-
-Authentication
-  authentication.type   Dropdown · default: noAuth
-                        Type — Choose the authentication type. Select 'None' if no authentication is necessary
-                        Choices: apiKey, basic, bearer, noAuth, oauth-client-credentials-flow
-
-  authentication.token  String · required · feel: optional
-                        Bearer token
-                        Active when authentication.type = "bearer"
-  ...
-
-HTTP endpoint
-  method  Dropdown · required · default: GET
-          Method
-          Choices: POST, GET, DELETE, PATCH, PUT
-
-  url     String · required · feel: optional
-          URL
-          Pattern: ^(=|(http://|https://|secrets|\{\{).*$)
-                   Must be a http(s) URL
-
-Payload
-  body    Text · feel: optional
-          Request body — Payload to send with the request
-          Active when method ∈ {"POST", "PUT", "PATCH"}
-
-Output mapping
-  resultVariable    String · binding: header
-                    Result variable — Name of variable to store the response in
-  resultExpression  Text · feel: required · binding: header
-                    Result expression — Expression to map the response into process variables
-```
-
-Each property carries badges that an agent (or a human) needs to pick a
-value without re-reading the raw template:
-
-| Badge | Meaning |
-|-------|---------|
-| `required` | `optional: false` or `constraints.notEmpty: true` |
-| `default: <v>` | Pre-populated value (omit `--set` if it's already what you want) |
-| `feel: optional`/`required`/`static` | FEEL support — determines whether a leading `=` is allowed/required |
-| `binding: <type>` | Non-default binding (`zeebe:input` is implicit) |
-
-Sub-lines surface the **label/description**, the full **condition
-expression** (`Active when X = "Y"` or `X ∈ {…}`) so you know what to
-set first, and **pattern** constraints with their error message.
-
-#### Drill into a single property
-
-```bash
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 authentication.token
-```
-
-```
-REST Outbound Connector (io.camunda.connectors.HttpJson.v2) v13
-Invoke REST API. Applies to bpmn:Task → bpmn:ServiceTask. Engines: ^8.9.
-https://docs.camunda.io/docs/components/connectors/protocol/rest/
-
-  authentication.token  String · required · feel: optional · binding: input
-                        Bearer token
-                        Active when authentication.type = "bearer"
-```
-
-When two bindings share a name, qualify with the binding-type prefix
-(`input:`, `output:`, `header:`, `property:`, `taskDefinition:`).
-
-#### Machine-readable output
-
-`c8ctl output json` switches the session into JSON mode, which exposes
-the full template + property descriptor — designed to be consumed by
-coding agents. Top-level fields carry template metadata (`description`,
-`appliesTo`, `elementType`, `engines`, `documentationRef`); each entry
-in `properties[]` carries label, description, required, feel, choices,
-condition object + rendered text, pattern, and binding type:
-
-```bash
-c8ctl output json
-c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 authentication.token
-# → {"name":"REST Outbound Connector","id":"io.camunda.connectors.HttpJson.v2","version":13,
-#    "description":"Invoke REST API","appliesTo":["bpmn:Task"],"elementType":"bpmn:ServiceTask",
-#    "engines":{"camunda":"^8.9"},"documentationRef":"https://docs.camunda.io/...",
-#    "properties":[{"name":"authentication.token","type":"String","label":"Bearer token",
-#      "required":true,"feel":"optional","bindingType":"zeebe:input",
-#      "condition":{"property":"authentication.type","equals":"bearer"},
-#      "conditionText":"authentication.type = \"bearer\"", ...}]}
-```
+resulting BPMN). Discover them with `get-properties`, then pick a value
+using the badges on the detail card (Required, FEEL, Default, Active when).
 
 ### Disambiguation prefixes
 
@@ -205,6 +263,11 @@ binding type:
 The plugin errors with the list of qualified names when a bare key is
 ambiguous, and with the list of available property names when the key
 is unknown.
+
+When two settable properties share the same binding name **and** binding
+type but differ by `condition` (template authors use this for
+operation-conditional duplicates), `--set` writes to all of them — the
+engine drops the inactive duplicates at runtime.
 
 ### Conditional properties
 
@@ -232,17 +295,20 @@ warning at the end (the property won't be applied).
    (`https://marketplace.cloud.camunda.io/api/v1/ootb-connectors`) — the
    same source Desktop Modeler uses. Override via
    `C8CTL_OOTB_ELEMENT_TEMPLATES_URL` for testing.
-2. **First use** (any subcommand that needs the index): a one-shot
-   bootstrap downloads ~459 templates with visible progress; per-template
-   failures are logged but don't abort the run.
-3. **Local file or URL** template args (paths containing `/` or `\`,
+2. **First use** of `search`, `info`, `get-properties`, `apply`, or
+   `sync`: a one-shot bootstrap downloads ~459 templates with visible
+   progress; per-template failures are logged but don't abort the run.
+3. **`get` does NOT auto-bootstrap.** It exits with a hint to run
+   `sync` first if the cache is missing — bootstrap progress would
+   otherwise corrupt redirected stdout (`get <id> > template.json`).
+4. **Local file or URL** template args (paths containing `/` or `\`,
    starting with `.`, ending in `.json`, or starting with `http(s)://`)
    skip the index entirely.
-4. **Version selection** uses `semver.satisfies` against the BPMN's
+5. **Version selection** uses `semver.satisfies` against the BPMN's
    `modeler:executionPlatformVersion` and each template's
    `engines.camunda` constraint. Without `@<version>`, the highest
    compatible version wins.
-5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
+6. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
    refresh — `sync` only fetches refs not already cached (commit-pinned
    URLs make incremental sync free).
 
