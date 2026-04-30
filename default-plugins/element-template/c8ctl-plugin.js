@@ -59,11 +59,11 @@ export const metadata = {
         'search the out-of-the-box template catalogue, and manage the local template cache.\n\n' +
         '<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).',
       subcommands: [
-        { name: 'apply', description: 'Apply a Camunda element template to a BPMN element' },
+        { name: 'search', description: 'Search out-of-the-box element templates' },
         { name: 'info', description: 'Show template metadata and a compact property table' },
         { name: 'get-properties', description: 'Show detail cards for one or more properties (or all if none given)' },
+        { name: 'apply', description: 'Apply a Camunda element template to a BPMN element' },
         { name: 'get', description: 'Print the raw template JSON to stdout (pipe-friendly)' },
-        { name: 'search', description: 'Search out-of-the-box element templates' },
         { name: 'sync', description: 'Refresh the local OOTB element template cache' },
       ],
       flags: {
@@ -77,18 +77,6 @@ export const metadata = {
         {
           command: 'c8ctl element-template search "AWS S3"',
           description: 'Search OOTB templates by name',
-        },
-        {
-          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn',
-          description: 'Apply an OOTB template (latest compatible with the BPMN engine version)',
-        },
-        {
-          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn',
-          description: 'Apply a specific OOTB template version',
-        },
-        {
-          command: 'c8ctl element-template apply template.json Task_1 process.bpmn',
-          description: 'Apply a template from a local file or URL',
         },
         {
           command: 'c8ctl element-template info io.camunda.connectors.HttpJson.v2',
@@ -105,6 +93,18 @@ export const metadata = {
         {
           command: 'c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint',
           description: 'Filter to one or more group ids (use the id, not the label — `info` shows the available group ids)',
+        },
+        {
+          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn',
+          description: 'Apply an OOTB template (latest compatible with the BPMN engine version)',
+        },
+        {
+          command: 'c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn',
+          description: 'Apply a specific OOTB template version',
+        },
+        {
+          command: 'c8ctl element-template apply template.json Task_1 process.bpmn',
+          description: 'Apply a template from a local file or URL',
         },
         {
           command: 'c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json',
@@ -1257,11 +1257,11 @@ async function syncSubcommand(args) {
 // ---------------------------------------------------------------------------
 
 const VALID_SUBCOMMANDS = [
-  'apply',
+  'search',
   'info',
   'get-properties',
+  'apply',
   'get',
-  'search',
   'sync',
 ];
 const SUBCOMMAND_ALIASES = {};
@@ -1314,16 +1314,16 @@ export const commands = {
     }
 
     try {
-      if (subcommand === 'apply') {
-        await applySubcommand(subArgs);
+      if (subcommand === 'search') {
+        await searchSubcommand(subArgs);
       } else if (subcommand === 'info') {
         await infoSubcommand(subArgs);
       } else if (subcommand === 'get-properties') {
         await getPropertiesSubcommand(subArgs);
+      } else if (subcommand === 'apply') {
+        await applySubcommand(subArgs);
       } else if (subcommand === 'get') {
         await getSubcommand(subArgs);
-      } else if (subcommand === 'search') {
-        await searchSubcommand(subArgs);
       } else if (subcommand === 'sync') {
         await syncSubcommand(subArgs);
       }
