@@ -28,7 +28,7 @@ The following are upstream dependencies — when they misbehave, report it. Do n
 | `tests/unit/` | Unit tests |
 | `tests/integration/` | Integration tests (require live Camunda or Docker) |
 | `tests/fixtures/` | BPMN/DMN test fixtures |
-| `default-plugins/` | Built-in embedded plugins (JavaScript) |
+| `default-plugins/` | Built-in embedded plugins (JavaScript or TypeScript) |
 | `plugins/` | GritQL lint and refactoring rules |
 | `assets/c8/rest-api/` | OpenAPI backup reference — do not edit |
 | `.github/SDK_GAPS.md` | SDK gap tracking — check before implementing SDK features |
@@ -52,7 +52,7 @@ Key components:
 - `src/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
 - `src/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
 - `src/commands/` — per-resource command handler files
-- `default-plugins/` — built-in embedded plugins (JavaScript, not TypeScript)
+- `default-plugins/` — built-in embedded plugins (JavaScript or TypeScript; `.ts` files are typechecked and linted alongside `src/`)
 
 ### Commit message guidelines
 
