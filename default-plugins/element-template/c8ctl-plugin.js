@@ -114,7 +114,11 @@ function isJsonMode() {
   return globalThis.c8ctl?.outputMode === 'json';
 }
 
-function readBpmnInput(filePath) {
+/**
+ * Read BPMN XML from a file path or stdin. See bpmn plugin for context on
+ * why stdin is consumed via async iteration rather than readFileSync(0).
+ */
+async function readBpmnInput(filePath) {
   if (filePath) {
     const resolved = resolvePath(filePath);
     if (!existsSync(resolved)) {
@@ -123,14 +127,11 @@ function readBpmnInput(filePath) {
     return { xml: readFileSync(resolved, 'utf-8'), source: resolved };
   }
 
-  // Read from stdin if not connected to a terminal. readFileSync(0) reads
-  // from file descriptor 0 (stdin) — portable across platforms.
   if (!process.stdin.isTTY) {
+    process.stdin.setEncoding('utf-8');
     let xml = '';
-    try {
-      xml = readFileSync(0, 'utf-8');
-    } catch (error) {
-      if (error.code !== 'EAGAIN' && error.code !== 'EWOULDBLOCK') throw error;
+    for await (const chunk of process.stdin) {
+      xml += chunk;
     }
     if (!xml.trim()) return null;
     return { xml, source: 'stdin' };
@@ -327,7 +328,7 @@ async function applySubcommand(args) {
     throw new Error('Missing element-id argument. Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>]');
   }
 
-  const input = readBpmnInput(bpmnFilePath);
+  const input = await readBpmnInput(bpmnFilePath);
   if (!input) {
     throw new Error('No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.');
   }
