@@ -236,7 +236,11 @@ async function lintSubcommand(args) {
   const { Linter } = require('bpmnlint');
   const NodeResolver = require('bpmnlint/lib/resolver/node-resolver');
 
-  const linter = new Linter({ config, resolver: new NodeResolver() });
+  // Pass our plugin-scoped `require` to NodeResolver so bpmnlint resolves
+  // `bpmnlint-plugin-camunda-compat` from c8ctl's installation, not the
+  // user's CWD. Without this, `bpmn lint` only works when run from a
+  // directory that happens to have the plugin in its node_modules.
+  const linter = new Linter({ config, resolver: new NodeResolver({ require }) });
   const results = await linter.lint(rootElement);
 
   const { lines, errorCount, warningCount, issues } = formatLintResults(results);
