@@ -26,15 +26,21 @@ export const metadata = {
     bpmn: {
       description: 'BPMN tooling — lint diagrams (supports stdin piping)',
       helpDescription:
-        'Lint BPMN diagrams against bpmnlint recommended rules and Camunda-specific rules. ' +
-        'Supports file paths and stdin piping. Uses .bpmnlintrc if present, otherwise auto-detects ' +
-        'the Camunda execution platform version from the BPMN file.',
+        'Lint BPMN diagrams. Supports file paths and stdin piping.\n\n' +
+        'Rule configuration: a .bpmnlintrc in the working directory takes precedence. ' +
+        'Otherwise the linter extends bpmnlint:recommended plus the matching ' +
+        'camunda-compat/camunda-cloud-<version> ruleset, auto-detected from ' +
+        'modeler:executionPlatformVersion in the BPMN file.',
       subcommands: [
         { name: 'lint', description: 'Lint a BPMN diagram against recommended and Camunda rules' },
       ],
+      flags: {
+        quiet: { type: 'boolean', short: 'q', description: 'Suppress the "No issues found." line on a clean lint (lint only)' },
+      },
       examples: [
         { command: 'c8ctl bpmn lint process.bpmn', description: 'Lint a BPMN file with Camunda rules' },
         { command: 'cat process.bpmn | c8ctl bpmn lint', description: 'Lint from stdin' },
+        { command: 'c8ctl bpmn lint --quiet process.bpmn', description: 'Suppress the success line in scripts' },
       ],
     },
   },
@@ -220,23 +226,28 @@ function formatLintResults(results) {
 async function lintSubcommand(args) {
   const logger = getLogger();
 
+  const usage = 'Usage: c8ctl bpmn lint [<file.bpmn>] [--quiet | -q]';
   const endOfOpts = args.indexOf('--');
   const optionArgs = endOfOpts === -1 ? args : args.slice(0, endOfOpts);
   const positionalArgs = endOfOpts === -1 ? [] : args.slice(endOfOpts + 1);
 
   // Handle --help/-h before interpreting args as file paths
   if (optionArgs.includes('--help') || optionArgs.includes('-h')) {
-    logger.output('Usage: c8ctl bpmn lint [<file.bpmn>]');
+    logger.output(usage);
     return;
   }
 
+  const quiet = optionArgs.includes('--quiet') || optionArgs.includes('-q');
+
   // Reject unknown flags
-  const unknownFlag = optionArgs.find((a) => a.startsWith('-'));
+  const unknownFlag = optionArgs.find(
+    (a) => a.startsWith('-') && a !== '--quiet' && a !== '-q',
+  );
   if (unknownFlag) {
-    throw new Error(`Unknown flag: ${unknownFlag}. Usage: c8ctl bpmn lint [<file.bpmn>]`);
+    throw new Error(`Unknown flag: ${unknownFlag}. ${usage}`);
   }
 
-  const filePath = positionalArgs[0] ?? optionArgs[0];
+  const filePath = positionalArgs[0] ?? optionArgs.find((a) => !a.startsWith('-'));
 
   const input = await readBpmnInput(filePath);
   if (!input) {
@@ -300,6 +311,11 @@ async function lintSubcommand(args) {
     const summaryColor = errorCount > 0 ? ['bold', 'red'] : ['bold', 'yellow'];
     logger.output('');
     logger.output(styleText(summaryColor, summary));
+  } else if (!quiet) {
+    // Mirror the bold red ✖ summary used for problems with a bold green
+    // ✓ on success — gives the user an unambiguous "lint ran cleanly"
+    // signal instead of trailing silence.
+    logger.output(styleText(['bold', 'green'], '✓ No issues found.'));
   }
 
   if (errorCount > 0) {
@@ -327,6 +343,14 @@ function printUsage() {
     logger.output(`  ${sub.name.padEnd(16)} ${sub.description}`);
   }
   logger.output('');
+  if (cmd.flags) {
+    logger.output('Options:');
+    for (const [name, def] of Object.entries(cmd.flags)) {
+      const shortStr = def.short ? `-${def.short}, ` : '    ';
+      logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
+    }
+    logger.output('');
+  }
   logger.output('Examples:');
   for (const ex of cmd.examples) {
     logger.output(`  ${ex.command}`);
