@@ -64,8 +64,14 @@ function isJsonMode() {
 
 /**
  * Read BPMN XML from a file path or stdin. Returns null if no input is available.
+ *
+ * Stdin is consumed via async iteration so a slow upstream writer (e.g.
+ * `apply | lint` in a pipeline, or any producer that hasn't flushed yet)
+ * is awaited until 'end'. The previous `readFileSync(0)` implementation
+ * raced with the writer: when stdin was a pipe with no buffered data
+ * yet, it threw EAGAIN, which was swallowed and reported as "no input".
  */
-function readBpmnInput(filePath) {
+async function readBpmnInput(filePath) {
   if (filePath) {
     const resolved = resolvePath(filePath);
     if (!existsSync(resolved)) {
@@ -74,16 +80,11 @@ function readBpmnInput(filePath) {
     return { xml: readFileSync(resolved, 'utf-8'), source: resolved };
   }
 
-  // Read from stdin if not connected to a terminal. readFileSync(0) reads
-  // from file descriptor 0 (stdin) — portable across platforms.
   if (!process.stdin.isTTY) {
+    process.stdin.setEncoding('utf-8');
     let xml = '';
-    try {
-      xml = readFileSync(0, 'utf-8');
-    } catch (error) {
-      // EAGAIN/EWOULDBLOCK: non-blocking stdin pipe with no data (e.g. spawned
-      // via execFile without a writer). Treat as no input.
-      if (error.code !== 'EAGAIN' && error.code !== 'EWOULDBLOCK') throw error;
+    for await (const chunk of process.stdin) {
+      xml += chunk;
     }
     if (!xml.trim()) return null;
     return { xml, source: 'stdin' };
@@ -237,7 +238,7 @@ async function lintSubcommand(args) {
 
   const filePath = positionalArgs[0] ?? optionArgs[0];
 
-  const input = readBpmnInput(filePath);
+  const input = await readBpmnInput(filePath);
   if (!input) {
     throw new Error('No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.');
   }
