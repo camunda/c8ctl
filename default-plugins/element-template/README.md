@@ -17,6 +17,10 @@ c8ctl element-template search "http"
 c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2
 c8ctl element-template list-properties ./my-template.json
 
+# Drill into one property — name only or `binding-type:name` to disambiguate
+c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 url
+c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 header:correlationKey
+
 # Apply by OOTB id — version is auto-resolved against the BPMN's
 # modeler:executionPlatformVersion (highest compatible version wins)
 c8ctl element-template apply io.camunda.connectors.HttpJson.v2 \
@@ -84,26 +88,94 @@ c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2
 ```
 
 ```
-HTTP REST Connector (io.camunda.connectors.HttpJson.v2) v13
+REST Outbound Connector (io.camunda.connectors.HttpJson.v2) v13
+Invoke REST API. Applies to bpmn:Task → bpmn:ServiceTask. Engines: ^8.9.
+https://docs.camunda.io/docs/components/connectors/protocol/rest/
 
-  Authentication:
-    authentication.type            Dropdown [noAuth, apiKey, basic, bearer, oauth-client-credentials-flow]  (default: noAuth)
-    authentication.apiKeyLocation  Dropdown [headers, query]  (conditional)
-    authentication.username        String  (conditional)
-    ...
+Authentication
+  authentication.type   Dropdown · default: noAuth
+                        Type — Choose the authentication type. Select 'None' if no authentication is necessary
+                        Choices: apiKey, basic, bearer, noAuth, oauth-client-credentials-flow
 
-  HTTP Endpoint:
-    method                         Dropdown [GET, POST, PATCH, PUT, DELETE]  (default: GET)
-    url                            String
+  authentication.token  String · required · feel: optional
+                        Bearer token
+                        Active when authentication.type = "bearer"
+  ...
 
-  Payload:
-    queryParameters                String
-    headers                        String
-    body                           String
+HTTP endpoint
+  method  Dropdown · required · default: GET
+          Method
+          Choices: POST, GET, DELETE, PATCH, PUT
 
-  Output mapping:
-    resultVariable                 String  [output]
-    resultExpression               String  [output]
+  url     String · required · feel: optional
+          URL
+          Pattern: ^(=|(http://|https://|secrets|\{\{).*$)
+                   Must be a http(s) URL
+
+Payload
+  body    Text · feel: optional
+          Request body — Payload to send with the request
+          Active when method ∈ {"POST", "PUT", "PATCH"}
+
+Output mapping
+  resultVariable    String · binding: header
+                    Result variable — Name of variable to store the response in
+  resultExpression  Text · feel: required · binding: header
+                    Result expression — Expression to map the response into process variables
+```
+
+Each property carries badges that an agent (or a human) needs to pick a
+value without re-reading the raw template:
+
+| Badge | Meaning |
+|-------|---------|
+| `required` | `optional: false` or `constraints.notEmpty: true` |
+| `default: <v>` | Pre-populated value (omit `--set` if it's already what you want) |
+| `feel: optional`/`required`/`static` | FEEL support — determines whether a leading `=` is allowed/required |
+| `binding: <type>` | Non-default binding (`zeebe:input` is implicit) |
+
+Sub-lines surface the **label/description**, the full **condition
+expression** (`Active when X = "Y"` or `X ∈ {…}`) so you know what to
+set first, and **pattern** constraints with their error message.
+
+#### Drill into a single property
+
+```bash
+c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 authentication.token
+```
+
+```
+REST Outbound Connector (io.camunda.connectors.HttpJson.v2) v13
+Invoke REST API. Applies to bpmn:Task → bpmn:ServiceTask. Engines: ^8.9.
+https://docs.camunda.io/docs/components/connectors/protocol/rest/
+
+  authentication.token  String · required · feel: optional · binding: input
+                        Bearer token
+                        Active when authentication.type = "bearer"
+```
+
+When two bindings share a name, qualify with the binding-type prefix
+(`input:`, `output:`, `header:`, `property:`, `taskDefinition:`).
+
+#### Machine-readable output
+
+`c8ctl output json` switches the session into JSON mode, which exposes
+the full template + property descriptor — designed to be consumed by
+coding agents. Top-level fields carry template metadata (`description`,
+`appliesTo`, `elementType`, `engines`, `documentationRef`); each entry
+in `properties[]` carries label, description, required, feel, choices,
+condition object + rendered text, pattern, and binding type:
+
+```bash
+c8ctl output json
+c8ctl element-template list-properties io.camunda.connectors.HttpJson.v2 authentication.token
+# → {"name":"REST Outbound Connector","id":"io.camunda.connectors.HttpJson.v2","version":13,
+#    "description":"Invoke REST API","appliesTo":["bpmn:Task"],"elementType":"bpmn:ServiceTask",
+#    "engines":{"camunda":"^8.9"},"documentationRef":"https://docs.camunda.io/...",
+#    "properties":[{"name":"authentication.token","type":"String","label":"Bearer token",
+#      "required":true,"feel":"optional","bindingType":"zeebe:input",
+#      "condition":{"property":"authentication.type","equals":"bearer"},
+#      "conditionText":"authentication.type = \"bearer\"", ...}]}
 ```
 
 ### Disambiguation prefixes

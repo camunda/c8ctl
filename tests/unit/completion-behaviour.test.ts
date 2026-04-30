@@ -247,7 +247,7 @@ describe("CLI behavioural: element-template completions", () => {
 	test("bash completion includes element-template resources", async () => {
 		const result = await c8("completion", "bash");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		for (const sub of ["apply", "list-properties"]) {
+		for (const sub of ["apply", "info", "get-properties"]) {
 			assert.ok(
 				result.stdout.includes(sub),
 				`Expected element-template resource "${sub}" in bash completions`,

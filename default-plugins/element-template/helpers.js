@@ -78,6 +78,107 @@ export function getSettableProperties(properties) {
 }
 
 /**
+ * A property is "required" if either `optional: false` or
+ * `constraints.notEmpty: true`. The element-template schema accepts both
+ * forms; templates in the wild use them interchangeably.
+ */
+export function isPropertyRequired(prop) {
+  if (prop.optional === false) return true;
+  if (prop.constraints?.notEmpty === true) return true;
+  return false;
+}
+
+/**
+ * Render an element-template `condition` object as a human-readable
+ * expression. Handles the common forms (`equals`, `oneOf`, `isActive`)
+ * and best-effort handles `allMatch`. Returns null for unrecognised
+ * shapes so the caller can fall back to a generic "(conditional)"
+ * marker.
+ *
+ * Examples:
+ *   { property: "method", equals: "POST" }        → 'method = "POST"'
+ *   { property: "method", oneOf: ["POST","PUT"] } → 'method ∈ {"POST", "PUT"}'
+ *   { property: "auth", isActive: true }          → 'auth is active'
+ */
+export function formatCondition(condition) {
+  if (!condition) return null;
+  if (Array.isArray(condition.allMatch)) {
+    const parts = condition.allMatch.map(formatCondition).filter(Boolean);
+    return parts.length > 0 ? parts.join(' AND ') : null;
+  }
+  if (!condition.property) return null;
+  if (Object.hasOwn(condition, 'equals')) {
+    return `${condition.property} = ${formatConditionValue(condition.equals)}`;
+  }
+  if (Array.isArray(condition.oneOf)) {
+    return `${condition.property} ∈ {${condition.oneOf.map(formatConditionValue).join(', ')}}`;
+  }
+  if (condition.isActive === true) return `${condition.property} is active`;
+  if (condition.isActive === false) return `${condition.property} is inactive`;
+  return null;
+}
+
+function formatConditionValue(value) {
+  if (typeof value === 'string') return JSON.stringify(value);
+  return JSON.stringify(value);
+}
+
+/**
+ * Build the structured property descriptor used by both text and JSON
+ * output of `list-properties`. Surfaces every field an agent or human
+ * needs to pick a value without re-reading the raw template:
+ *   - name, type, choices, default, group, label, description
+ *   - required (derived), feel support, condition expression, pattern
+ *   - binding type (always — JSON consumers shouldn't have to guess
+ *     the default zeebe:input)
+ */
+export function getPropertyDetail(prop, groupLabelMap) {
+  const bindingName = getBindingName(prop);
+  const bindingType = prop.binding?.type;
+  return {
+    // `id` is the schema's stable identifier — optional in the spec
+    // (~37% of OOTB properties don't have one) but the only reliable
+    // discriminator for properties that share binding name + type
+    // (operation-conditional duplicates).
+    id: prop.id,
+    name: bindingName,
+    type: prop.type,
+    label: prop.label,
+    description: prop.description,
+    // Both `groupId` (raw template id, used by --group filtering) and
+    // `group` (user-facing label) are exposed so callers can filter
+    // by the stable id without giving up the readable display string.
+    groupId: prop.group,
+    group: prop.group ? (groupLabelMap?.get(prop.group) ?? prop.group) : undefined,
+    bindingType,
+    bindingShorthand: bindingType ? getBindingTypeShorthand(bindingType) : undefined,
+    required: isPropertyRequired(prop),
+    feel: prop.feel,
+    default: prop.value,
+    choices: prop.choices?.map((c) => ({ value: c.value, label: c.name })),
+    condition: prop.condition ?? undefined,
+    conditionText: formatCondition(prop.condition),
+    pattern: prop.constraints?.pattern
+      ? { value: prop.constraints.pattern.value, message: prop.constraints.pattern.message }
+      : undefined,
+  };
+}
+
+/**
+ * Compile a shell-style glob to a regex. Only `*` is special — every
+ * other character matches literally. Used for `show-properties auth*`
+ * style positional matching.
+ *
+ *   "auth*"   → /^auth.*$/
+ *   "url"     → /^url$/
+ *   "a.b.*c"  → /^a\.b\..*c$/
+ */
+export function globToRegex(pattern) {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`);
+}
+
+/**
  * Parse a --set key=value string. If key contains a `:` prefix,
  * resolve the binding type shorthand.
  */
@@ -108,10 +209,22 @@ export function parseSetArg(arg) {
 }
 
 /**
- * Find a template property by binding name, optionally filtered by binding type.
- * Throws on ambiguity or unknown names.
+ * Find every template property matching a binding name, optionally
+ * filtered by binding type. Returns a non-empty array — the caller
+ * applies the value to ALL matches.
+ *
+ * Multi-match handling:
+ *   - Same name + SAME binding type → conditional duplicates (template
+ *     authors use these to vary defaults/labels per operation while
+ *     all targeting the same `<zeebe:input target="x">`). Apply the
+ *     value to all; the engine's condition evaluation drops inactive
+ *     ones at apply time.
+ *   - Same name + DIFFERENT binding types → genuine ambiguity (e.g.
+ *     `correlationKey` as both `zeebe:input` and `zeebe:taskHeader`
+ *     writes to two different BPMN locations). Throw, ask the user
+ *     to qualify with `<binding-type>:<name>`.
  */
-export function findPropertyByBindingName(properties, name, bindingTypeFilter) {
+export function findPropertiesByBindingName(properties, name, bindingTypeFilter) {
   const settable = getSettableProperties(properties);
 
   const matches = settable.filter((p) => {
@@ -120,22 +233,27 @@ export function findPropertyByBindingName(properties, name, bindingTypeFilter) {
     return true;
   });
 
-  if (matches.length === 1) return matches[0];
-
-  if (matches.length > 1) {
-    const qualified = matches.map((p) => {
-      const prefix = getBindingTypeShorthand(p.binding?.type ?? '');
-      return `${prefix}:${name}`;
-    });
+  if (matches.length === 0) {
+    const available = [...new Set(settable.map(getBindingName).filter(Boolean))];
     throw new Error(
-      `Ambiguous property "${name}" matches ${matches.length} bindings. Use a qualified name: ${qualified.join(', ')}`,
+      `Unknown property "${name}". Available properties for --set:\n  ${available.join(', ')}`,
     );
   }
 
-  const available = [...new Set(settable.map(getBindingName).filter(Boolean))];
-  throw new Error(
-    `Unknown property "${name}". Available properties for --set:\n  ${available.join(', ')}`,
-  );
+  // Multi-match across binding types is genuinely ambiguous — different
+  // binding types write to different BPMN locations.
+  const types = new Set(matches.map((p) => p.binding?.type));
+  if (types.size > 1) {
+    const qualified = [...types].map(
+      (t) => `${getBindingTypeShorthand(t ?? '')}:${name}`,
+    );
+    throw new Error(
+      `Ambiguous property "${name}" matches ${matches.length} bindings across ${types.size} binding types. ` +
+        `Use a qualified name: ${qualified.join(', ')}`,
+    );
+  }
+
+  return matches;
 }
 
 export function validateDropdownValue(prop, name, value) {
@@ -149,24 +267,33 @@ export function validateDropdownValue(prop, name, value) {
 }
 
 /**
- * Apply --set overrides to template properties. Mutates the template in place.
- * Returns the list of binding names that were set.
+ * Apply --set overrides to template properties. Mutates the template
+ * in place. When a name matches multiple conditional duplicates, the
+ * value is set on all of them — the engine's condition evaluation
+ * picks the active one at apply time. Returns the list of binding
+ * names that were set (deduped) for the post-apply unmet-condition
+ * warning check.
  */
 export function applySetOverrides(properties, setArgs) {
-  const setBindingNames = [];
+  const setBindingNames = new Set();
 
   for (const arg of setArgs) {
     const { bindingTypeFilter, name, value } = parseSetArg(arg);
-    const prop = findPropertyByBindingName(properties, name, bindingTypeFilter);
+    const matches = findPropertiesByBindingName(
+      properties,
+      name,
+      bindingTypeFilter,
+    );
 
-    if (prop.choices) validateDropdownValue(prop, name, value);
-
-    prop.value = value;
-    const bindingName = getBindingName(prop);
-    if (bindingName) setBindingNames.push(bindingName);
+    for (const prop of matches) {
+      if (prop.choices) validateDropdownValue(prop, name, value);
+      prop.value = value;
+      const bindingName = getBindingName(prop);
+      if (bindingName) setBindingNames.add(bindingName);
+    }
   }
 
-  return setBindingNames;
+  return [...setBindingNames];
 }
 
 /**
