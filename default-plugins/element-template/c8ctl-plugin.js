@@ -7,6 +7,7 @@
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
  *   c8ctl element-template info <template>
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed]
+ *   c8ctl element-template get <template>
  *   c8ctl element-template search <query>
  *   c8ctl element-template sync [--prune]
  *
@@ -34,6 +35,7 @@ import {
 import {
   bootstrapIfNeeded,
   findById,
+  loadCache,
   nudgeIfStale,
   pickVersion,
   searchTemplates,
@@ -60,6 +62,7 @@ export const metadata = {
         { name: 'apply', description: 'Apply a Camunda element template to a BPMN element' },
         { name: 'info', description: 'Show template metadata and a compact property table' },
         { name: 'get-properties', description: 'Show detail cards for one or more properties (or all if none given)' },
+        { name: 'get', description: 'Print the raw template JSON to stdout (pipe-friendly)' },
         { name: 'search', description: 'Search out-of-the-box element templates' },
         { name: 'sync', description: 'Refresh the local OOTB element template cache' },
       ],
@@ -102,6 +105,10 @@ export const metadata = {
         {
           command: 'c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint',
           description: 'Filter to one or more group ids (use the id, not the label — `info` shows the available group ids)',
+        },
+        {
+          command: 'c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json',
+          description: 'Print the raw template JSON to stdout (redirect to save a copy)',
         },
         {
           command: 'c8ctl element-template sync',
@@ -557,6 +564,82 @@ async function getPropertiesSubcommand(args) {
         `  c8ctl element-template get-properties ${parsed.templateArg} --detailed`,
     ),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Subcommand: get
+// ---------------------------------------------------------------------------
+
+/**
+ * Print the raw template JSON to stdout. For local paths and URLs we
+ * pass the source bytes through unchanged (no parse/stringify
+ * round-trip — preserves whitespace, key order, trailing newline). For
+ * OOTB ids we don't have the upstream bytes, so we serialize the cached
+ * object with a 2-space indent. Designed for shell redirection:
+ *
+ *   c8ctl element-template get <id> > template.json
+ *
+ * No trailing hints or colored output — they would corrupt the piped
+ * payload.
+ */
+async function getSubcommand(args) {
+  const usage = 'Usage: c8ctl element-template get <template>';
+
+  let templateArg;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--help' || arg === '-h') {
+      getLogger().output(usage);
+      return;
+    }
+    if (arg === '--') break;
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown flag: ${arg}. ${usage}`);
+    }
+    if (templateArg === undefined) {
+      templateArg = arg;
+      continue;
+    }
+    throw new Error(`Unexpected argument: ${arg}. ${usage}`);
+  }
+
+  if (!templateArg) {
+    throw new Error(`Missing template argument. ${usage}`);
+  }
+
+  const ref = parseTemplateRef(templateArg);
+
+  if (ref.kind === 'path' || ref.kind === 'url') {
+    const content = await readFileOrUrl(ref.value);
+    process.stdout.write(content);
+    return;
+  }
+
+  // OOTB id: no upstream bytes available — stringify the cached object.
+  // We deliberately do NOT auto-bootstrap here: the bootstrap log lines
+  // would interleave with the JSON payload on stdout and corrupt any
+  // shell redirect (`> template.json`). Surface the missing-cache case
+  // as an explicit error pointing at `sync`.
+  if (loadCache() === null) {
+    throw new Error(
+      "Element template cache not found. Run 'c8ctl element-template sync' first.",
+    );
+  }
+  const template = await resolveOotbTemplate(ref);
+
+  // The cache injects `metadata.upstreamRef` (our internal pointer for
+  // incremental sync); strip it so the output matches what you'd get
+  // from the marketplace, not c8ctl's cache shape.
+  const cleaned = stripInternalMetadata(template);
+  process.stdout.write(`${JSON.stringify(cleaned, null, 2)}\n`);
+}
+
+function stripInternalMetadata(template) {
+  if (!template?.metadata?.upstreamRef) return template;
+  const { metadata, ...rest } = template;
+  const { upstreamRef: _ignored, ...metaRest } = metadata;
+  if (Object.keys(metaRest).length === 0) return rest;
+  return { ...rest, metadata: metaRest };
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,6 +1260,7 @@ const VALID_SUBCOMMANDS = [
   'apply',
   'info',
   'get-properties',
+  'get',
   'search',
   'sync',
 ];
@@ -1236,6 +1320,8 @@ export const commands = {
         await infoSubcommand(subArgs);
       } else if (subcommand === 'get-properties') {
         await getPropertiesSubcommand(subArgs);
+      } else if (subcommand === 'get') {
+        await getSubcommand(subArgs);
       } else if (subcommand === 'search') {
         await searchSubcommand(subArgs);
       } else if (subcommand === 'sync') {

@@ -74,6 +74,7 @@ describe("CLI behavioural: element-template verb", () => {
 		assert.ok(output.includes("apply"), "Should list apply");
 		assert.ok(output.includes("info"), "Should list info");
 		assert.ok(output.includes("get-properties"), "Should list get-properties");
+		assert.ok(/^\s+get\s/m.test(output), "Should list get");
 	});
 });
 
@@ -482,6 +483,114 @@ describe("CLI behavioural: element-template info", () => {
 		assert.ok(
 			output.includes("not found") || output.includes("Failed"),
 			"Should report missing template",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template get — raw JSON passthrough
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: element-template get", () => {
+	test("local file: stdout is byte-identical to the source", async () => {
+		const result = await c8text("element-template", "get", TEMPLATE_FILE);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const source = readFileSync(TEMPLATE_FILE, "utf-8");
+		assert.strictEqual(
+			result.stdout,
+			source,
+			"get should pass file bytes through unchanged",
+		);
+	});
+
+	test("local file: stderr stays empty so redirect targets are clean", async () => {
+		const result = await c8text("element-template", "get", TEMPLATE_FILE);
+		assert.strictEqual(result.status, 0);
+		assert.strictEqual(result.stderr, "", "stderr must be empty for piping");
+	});
+
+	test("OOTB id with no cache exits 1 and points at sync", async () => {
+		// `get` deliberately does NOT auto-bootstrap: the bootstrap log
+		// would corrupt redirected JSON output. Cache miss must surface
+		// as an explicit error instructing the user to run `sync`.
+		const result = await c8text(
+			"element-template",
+			"get",
+			"io.camunda.connectors.HttpJson.v2",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("cache not found") &&
+				result.stderr.includes("c8ctl element-template sync"),
+			"Error should mention cache + the sync command",
+		);
+		assert.strictEqual(
+			result.stdout,
+			"",
+			"stdout must stay empty when erroring",
+		);
+	});
+
+	test("missing template argument exits 1", async () => {
+		const result = await c8text("element-template", "get");
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("Missing template argument"),
+			"Should report missing template",
+		);
+	});
+
+	test("unexpected positional arg exits 1", async () => {
+		const result = await c8text(
+			"element-template",
+			"get",
+			TEMPLATE_FILE,
+			"extra",
+		);
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("Unexpected argument") && output.includes("extra"),
+			"Should reject the extra positional",
+		);
+	});
+
+	test("unknown flag exits 1", async () => {
+		const result = await c8text(
+			"element-template",
+			"get",
+			"--bogus",
+			TEMPLATE_FILE,
+		);
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("Unknown flag") && output.includes("--bogus"),
+			"Should reject unknown flag",
+		);
+	});
+
+	test("--help prints usage and exits 0", async () => {
+		const result = await c8text("element-template", "get", "--help");
+		assert.strictEqual(result.status, 0);
+		assert.ok(
+			result.stdout.includes("c8ctl element-template get <template>"),
+			"Should print the usage line",
+		);
+	});
+
+	test("missing local file exits 1", async () => {
+		const result = await c8text(
+			"element-template",
+			"get",
+			"/nonexistent/template.json",
+		);
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("not found") || output.includes("Failed"),
+			"Should report missing file",
 		);
 	});
 });
