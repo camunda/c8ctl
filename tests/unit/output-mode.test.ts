@@ -111,8 +111,30 @@ describe("c8 which output", () => {
 			`Expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
 		);
 		assert.ok(
-			output.includes("text"),
-			`Expected output mode in output, got: ${output}`,
+			output.includes("Current output mode:"),
+			`Expected current mode in output, got: ${output}`,
+		);
+		assert.ok(
+			output.includes("Available modes: json|text"),
+			`Expected available modes in output, got: ${output}`,
+		);
+	});
+
+	test("produces identical output to 'c8ctl output' (no args)", async () => {
+		const [outputResult, whichResult] = await Promise.all([
+			cli("output"),
+			cli("which", "output"),
+		]);
+
+		assert.strictEqual(
+			whichResult.stdout,
+			outputResult.stdout,
+			"stdout of 'which output' must match 'output'",
+		);
+		assert.strictEqual(
+			whichResult.stderr,
+			outputResult.stderr,
+			"stderr of 'which output' must match 'output'",
 		);
 	});
 });

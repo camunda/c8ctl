@@ -857,6 +857,12 @@ c8 create pi --id=order-process
 ### Set Output Mode
 
 ```bash
+# Show current output mode
+c8 output
+
+# Also available as 'which output' (alias)
+c8 which output
+
 # Switch to JSON output
 c8 output json
 

@@ -288,6 +288,9 @@ c8ctl output json
 
 # Switch back to text output
 c8ctl output text
+
+# Also available as 'which output' (alias)
+c8ctl which output
 ```
 
 ### Debug Mode

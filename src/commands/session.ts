@@ -10,7 +10,7 @@ import {
 	setActiveTenant,
 	setOutputMode,
 } from "../config.ts";
-import { getLogger } from "../logger.ts";
+import { getLogger, type Logger } from "../logger.ts";
 import { c8ctl } from "../runtime.ts";
 
 /**
@@ -78,13 +78,20 @@ export function showSessionState(): void {
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────
 
+/**
+ * Display the current output mode. Shared by `output` (no args) and `which output`.
+ */
+function showOutputMode(logger: Logger): void {
+	logger.info(`Current output mode: ${c8ctl.outputMode}`);
+	if (c8ctl.outputMode === "text") {
+		logger.info("");
+	}
+	logger.info("Available modes: json|text");
+}
+
 export const outputCommand = defineCommand("output", "", async (ctx) => {
 	if (!ctx.resource) {
-		ctx.logger.info(`Current output mode: ${c8ctl.outputMode}`);
-		if (c8ctl.outputMode === "text") {
-			ctx.logger.info("");
-		}
-		ctx.logger.info("Available modes: json|text");
+		showOutputMode(ctx.logger);
 		return { kind: "none" };
 	}
 	setOutputFormat(ctx.resource);
@@ -116,8 +123,11 @@ export const useTenantCommand = defineCommand(
 	},
 );
 
-export const whichOutputCommand = defineCommand("which", "output", async () => {
-	const logger = getLogger();
-	logger.info(c8ctl.outputMode);
-	return { kind: "none" };
-});
+export const whichOutputCommand = defineCommand(
+	"which",
+	"output",
+	async (ctx) => {
+		showOutputMode(ctx.logger);
+		return { kind: "none" };
+	},
+);
