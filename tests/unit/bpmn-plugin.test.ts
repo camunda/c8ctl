@@ -64,10 +64,38 @@ describe("CLI behavioural: bpmn verb", () => {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: bpmn lint", () => {
-	test("lint clean file exits 0 with no output", async () => {
+	test("lint clean file prints success line and exits 0", async () => {
 		const file = join(FIXTURES_DIR, "simple.bpmn");
 		const result = await c8text("bpmn", "lint", file);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("No issues found"),
+			"Should print success affirmation on a clean lint",
+		);
+	});
+
+	test("--quiet suppresses the success line on a clean lint", async () => {
+		const file = join(FIXTURES_DIR, "simple.bpmn");
+		const result = await c8text("bpmn", "lint", "--quiet", file);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(
+			result.stdout,
+			"",
+			"--quiet should leave stdout empty on success",
+		);
+	});
+
+	test("--quiet does not suppress problems", async () => {
+		// --quiet only silences the success line. Problem output is the
+		// whole point of running the linter, so it must always render.
+		const file = join(FIXTURES_DIR, "simple-will-create-incident.bpmn");
+		const result = await c8text("bpmn", "lint", "-q", file);
+		assert.strictEqual(result.status, 1, "Should still exit 1 on errors");
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("label-required"),
+			"Problem output must render even with --quiet",
+		);
 	});
 
 	test("lint file with issues exits 1 and reports errors", async () => {
