@@ -62,14 +62,16 @@ function parseVersionFlag(values: Record<string, unknown>): number | undefined {
  */
 function parseCliArgs() {
 	try {
-		const { values, positionals } = parseArgs({
+		const { values, positionals, tokens } = parseArgs({
 			args: process.argv.slice(2),
+			tokens: true,
 			options: deriveParseArgsOptions(),
 			allowPositionals: true,
 			strict: false,
 		});
 
-		return { values, positionals };
+		const verbTokenIndex = tokens.find((t) => t.kind === "positional")?.index;
+		return { values, positionals, verbTokenIndex };
 	} catch (error: unknown) {
 		const message = error instanceof Error ? error.message : String(error);
 		console.error(`Error parsing arguments: ${message}`);
@@ -125,7 +127,7 @@ async function main() {
 	// Fire-and-forget: check for CLI updates in the background
 	startUpdateCheck(c8ctl.version);
 
-	const { values, positionals } = parseCliArgs();
+	const { values, positionals, verbTokenIndex } = parseCliArgs();
 
 	// Initialize logger with current output mode from c8ctl runtime
 	const logger = getLogger(c8ctl.outputMode);
@@ -296,7 +298,14 @@ async function main() {
 	}
 
 	// Try to execute plugin command (before unknown-command error)
-	if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
+	// Use raw argv slice so flags (e.g. --from) are forwarded to the plugin, not just positionals.
+	const pluginArgs =
+		verbTokenIndex !== undefined
+			? process.argv.slice(2 + verbTokenIndex + 1)
+			: resource
+				? [resource, ...args]
+				: args;
+	if (await executePluginCommand(verb, pluginArgs)) {
 		return;
 	}
 
