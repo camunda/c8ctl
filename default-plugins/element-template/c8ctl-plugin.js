@@ -50,13 +50,14 @@ const require = createRequire(import.meta.url);
 
 export const metadata = {
   name: 'element-template',
-  description: 'Apply and inspect Camunda element templates',
+  description: 'Apply, inspect, and export Camunda element templates',
   commands: {
     'element-template': {
-      description: 'Apply Camunda element templates and inspect template properties',
+      description: 'Apply, inspect, and export Camunda element templates',
       helpDescription:
-        'Apply Camunda element templates to BPMN elements, list settable properties, ' +
-        'search the out-of-the-box template catalogue, and manage the local template cache.\n\n' +
+        'Apply Camunda element templates to BPMN elements, inspect template metadata and properties, ' +
+        'search the out-of-the-box template catalogue, export raw template JSON, ' +
+        'and manage the local template cache.\n\n' +
         '<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).',
       subcommands: [
         { name: 'search', description: 'Search out-of-the-box element templates' },
