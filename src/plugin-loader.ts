@@ -4,12 +4,20 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FlagDef } from "./command-registry.ts";
 import { ensurePluginsDir } from "./config.ts";
 import { getLogger } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 interface PluginCommands {
-	[commandName: string]: (args: string[]) => Promise<void>;
+	[commandName: string]: (
+		args: string[],
+		flags?: Record<string, unknown>,
+	) => Promise<void>;
+}
+
+interface PluginFlags {
+	[commandName: string]: Record<string, FlagDef>;
 }
 
 interface PluginMetadata {
@@ -28,6 +36,7 @@ interface PluginMetadata {
 interface LoadedPlugin {
 	name: string;
 	commands: PluginCommands;
+	flags?: PluginFlags;
 	metadata?: PluginMetadata;
 }
 
@@ -106,6 +115,7 @@ async function loadDefaultPlugins(): Promise<void> {
 					loadedPlugins.set(pluginName, {
 						name: pluginName,
 						commands: plugin.commands,
+						flags: plugin.flags || undefined,
 						metadata: plugin.metadata || {},
 					});
 					const commandNames = Object.keys(plugin.commands);
@@ -233,6 +243,7 @@ export async function loadInstalledPlugins(): Promise<void> {
 					loadedPlugins.set(packageName, {
 						name: packageName,
 						commands: plugin.commands,
+						flags: plugin.flags || undefined,
 						metadata: plugin.metadata || {},
 					});
 					const commandNames = Object.keys(plugin.commands);
@@ -265,16 +276,32 @@ export function getPluginCommands(): PluginCommands {
 }
 
 /**
+ * Get all plugin flags for merging into parseArgs options
+ */
+export function getPluginFlags(): PluginFlags {
+	const allFlags: PluginFlags = {};
+
+	for (const plugin of loadedPlugins.values()) {
+		if (plugin.flags) {
+			Object.assign(allFlags, plugin.flags);
+		}
+	}
+
+	return allFlags;
+}
+
+/**
  * Execute a plugin command if it exists
  */
 export async function executePluginCommand(
 	commandName: string,
 	args: string[],
+	flags?: Record<string, unknown>,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
 
 	if (commands[commandName]) {
-		await commands[commandName](args);
+		await commands[commandName](args, flags);
 		return true;
 	}
 

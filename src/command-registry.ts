@@ -1751,10 +1751,9 @@ export function isValidCommand(verb: string, resource: string): boolean {
  * "string" wins because parseArgs with `type: "string"` can accept any
  * value, whereas `type: "boolean"` would discard the string payload.
  */
-export function deriveParseArgsOptions(): Record<
-	string,
-	{ type: "string" | "boolean"; short?: string }
-> {
+export function deriveParseArgsOptions(
+	pluginFlags?: Record<string, Record<string, FlagDef>>,
+): Record<string, { type: "string" | "boolean"; short?: string }> {
 	const options: Record<
 		string,
 		{ type: "string" | "boolean"; short?: string }
@@ -1790,6 +1789,13 @@ export function deriveParseArgsOptions(): Record<
 			for (const rFlags of Object.values(cmd.resourceFlags)) {
 				addFlags(rFlags);
 			}
+		}
+	}
+
+	// Add plugin flags if provided
+	if (pluginFlags) {
+		for (const commandFlags of Object.values(pluginFlags)) {
+			addFlags(commandFlags);
 		}
 	}
 
