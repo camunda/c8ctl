@@ -73,6 +73,7 @@ export type Template = {
 	engines?: { camunda?: string };
 	category?: { id?: string; name?: string };
 	deprecated?: boolean | { message?: string };
+	icon?: { contents?: string };
 	groups?: TemplateGroup[];
 	properties: TemplateProperty[];
 	metadata?: { upstreamRef?: string } & Record<string, unknown>;

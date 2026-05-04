@@ -84,6 +84,7 @@ c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 pro
 c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json
 c8ctl element-template get https://example.com/template.json > template.json
 c8ctl element-template get ./template.json > copy.json    # passthrough — bytes preserved
+c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop the base64 icon blob
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
