@@ -8,6 +8,7 @@
  *   c8ctl feel evaluate '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]
  */
 
+import { styleText } from "node:util";
 import {
 	type EvalContext,
 	type EvaluationResult,
@@ -39,10 +40,21 @@ type ParsedArgs = {
 
 type ParsedVar = { path: string; value: unknown };
 
+// Warning shape:
+// - `message` is always present (cluster + local).
+// - `type` and `position` are only emitted by the local feelin engine —
+//   the cluster API's ExpressionEvaluationWarningItem only carries a
+//   message. JSON consumers must handle absence.
+type EvaluationWarning = {
+	message: string;
+	type?: string;
+	position?: { from: number; to: number };
+};
+
 type EvaluationOutput = {
 	expression: string;
 	result: unknown;
-	warnings: { message: string }[];
+	warnings: EvaluationWarning[];
 };
 
 type ClusterErrorClassification = {
@@ -599,7 +611,11 @@ function evaluateLocal({
 	return {
 		expression,
 		result: raw.value === undefined ? null : raw.value,
-		warnings: raw.warnings.map((w) => ({ message: w.message })),
+		warnings: raw.warnings.map((w) => ({
+			message: w.message,
+			type: w.type,
+			position: { from: w.position.from, to: w.position.to },
+		})),
 	};
 }
 
@@ -615,11 +631,19 @@ function formatResultForText(result: unknown): string {
 
 function renderText(logger: PluginLogger, normalized: EvaluationOutput): void {
 	logger.output(formatResultForText(normalized.result));
-	if (normalized.warnings.length > 0) {
-		logger.output("");
-		for (const w of normalized.warnings) {
-			logger.output(`  warning  ${w.message}`);
-		}
+	if (normalized.warnings.length === 0) return;
+
+	const count = normalized.warnings.length;
+	const noun = count === 1 ? "warning" : "warnings";
+	logger.output("");
+	logger.output(styleText(["bold", "yellow"], `⚠ ${count} ${noun}:`));
+	for (const w of normalized.warnings) {
+		// Engine-conditional: feelin's local engine carries a WarningType
+		// (NO_VARIABLE_FOUND, INVALID_TYPE, …) we surface as a trailing
+		// dim parenthetical — same visual rhythm as bpmn lint's rule
+		// column. Cluster has no type, so the row stays a plain message.
+		const typeSuffix = w.type ? ` ${styleText("dim", `(${w.type})`)}` : "";
+		logger.output(`  ${w.message}${typeSuffix}`);
 	}
 }
 

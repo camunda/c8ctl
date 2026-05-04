@@ -30,30 +30,56 @@ c8ctl feel evaluate 'sum(items)' --vars "$(jq -c '{items: .data}' input.json)"
 c8ctl feel evaluate '1 + 2' --engine local
 ```
 
-## JSON output
+## Warnings
 
-`feel evaluate` honours c8ctl's session output mode. Set it once:
+Runtime issues (unknown variables, type mismatches) come back as
+warnings, not errors — `result` falls to `null` and the expression
+still exits 0.
+
+```text
+$ c8ctl feel evaluate 'unknownVar' --engine local
+null
+
+⚠ 1 warning:
+  Variable 'unknownVar' not found (NO_VARIABLE_FOUND)
+```
+
+The trailing `(NO_VARIABLE_FOUND)` is the engine's diagnostic type —
+emitted when available (local engine) and omitted when not (cluster).
+
+In JSON mode warnings expand to the engine's diagnostic shape:
 
 ```bash
 c8ctl output json
-c8ctl feel evaluate 'sum([1, 2, 3])'
-# → {"expression":"sum([1, 2, 3])","result":6,"warnings":[]}
+c8ctl feel evaluate 'unknownVar' --engine local
+# → {"expression":"unknownVar","result":null,"warnings":[
+#      { "message": "Variable 'unknownVar' not found",
+#        "type": "NO_VARIABLE_FOUND",
+#        "position": { "from": 0, "to": 10 } }
+#    ]}
 ```
 
-The shape is identical for `--engine cluster` and `--engine local` —
-JSON consumers don't have to branch on engine.
+The envelope `{ expression, result, warnings }` is identical across
+engines. The per-warning fields differ:
+
+| Field | `cluster` | `local` |
+|---|---|---|
+| `message` | always | always |
+| `type` | — | feelin's `WarningType` (`NO_VARIABLE_FOUND`, `INVALID_TYPE`, …) |
+| `position` | — | `{ from, to }` byte offsets in the expression |
+
+JSON consumers should treat `type` and `position` as engine-conditional.
 
 ## Engines
 
 | Engine | When | Notes |
 |---|---|---|
 | `cluster` (default) | Connected to a Camunda 8.9+ cluster | Uses `POST /v2/expression/evaluation`. Real Zeebe FEEL semantics, full Camunda extensions, supports tenant-scoped cluster variables. |
-| `local` | Offline or no cluster configured | Uses [feelin](https://github.com/nikku/feelin) in-process. Fast, but **does not support all Camunda FEEL extensions** — result may differ from the cluster engine. A warning is emitted on first use per process. |
+| `local` | Offline or no cluster configured | Uses [feelin](https://github.com/nikku/feelin) in-process. Fast, but **does not support all Camunda FEEL extensions** — result may differ from the cluster engine. |
 
-`feel evaluate` exits non-zero when the expression fails to parse.
-Runtime issues (unknown variables, type mismatches) come back as
-`result: null` plus warnings — not an error — because they're
-properly the engine's diagnostic output, not a CLI failure.
+`feel evaluate` exits non-zero only when the expression fails to
+parse — runtime issues are warnings, not failures, because they're
+properly the engine's diagnostic output, not a CLI error.
 
 ## Error behaviour
 
