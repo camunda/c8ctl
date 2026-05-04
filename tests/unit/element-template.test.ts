@@ -4,7 +4,13 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
@@ -1128,6 +1134,146 @@ describe("CLI behavioural: element-template get-properties", () => {
 				),
 			"choices keep the schema's { name, value } shape",
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template search — --limit (default 20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run search against a pre-seeded cache so we don't hit the live
+ * marketplace. Each call gets a fresh tmpdir wiped on completion.
+ */
+async function searchWithSeed(
+	templates: Array<Record<string, unknown>>,
+	mode: "text" | "json",
+	...args: string[]
+) {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: mode }),
+	);
+	const cacheDir = join(dataDir, "element-templates");
+	mkdirSync(cacheDir, { recursive: true });
+	writeFileSync(
+		join(cacheDir, "templates.json"),
+		JSON.stringify(templates, null, 2),
+	);
+	writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	try {
+		return await asyncSpawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				CLI,
+				"element-template",
+				"search",
+				...args,
+			],
+			{
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://test-cluster/v2",
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+/** Build N matchable templates with stable shape. */
+function makeTemplates(prefix: string, n: number) {
+	return Array.from({ length: n }, (_, i) => ({
+		id: `io.example.${prefix}.${i}`,
+		name: `${prefix} connector ${i}`,
+		version: 1,
+		description: `${prefix} test template`,
+		properties: [],
+	}));
+}
+
+describe("CLI behavioural: element-template search", () => {
+	test("default limit (20): all results show, no 'Showing X of Y' truncation header", async () => {
+		const result = await searchWithSeed(makeTemplates("aws", 5), "text", "aws");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			/^5 matches for 'aws'/.test(result.stdout),
+			`expected '5 matches' header. Got: ${result.stdout.slice(0, 300)}`,
+		);
+		assert.ok(
+			!result.stdout.includes("Showing"),
+			"no truncation header expected when total <= limit",
+		);
+		assert.ok(
+			!result.stdout.includes("Refine the query"),
+			"no refinement hint expected when nothing was elided",
+		);
+	});
+
+	test("--limit caps text output and shows refinement hint", async () => {
+		const result = await searchWithSeed(
+			makeTemplates("aws", 25),
+			"text",
+			"aws",
+			"--limit",
+			"5",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			/Showing 5 of 25 matches for 'aws'/.test(result.stdout),
+			`expected truncation header. Got: ${result.stdout.slice(0, 300)}`,
+		);
+		assert.ok(
+			result.stdout.includes("Refine the query"),
+			"truncated output should include the refinement hint",
+		);
+		assert.ok(
+			result.stdout.includes("--limit 25"),
+			"hint should suggest the exact total as a --limit value",
+		);
+	});
+
+	test("--limit reports count + total in JSON mode", async () => {
+		const result = await searchWithSeed(
+			makeTemplates("aws", 25),
+			"json",
+			"aws",
+			"--limit",
+			"5",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.count, 5, "post-limit count");
+		assert.strictEqual(parsed.total, 25, "pre-limit total");
+		assert.ok(Array.isArray(parsed.matches));
+		assert.strictEqual(parsed.matches.length, 5);
+	});
+
+	test("--limit must be a positive integer", async () => {
+		const cases = ["0", "-1", "abc", "1.5"];
+		for (const value of cases) {
+			const result = await searchWithSeed(
+				makeTemplates("aws", 3),
+				"text",
+				"aws",
+				"--limit",
+				value,
+			);
+			assert.strictEqual(
+				result.status,
+				1,
+				`--limit ${value} should be rejected. stdout: ${result.stdout}`,
+			);
+			assert.ok(
+				(result.stdout + result.stderr).includes("--limit"),
+				`error should reference --limit. Got: ${result.stdout + result.stderr}`,
+			);
+		}
 	});
 });
 

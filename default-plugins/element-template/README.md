@@ -29,6 +29,7 @@ auto-rewritten to raw content URLs — paste straight from the address bar.
 # Search OOTB templates
 c8ctl element-template search "AWS S3"
 c8ctl element-template search "http"
+c8ctl element-template search "AWS" --limit 5      # cap results (default 20)
 
 # Show the template metadata card
 c8ctl element-template info io.camunda.connectors.HttpJson.v2
