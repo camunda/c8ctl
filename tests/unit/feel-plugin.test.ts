@@ -255,7 +255,87 @@ describe("CLI behavioural: feel evaluate JSON output shape", () => {
 		const parsed = JSON.parse(result.stdout);
 		assert.strictEqual(parsed.result, null);
 		assert.ok(Array.isArray(parsed.warnings) && parsed.warnings.length >= 1);
-		assert.ok(typeof parsed.warnings[0].message === "string");
+
+		const w = parsed.warnings[0];
+		assert.ok(typeof w.message === "string");
+		// Local engine forwards feelin's WarningType + position; cluster
+		// only carries `message`. The presence of these fields is the
+		// signal to consumers that the diagnostic is engine-rich.
+		assert.strictEqual(
+			w.type,
+			"NO_VARIABLE_FOUND",
+			"local engine should forward feelin's WarningType",
+		);
+		assert.ok(
+			w.position &&
+				typeof w.position.from === "number" &&
+				typeof w.position.to === "number",
+			"local engine should forward feelin's position offsets",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// feel evaluate — text mode warning rendering
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate text warnings", () => {
+	test("zero warnings: no trailing warning block, no blank line", async () => {
+		const result = await feelText("evaluate", "1 + 2", "--engine", "local");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(result.stdout, /^3\s*$/);
+		assert.ok(
+			!result.stdout.includes("warning"),
+			"clean evaluation should not mention warnings",
+		);
+	});
+
+	test("one warning: prefixed header with count + indented message", async () => {
+		const result = await feelText(
+			"evaluate",
+			"unknownVar",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			/⚠\s+1 warning:/.test(result.stdout),
+			`expected '⚠ 1 warning:' header. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			/unknownVar/.test(result.stdout),
+			"warning message should reference the unknown variable",
+		);
+	});
+
+	test("warning type appears as a trailing parenthetical (local engine)", async () => {
+		// Trailing `(NO_VARIABLE_FOUND)` mirrors bpmn lint's rule-name
+		// column and gives users a stable string handle they can grep
+		// for without parsing the message body.
+		const result = await feelText(
+			"evaluate",
+			"unknownVar",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0);
+		assert.ok(
+			/\(NO_VARIABLE_FOUND\)/.test(result.stdout),
+			`expected trailing '(NO_VARIABLE_FOUND)'. Got: ${result.stdout}`,
+		);
+	});
+
+	test("multiple warnings: count is plural", async () => {
+		// `a + b` with both unknown trips three warnings: two missing
+		// variables plus the "can't add null to null" follow-on. Asserting
+		// the plural form rather than the exact number keeps the test
+		// resilient to feelin tweaking diagnostic granularity.
+		const result = await feelText("evaluate", "a + b", "--engine", "local");
+		assert.strictEqual(result.status, 0);
+		assert.ok(
+			/⚠\s+\d+ warnings:/.test(result.stdout),
+			`expected pluralised '⚠ N warnings:' header. Got: ${result.stdout}`,
+		);
 	});
 });
 
