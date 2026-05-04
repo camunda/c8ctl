@@ -195,11 +195,19 @@ export const metadata = {
 					description:
 						"Drop the icon field (often a large base64 blob) from the output (get only)",
 				},
+				limit: {
+					type: "string",
+					description: "Cap the number of matches (search only, default 20)",
+				},
 			},
 			examples: [
 				{
 					command: 'c8ctl element-template search "AWS S3"',
 					description: "Search OOTB templates by name",
+				},
+				{
+					command: 'c8ctl element-template search "AWS" --limit 5',
+					description: "Cap the number of results (default 20)",
 				},
 				{
 					command:
@@ -1348,8 +1356,12 @@ function formatBadgeValue(value: unknown): string {
 
 async function searchSubcommand(args: string[]): Promise<void> {
 	const logger = getLogger();
-	const usage = "Usage: c8ctl element-template search <query>";
+	const usage = "Usage: c8ctl element-template search <query> [--limit N]";
 
+	// Default cap that covers the common "AWS"-shaped query without
+	// dumping the whole catalogue. Pass --limit to widen.
+	const DEFAULT_LIMIT = 20;
+	let limit = DEFAULT_LIMIT;
 	const queryParts: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -1360,6 +1372,23 @@ async function searchSubcommand(args: string[]): Promise<void> {
 		if (arg === "--") {
 			queryParts.push(...args.slice(i + 1));
 			break;
+		}
+		if (arg === "--limit" || arg.startsWith("--limit=")) {
+			const value =
+				arg === "--limit" ? args[++i] : arg.slice("--limit=".length);
+			if (value === undefined || value === "") {
+				throw new Error(
+					`--limit requires a value (positive integer). ${usage}`,
+				);
+			}
+			const parsed = Number(value);
+			if (!Number.isInteger(parsed) || parsed < 1) {
+				throw new Error(
+					`--limit must be a positive integer; got "${value}". ${usage}`,
+				);
+			}
+			limit = parsed;
+			continue;
 		}
 		if (arg.startsWith("-")) {
 			throw new Error(`Unknown flag: ${arg}. ${usage}`);
@@ -1378,18 +1407,25 @@ async function searchSubcommand(args: string[]): Promise<void> {
 	// Hide deprecated templates from search results — same as Modeler.
 	// The schema's `deprecated` field is either `true` or `{ message }`;
 	// both forms mean the same thing.
-	const matches = searchTemplates(query).filter((t) => !t.deprecated);
+	const allMatches = searchTemplates(query).filter((t) => !t.deprecated);
+	const total = allMatches.length;
+	const limited = allMatches.slice(0, limit);
+	const truncated = total > limited.length;
 
 	if (isJsonMode()) {
+		// JSON consumers see `count` (post-limit) and `total` (pre-limit).
+		// `count !== total` is the explicit truncation signal — no need to
+		// inspect a separate field.
 		logger.json({
 			query,
-			count: matches.length,
-			matches: matches.map(buildTemplateSummary),
+			count: limited.length,
+			total,
+			matches: limited.map(buildTemplateSummary),
 		});
 		return;
 	}
 
-	if (matches.length === 0) {
+	if (total === 0) {
 		logger.output(`No element templates match '${query}'.`);
 		logger.output("");
 		logger.output(
@@ -1401,24 +1437,41 @@ async function searchSubcommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	// Header — count + the query that produced it.
-	const matchWord = matches.length === 1 ? "match" : "matches";
+	// Header — when truncated, lead with "Showing X of Y" so the elision
+	// is visible on the first line; otherwise the plain count is enough.
+	// Dim because it's meta-info above the result cards, matching how
+	// get-properties styles its "Showing X of Y properties" line.
+	const matchWord = total === 1 ? "match" : "matches";
 	logger.output(
-		styleText("bold", `${matches.length} ${matchWord} for '${query}'`),
+		styleText(
+			"dim",
+			truncated
+				? `Showing ${limited.length} of ${total} ${matchWord} for '${query}'`
+				: `${total} ${matchWord} for '${query}'`,
+		),
 	);
 	logger.output("");
 
-	for (let i = 0; i < matches.length; i++) {
-		const t = matches[i];
+	for (let i = 0; i < limited.length; i++) {
+		const t = limited[i];
 		for (const line of formatTemplateHeaderLines(t, t.id)) {
 			logger.output(line);
 		}
-		if (i < matches.length - 1) logger.output("");
+		if (i < limited.length - 1) logger.output("");
 	}
 
 	// Trailing hint.
 	logger.output("");
-	const exampleId = matches[0]?.id ?? "<id>";
+	if (truncated) {
+		logger.output(
+			styleText(
+				"dim",
+				`Refine the query or pass --limit ${total} to see them all.`,
+			),
+		);
+		logger.output("");
+	}
+	const exampleId = limited[0]?.id ?? "<id>";
 	logger.output(
 		styleText(
 			"dim",
