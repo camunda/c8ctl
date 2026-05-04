@@ -12,6 +12,7 @@
 import {
 	type ExecFileException,
 	execFile as execFileCb,
+	spawn,
 } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -122,4 +123,56 @@ export async function asyncSpawn(
 			status: typeof e.code === "number" ? e.code : 1,
 		};
 	}
+}
+
+/**
+ * Spawn variant that lets callers drive stdin programmatically — needed
+ * for testing pipeline behaviour (slow producers, multi-chunk writes).
+ * The `writeStdin` callback receives the child's stdin stream and is
+ * awaited before stdin is closed via end().
+ */
+export async function asyncSpawnWithStdin(
+	command: string,
+	args: string[],
+	writeStdin: (stdin: NodeJS.WritableStream) => void | Promise<void>,
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
+): Promise<SpawnResult> {
+	validateSpawnInputs(command, args, options);
+	const child = spawn(command, args, {
+		stdio: ["pipe", "pipe", "pipe"],
+		cwd: options?.cwd,
+		env: options?.env,
+		...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+	});
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.setEncoding("utf-8");
+	child.stderr?.setEncoding("utf-8");
+	child.stdout?.on("data", (chunk: string) => {
+		stdout += chunk;
+	});
+	child.stderr?.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	const stdin = child.stdin;
+	if (!stdin) throw new Error("child has no stdin");
+	stdin.on("error", () => {
+		// Ignore EPIPE: the child may close stdin before we finish writing
+		// (e.g. when the command rejects input early). Surfacing it would
+		// mask the real test signal in stderr/exit.
+	});
+
+	try {
+		await writeStdin(stdin);
+	} finally {
+		stdin.end();
+	}
+
+	const status = await new Promise<number | null>((resolve) => {
+		child.on("close", (code) => resolve(code));
+	});
+
+	return { stdout, stderr, status };
 }

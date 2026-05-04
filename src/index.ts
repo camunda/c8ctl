@@ -14,12 +14,13 @@ import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	deriveParseArgsOptions,
+	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { refreshCompletionsIfStale } from "./completion.ts";
-import { loadSessionState, resolveTenantId } from "./config.ts";
+import { getUserDataDir, loadSessionState, resolveTenantId } from "./config.ts";
 import {
 	showCommandHelp,
 	showHelp,
@@ -164,7 +165,12 @@ async function main() {
 	}
 
 	// Inject dependencies into the runtime (breaks circular imports)
-	c8ctl.init({ createClient, resolveTenantId, getLogger });
+	c8ctl.init({
+		createClient,
+		resolveTenantId,
+		getLogger,
+		getUserDataDir,
+	});
 
 	// Load installed plugins
 	await loadInstalledPlugins();
@@ -295,8 +301,90 @@ async function main() {
 		return;
 	}
 
-	// Try to execute plugin command (before unknown-command error)
-	if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
+	// Try to execute plugin command (before unknown-command error).
+	//
+	// Plugins parse their own flags. We pass the raw argv slice after the
+	// verb so they can see flags as written by the user. Going through the
+	// already-parsed `positionals` would lose unknown flags, because
+	// `parseArgs({ strict: false })` consumes them into `values` as booleans
+	// and lets their would-be values leak through as positionals. The end
+	// result is that plugin-specific flags like `--debug` (cluster) or
+	// `--set key=value` (element-template) never reach the plugin handler.
+	// Find the verb's index in process.argv by skipping flags and their
+	// values, avoiding false matches on flag values (e.g. --profile bpmn).
+	let verbIdx = -1;
+	{
+		const cliOpts = deriveParseArgsOptions();
+		for (let i = 2; i < process.argv.length; i++) {
+			const arg = process.argv[i];
+			if (arg === "--") {
+				verbIdx = i + 1 < process.argv.length ? i + 1 : -1;
+				break;
+			}
+			if (arg.startsWith("-")) {
+				// Skip the value of string-type flags (--flag value form)
+				if (!arg.includes("=")) {
+					const name = arg.startsWith("--") ? arg.slice(2) : undefined;
+					const short = !name && arg.length === 2 ? arg[1] : undefined;
+					const isString = name
+						? cliOpts[name]?.type === "string"
+						: short != null &&
+							Object.values(cliOpts).some(
+								(o) => o.short === short && o.type === "string",
+							);
+					if (isString) i++;
+				}
+				continue;
+			}
+			verbIdx = i;
+			break;
+		}
+	}
+	const rawPluginArgs =
+		verbIdx >= 0
+			? process.argv.slice(verbIdx + 1)
+			: resource
+				? [resource, ...args]
+				: args;
+
+	// Strip known global flags (and their values) so plugins don't choke
+	// on flags like --profile, --verbose, --dry-run, etc.
+	// Verb-specific flags (SEARCH_FLAGS, etc.) are intentionally NOT stripped
+	// here — plugins reject unknown flags with clear error messages.
+	const pluginArgs: string[] = [];
+	for (let i = 0; i < rawPluginArgs.length; i++) {
+		const a = rawPluginArgs[i];
+		if (a === "--") {
+			pluginArgs.push(...rawPluginArgs.slice(i));
+			break;
+		}
+		const flagName = a.startsWith("--") ? a.split("=")[0].slice(2) : undefined;
+		if (flagName && flagName !== "help" && flagName in GLOBAL_FLAGS) {
+			// If it's a string-type flag in --flag value form, skip the next arg too
+			const def = Object.entries(GLOBAL_FLAGS).find(
+				([k]) => k === flagName,
+			)?.[1];
+			if (def?.type === "string" && !a.includes("=")) i++;
+			continue;
+		}
+		// Handle short flags (-v) but preserve -h for plugin help
+		if (
+			a.length === 2 &&
+			a[0] === "-" &&
+			a[1] !== "-" &&
+			a[1] !== "h" &&
+			Object.values(GLOBAL_FLAGS).some((f) => "short" in f && f.short === a[1])
+		) {
+			const matchedDef = Object.values(GLOBAL_FLAGS).find(
+				(f) => "short" in f && f.short === a[1],
+			);
+			if (matchedDef?.type === "string") i++;
+			continue;
+		}
+		pluginArgs.push(a);
+	}
+
+	if (await executePluginCommand(verb, pluginArgs)) {
 		return;
 	}
 
