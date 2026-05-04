@@ -593,6 +593,34 @@ describe("CLI behavioural: element-template get", () => {
 			"Should report missing file",
 		);
 	});
+
+	test("--no-icon strips the icon field from a local file", async () => {
+		// Sanity-check that the fixture actually has an icon — otherwise
+		// the --no-icon assertion below could pass for the wrong reason.
+		const source = readFileSync(TEMPLATE_FILE, "utf-8");
+		assert.ok(
+			source.includes('"icon"'),
+			"fixture must include an icon field for this test to be meaningful",
+		);
+
+		const result = await c8text(
+			"element-template",
+			"get",
+			TEMPLATE_FILE,
+			"--no-icon",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.ok(
+			!Object.hasOwn(parsed, "icon"),
+			"--no-icon must drop the icon field",
+		);
+		// Other fields should remain.
+		assert.ok(
+			Array.isArray(parsed.properties),
+			"properties array must be preserved",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------

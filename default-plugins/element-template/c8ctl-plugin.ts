@@ -190,6 +190,11 @@ export const metadata = {
 					type: "boolean",
 					description: "Drop cached entries no longer in the index (sync only)",
 				},
+				"no-icon": {
+					type: "boolean",
+					description:
+						"Drop the icon field (often a large base64 blob) from the output (get only)",
+				},
 			},
 			examples: [
 				{
@@ -241,6 +246,12 @@ export const metadata = {
 						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
 					description:
 						"Print the raw template JSON to stdout (redirect to save a copy)",
+				},
+				{
+					command:
+						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon",
+					description:
+						"Drop the icon field (large base64 blob) for pipe-friendly output",
 				},
 				{
 					command: "c8ctl element-template sync",
@@ -773,9 +784,10 @@ async function getPropertiesSubcommand(args: string[]): Promise<void> {
  * payload.
  */
 async function getSubcommand(args: string[]): Promise<void> {
-	const usage = "Usage: c8ctl element-template get <template>";
+	const usage = "Usage: c8ctl element-template get <template> [--no-icon]";
 
 	let templateArg: string | undefined;
+	let noIcon = false;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === "--help" || arg === "-h") {
@@ -783,6 +795,10 @@ async function getSubcommand(args: string[]): Promise<void> {
 			return;
 		}
 		if (arg === "--") break;
+		if (arg === "--no-icon") {
+			noIcon = true;
+			continue;
+		}
 		if (arg.startsWith("-")) {
 			throw new Error(`Unknown flag: ${arg}. ${usage}`);
 		}
@@ -804,6 +820,15 @@ async function getSubcommand(args: string[]): Promise<void> {
 
 	if (ref.kind === "path" || ref.kind === "url") {
 		const content = await readFileOrUrl(ref.value);
+		// Pass-through preserves whitespace + key order — but --no-icon
+		// requires a parse/strip/re-stringify round-trip, which loses
+		// that. The user is opting in to the rewrite by asking for it.
+		if (noIcon) {
+			const template = parseTemplateJson(content);
+			const stripped = stripIcon(template);
+			process.stdout.write(`${JSON.stringify(stripped, null, 2)}\n`);
+			return;
+		}
 		process.stdout.write(content);
 		return;
 	}
@@ -823,7 +848,8 @@ async function getSubcommand(args: string[]): Promise<void> {
 	// The cache injects `metadata.upstreamRef` (our internal pointer for
 	// incremental sync); strip it so the output matches what you'd get
 	// from the marketplace, not c8ctl's cache shape.
-	const cleaned = stripInternalMetadata(template);
+	let cleaned = stripInternalMetadata(template);
+	if (noIcon) cleaned = stripIcon(cleaned);
 	process.stdout.write(`${JSON.stringify(cleaned, null, 2)}\n`);
 }
 
@@ -835,6 +861,12 @@ function stripInternalMetadata(template: Template): Template {
 		return { ...rest, properties: template.properties };
 	}
 	return { ...rest, properties: template.properties, metadata: metaRest };
+}
+
+function stripIcon(template: Template): Template {
+	if (!template.icon) return template;
+	const { icon: _icon, ...rest } = template;
+	return { ...rest, properties: template.properties };
 }
 
 // ---------------------------------------------------------------------------
