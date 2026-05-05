@@ -77,10 +77,14 @@ export const commands = {
       },
     },
     handler: async (args: string[], flags?: Record<string, unknown>) => {
+      // Flag values are unknown — cast before use
+      const source = flags?.source as string | undefined;
+      const target = flags?.target as string | undefined;
+      const detailed = flags?.detailed as boolean | undefined;
       console.log('Args:', args);
-      console.log('Source:', flags?.source);  // string | undefined
-      console.log('Target:', flags?.target);  // string | undefined
-      console.log('Detailed:', flags?.detailed);  // boolean | undefined
+      console.log('Source:', source);
+      console.log('Target:', target);
+      console.log('Detailed:', detailed);
     },
   },
 };
