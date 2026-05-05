@@ -191,11 +191,13 @@ async function main() {
 			// flag's parse type.
 			const builtinOptions = deriveParseArgsOptions();
 			const mergedOptions = { ...builtinOptions };
+			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
 				if (name in builtinOptions) {
 					logger.warn(
 						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
 					);
+					blockedFlags.add(name);
 					continue;
 				}
 				mergedOptions[name] = {
@@ -218,7 +220,14 @@ async function main() {
 			}
 			const extractedFlags: Record<string, unknown> = {};
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
-				const value = pluginParsed.values[flagName];
+				if (blockedFlags.has(flagName)) continue;
+				const raw = pluginParsed.values[flagName];
+				// Repeated string flags arrive as arrays — take the last value
+				// (last-write-wins), matching built-in flag normalization.
+				const value =
+					def.type === "string" && Array.isArray(raw)
+						? (raw.findLast((v) => typeof v === "string") ?? undefined)
+						: raw;
 				if (value !== undefined) {
 					extractedFlags[flagName] = value;
 				}
