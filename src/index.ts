@@ -179,9 +179,9 @@ async function main() {
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
 
-	// Check if this is a plugin command — executed before built-in dispatch
+	// Check if this is a plugin command — only for verbs not claimed by a built-in
 	const pluginCommands = getPluginCommands();
-	if (verb && pluginCommands[verb]) {
+	if (verb && pluginCommands[verb] && !getCommandDef(verb)) {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 		if (cmdFlagDefs) {
