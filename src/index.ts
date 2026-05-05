@@ -185,21 +185,49 @@ async function main() {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 		if (cmdFlagDefs) {
-			// Re-parse with only this command's flags to get correct types
-			const { values: reparsedValues, positionals: reparsedPositionals } =
-				parseArgs({
+			// Use built-in flags as a blacklist: start from the full built-in
+			// option set, then add plugin flags only when the name is not already
+			// taken. This prevents a plugin flag from silently changing a built-in
+			// flag's parse type.
+			const builtinOptions = deriveParseArgsOptions();
+			const mergedOptions = { ...builtinOptions };
+			for (const [name, def] of Object.entries(cmdFlagDefs)) {
+				if (name in builtinOptions) {
+					logger.warn(
+						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
+					);
+					continue;
+				}
+				mergedOptions[name] = {
+					type: def.type,
+					...(def.short && { short: def.short }),
+				};
+			}
+			let pluginParsed: ReturnType<typeof parseArgs>;
+			try {
+				pluginParsed = parseArgs({
 					args: process.argv.slice(2),
-					options: deriveParseArgsOptions({ [verb]: cmdFlagDefs }),
+					options: mergedOptions,
 					allowPositionals: true,
 					strict: false,
 				});
+			} catch (error: unknown) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.error(`Error parsing arguments: ${message}`);
+				process.exit(1);
+			}
 			const extractedFlags: Record<string, unknown> = {};
-			for (const flagName of Object.keys(cmdFlagDefs)) {
-				if (reparsedValues[flagName] !== undefined) {
-					extractedFlags[flagName] = reparsedValues[flagName];
+			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
+				const value = pluginParsed.values[flagName];
+				if (value !== undefined) {
+					extractedFlags[flagName] = value;
+				}
+				if (def.required === true && value === undefined) {
+					logger.error(`--${flagName} is required`);
+					process.exit(1);
 				}
 			}
-			const [_verb, _resource, ...pluginArgs] = reparsedPositionals;
+			const [_verb, _resource, ...pluginArgs] = pluginParsed.positionals;
 			await executePluginCommand(
 				verb,
 				_resource ? [_resource, ...pluginArgs] : pluginArgs,
