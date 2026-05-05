@@ -3,7 +3,12 @@
  */
 
 import assert from "node:assert";
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { asyncSpawn } from "../utils/spawn.ts";
 
 const testPlugin = await import(
 	// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
@@ -107,5 +112,97 @@ describe("Plugin Flags Integration", () => {
 		} finally {
 			console.log = originalLog;
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Subprocess-level tests: exercise the full CLI reparse/blacklist path in
+// src/index.ts rather than calling the handler directly.
+// ---------------------------------------------------------------------------
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const CLI = "src/index.ts";
+const FIXTURE_DIR = join(__dirname, "../fixtures/plugins/plugin-with-flags");
+
+function makePluginDataDir(): string {
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-plugin-test-"));
+	writeFileSync(
+		join(dir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+	const pluginInstallDir = join(
+		dir,
+		"plugins",
+		"node_modules",
+		"plugin-with-flags",
+	);
+	mkdirSync(pluginInstallDir, { recursive: true });
+	cpSync(FIXTURE_DIR, pluginInstallDir, { recursive: true });
+	return dir;
+}
+
+const PLUGIN_DATA_DIR = makePluginDataDir();
+
+async function c8plugin(...args: string[]) {
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+		env: {
+			...process.env,
+			CAMUNDA_BASE_URL: "http://test-cluster/v2",
+			HOME: "/tmp/c8ctl-test-nonexistent-home",
+			C8CTL_DATA_DIR: PLUGIN_DATA_DIR,
+		},
+	});
+}
+
+describe("Plugin Flags CLI subprocess", () => {
+	test("string and boolean flags are parsed and passed to handler", async () => {
+		const result = await c8plugin(
+			"test-flags",
+			"--source",
+			"Gateway_1",
+			"--debug",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		const output = JSON.parse(result.stdout);
+		assert.strictEqual(output.flags.source, "Gateway_1");
+		assert.strictEqual(output.flags.debug, true);
+	});
+
+	test("positional args are passed alongside flags", async () => {
+		const result = await c8plugin(
+			"test-flags",
+			"arg1",
+			"--source",
+			"Gateway_1",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0. stderr: ${result.stderr}`,
+		);
+		const output = JSON.parse(result.stdout);
+		assert.deepStrictEqual(output.args, ["arg1"]);
+		assert.strictEqual(output.flags.source, "Gateway_1");
+	});
+
+	test("repeated string flag uses last value", async () => {
+		const result = await c8plugin(
+			"test-flags",
+			"--source",
+			"first",
+			"--source",
+			"last",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0. stderr: ${result.stderr}`,
+		);
+		const output = JSON.parse(result.stdout);
+		assert.strictEqual(output.flags.source, "last");
 	});
 });
