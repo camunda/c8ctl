@@ -13,9 +13,9 @@ export const commands = {
 				type: 'string',
 				description: 'Target element ID',
 			},
-			verbose: {
+			debug: {
 				type: 'boolean',
-				description: 'Enable verbose output',
+				description: 'Enable debug output',
 			},
 		},
 		handler: async (args, flags) => {

@@ -30,7 +30,7 @@ describe("Plugin Flags", () => {
 			"Source flag should be string type",
 		);
 		assert.strictEqual(
-			cmd.flags.verbose.type,
+			cmd.flags.debug.type,
 			"boolean",
 			"Verbose flag should be boolean type",
 		);
@@ -61,7 +61,7 @@ describe("Plugin Flags", () => {
 
 describe("Plugin Flags Integration", () => {
 	test("plugin receives flags when executing command", async () => {
-		const flags = { source: "Gateway_1", target: "Task_2", verbose: true };
+		const flags = { source: "Gateway_1", target: "Task_2", debug: true };
 		const args: string[] = [];
 
 		let capturedOutput = "";
