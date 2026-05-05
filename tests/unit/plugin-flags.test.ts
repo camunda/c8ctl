@@ -6,8 +6,8 @@ import assert from "node:assert";
 import { describe, test } from "node:test";
 import { clearLoadedPlugins, getPluginFlags } from "../../src/plugin-loader.ts";
 
-// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const testPlugin = await import(
+	// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 	"../fixtures/plugins/plugin-with-flags/c8ctl-plugin.js"
 );
 

@@ -29,6 +29,7 @@ import {
 import { getLogger, type SortOrder } from "./logger.ts";
 import {
 	executePluginCommand,
+	getPluginCommands,
 	getPluginFlags,
 	loadInstalledPlugins,
 } from "./plugin-loader.ts";
@@ -179,33 +180,35 @@ async function main() {
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
 
-	// Check if this is a plugin command — if so, re-parse with plugin flags included
-	const pluginFlags = getPluginFlags();
-	const isPluginCmd = verb && pluginFlags[verb];
-	if (isPluginCmd) {
-		// Re-parse with plugin flags to get correct types for plugin-specific flags
-		const { values: reparsedValues, positionals: reparsedPositionals } =
-			parseArgs({
-				args: process.argv.slice(2),
-				options: deriveParseArgsOptions(pluginFlags),
-				allowPositionals: true,
-				strict: false,
-			});
-		// Extract the plugin-specific flags for this command
-		const cmdFlags = pluginFlags[verb] || {};
-		const extractedFlags: Record<string, unknown> = {};
-		for (const flagName of Object.keys(cmdFlags)) {
-			if (reparsedValues[flagName] !== undefined) {
-				extractedFlags[flagName] = reparsedValues[flagName];
+	// Check if this is a plugin command — executed before built-in dispatch
+	const pluginCommands = getPluginCommands();
+	if (verb && pluginCommands[verb]) {
+		const pluginFlags = getPluginFlags();
+		const cmdFlagDefs = pluginFlags[verb];
+		if (cmdFlagDefs) {
+			// Re-parse with plugin flags to get correct types
+			const { values: reparsedValues, positionals: reparsedPositionals } =
+				parseArgs({
+					args: process.argv.slice(2),
+					options: deriveParseArgsOptions(pluginFlags),
+					allowPositionals: true,
+					strict: false,
+				});
+			const extractedFlags: Record<string, unknown> = {};
+			for (const flagName of Object.keys(cmdFlagDefs)) {
+				if (reparsedValues[flagName] !== undefined) {
+					extractedFlags[flagName] = reparsedValues[flagName];
+				}
 			}
+			const [_verb, _resource, ...pluginArgs] = reparsedPositionals;
+			await executePluginCommand(
+				verb,
+				_resource ? [_resource, ...pluginArgs] : pluginArgs,
+				extractedFlags,
+			);
+		} else {
+			await executePluginCommand(verb, resource ? [resource, ...args] : args);
 		}
-		// Execute plugin with args and flags
-		const [_verb, _resource, ...pluginArgs] = reparsedPositionals;
-		await executePluginCommand(
-			verb,
-			_resource ? [_resource, ...pluginArgs] : pluginArgs,
-			extractedFlags,
-		);
 		return;
 	}
 

@@ -55,7 +55,7 @@ Plugins can export an optional `metadata` object alongside the required `command
 
 ## Plugin Flags
 
-**New in v3.0**: Plugins can now declare custom flags that are properly parsed and passed to command handlers.
+Plugins can declare custom flags that are properly parsed and passed to command handlers.
 
 To add flags to your plugin commands, export a `flags` object alongside `commands` and `metadata`:
 
@@ -250,7 +250,7 @@ import { c8ctl } from '@camunda8/cli/runtime';
 // Optional flags export
 export const flags = {
   'deploy-all': {
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       description: 'Preview without deploying',
     },
@@ -270,7 +270,7 @@ export const metadata = {
       description: 'Deploy all resources in a directory',
       examples: [
         { command: 'c8ctl deploy-all ./src', description: 'Deploy resources from ./src' },
-        { command: 'c8ctl deploy-all --path ./src --dryRun', description: 'Preview without deploying' },
+        { command: 'c8ctl deploy-all --path ./src --dry-run', description: 'Preview without deploying' },
       ],
     },
     status: {
@@ -284,7 +284,7 @@ export const commands = {
   'deploy-all': async (args, flags) => {
     const path = flags?.path || args[0] || './';
 
-    if (flags?.dryRun) {
+    if (flags?.['dry-run']) {
       console.log(`Would deploy from: ${path}`);
     } else {
       console.log(`Deploying from: ${path}`);
