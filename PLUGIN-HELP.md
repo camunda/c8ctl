@@ -234,8 +234,6 @@ export const commands = {
 ### JavaScript Example
 
 ```javascript
-import { c8ctl } from '@camunda8/cli/runtime';
-
 // Optional metadata export
 export const metadata = {
   name: 'my-plugin',
