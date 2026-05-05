@@ -190,6 +190,11 @@ async function main() {
 			// taken. This prevents a plugin flag from silently changing a built-in
 			// flag's parse type.
 			const builtinOptions = deriveParseArgsOptions();
+			const builtinShorts = new Set(
+				Object.values(builtinOptions)
+					.map((o) => o.short)
+					.filter((s): s is string => s !== undefined),
+			);
 			const mergedOptions = { ...builtinOptions };
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
@@ -200,9 +205,16 @@ async function main() {
 					blockedFlags.add(name);
 					continue;
 				}
+				const short =
+					def.short && builtinShorts.has(def.short) ? undefined : def.short;
+				if (def.short && !short) {
+					logger.warn(
+						`Plugin flag --${name} short alias -${def.short} conflicts with a built-in alias and will be ignored`,
+					);
+				}
 				mergedOptions[name] = {
 					type: def.type,
-					...(def.short && { short: def.short }),
+					...(short && { short }),
 				};
 			}
 			let pluginParsed: ReturnType<typeof parseArgs>;
