@@ -103,9 +103,9 @@ export const commands = {
 Each flag can have the following properties:
 
 - `type`: `'string'` or `'boolean'` (required)
-- `description`: Help text shown in command documentation (required)
+- `description`: Describes the flag for documentation purposes (required). Not currently shown in `c8ctl help` output.
 - `short`: Single-character alias (optional, e.g., `'s'` for `-s`)
-- `required`: Whether the flag must be provided (optional, defaults to `false`)
+- `required`: When `true`, the CLI exits with an error if the flag is omitted (optional, defaults to `false`)
 
 ### Example with Flags
 
@@ -211,32 +211,13 @@ export const metadata = {
 
 // Required commands export
 export const commands = {
-  analyze: {
-    flags: {
-      all: {
-        type: 'boolean' as const,
-        description: 'Analyze all deployed processes',
-      },
-      id: {
-        type: 'string' as const,
-        description: 'Analyze a specific process by ID',
-      },
-    },
-    handler: async (args: string[], flags?: Record<string, unknown>) => {
-      console.log('Analyzing...');
-      const client = globalThis.c8ctl.createClient();
-      const logger = globalThis.c8ctl.getLogger();
-
-      if (flags?.all) {
-        logger.info('Analyzing all processes');
-        // implementation for --all
-      } else if (flags?.id) {
-        logger.info(`Analyzing process: ${flags.id}`);
-        // implementation for --id
-      }
-
-      console.log('Client ready:', typeof client === 'object');
-    },
+  analyze: async (args: string[]) => {
+    console.log('Analyzing...');
+    const client = globalThis.c8ctl.createClient();
+    const logger = globalThis.c8ctl.getLogger();
+    logger.info('Plugin logger is ready');
+    console.log('Client ready:', typeof client === 'object');
+    // implementation
   },
 
   optimize: async (args: string[]) => {
