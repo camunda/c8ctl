@@ -111,6 +111,8 @@ Each flag can have the following properties:
 - `short`: Single-character alias (optional, e.g., `'s'` for `-s`)
 - `required`: When `true`, the CLI exits with an error if the flag is omitted (optional, defaults to `false`)
 
+> **Important:** Plugin flag names and short aliases are checked against c8ctl's built-in flags at runtime. Any plugin flag whose long name or short alias matches a built-in flag is silently dropped and a warning is emitted — the handler will not receive that value. Avoid names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
+
 ### Example with Flags
 
 ```javascript
