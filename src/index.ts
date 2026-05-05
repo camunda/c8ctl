@@ -186,11 +186,11 @@ async function main() {
 		const pluginFlags = getPluginFlags();
 		const cmdFlagDefs = pluginFlags[verb];
 		if (cmdFlagDefs) {
-			// Re-parse with plugin flags to get correct types
+			// Re-parse with only this command's flags to get correct types
 			const { values: reparsedValues, positionals: reparsedPositionals } =
 				parseArgs({
 					args: process.argv.slice(2),
-					options: deriveParseArgsOptions(pluginFlags),
+					options: deriveParseArgsOptions({ [verb]: cmdFlagDefs }),
 					allowPositionals: true,
 					strict: false,
 				});

@@ -12,36 +12,50 @@ const testPlugin = await import(
 );
 
 describe("Plugin Flags", () => {
-	test("plugin exports flags alongside commands", () => {
-		assert.ok(testPlugin.flags, "Plugin should export flags");
+	test("plugin command declares flags inline", () => {
+		const cmd = testPlugin.commands["test-flags"];
+		assert.ok(cmd, "Plugin should have test-flags command");
+		assert.strictEqual(
+			typeof cmd,
+			"object",
+			"Command with flags should be an object",
+		);
+		assert.ok("flags" in cmd, "Command object should have a flags property");
 		assert.ok(
-			testPlugin.flags["test-flags"],
-			"Plugin should have flags for test-flags command",
+			"handler" in cmd,
+			"Command object should have a handler property",
 		);
 		assert.strictEqual(
-			testPlugin.flags["test-flags"].source.type,
+			cmd.flags.source.type,
 			"string",
 			"Source flag should be string type",
 		);
 		assert.strictEqual(
-			testPlugin.flags["test-flags"].verbose.type,
+			cmd.flags.verbose.type,
 			"boolean",
 			"Verbose flag should be boolean type",
 		);
 	});
 
 	test("plugin command handler accepts flags parameter", async () => {
-		const handler = testPlugin.commands["test-flags"];
+		const cmd = testPlugin.commands["test-flags"];
 		assert.strictEqual(
-			typeof handler,
+			typeof cmd.handler,
 			"function",
-			"Command handler should be a function",
+			"handler should be a function",
 		);
-		// Check function signature accepts two parameters (args and flags)
 		assert.strictEqual(
-			handler.length,
+			cmd.handler.length,
 			2,
 			"Handler should accept 2 parameters (args, flags)",
+		);
+	});
+
+	test("plugin does not export a top-level flags object", () => {
+		assert.strictEqual(
+			testPlugin.flags,
+			undefined,
+			"Plugin should not export a top-level flags object",
 		);
 	});
 });
@@ -54,11 +68,9 @@ describe("Plugin Flags Integration", () => {
 	});
 
 	test("plugin receives flags when executing command", async () => {
-		// Simulate plugin execution with flags
 		const flags = { source: "Gateway_1", target: "Task_2", verbose: true };
 		const args: string[] = [];
 
-		// Capture stdout to verify plugin output
 		let capturedOutput = "";
 		const originalLog = console.log;
 		console.log = (msg: string) => {
@@ -66,7 +78,7 @@ describe("Plugin Flags Integration", () => {
 		};
 
 		try {
-			await testPlugin.commands["test-flags"](args, flags);
+			await testPlugin.commands["test-flags"].handler(args, flags);
 			const output = JSON.parse(capturedOutput);
 
 			assert.deepStrictEqual(output.args, args, "Args should be passed");
@@ -83,7 +95,6 @@ describe("Plugin Flags Integration", () => {
 	test("plugin receives empty flags object when no flags provided", async () => {
 		const args: string[] = ["arg1", "arg2"];
 
-		// Capture stdout to verify plugin output
 		let capturedOutput = "";
 		const originalLog = console.log;
 		console.log = (msg: string) => {
@@ -91,7 +102,7 @@ describe("Plugin Flags Integration", () => {
 		};
 
 		try {
-			await testPlugin.commands["test-flags"](args, undefined);
+			await testPlugin.commands["test-flags"].handler(args, undefined);
 			const output = JSON.parse(capturedOutput);
 
 			assert.deepStrictEqual(output.args, args, "Args should be passed");

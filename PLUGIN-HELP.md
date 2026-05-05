@@ -55,39 +55,46 @@ Plugins can export an optional `metadata` object alongside the required `command
 
 ## Plugin Flags
 
-Plugins can declare custom flags that are properly parsed and passed to command handlers.
+Plugins can declare custom flags per command. Flags are declared inline inside the command entry rather than in a separate top-level export.
 
-To add flags to your plugin commands, export a `flags` object alongside `commands` and `metadata`:
+To add flags to a command, replace the bare handler function with an object that has `flags` and `handler` properties:
 
 ```typescript
-export const flags = {
+export const commands = {
   'my-command': {
-    source: {
-      type: 'string',
-      description: 'Source element ID',
+    flags: {
+      source: {
+        type: 'string',
+        description: 'Source element ID',
+      },
+      target: {
+        type: 'string',
+        description: 'Target element ID',
+      },
+      verbose: {
+        type: 'boolean',
+        description: 'Enable verbose output',
+      },
     },
-    target: {
-      type: 'string',
-      description: 'Target element ID',
-    },
-    verbose: {
-      type: 'boolean',
-      description: 'Enable verbose output',
+    handler: async (args: string[], flags?: Record<string, unknown>) => {
+      console.log('Args:', args);
+      console.log('Source:', flags?.source);  // string | undefined
+      console.log('Target:', flags?.target);  // string | undefined
+      console.log('Verbose:', flags?.verbose);  // boolean | undefined
     },
   },
 };
 ```
 
-Your command handler then receives flags as a second parameter:
+Commands without flags continue to use the bare function form:
 
 ```typescript
 export const commands = {
-  'my-command': async (args: string[], flags?: Record<string, unknown>) => {
-    console.log('Args:', args);
-    console.log('Source:', flags?.source);  // string | undefined
-    console.log('Target:', flags?.target);  // string | undefined
-    console.log('Verbose:', flags?.verbose);  // boolean | undefined
+  'my-command': {
+    flags: { /* ... */ },
+    handler: async (args, flags) => { /* ... */ },
   },
+  'other-command': async (args) => { /* no flags needed */ },
 };
 ```
 
@@ -104,36 +111,35 @@ Each flag can have the following properties:
 
 ```javascript
 // c8ctl-plugin.js
-export const flags = {
-  'model': {
-    append: {
-      type: 'boolean',
-      description: 'Append to existing model instead of replacing',
-    },
-    source: {
-      type: 'string',
-      description: 'Source element ID for connection',
-      short: 's',
-    },
-    target: {
-      type: 'string',
-      description: 'Target element ID for connection',
-      short: 't',
-    },
-  },
-};
-
 export const commands = {
-  'model': async (args, flags) => {
-    const [action, ...rest] = args;
+  'model': {
+    flags: {
+      append: {
+        type: 'boolean',
+        description: 'Append to existing model instead of replacing',
+      },
+      source: {
+        type: 'string',
+        description: 'Source element ID for connection',
+        short: 's',
+      },
+      target: {
+        type: 'string',
+        description: 'Target element ID for connection',
+        short: 't',
+      },
+    },
+    handler: async (args, flags) => {
+      const [action] = args;
 
-    if (action === 'connect' && flags?.source && flags?.target) {
-      console.log(`Connecting ${flags.source} → ${flags.target}`);
-    }
+      if (action === 'connect' && flags?.source && flags?.target) {
+        console.log(`Connecting ${flags.source} → ${flags.target}`);
+      }
 
-    if (flags?.append) {
-      console.log('Appending to existing model');
-    }
+      if (flags?.append) {
+        console.log('Appending to existing model');
+      }
+    },
   },
 };
 
@@ -153,10 +159,10 @@ export const metadata = {
 
 ### Backward Compatibility
 
-Plugins without the `flags` export continue to work unchanged:
-- Existing plugins receive `args` only (the `flags` parameter is `undefined`)
+Commands declared as bare functions continue to work unchanged:
+- Existing handlers receive `args` only (the `flags` parameter is `undefined`)
 - The handler signature `async (args)` remains valid
-- No migration required for plugins that don't use custom flags
+- No migration required for commands that don't use custom flags
 
 ## Plugin Runtime API
 
@@ -185,20 +191,6 @@ logger.info(`Tenant: ${tenantId}`);
 ```typescript
 import { c8ctl } from '@camunda8/cli/runtime';
 
-// Optional flags export for custom command flags
-export const flags = {
-  analyze: {
-    all: {
-      type: 'boolean',
-      description: 'Analyze all deployed processes',
-    },
-    id: {
-      type: 'string',
-      description: 'Analyze a specific process by ID',
-    },
-  },
-};
-
 // Optional metadata export for help text
 export const metadata = {
   name: 'my-awesome-plugin',
@@ -219,20 +211,32 @@ export const metadata = {
 
 // Required commands export
 export const commands = {
-  analyze: async (args: string[], flags?: Record<string, unknown>) => {
-    console.log('Analyzing...');
-    const client = globalThis.c8ctl.createClient();
-    const logger = globalThis.c8ctl.getLogger();
+  analyze: {
+    flags: {
+      all: {
+        type: 'boolean' as const,
+        description: 'Analyze all deployed processes',
+      },
+      id: {
+        type: 'string' as const,
+        description: 'Analyze a specific process by ID',
+      },
+    },
+    handler: async (args: string[], flags?: Record<string, unknown>) => {
+      console.log('Analyzing...');
+      const client = globalThis.c8ctl.createClient();
+      const logger = globalThis.c8ctl.getLogger();
 
-    if (flags?.all) {
-      logger.info('Analyzing all processes');
-      // implementation for --all
-    } else if (flags?.id) {
-      logger.info(`Analyzing process: ${flags.id}`);
-      // implementation for --id
-    }
+      if (flags?.all) {
+        logger.info('Analyzing all processes');
+        // implementation for --all
+      } else if (flags?.id) {
+        logger.info(`Analyzing process: ${flags.id}`);
+        // implementation for --id
+      }
 
-    console.log('Client ready:', typeof client === 'object');
+      console.log('Client ready:', typeof client === 'object');
+    },
   },
 
   optimize: async (args: string[]) => {
@@ -246,20 +250,6 @@ export const commands = {
 
 ```javascript
 import { c8ctl } from '@camunda8/cli/runtime';
-
-// Optional flags export
-export const flags = {
-  'deploy-all': {
-    'dry-run': {
-      type: 'boolean',
-      description: 'Preview without deploying',
-    },
-    path: {
-      type: 'string',
-      description: 'Directory path to deploy from',
-    },
-  },
-};
 
 // Optional metadata export
 export const metadata = {
@@ -281,14 +271,26 @@ export const metadata = {
 
 // Required commands export
 export const commands = {
-  'deploy-all': async (args, flags) => {
-    const path = flags?.path || args[0] || './';
+  'deploy-all': {
+    flags: {
+      'dry-run': {
+        type: 'boolean',
+        description: 'Preview without deploying',
+      },
+      path: {
+        type: 'string',
+        description: 'Directory path to deploy from',
+      },
+    },
+    handler: async (args, flags) => {
+      const path = flags?.path || args[0] || './';
 
-    if (flags?.['dry-run']) {
-      console.log(`Would deploy from: ${path}`);
-    } else {
-      console.log(`Deploying from: ${path}`);
-    }
+      if (flags?.['dry-run']) {
+        console.log(`Would deploy from: ${path}`);
+      } else {
+        console.log(`Deploying from: ${path}`);
+      }
+    },
   },
 
   status: async (args) => {

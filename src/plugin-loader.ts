@@ -9,15 +9,20 @@ import { ensurePluginsDir } from "./config.ts";
 import { getLogger } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
-interface PluginCommands {
-	[commandName: string]: (
-		args: string[],
-		flags?: Record<string, unknown>,
-	) => Promise<void>;
+type CommandHandler = (
+	args: string[],
+	flags?: Record<string, unknown>,
+) => Promise<void>;
+
+interface CommandWithFlags {
+	flags: Record<string, FlagDef>;
+	handler: CommandHandler;
 }
 
-interface PluginFlags {
-	[commandName: string]: Record<string, FlagDef>;
+type PluginCommand = CommandHandler | CommandWithFlags;
+
+interface PluginCommands {
+	[commandName: string]: PluginCommand;
 }
 
 interface PluginMetadata {
@@ -36,7 +41,6 @@ interface PluginMetadata {
 interface LoadedPlugin {
 	name: string;
 	commands: PluginCommands;
-	flags?: PluginFlags;
 	metadata?: PluginMetadata;
 }
 
@@ -115,7 +119,6 @@ async function loadDefaultPlugins(): Promise<void> {
 					loadedPlugins.set(pluginName, {
 						name: pluginName,
 						commands: plugin.commands,
-						flags: plugin.flags || undefined,
 						metadata: plugin.metadata || {},
 					});
 					const commandNames = Object.keys(plugin.commands);
@@ -243,7 +246,6 @@ export async function loadInstalledPlugins(): Promise<void> {
 					loadedPlugins.set(packageName, {
 						name: packageName,
 						commands: plugin.commands,
-						flags: plugin.flags || undefined,
 						metadata: plugin.metadata || {},
 					});
 					const commandNames = Object.keys(plugin.commands);
@@ -276,14 +278,17 @@ export function getPluginCommands(): PluginCommands {
 }
 
 /**
- * Get all plugin flags for merging into parseArgs options
+ * Get all plugin flags, keyed by command name, for merging into parseArgs options.
+ * Only commands declared as `{ flags, handler }` are included.
  */
-export function getPluginFlags(): PluginFlags {
-	const allFlags: PluginFlags = {};
+export function getPluginFlags(): Record<string, Record<string, FlagDef>> {
+	const allFlags: Record<string, Record<string, FlagDef>> = {};
 
 	for (const plugin of loadedPlugins.values()) {
-		if (plugin.flags) {
-			Object.assign(allFlags, plugin.flags);
+		for (const [cmdName, cmd] of Object.entries(plugin.commands)) {
+			if (typeof cmd === "object" && "flags" in cmd) {
+				allFlags[cmdName] = cmd.flags;
+			}
 		}
 	}
 
@@ -299,9 +304,14 @@ export async function executePluginCommand(
 	flags?: Record<string, unknown>,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
+	const cmd = commands[commandName];
 
-	if (commands[commandName]) {
-		await commands[commandName](args, flags);
+	if (cmd) {
+		if (typeof cmd === "function") {
+			await cmd(args, flags);
+		} else {
+			await cmd.handler(args, flags);
+		}
 		return true;
 	}
 

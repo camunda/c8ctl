@@ -2,30 +2,29 @@
  * Test plugin with custom flags for testing flag support
  */
 
-export const flags = {
-	'test-flags': {
-		source: {
-			type: 'string',
-			description: 'Source element ID',
-		},
-		target: {
-			type: 'string',
-			description: 'Target element ID',
-		},
-		verbose: {
-			type: 'boolean',
-			description: 'Enable verbose output',
-		},
-	},
-};
-
 export const commands = {
-	'test-flags': async (args, flags) => {
-		// Output args and flags as JSON so tests can validate them
-		console.log(JSON.stringify({
-			args,
-			flags: flags || {},
-		}));
+	'test-flags': {
+		flags: {
+			source: {
+				type: 'string',
+				description: 'Source element ID',
+			},
+			target: {
+				type: 'string',
+				description: 'Target element ID',
+			},
+			verbose: {
+				type: 'boolean',
+				description: 'Enable verbose output',
+			},
+		},
+		handler: async (args, flags) => {
+			// Output args and flags as JSON so tests can validate them
+			console.log(JSON.stringify({
+				args,
+				flags: flags || {},
+			}));
+		},
 	},
 };
 
