@@ -241,7 +241,7 @@ export const metadata = {
       description: 'Deploy all resources in a directory',
       examples: [
         { command: 'c8ctl deploy-all ./src', description: 'Deploy resources from ./src' },
-        { command: 'c8ctl deploy-all --path ./src --dry-run', description: 'Preview without deploying' },
+        { command: 'c8ctl deploy-all --path ./src --preview', description: 'Preview without deploying' },
       ],
     },
     status: {
@@ -254,7 +254,7 @@ export const metadata = {
 export const commands = {
   'deploy-all': {
     flags: {
-      'dry-run': {
+      preview: {
         type: 'boolean',
         description: 'Preview without deploying',
       },
@@ -266,7 +266,7 @@ export const commands = {
     handler: async (args, flags) => {
       const path = flags?.path || args[0] || './';
 
-      if (flags?.['dry-run']) {
+      if (flags?.preview) {
         console.log(`Would deploy from: ${path}`);
       } else {
         console.log(`Deploying from: ${path}`);
