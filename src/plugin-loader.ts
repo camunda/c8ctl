@@ -278,24 +278,6 @@ export function getPluginCommands(): PluginCommands {
 }
 
 /**
- * Get all plugin flags, keyed by command name, for merging into parseArgs options.
- * Only commands declared as `{ flags, handler }` are included.
- */
-export function getPluginFlags(): Record<string, Record<string, FlagDef>> {
-	const allFlags: Record<string, Record<string, FlagDef>> = {};
-
-	for (const plugin of loadedPlugins.values()) {
-		for (const [cmdName, cmd] of Object.entries(plugin.commands)) {
-			if (typeof cmd === "object" && "flags" in cmd) {
-				allFlags[cmdName] = cmd.flags;
-			}
-		}
-	}
-
-	return allFlags;
-}
-
-/**
  * Execute a plugin command if it exists
  */
 export async function executePluginCommand(

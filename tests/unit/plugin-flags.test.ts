@@ -4,7 +4,6 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { clearLoadedPlugins, getPluginFlags } from "../../src/plugin-loader.ts";
 
 const testPlugin = await import(
 	// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
@@ -61,12 +60,6 @@ describe("Plugin Flags", () => {
 });
 
 describe("Plugin Flags Integration", () => {
-	test("getPluginFlags returns empty object when no plugins loaded", () => {
-		clearLoadedPlugins();
-		const flags = getPluginFlags();
-		assert.deepStrictEqual(flags, {}, "Should return empty object");
-	});
-
 	test("plugin receives flags when executing command", async () => {
 		const flags = { source: "Gateway_1", target: "Task_2", verbose: true };
 		const args: string[] = [];

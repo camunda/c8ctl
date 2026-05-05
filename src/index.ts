@@ -30,7 +30,6 @@ import { getLogger, type SortOrder } from "./logger.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
-	getPluginFlags,
 	loadInstalledPlugins,
 } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
@@ -183,8 +182,8 @@ async function main() {
 	// Check if this is a plugin command — executed before built-in dispatch
 	const pluginCommands = getPluginCommands();
 	if (verb && pluginCommands[verb]) {
-		const pluginFlags = getPluginFlags();
-		const cmdFlagDefs = pluginFlags[verb];
+		const cmd = pluginCommands[verb];
+		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 		if (cmdFlagDefs) {
 			// Re-parse with only this command's flags to get correct types
 			const { values: reparsedValues, positionals: reparsedPositionals } =
