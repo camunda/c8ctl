@@ -71,16 +71,16 @@ export const commands = {
         type: 'string',
         description: 'Target element ID',
       },
-      verbose: {
+      detailed: {
         type: 'boolean',
-        description: 'Enable verbose output',
+        description: 'Show detailed output',
       },
     },
     handler: async (args: string[], flags?: Record<string, unknown>) => {
       console.log('Args:', args);
       console.log('Source:', flags?.source);  // string | undefined
       console.log('Target:', flags?.target);  // string | undefined
-      console.log('Verbose:', flags?.verbose);  // boolean | undefined
+      console.log('Detailed:', flags?.detailed);  // boolean | undefined
     },
   },
 };
