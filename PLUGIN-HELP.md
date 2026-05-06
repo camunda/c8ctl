@@ -111,7 +111,11 @@ Each flag can have the following properties:
 - `short`: Single-character alias (optional, e.g., `'s'` for `-s`)
 - `required`: When `true`, the CLI exits with an error if the flag is omitted (optional, defaults to `false`)
 
-> **Important:** Plugin flag names and short aliases are checked against c8ctl's built-in flags at runtime. Any plugin flag whose long name or short alias matches a built-in flag is silently dropped and a warning is emitted — the handler will not receive that value. Avoid names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
+> **Important:** Plugin flags are checked against c8ctl's built-in flags at runtime with different consequences depending on where the collision occurs:
+> - **Long-name collision** (e.g. `--output`, `--verbose`, `--dry-run`): the entire plugin flag is dropped. A warning is emitted and the handler will not receive the value.
+> - **Short-alias collision** (e.g. `-v`, `-o`, `-h`): only the short alias is stripped. The long flag name still works — `--myflag value` is parsed correctly, but `-m value` is not.
+>
+> Avoid long names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
 
 ### Example with Flags
 
