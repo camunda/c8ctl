@@ -268,7 +268,7 @@ export async function loadInstalledPlugins(): Promise<void> {
  * Get all loaded plugin commands
  */
 export function getPluginCommands(): PluginCommands {
-	const allCommands: PluginCommands = {};
+	const allCommands: PluginCommands = Object.create(null);
 
 	for (const plugin of loadedPlugins.values()) {
 		Object.assign(allCommands, plugin.commands);
@@ -286,7 +286,9 @@ export async function executePluginCommand(
 	flags?: Record<string, unknown>,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
-	const cmd = commands[commandName];
+	const cmd = Object.hasOwn(commands, commandName)
+		? commands[commandName]
+		: undefined;
 
 	if (cmd) {
 		if (typeof cmd === "function") {
@@ -309,7 +311,7 @@ export async function executePluginCommand(
  */
 export function isPluginCommand(commandName: string): boolean {
 	const commands = getPluginCommands();
-	return commandName in commands;
+	return Object.hasOwn(commands, commandName);
 }
 
 /**
