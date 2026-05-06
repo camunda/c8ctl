@@ -254,7 +254,7 @@ async function main() {
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.
 	const pluginCommands = getPluginCommands();
-	if (verb && pluginCommands[verb] && !getCommandDef(verb)) {
+	if (verb && Object.hasOwn(pluginCommands, verb) && !getCommandDef(verb)) {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 		if (cmdFlagDefs) {
