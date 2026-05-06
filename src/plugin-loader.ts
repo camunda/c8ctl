@@ -290,7 +290,11 @@ export async function executePluginCommand(
 
 	if (cmd) {
 		if (typeof cmd === "function") {
-			await cmd(args, flags);
+			if (flags !== undefined) {
+				await cmd(args, flags);
+			} else {
+				await cmd(args);
+			}
 		} else {
 			await cmd.handler(args, flags);
 		}
