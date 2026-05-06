@@ -37,7 +37,7 @@ describe("Plugin Flags", () => {
 		assert.strictEqual(
 			cmd.flags.debug.type,
 			"boolean",
-			"Verbose flag should be boolean type",
+			"Debug flag should be boolean type",
 		);
 	});
 
