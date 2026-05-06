@@ -180,6 +180,38 @@ describe("Plugin Flags CLI subprocess — required flags", () => {
 	});
 });
 
+describe("Plugin Flags CLI subprocess — built-in collision", () => {
+	test("emits warning and does not forward colliding flag to handler", async () => {
+		const result = await c8plugin(
+			"test-collision",
+			"--verbose",
+			"myval",
+			"--safe",
+			"safeval",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("verbose"),
+			`expected collision warning for 'verbose' in stderr. stderr: ${result.stderr}`,
+		);
+		const output = JSON.parse(result.stdout);
+		assert.strictEqual(
+			output.flags.verbose,
+			undefined,
+			"colliding flag should not reach handler",
+		);
+		assert.strictEqual(
+			output.flags.safe,
+			"safeval",
+			"non-colliding flag should still be passed",
+		);
+	});
+});
+
 describe("Plugin Flags CLI subprocess", () => {
 	test("string and boolean flags are parsed and passed to handler", async () => {
 		const result = await c8plugin(
