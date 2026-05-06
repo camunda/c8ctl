@@ -95,6 +95,46 @@ export function resolveProcessDefinitionId(
 }
 
 /**
+ * Remove tokens for blocked plugin flags from an argv slice so they cannot
+ * shift positionals during the plugin-flag re-parse.
+ *
+ * The built-in may declare a blocked flag as boolean while the plugin
+ * declared it as string. In that case the user supplied a value token
+ * (--name value) that the built-in parser leaves in positionals. We use
+ * the PLUGIN's declared type to decide whether to strip a following token.
+ */
+function stripBlockedFlagTokens(
+	argv: string[],
+	blocked: Set<string>,
+	pluginFlagDefs: Record<string, { type: string }>,
+): string[] {
+	const out: string[] = [];
+	let i = 0;
+	while (i < argv.length) {
+		const arg = argv[i];
+		if (arg.startsWith("--")) {
+			const eqIdx = arg.indexOf("=");
+			const name = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);
+			if (blocked.has(name)) {
+				if (
+					eqIdx < 0 &&
+					pluginFlagDefs[name]?.type === "string" &&
+					i + 1 < argv.length &&
+					!argv[i + 1].startsWith("-")
+				) {
+					i++;
+				}
+				i++;
+				continue;
+			}
+		}
+		out.push(arg);
+		i++;
+	}
+	return out;
+}
+
+/**
  * Warn about unrecognized flags for a verb × resource combination.
  */
 function warnUnknownFlags(
@@ -217,10 +257,15 @@ async function main() {
 					...(short && { short }),
 				};
 			}
+			const filteredArgv = stripBlockedFlagTokens(
+				process.argv.slice(2),
+				blockedFlags,
+				cmdFlagDefs,
+			);
 			let pluginParsed: ReturnType<typeof parseArgs>;
 			try {
 				pluginParsed = parseArgs({
-					args: process.argv.slice(2),
+					args: filteredArgv,
 					options: mergedOptions,
 					allowPositionals: true,
 					strict: false,

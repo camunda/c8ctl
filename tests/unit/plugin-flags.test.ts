@@ -209,6 +209,11 @@ describe("Plugin Flags CLI subprocess — built-in collision", () => {
 			"safeval",
 			"non-colliding flag should still be passed",
 		);
+		assert.deepStrictEqual(
+			output.args,
+			[],
+			"value token of blocked flag should not appear as a positional arg",
+		);
 	});
 });
 
