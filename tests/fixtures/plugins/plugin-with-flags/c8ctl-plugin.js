@@ -26,6 +26,35 @@ export const commands = {
 			}));
 		},
 	},
+
+	'test-required': {
+		flags: {
+			'required-name': {
+				type: 'string',
+				description: 'A required string flag',
+				required: true,
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
+
+	'test-collision': {
+		flags: {
+			verbose: {
+				type: 'string',
+				description: 'Collides with built-in --verbose flag',
+			},
+			safe: {
+				type: 'string',
+				description: 'A non-colliding flag',
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
 };
 
 export const metadata = {

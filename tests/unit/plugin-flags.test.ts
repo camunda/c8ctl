@@ -154,6 +154,32 @@ async function c8plugin(...args: string[]) {
 	});
 }
 
+describe("Plugin Flags CLI subprocess — required flags", () => {
+	test("exits 1 with error message when required flag is omitted", async () => {
+		const result = await c8plugin("test-required");
+		assert.strictEqual(
+			result.status,
+			1,
+			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("--required-name is required"),
+			`expected '--required-name is required' in stderr. stderr: ${result.stderr}`,
+		);
+	});
+
+	test("exits 0 and passes value when required flag is provided", async () => {
+		const result = await c8plugin("test-required", "--required-name", "hello");
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		const output = JSON.parse(result.stdout);
+		assert.strictEqual(output.flags["required-name"], "hello");
+	});
+});
+
 describe("Plugin Flags CLI subprocess", () => {
 	test("string and boolean flags are parsed and passed to handler", async () => {
 		const result = await c8plugin(
