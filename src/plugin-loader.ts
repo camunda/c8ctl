@@ -4,12 +4,25 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FlagDef } from "./command-registry.ts";
 import { ensurePluginsDir } from "./config.ts";
 import { getLogger } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
+type CommandHandler = (
+	args: string[],
+	flags?: Record<string, unknown>,
+) => Promise<void>;
+
+interface CommandWithFlags {
+	flags: Record<string, FlagDef>;
+	handler: CommandHandler;
+}
+
+type PluginCommand = CommandHandler | CommandWithFlags;
+
 interface PluginCommands {
-	[commandName: string]: (args: string[]) => Promise<void>;
+	[commandName: string]: PluginCommand;
 }
 
 interface PluginMetadata {
@@ -270,11 +283,21 @@ export function getPluginCommands(): PluginCommands {
 export async function executePluginCommand(
 	commandName: string,
 	args: string[],
+	flags?: Record<string, unknown>,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
+	const cmd = commands[commandName];
 
-	if (commands[commandName]) {
-		await commands[commandName](args);
+	if (cmd) {
+		if (typeof cmd === "function") {
+			if (flags !== undefined) {
+				await cmd(args, flags);
+			} else {
+				await cmd(args);
+			}
+		} else {
+			await cmd.handler(args, flags);
+		}
 		return true;
 	}
 

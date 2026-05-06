@@ -1,11 +1,21 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.11/schema.json",
 	"files": {
-		"includes": ["src/**/*.ts", "!src/templates", "tests/**/*.ts", "scripts/**/*.ts"]
+		"includes": [
+			"src/**/*.ts",
+			"!src/templates",
+			"tests/**/*.ts",
+			"scripts/**/*.ts"
+		]
 	},
 	"linter": {
 		"enabled": true,
-		"includes": ["src/**/*.ts", "!/src/templates/**", "tests/**/*.ts", "scripts/**/*.ts"],
+		"includes": [
+			"src/**/*.ts",
+			"!/src/templates/**",
+			"tests/**/*.ts",
+			"scripts/**/*.ts"
+		],
 		"rules": {
 			"recommended": true,
 			"suspicious": {

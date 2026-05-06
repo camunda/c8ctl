@@ -27,7 +27,11 @@ import {
 	showVersion,
 } from "./help.ts";
 import { getLogger, type SortOrder } from "./logger.ts";
-import { executePluginCommand, loadInstalledPlugins } from "./plugin-loader.ts";
+import {
+	executePluginCommand,
+	getPluginCommands,
+	loadInstalledPlugins,
+} from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
 import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
 
@@ -175,6 +179,87 @@ async function main() {
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
 
+	// Check if this is a plugin command — only for verbs not claimed by a built-in
+	const pluginCommands = getPluginCommands();
+	if (verb && pluginCommands[verb] && !getCommandDef(verb)) {
+		const cmd = pluginCommands[verb];
+		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
+		if (cmdFlagDefs) {
+			// Use built-in flags as a blacklist: start from the full built-in
+			// option set, then add plugin flags only when the name is not already
+			// taken. This prevents a plugin flag from silently changing a built-in
+			// flag's parse type.
+			const builtinOptions = deriveParseArgsOptions();
+			const builtinShorts = new Set(
+				Object.values(builtinOptions)
+					.map((o) => o.short)
+					.filter((s): s is string => s !== undefined),
+			);
+			const mergedOptions = { ...builtinOptions };
+			const blockedFlags = new Set<string>();
+			for (const [name, def] of Object.entries(cmdFlagDefs)) {
+				if (name in builtinOptions) {
+					logger.warn(
+						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
+					);
+					blockedFlags.add(name);
+					continue;
+				}
+				const short =
+					def.short && builtinShorts.has(def.short) ? undefined : def.short;
+				if (def.short && !short) {
+					logger.warn(
+						`Plugin flag --${name} short alias -${def.short} conflicts with a built-in alias and will be ignored`,
+					);
+				}
+				mergedOptions[name] = {
+					type: def.type,
+					...(short && { short }),
+				};
+			}
+			let pluginParsed: ReturnType<typeof parseArgs>;
+			try {
+				pluginParsed = parseArgs({
+					args: process.argv.slice(2),
+					options: mergedOptions,
+					allowPositionals: true,
+					strict: false,
+				});
+			} catch (error: unknown) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.error(`Error parsing arguments: ${message}`);
+				process.exit(1);
+			}
+			const extractedFlags: Record<string, unknown> = {};
+			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
+				if (blockedFlags.has(flagName)) continue;
+				const raw = pluginParsed.values[flagName];
+				// Repeated string flags arrive as arrays — take the last value
+				// (last-write-wins), matching built-in flag normalization.
+				const value =
+					def.type === "string" && Array.isArray(raw)
+						? (raw.findLast((v) => typeof v === "string") ?? undefined)
+						: raw;
+				if (value !== undefined) {
+					extractedFlags[flagName] = value;
+				}
+				if (def.required === true && value === undefined) {
+					logger.error(`--${flagName} is required`);
+					process.exit(1);
+				}
+			}
+			const [_verb, _resource, ...pluginArgs] = pluginParsed.positionals;
+			await executePluginCommand(
+				verb,
+				_resource ? [_resource, ...pluginArgs] : pluginArgs,
+				extractedFlags,
+			);
+		} else {
+			await executePluginCommand(verb, resource ? [resource, ...args] : args);
+		}
+		return;
+	}
+
 	// Handle global --version flag (only when no verb/command is provided)
 	if (values.version && !verb) {
 		showVersion();
@@ -295,12 +380,7 @@ async function main() {
 		return;
 	}
 
-	// Try to execute plugin command (before unknown-command error)
-	if (await executePluginCommand(verb, resource ? [resource, ...args] : args)) {
-		return;
-	}
-
-	// Unknown command
+	// Unknown command (plugin check was already done above)
 	logger.error(`Unknown command: ${verb}${resource ? ` ${resource}` : ""}`);
 	logger.info('Run "c8 help" for usage information');
 	process.exit(1);
