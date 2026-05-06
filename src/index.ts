@@ -219,7 +219,40 @@ async function main() {
 	// Extract command and resource
 	const [verb, resource, ...args] = positionals;
 
-	// Check if this is a plugin command — only for verbs not claimed by a built-in
+	// Handle global --version flag (only when no verb/command is provided)
+	if (values.version && !verb) {
+		showVersion();
+		return;
+	}
+
+	if (values.help && positionals.length === 0) {
+		showHelp();
+		return;
+	}
+
+	if (!verb) {
+		showHelp();
+		return;
+	}
+
+	// Handle help command
+	if (
+		verb === "help" ||
+		verb === "menu" ||
+		verb === "--help" ||
+		verb === "-h"
+	) {
+		// Check if user wants help for a specific command
+		if (resource) {
+			await showCommandHelp(resource);
+		} else {
+			showHelp();
+		}
+		return;
+	}
+
+	// Check if this is a plugin command — only for verbs not claimed by a built-in.
+	// Placed after help/menu handling so those reserved verbs can never be shadowed.
 	const pluginCommands = getPluginCommands();
 	if (verb && pluginCommands[verb] && !getCommandDef(verb)) {
 		const cmd = pluginCommands[verb];
@@ -301,38 +334,6 @@ async function main() {
 			);
 		} else {
 			await executePluginCommand(verb, resource ? [resource, ...args] : args);
-		}
-		return;
-	}
-
-	// Handle global --version flag (only when no verb/command is provided)
-	if (values.version && !verb) {
-		showVersion();
-		return;
-	}
-
-	if (values.help && positionals.length === 0) {
-		showHelp();
-		return;
-	}
-
-	if (!verb) {
-		showHelp();
-		return;
-	}
-
-	// Handle help command
-	if (
-		verb === "help" ||
-		verb === "menu" ||
-		verb === "--help" ||
-		verb === "-h"
-	) {
-		// Check if user wants help for a specific command
-		if (resource) {
-			await showCommandHelp(resource);
-		} else {
-			showHelp();
 		}
 		return;
 	}
