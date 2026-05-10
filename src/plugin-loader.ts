@@ -97,15 +97,17 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
 		const commandMeta = meta[commandName];
 		if (commandMeta?.passthrough === undefined) continue;
 
-		// Strict-boolean check. Dispatch (`isPassthroughPluginCommand`) and
-		// help (`getPluginCommandsInfo`) both gate on `=== true`, so any
-		// truthy non-true value here (e.g. the string "true") would silently
-		// disagree with them. Reject loudly at load time.
+		// `passthrough: false` is equivalent to "not opted in" — silently
+		// skip. Any other non-`true` value (e.g. the string "true", a
+		// number) is a contract violation: dispatch and help both gate on
+		// `=== true`, so a truthy non-true value would silently disagree
+		// with them. Reject loudly at load time.
+		if (commandMeta.passthrough === false) continue;
 		if (commandMeta.passthrough !== true) {
 			logger.warn(
 				`Plugin '${plugin.name}' command '${commandName}' has metadata.passthrough set to ` +
 					`${JSON.stringify(commandMeta.passthrough)} but the contract requires the boolean ` +
-					"literal `true`. Dropping this command (#366).",
+					"literal `true` (or `false` / omitted to opt out). Dropping this command (#366).",
 			);
 			delete plugin.commands[commandName];
 			continue;
@@ -132,6 +134,26 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
 					"agents can advertise the boundary. Dropping this command (#366).",
 			);
 			delete plugin.commands[commandName];
+			continue;
+		}
+
+		// `flagsHint` is documentation-only and consumed by the help
+		// renderer, which assumes `string[]`. Validate the shape here so a
+		// mis-typed value can't reach the renderer. The field is optional;
+		// invalid shapes are stripped (not fatal) so the command itself
+		// continues to work — only the doc affordance is lost.
+		const flagsHint = commandMeta.flagsHint;
+		if (flagsHint !== undefined) {
+			const valid =
+				Array.isArray(flagsHint) &&
+				flagsHint.every((entry) => typeof entry === "string");
+			if (!valid) {
+				logger.warn(
+					`Plugin '${plugin.name}' command '${commandName}' declares metadata.flagsHint ` +
+						"but it is not a string[]. Ignoring flagsHint (#366).",
+				);
+				delete commandMeta.flagsHint;
+			}
 		}
 	}
 }
@@ -141,6 +163,14 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
  * a command name that is already registered by an earlier-loaded plugin,
  * drop it from `plugin.commands` and emit `logger.warn` naming both
  * plugins so the conflict is visible at startup.
+ *
+ * **Conflict policy: first registration wins.** This is an explicit
+ * choice (#366) and replaces the previous implicit "last-loaded wins"
+ * behaviour produced by `Object.assign` over `loadedPlugins` in
+ * insertion order. Plugins cannot override one another by registering
+ * the same command name; if you want a different command, give it a
+ * different name. Default plugins always load first, so user-installed
+ * plugins cannot override default commands by name.
  *
  * This guarantees that the merged map returned by `getPluginCommands()`
  * has a single owning plugin per command name, which keeps dispatch and
