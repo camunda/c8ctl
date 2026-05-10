@@ -205,6 +205,14 @@ export const GLOBAL_FLAGS = {
 			"Comma-separated list of output fields to include.\nReduces context window size when parsing output.\nExample: c8ctl list pi --fields Key,State,processDefinitionId\nCase-insensitive.",
 		agentAppliesTo: "all list/search/get commands",
 	},
+	json: {
+		type: "boolean",
+		description:
+			"Force JSON output for this invocation (does not persist; overrides session state and C8CTL_OUTPUT_MODE)",
+		agentDescription:
+			"Per-invocation JSON output. Equivalent to setting outputMode=json for one command without mutating session.json.\nPrecedence: --json > C8CTL_OUTPUT_MODE > persisted session state.",
+		agentAppliesTo: "all commands",
+	},
 } as const satisfies Record<string, FlagDef>;
 
 /**
