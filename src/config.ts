@@ -105,7 +105,7 @@ export interface SessionState {
  * Tracked separately from `c8ctl.outputMode` (which reflects the *effective*
  * mode for this invocation) so that per-invocation overrides like `--json`
  * or `C8CTL_OUTPUT_MODE` do not leak into `saveSessionState()` when other
- * commands (e.g. `use profile`, `set-tenant`) write the file. See #356.
+ * commands (e.g. `use profile`, `use tenant`) write the file. See #356.
  *
  * Initialised by `loadSessionState()`; updated by `setOutputMode()` (the
  * persistent setter behind `c8ctl output json|text`).

@@ -290,6 +290,27 @@ c8ctl output json
 c8ctl output text
 ```
 
+#### Per-invocation output override
+
+The persisted output mode (set by `c8ctl output json|text`) can be overridden for a single invocation without mutating `session.json`. This is useful for scripts, agent integrations, and one-off JSON capture without flipping global state.
+
+Precedence (highest first):
+
+1. `--json` global flag — force JSON for this invocation only.
+2. `C8CTL_OUTPUT_MODE` env var — accepts `json` or `text`. Other values (including unset or typos) fall through to the persisted mode without erroring.
+3. Persisted `session.json` `outputMode`.
+
+```bash
+# Force JSON for one command — session.json is not touched
+c8ctl --json list profile
+
+# Same effect via env var (handy for scoped shells / CI steps)
+C8CTL_OUTPUT_MODE=json c8ctl list profile
+
+# --json wins over the env var
+C8CTL_OUTPUT_MODE=text c8ctl --json list profile  # → JSON
+```
+
 ### Debug Mode
 
 Enable debug logging to see detailed information about plugin loading and other internal operations:
@@ -705,6 +726,9 @@ c8ctl <command>
 - `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
+- `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`. See [Per-invocation output override](#per-invocation-output-override).
+- `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
+- `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr.
 
 ## Configuration Files
 
