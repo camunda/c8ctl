@@ -97,6 +97,51 @@ export function resolveProcessDefinitionId(
 }
 
 /**
+ * Return the raw argv tokens that follow the verb position, where the
+ * verb position is found by walking from the start and skipping leading
+ * GLOBAL_FLAGS (consuming the value of string-typed global flags). The
+ * first non-flag token is the verb.
+ *
+ * This avoids `argv.indexOf(verb)`, which is unsafe because the verb
+ * string may also appear as the value of a global string flag (e.g.
+ * `--profile <verb>`). Returns `[]` if no verb token is found.
+ */
+export function sliceArgvAfterVerb(argv: string[], verb: string): string[] {
+	const stringGlobalNames = new Set<string>();
+	const stringGlobalShorts = new Set<string>();
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		if (def.type !== "string") continue;
+		stringGlobalNames.add(name);
+		const short = "short" in def ? def.short : undefined;
+		if (short) stringGlobalShorts.add(short);
+	}
+
+	let i = 0;
+	while (i < argv.length) {
+		const tok = argv[i];
+		if (tok === "--") {
+			// Verb cannot appear after `--`. Bail out.
+			return [];
+		}
+		if (tok.startsWith("--")) {
+			const eq = tok.indexOf("=");
+			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
+			i += eq < 0 && stringGlobalNames.has(name) ? 2 : 1;
+			continue;
+		}
+		if (tok.startsWith("-") && tok.length === 2) {
+			const short = tok.slice(1);
+			i += stringGlobalShorts.has(short) ? 2 : 1;
+			continue;
+		}
+		// First non-flag token at or after this position must be the verb.
+		if (tok === verb) return argv.slice(i + 1);
+		return [];
+	}
+	return [];
+}
+
+/**
  * Strip GLOBAL_FLAGS (and the value of any string-typed global flag) from
  * a raw argv slice before forwarding to a passthrough plugin handler
  * (#366). GLOBAL_FLAGS already affect the c8ctl runtime via their
@@ -349,10 +394,11 @@ async function main() {
 		// Validation at load time guarantees passthrough commands are the
 		// bare-function form and never carry a `flags` declaration.
 		if (isPassthroughPluginCommand(verb)) {
-			const argvAfterCli = process.argv.slice(2);
-			const verbIndex = argvAfterCli.indexOf(verb);
-			const rawAfterVerb =
-				verbIndex >= 0 ? argvAfterCli.slice(verbIndex + 1) : [];
+			// Locate the verb token by walking process.argv from the start and
+			// skipping leading GLOBAL_FLAGS (consuming string-flag values).
+			// A naive `indexOf(verb)` is unsafe because `verb` may also appear
+			// as the value of a global string flag (e.g. `--profile <verb>`).
+			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), verb);
 			const forwarded = stripGlobalFlags(rawAfterVerb);
 			await executePluginCommand(verb, forwarded);
 			return;

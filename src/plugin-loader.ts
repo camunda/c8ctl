@@ -79,7 +79,8 @@ const loadedPlugins = new Map<string, LoadedPlugin>();
 /**
  * Validate the passthrough/flags mutual-exclusion rule (#366). Removes
  * offending commands from the registered set so they cannot be invoked,
- * and emits a debug-level diagnostic naming the plugin and command.
+ * and emits a `logger.warn` naming the plugin and command so the
+ * misconfiguration is visible at startup.
  *
  * The contract: a command MUST NOT declare `passthrough: true` AND use the
  * `{ flags, handler }` form. Pick one. A passthrough command without a
@@ -117,6 +118,39 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
 					"agents can advertise the boundary. Dropping this command (#366).",
 			);
 			delete plugin.commands[commandName];
+		}
+	}
+}
+
+/**
+ * Reject duplicate plugin command names at load time. If `plugin` declares
+ * a command name that is already registered by an earlier-loaded plugin,
+ * drop it from `plugin.commands` and emit `logger.warn` naming both
+ * plugins so the conflict is visible at startup.
+ *
+ * This guarantees that the merged map returned by `getPluginCommands()`
+ * has a single owning plugin per command name, which keeps dispatch and
+ * `isPassthroughPluginCommand()` consistent: the help renderer and the
+ * runtime always agree on which plugin handles a given verb.
+ *
+ * Mutates `plugin.commands` in place. Safe to call after each plugin is
+ * loaded; relies on `loadedPlugins` already containing previously-loaded
+ * plugins.
+ */
+function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
+	const logger = getLogger();
+	for (const commandName of Object.keys(plugin.commands)) {
+		for (const existing of loadedPlugins.values()) {
+			if (existing.name === plugin.name) continue;
+			if (Object.hasOwn(existing.commands, commandName)) {
+				logger.warn(
+					`Plugin '${plugin.name}' tried to register command '${commandName}' but it is ` +
+						`already provided by plugin '${existing.name}'. The first registration wins; ` +
+						`dropping the duplicate from '${plugin.name}'.`,
+				);
+				delete plugin.commands[commandName];
+				break;
+			}
 		}
 	}
 }
@@ -197,6 +231,7 @@ async function loadDefaultPlugins(): Promise<void> {
 						metadata: plugin.metadata || {},
 					};
 					validatePassthroughCommands(loaded);
+					rejectDuplicateCommandNames(loaded);
 					loadedPlugins.set(pluginName, loaded);
 					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
@@ -326,6 +361,7 @@ export async function loadInstalledPlugins(): Promise<void> {
 						metadata: plugin.metadata || {},
 					};
 					validatePassthroughCommands(loaded);
+					rejectDuplicateCommandNames(loaded);
 					loadedPlugins.set(packageName, loaded);
 					const commandNames = Object.keys(loaded.commands);
 					logger.debug(

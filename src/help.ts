@@ -816,12 +816,16 @@ export async function showCommandHelp(command: string): Promise<void> {
 	const logger = getLogger();
 
 	// Passthrough plugin contract (#366): if the command is a registered
-	// passthrough plugin command, render the passthrough help shape — NOT
-	// the registry-driven shape and NOT the plugin's own handler. This
-	// keeps the boundary visible to users and agents.
-	const pluginInfo = getPluginCommandsInfo().find(
-		(p) => p.commandName === command && p.passthrough === true,
-	);
+	// passthrough plugin command AND the name does not collide with a
+	// built-in verb, render the passthrough help shape — NOT the
+	// registry-driven shape and NOT the plugin's own handler. This keeps
+	// the boundary visible to users and agents. Built-in verbs always win
+	// over plugins of the same name (consistent with dispatch).
+	const pluginInfo = lookupVerb(command)
+		? undefined
+		: getPluginCommandsInfo().find(
+				(p) => p.commandName === command && p.passthrough === true,
+			);
 	if (pluginInfo) {
 		if (logger.mode === "json") {
 			logger.json({
@@ -837,7 +841,10 @@ export async function showCommandHelp(command: string): Promise<void> {
 			return;
 		}
 		const lines: string[] = [];
-		lines.push(`c8ctl ${command} — ${pluginInfo.description ?? ""}`.trimEnd());
+		const description = pluginInfo.description?.trim();
+		lines.push(
+			description ? `c8ctl ${command} — ${description}` : `c8ctl ${command}`,
+		);
 		if (pluginInfo.helpDescription) {
 			lines.push("");
 			lines.push(pluginInfo.helpDescription);
