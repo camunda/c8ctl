@@ -14,6 +14,7 @@ import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	deriveParseArgsOptions,
+	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
@@ -30,6 +31,7 @@ import { getLogger, type SortOrder } from "./logger.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
+	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
@@ -92,6 +94,73 @@ export function resolveProcessDefinitionId(
 		str(values.processDefinitionId) ||
 		str(values.bpmnProcessId)
 	);
+}
+
+/**
+ * Strip GLOBAL_FLAGS (and the value of any string-typed global flag) from
+ * a raw argv slice before forwarding to a passthrough plugin handler
+ * (#366). GLOBAL_FLAGS already affect the c8ctl runtime via their
+ * regular handling in `main()`; the plugin must not see them again.
+ *
+ * Conservative behaviour: an isolated `--` terminator is preserved and
+ * everything after it is forwarded verbatim, matching POSIX convention.
+ */
+export function stripGlobalFlags(argv: string[]): string[] {
+	const booleanFlags = new Set<string>();
+	const stringFlags = new Set<string>();
+	const booleanShorts = new Set<string>();
+	const stringShorts = new Set<string>();
+
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		const short = "short" in def ? def.short : undefined;
+		if (def.type === "boolean") {
+			booleanFlags.add(name);
+			if (short) booleanShorts.add(short);
+		} else {
+			stringFlags.add(name);
+			if (short) stringShorts.add(short);
+		}
+	}
+
+	const out: string[] = [];
+	let i = 0;
+	let sawTerminator = false;
+	while (i < argv.length) {
+		const tok = argv[i];
+		if (sawTerminator) {
+			out.push(tok);
+			i++;
+			continue;
+		}
+		if (tok === "--") {
+			sawTerminator = true;
+			out.push(tok);
+			i++;
+			continue;
+		}
+		if (tok.startsWith("--")) {
+			const eq = tok.indexOf("=");
+			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
+			if (booleanFlags.has(name) || stringFlags.has(name)) {
+				if (eq < 0 && stringFlags.has(name)) i++; // consume value
+				i++;
+				continue;
+			}
+		} else if (tok.startsWith("-") && tok.length === 2) {
+			const short = tok.slice(1);
+			if (booleanShorts.has(short)) {
+				i++;
+				continue;
+			}
+			if (stringShorts.has(short)) {
+				i += 2; // consume short flag and its value
+				continue;
+			}
+		}
+		out.push(tok);
+		i++;
+	}
+	return out;
 }
 
 /**
@@ -272,6 +341,23 @@ async function main() {
 	if (verb && Object.hasOwn(pluginCommands, verb) && !getCommandDef(verb)) {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
+
+		// Passthrough plugin contract (#366): strip GLOBAL_FLAGS from the
+		// raw argv following the verb token and forward the rest verbatim.
+		// GLOBAL_FLAGS already affect the c8ctl runtime via their regular
+		// handling earlier in main(); the plugin must not see them again.
+		// Validation at load time guarantees passthrough commands are the
+		// bare-function form and never carry a `flags` declaration.
+		if (isPassthroughPluginCommand(verb)) {
+			const argvAfterCli = process.argv.slice(2);
+			const verbIndex = argvAfterCli.indexOf(verb);
+			const rawAfterVerb =
+				verbIndex >= 0 ? argvAfterCli.slice(verbIndex + 1) : [];
+			const forwarded = stripGlobalFlags(rawAfterVerb);
+			await executePluginCommand(verb, forwarded);
+			return;
+		}
+
 		if (cmdFlagDefs) {
 			// Use built-in flags as a blacklist: start from the full built-in
 			// option set, then add plugin flags only when the name is not already

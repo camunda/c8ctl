@@ -29,13 +29,43 @@ interface PluginMetadata {
 	name?: string;
 	description?: string;
 	commands?: {
-		[commandName: string]: {
-			description?: string;
-			examples?: { command: string; description: string }[];
-			/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
-			subcommands?: { name: string; description: string }[];
-		};
+		[commandName: string]: PluginCommandMeta;
 	};
+}
+
+/**
+ * Per-command plugin metadata.
+ *
+ * A plugin command is **either** metadata-driven (declares typed flags via
+ * the `{ flags, handler }` command form) **or** a passthrough command
+ * (`passthrough: true` + `passthroughHint`). Mutually exclusive — see
+ * #251 / #366. Declaring both is rejected at load time.
+ */
+export interface PluginCommandMeta {
+	description?: string;
+	helpDescription?: string;
+	examples?: { command: string; description: string }[];
+	/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
+	subcommands?: { name: string; description: string }[];
+	/**
+	 * If true, c8ctl strips GLOBAL_FLAGS from argv and forwards everything
+	 * else verbatim to the bare-function handler. Help and JSON help
+	 * advertise the boundary explicitly.
+	 *
+	 * MUST NOT appear together with the `{ flags, handler }` command form;
+	 * the load-time validator drops any command that declares both.
+	 */
+	passthrough?: boolean;
+	/**
+	 * Required when `passthrough` is true. Short text rendered in help that
+	 * advertises the boundary, e.g. "Forwards args to `kubectl`".
+	 */
+	passthroughHint?: string;
+	/**
+	 * Optional documentation-only flag list rendered in help under
+	 * passthrough commands. NOT parsed by c8ctl.
+	 */
+	flagsHint?: string[];
 }
 
 interface LoadedPlugin {
@@ -45,6 +75,51 @@ interface LoadedPlugin {
 }
 
 const loadedPlugins = new Map<string, LoadedPlugin>();
+
+/**
+ * Validate the passthrough/flags mutual-exclusion rule (#366). Removes
+ * offending commands from the registered set so they cannot be invoked,
+ * and emits a debug-level diagnostic naming the plugin and command.
+ *
+ * The contract: a command MUST NOT declare `passthrough: true` AND use the
+ * `{ flags, handler }` form. Pick one. A passthrough command without a
+ * `passthroughHint` is also rejected (the hint is what makes the boundary
+ * legible to users and agents).
+ *
+ * Mutates `plugin.commands` in place. Safe to call after each plugin is
+ * loaded.
+ */
+function validatePassthroughCommands(plugin: LoadedPlugin): void {
+	const logger = getLogger();
+	const meta = plugin.metadata?.commands ?? {};
+	for (const commandName of Object.keys(plugin.commands)) {
+		const commandMeta = meta[commandName];
+		if (!commandMeta?.passthrough) continue;
+
+		const cmd = plugin.commands[commandName];
+		const hasFlagsForm = typeof cmd !== "function";
+		if (hasFlagsForm) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' declares both passthrough:true AND flags. ` +
+					"Pick one \u2014 a passthrough command must use the bare-function handler form. " +
+					"Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+			continue;
+		}
+		if (
+			typeof commandMeta.passthroughHint !== "string" ||
+			commandMeta.passthroughHint.trim() === ""
+		) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' declares passthrough:true ` +
+					"but is missing a non-empty passthroughHint. The hint is required so help and " +
+					"agents can advertise the boundary. Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+		}
+	}
+}
 
 /**
  * Load default plugins bundled with c8ctl
@@ -116,12 +191,14 @@ async function loadDefaultPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					loadedPlugins.set(pluginName, {
+					const loaded: LoadedPlugin = {
 						name: pluginName,
-						commands: plugin.commands,
+						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
-					});
-					const commandNames = Object.keys(plugin.commands);
+					};
+					validatePassthroughCommands(loaded);
+					loadedPlugins.set(pluginName, loaded);
+					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
 						`Successfully loaded default plugin: ${pluginName} with ${commandNames.length} commands:`,
 						commandNames,
@@ -243,12 +320,14 @@ export async function loadInstalledPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					loadedPlugins.set(packageName, {
+					const loaded: LoadedPlugin = {
 						name: packageName,
-						commands: plugin.commands,
+						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
-					});
-					const commandNames = Object.keys(plugin.commands);
+					};
+					validatePassthroughCommands(loaded);
+					loadedPlugins.set(packageName, loaded);
+					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
 						`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`,
 						commandNames,
@@ -328,9 +407,16 @@ export interface PluginCommandInfo {
 	commandName: string;
 	pluginName: string;
 	description?: string;
+	helpDescription?: string;
 	examples?: { command: string; description: string }[];
 	/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
 	subcommands?: { name: string; description: string }[];
+	/** True when the command opted into the #366 passthrough contract. */
+	passthrough?: boolean;
+	/** Required when passthrough is true — short text that names the boundary. */
+	passthroughHint?: string;
+	/** Optional documentation-only flag list rendered under passthrough help. */
+	flagsHint?: string[];
 }
 
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
@@ -338,17 +424,35 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 
 	for (const plugin of loadedPlugins.values()) {
 		for (const commandName of Object.keys(plugin.commands)) {
+			const meta = plugin.metadata?.commands?.[commandName];
 			infos.push({
 				commandName,
 				pluginName: plugin.name,
-				description: plugin.metadata?.commands?.[commandName]?.description,
-				examples: plugin.metadata?.commands?.[commandName]?.examples,
-				subcommands: plugin.metadata?.commands?.[commandName]?.subcommands,
+				description: meta?.description,
+				helpDescription: meta?.helpDescription,
+				examples: meta?.examples,
+				subcommands: meta?.subcommands,
+				passthrough: meta?.passthrough === true ? true : undefined,
+				passthroughHint: meta?.passthroughHint,
+				flagsHint: meta?.flagsHint,
 			});
 		}
 	}
 
 	return infos;
+}
+
+/**
+ * True if the named command is a registered passthrough plugin command
+ * (#366). Used by the dispatcher to gate the strip-and-forward path.
+ */
+export function isPassthroughPluginCommand(commandName: string): boolean {
+	for (const plugin of loadedPlugins.values()) {
+		if (!Object.hasOwn(plugin.commands, commandName)) continue;
+		const meta = plugin.metadata?.commands?.[commandName];
+		if (meta?.passthrough === true) return true;
+	}
+	return false;
 }
 
 /**
