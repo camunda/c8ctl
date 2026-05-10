@@ -1,0 +1,7 @@
+{
+  "name": "c8ctl-plugin-test-flags",
+  "version": "1.0.0",
+  "description": "Test plugin for flag support",
+  "type": "module",
+  "keywords": ["c8ctl", "c8ctl-plugin"]
+}

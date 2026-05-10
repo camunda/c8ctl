@@ -4,12 +4,25 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { FlagDef } from "./command-registry.ts";
 import { ensurePluginsDir } from "./config.ts";
 import { getLogger } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
+type CommandHandler = (
+	args: string[],
+	flags?: Record<string, unknown>,
+) => Promise<void>;
+
+interface CommandWithFlags {
+	flags: Record<string, FlagDef>;
+	handler: CommandHandler;
+}
+
+type PluginCommand = CommandHandler | CommandWithFlags;
+
 interface PluginCommands {
-	[commandName: string]: (args: string[]) => Promise<void>;
+	[commandName: string]: PluginCommand;
 }
 
 interface PluginMetadata {
@@ -255,7 +268,7 @@ export async function loadInstalledPlugins(): Promise<void> {
  * Get all loaded plugin commands
  */
 export function getPluginCommands(): PluginCommands {
-	const allCommands: PluginCommands = {};
+	const allCommands: PluginCommands = Object.create(null);
 
 	for (const plugin of loadedPlugins.values()) {
 		Object.assign(allCommands, plugin.commands);
@@ -270,11 +283,23 @@ export function getPluginCommands(): PluginCommands {
 export async function executePluginCommand(
 	commandName: string,
 	args: string[],
+	flags?: Record<string, unknown>,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
+	const cmd = Object.hasOwn(commands, commandName)
+		? commands[commandName]
+		: undefined;
 
-	if (commands[commandName]) {
-		await commands[commandName](args);
+	if (cmd) {
+		if (typeof cmd === "function") {
+			if (flags !== undefined) {
+				await cmd(args, flags);
+			} else {
+				await cmd(args);
+			}
+		} else {
+			await cmd.handler(args, flags);
+		}
 		return true;
 	}
 
@@ -286,7 +311,7 @@ export async function executePluginCommand(
  */
 export function isPluginCommand(commandName: string): boolean {
 	const commands = getPluginCommands();
-	return commandName in commands;
+	return Object.hasOwn(commands, commandName);
 }
 
 /**
