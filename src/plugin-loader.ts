@@ -95,7 +95,21 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
 	const meta = plugin.metadata?.commands ?? {};
 	for (const commandName of Object.keys(plugin.commands)) {
 		const commandMeta = meta[commandName];
-		if (!commandMeta?.passthrough) continue;
+		if (commandMeta?.passthrough === undefined) continue;
+
+		// Strict-boolean check. Dispatch (`isPassthroughPluginCommand`) and
+		// help (`getPluginCommandsInfo`) both gate on `=== true`, so any
+		// truthy non-true value here (e.g. the string "true") would silently
+		// disagree with them. Reject loudly at load time.
+		if (commandMeta.passthrough !== true) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' has metadata.passthrough set to ` +
+					`${JSON.stringify(commandMeta.passthrough)} but the contract requires the boolean ` +
+					"literal `true`. Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+			continue;
+		}
 
 		const cmd = plugin.commands[commandName];
 		const hasFlagsForm = typeof cmd !== "function";

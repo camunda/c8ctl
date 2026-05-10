@@ -10,6 +10,7 @@ import {
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
+	getCommandDef,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
 } from "./command-registry.ts";
@@ -817,11 +818,13 @@ export async function showCommandHelp(command: string): Promise<void> {
 
 	// Passthrough plugin contract (#366): if the command is a registered
 	// passthrough plugin command AND the name does not collide with a
-	// built-in verb, render the passthrough help shape — NOT the
-	// registry-driven shape and NOT the plugin's own handler. This keeps
-	// the boundary visible to users and agents. Built-in verbs always win
-	// over plugins of the same name (consistent with dispatch).
-	const pluginInfo = lookupVerb(command)
+	// built-in verb (including aliases), render the passthrough help shape
+	// — NOT the registry-driven shape and NOT the plugin's own handler.
+	// This keeps the boundary visible to users and agents. Built-in verbs
+	// always win over plugins of the same name (consistent with dispatch).
+	// `getCommandDef` is alias-aware (e.g. `w` → `watch`), unlike the
+	// local `lookupVerb` which only checks COMMAND_REGISTRY keys.
+	const pluginInfo = getCommandDef(command)
 		? undefined
 		: getPluginCommandsInfo().find(
 				(p) => p.commandName === command && p.passthrough === true,
