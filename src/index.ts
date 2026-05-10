@@ -171,6 +171,21 @@ async function main() {
 
 	const { values, positionals } = parseCliArgs();
 
+	// Apply per-invocation output mode override (#356).
+	// Precedence: --json flag > C8CTL_OUTPUT_MODE env var > persisted session.
+	// Setting `c8ctl.outputMode` directly is in-memory only; saveSessionState
+	// uses the separately-tracked persistedOutputMode from config.ts so this
+	// override never leaks back to disk.
+	if (values.json === true) {
+		c8ctl.outputMode = "json";
+	} else if (process.env.C8CTL_OUTPUT_MODE === "json") {
+		c8ctl.outputMode = "json";
+	} else if (process.env.C8CTL_OUTPUT_MODE === "text") {
+		c8ctl.outputMode = "text";
+	}
+	// Any other C8CTL_OUTPUT_MODE value (including unset, empty, or
+	// "yaml"/typo) falls through to the persisted mode loaded above.
+
 	// Initialize logger with current output mode from c8ctl runtime
 	const logger = getLogger(c8ctl.outputMode);
 

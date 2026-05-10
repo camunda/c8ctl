@@ -99,6 +99,19 @@ export interface SessionState {
 	outputMode: OutputMode;
 }
 
+/**
+ * The output mode persisted on disk in `session.json`.
+ *
+ * Tracked separately from `c8ctl.outputMode` (which reflects the *effective*
+ * mode for this invocation) so that per-invocation overrides like `--json`
+ * or `C8CTL_OUTPUT_MODE` do not leak into `saveSessionState()` when other
+ * commands (e.g. `use profile`, `set-tenant`) write the file. See #356.
+ *
+ * Initialised by `loadSessionState()`; updated by `setOutputMode()` (the
+ * persistent setter behind `c8ctl output json|text`).
+ */
+let persistedOutputMode: OutputMode = "text";
+
 export interface ClusterConfig {
 	baseUrl: string;
 	clientId?: string;
@@ -634,6 +647,7 @@ export function loadSessionState(): SessionState {
 		c8ctl.activeTenant =
 			typeof state.activeTenant === "string" ? state.activeTenant : undefined;
 		c8ctl.outputMode = state.outputMode === "json" ? "json" : "text";
+		persistedOutputMode = c8ctl.outputMode;
 
 		return {
 			activeProfile: c8ctl.activeProfile,
@@ -653,16 +667,20 @@ export function loadSessionState(): SessionState {
  * Save session state from c8ctl runtime object to disk
  */
 export function saveSessionState(state?: SessionState): void {
+	// Use persistedOutputMode (the on-disk value) by default, NOT
+	// c8ctl.outputMode — the latter may carry a per-invocation override
+	// from --json or C8CTL_OUTPUT_MODE that must not leak to disk (#356).
 	const stateToSave: SessionState = {
 		activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
 		activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
-		outputMode: state?.outputMode ?? c8ctl.outputMode,
+		outputMode: state?.outputMode ?? persistedOutputMode,
 	};
 
 	if (state) {
 		c8ctl.activeProfile = state.activeProfile;
 		c8ctl.activeTenant = state.activeTenant;
 		c8ctl.outputMode = state.outputMode;
+		persistedOutputMode = state.outputMode;
 	}
 
 	const path = getSessionStatePath();
@@ -698,6 +716,7 @@ export function setActiveTenant(tenantId: string): void {
  */
 export function setOutputMode(mode: OutputMode): void {
 	c8ctl.outputMode = mode;
+	persistedOutputMode = mode;
 	saveSessionState();
 }
 
