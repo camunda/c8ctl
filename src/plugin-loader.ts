@@ -233,7 +233,12 @@ async function loadDefaultPlugins(): Promise<void> {
 			return;
 		}
 
-		const pluginDirs = readdirSync(defaultPluginsDir);
+		// Sort to make load order deterministic across filesystems/OSes.
+		// The first-registration-wins duplicate-name policy in
+		// `rejectDuplicateCommandNames` relies on this — without a stable
+		// sort, "who wins" would depend on `readdirSync()` order, which
+		// varies across platforms and filesystems.
+		const pluginDirs = readdirSync(defaultPluginsDir).sort();
 		logger.debug(`Found ${pluginDirs.length} default plugin(s)`);
 
 		for (const pluginDir of pluginDirs) {
@@ -315,7 +320,12 @@ export async function loadInstalledPlugins(): Promise<void> {
 	}
 
 	try {
-		const entries = readdirSync(nodeModulesPath);
+		// Sort to make load order deterministic across filesystems/OSes.
+		// The first-registration-wins duplicate-name policy in
+		// `rejectDuplicateCommandNames` relies on this — without a stable
+		// sort, "who wins" would depend on `readdirSync()` order, which
+		// varies across platforms and filesystems.
+		const entries = readdirSync(nodeModulesPath).sort();
 		logger.debug(`Scanning ${entries.length} entries in node_modules`);
 
 		const packagesToScan: string[] = [];
@@ -327,10 +337,10 @@ export async function loadInstalledPlugins(): Promise<void> {
 			}
 
 			if (entry.startsWith("@")) {
-				// Scoped package - scan subdirectories
+				// Scoped package - scan subdirectories (sorted for determinism).
 				const scopePath = join(nodeModulesPath, entry);
 				try {
-					const scopedPackages = readdirSync(scopePath);
+					const scopedPackages = readdirSync(scopePath).sort();
 					for (const scopedPkg of scopedPackages) {
 						if (!scopedPkg.startsWith(".")) {
 							packagesToScan.push(join(entry, scopedPkg));
@@ -347,6 +357,12 @@ export async function loadInstalledPlugins(): Promise<void> {
 				packagesToScan.push(entry);
 			}
 		}
+
+		// Final defensive sort: `@scope/pkg` paths interleave with bare
+		// `pkg` paths in the order we appended them, but for
+		// duplicate-name resolution we want a single, stable lexicographic
+		// order over the full set.
+		packagesToScan.sort();
 
 		logger.debug(
 			`Found ${packagesToScan.length} packages to scan:`,

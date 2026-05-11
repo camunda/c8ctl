@@ -162,6 +162,60 @@ describe("Passthrough plugin contract (#366)", () => {
 			assert.deepStrictEqual(out.args, ["--from", "URL"]);
 		});
 
+		test("strips GLOBAL_FLAGS in `--flag=value` form", async () => {
+			// stripGlobalFlags() and sliceArgvAfterVerb() both branch on the
+			// `=` syntax. Without this case, a regression in either path
+			// could silently leak `--profile=local` through to the plugin,
+			// or break verb detection when the verb is preceded by a
+			// `--flag=value`-shaped global.
+			const result = await c8(
+				"--profile=test-profile",
+				"pass-through-cmd",
+				"--from=URL",
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+			);
+			const out = JSON.parse(result.stdout);
+			assert.ok(
+				!out.args.some((a: string) => a.startsWith("--profile")),
+				`--profile=value must be stripped before forwarding. args=${JSON.stringify(out.args)}`,
+			);
+			assert.deepStrictEqual(
+				out.args,
+				["--from=URL"],
+				"non-global --flag=value entries must be forwarded verbatim",
+			);
+		});
+
+		test("verb-detection is robust when a string global flag's value equals the verb name", async () => {
+			// Regression guard for sliceArgvAfterVerb(): when a string
+			// global flag (e.g. --profile) takes a value that happens to
+			// match the verb token (`pass-through-cmd`), the slicer must
+			// consume the value as a flag-value and only treat the LATER
+			// occurrence as the verb. If it didn't, we'd dispatch on the
+			// flag-value and forward the real verb to the handler.
+			const result = await c8(
+				"--profile",
+				"pass-through-cmd",
+				"pass-through-cmd",
+				"actual-positional",
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+			);
+			const out = JSON.parse(result.stdout);
+			assert.deepStrictEqual(
+				out.args,
+				["actual-positional"],
+				`expected only the post-verb positional to reach the handler; the flag-value occurrence of the verb must not be forwarded. args=${JSON.stringify(out.args)}`,
+			);
+		});
+
 		test("strips --json (a GLOBAL_FLAG) but applies its effect to the runtime", async () => {
 			// --json must be stripped from args reaching the plugin, AND it must
 			// switch c8ctl.outputMode to json (which the bare-function plugin
@@ -302,7 +356,7 @@ describe("Passthrough plugin contract (#366)", () => {
 		});
 	});
 
-	describe("Duplicate command name policy (#366)", () => {
+	describe("Duplicate command name policy (#363)", () => {
 		// Class-scoped guard: c8ctl resolves plugin command-name conflicts
 		// with explicit "first registration wins" semantics. This replaces
 		// the previous implicit "last-loaded wins" Object.assign merge. The
