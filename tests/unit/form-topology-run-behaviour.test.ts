@@ -157,8 +157,8 @@ describe("CLI behavioural: run", () => {
 		const result = await c8("run", "process.unsupported");
 		assert.strictEqual(result.status, 1);
 		assert.ok(
-			result.stderr.includes("Unsupported file extension"),
-			`Expected unsupported extension error in stderr.\nActual stderr:\n${result.stderr}`,
+			result.stderr.includes("run requires a .bpmn file"),
+			`Expected .bpmn-only error in stderr.\nActual stderr:\n${result.stderr}`,
 		);
 	});
 

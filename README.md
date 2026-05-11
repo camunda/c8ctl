@@ -75,11 +75,26 @@ c8ctl --version
 
 ### Default Extensions
 
-When scanning directories, `deploy`, `run`, and `watch` only include files with these extensions:
+When scanning directories, `deploy` and `watch` only include files with these extensions by default:
 
-`.bpmn`, `.dmn`, `.form`, `.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`
+`.bpmn`, `.dmn`, `.form`
 
-Use `--extensions` to override (e.g. `--extensions=.bpmn,.dmn`).
+Explicitly named files bypass the extension allow-list (e.g. `c8 deploy my-doc.md`). Note that `.c8ignore` rules still apply.
+
+Use `--extensions` to add more types during directory discovery (merged with defaults):
+
+```bash
+c8 deploy --extensions=.md,.txt
+c8 watch --extensions=.md
+```
+
+Use `--all-extensions` to include all server-supported types (`.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`):
+
+```bash
+c8 deploy --all-extensions
+```
+
+Skipped files are logged to stderr with an actionable hint.
 
 ### Ignoring Files (`.c8ignore`)
 
@@ -1495,6 +1510,8 @@ Deploy files to Camunda (auto-discovers deployable files in directories)
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--force` | boolean |  | Deploy any file type, ignoring the default extension allow-list |
+| `--extensions` | string |  | Comma-separated list of additional file extensions to include when scanning directories (e.g. .md,.txt). Explicit file paths bypass the extension allow-list. |
+| `--all-extensions` | boolean |  | Include all server-supported file extensions during directory discovery |
 
 **Examples:**
 
@@ -1602,7 +1619,8 @@ Watch files for changes and auto-deploy
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--force` | boolean |  | Continue watching after all deployment errors |
-| `--extensions` | string |  | Comma-separated list of file extensions to watch (e.g. .bpmn,.dmn,.form) |
+| `--extensions` | string |  | Comma-separated list of additional file extensions to watch (merged with defaults, e.g. .md,.txt) |
+| `--all-extensions` | boolean |  | Watch all server-supported file extensions |
 
 **Examples:**
 

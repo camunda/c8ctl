@@ -341,6 +341,8 @@ describe("Help Module", () => {
 		const output = consoleLogSpy.join("\n");
 		assert.ok(output.includes("c8ctl deploy"));
 		assert.ok(output.includes("Deploy files"));
+		assert.ok(output.includes("--extensions"));
+		assert.ok(output.includes("--all-extensions"));
 	});
 
 	test("showCommandHelp shows run help", () => {
@@ -360,6 +362,8 @@ describe("Help Module", () => {
 		assert.ok(output.includes("Watch files"));
 		assert.ok(output.includes("Alias: w"));
 		assert.ok(output.includes("--force"));
+		assert.ok(output.includes("--extensions"));
+		assert.ok(output.includes("--all-extensions"));
 	});
 
 	test("showCommandHelp shows open help", () => {

@@ -9,7 +9,10 @@ import { deployResources } from "../deployments.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules } from "../ignore.ts";
 import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
-import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
+import {
+	ALL_DEPLOYABLE_EXTENSIONS,
+	DEPLOYABLE_EXTENSIONS,
+} from "./resource-extensions.ts";
 
 export { DEPLOY_COOLDOWN };
 
@@ -29,14 +32,21 @@ const DEBOUNCE_DELAY = 200; // ms to wait after last fs event before deploying
 export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	const { logger } = ctx;
 
-	// Parse --extensions flag into an array of extensions
-	const watchedExtensions =
-		flags.extensions && String(flags.extensions).trim()
-			? String(flags.extensions)
-					.split(",")
-					.map((e) => e.trim())
-					.filter(Boolean)
-					.map((e) => (e.startsWith(".") ? e : `.${e}`))
+	// Parse --extensions / --all-extensions flags into an array of extensions.
+	// --extensions merges with the defaults (same semantics as deploy).
+	const watchedExtensions = flags["all-extensions"]
+		? ALL_DEPLOYABLE_EXTENSIONS
+		: flags.extensions && String(flags.extensions).trim()
+			? [
+					...new Set([
+						...DEPLOYABLE_EXTENSIONS,
+						...String(flags.extensions)
+							.split(",")
+							.map((e) => e.trim())
+							.filter(Boolean)
+							.map((e) => (e.startsWith(".") ? e : `.${e}`)),
+					]),
+				]
 			: DEPLOYABLE_EXTENSIONS;
 
 	// watch treats resource + positionals as path varargs; default to "."

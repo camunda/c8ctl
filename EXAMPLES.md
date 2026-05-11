@@ -606,15 +606,32 @@ The CLI will detect duplicate IDs and provide a helpful error message showing wh
 
 ### Default Extensions
 
-When scanning directories, `deploy`, `run`, and `watch` only include files matching these extensions by default:
+When scanning directories, `deploy` and `watch` only include files matching these extensions by default:
 
-`.bpmn`, `.dmn`, `.form`, `.md`, `.txt`, `.xml`, `.rpa`, `.json`, `.config`, `.yml`, `.yaml`
+`.bpmn`, `.dmn`, `.form`
 
-Override with `--extensions`:
+Explicitly named files bypass the extension allow-list (`.c8ignore` rules still apply):
 
 ```bash
-c8 deploy --extensions=.bpmn,.dmn
-c8 watch --extensions=.bpmn,.form
+# Explicit file — deploys regardless of extension
+c8 deploy my-doc.md
+
+# Directory walk — only .bpmn/.dmn/.form by default
+c8 deploy ./my-project/
+```
+
+Use `--extensions` to add more types during directory discovery (merged with defaults):
+
+```bash
+c8 deploy --extensions=.md,.txt
+c8 watch --extensions=.md
+```
+
+Use `--all-extensions` to include all server-supported types:
+
+```bash
+c8 deploy --all-extensions
+c8 watch --all-extensions
 ```
 
 ### Ignoring Files (`.c8ignore`)
