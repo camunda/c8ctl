@@ -28,25 +28,35 @@ const FIXTURE_DIR = join(
 	__dirname,
 	"../fixtures/plugins/plugin-with-passthrough",
 );
+const CONFLICTING_FIXTURE_DIR = join(
+	__dirname,
+	"../fixtures/plugins/zzz-plugin-conflicting",
+);
 
-function makePluginDataDir(): string {
+function makePluginDataDir(
+	extraFixtures: { name: string; src: string }[] = [],
+) {
 	const dir = mkdtempSync(join(tmpdir(), "c8ctl-passthrough-test-"));
 	writeFileSync(
 		join(dir, "session.json"),
 		JSON.stringify({ outputMode: "text" }),
 	);
-	const pluginInstallDir = join(
-		dir,
-		"plugins",
-		"node_modules",
-		"plugin-with-passthrough",
-	);
+	const installRoot = join(dir, "plugins", "node_modules");
+	const pluginInstallDir = join(installRoot, "plugin-with-passthrough");
 	mkdirSync(pluginInstallDir, { recursive: true });
 	cpSync(FIXTURE_DIR, pluginInstallDir, { recursive: true });
+	for (const { name, src } of extraFixtures) {
+		const dst = join(installRoot, name);
+		mkdirSync(dst, { recursive: true });
+		cpSync(src, dst, { recursive: true });
+	}
 	return dir;
 }
 
 const PLUGIN_DATA_DIR = makePluginDataDir();
+const CONFLICT_DATA_DIR = makePluginDataDir([
+	{ name: "zzz-plugin-conflicting", src: CONFLICTING_FIXTURE_DIR },
+]);
 
 async function c8(...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
@@ -55,6 +65,17 @@ async function c8(...args: string[]) {
 			CAMUNDA_BASE_URL: "http://test-cluster/v2",
 			HOME: "/tmp/c8ctl-passthrough-test-nonexistent-home",
 			C8CTL_DATA_DIR: PLUGIN_DATA_DIR,
+		},
+	});
+}
+
+async function c8WithConflict(...args: string[]) {
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+		env: {
+			...process.env,
+			CAMUNDA_BASE_URL: "http://test-cluster/v2",
+			HOME: "/tmp/c8ctl-passthrough-test-nonexistent-home",
+			C8CTL_DATA_DIR: CONFLICT_DATA_DIR,
 		},
 	});
 }
@@ -255,6 +276,66 @@ describe("Passthrough plugin contract (#366)", () => {
 				json.flagsHint,
 				["--from <url>", "--to <path>", "--dry"],
 				"flagsHint must be present in the JSON help payload",
+			);
+		});
+
+		test("passthrough JSON help carries the same envelope as standard JSON help", async () => {
+			// The shape contract: passthrough JSON help adds a `kind` and
+			// passthrough-specific fields, but it must NOT omit the standard
+			// `globalFlags` / `searchFlags` / `agentFlags` envelope that
+			// callers and agents rely on for every help payload.
+			const result = await c8("--json", "help", "pass-through-cmd");
+			assert.strictEqual(result.status, 0);
+			const json = JSON.parse(result.stdout);
+			assert.ok(
+				json.globalFlags && typeof json.globalFlags === "object",
+				`passthrough JSON help must include globalFlags. got: ${JSON.stringify(json)}`,
+			);
+			assert.ok(
+				json.searchFlags && typeof json.searchFlags === "object",
+				`passthrough JSON help must include searchFlags. got: ${JSON.stringify(json)}`,
+			);
+			assert.ok(
+				json.agentFlags && typeof json.agentFlags === "object",
+				`passthrough JSON help must include agentFlags. got: ${JSON.stringify(json)}`,
+			);
+		});
+	});
+
+	describe("Duplicate command name policy (#366)", () => {
+		// Class-scoped guard: c8ctl resolves plugin command-name conflicts
+		// with explicit "first registration wins" semantics. This replaces
+		// the previous implicit "last-loaded wins" Object.assign merge. The
+		// fixture set in CONFLICT_DATA_DIR has both `plugin-with-passthrough`
+		// (loads first; alphabetically earlier) and `zzz-plugin-conflicting`
+		// (loads second), each declaring a `pass-through-cmd` handler that
+		// prints a unique `from` field. The winning handler's payload
+		// proves which plugin actually got dispatched.
+		test("first registration wins; the loser's handler is unreachable", async () => {
+			const result = await c8WithConflict("pass-through-cmd", "probe");
+			assert.strictEqual(
+				result.status,
+				0,
+				`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+			);
+			const out = JSON.parse(result.stdout);
+			assert.strictEqual(
+				out.from,
+				undefined,
+				"the winning fixture (plugin-with-passthrough) must respond, " +
+					`not the losing one. got: ${result.stdout}`,
+			);
+			assert.deepStrictEqual(out.args, ["probe"]);
+		});
+
+		test("the dropped duplicate is reported on stderr at load time", async () => {
+			const result = await c8WithConflict("pass-through-cmd", "probe");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/zzz-plugin-conflicting/.test(result.stderr) &&
+					/pass-through-cmd/.test(result.stderr) &&
+					/duplicate|already/i.test(result.stderr),
+				`expected a load-time warning naming the losing plugin and the conflicting command. stderr: ${result.stderr}`,
 			);
 		});
 	});

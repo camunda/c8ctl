@@ -831,6 +831,14 @@ export async function showCommandHelp(command: string): Promise<void> {
 			);
 	if (pluginInfo) {
 		if (logger.mode === "json") {
+			// Match the standard `showCommandHelp()` JSON shape so callers
+			// can rely on `globalFlags` / `searchFlags` / `agentFlags` being
+			// present regardless of `kind`. Passthrough adds the
+			// `kind: "passthrough"` discriminator plus the passthrough-only
+			// fields on top.
+			const version = getVersion();
+			const pluginCommandsInfo = getPluginCommandsInfo();
+			const allHelp = buildHelpJson(version, pluginCommandsInfo);
 			logger.json({
 				command,
 				verb: command,
@@ -840,6 +848,9 @@ export async function showCommandHelp(command: string): Promise<void> {
 				passthroughHint: pluginInfo.passthroughHint,
 				flagsHint: pluginInfo.flagsHint ?? [],
 				examples: pluginInfo.examples ?? [],
+				globalFlags: allHelp.globalFlags,
+				searchFlags: allHelp.searchFlags,
+				agentFlags: allHelp.agentFlags,
 			});
 			return;
 		}
