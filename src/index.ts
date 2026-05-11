@@ -405,6 +405,18 @@ async function main() {
 		return;
 	}
 
+	// `c8ctl <verb> [<resource>] [args] --help` — uniformly route to the help
+	// renderer. Placed AFTER the `help`/`menu` reserved-verb handler and
+	// BEFORE plugin pre-parse so that every verb (built-in or plugin,
+	// resourceless or resource-required) honours --help. Closes the
+	// class-scoped contract gap pinned by tests/unit/two-stage-parser-contract.test.ts
+	// (#373) where verbs whose missing-resource guard never fired (deploy,
+	// run, doctor, output, version, …) silently dispatched to the handler.
+	if (values.help) {
+		await showCommandHelp(verb);
+		return;
+	}
+
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.
 	const pluginCommands = getPluginCommands();
