@@ -650,12 +650,13 @@ export function clearLoadedPlugins(): void {
 
 /**
  * Snapshot of plugin collisions detected at load time (#363). Returns
- * a defensive copy so callers cannot mutate the loader's bookkeeping.
+ * a deep defensive copy of frozen records so callers cannot mutate
+ * the loader's bookkeeping (neither the array nor the entries).
  * Order reflects the order in which the loader observed the
  * collisions.
  */
-export function getPluginCollisions(): PluginCollision[] {
-	return pluginCollisions.slice();
+export function getPluginCollisions(): readonly Readonly<PluginCollision>[] {
+	return pluginCollisions.map((c) => Object.freeze({ ...c }));
 }
 
 /**

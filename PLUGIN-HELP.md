@@ -457,8 +457,9 @@ package name:
 
 - ✅ `c8ctl-plugin-mycorp` exports `mycorp-model`, `mycorp-export`
 - ✅ `c8ctl-plugin-acme` exports `acme-deploy`, `acme-status`
-- ❌ Two plugins both exporting `model` (one will be silently dropped at
-  load time, with a warning visible only on stderr)
+- ❌ Two plugins both exporting `model` (one will be dropped at load
+  time — c8ctl logs a `logger.warn` on stderr and surfaces the drop via
+  `c8ctl doctor plugin`, but the colliding command itself is unreachable)
 
 This is **not enforced** — c8ctl will load any command name that
 doesn't collide with a built-in — but a published convention reduces

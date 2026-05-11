@@ -77,17 +77,24 @@ guarantees that, today, no command silently disappears.
 Two installed plugins (different package names, same command):
 
 ```sh
-mkdir -p /tmp/c8ctl-collision/plugins/node_modules/plugin-a
-mkdir -p /tmp/c8ctl-collision/plugins/node_modules/plugin-b
-cat > /tmp/c8ctl-collision/plugins/node_modules/plugin-a/package.json <<'JSON'
+ROOT=/tmp/c8ctl-collision/plugins/node_modules
+mkdir -p "$ROOT/plugin-a" "$ROOT/plugin-b"
+
+cat > "$ROOT/plugin-a/package.json" <<'JSON'
 { "name": "plugin-a", "version": "0.0.0", "keywords": ["c8ctl-plugin"], "main": "c8ctl-plugin.js", "type": "module" }
 JSON
-cat > /tmp/c8ctl-collision/plugins/node_modules/plugin-a/c8ctl-plugin.js <<'JS'
+cat > "$ROOT/plugin-a/c8ctl-plugin.js" <<'JS'
 export const commands = { 'model': async () => console.log('A wins') };
 export const metadata = { name: 'plugin-a' };
 JS
-cp -R /tmp/c8ctl-collision/plugins/node_modules/plugin-{a,b}
-sed -i '' 's/plugin-a/plugin-b/g; s/A wins/B wins/' /tmp/c8ctl-collision/plugins/node_modules/plugin-b/{package.json,c8ctl-plugin.js}
+
+cat > "$ROOT/plugin-b/package.json" <<'JSON'
+{ "name": "plugin-b", "version": "0.0.0", "keywords": ["c8ctl-plugin"], "main": "c8ctl-plugin.js", "type": "module" }
+JSON
+cat > "$ROOT/plugin-b/c8ctl-plugin.js" <<'JS'
+export const commands = { 'model': async () => console.log('B wins') };
+export const metadata = { name: 'plugin-b' };
+JS
 
 C8CTL_DATA_DIR=/tmp/c8ctl-collision c8ctl doctor plugin
 ```
