@@ -239,12 +239,24 @@ describe("Plugin Flags CLI subprocess — required + built-in collision (#364)",
 			`expected error to name the colliding flag. stderr: ${result.stderr}`,
 		);
 		assert.ok(
-			result.stderr.includes("required") && result.stderr.includes("built-in"),
-			`expected actionable error mentioning required + built-in collision. stderr: ${result.stderr}`,
+			result.stderr.includes(
+				"is declared required but conflicts with a built-in flag",
+			),
+			`expected new actionable error sentence. stderr: ${result.stderr}`,
 		);
+		// The misleading legacy message is the bare phrase "--profile is
+		// required" with no surrounding "declared" / "conflicts" context.
+		// Assert it is absent independently of stderr formatting (text vs
+		// JSON, ✗ prefix, etc.).
+		const legacyBareError =
+			/(?:^|[^a-zA-Z])--profile is required(?:[^a-zA-Z]|$)/;
+		const withoutNewMessage = result.stderr
+			.split("\n")
+			.filter((line) => !line.includes("is declared required but conflicts"))
+			.join("\n");
 		assert.ok(
-			!result.stderr.match(/^ERROR: --profile is required\s*$/m),
-			`error must not be the misleading bare "--profile is required". stderr: ${result.stderr}`,
+			!legacyBareError.test(withoutNewMessage),
+			`legacy bare "--profile is required" must not appear. stderr: ${result.stderr}`,
 		);
 		assert.strictEqual(
 			result.stdout.trim(),

@@ -440,7 +440,12 @@ async function main() {
 					.map((o) => o.short)
 					.filter((s): s is string => s !== undefined),
 			);
-			const mergedOptions = { ...builtinOptions };
+			// Use a null-prototype object so plugin-supplied flag names like
+			// `__proto__`, `constructor`, or `prototype` cannot pollute the
+			// prototype chain when later assigned (paired with the
+			// `Object.hasOwn` collision check below).
+			const mergedOptions: Record<string, (typeof builtinOptions)[string]> =
+				Object.assign(Object.create(null), builtinOptions);
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
 				if (Object.hasOwn(builtinOptions, name)) {
