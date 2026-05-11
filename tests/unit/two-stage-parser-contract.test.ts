@@ -28,7 +28,7 @@ import assert from "node:assert";
 import { describe, test } from "node:test";
 import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
 import { isRecord } from "../../src/logger.ts";
-import { c8 } from "../utils/cli.ts";
+import { c8, c8WithOptions } from "../utils/cli.ts";
 
 /** Parse stdout as JSON and narrow to a record, or fail with context. */
 function parseJsonRecord(
@@ -105,20 +105,20 @@ describe("two-stage parser contract: --help reaches the help renderer", () => {
 	test("c8ctl <verb> --help renders verb-level help for every verb in the registry", async () => {
 		// Class-scoped: every verb in the registry must honour `--help` after
 		// the verb. Today this works by accident for verbs with
-		// `requiresResource: true` (the missing-resource guard at index.ts:546
-		// honours `values.help`), but verbs with `requiresResource: false`
-		// (deploy, run, watch, mcp-proxy, doctor, output, version, repl) have
-		// no such guard and the handler runs anyway. The contract is uniform:
-		// `--help` after the verb must always reach the help renderer.
+		// `requiresResource: true` (the missing-resource guard in
+		// `parseCliArgs` honours `values.help`), but verbs with
+		// `requiresResource: false` (deploy, run, watch, mcp-proxy, doctor,
+		// output, version, repl) have no such guard and the handler runs
+		// anyway. The contract is uniform: `--help` after the verb must
+		// always reach the help renderer.
 		//
-		// We exclude verbs whose handlers start a long-running / interactive
-		// process when `--help` is silently dropped today: those would hang
-		// the test run instead of failing it. Once `--help` is honoured at
-		// the parser layer they will exit fast and can be re-enabled.
+		// Long-running / interactive verbs (watch, repl, mcp-proxy) are
+		// invoked with a per-process timeout so a regression that re-allows
+		// the handler to start fails fast (timeout → non-zero status) instead
+		// of stalling the suite.
 		const LONG_RUNNING_VERBS = new Set(["watch", "repl", "mcp-proxy"]);
-		const allVerbs = Object.keys(COMMAND_REGISTRY).filter(
-			(v) => !LONG_RUNNING_VERBS.has(v),
-		);
+		const HELP_TIMEOUT_MS = 5_000;
+		const allVerbs = Object.keys(COMMAND_REGISTRY);
 		assert.ok(
 			allVerbs.length >= 10,
 			`expected many verbs in registry, got ${allVerbs.length}`,
@@ -126,7 +126,9 @@ describe("two-stage parser contract: --help reaches the help renderer", () => {
 
 		const failures: string[] = [];
 		for (const verb of allVerbs) {
-			const result = await c8(verb, "--help");
+			const result = LONG_RUNNING_VERBS.has(verb)
+				? await c8WithOptions({ timeout: HELP_TIMEOUT_MS }, verb, "--help")
+				: await c8(verb, "--help");
 			if (result.status !== 0) {
 				failures.push(
 					`\`c8ctl ${verb} --help\` → exit ${result.status}; stderr: ${result.stderr.slice(0, 200)}`,
@@ -135,7 +137,9 @@ describe("two-stage parser contract: --help reaches the help renderer", () => {
 			}
 			// Stderr must be empty under help: a help invocation that prints
 			// warnings, info messages, or errors is leaking implementation
-			// detail (or, worse, executing) on the help path.
+			// detail (or, worse, executing) on the help path. The c8() helper
+			// scrubs DEBUG/C8CTL_DEBUG/NODE_DEBUG/NODE_OPTIONS from the child
+			// env so this assertion is not sensitive to host environment.
 			if (result.stderr !== "") {
 				failures.push(
 					`\`c8ctl ${verb} --help\` produced stderr: ${result.stderr.slice(0, 200)}`,
