@@ -29,13 +29,43 @@ interface PluginMetadata {
 	name?: string;
 	description?: string;
 	commands?: {
-		[commandName: string]: {
-			description?: string;
-			examples?: { command: string; description: string }[];
-			/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
-			subcommands?: { name: string; description: string }[];
-		};
+		[commandName: string]: PluginCommandMeta;
 	};
+}
+
+/**
+ * Per-command plugin metadata.
+ *
+ * A plugin command is **either** metadata-driven (declares typed flags via
+ * the `{ flags, handler }` command form) **or** a passthrough command
+ * (`passthrough: true` + `passthroughHint`). Mutually exclusive — see
+ * #251 / #366. Declaring both is rejected at load time.
+ */
+export interface PluginCommandMeta {
+	description?: string;
+	helpDescription?: string;
+	examples?: { command: string; description: string }[];
+	/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
+	subcommands?: { name: string; description: string }[];
+	/**
+	 * If true, c8ctl strips GLOBAL_FLAGS from argv and forwards everything
+	 * else verbatim to the bare-function handler. Help and JSON help
+	 * advertise the boundary explicitly.
+	 *
+	 * MUST NOT appear together with the `{ flags, handler }` command form;
+	 * the load-time validator drops any command that declares both.
+	 */
+	passthrough?: boolean;
+	/**
+	 * Required when `passthrough` is true. Short text rendered in help that
+	 * advertises the boundary, e.g. "Forwards args to `kubectl`".
+	 */
+	passthroughHint?: string;
+	/**
+	 * Optional documentation-only flag list rendered in help under
+	 * passthrough commands. NOT parsed by c8ctl.
+	 */
+	flagsHint?: string[];
 }
 
 interface LoadedPlugin {
@@ -45,6 +75,154 @@ interface LoadedPlugin {
 }
 
 const loadedPlugins = new Map<string, LoadedPlugin>();
+
+/**
+ * Validate the passthrough/flags mutual-exclusion rule (#366). Removes
+ * offending commands from the registered set so they cannot be invoked,
+ * and emits a `logger.warn` naming the plugin and command so the
+ * misconfiguration is visible at startup.
+ *
+ * The contract: a command MUST NOT declare `passthrough: true` AND use the
+ * `{ flags, handler }` form. Pick one. A passthrough command without a
+ * `passthroughHint` is also rejected (the hint is what makes the boundary
+ * legible to users and agents).
+ *
+ * Mutates `plugin.commands` in place. Safe to call after each plugin is
+ * loaded.
+ */
+function validatePassthroughCommands(plugin: LoadedPlugin): void {
+	const logger = getLogger();
+	const meta = plugin.metadata?.commands ?? {};
+	for (const commandName of Object.keys(plugin.commands)) {
+		const commandMeta = meta[commandName];
+		if (commandMeta?.passthrough === undefined) continue;
+
+		// `passthrough: false` is equivalent to "not opted in" — silently
+		// skip. Any other non-`true` value (e.g. the string "true", a
+		// number) is a contract violation: dispatch and help both gate on
+		// `=== true`, so a truthy non-true value would silently disagree
+		// with them. Reject loudly at load time.
+		if (commandMeta.passthrough === false) continue;
+		if (commandMeta.passthrough !== true) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' has metadata.passthrough set to ` +
+					`${JSON.stringify(commandMeta.passthrough)} but the contract requires the boolean ` +
+					"literal `true` (or `false` / omitted to opt out). Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+			continue;
+		}
+
+		const cmd = plugin.commands[commandName];
+		const hasFlagsForm = typeof cmd !== "function";
+		if (hasFlagsForm) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' declares both passthrough:true AND flags. ` +
+					"Pick one \u2014 a passthrough command must use the bare-function handler form. " +
+					"Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+			continue;
+		}
+		if (
+			typeof commandMeta.passthroughHint !== "string" ||
+			commandMeta.passthroughHint.trim() === ""
+		) {
+			logger.warn(
+				`Plugin '${plugin.name}' command '${commandName}' declares passthrough:true ` +
+					"but is missing a non-empty passthroughHint. The hint is required so help and " +
+					"agents can advertise the boundary. Dropping this command (#366).",
+			);
+			delete plugin.commands[commandName];
+			continue;
+		}
+
+		// `flagsHint` is documentation-only and consumed by the help
+		// renderer, which assumes `string[]`. Validate the shape here so a
+		// mis-typed value can't reach the renderer. The field is optional;
+		// invalid shapes are stripped (not fatal) so the command itself
+		// continues to work — only the doc affordance is lost.
+		const flagsHint = commandMeta.flagsHint;
+		if (flagsHint !== undefined) {
+			const valid =
+				Array.isArray(flagsHint) &&
+				flagsHint.every((entry) => typeof entry === "string");
+			if (!valid) {
+				logger.warn(
+					`Plugin '${plugin.name}' command '${commandName}' declares metadata.flagsHint ` +
+						"but it is not a string[]. Ignoring flagsHint (#366).",
+				);
+				delete commandMeta.flagsHint;
+			}
+		}
+	}
+}
+
+/**
+ * Reject duplicate plugin command names at load time. If `plugin` declares
+ * a command name that is already registered by an earlier-loaded plugin,
+ * drop it from `plugin.commands` and emit `logger.warn` naming both
+ * plugins so the conflict is visible at startup.
+ *
+ * **Conflict policy: first registration wins.** This is an explicit
+ * choice (#366) and replaces the previous implicit "last-loaded wins"
+ * behaviour produced by `Object.assign` over `loadedPlugins` in
+ * insertion order. Plugins cannot override one another by registering
+ * the same command name; if you want a different command, give it a
+ * different name. Default plugins always load first, so user-installed
+ * plugins cannot override default commands by name.
+ *
+ * This guarantees that the merged map returned by `getPluginCommands()`
+ * has a single owning plugin per command name, which keeps dispatch and
+ * `isPassthroughPluginCommand()` consistent: the help renderer and the
+ * runtime always agree on which plugin handles a given verb.
+ *
+ * Mutates `plugin.commands` in place. Safe to call after each plugin is
+ * loaded; relies on `loadedPlugins` already containing previously-loaded
+ * plugins.
+ */
+function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
+	const logger = getLogger();
+	for (const commandName of Object.keys(plugin.commands)) {
+		for (const existing of loadedPlugins.values()) {
+			if (Object.hasOwn(existing.commands, commandName)) {
+				logger.warn(
+					`Plugin '${plugin.name}' tried to register command '${commandName}' but it is ` +
+						`already provided by plugin '${existing.name}'. The first registration wins; ` +
+						`dropping the duplicate from '${plugin.name}'.`,
+				);
+				delete plugin.commands[commandName];
+				break;
+			}
+		}
+	}
+}
+
+/**
+ * Reject a plugin whose name collides with an already-loaded plugin.
+ * This is a separate concern from the command-name collision policy
+ * tracked under #363: that policy rejects two plugins exporting the
+ * same command name, while this one rejects two plugins sharing the
+ * same `package.json#name`. Both follow first-registration-wins.
+ * Without this guard a user-installed package sharing a name with a
+ * default plugin (or with another already-loaded plugin) would
+ * silently overwrite the prior `loadedPlugins.set()` entry, bypassing
+ * the command-name policy entirely.
+ *
+ * Returns `true` when the caller should skip the load; `false` when
+ * the name is free.
+ */
+function isDuplicatePluginName(pluginName: string): boolean {
+	const logger = getLogger();
+	if (loadedPlugins.has(pluginName)) {
+		logger.warn(
+			`Plugin name '${pluginName}' is already loaded; refusing to load a second plugin ` +
+				`with the same name. The first registration wins.`,
+		);
+		return true;
+	}
+	return false;
+}
 
 /**
  * Load default plugins bundled with c8ctl
@@ -80,7 +258,12 @@ async function loadDefaultPlugins(): Promise<void> {
 			return;
 		}
 
-		const pluginDirs = readdirSync(defaultPluginsDir);
+		// Sort to make load order deterministic across filesystems/OSes.
+		// The first-registration-wins duplicate-name policy in
+		// `rejectDuplicateCommandNames` relies on this — without a stable
+		// sort, "who wins" would depend on `readdirSync()` order, which
+		// varies across platforms and filesystems.
+		const pluginDirs = readdirSync(defaultPluginsDir).sort();
 		logger.debug(`Found ${pluginDirs.length} default plugin(s)`);
 
 		for (const pluginDir of pluginDirs) {
@@ -106,6 +289,14 @@ async function loadDefaultPlugins(): Promise<void> {
 				const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 				const pluginName = packageJson.name || `default-${pluginDir}`;
 
+				// Check for duplicate plugin name BEFORE the dynamic import
+				// so a duplicate-name plugin's module code never runs (the
+				// import has top-level side effects we don't want to execute
+				// only to throw the result away).
+				if (isDuplicatePluginName(pluginName)) {
+					continue;
+				}
+
 				const pluginFile = existsSync(pluginFileJs)
 					? pluginFileJs
 					: pluginFileTs;
@@ -116,12 +307,15 @@ async function loadDefaultPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					loadedPlugins.set(pluginName, {
+					const loaded: LoadedPlugin = {
 						name: pluginName,
-						commands: plugin.commands,
+						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
-					});
-					const commandNames = Object.keys(plugin.commands);
+					};
+					validatePassthroughCommands(loaded);
+					rejectDuplicateCommandNames(loaded);
+					loadedPlugins.set(pluginName, loaded);
+					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
 						`Successfully loaded default plugin: ${pluginName} with ${commandNames.length} commands:`,
 						commandNames,
@@ -159,7 +353,12 @@ export async function loadInstalledPlugins(): Promise<void> {
 	}
 
 	try {
-		const entries = readdirSync(nodeModulesPath);
+		// Sort to make load order deterministic across filesystems/OSes.
+		// The first-registration-wins duplicate-name policy in
+		// `rejectDuplicateCommandNames` relies on this — without a stable
+		// sort, "who wins" would depend on `readdirSync()` order, which
+		// varies across platforms and filesystems.
+		const entries = readdirSync(nodeModulesPath).sort();
 		logger.debug(`Scanning ${entries.length} entries in node_modules`);
 
 		const packagesToScan: string[] = [];
@@ -171,10 +370,10 @@ export async function loadInstalledPlugins(): Promise<void> {
 			}
 
 			if (entry.startsWith("@")) {
-				// Scoped package - scan subdirectories
+				// Scoped package - scan subdirectories (sorted for determinism).
 				const scopePath = join(nodeModulesPath, entry);
 				try {
-					const scopedPackages = readdirSync(scopePath);
+					const scopedPackages = readdirSync(scopePath).sort();
 					for (const scopedPkg of scopedPackages) {
 						if (!scopedPkg.startsWith(".")) {
 							packagesToScan.push(join(entry, scopedPkg));
@@ -191,6 +390,12 @@ export async function loadInstalledPlugins(): Promise<void> {
 				packagesToScan.push(entry);
 			}
 		}
+
+		// Final defensive sort: `@scope/pkg` paths interleave with bare
+		// `pkg` paths in the order we appended them, but for
+		// duplicate-name resolution we want a single, stable lexicographic
+		// order over the full set.
+		packagesToScan.sort();
 
 		logger.debug(
 			`Found ${packagesToScan.length} packages to scan:`,
@@ -237,20 +442,44 @@ export async function loadInstalledPlugins(): Promise<void> {
 					? pluginFileJs
 					: pluginFileTs;
 
+				// Use the package.json#name (not the filesystem directory
+				// entry) as the canonical plugin name / loadedPlugins key.
+				// Under npm aliases (e.g. `npm i my-alias@npm:real-plugin`),
+				// the install directory is `my-alias` but the package name is
+				// `real-plugin`. Keying by directory would miss real
+				// duplicate-name collisions and surface the wrong name in
+				// duplicate warnings. `packageName` is kept for filesystem /
+				// logging purposes only.
+				const pluginName =
+					typeof packageJson.name === "string" && packageJson.name.length > 0
+						? packageJson.name
+						: packageName;
+
+				// Check for duplicate plugin name BEFORE the dynamic import
+				// so a duplicate-name plugin's module code never runs (the
+				// import has top-level side effects we don't want to execute
+				// only to throw the result away).
+				if (isDuplicatePluginName(pluginName)) {
+					continue;
+				}
+
 				// Use file:// protocol and add timestamp to bust cache
 				const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
 				logger.debug(`Loading plugin from: ${pluginUrl}`);
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					loadedPlugins.set(packageName, {
-						name: packageName,
-						commands: plugin.commands,
+					const loaded: LoadedPlugin = {
+						name: pluginName,
+						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
-					});
-					const commandNames = Object.keys(plugin.commands);
+					};
+					validatePassthroughCommands(loaded);
+					rejectDuplicateCommandNames(loaded);
+					loadedPlugins.set(pluginName, loaded);
+					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
-						`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`,
+						`Successfully loaded plugin: ${pluginName} (dir: ${packageName}) with ${commandNames.length} commands:`,
 						commandNames,
 					);
 				}
@@ -328,9 +557,16 @@ export interface PluginCommandInfo {
 	commandName: string;
 	pluginName: string;
 	description?: string;
+	helpDescription?: string;
 	examples?: { command: string; description: string }[];
 	/** Subcommands for shell completion (e.g. cluster → start, stop, status). */
 	subcommands?: { name: string; description: string }[];
+	/** True when the command opted into the #366 passthrough contract. */
+	passthrough?: boolean;
+	/** Required when passthrough is true — short text that names the boundary. */
+	passthroughHint?: string;
+	/** Optional documentation-only flag list rendered under passthrough help. */
+	flagsHint?: string[];
 }
 
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
@@ -338,17 +574,35 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 
 	for (const plugin of loadedPlugins.values()) {
 		for (const commandName of Object.keys(plugin.commands)) {
+			const meta = plugin.metadata?.commands?.[commandName];
 			infos.push({
 				commandName,
 				pluginName: plugin.name,
-				description: plugin.metadata?.commands?.[commandName]?.description,
-				examples: plugin.metadata?.commands?.[commandName]?.examples,
-				subcommands: plugin.metadata?.commands?.[commandName]?.subcommands,
+				description: meta?.description,
+				helpDescription: meta?.helpDescription,
+				examples: meta?.examples,
+				subcommands: meta?.subcommands,
+				passthrough: meta?.passthrough === true ? true : undefined,
+				passthroughHint: meta?.passthroughHint,
+				flagsHint: meta?.flagsHint,
 			});
 		}
 	}
 
 	return infos;
+}
+
+/**
+ * True if the named command is a registered passthrough plugin command
+ * (#366). Used by the dispatcher to gate the strip-and-forward path.
+ */
+export function isPassthroughPluginCommand(commandName: string): boolean {
+	for (const plugin of loadedPlugins.values()) {
+		if (!Object.hasOwn(plugin.commands, commandName)) continue;
+		const meta = plugin.metadata?.commands?.[commandName];
+		if (meta?.passthrough === true) return true;
+	}
+	return false;
 }
 
 /**

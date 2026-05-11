@@ -10,6 +10,7 @@ import {
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
+	getCommandDef,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
 } from "./command-registry.ts";
@@ -814,6 +815,79 @@ function showVirtualTopicHelp(topic: string, resource: string): void {
  */
 export async function showCommandHelp(command: string): Promise<void> {
 	const logger = getLogger();
+
+	// Passthrough plugin contract (#366): if the command is a registered
+	// passthrough plugin command AND the name does not collide with a
+	// built-in verb (including aliases), render the passthrough help shape
+	// — NOT the registry-driven shape and NOT the plugin's own handler.
+	// This keeps the boundary visible to users and agents. Built-in verbs
+	// always win over plugins of the same name (consistent with dispatch).
+	// `getCommandDef` is alias-aware (e.g. `w` → `watch`), unlike the
+	// local `lookupVerb` which only checks COMMAND_REGISTRY keys.
+	const pluginInfo = getCommandDef(command)
+		? undefined
+		: getPluginCommandsInfo().find(
+				(p) => p.commandName === command && p.passthrough === true,
+			);
+	if (pluginInfo) {
+		if (logger.mode === "json") {
+			// Match the standard `showCommandHelp()` JSON shape so callers
+			// can rely on `globalFlags` / `searchFlags` / `agentFlags` being
+			// present regardless of `kind`. Passthrough adds the
+			// `kind: "passthrough"` discriminator plus the passthrough-only
+			// fields on top.
+			const version = getVersion();
+			const pluginCommandsInfo = getPluginCommandsInfo();
+			const allHelp = buildHelpJson(version, pluginCommandsInfo);
+			logger.json({
+				command,
+				verb: command,
+				kind: "passthrough",
+				description: pluginInfo.description ?? "",
+				helpDescription: pluginInfo.helpDescription,
+				passthroughHint: pluginInfo.passthroughHint,
+				flagsHint: pluginInfo.flagsHint ?? [],
+				examples: pluginInfo.examples ?? [],
+				globalFlags: allHelp.globalFlags,
+				searchFlags: allHelp.searchFlags,
+				agentFlags: allHelp.agentFlags,
+			});
+			return;
+		}
+		const lines: string[] = [];
+		const description = pluginInfo.description?.trim();
+		lines.push(
+			description ? `c8ctl ${command} — ${description}` : `c8ctl ${command}`,
+		);
+		if (pluginInfo.helpDescription) {
+			lines.push("");
+			lines.push(pluginInfo.helpDescription);
+		}
+		lines.push("");
+		lines.push("Passthrough command");
+		lines.push(
+			`  ${pluginInfo.passthroughHint ?? ""}\n  c8ctl forwards args verbatim after stripping its global flags.`,
+		);
+		if (pluginInfo.flagsHint && pluginInfo.flagsHint.length > 0) {
+			lines.push("");
+			lines.push(
+				"Underlying tool flags (documentation only — not parsed by c8ctl):",
+			);
+			for (const f of pluginInfo.flagsHint) {
+				lines.push(`  ${f}`);
+			}
+		}
+		if (pluginInfo.examples && pluginInfo.examples.length > 0) {
+			lines.push("");
+			lines.push("Examples:");
+			for (const ex of pluginInfo.examples) {
+				lines.push(`  ${ex.command}`);
+				lines.push(`      ${ex.description}`);
+			}
+		}
+		logger.info(lines.join("\n"));
+		return;
+	}
 
 	// JSON mode: emit structured help for machine/agent consumption
 	if (logger.mode === "json") {

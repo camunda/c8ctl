@@ -1,0 +1,8 @@
+{
+  "name": "plugin-with-passthrough",
+  "version": "0.0.0",
+  "description": "Test fixture: same package.json#name as plugin-with-passthrough — used to assert duplicate-name detection refuses to import the second copy at all (no top-level side effects).",
+  "keywords": ["c8ctl", "c8ctl-plugin"],
+  "main": "c8ctl-plugin.js",
+  "type": "module"
+}

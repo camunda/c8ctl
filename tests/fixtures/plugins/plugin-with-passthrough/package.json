@@ -1,0 +1,8 @@
+{
+	"name": "plugin-with-passthrough",
+	"version": "0.0.0",
+	"description": "Test plugin for passthrough contract (#366)",
+	"keywords": ["c8ctl", "c8ctl-plugin"],
+	"main": "c8ctl-plugin.js",
+	"type": "module"
+}

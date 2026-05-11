@@ -85,6 +85,14 @@ interface VerbInfo {
 	aliases: string[];
 	/** File-path argument instead of resources (deploy/run/watch). */
 	fileComplete: boolean;
+	/**
+	 * True for plugin commands that opted into the #366 passthrough
+	 * contract. The completion generators use this to (a) treat the
+	 * verb like a fileComplete verb at the resource position and (b)
+	 * restrict flag completion to GLOBAL_FLAGS, since c8ctl cannot
+	 * know what flags the wrapped external tool accepts.
+	 */
+	passthrough: boolean;
 }
 
 function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
@@ -107,6 +115,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 			resources,
 			aliases: def.aliases ?? [],
 			fileComplete,
+			passthrough: false,
 		});
 	}
 
@@ -121,6 +130,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 			resources: (cmd.subcommands ?? []).map((s) => s.name),
 			aliases: [],
 			fileComplete: false,
+			passthrough: cmd.passthrough === true,
 		});
 	}
 
@@ -149,6 +159,44 @@ function deriveAllFlagNames(): string[] {
 	}
 
 	return [...names].map((n) => `--${n}`);
+}
+
+/**
+ * Collect only the GLOBAL_FLAGS, formatted as `--name` literals.
+ * Used by passthrough-verb completion branches: c8ctl has no way to
+ * know what flags the wrapped external tool accepts, but the global
+ * c8ctl flags (e.g. `--profile`, `--json`, `--verbose`) DO still apply
+ * because `stripGlobalFlags()` consumes and applies them before
+ * forwarding the rest to the plugin handler. So globals are exactly
+ * the right suggestion set for `c8ctl <passthrough-verb> --<TAB>`.
+ */
+function deriveGlobalFlagNames(): string[] {
+	return Object.keys(GLOBAL_FLAGS).map((n) => `--${n}`);
+}
+
+/** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
+function deriveGlobalFlags(): {
+	name: string;
+	description: string;
+	type: string;
+	short?: string;
+}[] {
+	const out: {
+		name: string;
+		description: string;
+		type: string;
+		short?: string;
+	}[] = [];
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		const short = "short" in def ? def.short : undefined;
+		out.push({
+			name,
+			description: def.description,
+			type: def.type,
+			short,
+		});
+	}
+	return out;
 }
 
 /** Collect all flags with descriptions and types for rich completions (zsh/fish). */
@@ -247,6 +295,7 @@ function generateBashCompletion(): string {
 	const pluginCmds = getPluginCommandsInfo();
 	const verbInfos = deriveVerbInfos(pluginCmds);
 	const allFlags = deriveAllFlagNames();
+	const globalFlags = deriveGlobalFlagNames();
 	const helpResources = deriveHelpResources();
 
 	// All verb names (including aliases)
@@ -258,6 +307,12 @@ function generateBashCompletion(): string {
 
 	const verbsStr = [...allVerbs].join(" ");
 	const flagsStr = allFlags.join(" ");
+	const globalFlagsStr = globalFlags.join(" ");
+
+	// Passthrough verbs (#366) get file-completion at the resource
+	// position and global-flag-only completion at later positions.
+	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
+	const passthroughVerbsStr = passthroughVerbs.map((v) => v.verb).join(" ");
 
 	// Build per-verb resource variables
 	const resourceVars: string[] = [];
@@ -275,10 +330,14 @@ function generateBashCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete) {
-			// deploy/run/watch complete with files
+		if (v.fileComplete || v.passthrough) {
+			// deploy/run/watch and #366 passthrough verbs complete with
+			// files. Include aliases in the case pattern so e.g. `c8ctl
+			// w <TAB>` (alias for `watch`) gets file completion too.
+			const filePattern =
+				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
 			caseBranches.push(
-				`        ${v.verb})\n          COMPREPLY=( $(compgen -f -- "\${cur}") )\n          ;;`,
+				`        ${filePattern})\n          COMPREPLY=( $(compgen -f -- "\${cur}") )\n          ;;`,
 			);
 			continue;
 		}
@@ -315,8 +374,16 @@ _c8ctl_completions() {
   # Resources by verb
 ${resourceVars.join("\n")}
 
-  # Global flags
+  # All flags (global + per-command)
   local flags="${flagsStr}"
+
+  # GLOBAL_FLAGS only — used after a passthrough verb (#366), where
+  # c8ctl cannot know what flags the wrapped external tool accepts.
+  local global_flags="${globalFlagsStr}"
+
+  # Passthrough verbs (#366): only c8ctl globals are meaningful flags;
+  # everything else is forwarded verbatim to the external tool.
+  local passthrough_verbs="${passthroughVerbsStr}"
 
   case \${cword} in
     1)
@@ -332,8 +399,18 @@ ${caseBranches.join("\n")}
       ;;
     *)
       # Complete flags or files
+      local verb="\${words[1]}"
+      local flag_set="\${flags}"
+      # If the current verb is a passthrough plugin command, restrict
+      # flag completion to GLOBAL_FLAGS only.
+      for pt in \${passthrough_verbs}; do
+        if [[ "\${verb}" == "\${pt}" ]]; then
+          flag_set="\${global_flags}"
+          break
+        fi
+      done
       if [[ \${cur} == -* ]]; then
-        COMPREPLY=( $(compgen -W "\${flags}" -- "\${cur}") )
+        COMPREPLY=( $(compgen -W "\${flag_set}" -- "\${cur}") )
       else
         COMPREPLY=( $(compgen -f -- "\${cur}") )
       fi
@@ -352,6 +429,7 @@ function generateZshCompletion(): string {
 	const pluginCmds = getPluginCommandsInfo();
 	const verbInfos = deriveVerbInfos(pluginCmds);
 	const allFlags = deriveAllFlags();
+	const globalFlagsOnly = deriveGlobalFlags();
 	const helpResources = deriveHelpResources();
 
 	// Verb entries: 'verb:description'
@@ -364,13 +442,23 @@ function generateZshCompletion(): string {
 	});
 
 	// Flag entries: '--flag[description]:hint:' or '--flag[description]'
-	const flagEntryLines = allFlags.map((f) => {
+	const toZshFlagEntry = (f: {
+		name: string;
+		description: string;
+		type: string;
+		short?: string;
+	}) => {
 		const desc = escZsh(f.description);
 		if (f.short) {
 			return `    '-${f.short}[${desc}]'\n    '--${f.name}[${desc}]${f.type === "string" ? `:${f.name}:` : ""}'`;
 		}
 		return `    '--${f.name}[${desc}]${f.type === "string" ? `:${f.name}:` : ""}'`;
-	});
+	};
+	const flagEntryLines = allFlags.map(toZshFlagEntry);
+	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
+
+	// Passthrough verbs (#366) for the case branch in the default arm.
+	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
 
 	// Per-verb resource case branches
 	const resourceCases: string[] = [];
@@ -385,7 +473,7 @@ function generateZshCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete) {
+		if (v.fileComplete || v.passthrough) {
 			const casePattern =
 				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
 			resourceCases.push(
@@ -411,7 +499,7 @@ function generateZshCompletion(): string {
 # c8ctl-completion-version: ${c8ctl.version}
 
 _c8ctl() {
-  local -a verbs resources flags
+  local -a verbs resources flags global_flags
 
   verbs=(
 ${verbEntries.join("\n")}
@@ -419,6 +507,12 @@ ${verbEntries.join("\n")}
 
   flags=(
 ${flagEntryLines.join("\n")}
+  )
+
+  # GLOBAL_FLAGS only — used after a passthrough verb (#366), where
+  # c8ctl cannot know what flags the wrapped external tool accepts.
+  global_flags=(
+${globalFlagEntryLines.join("\n")}
   )
 
   case $CURRENT in
@@ -431,6 +525,11 @@ ${resourceCases.join("\n")}
       esac
       ;;
     *)
+      # Passthrough verbs (#366): only c8ctl globals are meaningful;
+      # everything else is forwarded verbatim to the wrapped tool.
+      case "\${words[2]}" in
+${passthroughVerbs.map((v) => `        ${v.verb}) _arguments \${global_flags[@]}; return ;;`).join("\n") || "        # (no passthrough verbs registered)"}
+      esac
       _arguments \${flags[@]}
       ;;
   esac
@@ -448,7 +547,26 @@ function generateFishCompletion(): string {
 	const pluginCmds = getPluginCommandsInfo();
 	const verbInfos = deriveVerbInfos(pluginCmds);
 	const allFlags = deriveAllFlags();
+	const globalFlags = deriveGlobalFlags();
 	const helpResources = deriveHelpResources();
+
+	// Passthrough contract (#366): once the user has typed a passthrough
+	// verb, only c8ctl GLOBAL_FLAGS are meaningful (everything else is
+	// forwarded to the wrapped tool, whose flag surface c8ctl can't
+	// know). bash and zsh handle this by switching to a globals-only
+	// flag set; fish handles it via a `not __fish_seen_subcommand_from`
+	// predicate on every non-global flag so they disappear when a
+	// passthrough verb is the current subcommand.
+	const passthroughTokens: string[] = [];
+	for (const v of verbInfos) {
+		if (!v.passthrough) continue;
+		passthroughTokens.push(v.verb, ...v.aliases);
+	}
+	const nonGlobalGuard =
+		passthroughTokens.length > 0
+			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
+			: "";
+	const globalNames = new Set(globalFlags.map((f) => f.name));
 
 	const lines: string[] = [
 		"# c8ctl fish completion",
@@ -459,9 +577,9 @@ function generateFishCompletion(): string {
 		"",
 	];
 
-	// Global flags
-	lines.push("# Global flags");
-	for (const f of allFlags) {
+	// Global flags — always offered, regardless of which verb is active.
+	lines.push("# Global flags (always offered)");
+	for (const f of globalFlags) {
 		const desc = escFish(f.description);
 		const req = f.type === "string" ? " -r" : "";
 		if (f.short) {
@@ -474,6 +592,34 @@ function generateFishCompletion(): string {
 		} else {
 			lines.push(`complete -c c8ctl -l ${f.name} -d '${desc}'${req}`);
 			lines.push(`complete -c c8 -l ${f.name} -d '${desc}'${req}`);
+		}
+	}
+	lines.push("");
+
+	// Non-global flags — suppressed under passthrough verbs (#366).
+	lines.push(
+		passthroughTokens.length > 0
+			? `# Non-global flags (suppressed under passthrough verbs: ${passthroughTokens.join(", ")})`
+			: "# Non-global flags",
+	);
+	for (const f of allFlags) {
+		if (globalNames.has(f.name)) continue;
+		const desc = escFish(f.description);
+		const req = f.type === "string" ? " -r" : "";
+		if (f.short) {
+			lines.push(
+				`complete -c c8ctl${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+			lines.push(
+				`complete -c c8${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+		} else {
+			lines.push(
+				`complete -c c8ctl${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
+			);
+			lines.push(
+				`complete -c c8${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
+			);
 		}
 	}
 	lines.push("");
@@ -516,7 +662,31 @@ function generateFishCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.resources.length === 0) continue;
+		if (v.fileComplete || v.passthrough) {
+			// Both `fileComplete` verbs (deploy/run/watch — they take file
+			// paths as their resource argument) and `passthrough` verbs
+			// (#366 — c8ctl can't know what the wrapped tool accepts, so
+			// offering file paths is the only sensible default) want file
+			// completion at the resource position. Emit explicit
+			// `complete -F` so fish offers files instead of falling back
+			// to the generic verb suggestion list. bash/zsh already handle
+			// this in their own branches above.
+			const seenFrom = [v.verb, ...v.aliases].join(" ");
+			const label = v.passthrough
+				? `Files for passthrough verb '${v.verb}' (#366)`
+				: `Files for '${v.verb}' command`;
+			lines.push(`# ${label}`);
+			lines.push(
+				`complete -c c8ctl -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
+			);
+			lines.push(
+				`complete -c c8 -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
+			);
+			lines.push("");
+			continue;
+		}
+
+		if (v.resources.length === 0) continue;
 
 		const seenFrom = [v.verb, ...v.aliases].join(" ");
 		lines.push(`# Resources for '${v.verb}' command`);

@@ -14,6 +14,7 @@ import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	deriveParseArgsOptions,
+	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
 } from "./command-registry.ts";
@@ -30,6 +31,7 @@ import { getLogger, type SortOrder } from "./logger.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
+	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
@@ -92,6 +94,143 @@ export function resolveProcessDefinitionId(
 		str(values.processDefinitionId) ||
 		str(values.bpmnProcessId)
 	);
+}
+
+/**
+ * Return the raw argv tokens that follow the verb position, where the
+ * verb position is found by walking from the start and skipping leading
+ * GLOBAL_FLAGS only (consuming the value of string-typed global flags).
+ * The first non-flag token — or any unknown `--*`/`-*` token — is
+ * treated as the verb candidate.
+ *
+ * This avoids `argv.indexOf(verb)`, which is unsafe because the verb
+ * string may also appear as the value of a global string flag (e.g.
+ * `--profile <verb>`). Returns `[]` if no verb token is found at or
+ * after the scan position.
+ */
+export function sliceArgvAfterVerb(argv: string[], verb: string): string[] {
+	const stringGlobalNames = new Set<string>();
+	const stringGlobalShorts = new Set<string>();
+	const booleanGlobalNames = new Set<string>();
+	const booleanGlobalShorts = new Set<string>();
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		const short = "short" in def ? def.short : undefined;
+		if (def.type === "string") {
+			stringGlobalNames.add(name);
+			if (short) stringGlobalShorts.add(short);
+		} else {
+			booleanGlobalNames.add(name);
+			if (short) booleanGlobalShorts.add(short);
+		}
+	}
+
+	let i = 0;
+	while (i < argv.length) {
+		const tok = argv[i];
+		if (tok === "--") {
+			// GNU `--` convention: end of options. The next token is the
+			// verb candidate. Skip the separator and continue scanning so
+			// `c8ctl -- <verb> <args...>` dispatches correctly with the
+			// full post-verb argv (rather than bailing and forwarding []).
+			i++;
+			continue;
+		}
+		if (tok.startsWith("--")) {
+			const eq = tok.indexOf("=");
+			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
+			if (booleanGlobalNames.has(name)) {
+				i++;
+				continue;
+			}
+			if (stringGlobalNames.has(name)) {
+				i += eq < 0 ? 2 : 1;
+				continue;
+			}
+			// Unknown long flag — do not silently consume a value. Fall through
+			// to the verb match below (and bail if it doesn't match).
+		} else if (tok.startsWith("-") && tok.length === 2) {
+			const short = tok.slice(1);
+			if (booleanGlobalShorts.has(short)) {
+				i++;
+				continue;
+			}
+			if (stringGlobalShorts.has(short)) {
+				i += 2;
+				continue;
+			}
+		}
+		// First token that is not a leading GLOBAL_FLAG must be the verb.
+		if (tok === verb) return argv.slice(i + 1);
+		return [];
+	}
+	return [];
+}
+
+/**
+ * Strip GLOBAL_FLAGS (and the value of any string-typed global flag) from
+ * a raw argv slice before forwarding to a passthrough plugin handler
+ * (#366). GLOBAL_FLAGS already affect the c8ctl runtime via their
+ * regular handling in `main()`; the plugin must not see them again.
+ *
+ * Conservative behaviour: an isolated `--` terminator is preserved and
+ * everything after it is forwarded verbatim, matching POSIX convention.
+ */
+export function stripGlobalFlags(argv: string[]): string[] {
+	const booleanFlags = new Set<string>();
+	const stringFlags = new Set<string>();
+	const booleanShorts = new Set<string>();
+	const stringShorts = new Set<string>();
+
+	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+		const short = "short" in def ? def.short : undefined;
+		if (def.type === "boolean") {
+			booleanFlags.add(name);
+			if (short) booleanShorts.add(short);
+		} else {
+			stringFlags.add(name);
+			if (short) stringShorts.add(short);
+		}
+	}
+
+	const out: string[] = [];
+	let i = 0;
+	let sawTerminator = false;
+	while (i < argv.length) {
+		const tok = argv[i];
+		if (sawTerminator) {
+			out.push(tok);
+			i++;
+			continue;
+		}
+		if (tok === "--") {
+			sawTerminator = true;
+			out.push(tok);
+			i++;
+			continue;
+		}
+		if (tok.startsWith("--")) {
+			const eq = tok.indexOf("=");
+			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
+			if (booleanFlags.has(name) || stringFlags.has(name)) {
+				if (eq < 0 && stringFlags.has(name)) i++; // consume value
+				i++;
+				continue;
+			}
+		} else if (tok.startsWith("-") && tok.length === 2) {
+			const short = tok.slice(1);
+			if (booleanShorts.has(short)) {
+				i++;
+				continue;
+			}
+			if (stringShorts.has(short)) {
+				i += 2; // consume short flag and its value
+				continue;
+			}
+		}
+		out.push(tok);
+		i++;
+	}
+	return out;
 }
 
 /**
@@ -272,6 +411,24 @@ async function main() {
 	if (verb && Object.hasOwn(pluginCommands, verb) && !getCommandDef(verb)) {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
+
+		// Passthrough plugin contract (#366): strip GLOBAL_FLAGS from the
+		// raw argv following the verb token and forward the rest verbatim.
+		// GLOBAL_FLAGS already affect the c8ctl runtime via their regular
+		// handling earlier in main(); the plugin must not see them again.
+		// Validation at load time guarantees passthrough commands are the
+		// bare-function form and never carry a `flags` declaration.
+		if (isPassthroughPluginCommand(verb)) {
+			// Locate the verb token by walking process.argv from the start and
+			// skipping leading GLOBAL_FLAGS (consuming string-flag values).
+			// A naive `indexOf(verb)` is unsafe because `verb` may also appear
+			// as the value of a global string flag (e.g. `--profile <verb>`).
+			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), verb);
+			const forwarded = stripGlobalFlags(rawAfterVerb);
+			await executePluginCommand(verb, forwarded);
+			return;
+		}
+
 		if (cmdFlagDefs) {
 			// Use built-in flags as a blacklist: start from the full built-in
 			// option set, then add plugin flags only when the name is not already
