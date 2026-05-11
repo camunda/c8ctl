@@ -601,6 +601,35 @@ export const listPluginsCommand = defineCommand(
 					'Some plugins are out of sync. Run "c8ctl sync plugins" to synchronize your plugins',
 				);
 			}
+
+			// Surface load-time plugin collisions inline (#363). The full
+			// breakdown lives in `c8ctl doctor plugin`; we only summarise
+			// here so users notice from the verb they reach for first.
+			// Emitted via `logger.warn` (stderr) so the JSON shape of
+			// `list plugin --json` (a plain array) stays unchanged.
+			const collisions = getPluginCollisions();
+			if (collisions.length > 0) {
+				const commandCollisions = collisions.filter(
+					(c) => c.kind === "command-name",
+				).length;
+				const nameCollisions = collisions.filter(
+					(c) => c.kind === "plugin-name",
+				).length;
+				const parts: string[] = [];
+				if (commandCollisions > 0) {
+					parts.push(
+						`${commandCollisions} command-name collision${commandCollisions === 1 ? "" : "s"}`,
+					);
+				}
+				if (nameCollisions > 0) {
+					parts.push(
+						`${nameCollisions} plugin-name collision${nameCollisions === 1 ? "" : "s"}`,
+					);
+				}
+				logger.warn(
+					`${parts.join(", ")} detected at load time. Run "c8ctl doctor plugin" for details.`,
+				);
+			}
 		} catch (error) {
 			handleCommandError(logger, "Failed to list plugins", error);
 		}

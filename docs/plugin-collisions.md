@@ -36,6 +36,23 @@ visibility affordances:
    `loadInstalledPlugins` both `.sort()` their `readdirSync` results.
    "Who wins" is therefore stable for a given set of installed packages
    regardless of OS, filesystem, or install order.
+4. **`c8ctl list plugin`** prints a one-line stderr summary when any
+   collisions were detected at load time, pointing the user at
+   `c8ctl doctor plugin` for the full breakdown. The `--json` payload
+   on stdout remains a plain array so existing scripted callers are
+   unaffected.
+
+> **Cross-machine determinism caveat.** Sorting `readdirSync` makes
+> "who wins" deterministic *for a given set of installed plugin
+> directories on a single machine*. Two machines that have installed
+> the same logical plugins can still disagree if the install layouts
+> differ — npm hoisting, monorepo workspaces, `npm link` symlinks,
+> different package versions resolved to different physical
+> directories, or simply a different set of installed plugins will
+> all change the sort key set. If you need bit-for-bit reproducible
+> precedence across machines (e.g. for CI), pin the exact set of
+> plugin packages and use `c8ctl doctor plugin --json` to verify the
+> `loaded[]` order matches what you expect.
 
 Default plugins always load before user-installed plugins (built-ins
 always win). User-vs-user precedence falls back to alphabetical order on
