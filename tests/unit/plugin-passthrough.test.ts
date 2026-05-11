@@ -15,7 +15,13 @@
  */
 
 import assert from "node:assert";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
@@ -415,6 +421,61 @@ describe("Passthrough plugin contract (#366)", () => {
 					/pass-through-cmd/.test(result.stderr) &&
 					/duplicate|already/i.test(result.stderr),
 				`expected a load-time warning naming the losing plugin and the conflicting command. stderr: ${result.stderr}`,
+			);
+		});
+
+		// Class-scoped guard for the side-effect-free duplicate-name
+		// rejection. The loader must check `loadedPlugins.has(name)`
+		// BEFORE `await import(pluginUrl)` — otherwise a
+		// duplicate-name plugin's module body still executes (running
+		// any top-level side effects) only for the result to be
+		// thrown away. The fixture under
+		// `tests/fixtures/plugins/zzz-plugin-name-collider` declares
+		// the same package.json#name as the canonical
+		// `plugin-with-passthrough` fixture and writes a sentinel file
+		// at module-evaluation time. After running c8ctl with both
+		// installed, the sentinel must NOT exist.
+		test("duplicate-name plugin's module body is never evaluated (no top-level side effects)", async () => {
+			const dir = mkdtempSync(join(tmpdir(), "c8ctl-dup-sideeffect-"));
+			writeFileSync(
+				join(dir, "session.json"),
+				JSON.stringify({ outputMode: "text" }),
+			);
+			const installRoot = join(dir, "plugins", "node_modules");
+			const canonicalDst = join(installRoot, "plugin-with-passthrough");
+			mkdirSync(canonicalDst, { recursive: true });
+			cpSync(FIXTURE_DIR, canonicalDst, { recursive: true });
+			const colliderSrc = join(
+				__dirname,
+				"../fixtures/plugins/zzz-plugin-name-collider",
+			);
+			const colliderDst = join(installRoot, "zzz-plugin-name-collider");
+			mkdirSync(colliderDst, { recursive: true });
+			cpSync(colliderSrc, colliderDst, { recursive: true });
+
+			const sentinelPath = join(dir, "duplicate-side-effect.sentinel");
+
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "pass-through-cmd", "probe"],
+				{
+					env: {
+						...process.env,
+						CAMUNDA_BASE_URL: "http://test-cluster/v2",
+						HOME: "/tmp/c8ctl-dup-sideeffect-nonexistent-home",
+						C8CTL_DATA_DIR: dir,
+						C8CTL_TEST_DUP_SIDE_EFFECT_SENTINEL: sentinelPath,
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`expected exit 0; stderr: ${result.stderr}`,
+			);
+			assert.ok(
+				!existsSync(sentinelPath),
+				`duplicate-name plugin's module body must not be evaluated, but the sentinel file was created at ${sentinelPath}. The loader is importing the duplicate before checking loadedPlugins.has(name).`,
 			);
 		});
 	});

@@ -288,6 +288,14 @@ async function loadDefaultPlugins(): Promise<void> {
 				const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 				const pluginName = packageJson.name || `default-${pluginDir}`;
 
+				// Check for duplicate plugin name BEFORE the dynamic import
+				// so a duplicate-name plugin's module code never runs (the
+				// import has top-level side effects we don't want to execute
+				// only to throw the result away).
+				if (isDuplicatePluginName(pluginName)) {
+					continue;
+				}
+
 				const pluginFile = existsSync(pluginFileJs)
 					? pluginFileJs
 					: pluginFileTs;
@@ -298,9 +306,6 @@ async function loadDefaultPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					if (isDuplicatePluginName(pluginName)) {
-						continue;
-					}
 					const loaded: LoadedPlugin = {
 						name: pluginName,
 						commands: { ...plugin.commands },
@@ -449,15 +454,20 @@ export async function loadInstalledPlugins(): Promise<void> {
 						? packageJson.name
 						: packageName;
 
+				// Check for duplicate plugin name BEFORE the dynamic import
+				// so a duplicate-name plugin's module code never runs (the
+				// import has top-level side effects we don't want to execute
+				// only to throw the result away).
+				if (isDuplicatePluginName(pluginName)) {
+					continue;
+				}
+
 				// Use file:// protocol and add timestamp to bust cache
 				const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
 				logger.debug(`Loading plugin from: ${pluginUrl}`);
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					if (isDuplicatePluginName(pluginName)) {
-						continue;
-					}
 					const loaded: LoadedPlugin = {
 						name: pluginName,
 						commands: { ...plugin.commands },
