@@ -199,14 +199,15 @@ function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
 }
 
 /**
- * Reject a plugin whose name collides with an already-loaded plugin
- * (#363). The first-registration-wins policy applies at the plugin
- * level as well as at the command-name level: if a user-installed
- * package shares a `package.json#name` with a default plugin (or with
- * another already-loaded plugin), refusing the second load keeps
- * `loadedPlugins` single-owner per name and prevents a silent
- * `loadedPlugins.set()` overwrite from bypassing the
- * command-name policy.
+ * Reject a plugin whose name collides with an already-loaded plugin.
+ * This is a separate concern from the command-name collision policy
+ * tracked under #363: that policy rejects two plugins exporting the
+ * same command name, while this one rejects two plugins sharing the
+ * same `package.json#name`. Both follow first-registration-wins.
+ * Without this guard a user-installed package sharing a name with a
+ * default plugin (or with another already-loaded plugin) would
+ * silently overwrite the prior `loadedPlugins.set()` entry, bypassing
+ * the command-name policy entirely.
  *
  * Returns `true` when the caller should skip the load; `false` when
  * the name is free.
