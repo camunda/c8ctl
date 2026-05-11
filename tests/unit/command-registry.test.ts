@@ -56,6 +56,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"downgrade",
 		"sync",
 		"init",
+		"doctor",
 		"use",
 		"output",
 		"completion",

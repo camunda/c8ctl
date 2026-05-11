@@ -10,7 +10,11 @@ import { defineCommand } from "../command-framework.ts";
 import { ensurePluginsDir } from "../config.ts";
 import { handleCommandError } from "../errors.ts";
 import { getLogger } from "../logger.ts";
-import { clearLoadedPlugins } from "../plugin-loader.ts";
+import {
+	clearLoadedPlugins,
+	getLoadedPluginSummaries,
+	getPluginCollisions,
+} from "../plugin-loader.ts";
 import {
 	addPluginToRegistry,
 	getPluginEntry,
@@ -974,5 +978,77 @@ export const initPluginCommand = defineCommand(
 		} catch (error) {
 			handleCommandError(logger, "Failed to create plugin", error);
 		}
+	},
+);
+
+/**
+ * Doctor — surface plugin-loading collisions detected at startup
+ * (#363). The loader applies first-registration-wins for both
+ * plugin-name collisions (two packages sharing `package.json#name`)
+ * and command-name collisions (two plugins exporting the same
+ * command). Both are logged at warn level when they happen, but a
+ * user who didn't see those warnings has no way to discover what was
+ * dropped. `c8ctl doctor plugin` re-renders that diagnostic on
+ * demand.
+ *
+ * The output is two sections:
+ *   1. Loaded plugins, with the command names that survived
+ *      duplicate-name rejection.
+ *   2. Detected collisions, with kind, winner, loser, and (for
+ *      command-name collisions) the affected command.
+ *
+ * Exit code is always 0 — the doctor reports state, it doesn't
+ * enforce policy. Returning non-zero would interfere with scripted
+ * use (e.g. piping into `jq` under `--json`).
+ */
+export const doctorPluginCommand = defineCommand(
+	"doctor",
+	"plugin",
+	async (ctx, _flags, _args) => {
+		const { logger } = ctx;
+
+		const loaded = getLoadedPluginSummaries();
+		const collisions = getPluginCollisions();
+
+		if (logger.mode === "json") {
+			logger.json({ loaded, collisions });
+			return;
+		}
+
+		if (loaded.length === 0) {
+			logger.info("No plugins loaded.");
+		} else {
+			logger.info(`Loaded plugins (${loaded.length}):`);
+			logger.table(
+				loaded.map((p) => ({
+					Plugin: p.name,
+					Commands: p.commands.length === 0 ? "(none)" : p.commands.join(", "),
+				})),
+			);
+		}
+
+		if (collisions.length === 0) {
+			logger.info("");
+			logger.info("No plugin collisions detected.");
+			return;
+		}
+
+		logger.info("");
+		logger.info(`Detected collisions (${collisions.length}):`);
+		logger.table(
+			collisions.map((c) => ({
+				Kind: c.kind,
+				Winner: c.winner,
+				Loser: c.loser,
+				Command: c.command ?? "—",
+			})),
+		);
+		logger.info("");
+		logger.info(
+			"Resolution policy: first-registration-wins. The losing plugin's command (or the entire losing plugin, for plugin-name collisions) was dropped at load time.",
+		);
+		logger.info(
+			"To resolve: uninstall one of the colliding plugins, or ask the plugin author to rename. See docs/plugin-collisions.md for the full policy.",
+		);
 	},
 );

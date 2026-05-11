@@ -77,6 +77,30 @@ interface LoadedPlugin {
 const loadedPlugins = new Map<string, LoadedPlugin>();
 
 /**
+ * Structured record of a load-time collision between two plugins,
+ * surfaced by `c8ctl doctor plugin` (#363). Two flavours:
+ *
+ * - `command-name`: two plugins exported a command under the same name.
+ *   The earlier-loaded plugin's command stays in dispatch; the later
+ *   plugin's was dropped. `winner`/`loser` reflect that ordering.
+ * - `plugin-name`: two plugins shared the same `package.json#name`.
+ *   The entire later plugin was rejected (its module body was never
+ *   imported); `command` is undefined for this kind.
+ *
+ * The doctor command is the only consumer; the loader appends to this
+ * list as it discovers collisions and never reads from it. Cleared by
+ * `clearLoadedPlugins()` so test fixtures stay isolated.
+ */
+export interface PluginCollision {
+	kind: "command-name" | "plugin-name";
+	winner: string;
+	loser: string;
+	command?: string;
+}
+
+const pluginCollisions: PluginCollision[] = [];
+
+/**
  * Validate the passthrough/flags mutual-exclusion rule (#366). Removes
  * offending commands from the registered set so they cannot be invoked,
  * and emits a `logger.warn` naming the plugin and command so the
@@ -191,6 +215,12 @@ function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
 						`already provided by plugin '${existing.name}'. The first registration wins; ` +
 						`dropping the duplicate from '${plugin.name}'.`,
 				);
+				pluginCollisions.push({
+					kind: "command-name",
+					winner: existing.name,
+					loser: plugin.name,
+					command: commandName,
+				});
 				delete plugin.commands[commandName];
 				break;
 			}
@@ -219,6 +249,11 @@ function isDuplicatePluginName(pluginName: string): boolean {
 			`Plugin name '${pluginName}' is already loaded; refusing to load a second plugin ` +
 				`with the same name. The first registration wins.`,
 		);
+		pluginCollisions.push({
+			kind: "plugin-name",
+			winner: pluginName,
+			loser: pluginName,
+		});
 		return true;
 	}
 	return false;
@@ -610,4 +645,38 @@ export function isPassthroughPluginCommand(commandName: string): boolean {
  */
 export function clearLoadedPlugins(): void {
 	loadedPlugins.clear();
+	pluginCollisions.length = 0;
+}
+
+/**
+ * Snapshot of plugin collisions detected at load time (#363). Returns
+ * a defensive copy so callers cannot mutate the loader's bookkeeping.
+ * Order reflects the order in which the loader observed the
+ * collisions.
+ */
+export function getPluginCollisions(): PluginCollision[] {
+	return pluginCollisions.slice();
+}
+
+/**
+ * Snapshot of currently loaded plugins (#363). Returns the canonical
+ * `package.json#name` of each plugin together with the command names
+ * it actually registered (after duplicate-name rejection). Used by
+ * `c8ctl doctor plugin` to render an authoritative view of what was
+ * loaded vs. what was dropped.
+ */
+export interface LoadedPluginSummary {
+	name: string;
+	commands: string[];
+}
+
+export function getLoadedPluginSummaries(): LoadedPluginSummary[] {
+	const summaries: LoadedPluginSummary[] = [];
+	for (const plugin of loadedPlugins.values()) {
+		summaries.push({
+			name: plugin.name,
+			commands: Object.keys(plugin.commands),
+		});
+	}
+	return summaries;
 }
