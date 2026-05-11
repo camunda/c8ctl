@@ -440,10 +440,29 @@ async function main() {
 					.map((o) => o.short)
 					.filter((s): s is string => s !== undefined),
 			);
-			const mergedOptions = { ...builtinOptions };
+			// Use a null-prototype object so plugin-supplied flag names like
+			// `__proto__`, `constructor`, or `prototype` cannot pollute the
+			// prototype chain when later assigned (paired with the
+			// `Object.hasOwn` collision check below).
+			const mergedOptions: Record<string, (typeof builtinOptions)[string]> =
+				Object.assign(Object.create(null), builtinOptions);
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
-				if (name in builtinOptions) {
+				if (Object.hasOwn(builtinOptions, name)) {
+					// A required plugin flag whose name collides with a built-in
+					// flag is unsatisfiable: the token is always stripped from
+					// argv before the plugin parser sees it, so the required
+					// check downstream would always fire with the misleading
+					// "--<name> is required" message even when the user did
+					// pass a value (#364). Fail fast here with a single
+					// actionable error instead.
+					if (def.required === true) {
+						logger.error(
+							`Plugin flag --${name} is declared required but conflicts with a built-in flag of the same name; ` +
+								`it can never be satisfied. The plugin must rename this flag.`,
+						);
+						process.exit(1);
+					}
 					logger.warn(
 						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
 					);

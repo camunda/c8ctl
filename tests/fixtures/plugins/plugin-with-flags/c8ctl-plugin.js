@@ -55,6 +55,22 @@ export const commands = {
 			console.log(JSON.stringify({ args, flags: flags || {} }));
 		},
 	},
+
+	'test-required-collision': {
+		flags: {
+			// Collides with built-in --profile AND declared required.
+			// This combination is unsatisfiable (#364): the CLI must
+			// reject the command at dispatch with an actionable error.
+			profile: {
+				type: 'string',
+				description: 'Collides with built-in --profile flag',
+				required: true,
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
 };
 
 export const metadata = {

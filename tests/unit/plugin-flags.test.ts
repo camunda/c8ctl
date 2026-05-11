@@ -217,6 +217,68 @@ describe("Plugin Flags CLI subprocess — built-in collision", () => {
 	});
 });
 
+describe("Plugin Flags CLI subprocess — required + built-in collision (#364)", () => {
+	// A plugin flag declared `required: true` whose name collides with a
+	// built-in flag is unsatisfiable: the colliding token is always stripped
+	// from argv before the plugin parser sees it. The CLI must fail fast at
+	// dispatch with an actionable error rather than emit the misleading
+	// "--<name> is required" after the handler has been "called".
+	test("rejects unsatisfiable command with actionable error, even when user passes the flag", async () => {
+		const result = await c8plugin(
+			"test-required-collision",
+			"--profile",
+			"anything",
+		);
+		assert.strictEqual(
+			result.status,
+			1,
+			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("--profile"),
+			`expected error to name the colliding flag. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes(
+				"is declared required but conflicts with a built-in flag",
+			),
+			`expected new actionable error sentence. stderr: ${result.stderr}`,
+		);
+		// The misleading legacy message is the bare phrase "--profile is
+		// required" with no surrounding "declared" / "conflicts" context.
+		// Assert it is absent independently of stderr formatting (text vs
+		// JSON, ✗ prefix, etc.).
+		const legacyBareError =
+			/(?:^|[^a-zA-Z])--profile is required(?:[^a-zA-Z]|$)/;
+		const withoutNewMessage = result.stderr
+			.split("\n")
+			.filter((line) => !line.includes("is declared required but conflicts"))
+			.join("\n");
+		assert.ok(
+			!legacyBareError.test(withoutNewMessage),
+			`legacy bare "--profile is required" must not appear. stderr: ${result.stderr}`,
+		);
+		assert.strictEqual(
+			result.stdout.trim(),
+			"",
+			`handler must not run. stdout: ${result.stdout}`,
+		);
+	});
+
+	test("rejects unsatisfiable command even when user omits the flag entirely", async () => {
+		const result = await c8plugin("test-required-collision");
+		assert.strictEqual(
+			result.status,
+			1,
+			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("built-in"),
+			`expected error mentioning built-in collision. stderr: ${result.stderr}`,
+		);
+	});
+});
+
 describe("Plugin Flags CLI subprocess", () => {
 	test("string and boolean flags are parsed and passed to handler", async () => {
 		const result = await c8plugin(
