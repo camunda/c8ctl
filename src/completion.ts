@@ -611,24 +611,31 @@ function generateFishCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.resources.length === 0) {
-			// Passthrough verbs (#366) and fileComplete verbs both want
-			// file completion at the resource position. Emit explicit
+		if (v.fileComplete || v.passthrough) {
+			// Both `fileComplete` verbs (deploy/run/watch — they take file
+			// paths as their resource argument) and `passthrough` verbs
+			// (#366 — c8ctl can't know what the wrapped tool accepts, so
+			// offering file paths is the only sensible default) want file
+			// completion at the resource position. Emit explicit
 			// `complete -F` so fish offers files instead of falling back
-			// to the generic verb suggestion list.
-			if (v.passthrough) {
-				const seenFrom = [v.verb, ...v.aliases].join(" ");
-				lines.push(`# Files for passthrough verb '${v.verb}' (#366)`);
-				lines.push(
-					`complete -c c8ctl -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
-				);
-				lines.push(
-					`complete -c c8 -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
-				);
-				lines.push("");
-			}
+			// to the generic verb suggestion list. bash/zsh already handle
+			// this in their own branches above.
+			const seenFrom = [v.verb, ...v.aliases].join(" ");
+			const label = v.passthrough
+				? `Files for passthrough verb '${v.verb}' (#366)`
+				: `Files for '${v.verb}' command`;
+			lines.push(`# ${label}`);
+			lines.push(
+				`complete -c c8ctl -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
+			);
+			lines.push(
+				`complete -c c8 -n '__fish_seen_subcommand_from ${seenFrom}' -F`,
+			);
+			lines.push("");
 			continue;
 		}
+
+		if (v.resources.length === 0) continue;
 
 		const seenFrom = [v.verb, ...v.aliases].join(" ");
 		lines.push(`# Resources for '${v.verb}' command`);

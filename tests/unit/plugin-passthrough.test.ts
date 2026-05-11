@@ -485,5 +485,27 @@ describe("Passthrough plugin contract (#366)", () => {
 				`fish completion must offer file completion (-F) for passthrough verbs. stdout did not match.`,
 			);
 		});
+
+		// Class-scoped guard: the fish fileComplete branch must also emit
+		// `complete -F`, not only the passthrough branch. Previously the
+		// fish generator silently skipped fileComplete verbs, so users
+		// got the generic verb list at the resource position instead of
+		// file completion. bash and zsh already handled this; fish now
+		// does too. (The fileComplete set is derived in deriveVerbInfos
+		// from `!requiresResource && resources.length === 0` — currently
+		// `deploy` and `watch`. `run` takes a positional path but is
+		// classified as requiresResource, so it falls outside this set.)
+		test("fish completion offers file completion (-F) for fileComplete verbs (deploy/watch)", async () => {
+			const result = await c8("completion", "fish");
+			assert.strictEqual(result.status, 0);
+			for (const verb of ["deploy", "watch"]) {
+				assert.ok(
+					new RegExp(`__fish_seen_subcommand_from ${verb}[^']*' -F`).test(
+						result.stdout,
+					),
+					`fish completion must offer file completion (-F) for fileComplete verb '${verb}'. stdout did not match.`,
+				);
+			}
+		});
 	});
 });

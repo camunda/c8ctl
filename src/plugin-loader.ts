@@ -436,26 +436,39 @@ export async function loadInstalledPlugins(): Promise<void> {
 					? pluginFileJs
 					: pluginFileTs;
 
+				// Use the package.json#name (not the filesystem directory
+				// entry) as the canonical plugin name / loadedPlugins key.
+				// Under npm aliases (e.g. `npm i my-alias@npm:real-plugin`),
+				// the install directory is `my-alias` but the package name is
+				// `real-plugin`. Keying by directory would miss real
+				// duplicate-name collisions and surface the wrong name in
+				// duplicate warnings. `packageName` is kept for filesystem /
+				// logging purposes only.
+				const pluginName =
+					typeof packageJson.name === "string" && packageJson.name.length > 0
+						? packageJson.name
+						: packageName;
+
 				// Use file:// protocol and add timestamp to bust cache
 				const pluginUrl = `file://${pluginFile}?t=${Date.now()}`;
 				logger.debug(`Loading plugin from: ${pluginUrl}`);
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
-					if (isDuplicatePluginName(packageName)) {
+					if (isDuplicatePluginName(pluginName)) {
 						continue;
 					}
 					const loaded: LoadedPlugin = {
-						name: packageName,
+						name: pluginName,
 						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
 					};
 					validatePassthroughCommands(loaded);
 					rejectDuplicateCommandNames(loaded);
-					loadedPlugins.set(packageName, loaded);
+					loadedPlugins.set(pluginName, loaded);
 					const commandNames = Object.keys(loaded.commands);
 					logger.debug(
-						`Successfully loaded plugin: ${packageName} with ${commandNames.length} commands:`,
+						`Successfully loaded plugin: ${pluginName} (dir: ${packageName}) with ${commandNames.length} commands:`,
 						commandNames,
 					);
 				}
