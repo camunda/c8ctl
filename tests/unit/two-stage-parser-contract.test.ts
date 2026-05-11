@@ -84,8 +84,8 @@ describe("two-stage parser contract: --help reaches the help renderer", () => {
 
 	test("c8ctl <verb> <resource> <key> --help renders help and does not execute", async () => {
 		// Same defect class one positional deeper — the resource is present
-		// AND a key is present, so the missing-resource guard at line 546 of
-		// src/index.ts cannot save us. The dispatch path runs.
+		// AND a key is present, so the missing-resource guard cannot save us.
+		// This path proceeds to dispatch unless `--help` is claimed earlier.
 		const result = await c8("get", "topology", "some-key", "--help");
 
 		assert.strictEqual(
