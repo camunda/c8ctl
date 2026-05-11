@@ -656,7 +656,9 @@ export function clearLoadedPlugins(): void {
  * collisions.
  */
 export function getPluginCollisions(): readonly Readonly<PluginCollision>[] {
-	return pluginCollisions.map((c) => Object.freeze({ ...c }));
+	return Object.freeze(
+		pluginCollisions.map((c) => Object.freeze({ ...c })),
+	);
 }
 
 /**
