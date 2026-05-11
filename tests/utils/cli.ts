@@ -23,6 +23,41 @@ writeFileSync(
 );
 
 /**
+ * Options recognised by the test `c8()` / `c8WithOptions()` helpers.
+ *
+ * `timeout` is forwarded to `asyncSpawn` and ultimately to Node's `execFile`,
+ * which SIGTERMs the child after the deadline. Use it for invocations that
+ * could legitimately hang (e.g. long-running verbs on a regression of the
+ * --help gate) so the test fails fast instead of stalling the suite.
+ */
+export interface C8Options {
+	timeout?: number;
+}
+
+/**
+ * Build the env passed to every spawned CLI process.
+ *
+ * Sanitises DEBUG / C8CTL_DEBUG / NODE_DEBUG / NODE_OPTIONS so a developer or
+ * CI runner that exports a debug variable doesn't add stray stderr output that
+ * breaks tests asserting on a clean stderr (e.g. the --help contract sweep).
+ * The prod CLI's own logging is unaffected — these are debug-only env vars
+ * consulted by Node and by the CLI's verbose-logging path.
+ */
+function buildChildEnv(): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		CAMUNDA_BASE_URL: "http://test-cluster/v2",
+		HOME: "/tmp/c8ctl-test-nonexistent-home",
+		C8CTL_DATA_DIR: TEST_DATA_DIR,
+	};
+	delete env.DEBUG;
+	delete env.C8CTL_DEBUG;
+	delete env.NODE_DEBUG;
+	delete env.NODE_OPTIONS;
+	return env;
+}
+
+/**
  * Invoke the CLI as a subprocess with a test-friendly environment.
  * Sets CAMUNDA_BASE_URL so commands resolve a cluster config without
  * needing a real profile or running cluster.
@@ -30,12 +65,23 @@ writeFileSync(
  */
 export async function c8(...args: string[]): Promise<SpawnResult> {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
-		env: {
-			...process.env,
-			CAMUNDA_BASE_URL: "http://test-cluster/v2",
-			HOME: "/tmp/c8ctl-test-nonexistent-home",
-			C8CTL_DATA_DIR: TEST_DATA_DIR,
-		},
+		env: buildChildEnv(),
+	});
+}
+
+/**
+ * Like `c8()`, but accepts a `timeout` (and any future options). Use this
+ * for invocations that could hang under regression so the test fails fast
+ * instead of stalling the suite (e.g. long-running verbs against the --help
+ * gate).
+ */
+export async function c8WithOptions(
+	opts: C8Options,
+	...args: string[]
+): Promise<SpawnResult> {
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+		env: buildChildEnv(),
+		...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
 	});
 }
 
