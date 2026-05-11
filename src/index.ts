@@ -128,8 +128,12 @@ export function sliceArgvAfterVerb(argv: string[], verb: string): string[] {
 	while (i < argv.length) {
 		const tok = argv[i];
 		if (tok === "--") {
-			// Verb cannot appear after `--`. Bail out.
-			return [];
+			// GNU `--` convention: end of options. The next token is the
+			// verb candidate. Skip the separator and continue scanning so
+			// `c8ctl -- <verb> <args...>` dispatches correctly with the
+			// full post-verb argv (rather than bailing and forwarding []).
+			i++;
+			continue;
 		}
 		if (tok.startsWith("--")) {
 			const eq = tok.indexOf("=");

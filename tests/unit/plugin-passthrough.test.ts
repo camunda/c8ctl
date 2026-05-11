@@ -254,6 +254,31 @@ describe("Passthrough plugin contract (#366)", () => {
 				`args after -- must be forwarded verbatim. args=${JSON.stringify(out.args)}`,
 			);
 		});
+
+		test("handles a leading `--` separator before the verb (GNU convention)", async () => {
+			// `c8ctl -- <verb> <args...>` is the GNU "end of options"
+			// convention. The leading `--` must be skipped by the verb
+			// slicer rather than causing it to bail with an empty post-verb
+			// slice. Regression guard for sliceArgvAfterVerb().
+			const result = await c8(
+				"--",
+				"pass-through-cmd",
+				"arg1",
+				"--from",
+				"URL",
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+			);
+			const out = JSON.parse(result.stdout);
+			assert.deepStrictEqual(
+				out.args,
+				["arg1", "--from", "URL"],
+				`leading -- must be consumed, post-verb args must reach the handler verbatim. args=${JSON.stringify(out.args)}`,
+			);
+		});
 	});
 
 	describe("Load-time validation", () => {

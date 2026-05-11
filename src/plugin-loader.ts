@@ -185,7 +185,6 @@ function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
 	const logger = getLogger();
 	for (const commandName of Object.keys(plugin.commands)) {
 		for (const existing of loadedPlugins.values()) {
-			if (existing.name === plugin.name) continue;
 			if (Object.hasOwn(existing.commands, commandName)) {
 				logger.warn(
 					`Plugin '${plugin.name}' tried to register command '${commandName}' but it is ` +
@@ -197,6 +196,31 @@ function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
 			}
 		}
 	}
+}
+
+/**
+ * Reject a plugin whose name collides with an already-loaded plugin
+ * (#363). The first-registration-wins policy applies at the plugin
+ * level as well as at the command-name level: if a user-installed
+ * package shares a `package.json#name` with a default plugin (or with
+ * another already-loaded plugin), refusing the second load keeps
+ * `loadedPlugins` single-owner per name and prevents a silent
+ * `loadedPlugins.set()` overwrite from bypassing the
+ * command-name policy.
+ *
+ * Returns `true` when the caller should skip the load; `false` when
+ * the name is free.
+ */
+function isDuplicatePluginName(pluginName: string): boolean {
+	const logger = getLogger();
+	if (loadedPlugins.has(pluginName)) {
+		logger.warn(
+			`Plugin name '${pluginName}' is already loaded; refusing to load a second plugin ` +
+				`with the same name. The first registration wins.`,
+		);
+		return true;
+	}
+	return false;
 }
 
 /**
@@ -274,6 +298,9 @@ async function loadDefaultPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
+					if (isDuplicatePluginName(pluginName)) {
+						continue;
+					}
 					const loaded: LoadedPlugin = {
 						name: pluginName,
 						commands: { ...plugin.commands },
@@ -415,6 +442,9 @@ export async function loadInstalledPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
+					if (isDuplicatePluginName(packageName)) {
+						continue;
+					}
 					const loaded: LoadedPlugin = {
 						name: packageName,
 						commands: { ...plugin.commands },
