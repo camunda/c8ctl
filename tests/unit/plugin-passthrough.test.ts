@@ -418,4 +418,72 @@ describe("Passthrough plugin contract (#366)", () => {
 			);
 		});
 	});
+
+	describe("Shell completion (#366 — passthrough verbs)", () => {
+		// Class-scoped guard: c8ctl cannot know what flags the wrapped
+		// external tool accepts, so for any verb that opted into the
+		// passthrough contract the completion generators must (a) offer
+		// file completion at the resource position and (b) restrict
+		// flag completion to GLOBAL_FLAGS only. The fixture's
+		// `pass-through-cmd` exercises this — if the gate ever stops
+		// honouring `passthrough: true` these tests fail.
+
+		test("bash completion offers file completion for the passthrough verb", async () => {
+			const result = await c8("completion", "bash");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/pass-through-cmd\)\s*\n\s*COMPREPLY=\(\s*\$\(compgen -f /.test(
+					result.stdout,
+				),
+				`bash completion must use file completion for passthrough verbs. stdout did not match.`,
+			);
+		});
+
+		test("bash completion restricts flag completion to GLOBAL_FLAGS for passthrough verbs", async () => {
+			const result = await c8("completion", "bash");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/passthrough_verbs="[^"]*pass-through-cmd[^"]*"/.test(result.stdout),
+				`bash completion must list passthrough verbs in passthrough_verbs. stdout did not match.`,
+			);
+			assert.ok(
+				/local global_flags=/.test(result.stdout) &&
+					/flag_set="\$\{global_flags\}"/.test(result.stdout),
+				`bash completion must switch to \${global_flags} when current verb is a passthrough verb.`,
+			);
+		});
+
+		test("zsh completion uses _files for the passthrough verb", async () => {
+			const result = await c8("completion", "zsh");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/pass-through-cmd\)\s*\n\s*_files\s*\n\s*;;/.test(result.stdout),
+				`zsh completion must use _files for passthrough verbs. stdout did not match.`,
+			);
+		});
+
+		test("zsh completion exposes a global_flags array and routes passthrough verbs to it", async () => {
+			const result = await c8("completion", "zsh");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/global_flags=\(/.test(result.stdout),
+				`zsh completion must declare a global_flags array.`,
+			);
+			assert.ok(
+				/pass-through-cmd\) _arguments \$\{global_flags\[@\]\}/.test(
+					result.stdout,
+				),
+				`zsh completion must route passthrough verbs to _arguments \${global_flags[@]}.`,
+			);
+		});
+
+		test("fish completion offers file completion (-F) for the passthrough verb", async () => {
+			const result = await c8("completion", "fish");
+			assert.strictEqual(result.status, 0);
+			assert.ok(
+				/__fish_seen_subcommand_from pass-through-cmd' -F/.test(result.stdout),
+				`fish completion must offer file completion (-F) for passthrough verbs. stdout did not match.`,
+			);
+		});
+	});
 });
