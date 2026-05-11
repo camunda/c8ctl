@@ -543,7 +543,26 @@ function generateFishCompletion(): string {
 	const pluginCmds = getPluginCommandsInfo();
 	const verbInfos = deriveVerbInfos(pluginCmds);
 	const allFlags = deriveAllFlags();
+	const globalFlags = deriveGlobalFlags();
 	const helpResources = deriveHelpResources();
+
+	// Passthrough contract (#366): once the user has typed a passthrough
+	// verb, only c8ctl GLOBAL_FLAGS are meaningful (everything else is
+	// forwarded to the wrapped tool, whose flag surface c8ctl can't
+	// know). bash and zsh handle this by switching to a globals-only
+	// flag set; fish handles it via a `not __fish_seen_subcommand_from`
+	// predicate on every non-global flag so they disappear when a
+	// passthrough verb is the current subcommand.
+	const passthroughTokens: string[] = [];
+	for (const v of verbInfos) {
+		if (!v.passthrough) continue;
+		passthroughTokens.push(v.verb, ...v.aliases);
+	}
+	const nonGlobalGuard =
+		passthroughTokens.length > 0
+			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
+			: "";
+	const globalNames = new Set(globalFlags.map((f) => f.name));
 
 	const lines: string[] = [
 		"# c8ctl fish completion",
@@ -554,9 +573,9 @@ function generateFishCompletion(): string {
 		"",
 	];
 
-	// Global flags
-	lines.push("# Global flags");
-	for (const f of allFlags) {
+	// Global flags — always offered, regardless of which verb is active.
+	lines.push("# Global flags (always offered)");
+	for (const f of globalFlags) {
 		const desc = escFish(f.description);
 		const req = f.type === "string" ? " -r" : "";
 		if (f.short) {
@@ -569,6 +588,34 @@ function generateFishCompletion(): string {
 		} else {
 			lines.push(`complete -c c8ctl -l ${f.name} -d '${desc}'${req}`);
 			lines.push(`complete -c c8 -l ${f.name} -d '${desc}'${req}`);
+		}
+	}
+	lines.push("");
+
+	// Non-global flags — suppressed under passthrough verbs (#366).
+	lines.push(
+		passthroughTokens.length > 0
+			? `# Non-global flags (suppressed under passthrough verbs: ${passthroughTokens.join(", ")})`
+			: "# Non-global flags",
+	);
+	for (const f of allFlags) {
+		if (globalNames.has(f.name)) continue;
+		const desc = escFish(f.description);
+		const req = f.type === "string" ? " -r" : "";
+		if (f.short) {
+			lines.push(
+				`complete -c c8ctl${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+			lines.push(
+				`complete -c c8${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+			);
+		} else {
+			lines.push(
+				`complete -c c8ctl${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
+			);
+			lines.push(
+				`complete -c c8${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
+			);
 		}
 	}
 	lines.push("");

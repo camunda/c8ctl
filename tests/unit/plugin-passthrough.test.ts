@@ -507,5 +507,58 @@ describe("Passthrough plugin contract (#366)", () => {
 				);
 			}
 		});
+
+		// Class-scoped guard for the fish flag-completion contract under
+		// passthrough verbs. bash and zsh switch to a globals-only flag
+		// set; fish achieves the same thing by gating every non-global
+		// flag with a `not __fish_seen_subcommand_from <pt> ...`
+		// predicate. If any non-global flag escapes that predicate the
+		// passthrough contract is broken — c8ctl would suggest its own
+		// per-command flags instead of the wrapped tool's.
+		test("fish completion suppresses non-global flags under passthrough verbs", async () => {
+			const result = await c8("completion", "fish");
+			assert.strictEqual(result.status, 0);
+
+			// Pick a flag that exists somewhere in the registry but is
+			// definitely not in GLOBAL_FLAGS. `--variables` is owned by
+			// `run` and is NOT a global.
+			const nonGlobalFlag = "variables";
+			const lines = result.stdout
+				.split("\n")
+				.filter(
+					(l) =>
+						l.startsWith("complete -c c8") && l.includes(`-l ${nonGlobalFlag}`),
+				);
+			assert.ok(
+				lines.length > 0,
+				`expected at least one fish completion line for --${nonGlobalFlag}`,
+			);
+			for (const line of lines) {
+				assert.ok(
+					line.includes("-n 'not __fish_seen_subcommand_from pass-through-cmd"),
+					`every fish completion for non-global flag '--${nonGlobalFlag}' must be gated against passthrough verbs. line was: ${line}`,
+				);
+			}
+		});
+
+		test("fish completion offers global flags unconditionally", async () => {
+			const result = await c8("completion", "fish");
+			assert.strictEqual(result.status, 0);
+			// `--profile` is a GLOBAL_FLAG. Its fish completion line(s)
+			// must NOT carry the passthrough guard — globals stay
+			// available even after the user types a passthrough verb.
+			const lines = result.stdout
+				.split("\n")
+				.filter(
+					(l) => l.startsWith("complete -c c8") && l.includes("-l profile"),
+				);
+			assert.ok(lines.length > 0, "expected fish completion for --profile");
+			for (const line of lines) {
+				assert.ok(
+					!line.includes("__fish_seen_subcommand_from"),
+					`global flag '--profile' must not be guarded by __fish_seen_subcommand_from. line was: ${line}`,
+				);
+			}
+		});
 	});
 });
