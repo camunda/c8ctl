@@ -444,6 +444,31 @@ Choose descriptive, unique names for your plugin commands that don't conflict wi
 - ✅ `analyze-process`, `export-data`, `sync-resources`
 - ❌ `list`, `get`, `create`, `deploy`
 
+### Naming convention: prefix with your plugin's short name
+
+Plugin commands also collide with **other plugins'** commands. c8ctl
+applies first-registration-wins for plugin-vs-plugin command collisions
+and surfaces the dropped command via `c8ctl doctor plugin`, but the best
+fix is to avoid the collision in the first place.
+
+The recommended convention is to prefix every command your plugin
+exports with a short, plugin-specific tag — typically derived from the
+package name:
+
+- ✅ `c8ctl-plugin-mycorp` exports `mycorp-model`, `mycorp-export`
+- ✅ `c8ctl-plugin-acme` exports `acme-deploy`, `acme-status`
+- ❌ Two plugins both exporting `model` (one will be dropped at load
+  time — c8ctl logs a `logger.warn` on stderr and surfaces the drop via
+  `c8ctl doctor plugin`, but the colliding command itself is unreachable)
+
+This is **not enforced** — c8ctl will load any command name that
+doesn't collide with a built-in — but a published convention reduces
+the rate of real-world collisions and makes the dropped-command warning
+actionable when it does fire.
+
+For the collision policy, the diagnostic output, and the reproduction
+recipe, see [docs/plugin-collisions.md](docs/plugin-collisions.md).
+
 ## Testing
 
 See [tests/unit/plugin-loader.test.ts](tests/unit/plugin-loader.test.ts) for unit tests that verify:

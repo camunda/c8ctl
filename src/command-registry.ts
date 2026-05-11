@@ -1532,6 +1532,26 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	doctor: {
+		description: "Diagnose plugin loading state and collisions",
+		helpDescription:
+			"Surface plugin-loading collisions detected at startup (#363). Reports loaded plugins with their command names, and any first-registration-wins drops (plugin-name or command-name).",
+		mutating: false,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl doctor plugin",
+				description: "List loaded plugins and any load-time collisions",
+			},
+			{
+				command: "c8ctl doctor plugin --json",
+				description: "Machine-readable doctor output",
+			},
+		],
+		resources: ["plugin"],
+		flags: {},
+	},
+
 	// ── Session commands ───────────────────────────────────────────────────
 
 	use: {

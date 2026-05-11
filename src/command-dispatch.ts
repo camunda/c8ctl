@@ -71,6 +71,7 @@ import {
 } from "./commands/messages.ts";
 import { feedbackCommand, openAppCommand } from "./commands/open.ts";
 import {
+	doctorPluginCommand,
 	downgradePluginCommand,
 	initPluginCommand,
 	listPluginsCommand,
@@ -145,6 +146,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["sync:plugin", syncPluginsCommand],
 	["upgrade:plugin", upgradePluginCommand],
 	["downgrade:plugin", downgradePluginCommand],
+	["doctor:plugin", doctorPluginCommand],
 	["init:plugin", initPluginCommand],
 
 	// ── Process instances ──────────────────────────────────────────────
