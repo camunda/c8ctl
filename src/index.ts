@@ -443,7 +443,7 @@ async function main() {
 			const mergedOptions = { ...builtinOptions };
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
-				if (name in builtinOptions) {
+				if (Object.hasOwn(builtinOptions, name)) {
 					// A required plugin flag whose name collides with a built-in
 					// flag is unsatisfiable: the token is always stripped from
 					// argv before the plugin parser sees it, so the required
