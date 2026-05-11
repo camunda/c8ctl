@@ -439,6 +439,23 @@ describe("Passthrough plugin contract (#366)", () => {
 			);
 		});
 
+		// Class-scoped guard: the bash file-completion case branch must
+		// include verb aliases too, not just the canonical verb. This
+		// covers fileComplete aliases (e.g. `w` → `watch`) and any
+		// future passthrough verbs that declare aliases. Without
+		// alias support, `c8ctl w <TAB>` would fall through to the
+		// generic `*)` arm and offer the wrong completion set.
+		test("bash file-completion case branch includes verb aliases (e.g. w → watch)", async () => {
+			const result = await c8("completion", "bash");
+			assert.strictEqual(result.status, 0);
+			// The watch verb has alias `w`. Both must appear in a single
+			// alternation pattern that maps to compgen -f.
+			assert.ok(
+				/watch\|w\)\s*\n\s*COMPREPLY=\(\s*\$\(compgen -f /.test(result.stdout),
+				`bash completion for fileComplete verb 'watch' must include its alias 'w' in the case pattern. stdout did not match.`,
+			);
+		});
+
 		test("bash completion restricts flag completion to GLOBAL_FLAGS for passthrough verbs", async () => {
 			const result = await c8("completion", "bash");
 			assert.strictEqual(result.status, 0);

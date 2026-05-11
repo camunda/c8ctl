@@ -331,9 +331,13 @@ function generateBashCompletion(): string {
 		}
 
 		if (v.fileComplete || v.passthrough) {
-			// deploy/run/watch and #366 passthrough verbs complete with files
+			// deploy/run/watch and #366 passthrough verbs complete with
+			// files. Include aliases in the case pattern so e.g. `c8ctl
+			// w <TAB>` (alias for `watch`) gets file completion too.
+			const filePattern =
+				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
 			caseBranches.push(
-				`        ${v.verb})\n          COMPREPLY=( $(compgen -f -- "\${cur}") )\n          ;;`,
+				`        ${filePattern})\n          COMPREPLY=( $(compgen -f -- "\${cur}") )\n          ;;`,
 			);
 			continue;
 		}
