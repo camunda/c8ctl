@@ -739,6 +739,8 @@ Deploy files to Camunda (auto-discovers deployable files in directories)
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--force` | boolean |  | Deploy any file type, ignoring the default extension allow-list |
+| `--extensions` | string |  | Comma-separated list of additional file extensions to include when scanning directories (e.g. .md,.txt). Explicit file paths bypass the extension allow-list. |
+| `--all-extensions` | boolean |  | Include all server-supported file extensions during directory discovery |
 
 **Examples:**
 
@@ -846,7 +848,8 @@ Watch files for changes and auto-deploy
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--force` | boolean |  | Continue watching after all deployment errors |
-| `--extensions` | string |  | Comma-separated list of file extensions to watch (e.g. .bpmn,.dmn,.form) |
+| `--extensions` | string |  | Comma-separated list of additional file extensions to watch (merged with defaults, e.g. .md,.txt) |
+| `--all-extensions` | boolean |  | Watch all server-supported file extensions |
 
 **Examples:**
 

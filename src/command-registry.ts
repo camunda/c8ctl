@@ -1233,6 +1233,16 @@ export const COMMAND_REGISTRY = {
 				description:
 					"Deploy any file type, ignoring the default extension allow-list",
 			},
+			extensions: {
+				type: "string",
+				description:
+					"Comma-separated list of additional file extensions to include when scanning directories (e.g. .md,.txt). Explicit file paths bypass the extension allow-list.",
+			},
+			"all-extensions": {
+				type: "boolean",
+				description:
+					"Include all server-supported file extensions during directory discovery",
+			},
 		},
 	},
 
@@ -1338,7 +1348,11 @@ export const COMMAND_REGISTRY = {
 			extensions: {
 				type: "string",
 				description:
-					"Comma-separated list of file extensions to watch (e.g. .bpmn,.dmn,.form)",
+					"Comma-separated list of additional file extensions to watch (merged with defaults, e.g. .md,.txt)",
+			},
+			"all-extensions": {
+				type: "boolean",
+				description: "Watch all server-supported file extensions",
 			},
 		},
 		aliases: ["w"],

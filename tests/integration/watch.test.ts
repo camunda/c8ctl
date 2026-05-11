@@ -292,14 +292,16 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 		}
 	});
 
-	test("watch --extensions monitors only specified file types", async () => {
+	test("watch --extensions merges custom extensions with defaults", async () => {
 		const testWatchDir = mkdtempSync(join(tmpdir(), "c8ctl-watch-ext-"));
-		// Only watch .xml files
+		// --extensions=.xml merges with defaults (.bpmn, .dmn, .form)
 		const watch = startWatch(testWatchDir, dataDir, ["--extensions=.xml"]);
 
 		try {
 			const initialized = await pollUntil(
-				async () => watch.getOutput().includes("Monitoring extensions: .xml"),
+				async () =>
+					watch.getOutput().includes("Monitoring extensions:") &&
+					watch.getOutput().includes(".xml"),
 				5000,
 				POLL_INTERVAL_MS,
 			);
@@ -308,15 +310,10 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 				`Expected watcher to show .xml in monitored extensions.\nActual output:\n${watch.getOutput()}`,
 			);
 
-			// Step 1: copy a .bpmn file — this should be IGNORED by the watcher
-			copyFileSync(VALID_BPMN, join(testWatchDir, "ignored.bpmn"));
-			await new Promise((resolve) => setTimeout(resolve, 2000));
-			assert.ok(
-				!watch.getOutput().includes("Change detected: ignored.bpmn"),
-				`Watcher should NOT detect .bpmn files when --extensions=.xml is set.\nActual output:\n${watch.getOutput()}`,
-			);
+			// --extensions merges with defaults, so .bpmn is still watched.
+			// Verify that .xml files (the added extension) are detected and deployed.
 
-			// Step 2: copy a valid BPMN as a .xml file — this SHOULD be detected and deployed
+			// Copy a valid BPMN as a .xml file — this SHOULD be detected and deployed
 			copyFileSync(VALID_BPMN, join(testWatchDir, "process.xml"));
 			const detected = await pollUntil(
 				async () => watch.getOutput().includes("Change detected: process.xml"),

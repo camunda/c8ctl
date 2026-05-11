@@ -15,7 +15,6 @@ import {
 } from "@camunda8/orchestration-cluster-api";
 import { defineCommand, dryRun } from "../command-framework.ts";
 import { resolveTenantId } from "../config.ts";
-import { DEPLOYABLE_EXTENSIONS } from "./resource-extensions.ts";
 
 /**
  * Extract process ID from BPMN file content.
@@ -47,10 +46,13 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 	if (dr) return dr;
 
 	// Validate file extension unless --force is set.
+	// `run` deploys and starts a process instance, which requires a BPMN
+	// process ID — only .bpmn files are valid here.
 	const ext = extname(path);
-	if (!flags.force && ext && !DEPLOYABLE_EXTENSIONS.includes(ext)) {
+	if (!flags.force && ext !== ".bpmn") {
 		throw new Error(
-			`Unsupported file extension "${ext}". Use --force to deploy any file type.`,
+			`run requires a .bpmn file (got "${ext || "<no extension>"}"). ` +
+				`Use "c8 deploy" for other resource types, or --force to override.`,
 		);
 	}
 

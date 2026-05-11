@@ -163,16 +163,120 @@ describe("CLI behavioural: deploy", () => {
 
 	// ── Extension allow-list tests ──────────────────────────────────────────
 
-	test("rejects file with unsupported extension", async () => {
-		const unsupportedFile = join(tempDir, "process.unsupported");
-		writeFileSync(unsupportedFile, "dummy content");
+	test("explicit file bypasses extension allow-list", async () => {
+		// When a user names a file directly, deploy it regardless of extension.
+		// See https://github.com/camunda/c8ctl/issues/350
+		const mdFile = join(tempDir, "readme.md");
+		writeFileSync(mdFile, "# My Process Docs");
 
-		const result = await c8("deploy", unsupportedFile, "--dry-run");
-		assert.strictEqual(result.status, 1);
+		const result = await c8("deploy", mdFile, "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
 		assert.ok(
-			result.stderr.includes("No deployable files found") ||
-				result.stderr.includes("No deployable"),
-			`Expected rejection for unsupported extension.\nstderr: ${result.stderr}`,
+			names.includes("readme.md"),
+			`expected readme.md in resources, got: ${JSON.stringify(names)}`,
+		);
+	});
+
+	test("directory walk only includes .bpmn/.dmn/.form by default", async () => {
+		// Default allow-list is narrow: only unambiguous Camunda resources.
+		const subDir = join(tempDir, "project");
+		mkdirSync(subDir, { recursive: true });
+		writeFileSync(join(subDir, "main.bpmn"), MINIMAL_BPMN);
+		writeFileSync(join(subDir, "readme.md"), "# Docs");
+		writeFileSync(join(subDir, "config.json"), "{}");
+
+		const result = await c8("deploy", subDir, "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
+
+		assert.ok(
+			names.includes("main.bpmn"),
+			`expected main.bpmn, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			!names.includes("readme.md"),
+			`readme.md should be excluded by default, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			!names.includes("config.json"),
+			`config.json should be excluded by default, got: ${JSON.stringify(names)}`,
+		);
+	});
+
+	test("directory walk logs skipped extensions to stderr", async () => {
+		const subDir = join(tempDir, "project");
+		mkdirSync(subDir, { recursive: true });
+		writeFileSync(join(subDir, "main.bpmn"), MINIMAL_BPMN);
+		writeFileSync(join(subDir, "readme.md"), "# Docs");
+
+		const result = await c8("deploy", subDir, "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stderr.includes("Skipped files") && result.stderr.includes(".md"),
+			`expected skip message mentioning .md in stderr, got: ${result.stderr}`,
+		);
+	});
+
+	test("--extensions adds to the default allow-list for directory walks", async () => {
+		const subDir = join(tempDir, "project");
+		mkdirSync(subDir, { recursive: true });
+		writeFileSync(join(subDir, "main.bpmn"), MINIMAL_BPMN);
+		writeFileSync(join(subDir, "readme.md"), "# Docs");
+		writeFileSync(join(subDir, "config.json"), "{}");
+
+		const result = await c8("deploy", subDir, "--extensions=.md", "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
+
+		assert.ok(
+			names.includes("main.bpmn"),
+			`expected main.bpmn, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			names.includes("readme.md"),
+			`expected readme.md with --extensions, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			!names.includes("config.json"),
+			`config.json should still be excluded, got: ${JSON.stringify(names)}`,
+		);
+	});
+
+	test("--all-extensions includes expanded types in directory walk", async () => {
+		const subDir = join(tempDir, "project");
+		mkdirSync(subDir, { recursive: true });
+		writeFileSync(join(subDir, "main.bpmn"), MINIMAL_BPMN);
+		writeFileSync(join(subDir, "readme.md"), "# Docs");
+		writeFileSync(join(subDir, "config.json"), "{}");
+
+		const result = await c8("deploy", subDir, "--all-extensions", "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		const body = asRecord(out.body, "dry-run body");
+		const resources = asRecordArray(body.resources, "body.resources");
+		const names = resources.map((r) => r.name);
+
+		assert.ok(
+			names.includes("main.bpmn"),
+			`expected main.bpmn, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			names.includes("readme.md"),
+			`expected readme.md with --all-extensions, got: ${JSON.stringify(names)}`,
+		);
+		assert.ok(
+			names.includes("config.json"),
+			`expected config.json with --all-extensions, got: ${JSON.stringify(names)}`,
 		);
 	});
 

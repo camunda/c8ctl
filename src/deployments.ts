@@ -8,7 +8,10 @@ import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "./client.ts";
 import { defineCommand, dryRun } from "./command-framework.ts";
-import { DEPLOYABLE_EXTENSIONS } from "./commands/resource-extensions.ts";
+import {
+	ALL_DEPLOYABLE_EXTENSIONS,
+	DEPLOYABLE_EXTENSIONS,
+} from "./commands/resource-extensions.ts";
 import { resolveTenantId } from "./config.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
 import { isIgnored, loadIgnoreRules } from "./ignore.ts";
@@ -26,6 +29,20 @@ function logMessage(message: string): void {
 	} else {
 		console.error(message);
 	}
+}
+
+/**
+ * Format and log a hint about skipped file extensions.
+ * Shared between the dry-run preview and the execute path so the
+ * message stays consistent. See https://github.com/camunda/c8ctl/issues/350
+ */
+function logSkippedExtensions(skippedExtensions: Set<string>): void {
+	if (skippedExtensions.size === 0) return;
+	const exts = [...skippedExtensions].sort().join(", ");
+	logMessage(
+		`Skipped files with extensions not in the allow-list (${exts}). ` +
+			`Use --extensions=<ext> to add specific types, or --all-extensions to include all server-supported types.`,
+	);
 }
 
 /**
@@ -119,7 +136,14 @@ function findGroupRoot(
 }
 
 /**
- * Recursively collect resource files from a directory
+ * Recursively collect resource files from a directory.
+ *
+ * @param extensionList - The active allow-list of extensions. Only used
+ *   during directory walks; explicit file paths bypass this check (the
+ *   caller's intent is unambiguous). Pass `undefined` to skip extension
+ *   filtering entirely (equivalent to `--force`).
+ * @param skippedExtensions - Mutable set that accumulates extensions
+ *   skipped during directory walks, so the caller can log them.
  */
 function collectResourceFiles(
 	dirPath: string,
@@ -128,6 +152,8 @@ function collectResourceFiles(
 	ig?: Ignore,
 	ignoreBaseDir?: string,
 	force?: boolean,
+	extensionList?: readonly string[],
+	skippedExtensions?: Set<string>,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -144,10 +170,9 @@ function collectResourceFiles(
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
 			return collected;
 		}
-		// Unless --force, reject files with unsupported extensions
-		if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(dirPath))) {
-			return collected;
-		}
+		// Explicit file paths always pass through — the user named the
+		// file directly, so their intent is unambiguous. Extension
+		// filtering only applies during directory discovery (below).
 		const groupInfo = findGroupRoot(dirPath, basePath);
 		collected.push({
 			path: dirPath,
@@ -201,7 +226,15 @@ function collectResourceFiles(
 					return;
 				}
 				// Unless --force, only collect files with known deployable extensions
-				if (!force && !DEPLOYABLE_EXTENSIONS.includes(extname(fullPath))) {
+				if (
+					!force &&
+					extensionList &&
+					!extensionList.includes(extname(fullPath))
+				) {
+					if (skippedExtensions) {
+						const ext = extname(fullPath);
+						skippedExtensions.add(ext || "<no extension>");
+					}
 					return;
 				}
 				files.push(fullPath);
@@ -230,6 +263,8 @@ function collectResourceFiles(
 				ig,
 				ignoreBaseDir,
 				force,
+				extensionList,
+				skippedExtensions,
 			);
 		});
 
@@ -242,6 +277,8 @@ function collectResourceFiles(
 				ig,
 				ignoreBaseDir,
 				force,
+				extensionList,
+				skippedExtensions,
 			);
 		});
 	}
@@ -268,6 +305,15 @@ function findDuplicateDefinitionIds(
 }
 
 /**
+ * Result of collecting deployable resources, including any extensions
+ * that were skipped during directory walks (for user feedback).
+ */
+interface CollectResult {
+	resources: ResourceFile[];
+	skippedExtensions: Set<string>;
+}
+
+/**
  * Collect deployable resources from the given paths, applying `.c8ignore`
  * rules. Throws on the two pre-API guard failures so callers (deploy
  * handler, watch, dry-run preview) all surface the same errors with the
@@ -275,11 +321,15 @@ function findDuplicateDefinitionIds(
  *
  * Shared between `deployCommand` (used for both the dry-run preview and
  * the execute path via `deployResources`) and `deployResources` itself.
+ *
+ * @param extensionList - Active allow-list for directory discovery.
+ *   Defaults to `DEPLOYABLE_EXTENSIONS` (.bpmn, .dmn, .form).
  */
 function collectResourcesForPaths(
 	paths: string[],
 	force?: boolean,
-): ResourceFile[] {
+	extensionList: readonly string[] = DEPLOYABLE_EXTENSIONS,
+): CollectResult {
 	if (paths.length === 0) {
 		throw new Error(
 			"No paths provided. Use: c8 deploy <path> or c8 deploy (for current directory)",
@@ -291,15 +341,26 @@ function collectResourcesForPaths(
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	const resources: ResourceFile[] = [];
+	const skippedExtensions = new Set<string>();
 	paths.forEach((path) => {
-		collectResourceFiles(path, resources, undefined, ig, ignoreBaseDir, force);
+		collectResourceFiles(
+			path,
+			resources,
+			undefined,
+			ig,
+			ignoreBaseDir,
+			force,
+			extensionList,
+			skippedExtensions,
+		);
 	});
 
 	if (resources.length === 0) {
+		logSkippedExtensions(skippedExtensions);
 		throw new Error("No deployable files found in the specified paths");
 	}
 
-	return resources;
+	return { resources, skippedExtensions };
 }
 
 /**
@@ -320,6 +381,7 @@ export async function deployResources(
 		continueOnError?: boolean;
 		continueOnUserError?: boolean;
 		force?: boolean;
+		extensionList?: readonly string[];
 		/**
 		 * Optional cancellation signal. When aborted, an in-flight
 		 * `createDeployment` HTTP request is cancelled via the SDK's
@@ -341,7 +403,13 @@ export async function deployResources(
 	// HTTP deploy call (further down) is wrapped in a catch that routes
 	// through `handleDeploymentError` for rich Problem-Detail rendering.
 
-	const resources = collectResourcesForPaths(paths, options.force);
+	const { resources, skippedExtensions } = collectResourcesForPaths(
+		paths,
+		options.force,
+		options.extensionList ?? DEPLOYABLE_EXTENSIONS,
+	);
+
+	logSkippedExtensions(skippedExtensions);
 
 	// Store the base paths for relative path calculation. Safe to assign
 	// directly now: the empty-paths guard inside `collectResourcesForPaths`
@@ -799,6 +867,43 @@ function printDeploymentHints(
 // ─── defineCommand ───────────────────────────────────────────────────────────
 
 /**
+ * Resolve the effective extension allow-list from the deploy flags.
+ *
+ * Priority: --force (no filtering) > --all-extensions > --extensions > default
+ *
+ * When `--extensions` is provided, the custom list is *merged* with the
+ * default (.bpmn, .dmn, .form) so users add to the baseline rather than
+ * replacing it.
+ */
+function resolveExtensionList(flags: {
+	force?: boolean;
+	extensions?: string;
+	"all-extensions"?: boolean;
+}): readonly string[] {
+	// When --force is set the allow-list is irrelevant — downstream code
+	// skips filtering entirely. Return the default so callers always get a
+	// valid list, but the value is never consulted.
+	if (flags.force) return DEPLOYABLE_EXTENSIONS;
+
+	// --all-extensions: use the full server-supported list
+	if (flags["all-extensions"]) return ALL_DEPLOYABLE_EXTENSIONS;
+
+	// --extensions: merge custom extensions with the default set
+	if (flags.extensions && String(flags.extensions).trim()) {
+		const custom = String(flags.extensions)
+			.split(",")
+			.map((e) => e.trim())
+			.filter(Boolean)
+			.map((e) => (e.startsWith(".") ? e : `.${e}`));
+
+		const merged = [...new Set([...DEPLOYABLE_EXTENSIONS, ...custom])];
+		return merged;
+	}
+
+	return DEPLOYABLE_EXTENSIONS;
+}
+
+/**
  * Side-effectful: collects files, validates, deploys, and renders its own
  * table output.
  *
@@ -816,13 +921,21 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			? ctx.positionals
 			: ["."];
 
+	// Resolve the active extension allow-list from flags.
+	// Priority: --force (no filtering) > --all-extensions > --extensions > default
+	const extensionList = resolveExtensionList(flags);
+
 	// Dry-run preview. Collect resources first so the preview body
 	// reflects what would actually be sent — and so the empty-paths /
 	// no-files guards still surface as thrown errors before we emit.
 	// Uses `ctx.dryRun` and `ctx.tenantId` from the framework rather
 	// than reaching into the global runtime/config layer.
 	if (ctx.dryRun) {
-		const previewResources = collectResourcesForPaths(paths, flags.force);
+		const { resources: previewResources, skippedExtensions } =
+			collectResourcesForPaths(paths, flags.force, extensionList);
+
+		logSkippedExtensions(skippedExtensions);
+
 		const dr = dryRun({
 			command: "deploy",
 			method: "POST",
@@ -842,6 +955,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// table. Keeping the helper self-contained avoids threading
 	// pre-collected state between the handler and the shared helper
 	// used by `watch`.
-	await deployResources(paths, { profile: ctx.profile, force: flags.force });
+	await deployResources(paths, {
+		profile: ctx.profile,
+		force: flags.force,
+		extensionList,
+	});
 	return { kind: "none" };
 });
