@@ -2,10 +2,10 @@
  * Behavioural contract tests for the two-stage flag parser proposed in
  * issue #373.
  *
- * **Status: RED phase.** These tests describe the *desired* behaviour
- * after the parser refactor lands. They are expected to fail against the
- * current single-pass parser. Each `test` is named after the contract
- * statement it encodes; the failure messages document the gap.
+ * **Status: active contract coverage.** These tests capture the expected
+ * parser behaviour and are intended to pass in the main unit-test suite.
+ * Each `test` is named after the contract statement it encodes so failures
+ * point directly to the violated rule.
  *
  * Contract summary (see issue #373 for the full design):
  *
