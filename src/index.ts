@@ -444,6 +444,20 @@ async function main() {
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
 				if (name in builtinOptions) {
+					// A required plugin flag whose name collides with a built-in
+					// flag is unsatisfiable: the token is always stripped from
+					// argv before the plugin parser sees it, so the required
+					// check downstream would always fire with the misleading
+					// "--<name> is required" message even when the user did
+					// pass a value (#364). Fail fast here with a single
+					// actionable error instead.
+					if (def.required === true) {
+						logger.error(
+							`Plugin flag --${name} is declared required but conflicts with a built-in flag of the same name; ` +
+								`it can never be satisfied. The plugin must rename this flag.`,
+						);
+						process.exit(1);
+					}
 					logger.warn(
 						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
 					);

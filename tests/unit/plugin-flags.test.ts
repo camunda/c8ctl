@@ -217,6 +217,56 @@ describe("Plugin Flags CLI subprocess — built-in collision", () => {
 	});
 });
 
+describe("Plugin Flags CLI subprocess — required + built-in collision (#364)", () => {
+	// A plugin flag declared `required: true` whose name collides with a
+	// built-in flag is unsatisfiable: the colliding token is always stripped
+	// from argv before the plugin parser sees it. The CLI must fail fast at
+	// dispatch with an actionable error rather than emit the misleading
+	// "--<name> is required" after the handler has been "called".
+	test("rejects unsatisfiable command with actionable error, even when user passes the flag", async () => {
+		const result = await c8plugin(
+			"test-required-collision",
+			"--profile",
+			"anything",
+		);
+		assert.strictEqual(
+			result.status,
+			1,
+			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("--profile"),
+			`expected error to name the colliding flag. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("required") && result.stderr.includes("built-in"),
+			`expected actionable error mentioning required + built-in collision. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			!result.stderr.match(/^ERROR: --profile is required\s*$/m),
+			`error must not be the misleading bare "--profile is required". stderr: ${result.stderr}`,
+		);
+		assert.strictEqual(
+			result.stdout.trim(),
+			"",
+			`handler must not run. stdout: ${result.stdout}`,
+		);
+	});
+
+	test("rejects unsatisfiable command even when user omits the flag entirely", async () => {
+		const result = await c8plugin("test-required-collision");
+		assert.strictEqual(
+			result.status,
+			1,
+			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes("built-in"),
+			`expected error mentioning built-in collision. stderr: ${result.stderr}`,
+		);
+	});
+});
+
 describe("Plugin Flags CLI subprocess", () => {
 	test("string and boolean flags are parsed and passed to handler", async () => {
 		const result = await c8plugin(

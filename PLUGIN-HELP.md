@@ -113,6 +113,7 @@ Each flag can have the following properties:
 
 > **Important:** Plugin flags are checked against c8ctl's built-in flags at runtime with different consequences depending on where the collision occurs:
 > - **Long-name collision** (e.g. `--output`, `--verbose`, `--dry-run`): the entire plugin flag is dropped. A warning is emitted and the handler will not receive the value.
+> - **Long-name collision combined with `required: true`**: the command is **unsatisfiable** — the colliding token is always stripped from argv before the plugin parser sees it, so no user input can satisfy the requirement. c8ctl refuses to dispatch the command and exits with an actionable error directing the plugin author to rename the flag (#364).
 > - **Short-alias collision** (e.g. `-v`, `-o`, `-h`): only the short alias is stripped. The long flag name still works — `--myflag value` is parsed correctly, but `-m value` is not.
 >
 > Avoid long names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
