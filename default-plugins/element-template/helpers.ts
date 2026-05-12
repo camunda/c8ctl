@@ -5,10 +5,17 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import type {} from "../../src/runtime.ts";
 
-// Plugins must stay self-contained — they cannot reach into c8ctl's
-// internals via relative imports because the dist layout differs from
-// the source layout (src/logger.ts → dist/logger.js).
+const c8ctl = globalThis.c8ctl!;
+
+/**
+ * User-Agent header sent on every outbound HTTP call this plugin makes
+ * (marketplace index/template fetches and ad-hoc template URL loads),
+ * so traffic from c8ctl is attributable in upstream logs.
+ */
+export const USER_AGENT = `c8ctl-plugin-element-template/${c8ctl.version}`;
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 }
@@ -143,7 +150,9 @@ export function toRawGitHubUrl(url: string): string {
 export async function readFileOrUrl(input: string): Promise<string> {
 	if (isUrl(input)) {
 		const resolvedUrl = toRawGitHubUrl(input);
-		const response = await fetch(resolvedUrl);
+		const response = await fetch(resolvedUrl, {
+			headers: { "User-Agent": USER_AGENT },
+		});
 		if (!response.ok) {
 			throw new Error(
 				`Failed to fetch ${resolvedUrl}: HTTP ${response.status}`,

@@ -14,7 +14,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
-import { isRecord, type Logger, type Template } from "./helpers.ts";
+import {
+	isRecord,
+	type Logger,
+	type Template,
+	USER_AGENT,
+} from "./helpers.ts";
 
 const DEFAULT_OOTB_URL =
 	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";
@@ -155,7 +160,9 @@ export function nudgeIfStale(logger: Logger): void {
 // ---------------------------------------------------------------------------
 
 async function fetchJson(url: string): Promise<unknown> {
-	const response = await fetch(url);
+	const response = await fetch(url, {
+		headers: { "User-Agent": USER_AGENT },
+	});
 	if (!response.ok) {
 		throw new Error(
 			`HTTP ${response.status} ${response.statusText} for ${url}`,
