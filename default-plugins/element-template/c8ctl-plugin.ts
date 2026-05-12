@@ -179,11 +179,18 @@ function parseTemplateRef(arg: string | undefined): TemplateRef | null {
 	};
 }
 
-function getExecutionPlatformVersion(xml: string): string | null {
-	const match = xml.match(
-		/modeler:executionPlatformVersion\s*=\s*["']([^"']+)["']/,
-	);
-	return match ? match[1] : null;
+async function getExecutionPlatformVersion(
+	xml: string,
+): Promise<string | null> {
+	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const moddle = new BpmnModdle();
+	try {
+		const { rootElement } = await moddle.fromXML(xml);
+		const version = rootElement.$attrs?.["modeler:executionPlatformVersion"];
+		return typeof version === "string" ? version : null;
+	} catch {
+		return null;
+	}
 }
 
 async function readTemplateFromPathOrUrl(input: string): Promise<Template> {
@@ -374,7 +381,9 @@ async function applySubcommand(args: string[]): Promise<void> {
 	}
 	let template: Template;
 	if (ref.kind === "id") {
-		const executionPlatformVersion = getExecutionPlatformVersion(input.xml);
+		const executionPlatformVersion = await getExecutionPlatformVersion(
+			input.xml,
+		);
 		template = await resolveOotbTemplate(ref, { executionPlatformVersion });
 		if (!ref.version && !executionPlatformVersion) {
 			logger.warn(
