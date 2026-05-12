@@ -16,7 +16,6 @@ import {
 } from "./command-registry.ts";
 import { getLogger } from "./logger.ts";
 import {
-	executePluginCommand,
 	getPluginCommandsInfo,
 	isPluginCommand,
 	type PluginCommandInfo,
@@ -810,6 +809,98 @@ function showVirtualTopicHelp(topic: string, resource: string): void {
 }
 
 /**
+ * Render help for a flag-aware (non-passthrough) plugin command (#377).
+ *
+ * The host owns rendering so the boundary stays declarative: plugins
+ * declare metadata + typed `flags`, the host renders. In JSON mode the
+ * payload mirrors the registry-driven `showCommandHelp` shape with a
+ * `kind: "plugin"` discriminator and `pluginName` / `pluginVersion`
+ * identification, so agents can tell a plugin verb apart from a
+ * built-in.
+ */
+function showFlagAwarePluginHelp(command: string): void {
+	const logger = getLogger();
+	const pluginInfo = getPluginCommandsInfo().find(
+		(p) => p.commandName === command,
+	);
+	if (!pluginInfo) {
+		showGenericVerbHelp(command);
+		return;
+	}
+
+	if (logger.mode === "json") {
+		const version = getVersion();
+		const pluginCommandsInfo = getPluginCommandsInfo();
+		const allHelp = buildHelpJson(version, pluginCommandsInfo);
+		logger.json({
+			command,
+			verb: command,
+			kind: "plugin",
+			pluginName: pluginInfo.pluginName,
+			pluginVersion: pluginInfo.pluginVersion,
+			description: pluginInfo.description ?? "",
+			helpDescription: pluginInfo.helpDescription,
+			flags: pluginInfo.flags
+				? Object.fromEntries(
+						Object.entries(pluginInfo.flags).map(([name, def]) => [
+							name,
+							{
+								type: def.type,
+								description: def.description ?? "",
+								...(def.short ? { short: def.short } : {}),
+								...(def.required ? { required: true } : {}),
+							},
+						]),
+					)
+				: {},
+			examples: pluginInfo.examples ?? [],
+			globalFlags: allHelp.globalFlags,
+			searchFlags: allHelp.searchFlags,
+			agentFlags: allHelp.agentFlags,
+		});
+		return;
+	}
+
+	const lines: string[] = [];
+	const description = pluginInfo.description?.trim();
+	lines.push(
+		description ? `c8ctl ${command} — ${description}` : `c8ctl ${command}`,
+	);
+	lines.push(
+		`  (plugin: ${pluginInfo.pluginName} ${pluginInfo.pluginVersion})`,
+	);
+	if (pluginInfo.helpDescription) {
+		lines.push("");
+		lines.push(pluginInfo.helpDescription);
+	}
+	if (pluginInfo.flags && Object.keys(pluginInfo.flags).length > 0) {
+		lines.push("");
+		lines.push("Flags:");
+		const FLAG_COL = 28;
+		for (const [name, def] of Object.entries(pluginInfo.flags)) {
+			lines.push(formatFlag(name, def, FLAG_COL));
+		}
+	}
+	if (pluginInfo.subcommands && pluginInfo.subcommands.length > 0) {
+		lines.push("");
+		lines.push("Subcommands:");
+		const SUB_COL = 16;
+		for (const sub of pluginInfo.subcommands) {
+			lines.push(`  ${sub.name.padEnd(SUB_COL)}${sub.description}`);
+		}
+	}
+	if (pluginInfo.examples && pluginInfo.examples.length > 0) {
+		lines.push("");
+		lines.push("Examples:");
+		for (const ex of pluginInfo.examples) {
+			lines.push(`  ${ex.command}`);
+			lines.push(`      ${ex.description}`);
+		}
+	}
+	logger.info(lines.join("\n"));
+}
+
+/**
  * Show detailed help for a specific command.
  * Dispatches to the generic renderer for all verbs.
  */
@@ -930,10 +1021,15 @@ export async function showCommandHelp(command: string): Promise<void> {
 	}
 
 	// If the verb is still not in the registry, check if it's a plugin command.
-	// Delegate to the plugin's own handler which renders its own help output.
+	// Render the plugin's declarative help (#377) — derived from
+	// `metadata.commands[verb]` plus typed `flags` declarations. The
+	// plugin's own handler is NOT invoked; previously help was rendered
+	// by side-effect of calling the handler with no args, which leaked
+	// the boundary between host and plugin (the plugin had to know it
+	// was being asked for help, parse argv itself, and produce a
+	// consistent shape — none of which it could be relied on to do).
 	if (!lookupVerb(resolvedVerb) && isPluginCommand(resolvedVerb)) {
-		// Plugin handlers show help when called with no valid subcommand
-		await executePluginCommand(resolvedVerb, []);
+		showFlagAwarePluginHelp(resolvedVerb);
 		return;
 	}
 

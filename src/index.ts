@@ -31,8 +31,10 @@ import { getLogger, type SortOrder } from "./logger.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
+	getPluginVersionForCommand,
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
+	type PluginCtx,
 } from "./plugin-loader.ts";
 import { c8ctl } from "./runtime.ts";
 import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
@@ -435,6 +437,47 @@ async function main() {
 		const cmd = pluginCommands[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 
+		// Plugin --version (#377): when a plugin verb is invoked with
+		// --version, print the plugin's package version and identifying
+		// name, not c8ctl's. Routed before any other plugin dispatch so
+		// the handler is never called.
+		if (values.version) {
+			const info = getPluginVersionForCommand(verb);
+			if (info) {
+				if (logger.mode === "json") {
+					logger.json({
+						kind: "plugin-version",
+						verb,
+						pluginName: info.pluginName,
+						version: info.version,
+					});
+				} else {
+					logger.info(`${info.pluginName} ${info.version}`);
+				}
+				return;
+			}
+		}
+
+		// Construct the plugin host context (#377). Lazy `client` getter
+		// mirrors the built-in CommandContext pattern so plugins that
+		// never touch a Camunda client (e.g. local-only utilities) do
+		// not trigger credential resolution by virtue of receiving ctx.
+		const pluginProfile =
+			str(values.profile) ?? c8ctl.activeProfile ?? "default";
+		let _pluginClient: ReturnType<typeof createClient> | undefined;
+		const pluginCtx: PluginCtx = {
+			profile: pluginProfile,
+			dryRun: c8ctl.dryRun === true,
+			verbose: c8ctl.verbose === true,
+			outputMode: c8ctl.outputMode,
+			fields: c8ctl.fields,
+			logger,
+			get client() {
+				if (!_pluginClient) _pluginClient = createClient(pluginProfile);
+				return _pluginClient;
+			},
+		};
+
 		// Passthrough plugin contract (#366): strip GLOBAL_FLAGS from the
 		// raw argv following the verb token and forward the rest verbatim.
 		// GLOBAL_FLAGS already affect the c8ctl runtime via their regular
@@ -572,9 +615,15 @@ async function main() {
 				verb,
 				_resource ? [_resource, ...pluginArgs] : pluginArgs,
 				extractedFlags,
+				pluginCtx,
 			);
 		} else {
-			await executePluginCommand(verb, resource ? [resource, ...args] : args);
+			await executePluginCommand(
+				verb,
+				resource ? [resource, ...args] : args,
+				undefined,
+				pluginCtx,
+			);
 		}
 		return;
 	}
