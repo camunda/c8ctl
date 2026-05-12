@@ -15,6 +15,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	renameSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -76,14 +77,16 @@ export function writeJsonAtomic(
 	try {
 		renameSync(tmpPath, path);
 	} catch (error) {
-		// Best-effort cleanup of the orphaned temp file before re-throwing.
+		// Best-effort: delete the orphaned temp file (it contains OAuth
+		// client secrets, so leaving a `.failed` sentinel on disk would
+		// expand the secret-exposure surface). The original error is what
+		// matters; cleanup errors are intentionally swallowed.
 		try {
 			if (existsSync(tmpPath)) {
-				const sentinel = `${tmpPath}.failed`;
-				renameSync(tmpPath, sentinel);
+				unlinkSync(tmpPath);
 			}
 		} catch {
-			// Cleanup errors are non-fatal; the original failure is what matters.
+			// Cleanup errors are non-fatal.
 		}
 		throw error;
 	}

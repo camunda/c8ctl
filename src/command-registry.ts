@@ -1675,12 +1675,12 @@ export const COMMAND_REGISTRY = {
 				profile: {
 					type: "string",
 					description:
-						"Profile name to embed in the MCP entry (default: active profile)",
+						"Profile name to embed in the MCP entry (default: active profile, then the bootstrap 'local' profile)",
 				},
 				alias: {
 					type: "string",
 					description:
-						"Alias to use as the entry key in the client's config (default: profile name)",
+						"Alias to use as the entry key in the client's config (default: the resolved profile name)",
 				},
 				force: {
 					type: "boolean",
@@ -1692,7 +1692,7 @@ export const COMMAND_REGISTRY = {
 				alias: {
 					type: "string",
 					description:
-						"Alias of the entry to remove (default: active profile name)",
+						"Alias of the entry to remove (default: active profile name, then 'local', then 'camunda')",
 				},
 				force: {
 					type: "boolean",
@@ -1703,8 +1703,12 @@ export const COMMAND_REGISTRY = {
 			list: {},
 		},
 		resourcePositionals: {
-			install: [{ name: "client", required: true }],
-			uninstall: [{ name: "client", required: true }],
+			install: [
+				{ name: "client", required: true },
+			] as const satisfies readonly PositionalDef[],
+			uninstall: [
+				{ name: "client", required: true },
+			] as const satisfies readonly PositionalDef[],
 		},
 		helpExamples: [
 			{

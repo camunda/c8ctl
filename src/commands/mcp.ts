@@ -81,14 +81,9 @@ function resolveProfileName(profileFlag: string | undefined): string {
 export const mcpInstallCommand = defineCommand(
 	"mcp",
 	"install",
-	async (ctx, flags) => {
+	async (ctx, flags, args) => {
 		const { logger } = ctx;
-		const clientId = ctx.positionals[0];
-		if (!clientId) {
-			throw new Error(
-				`Missing MCP client name. Supported clients: ${listSupportedClients().join(", ")}.`,
-			);
-		}
+		const clientId = args.client;
 		const adapter = getAdapter(clientId);
 		const profileName = resolveProfileName(flags.profile);
 		const alias =
@@ -166,14 +161,9 @@ export const mcpInstallCommand = defineCommand(
 export const mcpUninstallCommand = defineCommand(
 	"mcp",
 	"uninstall",
-	async (ctx, flags) => {
+	async (ctx, flags, args) => {
 		const { logger } = ctx;
-		const clientId = ctx.positionals[0];
-		if (!clientId) {
-			throw new Error(
-				`Missing MCP client name. Supported clients: ${listSupportedClients().join(", ")}.`,
-			);
-		}
+		const clientId = args.client;
 		const adapter = getAdapter(clientId);
 		// Default alias must match install's default — both fall back through
 		// the same `defaultProfileNameForAlias()` chain so `mcp uninstall <client>`
@@ -330,11 +320,18 @@ function lookupExistingEntry(
 }
 
 /**
- * Recognise an entry that c8ctl would have written: it must launch
- * `npx` (or carry an args array containing) the published `@camunda8/cli`
- * package and the `mcp-proxy` subcommand. This is the same signature
- * `buildNpxProxyEntry` produces, so install/uninstall round-trip on
- * matching entries and refuse to touch foreign ones.
+ * Recognise an entry that c8ctl would have written. The check is the
+ * minimum signature that distinguishes a c8ctl-managed proxy entry
+ * from any other MCP server: the `args` array references the published
+ * `@camunda8/cli` package *and* the `mcp-proxy` subcommand. We do not
+ * lock the predicate to `command === "npx"` because users (and future
+ * c8ctl versions) may legitimately swap the runner (`bunx`, `npx -y`,
+ * a wrapper script) without changing the entry's identity — the args
+ * pair is the stable c8ctl fingerprint, the runner is not.
+ *
+ * Kept deliberately narrow: install/uninstall must only round-trip
+ * entries this predicate recognises, and `mcp list` must only surface
+ * those.
  */
 function isC8ctlManagedEntry(entry: unknown): boolean {
 	if (!isRecordLike(entry)) return false;
