@@ -357,7 +357,7 @@ export async function applySubcommand(args: string[]): Promise<void> {
 			input.xml,
 		);
 		template = await resolveOotbTemplate(ref, { executionPlatformVersion });
-		if (!ref.version && !executionPlatformVersion) {
+		if (ref.version === undefined && !executionPlatformVersion) {
 			logger.warn(
 				"BPMN has no modeler:executionPlatformVersion — applying latest version " +
 					`(${template.version}) of ${ref.id}.`,

@@ -244,6 +244,6 @@ export async function loadTemplate(
 		allDetails,
 		groupLabelMap,
 		sourceByDetail,
-		autoResolvedVersion: ref.kind === "id" && !ref.version,
+		autoResolvedVersion: ref.kind === "id" && ref.version === undefined,
 	};
 }
