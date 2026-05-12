@@ -12,7 +12,12 @@
 
 import { existsSync } from "node:fs";
 import { defineCommand } from "../command-framework.ts";
-import { getAllProfiles, getProfile, resolveClusterConfig } from "../config.ts";
+import {
+	DEFAULT_PROFILE,
+	getProfile,
+	getProfileOrModeler,
+	resolveClusterConfig,
+} from "../config.ts";
 import {
 	getAdapter,
 	listSupportedClients,
@@ -33,30 +38,40 @@ function defaultAlias(profileName: string | undefined): string {
 }
 
 /**
+ * Profile name install/uninstall use as the default alias when neither
+ * `--profile` nor `--alias` is given. Mirrors `resolveClusterConfig`'s
+ * profile chain (active profile → bootstrap 'local' default) so install
+ * and uninstall agree on which entry the user means without `--alias`.
+ * Returns `undefined` when nothing is available; callers fall back to
+ * the literal "camunda".
+ */
+function defaultProfileNameForAlias(): string | undefined {
+	if (c8ctl.activeProfile) return c8ctl.activeProfile;
+	if (getProfile(DEFAULT_PROFILE)) return DEFAULT_PROFILE;
+	return undefined;
+}
+
+/**
  * Resolve the profile that the installed MCP entry will reference.
  * Throws when an explicit `--profile` names an unknown profile so the
  * defect class "wrote a working entry pointing at a profile that
- * doesn't exist" cannot occur.
+ * doesn't exist" cannot occur. Accepts `modeler:<name>` via
+ * `getProfileOrModeler` so Modeler connections work the same as in
+ * every other command.
  */
 function resolveProfileName(profileFlag: string | undefined): string {
 	if (profileFlag) {
-		if (!getProfile(profileFlag)) {
+		if (!getProfileOrModeler(profileFlag)) {
 			throw new Error(
 				`Profile '${profileFlag}' not found. Run 'c8ctl list profile' to see available profiles.`,
 			);
 		}
 		return profileFlag;
 	}
-	if (c8ctl.activeProfile) return c8ctl.activeProfile;
-	// Fall back to the first defined profile rather than emitting an
-	// entry with no `--profile` arg — that would silently reuse env vars
-	// at proxy-spawn time, breaking the "what you installed is what runs"
-	// contract.
-	const profiles = getAllProfiles();
-	const first = profiles[0];
-	if (first) return first.name;
+	const defaulted = defaultProfileNameForAlias();
+	if (defaulted) return defaulted;
 	throw new Error(
-		"No profile available. Create one with 'c8ctl add profile <name>' before running 'c8ctl mcp install'.",
+		"No profile available. Create one with 'c8ctl add profile <name>' or pass --profile before running 'c8ctl mcp install'.",
 	);
 }
 
@@ -139,10 +154,13 @@ export const mcpUninstallCommand = defineCommand(
 			);
 		}
 		const adapter = getAdapter(clientId);
+		// Default alias must match install's default — both fall back through
+		// the same `defaultProfileNameForAlias()` chain so `mcp uninstall <client>`
+		// always removes what `mcp install <client>` created.
 		const alias =
 			flags.alias && flags.alias.length > 0
 				? flags.alias
-				: defaultAlias(c8ctl.activeProfile);
+				: defaultAlias(defaultProfileNameForAlias());
 		const configPath = adapter.configPath();
 		const existing = readJsonFileOrNull(configPath);
 		const { merged, existed } = unmergeMcpConfig(

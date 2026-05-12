@@ -34,9 +34,8 @@ function configPathFor(clientId: string): string {
 beforeEach(() => {
 	tempHome = mkdtempSync(join(tmpdir(), "c8ctl-mcp-home-"));
 	tempDataDir = mkdtempSync(join(tmpdir(), "c8ctl-mcp-data-"));
-	// Seed a profile so install has credentials to embed. Profiles are
-	// stored as a name → record map at <data>/profiles.json (see
-	// src/config.ts loadProfiles()).
+	// Seed a profile so install has credentials to embed. profiles.json
+	// is parsed as `{ profiles: Profile[] }` (see src/config.ts loadProfiles()).
 	writeFileSync(
 		join(tempDataDir, "profiles.json"),
 		JSON.stringify({

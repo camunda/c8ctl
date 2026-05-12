@@ -175,6 +175,23 @@ describe("MCP client adapter contract (#293)", () => {
 		assert.deepStrictEqual(env, { CAMUNDA_BASE_URL: "http://x" });
 	});
 
+	test("buildProxyEnv emits the env vars resolveClusterConfig actually reads", () => {
+		// Defect class: emitting env names that resolveClusterConfig
+		// (src/config.ts) does NOT consult would silently break auth at
+		// proxy spawn time. The basic-auth pair MUST be CAMUNDA_USERNAME /
+		// CAMUNDA_PASSWORD, not CAMUNDA_BASIC_AUTH_* (those are SDK keys
+		// translated downstream by client.ts, never read from env).
+		const env = buildProxyEnv({
+			baseUrl: "http://x",
+			username: "demo",
+			password: "demo",
+		});
+		assert.strictEqual(env.CAMUNDA_USERNAME, "demo");
+		assert.strictEqual(env.CAMUNDA_PASSWORD, "demo");
+		assert.strictEqual(env.CAMUNDA_BASIC_AUTH_USERNAME, undefined);
+		assert.strictEqual(env.CAMUNDA_BASIC_AUTH_PASSWORD, undefined);
+	});
+
 	test("getAdapter throws with the supported client list on miss", () => {
 		assert.throws(() => getAdapter("zed"), /Supported clients:/);
 	});

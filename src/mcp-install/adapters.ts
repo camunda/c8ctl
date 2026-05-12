@@ -108,8 +108,10 @@ export function buildProxyEnv(
 	if (profile.clientSecret) env.CAMUNDA_CLIENT_SECRET = profile.clientSecret;
 	if (profile.oAuthUrl) env.CAMUNDA_OAUTH_URL = profile.oAuthUrl;
 	if (profile.audience) env.CAMUNDA_TOKEN_AUDIENCE = profile.audience;
-	if (profile.username) env.CAMUNDA_BASIC_AUTH_USERNAME = profile.username;
-	if (profile.password) env.CAMUNDA_BASIC_AUTH_PASSWORD = profile.password;
+	// Use CAMUNDA_USERNAME / CAMUNDA_PASSWORD (not CAMUNDA_BASIC_AUTH_*)
+	// to match the env vars resolveClusterConfig actually reads in src/config.ts.
+	if (profile.username) env.CAMUNDA_USERNAME = profile.username;
+	if (profile.password) env.CAMUNDA_PASSWORD = profile.password;
 	return env;
 }
 

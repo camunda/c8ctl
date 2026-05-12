@@ -8,6 +8,7 @@
  * filed to eliminate.
  */
 
+import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -42,9 +43,15 @@ export function readJsonFileOrNull(path: string): unknown {
 
 /**
  * Write JSON to `path` atomically: serialise to a sibling temp file
- * (`<path>.c8ctl-tmp`), then `renameSync`. POSIX guarantees rename is
- * atomic on the same filesystem, so a crash mid-write either leaves
- * the original intact or replaces it with the fully-written successor.
+ * with a unique per-invocation suffix (`<path>.c8ctl-tmp.<pid>.<rand>`),
+ * then `renameSync`. POSIX guarantees rename is atomic on the same
+ * filesystem, so a crash mid-write either leaves the original intact
+ * or replaces it with the fully-written successor.
+ *
+ * The unique suffix means two concurrent installers targeting the same
+ * config file (e.g. two terminals racing `c8ctl mcp install claude-desktop`)
+ * each write to a distinct temp file. The renames serialise; whichever
+ * lands second wins — but neither corrupts the other's intermediate state.
  *
  * Restricts file mode to 0o600 (owner read/write only) because the
  * written JSON contains OAuth client secrets in its `env` block. On
@@ -64,7 +71,7 @@ export function writeJsonAtomic(
 		(opts?.pretty ?? true)
 			? JSON.stringify(value, null, 2)
 			: JSON.stringify(value);
-	const tmpPath = `${path}.c8ctl-tmp`;
+	const tmpPath = `${path}.c8ctl-tmp.${process.pid}.${randomBytes(6).toString("hex")}`;
 	writeFileSync(tmpPath, `${json}\n`, { encoding: "utf8", mode: 0o600 });
 	try {
 		renameSync(tmpPath, path);
@@ -72,9 +79,7 @@ export function writeJsonAtomic(
 		// Best-effort cleanup of the orphaned temp file before re-throwing.
 		try {
 			if (existsSync(tmpPath)) {
-				// Use renameSync to a unique sentinel path so concurrent installers
-				// for different clients don't race on the same tmp filename.
-				const sentinel = `${tmpPath}.${process.pid}.failed`;
+				const sentinel = `${tmpPath}.failed`;
 				renameSync(tmpPath, sentinel);
 			}
 		} catch {
