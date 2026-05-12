@@ -150,7 +150,8 @@ export const metadata = {
 				},
 				{
 					name: "info",
-					description: "Show template metadata and a compact property table",
+					description:
+						"Show template metadata (id, version, applies-to, description) and a pointer to get-properties",
 				},
 				{
 					name: "get-properties",
