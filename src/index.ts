@@ -237,15 +237,23 @@ export function stripGlobalFlags(argv: string[]): string[] {
  * Remove tokens for blocked plugin flags from an argv slice so they cannot
  * shift positionals during the plugin-flag re-parse.
  *
- * The built-in may declare a blocked flag as boolean while the plugin
- * declared it as string. In that case the user supplied a value token
- * (--name value) that the built-in parser leaves in positionals. We use
- * the PLUGIN's declared type to decide whether to strip a following token.
+ * Post-#373, "blocked" exclusively means "collides with a GLOBAL flag".
+ * The user may have supplied a value token (`--name value`) intending
+ * either:
+ *   - the GLOBAL's interpretation (global type === "string"), or
+ *   - the PLUGIN's interpretation (plugin type === "string", e.g. global
+ *     is boolean but the plugin declared the same name as string).
+ *
+ * Either way the value is meaningless to both sides (plugin's flag is
+ * blocked; global is consumed by the host elsewhere) and must not leak
+ * into the plugin's positional args. Strip the following non-flag token
+ * if either side typed the flag as string.
  */
 function stripBlockedFlagTokens(
 	argv: string[],
 	blocked: Set<string>,
 	pluginFlagDefs: Record<string, { type: string }>,
+	globalFlagDefs: Record<string, { type: string }>,
 ): string[] {
 	const out: string[] = [];
 	let i = 0;
@@ -255,9 +263,12 @@ function stripBlockedFlagTokens(
 			const eqIdx = arg.indexOf("=");
 			const name = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);
 			if (blocked.has(name)) {
+				const eitherIsString =
+					pluginFlagDefs[name]?.type === "string" ||
+					globalFlagDefs[name]?.type === "string";
 				if (
 					eqIdx < 0 &&
-					pluginFlagDefs[name]?.type === "string" &&
+					eitherIsString &&
 					i + 1 < argv.length &&
 					!argv[i + 1].startsWith("-")
 				) {
@@ -442,11 +453,29 @@ async function main() {
 		}
 
 		if (cmdFlagDefs) {
-			// Use built-in flags as a blacklist: start from the full built-in
-			// option set, then add plugin flags only when the name is not already
-			// taken. This prevents a plugin flag from silently changing a built-in
-			// flag's parse type.
-			const builtinOptions = deriveParseArgsOptions();
+			// Plugin flag scoping (#373): a plugin verb's effective flag
+			// namespace is `GLOBAL_FLAGS ∪ plugin.flags`. Use ONLY the
+			// global flags as the conflict source — never the union of
+			// every built-in verb's flags. Otherwise a plugin can't declare
+			// a flag like `--limit` (which lives in SEARCH_FLAGS, valid
+			// only on `search`/`get`) without being silently blocked, even
+			// though `--limit` is irrelevant to the plugin's verb.
+			//
+			// Globals are still treated as a hard conflict because the
+			// host strips them from argv before the plugin parser sees
+			// them, so a plugin's same-named flag would never receive a
+			// value (#364).
+			const builtinOptions: Record<
+				string,
+				{ type: "string" | "boolean"; short?: string }
+			> = {};
+			for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
+				const short = "short" in def ? def.short : undefined;
+				builtinOptions[name] = {
+					type: def.type,
+					...(short && { short }),
+				};
+			}
 			const builtinShorts = new Set(
 				Object.values(builtinOptions)
 					.map((o) => o.short)
@@ -461,7 +490,7 @@ async function main() {
 			const blockedFlags = new Set<string>();
 			for (const [name, def] of Object.entries(cmdFlagDefs)) {
 				if (Object.hasOwn(builtinOptions, name)) {
-					// A required plugin flag whose name collides with a built-in
+					// A required plugin flag whose name collides with a global
 					// flag is unsatisfiable: the token is always stripped from
 					// argv before the plugin parser sees it, so the required
 					// check downstream would always fire with the misleading
@@ -470,13 +499,13 @@ async function main() {
 					// actionable error instead.
 					if (def.required === true) {
 						logger.error(
-							`Plugin flag --${name} is declared required but conflicts with a built-in flag of the same name; ` +
+							`Plugin flag --${name} is declared required but conflicts with a global c8ctl flag of the same name; ` +
 								`it can never be satisfied. The plugin must rename this flag.`,
 						);
 						process.exit(1);
 					}
 					logger.warn(
-						`Plugin flag --${name} conflicts with a built-in flag and will not be parsed`,
+						`Plugin flag --${name} conflicts with a global c8ctl flag and will not be parsed`,
 					);
 					blockedFlags.add(name);
 					continue;
@@ -485,7 +514,7 @@ async function main() {
 					def.short && builtinShorts.has(def.short) ? undefined : def.short;
 				if (def.short && !short) {
 					logger.warn(
-						`Plugin flag --${name} short alias -${def.short} conflicts with a built-in alias and will be ignored`,
+						`Plugin flag --${name} short alias -${def.short} conflicts with a global c8ctl alias and will be ignored`,
 					);
 				}
 				mergedOptions[name] = {
@@ -493,10 +522,19 @@ async function main() {
 					...(short && { short }),
 				};
 			}
+			// Strip blocked-flag tokens from argv before re-parse. Blocked
+			// names exclusively collide with GLOBAL_FLAGS (post-#373), but
+			// `mergedOptions` carries the global type for those names, so
+			// parseArgs alone would consume only the value of *string*
+			// globals — leaving the value of a *boolean* global behind to
+			// drift into positionals when the plugin typed the same name
+			// as string. The helper consults both type tables and strips
+			// the following non-flag token when either side is string.
 			const filteredArgv = stripBlockedFlagTokens(
 				process.argv.slice(2),
 				blockedFlags,
 				cmdFlagDefs,
+				builtinOptions,
 			);
 			let pluginParsed: ReturnType<typeof parseArgs>;
 			try {

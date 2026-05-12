@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-verb-scoped-flag",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": ["c8ctl-plugin"],
+  "description": "Test fixture for #373: a plugin that declares flag names which collide with verb-scoped (not global) built-in flags. Used to pin the contract that under per-verb flag scoping, a plugin verb's --limit (which is a SEARCH_FLAGS entry, not a GLOBAL_FLAGS entry) must reach the plugin handler instead of being blocked by the global-union pre-parse."
+}

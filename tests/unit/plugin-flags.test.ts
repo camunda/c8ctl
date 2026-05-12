@@ -240,7 +240,7 @@ describe("Plugin Flags CLI subprocess — required + built-in collision (#364)",
 		);
 		assert.ok(
 			result.stderr.includes(
-				"is declared required but conflicts with a built-in flag",
+				"is declared required but conflicts with a global c8ctl flag",
 			),
 			`expected new actionable error sentence. stderr: ${result.stderr}`,
 		);
@@ -273,8 +273,8 @@ describe("Plugin Flags CLI subprocess — required + built-in collision (#364)",
 			`expected exit 1, got ${result.status}. stderr: ${result.stderr}`,
 		);
 		assert.ok(
-			result.stderr.includes("built-in"),
-			`expected error mentioning built-in collision. stderr: ${result.stderr}`,
+			result.stderr.includes("global c8ctl flag"),
+			`expected error mentioning global flag collision. stderr: ${result.stderr}`,
 		);
 	});
 });
