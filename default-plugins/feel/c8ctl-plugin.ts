@@ -32,7 +32,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 type ParsedArgs = {
-	help: boolean;
 	engine: Engine;
 	vars: string | undefined;
 	varArgs: string[];
@@ -161,7 +160,6 @@ function isJsonMode(): boolean {
 
 function parseArgs(args: string[]): ParsedArgs {
 	const result: ParsedArgs = {
-		help: false,
 		engine: "cluster",
 		vars: undefined,
 		varArgs: [],
@@ -176,11 +174,6 @@ function parseArgs(args: string[]): ParsedArgs {
 		if (arg === "--") {
 			result.positionals.push(...args.slice(i + 1));
 			break;
-		}
-
-		if (arg === "--help" || arg === "-h") {
-			result.help = true;
-			continue;
 		}
 
 		if (arg === "--engine" || arg.startsWith("--engine=")) {
@@ -622,13 +615,6 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 	const logger = getLogger();
 	const parsed = parseArgs(args);
 
-	if (parsed.help) {
-		logger.output(
-			"Usage: c8ctl feel evaluate '<expression>' [--vars '{...}'] [--tenant <id>] [--engine cluster|local]",
-		);
-		return;
-	}
-
 	if (parsed.error) {
 		throw new Error(parsed.error);
 	}
@@ -693,6 +679,68 @@ function printUsage(): void {
 	logger.output("Examples:");
 	for (const ex of cmd.examples) {
 		logger.output(`  ${ex.command}`);
+	}
+}
+
+/**
+ * Reinject flags pre-parsed by the host (#366/#367) back into the args
+ * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
+ * `parseArgs` still sees them. Repeated string flags arrive as arrays
+ * (e.g. multiple `--var x=1 --var y=2`).
+ */
+function injectFlagsIntoArgs(
+	args: readonly string[],
+	flags: Record<string, unknown> | undefined,
+): string[] {
+	const out = [...args];
+	if (!flags) return out;
+	for (const [name, value] of Object.entries(flags)) {
+		if (value === undefined || value === null) continue;
+		if (typeof value === "boolean") {
+			if (value) out.push(`--${name}`);
+		} else if (Array.isArray(value)) {
+			for (const item of value) {
+				if (item !== undefined && item !== null) {
+					out.push(`--${name}`, String(item));
+				}
+			}
+		} else {
+			out.push(`--${name}`, String(value));
+		}
+	}
+	return out;
+}
+
+async function feelHandler(
+	args: string[] | undefined,
+	flags?: Record<string, unknown>,
+): Promise<void> {
+	// Host now extracts declared flags upstream (#366/#367) and forwards
+	// them via `flags`. The plugin's hand-rolled parseArgs still expects
+	// to see them as `--name value` tokens, so reinject them.
+	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
+	const subcommand = reinjected[0];
+	const subArgs = reinjected.slice(1);
+
+	if (!subcommand) {
+		printUsage();
+		return;
+	}
+	if (!isValidSubcommand(subcommand)) {
+		printUsage();
+		process.exitCode = 1;
+		return;
+	}
+
+	try {
+		if (subcommand === "evaluate") {
+			await evaluateSubcommand(subArgs);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const logger = getLogger();
+		logger.error(`Failed to feel ${subcommand}: ${message}`);
+		process.exitCode = 1;
 	}
 }
 

@@ -74,8 +74,7 @@ type LoadedTemplate = {
 };
 
 type InspectArgs = {
-	help: boolean;
-	templateArg: string | undefined;
+	templateArg: string;
 	propertyArgs: string[];
 	groups: string[];
 	detailed: boolean;
@@ -492,12 +491,6 @@ async function applySubcommand(args: string[]): Promise<void> {
 	const logger = getLogger();
 	const parsed = parseArgs(args);
 
-	if (parsed.help) {
-		logger.output(
-			"Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]",
-		);
-		return;
-	}
 
 	if (parsed.error) {
 		throw new Error(parsed.error);
@@ -624,13 +617,6 @@ async function infoSubcommand(args: string[]): Promise<void> {
 		allowPropertyNames: false,
 		allowFilters: false,
 	});
-	if (parsed.help) {
-		logger.output(usage);
-		return;
-	}
-	if (parsed.templateArg === undefined) {
-		throw new Error(`Missing template argument. ${usage}`);
-	}
 
 	const { template, autoResolvedVersion } = await loadTemplate(
 		parsed.templateArg,
@@ -675,13 +661,6 @@ async function getPropertiesSubcommand(args: string[]): Promise<void> {
 		allowPropertyNames: true,
 		allowFilters: true,
 	});
-	if (parsed.help) {
-		logger.output(usage);
-		return;
-	}
-	if (parsed.templateArg === undefined) {
-		throw new Error(`Missing template argument. ${usage}`);
-	}
 
 	const { template, allDetails, groupLabelMap, sourceByDetail } =
 		await loadTemplate(parsed.templateArg);
@@ -781,10 +760,6 @@ async function getSubcommand(args: string[]): Promise<void> {
 	let noIcon = false;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === "--help" || arg === "-h") {
-			getLogger().output(usage);
-			return;
-		}
 		if (arg === "--") break;
 		if (arg === "--no-icon") {
 			noIcon = true;
@@ -877,20 +852,13 @@ function parseInspectArgs(
 		allowFilters,
 	}: { allowPropertyNames: boolean; allowFilters: boolean },
 ): InspectArgs {
-	const out: InspectArgs = {
-		help: false,
-		templateArg: undefined,
-		propertyArgs: [],
-		groups: [],
-		detailed: false,
-	};
+	let templateArg: string | undefined;
+	const propertyArgs: string[] = [];
+	const groups: string[] = [];
+	let detailed = false;
 	let afterDoubleDash = false;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (!afterDoubleDash && (arg === "--help" || arg === "-h")) {
-			out.help = true;
-			return out;
-		}
 		if (!afterDoubleDash && arg === "--") {
 			afterDoubleDash = true;
 			continue;
@@ -904,30 +872,30 @@ function parseInspectArgs(
 			if (value === undefined || value === "") {
 				throw new Error(`--group requires a value (group id). ${usage}`);
 			}
-			out.groups.push(value);
+			groups.push(value);
 			continue;
 		}
 		if (!afterDoubleDash && (arg === "--detailed" || arg === "-d")) {
-			out.detailed = true;
+			detailed = true;
 			continue;
 		}
 		if (!afterDoubleDash && arg.startsWith("-")) {
 			throw new Error(`Unknown flag: ${arg}. ${usage}`);
 		}
-		if (out.templateArg === undefined) {
-			out.templateArg = arg;
+		if (templateArg === undefined) {
+			templateArg = arg;
 			continue;
 		}
 		if (!allowPropertyNames) {
 			throw new Error(`Unexpected argument: ${arg}. ${usage}`);
 		}
-		out.propertyArgs.push(arg);
+		propertyArgs.push(arg);
 	}
 
-	if (!out.templateArg && !out.help) {
+	if (!templateArg) {
 		throw new Error(`Missing template argument. ${usage}`);
 	}
-	return out;
+	return { templateArg, propertyArgs, groups, detailed };
 }
 
 /** Load and parse a template (OOTB id, local path, or URL). */
@@ -1348,10 +1316,6 @@ async function searchSubcommand(args: string[]): Promise<void> {
 	const queryParts: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === "--help" || arg === "-h") {
-			logger.output(usage);
-			return;
-		}
 		if (arg === "--") {
 			queryParts.push(...args.slice(i + 1));
 			break;
@@ -1474,10 +1438,6 @@ async function syncSubcommand(args: string[]): Promise<void> {
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === "--help" || arg === "-h") {
-			logger.output("Usage: c8ctl element-template sync [--prune]");
-			return;
-		}
 		if (arg === "--prune") {
 			prune = true;
 			continue;
@@ -1544,6 +1504,74 @@ function printUsage(): void {
 	logger.output("Examples:");
 	for (const ex of cmd.examples) {
 		logger.output(`  ${ex.command}`);
+	}
+}
+
+/**
+ * Reinject flags pre-parsed by the host (#366/#367) back into the args
+ * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
+ * `parseArgs` still sees them. Repeated string flags arrive as arrays.
+ */
+function injectFlagsIntoArgs(
+	args: readonly string[],
+	flags: Record<string, unknown> | undefined,
+): string[] {
+	const out = [...args];
+	if (!flags) return out;
+	for (const [name, value] of Object.entries(flags)) {
+		if (value === undefined || value === null) continue;
+		if (typeof value === "boolean") {
+			if (value) out.push(`--${name}`);
+		} else if (Array.isArray(value)) {
+			for (const item of value) {
+				if (item !== undefined && item !== null) {
+					out.push(`--${name}`, String(item));
+				}
+			}
+		} else {
+			out.push(`--${name}`, String(value));
+		}
+	}
+	return out;
+}
+
+async function elementTemplateHandler(
+	args: string[] | undefined,
+	flags?: Record<string, unknown>,
+): Promise<void> {
+	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
+	const subcommand = reinjected[0];
+	const subArgs = reinjected.slice(1);
+
+	if (!subcommand) {
+		printUsage();
+		return;
+	}
+	if (!isValidSubcommand(subcommand)) {
+		printUsage();
+		process.exitCode = 1;
+		return;
+	}
+
+	try {
+		if (subcommand === "search") {
+			await searchSubcommand(subArgs);
+		} else if (subcommand === "info") {
+			await infoSubcommand(subArgs);
+		} else if (subcommand === "get-properties") {
+			await getPropertiesSubcommand(subArgs);
+		} else if (subcommand === "apply") {
+			await applySubcommand(subArgs);
+		} else if (subcommand === "get") {
+			await getSubcommand(subArgs);
+		} else if (subcommand === "sync") {
+			await syncSubcommand(subArgs);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const logger = getLogger();
+		logger.error(`Failed to element-template ${subcommand}: ${message}`);
+		process.exitCode = 1;
 	}
 }
 

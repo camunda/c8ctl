@@ -324,11 +324,6 @@ async function lintSubcommand(args: string[]): Promise<void> {
 	const optionArgs = endOfOpts === -1 ? args : args.slice(0, endOfOpts);
 	const positionalArgs = endOfOpts === -1 ? [] : args.slice(endOfOpts + 1);
 
-	if (optionArgs.includes("--help") || optionArgs.includes("-h")) {
-		logger.output(usage);
-		return;
-	}
-
 	const quiet = optionArgs.includes("--quiet") || optionArgs.includes("-q");
 
 	const unknownFlag = optionArgs.find(
@@ -458,6 +453,64 @@ function printUsage(): void {
 	logger.output("Examples:");
 	for (const ex of cmd.examples) {
 		logger.output(`  ${ex.command}`);
+	}
+}
+
+/**
+ * Reinject flags pre-parsed by the host (#366/#367) back into the args
+ * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
+ * `parseArgs` still sees them.
+ */
+function injectFlagsIntoArgs(
+	args: readonly string[],
+	flags: Record<string, unknown> | undefined,
+): string[] {
+	const out = [...args];
+	if (!flags) return out;
+	for (const [name, value] of Object.entries(flags)) {
+		if (value === undefined || value === null) continue;
+		if (typeof value === "boolean") {
+			if (value) out.push(`--${name}`);
+		} else if (Array.isArray(value)) {
+			for (const item of value) {
+				if (item !== undefined && item !== null) {
+					out.push(`--${name}`, String(item));
+				}
+			}
+		} else {
+			out.push(`--${name}`, String(value));
+		}
+	}
+	return out;
+}
+
+async function bpmnHandler(
+	args: string[] | undefined,
+	flags?: Record<string, unknown>,
+): Promise<void> {
+	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
+	const subcommand = reinjected[0];
+	const subArgs = reinjected.slice(1);
+
+	if (!subcommand) {
+		printUsage();
+		return;
+	}
+	if (!isValidSubcommand(subcommand)) {
+		printUsage();
+		process.exitCode = 1;
+		return;
+	}
+
+	try {
+		if (subcommand === "lint") {
+			await lintSubcommand(subArgs);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		const logger = getLogger();
+		logger.error(`Failed to bpmn ${subcommand}: ${message}`);
+		process.exitCode = 1;
 	}
 }
 

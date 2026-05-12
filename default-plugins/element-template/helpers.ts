@@ -106,7 +106,6 @@ export type ParsedSetArg = {
 
 export type ParsedPluginArgs = {
 	inPlace: boolean;
-	help: boolean;
 	setArgs: string[];
 	positionals: string[];
 	error: string | null;
@@ -492,7 +491,6 @@ export function warnUnmetConditions(
 export function parseArgs(args: string[]): ParsedPluginArgs {
 	const result: ParsedPluginArgs = {
 		inPlace: false,
-		help: false,
 		setArgs: [],
 		positionals: [],
 		error: null,
@@ -508,11 +506,6 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 
 		if (arg === "--in-place" || arg === "-i") {
 			result.inPlace = true;
-			continue;
-		}
-
-		if (arg === "--help" || arg === "-h") {
-			result.help = true;
 			continue;
 		}
 
