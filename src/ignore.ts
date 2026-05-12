@@ -6,7 +6,9 @@
  *   target/
  *   .git/
  *
- * Users can override or extend via a `.c8ignore` file in the working directory.
+ * The `.c8ignore` file is resolved from the deploy/watch target directory
+ * (via `resolveIgnoreBaseDir`), falling back to `process.cwd()` when no
+ * target is specified. See #258.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -97,5 +99,9 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 		}
 	}
 
-	return common.length > 0 ? common.join(sep) : resolve(process.cwd());
+	if (common.length === 0) return resolve(process.cwd());
+
+	// Normalize filesystem root: on POSIX [''] → '/', on Windows ['C:'] → 'C:\'
+	const joined = common.join(sep);
+	return joined === "" || joined.endsWith(":") ? resolve(joined + sep) : joined;
 }

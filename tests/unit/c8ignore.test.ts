@@ -379,6 +379,29 @@ describe(".c8ignore", () => {
 			const result = resolveIgnoreBaseDir([]);
 			assert.strictEqual(result, process.cwd());
 		});
+
+		test("resolveIgnoreBaseDir returns common ancestor for multiple sibling dirs", () => {
+			const dirA = join(testDir, "projA");
+			const dirB = join(testDir, "projB");
+			mkdirSync(dirA, { recursive: true });
+			mkdirSync(dirB, { recursive: true });
+			assert.strictEqual(
+				resolveIgnoreBaseDir([dirA, dirB]),
+				testDir,
+				"common ancestor of sibling dirs should be their parent",
+			);
+		});
+
+		test("resolveIgnoreBaseDir returns valid path for root-level divergence", () => {
+			// When paths diverge at the filesystem root, the result must
+			// still be a valid directory, not an empty string or bare drive.
+			const result = resolveIgnoreBaseDir([
+				join(testDir, "a"),
+				join(testDir, "b"),
+			]);
+			assert.ok(result.length > 0, "should not return an empty string");
+			assert.ok(!result.endsWith(":"), "should not return a bare drive letter");
+		});
 	});
 
 	// ── Target-directory resolution (#258) ───────────────────────────
@@ -509,6 +532,60 @@ describe(".c8ignore", () => {
 			assert.ok(
 				!output.includes("Change detected"),
 				`Watch should not detect changes in ignored directories, but got:\n${output}`,
+			);
+		});
+
+		test("watch target dir picks up .c8ignore from that dir (#258)", () => {
+			// Watch from a parent directory, targeting a subdirectory that has .c8ignore
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "ignored/\n");
+			mkdirSync(join(projectDir, "ignored"), { recursive: true });
+			writeFileSync(join(projectDir, "ignored", "hidden.bpmn"), "<bpmn/>");
+			writeFileSync(join(projectDir, "visible.bpmn"), "<bpmn/>");
+
+			const helperScript = `
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const { join } = require('node:path');
+
+        const proc = spawn('node', [
+          '--experimental-strip-types',
+          ${JSON.stringify(CLI_ENTRY)},
+          'watch', './project/',
+        ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
+
+        let output = '';
+        proc.stdout.on('data', d => output += d);
+        proc.stderr.on('data', d => output += d);
+
+        setTimeout(() => {
+          writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+          setTimeout(() => {
+            proc.kill('SIGTERM');
+            process.stdout.write(output);
+            process.exit(0);
+          }, 1500);
+        }, 500);
+      `;
+
+			const result = spawnSync("node", ["-e", helperScript], {
+				encoding: "utf-8",
+				timeout: 5000,
+				cwd: testDir,
+				env: {
+					...process.env,
+					XDG_DATA_HOME: join(tmpdir(), `c8ctl-watch-ign-${Date.now()}`),
+				},
+			});
+
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+
+			// .c8ignore from project/ dir should be picked up even though
+			// watch was started from the parent (testDir)
+			assert.ok(
+				!output.includes("Change detected"),
+				`Watch should pick up .c8ignore from target dir, but got:\n${output}`,
 			);
 		});
 	});
