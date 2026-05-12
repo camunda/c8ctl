@@ -323,11 +323,13 @@ describe(".c8ignore", () => {
 		// Import the module functions directly
 		let loadIgnoreRules: typeof import("../../src/ignore.ts").loadIgnoreRules;
 		let isIgnored: typeof import("../../src/ignore.ts").isIgnored;
+		let resolveIgnoreBaseDir: typeof import("../../src/ignore.ts").resolveIgnoreBaseDir;
 
 		beforeEach(async () => {
 			const mod = await import("../../src/ignore.ts");
 			loadIgnoreRules = mod.loadIgnoreRules;
 			isIgnored = mod.isIgnored;
+			resolveIgnoreBaseDir = mod.resolveIgnoreBaseDir;
 		});
 
 		test("loadIgnoreRules returns ignore instance with defaults", () => {
@@ -358,6 +360,135 @@ describe(".c8ignore", () => {
 			assert.strictEqual(
 				isIgnored(ig, "/some/other/path/file.bpmn", testDir),
 				false,
+			);
+		});
+
+		test("resolveIgnoreBaseDir returns directory for a directory path", () => {
+			const subDir = join(testDir, "myproject");
+			mkdirSync(subDir, { recursive: true });
+			assert.strictEqual(resolveIgnoreBaseDir([subDir]), subDir);
+		});
+
+		test("resolveIgnoreBaseDir returns parent for a file path", () => {
+			const file = join(testDir, "process.bpmn");
+			writeFileSync(file, "<bpmn/>");
+			assert.strictEqual(resolveIgnoreBaseDir([file]), testDir);
+		});
+
+		test("resolveIgnoreBaseDir defaults to cwd for empty array", () => {
+			const result = resolveIgnoreBaseDir([]);
+			assert.strictEqual(result, process.cwd());
+		});
+
+		test("resolveIgnoreBaseDir returns common ancestor for multiple sibling dirs", () => {
+			const dirA = join(testDir, "projA");
+			const dirB = join(testDir, "projB");
+			mkdirSync(dirA, { recursive: true });
+			mkdirSync(dirB, { recursive: true });
+			assert.strictEqual(
+				resolveIgnoreBaseDir([dirA, dirB]),
+				testDir,
+				"common ancestor of sibling dirs should be their parent",
+			);
+		});
+
+		test("resolveIgnoreBaseDir always returns a normalized path", () => {
+			// The result must always be a valid directory path — never an
+			// empty string or a bare drive letter like "C:".
+			const result = resolveIgnoreBaseDir([
+				join(testDir, "a"),
+				join(testDir, "b"),
+			]);
+			assert.ok(result.length > 0, "should not return an empty string");
+			assert.ok(!result.endsWith(":"), "should not return a bare drive letter");
+			assert.strictEqual(
+				result,
+				testDir,
+				"should return common ancestor of sibling paths",
+			);
+		});
+	});
+
+	// ── Target-directory resolution (#258) ───────────────────────────
+
+	describe(".c8ignore resolves from target directory, not cwd (#258)", () => {
+		test("deploy target dir picks up .c8ignore from that dir", () => {
+			// Scenario from #258:
+			//   testDir/           ← cwd (no .c8ignore here)
+			//     project/
+			//       .c8ignore      ← contains "dist/"
+			//       main.bpmn
+			//       dist/
+			//         output.bpmn  ← should be ignored
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "dist/\n");
+			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
+			mkdirSync(join(projectDir, "dist"), { recursive: true });
+			writeFileSync(join(projectDir, "dist", "output.bpmn"), "<bpmn/>");
+
+			// Deploy from parent (testDir as cwd), targeting ./project/
+			const result = dryRunDeploy(testDir, ["./project/"]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(
+				names,
+				["main.bpmn"],
+				"dist/output.bpmn should be ignored by project/.c8ignore",
+			);
+		});
+
+		test("deploy with no target still uses cwd (backward compat)", () => {
+			// .c8ignore at cwd should still work when no target is specified
+			writeFileSync(join(testDir, ".c8ignore"), "dist/\n");
+			writeFileSync(join(testDir, "main.bpmn"), "<bpmn/>");
+			mkdirSync(join(testDir, "dist"), { recursive: true });
+			writeFileSync(join(testDir, "dist", "output.bpmn"), "<bpmn/>");
+
+			const result = dryRunDeploy(testDir);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(names, ["main.bpmn"]);
+		});
+
+		test("deploy explicit file resolves .c8ignore from file's parent dir", () => {
+			// When deploying an explicit file path, resolveIgnoreBaseDir
+			// should use the file's parent directory. We verify by deploying
+			// two explicit files from a directory that has a .c8ignore —
+			// one file matches the ignore rule and should be filtered out.
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "draft-*.bpmn\n");
+			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
+			writeFileSync(join(projectDir, "draft-wip.bpmn"), "<bpmn/>");
+
+			// Deploy two explicit files from the parent dir — .c8ignore in
+			// projectDir should filter out the draft file
+			const result = dryRunDeploy(testDir, [
+				"./project/main.bpmn",
+				"./project/draft-wip.bpmn",
+			]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(
+				names,
+				["main.bpmn"],
+				"draft-wip.bpmn should be ignored by project/.c8ignore",
+			);
+		});
+
+		test("deploy subdirectory picks up .c8ignore from subdirectory", () => {
+			// .c8ignore in a subdirectory, deploy that subdirectory from grandparent
+			const subDir = join(testDir, "a", "b");
+			mkdirSync(subDir, { recursive: true });
+			writeFileSync(join(subDir, ".c8ignore"), "scratch/\n");
+			writeFileSync(join(subDir, "process.bpmn"), "<bpmn/>");
+			mkdirSync(join(subDir, "scratch"), { recursive: true });
+			writeFileSync(join(subDir, "scratch", "draft.bpmn"), "<bpmn/>");
+
+			const result = dryRunDeploy(testDir, ["./a/b/"]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(
+				names,
+				["process.bpmn"],
+				"scratch/draft.bpmn should be ignored by a/b/.c8ignore",
 			);
 		});
 	});
@@ -415,6 +546,96 @@ describe(".c8ignore", () => {
 			assert.ok(
 				!output.includes("Change detected"),
 				`Watch should not detect changes in ignored directories, but got:\n${output}`,
+			);
+		});
+
+		test("watch target dir picks up .c8ignore from that dir (#258)", () => {
+			// Watch from a parent directory, targeting a subdirectory that has .c8ignore
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "ignored/\n");
+			mkdirSync(join(projectDir, "ignored"), { recursive: true });
+			writeFileSync(join(projectDir, "ignored", "hidden.bpmn"), "<bpmn/>");
+			writeFileSync(join(projectDir, "visible.bpmn"), "<bpmn/>");
+
+			// Helper waits for the "Watching for changes" readiness banner
+			// before writing a file, ensuring the watcher is actually live.
+			const helperScript = `
+        const { spawn } = require('node:child_process');
+        const { writeFileSync } = require('node:fs');
+        const { join } = require('node:path');
+
+        const proc = spawn('node', [
+          '--experimental-strip-types',
+          ${JSON.stringify(CLI_ENTRY)},
+          'watch', './project/',
+        ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
+
+        let output = '';
+        let ready = false;
+        proc.stdout.on('data', d => {
+          output += d;
+          if (!ready && output.includes('Watching for changes')) {
+            ready = true;
+            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+            setTimeout(() => {
+              proc.kill('SIGTERM');
+              process.stdout.write(output);
+              process.exit(0);
+            }, 1500);
+          }
+        });
+        proc.stderr.on('data', d => {
+          output += d;
+          if (!ready && output.includes('Watching for changes')) {
+            ready = true;
+            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+            setTimeout(() => {
+              proc.kill('SIGTERM');
+              process.stdout.write(output);
+              process.exit(0);
+            }, 1500);
+          }
+        });
+
+        // Safety timeout: if watch never starts, fail explicitly
+        setTimeout(() => {
+          if (!ready) {
+            proc.kill('SIGTERM');
+            process.stderr.write('WATCH_NEVER_READY: ' + output);
+            process.exit(1);
+          }
+        }, 4000);
+      `;
+
+			const result = spawnSync("node", ["-e", helperScript], {
+				encoding: "utf-8",
+				timeout: 8000,
+				cwd: testDir,
+				env: {
+					...process.env,
+					XDG_DATA_HOME: join(tmpdir(), `c8ctl-watch-ign-${Date.now()}`),
+				},
+			});
+
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+
+			// Assert the watcher actually started (didn't silently fail)
+			assert.ok(
+				!output.includes("WATCH_NEVER_READY"),
+				`Watcher never reached readiness:\n${output}`,
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`Helper script should exit cleanly, got status ${result.status}:\n${output}`,
+			);
+
+			// .c8ignore from project/ dir should be picked up even though
+			// watch was started from the parent (testDir)
+			assert.ok(
+				!output.includes("Change detected"),
+				`Watch should pick up .c8ignore from target dir, but got:\n${output}`,
 			);
 		});
 	});

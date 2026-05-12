@@ -3,7 +3,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "./client.ts";
@@ -14,7 +14,7 @@ import {
 } from "./commands/resource-extensions.ts";
 import { resolveTenantId } from "./config.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
-import { isIgnored, loadIgnoreRules } from "./ignore.ts";
+import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "./ignore.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
@@ -336,8 +336,9 @@ function collectResourcesForPaths(
 		);
 	}
 
-	// Load .c8ignore rules from the working directory
-	const ignoreBaseDir = resolve(process.cwd());
+	// Load .c8ignore rules from the target directory (not cwd) so that
+	// `c8 deploy <target>` picks up the .c8ignore inside the target. (#258)
+	const ignoreBaseDir = resolveIgnoreBaseDir(paths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	const resources: ResourceFile[] = [];
