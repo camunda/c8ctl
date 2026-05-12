@@ -247,7 +247,7 @@ export const commands = {
 			set: {
 				type: "string",
 				multiple: true,
-				description: "Set a template property value [apply] (repeatable)",
+				description: "Set a template property value (repeatable) [apply]",
 			},
 			detailed: {
 				type: "boolean",
@@ -259,7 +259,7 @@ export const commands = {
 				type: "string",
 				multiple: true,
 				description:
-					"Filter to one or more group ids [get-properties] (repeatable)",
+					"Filter to one or more group ids (repeatable) [get-properties]",
 			},
 			prune: {
 				type: "boolean",
@@ -272,7 +272,7 @@ export const commands = {
 			},
 			limit: {
 				type: "string",
-				description: "Cap the number of matches [search] (default 20)",
+				description: "Cap the number of matches (default 20) [search]",
 			},
 		},
 		handler: elementTemplateHandler,
