@@ -112,16 +112,11 @@ export type ParsedPluginArgs = {
 	error: string | null;
 };
 
-// Structural slice of the host Logger surface this plugin uses. The
-// host Logger satisfies this implicitly via duck typing.
-export type PluginLogger = {
-	info(message: string): void;
-	warn(message: string): void;
-	error(message: string, error?: Error): void;
-	debug(message: string, ...args: unknown[]): void;
-	output(content: string): void;
-	json(data: unknown): void;
-};
+// Re-export the host Logger type so call sites in this plugin can refer
+// to it without each importing from the host. Type-only — fully erased at
+// runtime by --experimental-strip-types.
+import type { Logger } from "../../src/logger.ts";
+export type { Logger };
 
 // ---------------------------------------------------------------------------
 // File / URL fetching
@@ -457,7 +452,7 @@ export function applySetOverrides(
  * Warn for any that were dropped (unmet condition).
  */
 export function warnUnmetConditions(
-	logger: PluginLogger,
+	logger: Logger,
 	resultXml: string,
 	setBindingNames: string[],
 	properties: TemplateProperty[],

@@ -14,12 +14,14 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
+// Type-only imports — fully erased at runtime by --experimental-strip-types.
+// Importing from runtime.ts pulls in its `declare global { var c8ctl: ... }`
+// block, which types globalThis.c8ctl across this file.
+import type { Logger } from "../../src/logger.ts";
+import type {} from "../../src/runtime.ts";
 
 // ---------------------------------------------------------------------------
 // Local types
-//
-// Plugins must stay self-contained — they're loaded from their own location
-// in dist and cannot rely on relative imports into c8ctl's internals.
 // ---------------------------------------------------------------------------
 
 type Engine = "cluster" | "local";
@@ -61,17 +63,6 @@ type ClusterErrorClassification = {
 	title: string;
 	hint: string | null;
 	terminal: boolean;
-};
-
-// Structural slice of the host Logger surface this plugin uses. The
-// host Logger satisfies this implicitly via duck typing.
-type PluginLogger = {
-	info(message: string): void;
-	warn(message: string): void;
-	error(message: string, error?: Error): void;
-	debug(message: string, ...args: unknown[]): void;
-	output(content: string): void;
-	json(data: unknown): void;
 };
 
 // Plugin metadata shape — the loader only reads `description`, `examples`,
@@ -174,18 +165,11 @@ export const metadata = {
 // Runtime helpers
 // ---------------------------------------------------------------------------
 
-function getLogger(): PluginLogger {
-	if (globalThis.c8ctl) {
-		return globalThis.c8ctl.getLogger();
+function getLogger(): Logger {
+	if (!globalThis.c8ctl) {
+		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
 	}
-	return {
-		info: (message) => console.log(message),
-		warn: (message) => console.warn(message),
-		error: (message) => console.error(message),
-		debug: () => {},
-		output: (content) => console.log(content),
-		json: (data) => console.log(JSON.stringify(data, null, 2)),
-	};
+	return globalThis.c8ctl.getLogger();
 }
 
 function isJsonMode(): boolean {
@@ -629,7 +613,7 @@ function formatResultForText(result: unknown): string {
 	return JSON.stringify(result, null, 2);
 }
 
-function renderText(logger: PluginLogger, normalized: EvaluationOutput): void {
+function renderText(logger: Logger, normalized: EvaluationOutput): void {
 	logger.output(formatResultForText(normalized.result));
 	if (normalized.warnings.length === 0) return;
 
@@ -647,7 +631,7 @@ function renderText(logger: PluginLogger, normalized: EvaluationOutput): void {
 	}
 }
 
-function renderJson(logger: PluginLogger, normalized: EvaluationOutput): void {
+function renderJson(logger: Logger, normalized: EvaluationOutput): void {
 	logger.json(normalized);
 }
 

@@ -28,7 +28,7 @@ import {
 	getPropertyDetail,
 	getSettableProperties,
 	globToRegex,
-	type PluginLogger,
+	type Logger,
 	type PropertyDetail,
 	parseArgs,
 	parseTemplateJson,
@@ -37,6 +37,9 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "./helpers.ts";
+// Side-effect type import — activates the `declare global { var c8ctl: ... }`
+// block in runtime.ts so globalThis.c8ctl is typed across this file.
+import type {} from "../../src/runtime.ts";
 import {
 	bootstrapIfNeeded,
 	findById,
@@ -274,16 +277,11 @@ export const metadata = {
 // Runtime helpers
 // ---------------------------------------------------------------------------
 
-function getLogger(): PluginLogger {
-	if (globalThis.c8ctl) return globalThis.c8ctl.getLogger();
-	return {
-		info: (message) => console.log(message),
-		warn: (message) => console.warn(message),
-		error: (message) => console.error(message),
-		debug: () => {},
-		output: (content) => console.log(content),
-		json: (data) => console.log(JSON.stringify(data, null, 2)),
-	};
+function getLogger(): Logger {
+	if (!globalThis.c8ctl) {
+		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
+	}
+	return globalThis.c8ctl.getLogger();
 }
 
 function isJsonMode(): boolean {
@@ -1106,7 +1104,7 @@ function applyGroupFilter(
 function renderCondensedTable(
 	details: PropertyDetail[],
 	groupLabelMap: Map<string, string>,
-	logger: PluginLogger,
+	logger: Logger,
 ): void {
 	const grouped = new Map<string, PropertyDetail[]>();
 	const ungrouped: PropertyDetail[] = [];

@@ -14,6 +14,11 @@ import { resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
+// Type-only imports — fully erased at runtime by --experimental-strip-types.
+// Importing from runtime.ts pulls in its `declare global { var c8ctl: ... }`
+// block, which types globalThis.c8ctl across this file.
+import type { Logger } from "../../src/logger.ts";
+import type {} from "../../src/runtime.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
@@ -26,16 +31,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // Local types
 // ---------------------------------------------------------------------------
-
-// Structural slice of the host Logger surface this plugin uses.
-type PluginLogger = {
-	info(message: string): void;
-	warn(message: string): void;
-	error(message: string, error?: Error): void;
-	debug(message: string, ...args: unknown[]): void;
-	output(content: string): void;
-	json(data: unknown): void;
-};
 
 type BpmnInput = { xml: string; source: string };
 
@@ -144,18 +139,11 @@ export const metadata = {
 // Runtime helpers
 // ---------------------------------------------------------------------------
 
-function getLogger(): PluginLogger {
-	if (globalThis.c8ctl) {
-		return globalThis.c8ctl.getLogger();
+function getLogger(): Logger {
+	if (!globalThis.c8ctl) {
+		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
 	}
-	return {
-		info: (message) => console.log(message),
-		warn: (message) => console.warn(message),
-		error: (message) => console.error(message),
-		debug: () => {},
-		output: (content) => console.log(content),
-		json: (data) => console.log(JSON.stringify(data, null, 2)),
-	};
+	return globalThis.c8ctl.getLogger();
 }
 
 function isJsonMode(): boolean {

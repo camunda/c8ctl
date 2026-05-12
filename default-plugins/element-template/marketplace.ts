@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
-import { isRecord, type PluginLogger, type Template } from "./helpers.ts";
+import { isRecord, type Logger, type Template } from "./helpers.ts";
 
 const DEFAULT_OOTB_URL =
 	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";
@@ -138,7 +138,7 @@ export function getCacheAgeDays(): number | null {
 	return Math.floor((Date.now() - fetchedAt) / (24 * 60 * 60 * 1000));
 }
 
-export function nudgeIfStale(logger: PluginLogger): void {
+export function nudgeIfStale(logger: Logger): void {
 	if (!existsSync(getCachePath())) return;
 	if (!isCacheStale()) return;
 	const days = getCacheAgeDays();
@@ -272,7 +272,7 @@ export async function syncTemplates({
 	logger,
 	prune = false,
 }: {
-	logger: PluginLogger;
+	logger: Logger;
 	prune?: boolean;
 }): Promise<SyncSummary> {
 	logger.info(`Fetching index from ${getMarketplaceUrl()} ...`);
@@ -377,7 +377,7 @@ export async function syncTemplates({
 export async function bootstrapIfNeeded({
 	logger,
 }: {
-	logger: PluginLogger;
+	logger: Logger;
 }): Promise<void> {
 	if (existsSync(getCachePath())) return;
 	logger.info("Element template cache not found — running first-time sync...");
