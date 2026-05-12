@@ -492,9 +492,9 @@ export function warnUnmetConditions(
  * Parse plugin args, separating flags from positionals.
  * - `--set foo=bar` (or `--set=foo=bar`) is repeatable, collected into setArgs[]
  * - `--in-place` / `-i` is a boolean
- * - `--help` / `-h` is a boolean
  * - everything else is a positional
  *
+ * `--help` / `-h` is handled by the host before args reach here.
  * Unknown flags return { error: '...' } so the caller can warn and exit.
  */
 export function parseArgs(args: string[]): ParsedPluginArgs {
