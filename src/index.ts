@@ -237,15 +237,23 @@ export function stripGlobalFlags(argv: string[]): string[] {
  * Remove tokens for blocked plugin flags from an argv slice so they cannot
  * shift positionals during the plugin-flag re-parse.
  *
- * The built-in may declare a blocked flag as boolean while the plugin
- * declared it as string. In that case the user supplied a value token
- * (--name value) that the built-in parser leaves in positionals. We use
- * the PLUGIN's declared type to decide whether to strip a following token.
+ * Post-#373, "blocked" exclusively means "collides with a GLOBAL flag".
+ * The user may have supplied a value token (`--name value`) intending
+ * either:
+ *   - the GLOBAL's interpretation (global type === "string"), or
+ *   - the PLUGIN's interpretation (plugin type === "string", e.g. global
+ *     is boolean but the plugin declared the same name as string).
+ *
+ * Either way the value is meaningless to both sides (plugin's flag is
+ * blocked; global is consumed by the host elsewhere) and must not leak
+ * into the plugin's positional args. Strip the following non-flag token
+ * if either side typed the flag as string.
  */
 function stripBlockedFlagTokens(
 	argv: string[],
 	blocked: Set<string>,
 	pluginFlagDefs: Record<string, { type: string }>,
+	globalFlagDefs: Record<string, { type: string }>,
 ): string[] {
 	const out: string[] = [];
 	let i = 0;
@@ -255,9 +263,12 @@ function stripBlockedFlagTokens(
 			const eqIdx = arg.indexOf("=");
 			const name = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);
 			if (blocked.has(name)) {
+				const eitherIsString =
+					pluginFlagDefs[name]?.type === "string" ||
+					globalFlagDefs[name]?.type === "string";
 				if (
 					eqIdx < 0 &&
-					pluginFlagDefs[name]?.type === "string" &&
+					eitherIsString &&
 					i + 1 < argv.length &&
 					!argv[i + 1].startsWith("-")
 				) {
@@ -511,10 +522,19 @@ async function main() {
 					...(short && { short }),
 				};
 			}
+			// Strip blocked-flag tokens from argv before re-parse. Blocked
+			// names exclusively collide with GLOBAL_FLAGS (post-#373), but
+			// `mergedOptions` carries the global type for those names, so
+			// parseArgs alone would consume only the value of *string*
+			// globals — leaving the value of a *boolean* global behind to
+			// drift into positionals when the plugin typed the same name
+			// as string. The helper consults both type tables and strips
+			// the following non-flag token when either side is string.
 			const filteredArgv = stripBlockedFlagTokens(
 				process.argv.slice(2),
 				blockedFlags,
 				cmdFlagDefs,
+				builtinOptions,
 			);
 			let pluginParsed: ReturnType<typeof parseArgs>;
 			try {

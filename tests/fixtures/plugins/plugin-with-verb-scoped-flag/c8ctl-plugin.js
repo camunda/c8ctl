@@ -36,6 +36,22 @@ export const commands = {
 			console.log(JSON.stringify({ args, flags: flags || {} }));
 		},
 	},
+	// Pinned by Copilot review on PR #376: a plugin declaring a flag that
+	// collides with a *global string* flag (here `--profile`) but typing it
+	// as `boolean` must not let the global's value token leak into the
+	// plugin's positional args. Echoes args+flags so the contract test can
+	// assert positional shape.
+	'boolean-profile-collision': {
+		flags: {
+			profile: {
+				type: 'boolean',
+				description: "Plugin's own --profile typed as boolean (collides with GLOBAL --profile string)",
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
 };
 
 export const metadata = {

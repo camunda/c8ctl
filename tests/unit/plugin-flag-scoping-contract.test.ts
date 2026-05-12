@@ -242,3 +242,49 @@ describe("plugin flag scoping contract: GLOBAL_FLAGS remain host-owned", () => {
 		);
 	});
 });
+
+// ─── D. Boolean-vs-string global collision must not shift positionals ────────
+
+describe("plugin flag scoping contract: global-string collision keeps plugin positionals intact", () => {
+	// Class-scoped guard for the edge case Copilot raised on PR #376:
+	// when a plugin declares a flag whose name collides with a GLOBAL
+	// string flag (e.g. --profile) but types it as `boolean`, the host
+	// must still consume the global's value token from argv. Otherwise
+	// the leftover value drifts into the plugin's positional args.
+	//
+	// Today the plugin pre-parse blocks the colliding name and the
+	// downstream `stripBlockedFlagTokens` decides whether to also strip
+	// the following token by consulting the *plugin's* declared type.
+	// Boolean → don't strip → value leaks into positionals. The fix is
+	// to consult the GLOBAL type (string) for blocked-because-global
+	// flags, or to let parseArgs consume the token via the merged
+	// options table directly (mergedOptions still carries the global's
+	// type for that name).
+	test("plugin's positional args are not shifted by a global-string flag's value", async () => {
+		const result = await c8Plugin(
+			"boolean-profile-collision",
+			"--profile",
+			"some-profile-value",
+			"pos1",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		const parsed = parseJsonRecord(result.stdout);
+		assert.ok(
+			Array.isArray(parsed.args),
+			`expected handler payload with .args, got: ${JSON.stringify(parsed)}`,
+		);
+		assert.deepStrictEqual(
+			parsed.args,
+			["pos1"],
+			`expected positional args to be ["pos1"]. The global --profile's value ("some-profile-value") must be consumed by the host, not leak into plugin positionals. got: ${JSON.stringify(parsed.args)}`,
+		);
+		assert.ok(
+			isRecord(parsed.flags) && !("profile" in parsed.flags),
+			`expected plugin flags to NOT include profile (it's a global). got: ${JSON.stringify(parsed.flags)}`,
+		);
+	});
+});
