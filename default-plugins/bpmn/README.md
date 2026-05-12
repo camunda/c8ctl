@@ -57,9 +57,13 @@ c8ctl bpmn lint process.bpmn
    `camunda-cloud-X-Y` config from `bpmnlint-plugin-camunda-compat`.
    For example, a file with `executionPlatformVersion="8.7.0"` uses
    the `camunda-cloud-8-7` ruleset.
-3. If either attribute is missing (or `executionPlatform` is something
-   other than `Camunda Cloud`), the latest available `camunda-cloud-*`
-   config is used.
+3. If `executionPlatformVersion` doesn't match any known
+   `camunda-cloud-X-Y` config (e.g. a newer minor than this plugin
+   ships), the highest available `camunda-cloud-*` config is used as
+   a fallback.
+4. If either attribute is missing (or `executionPlatform` is something
+   other than `Camunda Cloud`), only `bpmnlint:recommended` rules run
+   — no Camunda-specific rules are applied.
 
 This means linting "just works" against the right rule set for the
 target engine version, without any per-project configuration.
