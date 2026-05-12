@@ -84,7 +84,9 @@ function detectCamundaCloudVersion(
 	const attrs = rootElement.$attrs ?? {};
 	const platform = attrs["modeler:executionPlatform"];
 	const version = attrs["modeler:executionPlatformVersion"];
-	if (platform !== "Camunda Cloud" || !version) return null;
+	if (platform !== "Camunda Cloud" || !version) {
+		return null;
+	}
 	const match = version.match(/^(\d+\.\d+)/);
 	return match ? match[1] : null;
 }
@@ -107,7 +109,9 @@ function resolveCamundaCompatConfig(version: string): string | null {
 			const vb = parse(b);
 			for (let i = 0; i < Math.max(va.length, vb.length); i++) {
 				const diff = (va[i] || 0) - (vb[i] || 0);
-				if (diff !== 0) return diff;
+				if (diff !== 0) {
+					return diff;
+				}
 			}
 			return 0;
 		});

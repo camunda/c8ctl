@@ -154,8 +154,12 @@ async function readBpmnInput(
  *   3. matches `<id>` or `<id>@<n>`  → id
  */
 function parseTemplateRef(arg: string | undefined): TemplateRef | null {
-	if (!arg) return null;
-	if (/^https?:\/\//.test(arg)) return { kind: "url", value: arg };
+	if (!arg) {
+		return null;
+	}
+	if (/^https?:\/\//.test(arg)) {
+		return { kind: "url", value: arg };
+	}
 	if (
 		arg.includes("/") ||
 		arg.includes("\\") ||
@@ -165,7 +169,9 @@ function parseTemplateRef(arg: string | undefined): TemplateRef | null {
 		return { kind: "path", value: arg };
 	}
 	const match = arg.match(/^([^@\s]+?)(?:@(\d+))?$/);
-	if (!match) return { kind: "path", value: arg };
+	if (!match) {
+		return { kind: "path", value: arg };
+	}
 	return {
 		kind: "id",
 		id: match[1],
@@ -602,7 +608,9 @@ async function getSubcommand(args: string[]): Promise<void> {
 	let noIcon = false;
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (arg === "--") break;
+		if (arg === "--") {
+			break;
+		}
 		if (arg === "--no-icon") {
 			noIcon = true;
 			continue;
@@ -662,7 +670,9 @@ async function getSubcommand(args: string[]): Promise<void> {
 }
 
 function stripInternalMetadata(template: Template): Template {
-	if (!template.metadata?.upstreamRef) return template;
+	if (!template.metadata?.upstreamRef) {
+		return template;
+	}
 	const { metadata, ...rest } = template;
 	const { upstreamRef: _ignored, ...metaRest } = metadata;
 	if (Object.keys(metaRest).length === 0) {
@@ -672,7 +682,9 @@ function stripInternalMetadata(template: Template): Template {
 }
 
 function stripIcon(template: Template): Template {
-	if (!template.icon) return template;
+	if (!template.icon) {
+		return template;
+	}
 	const { icon: _icon, ...rest } = template;
 	return { ...rest, properties: template.properties };
 }
@@ -877,7 +889,9 @@ function applyGroupFilter(
 	groups: string[],
 	groupLabelMap: Map<string, string>,
 ): PropertyDetail[] {
-	if (groups.length === 0) return details;
+	if (groups.length === 0) {
+		return details;
+	}
 	const valid = new Set(groupLabelMap.keys());
 	for (const g of groups) {
 		if (!valid.has(g)) {
@@ -1005,7 +1019,9 @@ function formatAppliesToValue(template: Template): string | null {
 		? template.appliesTo.filter((v): v is string => Boolean(v))
 		: [];
 	const elementType = template.elementType?.value;
-	if (applies.length === 0 && !elementType) return null;
+	if (applies.length === 0 && !elementType) {
+		return null;
+	}
 
 	const left =
 		applies.length === 0
@@ -1019,7 +1035,9 @@ function formatAppliesToValue(template: Template): string | null {
 	if (left && elementType && !applies.includes(elementType)) {
 		return `${left} → ${elementType}`;
 	}
-	if (left) return left;
+	if (left) {
+		return left;
+	}
 	return elementType ?? null;
 }
 
@@ -1038,10 +1056,14 @@ function formatKeyedCard({
 }): string[] {
 	const lines: string[] = [];
 	const titleParts = [styleText("bold", title)];
-	if (subtitle) titleParts.push(styleText("dim", subtitle));
+	if (subtitle) {
+		titleParts.push(styleText("dim", subtitle));
+	}
 	lines.push(titleParts.join(" "));
 
-	if (fields.length === 0) return lines;
+	if (fields.length === 0) {
+		return lines;
+	}
 
 	const keyWidth = Math.max(0, ...fields.map(([k]) => k.length));
 	for (const [key, value] of fields) {
@@ -1119,8 +1141,12 @@ function filterByPropertyArg(
 	const matcher = isGlob ? globToRegex(nameFilter) : null;
 
 	const matches = details.filter((d) => {
-		if (typeFilter && d.bindingType !== typeFilter) return false;
-		if (!d.name) return false;
+		if (typeFilter && d.bindingType !== typeFilter) {
+			return false;
+		}
+		if (!d.name) {
+			return false;
+		}
 		return matcher ? matcher.test(d.name) : d.name === nameFilter;
 	});
 	if (matches.length === 0) {
@@ -1314,11 +1340,17 @@ function injectFlagsIntoArgs(
 	flags: Record<string, unknown> | undefined,
 ): string[] {
 	const out = [...args];
-	if (!flags) return out;
+	if (!flags) {
+		return out;
+	}
 	for (const [name, value] of Object.entries(flags)) {
-		if (value === undefined || value === null) continue;
+		if (value === undefined || value === null) {
+			continue;
+		}
 		if (typeof value === "boolean") {
-			if (value) out.push(`--${name}`);
+			if (value) {
+				out.push(`--${name}`);
+			}
 		} else if (Array.isArray(value)) {
 			for (const item of value) {
 				if (item !== undefined && item !== null) {

@@ -154,7 +154,9 @@ function normalizeExpression(expression: string): string {
 function parseVarsJson(
 	vars: string | undefined,
 ): Record<string, unknown> | undefined {
-	if (!vars) return undefined;
+	if (!vars) {
+		return undefined;
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(vars);
@@ -210,8 +212,12 @@ function parseVarArg(arg: string): ParsedVar {
 }
 
 function describeType(value: unknown): string {
-	if (value === null) return "null";
-	if (Array.isArray(value)) return "array";
+	if (value === null) {
+		return "null";
+	}
+	if (Array.isArray(value)) {
+		return "array";
+	}
 	return typeof value;
 }
 
@@ -261,7 +267,9 @@ function buildVariables(
 	varArgs: string[],
 ): Record<string, unknown> | undefined {
 	const fromJson = parseVarsJson(varsJson);
-	if (varArgs.length === 0) return fromJson;
+	if (varArgs.length === 0) {
+		return fromJson;
+	}
 
 	const merged: Record<string, unknown> = fromJson
 		? structuredClone(fromJson)
@@ -303,7 +311,9 @@ function findNetworkErrorCode(error: unknown): string | undefined {
 	const seen = new Set<unknown>();
 	while (isRecord(cur) && !seen.has(cur)) {
 		seen.add(cur);
-		if (typeof cur.code === "string") return cur.code;
+		if (typeof cur.code === "string") {
+			return cur.code;
+		}
 		if (Array.isArray(cur.errors)) {
 			for (const e of cur.errors) {
 				if (isRecord(e) && typeof e.code === "string") return e.code;
@@ -489,14 +499,20 @@ function evaluateLocal({
 // ---------------------------------------------------------------------------
 
 function formatResultForText(result: unknown): string {
-	if (typeof result === "string") return result;
-	if (result === null || result === undefined) return "null";
+	if (typeof result === "string") {
+		return result;
+	}
+	if (result === null || result === undefined) {
+		return "null";
+	}
 	return JSON.stringify(result, null, 2);
 }
 
 function renderText(logger: Logger, normalized: EvaluationOutput): void {
 	logger.output(formatResultForText(normalized.result));
-	if (normalized.warnings.length === 0) return;
+	if (normalized.warnings.length === 0) {
+		return;
+	}
 
 	const count = normalized.warnings.length;
 	const noun = count === 1 ? "warning" : "warnings";
@@ -573,11 +589,17 @@ function injectFlagsIntoArgs(
 	flags: Record<string, unknown> | undefined,
 ): string[] {
 	const out = [...args];
-	if (!flags) return out;
+	if (!flags) {
+		return out;
+	}
 	for (const [name, value] of Object.entries(flags)) {
-		if (value === undefined || value === null) continue;
+		if (value === undefined || value === null) {
+			continue;
+		}
 		if (typeof value === "boolean") {
-			if (value) out.push(`--${name}`);
+			if (value) {
+				out.push(`--${name}`);
+			}
 		} else if (Array.isArray(value)) {
 			for (const item of value) {
 				if (item !== undefined && item !== null) {

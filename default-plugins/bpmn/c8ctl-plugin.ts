@@ -31,11 +31,17 @@ function injectFlagsIntoArgs(
 	flags: Record<string, unknown> | undefined,
 ): string[] {
 	const out = [...args];
-	if (!flags) return out;
+	if (!flags) {
+		return out;
+	}
 	for (const [name, value] of Object.entries(flags)) {
-		if (value === undefined || value === null) continue;
+		if (value === undefined || value === null) {
+			continue;
+		}
 		if (typeof value === "boolean") {
-			if (value) out.push(`--${name}`);
+			if (value) {
+				out.push(`--${name}`);
+			}
 		} else if (Array.isArray(value)) {
 			for (const item of value) {
 				if (item !== undefined && item !== null) {
