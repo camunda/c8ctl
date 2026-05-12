@@ -1,0 +1,8 @@
+{
+  "name": "c8ctl-plugin-host-context",
+  "version": "9.9.9",
+  "description": "Fixture for plugin host context (#377): ctx third arg, plugin --help, plugin --version",
+  "type": "module",
+  "main": "c8ctl-plugin.js",
+  "keywords": ["c8ctl-plugin"]
+}

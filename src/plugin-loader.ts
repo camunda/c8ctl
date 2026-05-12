@@ -4,14 +4,52 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
 import type { FlagDef } from "./command-registry.ts";
 import { ensurePluginsDir } from "./config.ts";
-import { getLogger } from "./logger.ts";
+import { getLogger, type Logger, type OutputMode } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
+
+/**
+ * Typed, documented host context passed to plugin command handlers as
+ * the third argument (#377).
+ *
+ * Reflects every member of `GLOBAL_FLAGS` whose value is meaningful to
+ * a plugin handler; `help` and `version` are intentionally absent
+ * because they are intercepted by the host before dispatch. The
+ * class-scoped contract test
+ * (`tests/unit/plugin-host-context-contract.test.ts`) pins this
+ * relationship.
+ *
+ * `client` is exposed as a lazy getter so plugins that never need a
+ * Camunda client (e.g. local-only utilities, session inspectors) do
+ * not trigger credential resolution simply by receiving the ctx.
+ *
+ * Plugins authored before #377 use the two-argument signature
+ * `(args, flags)` — the third argument is additive and JavaScript's
+ * variadic call semantics keep those handlers working unchanged.
+ */
+export interface PluginCtx {
+	/** Resolved active profile name (from `--profile` or session). */
+	profile: string;
+	/** True when `--dry-run` is set. Plugins SHOULD honour this. */
+	dryRun: boolean;
+	/** True when `--verbose` is set. */
+	verbose: boolean;
+	/** Effective output mode (`--json` toggles to `json`). */
+	outputMode: OutputMode;
+	/** Parsed `--fields a,b,c` list, or undefined when not set. */
+	fields?: string[];
+	/** Host logger — use `logger.json(...)` for structured output. */
+	logger: Logger;
+	/** Lazily-resolved Camunda client. Reading triggers credential resolution. */
+	readonly client: CamundaClient;
+}
 
 type CommandHandler = (
 	args: string[],
 	flags?: Record<string, unknown>,
+	ctx?: PluginCtx,
 ) => Promise<void>;
 
 interface CommandWithFlags {
@@ -70,6 +108,8 @@ export interface PluginCommandMeta {
 
 interface LoadedPlugin {
 	name: string;
+	/** Plugin package version from its `package.json#version`. */
+	version: string;
 	commands: PluginCommands;
 	metadata?: PluginMetadata;
 }
@@ -323,6 +363,11 @@ async function loadDefaultPlugins(): Promise<void> {
 				// Read package.json
 				const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 				const pluginName = packageJson.name || `default-${pluginDir}`;
+				const pluginVersion =
+					typeof packageJson.version === "string" &&
+					packageJson.version.length > 0
+						? packageJson.version
+						: "0.0.0";
 
 				// Check for duplicate plugin name BEFORE the dynamic import
 				// so a duplicate-name plugin's module code never runs (the
@@ -344,6 +389,7 @@ async function loadDefaultPlugins(): Promise<void> {
 				if (plugin.commands && typeof plugin.commands === "object") {
 					const loaded: LoadedPlugin = {
 						name: pluginName,
+						version: pluginVersion,
 						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
 					};
@@ -489,6 +535,11 @@ export async function loadInstalledPlugins(): Promise<void> {
 					typeof packageJson.name === "string" && packageJson.name.length > 0
 						? packageJson.name
 						: packageName;
+				const pluginVersion =
+					typeof packageJson.version === "string" &&
+					packageJson.version.length > 0
+						? packageJson.version
+						: "0.0.0";
 
 				// Check for duplicate plugin name BEFORE the dynamic import
 				// so a duplicate-name plugin's module code never runs (the
@@ -506,6 +557,7 @@ export async function loadInstalledPlugins(): Promise<void> {
 				if (plugin.commands && typeof plugin.commands === "object") {
 					const loaded: LoadedPlugin = {
 						name: pluginName,
+						version: pluginVersion,
 						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
 					};
@@ -542,12 +594,19 @@ export function getPluginCommands(): PluginCommands {
 }
 
 /**
- * Execute a plugin command if it exists
+ * Execute a plugin command if it exists.
+ *
+ * `ctx` is the typed host context introduced in #377. When provided it
+ * is passed as the third handler argument; legacy two-argument
+ * handlers ignore it. When omitted the call site is treating the
+ * plugin as a fire-and-forget passthrough/help-render shim and
+ * intentionally does not construct a client.
  */
 export async function executePluginCommand(
 	commandName: string,
 	args: string[],
 	flags?: Record<string, unknown>,
+	ctx?: PluginCtx,
 ): Promise<boolean> {
 	const commands = getPluginCommands();
 	const cmd = Object.hasOwn(commands, commandName)
@@ -556,18 +615,36 @@ export async function executePluginCommand(
 
 	if (cmd) {
 		if (typeof cmd === "function") {
-			if (flags !== undefined) {
+			if (ctx !== undefined) {
+				await cmd(args, flags, ctx);
+			} else if (flags !== undefined) {
 				await cmd(args, flags);
 			} else {
 				await cmd(args);
 			}
 		} else {
-			await cmd.handler(args, flags);
+			await cmd.handler(args, flags, ctx);
 		}
 		return true;
 	}
 
 	return false;
+}
+
+/**
+ * Look up the loaded version of a plugin by command name. Returns
+ * `undefined` if no plugin owns the command. Used by `--version` on a
+ * plugin verb to print the plugin's package version (#377).
+ */
+export function getPluginVersionForCommand(
+	commandName: string,
+): { pluginName: string; version: string } | undefined {
+	for (const plugin of loadedPlugins.values()) {
+		if (Object.hasOwn(plugin.commands, commandName)) {
+			return { pluginName: plugin.name, version: plugin.version };
+		}
+	}
+	return undefined;
 }
 
 /**
@@ -591,6 +668,8 @@ export function getPluginCommandNames(): string[] {
 export interface PluginCommandInfo {
 	commandName: string;
 	pluginName: string;
+	/** Plugin package version (`package.json#version`). */
+	pluginVersion: string;
 	description?: string;
 	helpDescription?: string;
 	examples?: { command: string; description: string }[];
@@ -602,6 +681,8 @@ export interface PluginCommandInfo {
 	passthroughHint?: string;
 	/** Optional documentation-only flag list rendered under passthrough help. */
 	flagsHint?: string[];
+	/** Typed flag declarations for flag-aware (non-passthrough) commands. */
+	flags?: Record<string, FlagDef>;
 }
 
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
@@ -610,9 +691,12 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 	for (const plugin of loadedPlugins.values()) {
 		for (const commandName of Object.keys(plugin.commands)) {
 			const meta = plugin.metadata?.commands?.[commandName];
+			const cmd = plugin.commands[commandName];
+			const flags = typeof cmd !== "function" ? cmd.flags : undefined;
 			infos.push({
 				commandName,
 				pluginName: plugin.name,
+				pluginVersion: plugin.version,
 				description: meta?.description,
 				helpDescription: meta?.helpDescription,
 				examples: meta?.examples,
@@ -620,6 +704,7 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 				passthrough: meta?.passthrough === true ? true : undefined,
 				passthroughHint: meta?.passthroughHint,
 				flagsHint: meta?.flagsHint,
+				flags,
 			});
 		}
 	}
