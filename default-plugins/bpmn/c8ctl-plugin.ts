@@ -128,8 +128,7 @@ export const commands = {
 			quiet: {
 				type: "boolean",
 				short: "q",
-				description:
-					'Suppress the "No issues found." line on a clean lint (lint only)',
+				description: 'Suppress the "No issues found." line on a clean lint',
 			},
 		},
 		handler: bpmnHandler,

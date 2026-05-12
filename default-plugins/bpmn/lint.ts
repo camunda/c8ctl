@@ -50,9 +50,9 @@ type LintResult = {
  *
  * Stdin is consumed via async iteration so a slow upstream writer (e.g.
  * `apply | lint` in a pipeline, or any producer that hasn't flushed yet)
- * is awaited until 'end'. The previous `readFileSync(0)` implementation
- * raced with the writer: when stdin was a pipe with no buffered data
- * yet, it threw EAGAIN, which was swallowed and reported as "no input".
+ * is awaited until 'end'. Do not use `readFileSync(0)` here — when stdin
+ * is a pipe with no buffered data yet, it throws EAGAIN, which gets
+ * swallowed and surfaces as "no input".
  */
 async function readBpmnInput(
 	filePath: string | undefined,

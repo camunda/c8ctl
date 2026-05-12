@@ -133,7 +133,7 @@ For `<id>` (no `@<version>`):
 Errors include the available versions to make the next step obvious:
 
 ```
-Failed to element-template apply: Template 'io.camunda.connectors.aws.s3.v1' has no version 99. Available: 1, 2.
+Failed to element-template apply: Element template 'io.camunda.connectors.aws.s3.v1' has no version 99. Available: 1, 2.
 ```
 
 ## Search

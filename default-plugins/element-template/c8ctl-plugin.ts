@@ -110,8 +110,13 @@ type VendorBundle = {
 };
 
 /**
- * Read BPMN XML from a file path or stdin. See bpmn plugin for context on
- * why stdin is consumed via async iteration rather than readFileSync(0).
+ * Read BPMN XML from a file path or stdin. Returns null if no input is available.
+ *
+ * Stdin is consumed via async iteration so a slow upstream writer (e.g.
+ * `apply | lint` in a pipeline, or any producer that hasn't flushed yet)
+ * is awaited until 'end'. Do not use `readFileSync(0)` here — when stdin
+ * is a pipe with no buffered data yet, it throws EAGAIN, which gets
+ * swallowed and surfaces as "no input".
  */
 async function readBpmnInput(
 	filePath: string | undefined,
@@ -198,7 +203,7 @@ async function resolveOotbTemplate(
 	const candidates = findById(ref.id);
 	if (candidates.length === 0) {
 		throw new Error(
-			`Template '${ref.id}' not found. Run 'c8ctl element-template sync' to refresh the cache, ` +
+			`Element template '${ref.id}' not found. Run 'c8ctl element-template sync' to refresh the cache, ` +
 				"or use 'c8ctl element-template search <query>' to find an id.",
 		);
 	}
@@ -218,7 +223,7 @@ async function resolveOotbTemplate(
 					? `Available: ${known.join(", ")}.`
 					: "No known versions in cache.";
 			throw new Error(
-				`Template '${ref.id}' has no version ${ref.version}. ${available}`,
+				`Element template '${ref.id}' has no version ${ref.version}. ${available}`,
 			);
 		}
 		const available = candidates
@@ -230,7 +235,7 @@ async function resolveOotbTemplate(
 			})
 			.join(", ");
 		throw new Error(
-			`Template '${ref.id}' has no version compatible with execution platform ` +
+			`Element template '${ref.id}' has no version compatible with execution platform ` +
 				`${executionPlatformVersion}. Available: ${available}.`,
 		);
 	}
@@ -1488,38 +1493,37 @@ export const commands = {
 			"in-place": {
 				type: "boolean",
 				short: "i",
-				description: "Modify the BPMN file in place (apply only)",
+				description: "Modify the BPMN file in place [apply]",
 			},
 			set: {
 				type: "string",
 				multiple: true,
-				description:
-					"Set a template property value (repeatable, apply only)",
+				description: "Set a template property value [apply] (repeatable)",
 			},
 			detailed: {
 				type: "boolean",
 				short: "d",
 				description:
-					"Render full detail cards instead of the condensed list (get-properties)",
+					"Render full detail cards instead of the condensed list [get-properties]",
 			},
 			group: {
 				type: "string",
 				multiple: true,
 				description:
-					"Filter to one or more group ids (repeatable; get-properties only)",
+					"Filter to one or more group ids [get-properties] (repeatable)",
 			},
 			prune: {
 				type: "boolean",
-				description: "Drop cached entries no longer in the index (sync only)",
+				description: "Drop cached entries no longer in the index [sync]",
 			},
 			"no-icon": {
 				type: "boolean",
 				description:
-					"Drop the icon field (often a large base64 blob) from the output (get only)",
+					"Drop the icon field (often a large base64 blob) from the output [get]",
 			},
 			limit: {
 				type: "string",
-				description: "Cap the number of matches (search only, default 20)",
+				description: "Cap the number of matches [search] (default 20)",
 			},
 		},
 		handler: elementTemplateHandler,
