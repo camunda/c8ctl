@@ -46,20 +46,20 @@ export interface PluginCtx {
 	readonly client: CamundaClient;
 }
 
-type CommandHandler = (
+export type CommandHandler = (
 	args: string[],
 	flags?: Record<string, unknown>,
 	ctx?: PluginCtx,
 ) => Promise<void>;
 
-interface CommandWithFlags {
+export interface CommandWithFlags {
 	flags: Record<string, FlagDef>;
 	handler: CommandHandler;
 }
 
-type PluginCommand = CommandHandler | CommandWithFlags;
+export type PluginCommand = CommandHandler | CommandWithFlags;
 
-interface PluginCommands {
+export interface PluginCommands {
 	[commandName: string]: PluginCommand;
 }
 

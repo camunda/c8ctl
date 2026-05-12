@@ -14,9 +14,11 @@ import { resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-import type { FlagDef } from "../../src/command-registry.ts";
 import type { Logger } from "../../src/logger.ts";
-import type { PluginMetadata } from "../../src/plugin-loader.ts";
+import type {
+	PluginCommands,
+	PluginMetadata,
+} from "../../src/plugin-loader.ts";
 // Side-effect import: brings in the `declare global { var c8ctl: ... }`
 // block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
@@ -503,7 +505,7 @@ export const commands = {
 				description:
 					'Suppress the "No issues found." line on a clean lint (lint only)',
 			},
-		} as const satisfies Record<string, FlagDef>,
+		},
 		handler: bpmnHandler,
 	},
-};
+} satisfies PluginCommands;

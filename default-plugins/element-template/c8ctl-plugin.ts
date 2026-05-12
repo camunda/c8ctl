@@ -37,8 +37,10 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "./helpers.ts";
-import type { FlagDef } from "../../src/command-registry.ts";
-import type { PluginMetadata } from "../../src/plugin-loader.ts";
+import type {
+	PluginCommands,
+	PluginMetadata,
+} from "../../src/plugin-loader.ts";
 // Side-effect import: brings in the `declare global { var c8ctl: ... }`
 // block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
@@ -1562,7 +1564,7 @@ export const commands = {
 				type: "string",
 				description: "Cap the number of matches (search only, default 20)",
 			},
-		} as const satisfies Record<string, FlagDef>,
+		},
 		handler: elementTemplateHandler,
 	},
-};
+} satisfies PluginCommands;

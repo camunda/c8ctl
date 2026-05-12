@@ -14,9 +14,11 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
-import type { FlagDef } from "../../src/command-registry.ts";
 import type { Logger } from "../../src/logger.ts";
-import type { PluginMetadata } from "../../src/plugin-loader.ts";
+import type {
+	PluginCommands,
+	PluginMetadata,
+} from "../../src/plugin-loader.ts";
 // Side-effect import: brings in the `declare global { var c8ctl: ... }`
 // block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
@@ -740,7 +742,7 @@ export const commands = {
 				description:
 					"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
 			},
-		} as const satisfies Record<string, FlagDef>,
+		},
 		handler: feelHandler,
 	},
-};
+} satisfies PluginCommands;
