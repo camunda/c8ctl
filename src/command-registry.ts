@@ -1214,7 +1214,10 @@ export const COMMAND_REGISTRY = {
 	deploy: {
 		description: "Deploy resources",
 		helpDescription:
-			"Deploy files to Camunda (auto-discovers deployable files in directories)",
+			"Deploy files to Camunda (auto-discovers deployable files in directories). " +
+			"When deploying a directory that is inside a process application " +
+			"(a parent directory contains a .process-application marker), the entire " +
+			"application root is deployed. Explicit file paths are not expanded.",
 		helpResource: "[path...]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show deploy command with all flags",
@@ -1224,6 +1227,11 @@ export const COMMAND_REGISTRY = {
 			{
 				command: "c8ctl deploy ./my-process.bpmn",
 				description: "Deploy a BPMN file",
+			},
+			{
+				command: "c8ctl deploy",
+				description:
+					"Deploy from current directory (detects process application root)",
 			},
 		],
 		resources: [],
@@ -1353,6 +1361,15 @@ export const COMMAND_REGISTRY = {
 			"all-extensions": {
 				type: "boolean",
 				description: "Watch all server-supported file extensions",
+			},
+			"process-application": {
+				type: "boolean",
+				description:
+					"Watch and deploy the entire process application (requires .process-application marker)",
+			},
+			pa: {
+				type: "boolean",
+				description: "Alias for --process-application",
 			},
 		},
 		aliases: ["w"],
