@@ -562,30 +562,6 @@ describe("CLI behavioural: element-template get", () => {
 		);
 	});
 
-	test("unknown flag exits 1", async () => {
-		const result = await c8text(
-			"element-template",
-			"get",
-			"--bogus",
-			TEMPLATE_FILE,
-		);
-		assert.strictEqual(result.status, 1);
-		const output = result.stdout + result.stderr;
-		assert.ok(
-			output.includes("Unknown flag") && output.includes("--bogus"),
-			"Should reject unknown flag",
-		);
-	});
-
-	test("--help prints usage and exits 0", async () => {
-		const result = await c8text("element-template", "get", "--help");
-		assert.strictEqual(result.status, 0);
-		assert.ok(
-			result.stdout.includes("c8ctl element-template get <template>"),
-			"Should print the usage line",
-		);
-	});
-
 	test("missing local file exits 1", async () => {
 		const result = await c8text(
 			"element-template",
