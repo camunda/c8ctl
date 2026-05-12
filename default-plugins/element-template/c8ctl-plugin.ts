@@ -107,44 +107,6 @@ type VendorBundle = {
 	HeadlessTextRendererModule: unknown;
 };
 
-const ELEMENT_TEMPLATE_FLAGS = {
-	"in-place": {
-		type: "boolean",
-		short: "i",
-		description: "Modify the BPMN file in place (apply only)",
-	},
-	set: {
-		type: "string",
-		multiple: true,
-		description: "Set a template property value (repeatable, apply only)",
-	},
-	detailed: {
-		type: "boolean",
-		short: "d",
-		description:
-			"Render full detail cards instead of the condensed list (get-properties)",
-	},
-	group: {
-		type: "string",
-		multiple: true,
-		description:
-			"Filter to one or more group ids (repeatable; get-properties only)",
-	},
-	prune: {
-		type: "boolean",
-		description: "Drop cached entries no longer in the index (sync only)",
-	},
-	"no-icon": {
-		type: "boolean",
-		description:
-			"Drop the icon field (often a large base64 blob) from the output (get only)",
-	},
-	limit: {
-		type: "string",
-		description: "Cap the number of matches (search only, default 20)",
-	},
-} as const satisfies Record<string, FlagDef>;
-
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
@@ -1575,9 +1537,45 @@ async function elementTemplateHandler(
 	}
 }
 
+const ELEMENT_TEMPLATE_FLAGS = {
+	"in-place": {
+		type: "boolean",
+		short: "i",
+		description: "Modify the BPMN file in place (apply only)",
+	},
+	set: {
+		type: "string",
+		multiple: true,
+		description: "Set a template property value (repeatable, apply only)",
+	},
+	detailed: {
+		type: "boolean",
+		short: "d",
+		description:
+			"Render full detail cards instead of the condensed list (get-properties)",
+	},
+	group: {
+		type: "string",
+		multiple: true,
+		description:
+			"Filter to one or more group ids (repeatable; get-properties only)",
+	},
+	prune: {
+		type: "boolean",
+		description: "Drop cached entries no longer in the index (sync only)",
+	},
+	"no-icon": {
+		type: "boolean",
+		description:
+			"Drop the icon field (often a large base64 blob) from the output (get only)",
+	},
+	limit: {
+		type: "string",
+		description: "Cap the number of matches (search only, default 20)",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 export const commands = {
-	// Object form so the host pre-parses declared flags and forwards
-	// them to the handler as the second argument (#366/#367).
 	"element-template": {
 		flags: ELEMENT_TEMPLATE_FLAGS,
 		handler: elementTemplateHandler,

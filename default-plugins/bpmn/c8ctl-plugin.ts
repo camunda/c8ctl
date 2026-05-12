@@ -71,15 +71,6 @@ const require = createRequire(import.meta.url);
 // Metadata
 // ---------------------------------------------------------------------------
 
-const BPMN_FLAGS = {
-	quiet: {
-		type: "boolean",
-		short: "q",
-		description:
-			'Suppress the "No issues found." line on a clean lint (lint only)',
-	},
-} as const satisfies Record<string, FlagDef>;
-
 export const metadata = {
 	name: "bpmn",
 	description: "Lint BPMN diagrams",
@@ -514,9 +505,16 @@ async function bpmnHandler(
 	}
 }
 
+const BPMN_FLAGS = {
+	quiet: {
+		type: "boolean",
+		short: "q",
+		description:
+			'Suppress the "No issues found." line on a clean lint (lint only)',
+	},
+} as const satisfies Record<string, FlagDef>;
+
 export const commands = {
-	// Object form so the host pre-parses declared flags and forwards
-	// them to the handler as the second argument (#366/#367).
 	bpmn: {
 		flags: BPMN_FLAGS,
 		handler: bpmnHandler,

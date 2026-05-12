@@ -65,28 +65,6 @@ type ClusterErrorClassification = {
 	terminal: boolean;
 };
 
-const FEEL_FLAGS = {
-	engine: {
-		type: "string",
-		description: "Engine: 'cluster' (default) or 'local' (feelin)",
-	},
-	vars: {
-		type: "string",
-		description: "JSON object of variables (use --var for individual values)",
-	},
-	var: {
-		type: "string",
-		multiple: true,
-		description:
-			"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
-	},
-	tenant: {
-		type: "string",
-		description:
-			"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
-	},
-} as const satisfies Record<string, FlagDef>;
-
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
@@ -744,9 +722,29 @@ async function feelHandler(
 	}
 }
 
+const FEEL_FLAGS = {
+	engine: {
+		type: "string",
+		description: "Engine: 'cluster' (default) or 'local' (feelin)",
+	},
+	vars: {
+		type: "string",
+		description: "JSON object of variables (use --var for individual values)",
+	},
+	var: {
+		type: "string",
+		multiple: true,
+		description:
+			"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
+	},
+	tenant: {
+		type: "string",
+		description:
+			"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 export const commands = {
-	// Object form so the host pre-parses declared flags and forwards
-	// them to the handler as the second argument (#366/#367).
 	feel: {
 		flags: FEEL_FLAGS,
 		handler: feelHandler,
