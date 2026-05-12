@@ -7,20 +7,20 @@ import { existsSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../../src/runtime.ts";
 import {
 	applySetOverrides,
 	parseArgs,
 	type Template,
 	warnUnmetConditions,
-} from "./helpers.ts";
+} from "../helpers.ts";
 import {
 	getExecutionPlatformVersion,
 	parseTemplateRef,
 	readBpmnInput,
 	readTemplateFromPathOrUrl,
 	resolveOotbTemplate,
-} from "./template-ref.ts";
+} from "../template-ref.ts";
 
 const c8ctl = globalThis.c8ctl!;
 const require = createRequire(import.meta.url);
@@ -56,10 +56,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * Locate the prebuilt vendor bundle. Plugins live in two places:
- *   - dev:        default-plugins/element-template/c8ctl-plugin.ts
- *                 vendor: ../../dist/vendor/bpmn-element-templates.cjs
- *   - production: dist/default-plugins/element-template/c8ctl-plugin.js
- *                 vendor: ../../vendor/bpmn-element-templates.cjs
+ *   - dev:        default-plugins/element-template/commands/apply.ts
+ *                 vendor: ../../../dist/vendor/bpmn-element-templates.cjs
+ *   - production: dist/default-plugins/element-template/commands/apply.js
+ *                 vendor: ../../../vendor/bpmn-element-templates.cjs
  */
 function resolveVendorBundle(): string {
 	const candidates = [
@@ -67,11 +67,19 @@ function resolveVendorBundle(): string {
 			__dirname,
 			"..",
 			"..",
+			"..",
 			"dist",
 			"vendor",
 			"bpmn-element-templates.cjs",
 		),
-		resolvePath(__dirname, "..", "..", "vendor", "bpmn-element-templates.cjs"),
+		resolvePath(
+			__dirname,
+			"..",
+			"..",
+			"..",
+			"vendor",
+			"bpmn-element-templates.cjs",
+		),
 	];
 	for (const path of candidates) {
 		if (existsSync(path)) {

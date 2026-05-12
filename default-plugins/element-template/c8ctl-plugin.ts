@@ -21,12 +21,12 @@ import type {
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
 import type {} from "../../src/runtime.ts";
-import { applySubcommand } from "./apply.ts";
-import { getSubcommand } from "./get.ts";
-import { getPropertiesSubcommand } from "./get-properties.ts";
-import { infoSubcommand } from "./info.ts";
-import { searchSubcommand } from "./search.ts";
-import { syncSubcommand } from "./sync.ts";
+import { applySubcommand } from "./commands/apply.ts";
+import { getSubcommand } from "./commands/get.ts";
+import { getPropertiesSubcommand } from "./commands/get-properties.ts";
+import { infoSubcommand } from "./commands/info.ts";
+import { searchSubcommand } from "./commands/search.ts";
+import { syncSubcommand } from "./commands/sync.ts";
 
 const c8ctl = globalThis.c8ctl!;
 

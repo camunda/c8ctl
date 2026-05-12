@@ -14,10 +14,10 @@
  * payload.
  */
 
-import type {} from "../../src/runtime.ts";
-import { parseTemplateJson, readFileOrUrl, type Template } from "./helpers.ts";
-import { loadCache } from "./marketplace.ts";
-import { parseTemplateRef, resolveOotbTemplate } from "./template-ref.ts";
+import type {} from "../../../src/runtime.ts";
+import { parseTemplateJson, readFileOrUrl, type Template } from "../helpers.ts";
+import { loadCache } from "../marketplace.ts";
+import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
 	const usage = "Usage: c8ctl element-template get <template> [--no-icon]";

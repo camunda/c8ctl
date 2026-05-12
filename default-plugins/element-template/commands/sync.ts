@@ -3,8 +3,8 @@
  * cache from the marketplace.
  */
 
-import type {} from "../../src/runtime.ts";
-import { syncTemplates } from "./marketplace.ts";
+import type {} from "../../../src/runtime.ts";
+import { syncTemplates } from "../marketplace.ts";
 
 const c8ctl = globalThis.c8ctl!;
 

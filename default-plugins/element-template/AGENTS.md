@@ -9,9 +9,11 @@ version resolution, and the default-plugin-vs-core-command rationale.
 
 | File | Purpose |
 | --- | --- |
-| `c8ctl-plugin.js` | Subcommand dispatch (`search`, `info`, `get-properties`, `apply`, `get`, `sync`), arg parsing, vendor-bundle apply |
-| `marketplace.js` | Cache I/O, `/ootb-connectors` fetch, sync, search, version resolution |
-| `helpers.js` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings |
+| `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
+| `commands/<name>.ts` | One file per subcommand: `apply`, `get`, `get-properties`, `info`, `search`, `sync` |
+| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
+| `marketplace.ts` | Cache I/O, `/ootb-connectors` fetch, sync, search, version resolution |
+| `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings |
 | `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
 
 ## Things to know before editing
@@ -31,7 +33,7 @@ version resolution, and the default-plugin-vs-core-command rationale.
   bootstrap call to `getSubcommand` without changing the logger story
   first.
 - **Path/URL apply paths must not trigger the index bootstrap.**
-  Detection happens in `parseTemplateRef()` in `c8ctl-plugin.js`
+  Detection happens in `parseTemplateRef()` in `template-ref.ts`
   before any cache call.
 - **JSON output uses element-templates schema field names verbatim.**
   No invented derivations — `binding`, `optional`, `value`, `condition`,

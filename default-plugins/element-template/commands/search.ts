@@ -4,13 +4,13 @@
  */
 
 import { styleText } from "node:util";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../../src/runtime.ts";
 import { buildTemplateSummary, formatTemplateHeaderLines } from "./info.ts";
 import {
 	bootstrapIfNeeded,
 	nudgeIfStale,
 	searchTemplates,
-} from "./marketplace.ts";
+} from "../marketplace.ts";
 
 const c8ctl = globalThis.c8ctl!;
 

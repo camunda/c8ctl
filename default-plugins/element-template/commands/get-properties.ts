@@ -5,7 +5,7 @@
  */
 
 import { styleText } from "node:util";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../../src/runtime.ts";
 import {
 	BINDING_TYPE_SHORTHANDS,
 	globToRegex,
@@ -13,9 +13,9 @@ import {
 	type PropertyDetail,
 	type Template,
 	type TemplateProperty,
-} from "./helpers.ts";
+} from "../helpers.ts";
 import { formatKeyedCard, parseInspectArgs } from "./info.ts";
-import { loadTemplate } from "./template-ref.ts";
+import { loadTemplate } from "../template-ref.ts";
 
 const c8ctl = globalThis.c8ctl!;
 

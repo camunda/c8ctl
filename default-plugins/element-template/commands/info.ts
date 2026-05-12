@@ -9,9 +9,9 @@
  */
 
 import { styleText } from "node:util";
-import type {} from "../../src/runtime.ts";
-import type { Template } from "./helpers.ts";
-import { loadTemplate } from "./template-ref.ts";
+import type {} from "../../../src/runtime.ts";
+import type { Template } from "../helpers.ts";
+import { loadTemplate } from "../template-ref.ts";
 
 const c8ctl = globalThis.c8ctl!;
 
