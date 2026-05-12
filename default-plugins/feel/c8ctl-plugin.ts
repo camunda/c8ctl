@@ -618,15 +618,15 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 // Command export
 // ---------------------------------------------------------------------------
 
+const validSubcommands: readonly string[] = metadata.commands.feel.subcommands
+	.map((s) => s.name);
+
 function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = c8ctl.getLogger();
-	const names = metadata.commands.feel.subcommands
-		.map((s) => s.name)
-		.join(", ");
 	const lead = unknownSubcommand
 		? `Unknown subcommand '${unknownSubcommand}'.`
 		: "c8ctl feel requires a subcommand.";
-	logger.info(`${lead} Available: ${names}`);
+	logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
 	logger.info("Run 'c8ctl feel --help' for full usage.");
 }
 
@@ -667,14 +667,14 @@ async function feelHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	if (subcommand !== "evaluate") {
+	if (!subcommand || !validSubcommands.includes(subcommand)) {
 		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
 
 	try {
-		await evaluateSubcommand(subArgs);
+		if (subcommand === "evaluate") await evaluateSubcommand(subArgs);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();

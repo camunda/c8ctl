@@ -1415,24 +1415,16 @@ async function syncSubcommand(args: string[]): Promise<void> {
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = [
-	"search",
-	"info",
-	"get-properties",
-	"apply",
-	"get",
-	"sync",
-];
+const validSubcommands: readonly string[] = metadata.commands[
+	"element-template"
+].subcommands.map((s) => s.name);
 
 function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = c8ctl.getLogger();
-	const names = metadata.commands["element-template"].subcommands
-		.map((s) => s.name)
-		.join(", ");
 	const lead = unknownSubcommand
 		? `Unknown subcommand '${unknownSubcommand}'.`
 		: "c8ctl element-template requires a subcommand.";
-	logger.info(`${lead} Available: ${names}`);
+	logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
 	logger.info("Run 'c8ctl element-template --help' for full usage.");
 }
 
@@ -1472,7 +1464,7 @@ async function elementTemplateHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	if (!subcommand || !VALID_SUBCOMMANDS.includes(subcommand)) {
+	if (!subcommand || !validSubcommands.includes(subcommand)) {
 		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
