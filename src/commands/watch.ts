@@ -7,7 +7,7 @@ import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
 import { deployResources } from "../deployments.ts";
 import { normalizeToError } from "../errors.ts";
-import { isIgnored, loadIgnoreRules } from "../ignore.ts";
+import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
 import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
@@ -64,8 +64,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		}
 	}
 
-	// Load .c8ignore rules from the working directory
-	const ignoreBaseDir = resolve(process.cwd());
+	// Load .c8ignore rules from the target directory (not cwd) so that
+	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
+	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	// Keep track of recently deployed files to avoid duplicate deploys

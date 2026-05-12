@@ -323,11 +323,13 @@ describe(".c8ignore", () => {
 		// Import the module functions directly
 		let loadIgnoreRules: typeof import("../../src/ignore.ts").loadIgnoreRules;
 		let isIgnored: typeof import("../../src/ignore.ts").isIgnored;
+		let resolveIgnoreBaseDir: typeof import("../../src/ignore.ts").resolveIgnoreBaseDir;
 
 		beforeEach(async () => {
 			const mod = await import("../../src/ignore.ts");
 			loadIgnoreRules = mod.loadIgnoreRules;
 			isIgnored = mod.isIgnored;
+			resolveIgnoreBaseDir = mod.resolveIgnoreBaseDir;
 		});
 
 		test("loadIgnoreRules returns ignore instance with defaults", () => {
@@ -358,6 +360,98 @@ describe(".c8ignore", () => {
 			assert.strictEqual(
 				isIgnored(ig, "/some/other/path/file.bpmn", testDir),
 				false,
+			);
+		});
+
+		test("resolveIgnoreBaseDir returns directory for a directory path", () => {
+			const subDir = join(testDir, "myproject");
+			mkdirSync(subDir, { recursive: true });
+			assert.strictEqual(resolveIgnoreBaseDir([subDir]), subDir);
+		});
+
+		test("resolveIgnoreBaseDir returns parent for a file path", () => {
+			const file = join(testDir, "process.bpmn");
+			writeFileSync(file, "<bpmn/>");
+			assert.strictEqual(resolveIgnoreBaseDir([file]), testDir);
+		});
+
+		test("resolveIgnoreBaseDir defaults to cwd for empty array", () => {
+			const result = resolveIgnoreBaseDir([]);
+			assert.strictEqual(result, process.cwd());
+		});
+	});
+
+	// ── Target-directory resolution (#258) ───────────────────────────
+
+	describe(".c8ignore resolves from target directory, not cwd (#258)", () => {
+		test("deploy target dir picks up .c8ignore from that dir", () => {
+			// Scenario from #258:
+			//   testDir/           ← cwd (no .c8ignore here)
+			//     project/
+			//       .c8ignore      ← contains "dist/"
+			//       main.bpmn
+			//       dist/
+			//         output.bpmn  ← should be ignored
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "dist/\n");
+			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
+			mkdirSync(join(projectDir, "dist"), { recursive: true });
+			writeFileSync(join(projectDir, "dist", "output.bpmn"), "<bpmn/>");
+
+			// Deploy from parent (testDir as cwd), targeting ./project/
+			const result = dryRunDeploy(testDir, ["./project/"]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(
+				names,
+				["main.bpmn"],
+				"dist/output.bpmn should be ignored by project/.c8ignore",
+			);
+		});
+
+		test("deploy with no target still uses cwd (backward compat)", () => {
+			// .c8ignore at cwd should still work when no target is specified
+			writeFileSync(join(testDir, ".c8ignore"), "dist/\n");
+			writeFileSync(join(testDir, "main.bpmn"), "<bpmn/>");
+			mkdirSync(join(testDir, "dist"), { recursive: true });
+			writeFileSync(join(testDir, "dist", "output.bpmn"), "<bpmn/>");
+
+			const result = dryRunDeploy(testDir);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(names, ["main.bpmn"]);
+		});
+
+		test("deploy explicit file uses parent dir for .c8ignore", () => {
+			// When deploying a single file, .c8ignore in the file's directory
+			// should be checked (though the explicit file itself bypasses
+			// extension filtering, it should still honour ignore rules for
+			// the base-dir resolution).
+			const projectDir = join(testDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			writeFileSync(join(projectDir, ".c8ignore"), "");
+			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
+
+			// Deploying a single explicit file from the parent dir
+			const result = dryRunDeploy(testDir, ["./project/main.bpmn"]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(names, ["main.bpmn"]);
+		});
+
+		test("deploy subdirectory picks up .c8ignore from subdirectory", () => {
+			// .c8ignore in a subdirectory, deploy that subdirectory from grandparent
+			const subDir = join(testDir, "a", "b");
+			mkdirSync(subDir, { recursive: true });
+			writeFileSync(join(subDir, ".c8ignore"), "scratch/\n");
+			writeFileSync(join(subDir, "process.bpmn"), "<bpmn/>");
+			mkdirSync(join(subDir, "scratch"), { recursive: true });
+			writeFileSync(join(subDir, "scratch", "draft.bpmn"), "<bpmn/>");
+
+			const result = dryRunDeploy(testDir, ["./a/b/"]);
+			const names = resourceNames(result);
+			assert.deepStrictEqual(
+				names,
+				["process.bpmn"],
+				"scratch/draft.bpmn should be ignored by a/b/.c8ignore",
 			);
 		});
 	});
