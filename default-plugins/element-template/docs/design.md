@@ -5,26 +5,6 @@ templates to BPMN elements and inspects their settable properties — for
 local files, arbitrary URLs, and out-of-the-box (OOTB) connector
 templates resolved by id.
 
-## Why a default plugin (not a core command)
-
-The `element-template` and `bpmn` verbs were originally core commands
-in `src/commands/`. We migrated them to default plugins because:
-
-- **Faster iteration without core framework churn.** Earlier work added
-  a `multiple: true` flag to the framework's `FlagDef` so a core
-  command could accept repeatable `--set` flags. Plugins parse their
-  own flags, so the framework doesn't need to grow that surface for
-  every plugin's needs. The `multiple: true` change was reverted as
-  part of the migration.
-- **Looser coupling.** Plugin-specific deps (`bpmnlint`, the bpmn-js
-  vendor bundle) don't bleed into the core dispatch.
-- **Showcases the plugin model.** `element-template` and `bpmn` are
-  realistic examples — a third party could ship the same shape.
-
-The known limitation is that plugin deps and prebuilt vendor bundles
-have to be shipped via the c8ctl install. Acceptable for now; we'll
-revisit when we have third-party plugins that need the same.
-
 ## Vendor bundle for `bpmn-js-element-templates`
 
 `apply` runs the same `Modeler` + `CloudElementTemplatesCoreModule` +
