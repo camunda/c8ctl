@@ -348,6 +348,56 @@ describe("CLI behavioural: element-template apply --set", () => {
 			"Should reject unknown prefix",
 		);
 	});
+
+	test("--set overrides existing dropdown value on re-apply", async () => {
+		// bpmn-js-element-templates' applyTemplate preserves an existing
+		// Dropdown value as long as it's a valid choice. CLI users expect
+		// --set to win regardless — verify the post-apply override does that.
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const tempBpmn = join(tempDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		try {
+			// First apply: default method (GET).
+			const first = await c8text(
+				"element-template",
+				"apply",
+				"--in-place",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+				tempBpmn,
+			);
+			assert.strictEqual(first.status, 0, `stderr: ${first.stderr}`);
+			const afterFirst = readFileSync(tempBpmn, "utf-8");
+			assert.strictEqual(getInputValue(afterFirst, "method"), "GET");
+
+			// Re-apply with --set method=POST plus a method-conditional input.
+			const second = await c8text(
+				"element-template",
+				"apply",
+				"--in-place",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=POST",
+				"--set",
+				'body={"hello":"world"}',
+			);
+			assert.strictEqual(second.status, 0, `stderr: ${second.stderr}`);
+			const afterSecond = readFileSync(tempBpmn, "utf-8");
+			assert.strictEqual(
+				getInputValue(afterSecond, "method"),
+				"POST",
+				"--set should overwrite the preserved Dropdown value",
+			);
+			assert.ok(
+				hasInput(afterSecond, "body"),
+				"conditional dependent should be created after gating property changed",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------

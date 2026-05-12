@@ -10,8 +10,11 @@ import { fileURLToPath } from "node:url";
 import type {} from "../../../src/runtime.ts";
 import {
 	applySetOverrides,
+	findPropertiesByBindingName,
 	parseArgs,
+	parseSetArg,
 	type Template,
+	type TemplateProperty,
 	warnUnmetConditions,
 } from "../helpers.ts";
 import {
@@ -29,15 +32,29 @@ const require = createRequire(import.meta.url);
 // an absolute path, so we type the local destination instead of declaring
 // the module name. Everything beyond this surface stays as `unknown` and
 // gets narrowed at the use site.
-type ElementRegistry = { get(id: string): unknown };
+type ModdleElement = {
+	$type: string;
+	get(name: string): unknown;
+	[key: string]: unknown;
+};
+type BpmnElement = { businessObject: ModdleElement };
+type ElementRegistry = { get(id: string): BpmnElement | undefined };
 type ElementTemplatesService = {
 	set(templates: Template[]): void;
-	applyTemplate(element: unknown, template: Template): void;
+	applyTemplate(element: BpmnElement, template: Template): void;
+};
+type Modeling = {
+	updateModdleProperties(
+		element: BpmnElement,
+		moddleElement: ModdleElement,
+		properties: Record<string, unknown>,
+	): void;
 };
 type ModelerInstance = {
 	importXML(xml: string): Promise<unknown>;
 	get(name: "elementRegistry"): ElementRegistry;
 	get(name: "elementTemplates"): ElementTemplatesService;
+	get(name: "modeling"): Modeling;
 	get(name: string): unknown;
 	saveXML(options: { format?: boolean }): Promise<{ xml: string }>;
 };
@@ -93,16 +110,166 @@ function resolveVendorBundle(): string {
 }
 
 /**
+ * Find the first child of `extensionElements` whose moddle `$type` matches.
+ * Avoids importing bpmn-js's `is()` helper just for one shape check.
+ */
+function findExtensionByType(
+	extensionElements: ModdleElement | undefined,
+	type: string,
+): ModdleElement | undefined {
+	if (!extensionElements) {
+		return undefined;
+	}
+	const values = extensionElements.get("values") as ModdleElement[] | undefined;
+	return values?.find((v) => v.$type === type);
+}
+
+/**
+ * Force the source/value of each `--set` into the corresponding moddle child.
+ *
+ * bpmn-js-element-templates' applyTemplate preserves existing input/output/
+ * header/property values on a re-apply (and unconditionally on Dropdown
+ * properties — see ChangeElementTemplateHandler#shouldKeepValue, ref
+ * bpmn-io/bpmn-js-properties-panel#767). For a CLI the user expectation is
+ * "--set wins". After the first applyTemplate we walk the --set args, locate
+ * the moddle entry that backs each binding, and update its value via
+ * `modeling.updateModdleProperties` so the change goes through the same
+ * command stack the library uses internally.
+ *
+ * Bindings whose moddle entry doesn't exist yet (because their condition was
+ * not met against the pre-apply element state) are skipped here and picked
+ * up by the second applyTemplate, which re-evaluates conditions against the
+ * now-updated element and creates the missing entries using our mutated
+ * `prop.value` as the default.
+ */
+function forceSetValues(
+	modeler: ModelerInstance,
+	element: BpmnElement,
+	template: Template,
+	setArgs: string[],
+): void {
+	const modeling = modeler.get("modeling");
+	const extensionElements = element.businessObject.get("extensionElements") as
+		| ModdleElement
+		| undefined;
+	if (!extensionElements) {
+		return;
+	}
+
+	const ioMapping = findExtensionByType(extensionElements, "zeebe:IoMapping");
+	const taskHeaders = findExtensionByType(
+		extensionElements,
+		"zeebe:TaskHeaders",
+	);
+	const taskDefinition = findExtensionByType(
+		extensionElements,
+		"zeebe:TaskDefinition",
+	);
+	const zeebeProperties = findExtensionByType(
+		extensionElements,
+		"zeebe:Properties",
+	);
+
+	for (const arg of setArgs) {
+		const { bindingTypeFilter, name, value } = parseSetArg(arg);
+		const matches = findPropertiesByBindingName(
+			template.properties,
+			name,
+			bindingTypeFilter,
+		);
+		for (const prop of matches) {
+			updateModdleForProperty(modeling, element, prop, value, {
+				ioMapping,
+				taskHeaders,
+				taskDefinition,
+				zeebeProperties,
+			});
+		}
+	}
+}
+
+function updateModdleForProperty(
+	modeling: Modeling,
+	element: BpmnElement,
+	prop: TemplateProperty,
+	value: string,
+	containers: {
+		ioMapping: ModdleElement | undefined;
+		taskHeaders: ModdleElement | undefined;
+		taskDefinition: ModdleElement | undefined;
+		zeebeProperties: ModdleElement | undefined;
+	},
+): void {
+	const binding = prop.binding;
+	if (!binding) {
+		return;
+	}
+
+	switch (binding.type) {
+		case "zeebe:input": {
+			const inputs = (containers.ioMapping?.get("inputParameters") ??
+				[]) as ModdleElement[];
+			const child = inputs.find((p) => p.target === binding.name);
+			if (child) {
+				modeling.updateModdleProperties(element, child, { source: value });
+			}
+			return;
+		}
+		case "zeebe:output": {
+			const outputs = (containers.ioMapping?.get("outputParameters") ??
+				[]) as ModdleElement[];
+			const child = outputs.find((p) => p.source === binding.source);
+			if (child) {
+				modeling.updateModdleProperties(element, child, { target: value });
+			}
+			return;
+		}
+		case "zeebe:taskHeader": {
+			const headers = (containers.taskHeaders?.get("values") ??
+				[]) as ModdleElement[];
+			const child = headers.find((h) => h.key === binding.key);
+			if (child) {
+				modeling.updateModdleProperties(element, child, { value });
+			}
+			return;
+		}
+		case "zeebe:property": {
+			const props = (containers.zeebeProperties?.get("properties") ??
+				[]) as ModdleElement[];
+			const child = props.find((p) => p.name === binding.name);
+			if (child) {
+				modeling.updateModdleProperties(element, child, { value });
+			}
+			return;
+		}
+		case "zeebe:taskDefinition": {
+			if (containers.taskDefinition && binding.property) {
+				modeling.updateModdleProperties(element, containers.taskDefinition, {
+					[binding.property]: value,
+				});
+			}
+			return;
+		}
+	}
+}
+
+/**
  * Apply an element template to a BPMN element using bpmn-js-headless and
  * bpmn-js-element-templates (same libraries as Web/Desktop Modeler).
  *
  * Loaded from a prebuilt CJS vendor bundle since the upstream libraries
  * use extensionless ESM imports that Node.js can't resolve without a bundler.
+ *
+ * Pass `setArgs` to honor `--set` overrides on re-apply. The first
+ * applyTemplate uses the (already-mutated) template defaults for fresh
+ * properties; `forceSetValues` then overrides preserved values; a second
+ * applyTemplate picks up dependents whose conditions just became met.
  */
 async function applyElementTemplate(
 	xml: string,
 	template: Template,
 	elementId: string,
+	setArgs: string[],
 ): Promise<string> {
 	const vendorPath = resolveVendorBundle();
 	const vendor: VendorBundle = require(vendorPath);
@@ -136,6 +303,13 @@ async function applyElementTemplate(
 	const elementTemplates = modeler.get("elementTemplates");
 	elementTemplates.set([template]);
 	elementTemplates.applyTemplate(element, template);
+
+	if (setArgs.length > 0) {
+		forceSetValues(modeler, element, template, setArgs);
+		// Second pass so dependents whose conditions are newly met get
+		// created with our mutated defaults.
+		elementTemplates.applyTemplate(element, template);
+	}
 
 	const result = await modeler.saveXML({ format: true });
 	return result.xml;
@@ -239,7 +413,12 @@ export async function applySubcommand(args: string[]): Promise<void> {
 
 	let resultXml: string;
 	try {
-		resultXml = await applyElementTemplate(input.xml, template, elementId);
+		resultXml = await applyElementTemplate(
+			input.xml,
+			template,
+			elementId,
+			parsed.setArgs,
+		);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Error applying template: ${message}`);
