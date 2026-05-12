@@ -138,7 +138,11 @@ export const metadata = {
 				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
 				"search the out-of-the-box template catalogue, export raw template JSON, " +
 				"and manage the local template cache.\n\n" +
-				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).",
+				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).\n\n" +
+				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
+				"Pass --set multiple times to set multiple properties. " +
+				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
+				"is bound across multiple types — e.g. --set input:correlationKey=order-42.",
 			subcommands: [
 				{
 					name: "search",
@@ -217,6 +221,24 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set method=POST --set url=https://api.example.com",
+					description:
+						"Set property values via --set name=value (one per --set; discover names via get-properties)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set authentication.type=basic --set authentication.username=alice",
+					description:
+						"Conditional properties: child controls (e.g. authentication.username) apply only when the gating property is also set",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set input:method=POST",
+					description:
+						"Qualify with <binding-type>:name=value when the same name is bound across multiple types",
+				},
+				{
+					command:
 						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
 					description:
 						"Print the raw template JSON to stdout (redirect to save a copy)",
@@ -247,7 +269,8 @@ export const commands = {
 			set: {
 				type: "string",
 				multiple: true,
-				description: "Set a template property value (repeatable) [apply]",
+				description:
+					"Set a property value: name=value (repeatable; binding name from get-properties) [apply]",
 			},
 			detailed: {
 				type: "boolean",
