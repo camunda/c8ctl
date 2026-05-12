@@ -63,7 +63,7 @@ interface PluginCommands {
 	[commandName: string]: PluginCommand;
 }
 
-interface PluginMetadata {
+export interface PluginMetadata {
 	name?: string;
 	description?: string;
 	commands?: {

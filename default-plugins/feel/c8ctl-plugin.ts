@@ -14,10 +14,11 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
-// Type-only imports — fully erased at runtime by --experimental-strip-types.
-// Importing from runtime.ts pulls in its `declare global { var c8ctl: ... }`
-// block, which types globalThis.c8ctl across this file.
+import type { FlagDef } from "../../src/command-registry.ts";
 import type { Logger } from "../../src/logger.ts";
+import type { PluginMetadata } from "../../src/plugin-loader.ts";
+// Side-effect import: brings in the `declare global { var c8ctl: ... }`
+// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
 
 // ---------------------------------------------------------------------------
@@ -65,28 +66,27 @@ type ClusterErrorClassification = {
 	terminal: boolean;
 };
 
-// Plugin metadata shape — the loader only reads `description`, `examples`,
-// and `subcommands`, so extra fields here are inert. They drive our
-// hand-rolled `printUsage` output.
-type SubcommandMeta = { name: string; description: string };
-type FlagMeta = {
-	type: "string" | "boolean";
-	description: string;
-	short?: string;
-};
-type ExampleMeta = { command: string; description: string };
-type CommandMeta = {
-	description: string;
-	helpDescription?: string;
-	subcommands?: readonly SubcommandMeta[];
-	flags?: Record<string, FlagMeta>;
-	examples?: readonly ExampleMeta[];
-};
-type PluginMetadata = {
-	name: string;
-	description: string;
-	commands: Record<string, CommandMeta>;
-};
+const FEEL_FLAGS = {
+	engine: {
+		type: "string",
+		description: "Engine: 'cluster' (default) or 'local' (feelin)",
+	},
+	vars: {
+		type: "string",
+		description: "JSON object of variables (use --var for individual values)",
+	},
+	var: {
+		type: "string",
+		multiple: true,
+		description:
+			"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
+	},
+	tenant: {
+		type: "string",
+		description:
+			"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
+	},
+} as const satisfies Record<string, FlagDef>;
 
 // ---------------------------------------------------------------------------
 // Metadata
@@ -106,27 +106,6 @@ export const metadata = {
 			subcommands: [
 				{ name: "evaluate", description: "Evaluate a FEEL expression" },
 			],
-			flags: {
-				engine: {
-					type: "string",
-					description: "Engine: 'cluster' (default) or 'local' (feelin)",
-				},
-				vars: {
-					type: "string",
-					description:
-						"JSON object of variables (use --var for individual values)",
-				},
-				var: {
-					type: "string",
-					description:
-						"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
-				},
-				tenant: {
-					type: "string",
-					description:
-						"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
-				},
-			},
 			examples: [
 				{
 					command: "c8ctl feel evaluate '1 + 2'",
@@ -718,29 +697,10 @@ function printUsage(): void {
 }
 
 export const commands = {
-	feel: async (args: string[] | undefined): Promise<void> => {
-		const subcommand = args?.[0];
-		const subArgs = args?.slice(1) ?? [];
-
-		if (!subcommand || subcommand === "--help" || subcommand === "-h") {
-			printUsage();
-			return;
-		}
-		if (!isValidSubcommand(subcommand)) {
-			printUsage();
-			process.exitCode = 1;
-			return;
-		}
-
-		try {
-			if (subcommand === "evaluate") {
-				await evaluateSubcommand(subArgs);
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const logger = getLogger();
-			logger.error(`Failed to feel ${subcommand}: ${message}`);
-			process.exitCode = 1;
-		}
+	// Object form so the host pre-parses declared flags and forwards
+	// them to the handler as the second argument (#366/#367).
+	feel: {
+		flags: FEEL_FLAGS,
+		handler: feelHandler,
 	},
 };

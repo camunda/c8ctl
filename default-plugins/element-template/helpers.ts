@@ -113,8 +113,7 @@ export type ParsedPluginArgs = {
 };
 
 // Re-export the host Logger type so call sites in this plugin can refer
-// to it without each importing from the host. Type-only — fully erased at
-// runtime by --experimental-strip-types.
+// to it without each importing from the host.
 import type { Logger } from "../../src/logger.ts";
 export type { Logger };
 

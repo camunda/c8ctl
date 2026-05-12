@@ -14,10 +14,11 @@ import { resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-// Type-only imports — fully erased at runtime by --experimental-strip-types.
-// Importing from runtime.ts pulls in its `declare global { var c8ctl: ... }`
-// block, which types globalThis.c8ctl across this file.
+import type { FlagDef } from "../../src/command-registry.ts";
 import type { Logger } from "../../src/logger.ts";
+import type { PluginMetadata } from "../../src/plugin-loader.ts";
+// Side-effect import: brings in the `declare global { var c8ctl: ... }`
+// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,26 +58,6 @@ type FormattedLintResults = {
 	issues: LintIssue[];
 };
 
-type SubcommandMeta = { name: string; description: string };
-type FlagMeta = {
-	type: "string" | "boolean";
-	description: string;
-	short?: string;
-};
-type ExampleMeta = { command: string; description: string };
-type CommandMeta = {
-	description: string;
-	helpDescription?: string;
-	subcommands?: readonly SubcommandMeta[];
-	flags?: Record<string, FlagMeta>;
-	examples?: readonly ExampleMeta[];
-};
-type PluginMetadata = {
-	name: string;
-	description: string;
-	commands: Record<string, CommandMeta>;
-};
-
 // ---------------------------------------------------------------------------
 // Module-scoped require — used for CommonJS bpmnlint internals so we can
 // pass the plugin's own `require` to NodeResolver (resolves
@@ -89,6 +70,15 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
+
+const BPMN_FLAGS = {
+	quiet: {
+		type: "boolean",
+		short: "q",
+		description:
+			'Suppress the "No issues found." line on a clean lint (lint only)',
+	},
+} as const satisfies Record<string, FlagDef>;
 
 export const metadata = {
 	name: "bpmn",
@@ -109,14 +99,6 @@ export const metadata = {
 						"Lint a BPMN diagram against recommended and Camunda rules",
 				},
 			],
-			flags: {
-				quiet: {
-					type: "boolean",
-					short: "q",
-					description:
-						'Suppress the "No issues found." line on a clean lint (lint only)',
-				},
-			},
 			examples: [
 				{
 					command: "c8ctl bpmn lint process.bpmn",
@@ -468,7 +450,7 @@ function printUsage(): void {
 	}
 	logger.output("");
 	logger.output("Options:");
-	for (const [name, def] of Object.entries(cmd.flags)) {
+	for (const [name, def] of Object.entries(BPMN_FLAGS)) {
 		const shortStr = def.short ? `-${def.short}, ` : "    ";
 		logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
 	}
@@ -480,29 +462,10 @@ function printUsage(): void {
 }
 
 export const commands = {
-	bpmn: async (args: string[] | undefined): Promise<void> => {
-		const subcommand = args?.[0];
-		const subArgs = args?.slice(1) ?? [];
-
-		if (!subcommand || subcommand === "--help" || subcommand === "-h") {
-			printUsage();
-			return;
-		}
-		if (!isValidSubcommand(subcommand)) {
-			printUsage();
-			process.exitCode = 1;
-			return;
-		}
-
-		try {
-			if (subcommand === "lint") {
-				await lintSubcommand(subArgs);
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const logger = getLogger();
-			logger.error(`Failed to bpmn ${subcommand}: ${message}`);
-			process.exitCode = 1;
-		}
+	// Object form so the host pre-parses declared flags and forwards
+	// them to the handler as the second argument (#366/#367).
+	bpmn: {
+		flags: BPMN_FLAGS,
+		handler: bpmnHandler,
 	},
 };

@@ -37,8 +37,10 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "./helpers.ts";
-// Side-effect type import — activates the `declare global { var c8ctl: ... }`
-// block in runtime.ts so globalThis.c8ctl is typed across this file.
+import type { FlagDef } from "../../src/command-registry.ts";
+import type { PluginMetadata } from "../../src/plugin-loader.ts";
+// Side-effect import: brings in the `declare global { var c8ctl: ... }`
+// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
 import {
 	bootstrapIfNeeded,
@@ -55,26 +57,6 @@ const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 // Local types
 // ---------------------------------------------------------------------------
-
-type SubcommandMeta = { name: string; description: string };
-type FlagMeta = {
-	type: "string" | "boolean";
-	description: string;
-	short?: string;
-};
-type ExampleMeta = { command: string; description: string };
-type CommandMeta = {
-	description: string;
-	helpDescription?: string;
-	subcommands?: readonly SubcommandMeta[];
-	flags?: Record<string, FlagMeta>;
-	examples?: readonly ExampleMeta[];
-};
-type PluginMetadata = {
-	name: string;
-	description: string;
-	commands: Record<string, CommandMeta>;
-};
 
 type BpmnInput = { xml: string; source: string };
 
@@ -126,6 +108,44 @@ type VendorBundle = {
 	HeadlessTextRendererModule: unknown;
 };
 
+const ELEMENT_TEMPLATE_FLAGS = {
+	"in-place": {
+		type: "boolean",
+		short: "i",
+		description: "Modify the BPMN file in place (apply only)",
+	},
+	set: {
+		type: "string",
+		multiple: true,
+		description: "Set a template property value (repeatable, apply only)",
+	},
+	detailed: {
+		type: "boolean",
+		short: "d",
+		description:
+			"Render full detail cards instead of the condensed list (get-properties)",
+	},
+	group: {
+		type: "string",
+		multiple: true,
+		description:
+			"Filter to one or more group ids (repeatable; get-properties only)",
+	},
+	prune: {
+		type: "boolean",
+		description: "Drop cached entries no longer in the index (sync only)",
+	},
+	"no-icon": {
+		type: "boolean",
+		description:
+			"Drop the icon field (often a large base64 blob) from the output (get only)",
+	},
+	limit: {
+		type: "string",
+		description: "Cap the number of matches (search only, default 20)",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
@@ -168,41 +188,6 @@ export const metadata = {
 					description: "Refresh the local OOTB element template cache",
 				},
 			],
-			flags: {
-				"in-place": {
-					type: "boolean",
-					short: "i",
-					description: "Modify the BPMN file in place (apply only)",
-				},
-				set: {
-					type: "string",
-					description: "Set a template property value (repeatable, apply only)",
-				},
-				detailed: {
-					type: "boolean",
-					short: "d",
-					description:
-						"Render full detail cards instead of the condensed list (get-properties)",
-				},
-				group: {
-					type: "string",
-					description:
-						"Filter to one or more group ids (repeatable; get-properties only)",
-				},
-				prune: {
-					type: "boolean",
-					description: "Drop cached entries no longer in the index (sync only)",
-				},
-				"no-icon": {
-					type: "boolean",
-					description:
-						"Drop the icon field (often a large base64 blob) from the output (get only)",
-				},
-				limit: {
-					type: "string",
-					description: "Cap the number of matches (search only, default 20)",
-				},
-			},
 			examples: [
 				{
 					command: 'c8ctl element-template search "AWS S3"',
@@ -1550,7 +1535,7 @@ function printUsage(): void {
 	}
 	logger.output("");
 	logger.output("Options:");
-	const flags: Record<string, FlagMeta> = cmd.flags;
+	const flags: Record<string, FlagDef> = ELEMENT_TEMPLATE_FLAGS;
 	for (const [name, def] of Object.entries(flags)) {
 		const shortStr = def.short ? `-${def.short}, ` : "    ";
 		logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
@@ -1563,39 +1548,10 @@ function printUsage(): void {
 }
 
 export const commands = {
-	"element-template": async (args: string[] | undefined): Promise<void> => {
-		const subcommand = args?.[0];
-		const subArgs = args?.slice(1) ?? [];
-
-		if (!subcommand || subcommand === "--help" || subcommand === "-h") {
-			printUsage();
-			return;
-		}
-		if (!isValidSubcommand(subcommand)) {
-			printUsage();
-			process.exitCode = 1;
-			return;
-		}
-
-		try {
-			if (subcommand === "search") {
-				await searchSubcommand(subArgs);
-			} else if (subcommand === "info") {
-				await infoSubcommand(subArgs);
-			} else if (subcommand === "get-properties") {
-				await getPropertiesSubcommand(subArgs);
-			} else if (subcommand === "apply") {
-				await applySubcommand(subArgs);
-			} else if (subcommand === "get") {
-				await getSubcommand(subArgs);
-			} else if (subcommand === "sync") {
-				await syncSubcommand(subArgs);
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			const logger = getLogger();
-			logger.error(`Failed to element-template ${subcommand}: ${message}`);
-			process.exitCode = 1;
-		}
+	// Object form so the host pre-parses declared flags and forwards
+	// them to the handler as the second argument (#366/#367).
+	"element-template": {
+		flags: ELEMENT_TEMPLATE_FLAGS,
+		handler: elementTemplateHandler,
 	},
 };
