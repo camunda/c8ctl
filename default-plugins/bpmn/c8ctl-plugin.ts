@@ -14,14 +14,13 @@ import { resolve as resolvePath } from "node:path";
 import { styleText } from "node:util";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-import type { Logger } from "../../src/logger.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
-// Side-effect import: brings in the `declare global { var c8ctl: ... }`
-// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
+
+const c8ctl = globalThis.c8ctl!;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
@@ -109,21 +108,6 @@ export const metadata = {
 		},
 	},
 } as const satisfies PluginMetadata;
-
-// ---------------------------------------------------------------------------
-// Runtime helpers
-// ---------------------------------------------------------------------------
-
-function getLogger(): Logger {
-	if (!globalThis.c8ctl) {
-		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
-	}
-	return globalThis.c8ctl.getLogger();
-}
-
-function isJsonMode(): boolean {
-	return globalThis.c8ctl?.outputMode === "json";
-}
 
 /**
  * Read BPMN XML from a file path or stdin. Returns null if no input is available.
@@ -310,7 +294,7 @@ function formatElementRef(
 // ---------------------------------------------------------------------------
 
 async function lintSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 
 	const usage = "Usage: c8ctl bpmn lint [<file.bpmn>] [--quiet | -q]";
 	const endOfOpts = args.indexOf("--");
@@ -371,7 +355,7 @@ async function lintSubcommand(args: string[]): Promise<void> {
 	const { lines, errorCount, warningCount, issues } =
 		formatLintResults(results);
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		logger.json({
 			file: input.source,
 			issues,
@@ -426,7 +410,7 @@ function isValidSubcommand(s: string): s is Subcommand {
 }
 
 function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const names = metadata.commands.bpmn.subcommands
 		.map((s) => s.name)
 		.join(", ");
@@ -490,7 +474,7 @@ async function bpmnHandler(
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		const logger = getLogger();
+		const logger = c8ctl.getLogger();
 		logger.error(`Failed to bpmn ${subcommand}: ${message}`);
 		process.exitCode = 1;
 	}

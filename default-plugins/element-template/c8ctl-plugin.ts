@@ -41,9 +41,9 @@ import type {
 	PluginCommands,
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
-// Side-effect import: brings in the `declare global { var c8ctl: ... }`
-// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
+
+const c8ctl = globalThis.c8ctl!;
 import {
 	bootstrapIfNeeded,
 	findById,
@@ -221,21 +221,6 @@ export const metadata = {
 	},
 } as const satisfies PluginMetadata;
 
-// ---------------------------------------------------------------------------
-// Runtime helpers
-// ---------------------------------------------------------------------------
-
-function getLogger(): Logger {
-	if (!globalThis.c8ctl) {
-		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
-	}
-	return globalThis.c8ctl.getLogger();
-}
-
-function isJsonMode(): boolean {
-	return globalThis.c8ctl?.outputMode === "json";
-}
-
 /**
  * Read BPMN XML from a file path or stdin. See bpmn plugin for context on
  * why stdin is consumed via async iteration rather than readFileSync(0).
@@ -318,7 +303,7 @@ async function resolveOotbTemplate(
 		executionPlatformVersion,
 	}: { executionPlatformVersion?: string | null } = {},
 ): Promise<Template> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	await bootstrapIfNeeded({ logger });
 	nudgeIfStale(logger);
 
@@ -452,7 +437,7 @@ async function applyElementTemplate(
 // ---------------------------------------------------------------------------
 
 async function applySubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const parsed = parseArgs(args);
 
 
@@ -503,7 +488,7 @@ async function applySubcommand(args: string[]): Promise<void> {
 	}
 
 	// Dry-run: describe what would happen without mutating anything
-	if (globalThis.c8ctl?.dryRun) {
+	if (c8ctl.dryRun) {
 		const fallbackId = ref.kind === "id" ? ref.id : ref.value;
 		const info = {
 			dryRun: true,
@@ -518,7 +503,7 @@ async function applySubcommand(args: string[]): Promise<void> {
 			inPlace: parsed.inPlace && !!bpmnFilePath,
 			setOverrides: parsed.setArgs,
 		};
-		if (isJsonMode()) {
+		if (c8ctl.outputMode === "json") {
 			logger.json(info);
 		} else {
 			logger.output("Dry run — no changes applied.");
@@ -574,7 +559,7 @@ async function applySubcommand(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function infoSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const usage = "Usage: c8ctl element-template info <template>";
 
 	const parsed = parseInspectArgs(args, usage, {
@@ -586,7 +571,7 @@ async function infoSubcommand(args: string[]): Promise<void> {
 		parsed.templateArg,
 	);
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		logger.json(buildTemplateSummary(template));
 		return;
 	}
@@ -615,7 +600,7 @@ async function infoSubcommand(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function getPropertiesSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const usage =
 		"Usage: c8ctl element-template get-properties <template> [<name>...] [--group <id>...] [--detailed | -d]\n" +
 		"  Default: condensed list (name + description). --detailed shows full cards.\n" +
@@ -656,7 +641,7 @@ async function getPropertiesSubcommand(args: string[]): Promise<void> {
 
 	const total = allDetails.length;
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		const projector = parsed.detailed
 			? buildShowProperty
 			: buildCondensedProperty;
@@ -1270,7 +1255,7 @@ function formatBadgeValue(value: unknown): string {
 // ---------------------------------------------------------------------------
 
 async function searchSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const usage = "Usage: c8ctl element-template search <query> [--limit N]";
 
 	// Default cap that covers the common "AWS"-shaped query without
@@ -1323,7 +1308,7 @@ async function searchSubcommand(args: string[]): Promise<void> {
 	const limited = allMatches.slice(0, limit);
 	const truncated = total > limited.length;
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		// JSON consumers see `count` (post-limit) and `total` (pre-limit).
 		// `count !== total` is the explicit truncation signal — no need to
 		// inspect a separate field.
@@ -1397,7 +1382,7 @@ async function searchSubcommand(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function syncSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	let prune = false;
 
 	for (let i = 0; i < args.length; i++) {
@@ -1421,7 +1406,7 @@ async function syncSubcommand(args: string[]): Promise<void> {
 
 	const summary = await syncTemplates({ logger, prune });
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		logger.json(summary);
 	}
 }
@@ -1445,7 +1430,7 @@ function isValidSubcommand(s: string): s is Subcommand {
 }
 
 function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const names = metadata.commands["element-template"].subcommands
 		.map((s) => s.name)
 		.join(", ");
@@ -1519,7 +1504,7 @@ async function elementTemplateHandler(
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		const logger = getLogger();
+		const logger = c8ctl.getLogger();
 		logger.error(`Failed to element-template ${subcommand}: ${message}`);
 		process.exitCode = 1;
 	}

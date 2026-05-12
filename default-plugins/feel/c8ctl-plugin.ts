@@ -19,9 +19,9 @@ import type {
 	PluginCommands,
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
-// Side-effect import: brings in the `declare global { var c8ctl: ... }`
-// block so globalThis.c8ctl is typed across this file.
 import type {} from "../../src/runtime.ts";
+
+const c8ctl = globalThis.c8ctl!;
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -118,21 +118,6 @@ export const metadata = {
 		},
 	},
 } as const satisfies PluginMetadata;
-
-// ---------------------------------------------------------------------------
-// Runtime helpers
-// ---------------------------------------------------------------------------
-
-function getLogger(): Logger {
-	if (!globalThis.c8ctl) {
-		throw new Error("c8ctl runtime not initialised — plugin loaded outside host");
-	}
-	return globalThis.c8ctl.getLogger();
-}
-
-function isJsonMode(): boolean {
-	return globalThis.c8ctl?.outputMode === "json";
-}
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -479,13 +464,9 @@ async function evaluateCluster({
 	variables: Record<string, unknown> | undefined;
 	tenantId: string | undefined;
 }): Promise<EvaluationOutput> {
-	if (!globalThis.c8ctl) {
-		throw new Error(`c8ctl runtime is not available. ${LOCAL_HINT}.`);
-	}
-
-	let client: ReturnType<NonNullable<typeof globalThis.c8ctl>["createClient"]>;
+	let client: ReturnType<typeof c8ctl.createClient>;
 	try {
-		client = globalThis.c8ctl.createClient();
+		client = c8ctl.createClient();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`No cluster configured: ${message}\n${LOCAL_HINT}.`);
@@ -592,7 +573,7 @@ function renderJson(logger: Logger, normalized: EvaluationOutput): void {
 // ---------------------------------------------------------------------------
 
 async function evaluateSubcommand(args: string[]): Promise<void> {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const parsed = parseArgs(args);
 
 	if (parsed.error) {
@@ -626,7 +607,7 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 				})
 			: evaluateLocal({ expression, variables });
 
-	if (isJsonMode()) {
+	if (c8ctl.outputMode === "json") {
 		renderJson(logger, normalized);
 	} else {
 		renderText(logger, normalized);
@@ -645,7 +626,7 @@ function isValidSubcommand(s: string): s is Subcommand {
 }
 
 function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = getLogger();
+	const logger = c8ctl.getLogger();
 	const names = metadata.commands.feel.subcommands
 		.map((s) => s.name)
 		.join(", ");
@@ -713,7 +694,7 @@ async function feelHandler(
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		const logger = getLogger();
+		const logger = c8ctl.getLogger();
 		logger.error(`Failed to feel ${subcommand}: ${message}`);
 		process.exitCode = 1;
 	}
