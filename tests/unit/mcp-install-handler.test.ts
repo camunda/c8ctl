@@ -22,9 +22,21 @@ import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 let tempHome: string;
 let tempDataDir: string;
 
-/** Match the resolution the CLI subprocess sees (HOME=tempHome). */
+/**
+ * Match the resolution the CLI subprocess sees. Both must agree on
+ * `HOME`, `XDG_CONFIG_HOME`, and `APPDATA` — otherwise the test process
+ * resolves a config path under (e.g.) the runner's real
+ * `$XDG_CONFIG_HOME` while the subprocess writes under `tempHome`,
+ * causing every assertion against the resolved path to fail on Linux
+ * CI even when the install itself succeeded.
+ */
 function adapterEnv(): AdapterEnv {
-	return { HOME: tempHome, platform: process.platform };
+	return {
+		HOME: tempHome,
+		XDG_CONFIG_HOME: undefined,
+		APPDATA: undefined,
+		platform: process.platform,
+	};
 }
 
 function configPathFor(clientId: string): string {
@@ -73,6 +85,10 @@ async function c8(...args: string[]): Promise<SpawnResult> {
 	delete env.C8CTL_DEBUG;
 	delete env.NODE_DEBUG;
 	delete env.NODE_OPTIONS;
+	// Pin path resolution to HOME=tempHome so test-process and subprocess
+	// agree on the resolved config path on every OS (see adapterEnv()).
+	delete env.XDG_CONFIG_HOME;
+	delete env.APPDATA;
 	delete env.CAMUNDA_BASE_URL;
 	delete env.CAMUNDA_CLIENT_ID;
 	delete env.CAMUNDA_CLIENT_SECRET;
