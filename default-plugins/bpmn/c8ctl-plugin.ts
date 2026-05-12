@@ -68,47 +68,6 @@ type FormattedLintResults = {
 
 const require = createRequire(import.meta.url);
 
-// ---------------------------------------------------------------------------
-// Metadata
-// ---------------------------------------------------------------------------
-
-export const metadata = {
-	name: "bpmn",
-	description: "Lint BPMN diagrams",
-	commands: {
-		bpmn: {
-			description: "BPMN tooling — lint diagrams (supports stdin piping)",
-			helpDescription:
-				"Lint BPMN diagrams. Supports file paths and stdin piping.\n\n" +
-				"Rule configuration: a .bpmnlintrc in the working directory takes precedence. " +
-				"Otherwise the linter extends bpmnlint:recommended plus the matching " +
-				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
-				"modeler:executionPlatformVersion in the BPMN file.",
-			subcommands: [
-				{
-					name: "lint",
-					description:
-						"Lint a BPMN diagram against recommended and Camunda rules",
-				},
-			],
-			examples: [
-				{
-					command: "c8ctl bpmn lint process.bpmn",
-					description: "Lint a BPMN file with Camunda rules",
-				},
-				{
-					command: "cat process.bpmn | c8ctl bpmn lint",
-					description: "Lint from stdin",
-				},
-				{
-					command: "c8ctl bpmn lint --quiet process.bpmn",
-					description: "Suppress the success line in scripts",
-				},
-			],
-		},
-	},
-} as const satisfies PluginMetadata;
-
 /**
  * Read BPMN XML from a file path or stdin. Returns null if no input is available.
  *
@@ -398,22 +357,6 @@ async function lintSubcommand(args: string[]): Promise<void> {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Plugin commands export
-// ---------------------------------------------------------------------------
-
-const validSubcommands: readonly string[] = metadata.commands.bpmn.subcommands
-	.map((s) => s.name);
-
-function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = c8ctl.getLogger();
-	const lead = unknownSubcommand
-		? `Unknown subcommand '${unknownSubcommand}'.`
-		: "c8ctl bpmn requires a subcommand.";
-	logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-	logger.info("Run 'c8ctl bpmn --help' for full usage.");
-}
-
 /**
  * Reinject flags pre-parsed by the host (#366/#367) back into the args
  * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
@@ -450,8 +393,16 @@ async function bpmnHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
+	const validSubcommands = metadata.commands.bpmn.subcommands.map(
+		(s) => s.name as string,
+	);
 	if (!subcommand || !validSubcommands.includes(subcommand)) {
-		printSubcommandHint(subcommand);
+		const logger = c8ctl.getLogger();
+		const lead = subcommand
+			? `Unknown subcommand '${subcommand}'.`
+			: "c8ctl bpmn requires a subcommand.";
+		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.info("Run 'c8ctl bpmn --help' for full usage.");
 		process.exitCode = 1;
 		return;
 	}
@@ -465,6 +416,47 @@ async function bpmnHandler(
 		process.exitCode = 1;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plugin API
+// ---------------------------------------------------------------------------
+
+export const metadata = {
+	name: "bpmn",
+	description: "Lint BPMN diagrams",
+	commands: {
+		bpmn: {
+			description: "BPMN tooling — lint diagrams (supports stdin piping)",
+			helpDescription:
+				"Lint BPMN diagrams. Supports file paths and stdin piping.\n\n" +
+				"Rule configuration: a .bpmnlintrc in the working directory takes precedence. " +
+				"Otherwise the linter extends bpmnlint:recommended plus the matching " +
+				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
+				"modeler:executionPlatformVersion in the BPMN file.",
+			subcommands: [
+				{
+					name: "lint",
+					description:
+						"Lint a BPMN diagram against recommended and Camunda rules",
+				},
+			],
+			examples: [
+				{
+					command: "c8ctl bpmn lint process.bpmn",
+					description: "Lint a BPMN file with Camunda rules",
+				},
+				{
+					command: "cat process.bpmn | c8ctl bpmn lint",
+					description: "Lint from stdin",
+				},
+				{
+					command: "c8ctl bpmn lint --quiet process.bpmn",
+					description: "Suppress the success line in scripts",
+				},
+			],
+		},
+	},
+} as const satisfies PluginMetadata;
 
 export const commands = {
 	bpmn: {

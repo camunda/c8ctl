@@ -68,58 +68,6 @@ type ClusterErrorClassification = {
 };
 
 // ---------------------------------------------------------------------------
-// Metadata
-// ---------------------------------------------------------------------------
-
-export const metadata = {
-	name: "feel",
-	description: "Evaluate FEEL expressions",
-	commands: {
-		feel: {
-			description: "Evaluate FEEL expressions against a cluster or locally",
-			helpDescription:
-				"Evaluate FEEL expressions and return the result. By default uses the connected " +
-				"Camunda cluster's engine (POST /v2/expression/evaluation, requires 8.9+). Use " +
-				"--engine local to evaluate offline via feelin (note: feelin does not support " +
-				"all Camunda FEEL extensions; result may differ from cluster).",
-			subcommands: [
-				{ name: "evaluate", description: "Evaluate a FEEL expression" },
-			],
-			examples: [
-				{
-					command: "c8ctl feel evaluate '1 + 2'",
-					description: "Evaluate a simple expression",
-				},
-				{
-					command: "c8ctl feel evaluate '=1 + 2'",
-					description: "Same — leading '=' is optional",
-				},
-				{
-					command: "c8ctl feel evaluate 'a + b' --var a=1 --var b=2",
-					description: "Set individual variables",
-				},
-				{
-					command: "c8ctl feel evaluate 'person.name' --var person.name=Alice",
-					description: "Dot-path nesting",
-				},
-				{
-					command: "c8ctl feel evaluate 'sum(items)' --var 'items=[1,2,3]'",
-					description: "JSON values (arrays, numbers, booleans, null)",
-				},
-				{
-					command: "c8ctl feel evaluate 'a + b' --vars '{\"a\": 1, \"b\": 2}'",
-					description: "Bulk variables as JSON",
-				},
-				{
-					command: "c8ctl feel evaluate '1 + 2' --engine local",
-					description: "Evaluate offline via feelin",
-				},
-			],
-		},
-	},
-} as const satisfies PluginMetadata;
-
-// ---------------------------------------------------------------------------
 // Arg parsing
 // ---------------------------------------------------------------------------
 
@@ -614,22 +562,6 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Command export
-// ---------------------------------------------------------------------------
-
-const validSubcommands: readonly string[] = metadata.commands.feel.subcommands
-	.map((s) => s.name);
-
-function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = c8ctl.getLogger();
-	const lead = unknownSubcommand
-		? `Unknown subcommand '${unknownSubcommand}'.`
-		: "c8ctl feel requires a subcommand.";
-	logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-	logger.info("Run 'c8ctl feel --help' for full usage.");
-}
-
 /**
  * Reinject flags pre-parsed by the host (#366/#367) back into the args
  * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
@@ -667,8 +599,16 @@ async function feelHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
+	const validSubcommands = metadata.commands.feel.subcommands.map(
+		(s) => s.name as string,
+	);
 	if (!subcommand || !validSubcommands.includes(subcommand)) {
-		printSubcommandHint(subcommand);
+		const logger = c8ctl.getLogger();
+		const lead = subcommand
+			? `Unknown subcommand '${subcommand}'.`
+			: "c8ctl feel requires a subcommand.";
+		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.info("Run 'c8ctl feel --help' for full usage.");
 		process.exitCode = 1;
 		return;
 	}
@@ -682,6 +622,58 @@ async function feelHandler(
 		process.exitCode = 1;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plugin API
+// ---------------------------------------------------------------------------
+
+export const metadata = {
+	name: "feel",
+	description: "Evaluate FEEL expressions",
+	commands: {
+		feel: {
+			description: "Evaluate FEEL expressions against a cluster or locally",
+			helpDescription:
+				"Evaluate FEEL expressions and return the result. By default uses the connected " +
+				"Camunda cluster's engine (POST /v2/expression/evaluation, requires 8.9+). Use " +
+				"--engine local to evaluate offline via feelin (note: feelin does not support " +
+				"all Camunda FEEL extensions; result may differ from cluster).",
+			subcommands: [
+				{ name: "evaluate", description: "Evaluate a FEEL expression" },
+			],
+			examples: [
+				{
+					command: "c8ctl feel evaluate '1 + 2'",
+					description: "Evaluate a simple expression",
+				},
+				{
+					command: "c8ctl feel evaluate '=1 + 2'",
+					description: "Same — leading '=' is optional",
+				},
+				{
+					command: "c8ctl feel evaluate 'a + b' --var a=1 --var b=2",
+					description: "Set individual variables",
+				},
+				{
+					command: "c8ctl feel evaluate 'person.name' --var person.name=Alice",
+					description: "Dot-path nesting",
+				},
+				{
+					command: "c8ctl feel evaluate 'sum(items)' --var 'items=[1,2,3]'",
+					description: "JSON values (arrays, numbers, booleans, null)",
+				},
+				{
+					command: "c8ctl feel evaluate 'a + b' --vars '{\"a\": 1, \"b\": 2}'",
+					description: "Bulk variables as JSON",
+				},
+				{
+					command: "c8ctl feel evaluate '1 + 2' --engine local",
+					description: "Evaluate offline via feelin",
+				},
+			],
+		},
+	},
+} as const satisfies PluginMetadata;
 
 export const commands = {
 	feel: {

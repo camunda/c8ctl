@@ -109,118 +109,6 @@ type VendorBundle = {
 	HeadlessTextRendererModule: unknown;
 };
 
-// ---------------------------------------------------------------------------
-// Metadata
-// ---------------------------------------------------------------------------
-
-export const metadata = {
-	name: "element-template",
-	description: "Apply, inspect, and export Camunda element templates",
-	commands: {
-		"element-template": {
-			description: "Apply, inspect, and export Camunda element templates",
-			helpDescription:
-				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
-				"search the out-of-the-box template catalogue, export raw template JSON, " +
-				"and manage the local template cache.\n\n" +
-				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).",
-			subcommands: [
-				{
-					name: "search",
-					description: "Search out-of-the-box element templates",
-				},
-				{
-					name: "info",
-					description: "Show template metadata and a compact property table",
-				},
-				{
-					name: "get-properties",
-					description:
-						"Show detail cards for one or more properties (or all if none given)",
-				},
-				{
-					name: "apply",
-					description: "Apply a Camunda element template to a BPMN element",
-				},
-				{
-					name: "get",
-					description: "Print the raw template JSON to stdout (pipe-friendly)",
-				},
-				{
-					name: "sync",
-					description: "Refresh the local OOTB element template cache",
-				},
-			],
-			examples: [
-				{
-					command: 'c8ctl element-template search "AWS S3"',
-					description: "Search OOTB templates by name",
-				},
-				{
-					command: 'c8ctl element-template search "AWS" --limit 5',
-					description: "Cap the number of results (default 20)",
-				},
-				{
-					command:
-						"c8ctl element-template info io.camunda.connectors.HttpJson.v2",
-					description:
-						"Show the template metadata card (id, version, applies-to, engines, docs)",
-				},
-				{
-					command:
-						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2",
-					description:
-						"List every settable property as a condensed name + description row",
-				},
-				{
-					command:
-						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --detailed 'authentication.*'",
-					description:
-						"Drill into specific properties as full detail cards (quote globs to avoid shell expansion)",
-				},
-				{
-					command:
-						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint",
-					description:
-						"Filter to one or more group ids (use the id, not the label — `info` shows the available group ids)",
-				},
-				{
-					command:
-						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn",
-					description:
-						"Apply an OOTB template (latest compatible with the BPMN engine version)",
-				},
-				{
-					command:
-						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn",
-					description: "Apply a specific OOTB template version",
-				},
-				{
-					command:
-						"c8ctl element-template apply template.json Task_1 process.bpmn",
-					description: "Apply a template from a local file or URL",
-				},
-				{
-					command:
-						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
-					description:
-						"Print the raw template JSON to stdout (redirect to save a copy)",
-				},
-				{
-					command:
-						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon",
-					description:
-						"Drop the icon field (large base64 blob) for pipe-friendly output",
-				},
-				{
-					command: "c8ctl element-template sync",
-					description: "Refresh the local OOTB element template cache",
-				},
-			],
-		},
-	},
-} as const satisfies PluginMetadata;
-
 /**
  * Read BPMN XML from a file path or stdin. See bpmn plugin for context on
  * why stdin is consumed via async iteration rather than readFileSync(0).
@@ -1411,23 +1299,6 @@ async function syncSubcommand(args: string[]): Promise<void> {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Plugin commands export
-// ---------------------------------------------------------------------------
-
-const validSubcommands: readonly string[] = metadata.commands[
-	"element-template"
-].subcommands.map((s) => s.name);
-
-function printSubcommandHint(unknownSubcommand?: string): void {
-	const logger = c8ctl.getLogger();
-	const lead = unknownSubcommand
-		? `Unknown subcommand '${unknownSubcommand}'.`
-		: "c8ctl element-template requires a subcommand.";
-	logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-	logger.info("Run 'c8ctl element-template --help' for full usage.");
-}
-
 /**
  * Reinject flags pre-parsed by the host (#366/#367) back into the args
  * array as `--name value` / `--name` tokens, so the plugin's hand-rolled
@@ -1464,8 +1335,15 @@ async function elementTemplateHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
+	const validSubcommands = metadata.commands["element-template"].subcommands
+		.map((s) => s.name as string);
 	if (!subcommand || !validSubcommands.includes(subcommand)) {
-		printSubcommandHint(subcommand);
+		const logger = c8ctl.getLogger();
+		const lead = subcommand
+			? `Unknown subcommand '${subcommand}'.`
+			: "c8ctl element-template requires a subcommand.";
+		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.info("Run 'c8ctl element-template --help' for full usage.");
 		process.exitCode = 1;
 		return;
 	}
@@ -1491,6 +1369,118 @@ async function elementTemplateHandler(
 		process.exitCode = 1;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plugin API
+// ---------------------------------------------------------------------------
+
+export const metadata = {
+	name: "element-template",
+	description: "Apply, inspect, and export Camunda element templates",
+	commands: {
+		"element-template": {
+			description: "Apply, inspect, and export Camunda element templates",
+			helpDescription:
+				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
+				"search the out-of-the-box template catalogue, export raw template JSON, " +
+				"and manage the local template cache.\n\n" +
+				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).",
+			subcommands: [
+				{
+					name: "search",
+					description: "Search out-of-the-box element templates",
+				},
+				{
+					name: "info",
+					description: "Show template metadata and a compact property table",
+				},
+				{
+					name: "get-properties",
+					description:
+						"Show detail cards for one or more properties (or all if none given)",
+				},
+				{
+					name: "apply",
+					description: "Apply a Camunda element template to a BPMN element",
+				},
+				{
+					name: "get",
+					description: "Print the raw template JSON to stdout (pipe-friendly)",
+				},
+				{
+					name: "sync",
+					description: "Refresh the local OOTB element template cache",
+				},
+			],
+			examples: [
+				{
+					command: 'c8ctl element-template search "AWS S3"',
+					description: "Search OOTB templates by name",
+				},
+				{
+					command: 'c8ctl element-template search "AWS" --limit 5',
+					description: "Cap the number of results (default 20)",
+				},
+				{
+					command:
+						"c8ctl element-template info io.camunda.connectors.HttpJson.v2",
+					description:
+						"Show the template metadata card (id, version, applies-to, engines, docs)",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2",
+					description:
+						"List every settable property as a condensed name + description row",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --detailed 'authentication.*'",
+					description:
+						"Drill into specific properties as full detail cards (quote globs to avoid shell expansion)",
+				},
+				{
+					command:
+						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint",
+					description:
+						"Filter to one or more group ids (use the id, not the label — `info` shows the available group ids)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn",
+					description:
+						"Apply an OOTB template (latest compatible with the BPMN engine version)",
+				},
+				{
+					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2@13 Task_1 process.bpmn",
+					description: "Apply a specific OOTB template version",
+				},
+				{
+					command:
+						"c8ctl element-template apply template.json Task_1 process.bpmn",
+					description: "Apply a template from a local file or URL",
+				},
+				{
+					command:
+						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
+					description:
+						"Print the raw template JSON to stdout (redirect to save a copy)",
+				},
+				{
+					command:
+						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon",
+					description:
+						"Drop the icon field (large base64 blob) for pipe-friendly output",
+				},
+				{
+					command: "c8ctl element-template sync",
+					description: "Refresh the local OOTB element template cache",
+				},
+			],
+		},
+	},
+} as const satisfies PluginMetadata;
 
 export const commands = {
 	"element-template": {
