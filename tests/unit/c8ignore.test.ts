@@ -449,21 +449,23 @@ describe(".c8ignore", () => {
 			assert.deepStrictEqual(names, ["main.bpmn"]);
 		});
 
-		test("deploy explicit file uses parent dir for .c8ignore", () => {
-			// When deploying a single file, .c8ignore in the file's parent
-			// directory should be picked up as the base dir. We verify this
-			// by placing two files in the directory and ignoring one — the
-			// deploy of a single explicit file still uses that .c8ignore
-			// for its ignore-base resolution.
+		test("deploy explicit file resolves .c8ignore from file's parent dir", () => {
+			// When deploying an explicit file path, resolveIgnoreBaseDir
+			// should use the file's parent directory. We verify by deploying
+			// two explicit files from a directory that has a .c8ignore —
+			// one file matches the ignore rule and should be filtered out.
 			const projectDir = join(testDir, "project");
 			mkdirSync(projectDir, { recursive: true });
 			writeFileSync(join(projectDir, ".c8ignore"), "draft-*.bpmn\n");
 			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
 			writeFileSync(join(projectDir, "draft-wip.bpmn"), "<bpmn/>");
 
-			// Deploying the directory from the parent — the .c8ignore in
-			// projectDir should filter out draft-wip.bpmn
-			const result = dryRunDeploy(testDir, ["./project/"]);
+			// Deploy two explicit files from the parent dir — .c8ignore in
+			// projectDir should filter out the draft file
+			const result = dryRunDeploy(testDir, [
+				"./project/main.bpmn",
+				"./project/draft-wip.bpmn",
+			]);
 			const names = resourceNames(result);
 			assert.deepStrictEqual(
 				names,
