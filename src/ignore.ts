@@ -87,12 +87,18 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 
 	if (dirs.length === 1) return dirs[0];
 
-	// Multiple paths: find deepest common ancestor
+	// Multiple paths: find deepest common ancestor.
+	// On Windows, drive letters are case-insensitive (c:\ === C:\),
+	// so we compare segments case-insensitively on win32.
+	const caseFold =
+		process.platform === "win32"
+			? (s: string) => s.toLowerCase()
+			: (s: string) => s;
 	const segments = dirs.map((d) => d.split(sep));
 	const minLen = Math.min(...segments.map((s) => s.length));
 	const common: string[] = [];
 	for (let i = 0; i < minLen; i++) {
-		if (segments.every((s) => s[i] === segments[0][i])) {
+		if (segments.every((s) => caseFold(s[i]) === caseFold(segments[0][i]))) {
 			common.push(segments[0][i]);
 		} else {
 			break;

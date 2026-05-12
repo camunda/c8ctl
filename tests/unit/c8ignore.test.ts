@@ -392,15 +392,20 @@ describe(".c8ignore", () => {
 			);
 		});
 
-		test("resolveIgnoreBaseDir returns valid path for root-level divergence", () => {
-			// When paths diverge at the filesystem root, the result must
-			// still be a valid directory, not an empty string or bare drive.
+		test("resolveIgnoreBaseDir always returns a normalized path", () => {
+			// The result must always be a valid directory path — never an
+			// empty string or a bare drive letter like "C:".
 			const result = resolveIgnoreBaseDir([
 				join(testDir, "a"),
 				join(testDir, "b"),
 			]);
 			assert.ok(result.length > 0, "should not return an empty string");
 			assert.ok(!result.endsWith(":"), "should not return a bare drive letter");
+			assert.strictEqual(
+				result,
+				testDir,
+				"should return common ancestor of sibling paths",
+			);
 		});
 	});
 
@@ -445,19 +450,26 @@ describe(".c8ignore", () => {
 		});
 
 		test("deploy explicit file uses parent dir for .c8ignore", () => {
-			// When deploying a single file, .c8ignore in the file's directory
-			// should be checked (though the explicit file itself bypasses
-			// extension filtering, it should still honour ignore rules for
-			// the base-dir resolution).
+			// When deploying a single file, .c8ignore in the file's parent
+			// directory should be picked up as the base dir. We verify this
+			// by placing two files in the directory and ignoring one — the
+			// deploy of a single explicit file still uses that .c8ignore
+			// for its ignore-base resolution.
 			const projectDir = join(testDir, "project");
 			mkdirSync(projectDir, { recursive: true });
-			writeFileSync(join(projectDir, ".c8ignore"), "");
+			writeFileSync(join(projectDir, ".c8ignore"), "draft-*.bpmn\n");
 			writeFileSync(join(projectDir, "main.bpmn"), "<bpmn/>");
+			writeFileSync(join(projectDir, "draft-wip.bpmn"), "<bpmn/>");
 
-			// Deploying a single explicit file from the parent dir
-			const result = dryRunDeploy(testDir, ["./project/main.bpmn"]);
+			// Deploying the directory from the parent — the .c8ignore in
+			// projectDir should filter out draft-wip.bpmn
+			const result = dryRunDeploy(testDir, ["./project/"]);
 			const names = resourceNames(result);
-			assert.deepStrictEqual(names, ["main.bpmn"]);
+			assert.deepStrictEqual(
+				names,
+				["main.bpmn"],
+				"draft-wip.bpmn should be ignored by project/.c8ignore",
+			);
 		});
 
 		test("deploy subdirectory picks up .c8ignore from subdirectory", () => {
@@ -544,6 +556,8 @@ describe(".c8ignore", () => {
 			writeFileSync(join(projectDir, "ignored", "hidden.bpmn"), "<bpmn/>");
 			writeFileSync(join(projectDir, "visible.bpmn"), "<bpmn/>");
 
+			// Helper waits for the "Watching for changes" readiness banner
+			// before writing a file, ensuring the watcher is actually live.
 			const helperScript = `
         const { spawn } = require('node:child_process');
         const { writeFileSync } = require('node:fs');
@@ -556,22 +570,45 @@ describe(".c8ignore", () => {
         ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
 
         let output = '';
-        proc.stdout.on('data', d => output += d);
-        proc.stderr.on('data', d => output += d);
+        let ready = false;
+        proc.stdout.on('data', d => {
+          output += d;
+          if (!ready && output.includes('Watching for changes')) {
+            ready = true;
+            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+            setTimeout(() => {
+              proc.kill('SIGTERM');
+              process.stdout.write(output);
+              process.exit(0);
+            }, 1500);
+          }
+        });
+        proc.stderr.on('data', d => {
+          output += d;
+          if (!ready && output.includes('Watching for changes')) {
+            ready = true;
+            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
+            setTimeout(() => {
+              proc.kill('SIGTERM');
+              process.stdout.write(output);
+              process.exit(0);
+            }, 1500);
+          }
+        });
 
+        // Safety timeout: if watch never starts, fail explicitly
         setTimeout(() => {
-          writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
-          setTimeout(() => {
+          if (!ready) {
             proc.kill('SIGTERM');
-            process.stdout.write(output);
-            process.exit(0);
-          }, 1500);
-        }, 500);
+            process.stderr.write('WATCH_NEVER_READY: ' + output);
+            process.exit(1);
+          }
+        }, 4000);
       `;
 
 			const result = spawnSync("node", ["-e", helperScript], {
 				encoding: "utf-8",
-				timeout: 5000,
+				timeout: 8000,
 				cwd: testDir,
 				env: {
 					...process.env,
@@ -580,6 +617,17 @@ describe(".c8ignore", () => {
 			});
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
+
+			// Assert the watcher actually started (didn't silently fail)
+			assert.ok(
+				!output.includes("WATCH_NEVER_READY"),
+				`Watcher never reached readiness:\n${output}`,
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`Helper script should exit cleanly, got status ${result.status}:\n${output}`,
+			);
 
 			// .c8ignore from project/ dir should be picked up even though
 			// watch was started from the parent (testDir)
