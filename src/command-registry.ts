@@ -1682,12 +1682,22 @@ export const COMMAND_REGISTRY = {
 					description:
 						"Alias to use as the entry key in the client's config (default: profile name)",
 				},
+				force: {
+					type: "boolean",
+					description:
+						"Overwrite an existing entry at the same alias even if it was not installed by c8ctl",
+				},
 			},
 			uninstall: {
 				alias: {
 					type: "string",
 					description:
 						"Alias of the entry to remove (default: active profile name)",
+				},
+				force: {
+					type: "boolean",
+					description:
+						"Remove an entry at the alias even if it does not look like a c8ctl-managed entry",
 				},
 			},
 			list: {},

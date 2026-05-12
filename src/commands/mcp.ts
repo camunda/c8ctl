@@ -102,6 +102,27 @@ export const mcpInstallCommand = defineCommand(
 		});
 		const configPath = adapter.configPath();
 		const existing = readJsonFileOrNull(configPath);
+		// Refuse to clobber a third-party MCP server that happens to share
+		// this alias. The verb's contract is "manage c8ctl mcp-proxy entries",
+		// so silently overwriting an unrelated entry would violate it.
+		// `--force` is the explicit escape hatch for users who really do want
+		// to take over the alias.
+		const existingEntry = lookupExistingEntry(
+			existing,
+			adapter.serversKey,
+			alias,
+		);
+		if (
+			existingEntry !== undefined &&
+			!isC8ctlManagedEntry(existingEntry) &&
+			!flags.force
+		) {
+			throw new Error(
+				`Refusing to overwrite '${alias}' under ${adapter.displayName}: ` +
+					"the existing entry was not installed by c8ctl. " +
+					"Pass --force to overwrite, or use --alias <other-name> to install alongside it.",
+			);
+		}
 		const { merged, existed } = mergeMcpConfig(
 			existing,
 			adapter.serversKey,
@@ -163,6 +184,24 @@ export const mcpUninstallCommand = defineCommand(
 				: defaultAlias(defaultProfileNameForAlias());
 		const configPath = adapter.configPath();
 		const existing = readJsonFileOrNull(configPath);
+		// Refuse to remove an unrelated MCP server entry that just happens
+		// to share this alias. Same reasoning as install: this verb manages
+		// c8ctl-shaped entries, not arbitrary ones. `--force` overrides.
+		const existingEntry = lookupExistingEntry(
+			existing,
+			adapter.serversKey,
+			alias,
+		);
+		if (
+			existingEntry !== undefined &&
+			!isC8ctlManagedEntry(existingEntry) &&
+			!flags.force
+		) {
+			throw new Error(
+				`Refusing to remove '${alias}' from ${adapter.displayName}: ` +
+					"the entry was not installed by c8ctl. Pass --force to remove anyway.",
+			);
+		}
 		const { merged, existed } = unmergeMcpConfig(
 			existing,
 			adapter.serversKey,
@@ -230,6 +269,11 @@ export const mcpListCommand = defineCommand(
 			}
 			const servers = extractServerEntries(parsed, adapter.serversKey);
 			for (const [alias, entry] of servers) {
+				// Only surface c8ctl-managed entries so the listing matches
+				// the verb's contract. Users with their own unrelated MCP
+				// servers in the same config see them via the third-party
+				// client's own UI; this command is intentionally scoped.
+				if (!isC8ctlManagedEntry(entry)) continue;
 				items.push({
 					Client: adapter.displayName,
 					Alias: alias,
@@ -266,6 +310,37 @@ function extractProfileName(entry: unknown): string | undefined {
 	if (idx < 0 || idx === args.length - 1) return undefined;
 	const value = args[idx + 1];
 	return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * Look up a single entry under `serversKey/alias` in a parsed config
+ * tree. Returns `undefined` when the path is absent so callers can use
+ * triple-equals to distinguish "not present" from "present but empty".
+ */
+function lookupExistingEntry(
+	parsed: unknown,
+	serversKey: string,
+	alias: string,
+): unknown {
+	if (!isRecordLike(parsed)) return undefined;
+	const servers = parsed[serversKey];
+	if (!isRecordLike(servers)) return undefined;
+	if (!Object.hasOwn(servers, alias)) return undefined;
+	return servers[alias];
+}
+
+/**
+ * Recognise an entry that c8ctl would have written: it must launch
+ * `npx` (or carry an args array containing) the published `@camunda8/cli`
+ * package and the `mcp-proxy` subcommand. This is the same signature
+ * `buildNpxProxyEntry` produces, so install/uninstall round-trip on
+ * matching entries and refuse to touch foreign ones.
+ */
+function isC8ctlManagedEntry(entry: unknown): boolean {
+	if (!isRecordLike(entry)) return false;
+	const args = entry.args;
+	if (!Array.isArray(args)) return false;
+	return args.includes("@camunda8/cli") && args.includes("mcp-proxy");
 }
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {

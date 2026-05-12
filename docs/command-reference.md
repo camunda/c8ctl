@@ -1158,6 +1158,7 @@ Install/uninstall/list c8ctl mcp-proxy entries in MCP client configs (Claude Des
 |------|------|----------|-------------|
 | `--profile` | string |  | Profile name to embed in the MCP entry (default: active profile) |
 | `--alias` | string |  | Alias to use as the entry key in the client's config (default: profile name) |
+| `--force` | boolean |  | Overwrite an existing entry at the same alias even if it was not installed by c8ctl |
 
 </details>
 
@@ -1167,6 +1168,7 @@ Install/uninstall/list c8ctl mcp-proxy entries in MCP client configs (Claude Des
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--alias` | string |  | Alias of the entry to remove (default: active profile name) |
+| `--force` | boolean |  | Remove an entry at the alias even if it does not look like a c8ctl-managed entry |
 
 </details>
 
