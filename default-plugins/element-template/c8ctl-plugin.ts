@@ -1442,31 +1442,16 @@ function isValidSubcommand(s: string): s is Subcommand {
 	return VALID_SUBCOMMANDS.some((v) => v === s);
 }
 
-function printUsage(): void {
+function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = getLogger();
-	const cmd = metadata.commands["element-template"];
-	logger.output("Usage: c8ctl element-template <subcommand> [options]");
-	logger.output("");
-	for (const line of cmd.helpDescription.split("\n")) {
-		logger.output(line);
-	}
-	logger.output("");
-	logger.output("Subcommands:");
-	for (const sub of cmd.subcommands) {
-		logger.output(`  ${sub.name.padEnd(20)} ${sub.description}`);
-	}
-	logger.output("");
-	logger.output("Options:");
-	const flags: Record<string, FlagDef> = ELEMENT_TEMPLATE_FLAGS;
-	for (const [name, def] of Object.entries(flags)) {
-		const shortStr = def.short ? `-${def.short}, ` : "    ";
-		logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
-	}
-	logger.output("");
-	logger.output("Examples:");
-	for (const ex of cmd.examples) {
-		logger.output(`  ${ex.command}`);
-	}
+	const names = metadata.commands["element-template"].subcommands
+		.map((s) => s.name)
+		.join(", ");
+	const lead = unknownSubcommand
+		? `Unknown subcommand '${unknownSubcommand}'.`
+		: "c8ctl element-template requires a subcommand.";
+	logger.info(`${lead} Available: ${names}`);
+	logger.info("Run 'c8ctl element-template --help' for full usage.");
 }
 
 /**
@@ -1506,11 +1491,12 @@ async function elementTemplateHandler(
 	const subArgs = reinjected.slice(1);
 
 	if (!subcommand) {
-		printUsage();
+		printSubcommandHint();
+		process.exitCode = 1;
 		return;
 	}
 	if (!isValidSubcommand(subcommand)) {
-		printUsage();
+		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
@@ -1537,47 +1523,46 @@ async function elementTemplateHandler(
 	}
 }
 
-const ELEMENT_TEMPLATE_FLAGS = {
-	"in-place": {
-		type: "boolean",
-		short: "i",
-		description: "Modify the BPMN file in place (apply only)",
-	},
-	set: {
-		type: "string",
-		multiple: true,
-		description: "Set a template property value (repeatable, apply only)",
-	},
-	detailed: {
-		type: "boolean",
-		short: "d",
-		description:
-			"Render full detail cards instead of the condensed list (get-properties)",
-	},
-	group: {
-		type: "string",
-		multiple: true,
-		description:
-			"Filter to one or more group ids (repeatable; get-properties only)",
-	},
-	prune: {
-		type: "boolean",
-		description: "Drop cached entries no longer in the index (sync only)",
-	},
-	"no-icon": {
-		type: "boolean",
-		description:
-			"Drop the icon field (often a large base64 blob) from the output (get only)",
-	},
-	limit: {
-		type: "string",
-		description: "Cap the number of matches (search only, default 20)",
-	},
-} as const satisfies Record<string, FlagDef>;
-
 export const commands = {
 	"element-template": {
-		flags: ELEMENT_TEMPLATE_FLAGS,
+		flags: {
+			"in-place": {
+				type: "boolean",
+				short: "i",
+				description: "Modify the BPMN file in place (apply only)",
+			},
+			set: {
+				type: "string",
+				multiple: true,
+				description:
+					"Set a template property value (repeatable, apply only)",
+			},
+			detailed: {
+				type: "boolean",
+				short: "d",
+				description:
+					"Render full detail cards instead of the condensed list (get-properties)",
+			},
+			group: {
+				type: "string",
+				multiple: true,
+				description:
+					"Filter to one or more group ids (repeatable; get-properties only)",
+			},
+			prune: {
+				type: "boolean",
+				description: "Drop cached entries no longer in the index (sync only)",
+			},
+			"no-icon": {
+				type: "boolean",
+				description:
+					"Drop the icon field (often a large base64 blob) from the output (get only)",
+			},
+			limit: {
+				type: "string",
+				description: "Cap the number of matches (search only, default 20)",
+			},
+		} as const satisfies Record<string, FlagDef>,
 		handler: elementTemplateHandler,
 	},
 };

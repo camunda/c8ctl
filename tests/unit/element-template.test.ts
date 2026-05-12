@@ -74,13 +74,17 @@ function getTaskDefinitionType(xml: string): string | null {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: element-template verb", () => {
-	test("element-template with no subcommand shows usage", async () => {
+	test("element-template with no subcommand lists available subcommands and exits 1", async () => {
 		const result = await c8text("element-template");
 		const output = result.stdout + result.stderr;
+		assert.strictEqual(result.status, 1);
 		assert.ok(output.includes("apply"), "Should list apply");
 		assert.ok(output.includes("info"), "Should list info");
 		assert.ok(output.includes("get-properties"), "Should list get-properties");
-		assert.ok(/^\s+get\s/m.test(output), "Should list get");
+		// `get` should appear as its own subcommand name (not just a prefix of
+		// `get-properties`). The hint format is `..., get, sync`, so look for
+		// the bounded form.
+		assert.ok(/\bget\b(?!-)/.test(output), "Should list get");
 	});
 });
 

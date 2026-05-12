@@ -423,28 +423,16 @@ function isValidSubcommand(s: string): s is Subcommand {
 	return VALID_SUBCOMMANDS.some((v) => v === s);
 }
 
-function printUsage(): void {
+function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = getLogger();
-	const cmd = metadata.commands.bpmn;
-	logger.output("Usage: c8ctl bpmn <subcommand> [options]");
-	logger.output("");
-	logger.output(cmd.helpDescription);
-	logger.output("");
-	logger.output("Subcommands:");
-	for (const sub of cmd.subcommands) {
-		logger.output(`  ${sub.name.padEnd(16)} ${sub.description}`);
-	}
-	logger.output("");
-	logger.output("Options:");
-	for (const [name, def] of Object.entries(BPMN_FLAGS)) {
-		const shortStr = def.short ? `-${def.short}, ` : "    ";
-		logger.output(`  ${shortStr}--${name.padEnd(16)} ${def.description}`);
-	}
-	logger.output("");
-	logger.output("Examples:");
-	for (const ex of cmd.examples) {
-		logger.output(`  ${ex.command}`);
-	}
+	const names = metadata.commands.bpmn.subcommands
+		.map((s) => s.name)
+		.join(", ");
+	const lead = unknownSubcommand
+		? `Unknown subcommand '${unknownSubcommand}'.`
+		: "c8ctl bpmn requires a subcommand.";
+	logger.info(`${lead} Available: ${names}`);
+	logger.info("Run 'c8ctl bpmn --help' for full usage.");
 }
 
 /**
@@ -484,11 +472,12 @@ async function bpmnHandler(
 	const subArgs = reinjected.slice(1);
 
 	if (!subcommand) {
-		printUsage();
+		printSubcommandHint();
+		process.exitCode = 1;
 		return;
 	}
 	if (!isValidSubcommand(subcommand)) {
-		printUsage();
+		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
@@ -505,18 +494,16 @@ async function bpmnHandler(
 	}
 }
 
-const BPMN_FLAGS = {
-	quiet: {
-		type: "boolean",
-		short: "q",
-		description:
-			'Suppress the "No issues found." line on a clean lint (lint only)',
-	},
-} as const satisfies Record<string, FlagDef>;
-
 export const commands = {
 	bpmn: {
-		flags: BPMN_FLAGS,
+		flags: {
+			quiet: {
+				type: "boolean",
+				short: "q",
+				description:
+					'Suppress the "No issues found." line on a clean lint (lint only)',
+			},
+		} as const satisfies Record<string, FlagDef>,
 		handler: bpmnHandler,
 	},
 };

@@ -642,22 +642,16 @@ function isValidSubcommand(s: string): s is Subcommand {
 	return VALID_SUBCOMMANDS.some((v) => v === s);
 }
 
-function printUsage(): void {
+function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = getLogger();
-	const cmd = metadata.commands.feel;
-	logger.output("Usage: c8ctl feel <subcommand> [options]");
-	logger.output("");
-	logger.output(cmd.helpDescription);
-	logger.output("");
-	logger.output("Subcommands:");
-	for (const sub of cmd.subcommands) {
-		logger.output(`  ${sub.name.padEnd(16)} ${sub.description}`);
-	}
-	logger.output("");
-	logger.output("Examples:");
-	for (const ex of cmd.examples) {
-		logger.output(`  ${ex.command}`);
-	}
+	const names = metadata.commands.feel.subcommands
+		.map((s) => s.name)
+		.join(", ");
+	const lead = unknownSubcommand
+		? `Unknown subcommand '${unknownSubcommand}'.`
+		: "c8ctl feel requires a subcommand.";
+	logger.info(`${lead} Available: ${names}`);
+	logger.info("Run 'c8ctl feel --help' for full usage.");
 }
 
 /**
@@ -701,11 +695,12 @@ async function feelHandler(
 	const subArgs = reinjected.slice(1);
 
 	if (!subcommand) {
-		printUsage();
+		printSubcommandHint();
+		process.exitCode = 1;
 		return;
 	}
 	if (!isValidSubcommand(subcommand)) {
-		printUsage();
+		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
@@ -722,31 +717,30 @@ async function feelHandler(
 	}
 }
 
-const FEEL_FLAGS = {
-	engine: {
-		type: "string",
-		description: "Engine: 'cluster' (default) or 'local' (feelin)",
-	},
-	vars: {
-		type: "string",
-		description: "JSON object of variables (use --var for individual values)",
-	},
-	var: {
-		type: "string",
-		multiple: true,
-		description:
-			"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
-	},
-	tenant: {
-		type: "string",
-		description:
-			"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
-	},
-} as const satisfies Record<string, FlagDef>;
-
 export const commands = {
 	feel: {
-		flags: FEEL_FLAGS,
+		flags: {
+			engine: {
+				type: "string",
+				description: "Engine: 'cluster' (default) or 'local' (feelin)",
+			},
+			vars: {
+				type: "string",
+				description:
+					"JSON object of variables (use --var for individual values)",
+			},
+			var: {
+				type: "string",
+				multiple: true,
+				description:
+					"Set a single variable (repeatable). Dot paths nest; values parsed as JSON, falling back to string. e.g. --var x=42 --var person.name=Alice --var items=[1,2,3]",
+			},
+			tenant: {
+				type: "string",
+				description:
+					"Tenant ID (cluster engine only, for tenant-scoped cluster variables)",
+			},
+		} as const satisfies Record<string, FlagDef>,
 		handler: feelHandler,
 	},
 };
