@@ -102,6 +102,7 @@ export const metadata = {
 				"Rule configuration: a .bpmnlintrc in the working directory takes precedence. " +
 				"Otherwise the linter extends bpmnlint:recommended plus the matching " +
 				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
+				'modeler:executionPlatform="Camunda Cloud" + ' +
 				"modeler:executionPlatformVersion in the BPMN file.",
 			subcommands: [
 				{
