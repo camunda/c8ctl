@@ -402,13 +402,6 @@ async function lintSubcommand(args: string[]): Promise<void> {
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ["lint"] as const;
-type Subcommand = (typeof VALID_SUBCOMMANDS)[number];
-
-function isValidSubcommand(s: string): s is Subcommand {
-	return VALID_SUBCOMMANDS.some((v) => v === s);
-}
-
 function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = c8ctl.getLogger();
 	const names = metadata.commands.bpmn.subcommands
@@ -457,21 +450,14 @@ async function bpmnHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	if (!subcommand) {
-		printSubcommandHint();
-		process.exitCode = 1;
-		return;
-	}
-	if (!isValidSubcommand(subcommand)) {
+	if (subcommand !== "lint") {
 		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
 
 	try {
-		if (subcommand === "lint") {
-			await lintSubcommand(subArgs);
-		}
+		await lintSubcommand(subArgs);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();

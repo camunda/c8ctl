@@ -618,13 +618,6 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 // Command export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ["evaluate"] as const;
-type Subcommand = (typeof VALID_SUBCOMMANDS)[number];
-
-function isValidSubcommand(s: string): s is Subcommand {
-	return VALID_SUBCOMMANDS.some((v) => v === s);
-}
-
 function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = c8ctl.getLogger();
 	const names = metadata.commands.feel.subcommands
@@ -670,28 +663,18 @@ async function feelHandler(
 	args: string[] | undefined,
 	flags?: Record<string, unknown>,
 ): Promise<void> {
-	// Host now extracts declared flags upstream (#366/#367) and forwards
-	// them via `flags`. The plugin's hand-rolled parseArgs still expects
-	// to see them as `--name value` tokens, so reinject them.
 	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	if (!subcommand) {
-		printSubcommandHint();
-		process.exitCode = 1;
-		return;
-	}
-	if (!isValidSubcommand(subcommand)) {
+	if (subcommand !== "evaluate") {
 		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
 	}
 
 	try {
-		if (subcommand === "evaluate") {
-			await evaluateSubcommand(subArgs);
-		}
+		await evaluateSubcommand(subArgs);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();

@@ -1422,12 +1422,7 @@ const VALID_SUBCOMMANDS = [
 	"apply",
 	"get",
 	"sync",
-] as const;
-type Subcommand = (typeof VALID_SUBCOMMANDS)[number];
-
-function isValidSubcommand(s: string): s is Subcommand {
-	return VALID_SUBCOMMANDS.some((v) => v === s);
-}
+];
 
 function printSubcommandHint(unknownSubcommand?: string): void {
 	const logger = c8ctl.getLogger();
@@ -1477,12 +1472,7 @@ async function elementTemplateHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	if (!subcommand) {
-		printSubcommandHint();
-		process.exitCode = 1;
-		return;
-	}
-	if (!isValidSubcommand(subcommand)) {
+	if (!subcommand || !VALID_SUBCOMMANDS.includes(subcommand)) {
 		printSubcommandHint(subcommand);
 		process.exitCode = 1;
 		return;
