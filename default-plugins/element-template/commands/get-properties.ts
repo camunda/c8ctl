@@ -125,6 +125,7 @@ function buildCondensedProperty(
 		label: prop.label,
 		description: prop.description,
 		group: prop.group,
+		choices: prop.choices,
 	};
 }
 
@@ -263,6 +264,7 @@ function formatCondensedRow(
 ): string {
 	const NAME_INDENT = "  ";
 	const COLUMN_GAP = "  ";
+	const CONT_INDENT = " ".repeat(NAME_INDENT.length + 4);
 	const name = (detail.name ?? "?").padEnd(nameWidth);
 	const text = detail.description ?? detail.label ?? "";
 	const trailing = text ? `${COLUMN_GAP}${styleText("dim", text)}` : "";
@@ -272,8 +274,12 @@ function formatCondensedRow(
 	// differs from the binding name. For most properties (id == name or
 	// id missing) this stays a single-line row.
 	if (detail.id && detail.id !== detail.name) {
-		const indent = " ".repeat(NAME_INDENT.length + 4);
-		lines.push(styleText("dim", `${indent}[id: ${detail.id}]`));
+		lines.push(styleText("dim", `${CONT_INDENT}[id: ${detail.id}]`));
+	}
+
+	if (detail.choices?.length) {
+		const values = detail.choices.map((c) => c.value).join(", ");
+		lines.push(styleText("dim", `${CONT_INDENT}[choices: ${values}]`));
 	}
 
 	return lines.join("\n");
