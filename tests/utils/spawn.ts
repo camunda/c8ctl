@@ -170,8 +170,12 @@ export async function asyncSpawnWithStdin(
 		stdin.end();
 	}
 
-	const status = await new Promise<number | null>((resolve) => {
+	const status = await new Promise<number | null>((resolve, reject) => {
 		child.on("close", (code) => resolve(code));
+		child.on("error", (err) => {
+			stderr += `${err.message}\n`;
+			reject(err);
+		});
 	});
 
 	return { stdout, stderr, status };
