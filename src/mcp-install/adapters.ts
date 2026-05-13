@@ -253,6 +253,26 @@ function home(env: AdapterEnv): string {
 // ─── Config merge helpers ────────────────────────────────────────────────────
 
 /**
+ * Narrow a parsed config value to a plain object we can safely merge into.
+ *
+ * - `null` / `undefined` (i.e. file absent or empty per `readJsonFileOrNull`)
+ *   collapses to an empty object so install can seed a fresh config.
+ * - A plain object is returned as-is.
+ * - Any other shape (array, scalar, ...) is a structural mismatch we refuse
+ *   to silently overwrite: writing a JSON object on top of an existing array
+ *   would clobber data the user explicitly chose to store there.
+ */
+function coerceExistingConfig(existing: unknown): Record<string, unknown> {
+	if (existing === null || existing === undefined) return {};
+	if (isRecord(existing)) return existing;
+	const observed = Array.isArray(existing) ? "array" : typeof existing;
+	throw new Error(
+		`Existing MCP client config is a ${observed}, not a JSON object. ` +
+			"Refusing to overwrite — fix the file manually or delete it and re-run.",
+	);
+}
+
+/**
  * Result of merging an MCP server entry into an existing client config.
  * Returned as a plain object so callers can stringify, write, or render
  * it without further mutation. `existed` distinguishes "added new" from
@@ -281,7 +301,7 @@ export function mergeMcpConfig(
 	alias: string,
 	entry: McpServerEntry,
 ): MergeResult {
-	const base: Record<string, unknown> = isRecord(existing) ? existing : {};
+	const base = coerceExistingConfig(existing);
 	const priorServers = isRecord(base[serversKey]) ? base[serversKey] : {};
 	const existed = Object.hasOwn(priorServers, alias);
 	const nextServers = { ...priorServers, [alias]: entry };
@@ -303,7 +323,7 @@ export function unmergeMcpConfig(
 	serversKey: string,
 	alias: string,
 ): MergeResult {
-	const base: Record<string, unknown> = isRecord(existing) ? existing : {};
+	const base = coerceExistingConfig(existing);
 	const priorServers = isRecord(base[serversKey]) ? base[serversKey] : {};
 	const existed = Object.hasOwn(priorServers, alias);
 	if (!existed) {

@@ -188,6 +188,26 @@ describe("c8ctl mcp install (#293)", () => {
 		);
 	});
 
+	test("--dry-run redacts credential env values before printing", async () => {
+		// Defect class: dry-run echoes the merged config (env block included)
+		// to stdout. `logger.json`'s field-name redactor only matches the
+		// SDK's lower-case keys; upper-case env names (CAMUNDA_CLIENT_SECRET,
+		// CAMUNDA_PASSWORD) would otherwise print verbatim. Class-scoped over
+		// every adapter and every sensitive-looking env key.
+		for (const clientId of listSupportedClients()) {
+			const result = await c8("mcp", "install", clientId, "--dry-run");
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(
+				!result.stdout.includes("csecret"),
+				`${clientId}: dry-run stdout must NOT contain the raw clientSecret 'csecret'; got: ${result.stdout}`,
+			);
+			assert.ok(
+				result.stdout.includes("[REDACTED]"),
+				`${clientId}: dry-run stdout must mark redacted env values; got: ${result.stdout}`,
+			);
+		}
+	});
+
 	test("--profile <name> with unknown profile fails with a helpful error", async () => {
 		const result = await c8(
 			"mcp",

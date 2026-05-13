@@ -137,7 +137,7 @@ export const mcpInstallCommand = defineCommand(
 					alias,
 					profile: profileName,
 					wouldOverwrite: existed,
-					content: merged,
+					content: redactConfigSecrets(merged),
 				},
 			};
 		}
@@ -214,7 +214,7 @@ export const mcpUninstallCommand = defineCommand(
 					client: clientId,
 					configPath,
 					alias,
-					content: merged,
+					content: redactConfigSecrets(merged),
 				},
 			};
 		}
@@ -342,6 +342,62 @@ function isC8ctlManagedEntry(entry: unknown): boolean {
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Redact env-var values that look like credentials before printing the
+ * merged config in `--dry-run` output.
+ *
+ * Defect class: `logger.json()`'s field-name redactor only matches the
+ * lower-case keys it knows about (`password`, `clientSecret`, ...). MCP
+ * entries embed credentials under upper-case env names like
+ * `CAMUNDA_CLIENT_SECRET` / `CAMUNDA_PASSWORD`, which would otherwise
+ * print verbatim to stdout on `c8ctl mcp install --dry-run`.
+ *
+ * Strategy: walk the merged config, locate the `env` block of every
+ * server entry under any `serversKey`, and replace values whose key
+ * looks sensitive (case-insensitive match against SECRET / PASSWORD /
+ * TOKEN / KEY) with `[REDACTED]`. The check is by key name so future
+ * env additions stay protected without code changes.
+ */
+function redactConfigSecrets(
+	merged: Record<string, unknown>,
+): Record<string, unknown> {
+	const result: Record<string, unknown> = {};
+	for (const [topKey, topVal] of Object.entries(merged)) {
+		if (!isRecordLike(topVal)) {
+			result[topKey] = topVal;
+			continue;
+		}
+		const redactedServers: Record<string, unknown> = {};
+		for (const [alias, entry] of Object.entries(topVal)) {
+			redactedServers[alias] = redactEntryEnv(entry);
+		}
+		result[topKey] = redactedServers;
+	}
+	return result;
+}
+
+function redactEntryEnv(entry: unknown): unknown {
+	if (!isRecordLike(entry)) return entry;
+	const env = entry.env;
+	if (!isRecordLike(env)) return entry;
+	const redactedEnv: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(env)) {
+		redactedEnv[k] = looksSensitive(k) ? "[REDACTED]" : v;
+	}
+	return { ...entry, env: redactedEnv };
+}
+
+function looksSensitive(envKey: string): boolean {
+	const upper = envKey.toUpperCase();
+	return (
+		upper.includes("SECRET") ||
+		upper.includes("PASSWORD") ||
+		upper.includes("TOKEN") ||
+		upper.endsWith("_KEY") ||
+		upper === "KEY"
+	);
 }
 
 function restartHintFor(adapter: McpClientAdapter): string {

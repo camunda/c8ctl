@@ -349,4 +349,26 @@ describe("unmergeMcpConfig is symmetric with mergeMcpConfig (#293)", () => {
 		assert.strictEqual(existed, false);
 		assert.deepStrictEqual(merged, { mcpServers: { other: {} } });
 	});
+
+	test("refuses to silently overwrite a non-object existing config", () => {
+		// Defect class: a user (or tool) wrote a JSON array / scalar at
+		// the config path. Silently coercing it to {} would clobber data
+		// we cannot reason about; we must throw with a recoverable hint.
+		for (const bogus of [[], ["mcp"], 42, "string", true]) {
+			assert.throws(
+				() =>
+					mergeMcpConfig(bogus, "mcpServers", "camunda", {
+						command: "npx",
+						args: [],
+					}),
+				/not a JSON object/,
+				`mergeMcpConfig must reject ${JSON.stringify(bogus)}`,
+			);
+			assert.throws(
+				() => unmergeMcpConfig(bogus, "mcpServers", "camunda"),
+				/not a JSON object/,
+				`unmergeMcpConfig must reject ${JSON.stringify(bogus)}`,
+			);
+		}
+	});
 });
