@@ -8,7 +8,7 @@
   "c8ctl": {
     "versionAliases": {
       "stable": "8.9",
-      "alpha": "8.10-alpha1"
+      "alpha": "8.10"
     }
   }
 }
