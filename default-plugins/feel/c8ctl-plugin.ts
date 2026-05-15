@@ -376,8 +376,16 @@ function cleanParseDetail(detail: string): string {
  * what the user can do about it.
  */
 function classifyClusterError(error: unknown): ClusterErrorClassification {
-	if (isRecord(error) && typeof error.status === "number") {
-		const status = error.status;
+	// SDK errors expose the HTTP status as either `status` or `statusCode`
+	// depending on which layer raised them (see src/commands/forms.ts).
+	const status = isRecord(error)
+		? typeof error.status === "number"
+			? error.status
+			: typeof error.statusCode === "number"
+				? error.statusCode
+				: undefined
+		: undefined;
+	if (isRecord(error) && status !== undefined) {
 		const title = typeof error.title === "string" ? error.title : undefined;
 		const detail = typeof error.detail === "string" ? error.detail : undefined;
 
