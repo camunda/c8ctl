@@ -378,6 +378,14 @@ describe("CLI behavioural: bpmn lint .bpmnlintrc override", () => {
 				{ cwd: externalDir, env: process.env },
 			);
 			const output = result.stdout + result.stderr;
+			// Assert exit 0 before checking output absence — a config
+			// parse / module-load failure would also produce output
+			// without "label-required" and falsely pass otherwise.
+			assert.strictEqual(
+				result.status,
+				0,
+				`lint should succeed with the override applied. Got status=${result.status}, output: ${output.slice(0, 400)}`,
+			);
 			assert.ok(
 				!output.includes("label-required"),
 				`label-required should be suppressed by .bpmnlintrc. Got: ${output.slice(0, 400)}`,
