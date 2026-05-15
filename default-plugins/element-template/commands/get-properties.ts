@@ -74,6 +74,27 @@ export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 		return true;
 	});
 
+	// Each filter is individually validated (positional names via
+	// filterByPropertyArg, group ids via applyGroupFilter), but their
+	// intersection can still be empty when a property exists somewhere
+	// and a group exists, just not together. Surface that as an error
+	// to match the README contract that filters error on no-match.
+	if (
+		details.length === 0 &&
+		(parsed.propertyArgs.length > 0 || parsed.groups.length > 0)
+	) {
+		const nameClause =
+			parsed.propertyArgs.length > 0
+				? `name${parsed.propertyArgs.length > 1 ? "s" : ""} ${parsed.propertyArgs.map((a) => `"${a}"`).join(", ")}`
+				: "";
+		const groupClause =
+			parsed.groups.length > 0
+				? `group${parsed.groups.length > 1 ? "s" : ""} ${parsed.groups.map((g) => `"${g}"`).join(", ")}`
+				: "";
+		const what = [nameClause, groupClause].filter(Boolean).join(" and ");
+		throw new Error(`No properties match ${what}.`);
+	}
+
 	const total = allDetails.length;
 
 	if (c8ctl.outputMode === "json") {

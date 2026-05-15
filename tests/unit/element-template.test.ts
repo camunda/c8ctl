@@ -1113,6 +1113,31 @@ describe("CLI behavioural: element-template get-properties", () => {
 		);
 	});
 
+	test("rejects empty intersection of name + --group filters", async () => {
+		// `url` exists (in group `endpoint`) and `authentication` is a valid
+		// group, but `url` is NOT in `authentication`. Each filter is
+		// individually valid; their intersection is empty. Should error
+		// rather than silently print `Showing 0 of N properties`.
+		const result = await c8text(
+			"element-template",
+			"get-properties",
+			TEMPLATE_FILE,
+			"url",
+			"--group",
+			"authentication",
+		);
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("No properties match"),
+			`Empty intersection should error. Got: ${output}`,
+		);
+		assert.ok(
+			output.includes('"url"') && output.includes('"authentication"'),
+			"Error should quote the offending filters",
+		);
+	});
+
 	test("--detailed JSON: full per-property shape", async () => {
 		const result = await c8(
 			"element-template",
