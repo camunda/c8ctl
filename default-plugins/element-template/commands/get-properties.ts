@@ -57,8 +57,12 @@ export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 				)
 			: allDetails;
 
-	// --group intersects with positional matches.
-	details = applyGroupFilter(details, parsed.groups, groupLabelMap);
+	// --group intersects with positional matches. Validation of the
+	// requested group ids uses the full template (allDetails) so a
+	// valid group id on a property the name filter excluded still
+	// counts as known — the user should see "no match" for the
+	// combination, not "unknown group id".
+	details = applyGroupFilter(details, allDetails, parsed.groups, groupLabelMap);
 
 	// Dedupe by object reference — the same property detail object is
 	// returned when it matches multiple positionals (e.g. `url` and
@@ -211,12 +215,20 @@ function buildJsonPayload(
 }
 
 /**
- * Filter details to those whose `groupId` is in the requested list.
+ * Filter `details` to those whose `groupId` is in the requested list.
  * Empty list means no filter. Unknown group ids throw with the list of
  * valid ids — group ids are short and bounded so we always show them.
+ *
+ * `allDetails` is the unfiltered property set from the template; we
+ * use it to compute the valid-group set so that a group id which only
+ * appears on a property excluded by an earlier name filter still counts
+ * as known. Without this, combining a valid name filter and a valid
+ * group id from a template with no `groups` table would surface
+ * "Unknown group id" rather than the intended empty-intersection error.
  */
 function applyGroupFilter(
 	details: PropertyDetail[],
+	allDetails: PropertyDetail[],
 	groups: string[],
 	groupLabelMap: Map<string, string>,
 ): PropertyDetail[] {
@@ -224,12 +236,12 @@ function applyGroupFilter(
 		return details;
 	}
 	// Valid group IDs: the template's declared groups table PLUS any group id
-	// referenced directly on property details (templates that use property.group
-	// without a matching groups entry still render a heading — so the filter
-	// must accept those ids too).
+	// referenced directly on any property in the template (templates that use
+	// property.group without a matching groups entry still render a heading —
+	// so the filter must accept those ids too).
 	const validFromTemplate = new Set(groupLabelMap.keys());
 	const validFromDetails = new Set(
-		details
+		allDetails
 			.map((d) => d.groupId)
 			.filter((id): id is string => id !== undefined),
 	);
