@@ -66,7 +66,6 @@ type EvaluationOutput = {
 type ClusterErrorClassification = {
 	title: string;
 	hint: string | null;
-	terminal: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -358,78 +357,26 @@ function cleanParseDetail(detail: string): string {
 }
 
 /**
- * Walk the cause chain looking for a network error code.
- * The SDK can wrap errors several layers deep (TypeError →
- * AggregateError → individual fetch errors), so a single-level
- * `error.cause.code` check isn't enough.
- */
-function findNetworkErrorCode(error: unknown): string | undefined {
-	let cur: unknown = error;
-	const seen = new Set<unknown>();
-	while (isRecord(cur) && !seen.has(cur)) {
-		seen.add(cur);
-		if (typeof cur.code === "string") {
-			return cur.code;
-		}
-		if (Array.isArray(cur.errors)) {
-			for (const e of cur.errors) {
-				if (isRecord(e) && typeof e.code === "string") return e.code;
-			}
-		}
-		cur = cur.cause;
-	}
-	return undefined;
-}
-
-/**
- * Translate a network-level error code into an actionable title.
- * Mirrors the table used by the deployments command for consistency.
- */
-function networkErrorMessage(error: unknown): string | undefined {
-	const code = findNetworkErrorCode(error);
-
-	if (!code && isRecord(error) && error.name === "AbortError") {
-		return "Request to Camunda cluster timed out or was aborted.";
-	}
-
-	switch (code) {
-		case "ECONNREFUSED":
-			return "Cannot connect to Camunda cluster (connection refused). Verify the endpoint URL and that the cluster is reachable.";
-		case "ENOTFOUND":
-			return "Cannot resolve Camunda cluster host. Check the cluster URL and your DNS/network configuration.";
-		case "EHOSTUNREACH":
-			return "Camunda cluster host is unreachable. Check VPN/proxy settings and your network connectivity.";
-		case "ECONNRESET":
-			return "Connection to Camunda cluster was reset. Retry the operation.";
-		case "ETIMEDOUT":
-			return "Request to Camunda cluster timed out.";
-	}
-
-	// Fallback for `TypeError("fetch failed")` with no recognizable
-	// code on the cause chain — observed on Linux CI when a server
-	// destroys the socket mid-request. Treat as a generic connection
-	// failure so the user still gets the local-engine hint.
-	if (
-		isRecord(error) &&
-		error.name === "TypeError" &&
-		typeof error.message === "string" &&
-		error.message.toLowerCase().includes("fetch failed")
-	) {
-		return "Cannot connect to Camunda cluster. Verify the endpoint URL and that the cluster is reachable.";
-	}
-
-	return undefined;
-}
-
-/**
  * Translate an SDK / fetch error into a `{ title, hint }` pair we can render.
- * Returns null if the error wasn't a recognized cluster-side failure.
+ *
+ * We special-case the cluster responses where the user's action differs:
+ *
+ *   - 400: surface the cleaned parse-error detail so the user can fix the
+ *     expression they typed.
+ *   - 401 / 403: auth failed — the cluster is reachable, the user needs to
+ *     re-authenticate or check permissions.
+ *   - 404: tell the user the cluster doesn't support FEEL evaluation yet
+ *     (requires Camunda 8.9+) and point at the local engine.
+ *
+ * Everything else — 5xx and any kind of network / transport failure —
+ * collapses to a single generic "cannot connect" message plus the
+ * local-engine hint. Trying to map specific Node/undici error codes is
+ * fragile across platforms (Linux fetch failures don't always preserve the
+ * underlying code on the cause chain) and the precise variant doesn't change
+ * what the user can do about it.
  */
-function classifyClusterError(
-	error: unknown,
-): ClusterErrorClassification | null {
-	// RFC 9457 Problem Detail (SDK throws plain objects)
-	if (isRecord(error) && "status" in error) {
+function classifyClusterError(error: unknown): ClusterErrorClassification {
+	if (isRecord(error) && typeof error.status === "number") {
 		const status = error.status;
 		const title = typeof error.title === "string" ? error.title : undefined;
 		const detail = typeof error.detail === "string" ? error.detail : undefined;
@@ -438,20 +385,18 @@ function classifyClusterError(
 			const cleaned = detail
 				? cleanParseDetail(detail)
 				: title || "Invalid expression";
-			return { title: cleaned, hint: null, terminal: true };
+			return { title: cleaned, hint: null };
 		}
 		if (status === 401 || title === "UNAUTHENTICATED") {
 			return {
 				title: `Authentication failed (${status}). Run \`c8ctl auth login\` to refresh.`,
 				hint: LOCAL_HINT,
-				terminal: true,
 			};
 		}
 		if (status === 403 || title === "PERMISSION_DENIED") {
 			return {
 				title: `Authorization failed (${status}): not permitted to evaluate expressions.`,
 				hint: LOCAL_HINT,
-				terminal: true,
 			};
 		}
 		if (status === 404 || title === "NOT_FOUND") {
@@ -459,28 +404,15 @@ function classifyClusterError(
 				title:
 					"Cluster does not support FEEL evaluation (404). Requires Camunda 8.9+.",
 				hint: LOCAL_HINT,
-				terminal: true,
-			};
-		}
-		if (typeof status === "number" && status >= 500) {
-			const head = detail
-				? `${title ?? "Server error"}: ${detail}`
-				: (title ?? "Server error");
-			return {
-				title: `Cluster returned ${status}: ${head}`,
-				hint: null,
-				terminal: true,
 			};
 		}
 	}
 
-	// Network-level errors (no HTTP response)
-	const networkTitle = networkErrorMessage(error);
-	if (networkTitle) {
-		return { title: networkTitle, hint: LOCAL_HINT, terminal: true };
-	}
-
-	return null;
+	return {
+		title:
+			"Cannot connect to Camunda cluster. Verify the endpoint URL, credentials, and that the cluster is reachable.",
+		hint: LOCAL_HINT,
+	};
 }
 
 async function evaluateCluster({
@@ -515,14 +447,11 @@ async function evaluateCluster({
 		};
 	} catch (error) {
 		const classified = classifyClusterError(error);
-		if (classified) {
-			const lines = [classified.title];
-			if (classified.hint) lines.push(`  Hint: ${classified.hint}`);
-			const wrapped = new Error(lines.join("\n"));
-			wrapped.cause = error;
-			throw wrapped;
-		}
-		throw error;
+		const lines = [classified.title];
+		if (classified.hint) lines.push(`  Hint: ${classified.hint}`);
+		const wrapped = new Error(lines.join("\n"));
+		wrapped.cause = error;
+		throw wrapped;
 	}
 }
 
