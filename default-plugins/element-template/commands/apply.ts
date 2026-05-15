@@ -350,15 +350,18 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		);
 	}
 
+	// Reject incompatible flag combinations before reading stdin —
+	// otherwise a piped BPMN stream is consumed (and a long-running
+	// producer can hang) just to surface a usage error.
+	if (parsed.inPlace && !bpmnFilePath) {
+		throw new Error("--in-place cannot be used with stdin input");
+	}
+
 	const input = await readBpmnInput(bpmnFilePath);
 	if (!input) {
 		throw new Error(
 			"No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.",
 		);
-	}
-
-	if (parsed.inPlace && !bpmnFilePath) {
-		throw new Error("--in-place cannot be used with stdin input");
 	}
 
 	const ref = parseTemplateRef(templateArg);
