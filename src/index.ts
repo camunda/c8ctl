@@ -467,8 +467,10 @@ async function main() {
 		// mirrors the built-in CommandContext pattern so plugins that
 		// never touch a Camunda client (e.g. local-only utilities) do
 		// not trigger credential resolution by virtue of receiving ctx.
-		const pluginProfile =
-			str(values.profile) ?? c8ctl.activeProfile ?? "default";
+		// Leave undefined when no flag/session profile is set so
+		// resolveClusterConfig() can fall through to CAMUNDA_* env vars,
+		// matching the behaviour of built-in commands.
+		const pluginProfile = str(values.profile) ?? c8ctl.activeProfile;
 		let _pluginClient: ReturnType<typeof createClient> | undefined;
 		const pluginCtx: PluginCtx = {
 			profile: pluginProfile,
