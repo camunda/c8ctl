@@ -93,11 +93,10 @@ get an explicit error with a hint:
 | Failure | Detection | Behaviour |
 |---|---|---|
 | No cluster configured | client construction fails | error + hint to use `--engine local` |
-| Unreachable (DNS / refused / timeout) | network-level error | error + hint |
+| Parse error | 400 | error with cleaned-up FEEL parser message (no hint — fix the expression) |
 | Auth failure | 401 / 403 | error + hint |
 | Cluster pre-8.9 | 404 on `/v2/expression/evaluation` | error noting 8.9 requirement + hint |
-| Server error | 5xx | error (no hint — likely transient, retry-class) |
-| Parse error | 400 | error with cleaned-up FEEL parser message |
+| Anything else (network failure, 5xx, …) | non-400/401/403/404 | generic "cannot connect" error + hint |
 
 The hint always reminds you that feelin behaviour may differ from
 the cluster engine.
