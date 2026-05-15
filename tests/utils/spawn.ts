@@ -164,19 +164,25 @@ export async function asyncSpawnWithStdin(
 		// mask the real test signal in stderr/exit.
 	});
 
-	try {
-		await writeStdin(stdin);
-	} finally {
-		stdin.end();
-	}
-
-	const status = await new Promise<number | null>((resolve, reject) => {
+	// Create the close/error promise BEFORE awaiting writeStdin so we don't
+	// miss the 'close' event if the child exits early (e.g. rejects input
+	// immediately). Any buffered 'close' emission will be captured by the
+	// already-registered listener rather than being lost between the two awaits.
+	const statusPromise = new Promise<number | null>((resolve, reject) => {
 		child.on("close", (code) => resolve(code));
 		child.on("error", (err) => {
 			stderr += `${err.message}\n`;
 			reject(err);
 		});
 	});
+
+	try {
+		await writeStdin(stdin);
+	} finally {
+		stdin.end();
+	}
+
+	const status = await statusPromise;
 
 	return { stdout, stderr, status };
 }

@@ -100,7 +100,13 @@ export function parseTemplateRef(arg: string | undefined): TemplateRef | null {
 	if (!arg) {
 		return null;
 	}
-	if (/^https?:\/\//.test(arg)) {
+	if (/^http:\/\//.test(arg)) {
+		throw new Error(
+			`Insecure template URL rejected: ${arg}\n` +
+				"Template URLs must use HTTPS to protect credentials and content integrity.",
+		);
+	}
+	if (/^https:\/\//.test(arg)) {
 		return { kind: "url", value: arg };
 	}
 	if (

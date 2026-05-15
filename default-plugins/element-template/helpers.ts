@@ -150,6 +150,12 @@ export function toRawGitHubUrl(url: string): string {
 }
 
 export async function readFileOrUrl(input: string): Promise<string> {
+	if (input.startsWith("http://")) {
+		throw new Error(
+			`Insecure template URL rejected: ${input}\n` +
+				"Template URLs must use HTTPS to protect credentials and content integrity.",
+		);
+	}
 	if (isUrl(input)) {
 		const resolvedUrl = toRawGitHubUrl(input);
 		const response = await fetch(resolvedUrl, {
@@ -189,6 +195,10 @@ export function getBindingName(prop: TemplateProperty): string | null {
 	if (b.name !== undefined) return b.name;
 	if (b.key !== undefined) return b.key;
 	if (b.property !== undefined) return b.property;
+	// zeebe:output bindings use `source` as the user-facing identifier
+	// (the expression that produces the value). Without this fallback,
+	// output bindings are invisible to `--set` and `get-properties`.
+	if (b.source !== undefined) return b.source;
 	return null;
 }
 

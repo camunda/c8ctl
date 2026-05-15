@@ -130,8 +130,16 @@ function parseArgs(args: string[]): ParsedArgs {
 		}
 
 		if (arg.startsWith("-")) {
-			result.error = `Unknown flag: ${arg}`;
-			return result;
+			// Double-dash unknown flags are always errors.
+			// Single-dash tokens before the expression are accepted as the
+			// expression itself: FEEL expressions can start with `-` (e.g. `-1`,
+			// `-a`). Once the expression is captured, a lone `-x` is an error.
+			if (arg.startsWith("--") || result.positionals.length > 0) {
+				result.error = `Unknown flag: ${arg}`;
+				return result;
+			}
+			result.positionals.push(arg);
+			continue;
 		}
 
 		result.positionals.push(arg);

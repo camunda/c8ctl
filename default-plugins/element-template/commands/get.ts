@@ -27,6 +27,14 @@ export async function getSubcommand(args: string[]): Promise<void> {
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === "--") {
+			// All tokens after `--` are literal positionals — not flags.
+			for (const rest of args.slice(i + 1)) {
+				if (templateArg === undefined) {
+					templateArg = rest;
+				} else {
+					throw new Error(`Unexpected argument: ${rest}. ${usage}`);
+				}
+			}
 			break;
 		}
 		if (arg === "--no-icon") {

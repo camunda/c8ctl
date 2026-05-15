@@ -300,6 +300,15 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 	const filePath =
 		positionalArgs[0] ?? optionArgs.find((a) => !a.startsWith("-"));
 
+	// Reject extra positional args (only one BPMN file is accepted).
+	const allPositionals = [
+		...positionalArgs,
+		...optionArgs.filter((a) => !a.startsWith("-")),
+	];
+	if (allPositionals.length > 1) {
+		throw new Error(`Unexpected argument: ${allPositionals[1]}. ${usage}`);
+	}
+
 	const input = await readBpmnInput(filePath);
 	if (!input) {
 		throw new Error(

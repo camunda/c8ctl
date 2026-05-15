@@ -8,6 +8,7 @@
 
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -345,10 +346,26 @@ describe("CLI behavioural: feel evaluate text warnings", () => {
 
 describe("CLI behavioural: feel evaluate cluster errors", () => {
 	test("unreachable cluster surfaces 'connection refused' with local-engine hint", async () => {
-		// Connect attempts to a high-numbered closed port on loopback get
-		// refused immediately on macOS/Linux without any DNS lookup,
-		// producing ECONNREFUSED that the plugin's classifier translates
-		// to a user-friendly message.
+		// Bind to port 0 to obtain an OS-assigned ephemeral port, then immediately
+		// close the server. The port is now known-unused on this machine, so a
+		// subsequent connect attempt will get ECONNREFUSED without any chance of
+		// accidentally hitting a real service (unlike a hard-coded port such as 9999).
+		const port = await new Promise<number>((resolve, reject) => {
+			const server = net.createServer();
+			server.listen(0, "127.0.0.1", () => {
+				const addr = server.address();
+				const p = typeof addr === "object" && addr !== null ? addr.port : null;
+				server.close(() => {
+					if (p !== null) {
+						resolve(p);
+					} else {
+						reject(new Error("Could not determine ephemeral port"));
+					}
+				});
+			});
+			server.on("error", reject);
+		});
+
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
 		writeFileSync(
 			join(dataDir, "session.json"),
@@ -361,7 +378,7 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 				{
 					env: {
 						...process.env,
-						CAMUNDA_BASE_URL: "http://127.0.0.1:9999",
+						CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
 					},

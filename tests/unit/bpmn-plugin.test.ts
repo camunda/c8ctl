@@ -310,14 +310,24 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 
 	test("emits ANSI color codes when FORCE_COLOR=1", async () => {
 		const file = join(FIXTURES_DIR, "simple-will-create-incident.bpmn");
-		const result = await asyncSpawn(
-			"node",
-			["--experimental-strip-types", CLI, "bpmn", "lint", file],
-			{
-				cwd: REPO_ROOT,
-				env: { ...process.env, FORCE_COLOR: "1" },
-			},
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-test-"));
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({ outputMode: "text" }),
 		);
+		let result: Awaited<ReturnType<typeof asyncSpawn>>;
+		try {
+			result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "bpmn", "lint", file],
+				{
+					cwd: REPO_ROOT,
+					env: { ...process.env, FORCE_COLOR: "1", C8CTL_DATA_DIR: dataDir },
+				},
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
 		const output = result.stdout + result.stderr;
 		// styleText emits CSI escape sequences (ESC '[' ... 'm') around
 		// colored text; presence proves the formatter wraps severity/summary.

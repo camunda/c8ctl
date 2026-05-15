@@ -332,6 +332,12 @@ export async function applySubcommand(args: string[]): Promise<void> {
 
 	const [templateArg, elementId, bpmnFilePath] = parsed.positionals;
 
+	if (parsed.positionals.length > 3) {
+		throw new Error(
+			`Unexpected argument: ${parsed.positionals[3]}. Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>]`,
+		);
+	}
+
 	if (!templateArg) {
 		throw new Error(
 			"Missing template argument. Usage: c8ctl element-template apply <template> <element-id> [<file.bpmn>]",

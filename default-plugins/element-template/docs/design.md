@@ -65,10 +65,10 @@ We mirror Desktop Modeler's approach
 
 ### Lifecycle
 
-- **First time the index is needed** (search, sync, or `apply`/`list-properties`
+- **First time the index is needed** (search, sync, or `apply`/`get-properties`
   with an `<id>` arg): bootstrap auto-runs — full fetch, ~459 templates,
   visible per-template progress.
-- **Local file or URL paths** for `apply`/`list-properties`: never
+- **Local file or URL paths** for `apply`/`get-properties`: never
   trigger bootstrap. The plugin classifies the template arg before
   touching the cache.
 - **Stale cache** (>7 days since `fetched-at`): warn-only, suggesting
@@ -91,7 +91,7 @@ cost is acceptable, and incremental syncs are cheap.
 
 ## Version resolution
 
-`apply` and `list-properties` accept three template-arg shapes:
+`apply` and `get-properties` accept three template-arg shapes:
 
 | Shape | Detection | Resolution |
 |---|---|---|
@@ -102,12 +102,12 @@ cost is acceptable, and incremental syncs are cheap.
 For `<id>` (no `@<version>`):
 
 - `apply` parses the BPMN file's `modeler:executionPlatformVersion`
-  attribute (regex; cheap and we don't need the full moddle parse for
-  this), then picks the highest cached version where
+  attribute via bpmn-moddle (the same moddle instance used for the main
+  parse), then picks the highest cached version where
   `semver.satisfies(coerce(executionPlatformVersion), engines.camunda)`
   is true. Templates without `engines.camunda` are treated as
   compatible (legacy fallback).
-- `list-properties` has no BPMN context, so it picks the latest version
+- `get-properties` has no BPMN context, so it picks the latest version
   and warns the user to pin with `id@<n>` if they want a specific one.
 
 Errors include the available versions to make the next step obvious:
