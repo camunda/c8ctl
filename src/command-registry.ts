@@ -30,6 +30,11 @@ export interface FlagDef {
 	short?: string;
 	/** When true, the flag must be supplied or the command exits with an error. */
 	required?: boolean;
+	/**
+	 * When true, the flag may be repeated and its values are collected into an
+	 * array. Only valid when type is "string". The handler receives string[].
+	 */
+	multiple?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
@@ -1566,7 +1571,6 @@ export const COMMAND_REGISTRY = {
 		flags: {},
 	},
 
-
 	// ── Session commands ───────────────────────────────────────────────────
 
 	use: {
@@ -1796,7 +1800,10 @@ export function isValidCommand(verb: string, resource: string): boolean {
  */
 export function deriveParseArgsOptions(
 	pluginFlags?: Record<string, Record<string, FlagDef>>,
-): Record<string, { type: "string" | "boolean"; short?: string; multiple?: boolean }> {
+): Record<
+	string,
+	{ type: "string" | "boolean"; short?: string; multiple?: boolean }
+> {
 	const options: Record<
 		string,
 		{ type: "string" | "boolean"; short?: string; multiple?: boolean }
