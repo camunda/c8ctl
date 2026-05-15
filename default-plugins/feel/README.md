@@ -3,8 +3,8 @@
 A default [c8ctl](https://github.com/camunda/c8ctl) plugin for
 evaluating [FEEL](https://docs.camunda.io/docs/components/modeler/feel/what-is-feel/)
 expressions. By default uses the connected Camunda cluster's engine
-via the 8.9+ REST API; falls back to in-process
-[feelin](https://github.com/nikku/feelin) with `--engine local`.
+via the 8.9+ REST API. Use `--engine local` to evaluate in-process
+via [feelin](https://github.com/nikku/feelin) without a cluster connection.
 
 ## Usage
 

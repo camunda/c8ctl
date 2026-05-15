@@ -119,10 +119,12 @@ Failed to element-template apply: Element template 'io.camunda.connectors.aws.s3
 
 ## Search
 
-Substring case-insensitive match on `name`, `description`, and `id`
-(matches Modeler, plus `id` for CLI users who already know roughly
-what they want). Returns the latest cached version per matched id.
-Output groups by `category.name` to mirror Modeler's UI layout.
+Substring case-insensitive match on `name`, `description`, `id`, and `keywords`
+(matches Modeler's discovery path, plus `id` for CLI users who already know roughly
+what they want). Deprecated versions are filtered out before the per-id
+latest-version reduction, so the latest non-deprecated version of a connector
+surfaces even when its newest version is deprecated. Output is a flat sequence
+of template cards (no grouping by category).
 
 ## Plugin dependencies
 

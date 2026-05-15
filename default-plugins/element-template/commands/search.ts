@@ -61,10 +61,10 @@ export async function searchSubcommand(args: string[]): Promise<void> {
 	await bootstrapIfNeeded({ logger });
 	nudgeIfStale(logger);
 
-	// Hide deprecated templates from search results — same as Modeler.
-	// The schema's `deprecated` field is either `true` or `{ message }`;
-	// both forms mean the same thing.
-	const allMatches = searchTemplates(query).filter((t) => !t.deprecated);
+	// Deprecated filtering and per-id latest-version reduction are done
+	// inside searchTemplates() so the latest non-deprecated version of a
+	// connector is still returned when its newest version is deprecated.
+	const allMatches = searchTemplates(query);
 	const total = allMatches.length;
 	const limited = allMatches.slice(0, limit);
 	const truncated = total > limited.length;

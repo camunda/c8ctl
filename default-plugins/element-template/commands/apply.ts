@@ -382,9 +382,9 @@ export async function applySubcommand(args: string[]): Promise<void> {
 
 	// Validate --set overrides against the template before dry-run or real apply,
 	// so `--dry-run --set notAProperty=x` fails just as the real apply would.
-	let setBindingNames: string[] = [];
+	let setProperties: TemplateProperty[] = [];
 	if (parsed.setArgs.length > 0) {
-		setBindingNames = applySetOverrides(template.properties, parsed.setArgs);
+		setProperties = applySetOverrides(template.properties, parsed.setArgs);
 	}
 
 	// Dry-run: describe what would happen without mutating anything
@@ -439,13 +439,8 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		throw new Error(`Error applying template: ${message}`);
 	}
 
-	if (setBindingNames.length > 0) {
-		warnUnmetConditions(
-			logger,
-			resultXml,
-			setBindingNames,
-			template.properties,
-		);
+	if (setProperties.length > 0) {
+		warnUnmetConditions(logger, resultXml, setProperties);
 	}
 
 	if (parsed.inPlace && bpmnFilePath) {

@@ -202,7 +202,17 @@ function applyGroupFilter(
 	if (groups.length === 0) {
 		return details;
 	}
-	const valid = new Set(groupLabelMap.keys());
+	// Valid group IDs: the template's declared groups table PLUS any group id
+	// referenced directly on property details (templates that use property.group
+	// without a matching groups entry still render a heading — so the filter
+	// must accept those ids too).
+	const validFromTemplate = new Set(groupLabelMap.keys());
+	const validFromDetails = new Set(
+		details
+			.map((d) => d.groupId)
+			.filter((id): id is string => id !== undefined),
+	);
+	const valid = new Set([...validFromTemplate, ...validFromDetails]);
 	for (const g of groups) {
 		if (!valid.has(g)) {
 			const known = [...valid].join(", ") || "(none defined on this template)";

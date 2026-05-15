@@ -464,18 +464,31 @@ export function pickVersion(
 }
 
 /**
- * Substring search on name + description (case-insensitive). Mirrors Modeler.
- * Returns the latest version of each matching id.
+ * Substring search on name + description + keywords (case-insensitive).
+ * Mirrors Modeler's discovery path. Deprecated versions are excluded
+ * before the per-id latest-version reduction so that if the newest
+ * version of a connector is deprecated, the latest non-deprecated
+ * version is still discoverable.
  */
 export function searchTemplates(query: string): Template[] {
 	const cache = loadCache() || [];
 	const q = query.toLowerCase();
-	const matches = cache.filter((t) => {
-		const name = (t.name || "").toLowerCase();
-		const description = (t.description || "").toLowerCase();
-		const id = (t.id || "").toLowerCase();
-		return name.includes(q) || description.includes(q) || id.includes(q);
-	});
+	const matches = cache
+		.filter((t) => {
+			const name = (t.name || "").toLowerCase();
+			const description = (t.description || "").toLowerCase();
+			const id = (t.id || "").toLowerCase();
+			const keywords = (t.keywords ?? []).map((k) => k.toLowerCase()).join(" ");
+			return (
+				name.includes(q) ||
+				description.includes(q) ||
+				id.includes(q) ||
+				keywords.includes(q)
+			);
+		})
+		// Filter deprecated before per-id reduction so the latest
+		// non-deprecated version surfaces when the newest is deprecated.
+		.filter((t) => !t.deprecated);
 
 	// Reduce to the latest version per id.
 	const byId = new Map<string, Template>();

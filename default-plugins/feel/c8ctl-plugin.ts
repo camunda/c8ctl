@@ -120,7 +120,7 @@ function parseArgs(args: string[]): ParsedArgs {
 
 		if (arg === "--var") {
 			const next = args[i + 1];
-			if (next === undefined) {
+			if (next === undefined || next.startsWith("-")) {
 				result.error = "--var requires a value (e.g. --var x=42)";
 				return result;
 			}
@@ -142,7 +142,12 @@ function parseArgs(args: string[]): ParsedArgs {
 				}
 				result.tenant = args[++i];
 			} else {
-				result.tenant = arg.slice("--tenant=".length);
+				const value = arg.slice("--tenant=".length);
+				if (!value) {
+					result.error = "--tenant requires a value";
+					return result;
+				}
+				result.tenant = value;
 			}
 			continue;
 		}
@@ -181,7 +186,7 @@ function normalizeExpression(expression: string): string {
 function parseVarsJson(
 	vars: string | undefined,
 ): Record<string, unknown> | undefined {
-	if (!vars) {
+	if (vars === undefined) {
 		return undefined;
 	}
 	let parsed: unknown;
@@ -488,7 +493,7 @@ async function evaluateCluster({
 		const response = await client.evaluateExpression({
 			expression: normalizeExpression(expression),
 			...(variables !== undefined ? { variables } : {}),
-			...(tenantId !== undefined ? { tenantId } : {}),
+			...(tenantId ? { tenantId } : {}),
 		});
 		return {
 			expression,
@@ -615,8 +620,42 @@ async function evaluateSubcommand(
 
 	const variables = buildVariables(parsed.vars, parsed.varArgs);
 
+	// Resolve the effective tenant: explicit --tenant wins; otherwise fall back
+	// to the profile/session default via resolveTenantId (same path all other
+	// cluster commands use, so CAMUNDA_DEFAULT_TENANT_ID / profile settings
+	// are honoured without a redundant --tenant flag).
+	const effectiveTenantId =
+		parsed.engine === "cluster"
+			? (parsed.tenant ?? c8ctl.resolveTenantId(profile))
+			: parsed.tenant;
+
 	if (parsed.engine === "local" && parsed.tenant) {
 		logger.warn("--tenant has no effect with --engine local; ignored");
+	}
+
+	// Honour --dry-run for the cluster engine: emit the would-be request
+	// payload and return without hitting the API.
+	if (parsed.engine === "cluster" && c8ctl.dryRun) {
+		const payload = {
+			expression: normalizeExpression(expression),
+			...(variables !== undefined ? { variables } : {}),
+			...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
+		};
+		if (c8ctl.outputMode === "json") {
+			logger.json({
+				dryRun: true,
+				command: "feel evaluate",
+				endpoint: "POST /v2/expression/evaluation",
+				payload,
+			});
+		} else {
+			logger.output("Dry run — no cluster request sent.");
+			logger.output("  POST /v2/expression/evaluation");
+			logger.output(
+				`  ${JSON.stringify(payload, null, 2).split("\n").join("\n  ")}`,
+			);
+		}
+		return;
 	}
 
 	const normalized =
@@ -624,7 +663,7 @@ async function evaluateSubcommand(
 			? await evaluateCluster({
 					expression,
 					variables,
-					tenantId: parsed.tenant,
+					tenantId: effectiveTenantId,
 					profile,
 				})
 			: evaluateLocal({ expression, variables });

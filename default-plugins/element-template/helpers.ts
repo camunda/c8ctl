@@ -83,6 +83,7 @@ export type Template = {
 	deprecated?: boolean | { message?: string };
 	icon?: { contents?: string };
 	groups?: TemplateGroup[];
+	keywords?: string[];
 	properties: TemplateProperty[];
 	metadata?: { upstreamRef?: string } & Record<string, unknown>;
 };
@@ -445,8 +446,10 @@ export function validateDropdownValue(
 export function applySetOverrides(
 	properties: TemplateProperty[],
 	setArgs: string[],
-): string[] {
-	const setBindingNames = new Set<string>();
+): TemplateProperty[] {
+	// Track by object reference so qualified sets like `input:foo=...` and
+	// `header:foo=...` preserve their binding type through to warnUnmetConditions.
+	const setProperties = new Set<TemplateProperty>();
 
 	for (const arg of setArgs) {
 		const { bindingTypeFilter, name, value } = parseSetArg(arg);
@@ -459,12 +462,11 @@ export function applySetOverrides(
 		for (const prop of matches) {
 			if (prop.choices) validateDropdownValue(prop, name, value);
 			prop.value = value;
-			const bindingName = getBindingName(prop);
-			if (bindingName) setBindingNames.add(bindingName);
+			setProperties.add(prop);
 		}
 	}
 
-	return [...setBindingNames];
+	return [...setProperties];
 }
 
 /**
@@ -474,12 +476,13 @@ export function applySetOverrides(
 export function warnUnmetConditions(
 	logger: Logger,
 	resultXml: string,
-	setBindingNames: string[],
-	properties: TemplateProperty[],
+	setProperties: TemplateProperty[],
 ): void {
-	for (const name of setBindingNames) {
-		const prop = properties.find((p) => getBindingName(p) === name);
-		if (!prop?.binding) continue;
+	for (const prop of setProperties) {
+		if (!prop.binding) continue;
+
+		const name = getBindingName(prop);
+		if (!name) continue;
 
 		const bt = prop.binding.type;
 		let present = false;
