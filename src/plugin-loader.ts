@@ -30,8 +30,14 @@ import { c8ctl } from "./runtime.ts";
  * variadic call semantics keep those handlers working unchanged.
  */
 export interface PluginCtx {
-	/** Resolved active profile name (from `--profile` or session). */
-	profile: string;
+	/**
+	 * Active profile name (from `--profile` or session), or `undefined` when
+	 * neither was set. Plugins should pass this through to `createClient()` /
+	 * `resolveTenantId()` verbatim so env-var-only configurations (no
+	 * profile, just `CAMUNDA_*` env vars) resolve the same way they do for
+	 * built-in commands.
+	 */
+	profile: string | undefined;
 	/** True when `--dry-run` is set. Plugins SHOULD honour this. */
 	dryRun: boolean;
 	/** True when `--verbose` is set. */
@@ -46,24 +52,24 @@ export interface PluginCtx {
 	readonly client: CamundaClient;
 }
 
-type CommandHandler = (
+export type CommandHandler = (
 	args: string[],
 	flags?: Record<string, unknown>,
 	ctx?: PluginCtx,
 ) => Promise<void>;
 
-interface CommandWithFlags {
+export interface CommandWithFlags {
 	flags: Record<string, FlagDef>;
 	handler: CommandHandler;
 }
 
-type PluginCommand = CommandHandler | CommandWithFlags;
+export type PluginCommand = CommandHandler | CommandWithFlags;
 
-interface PluginCommands {
+export interface PluginCommands {
 	[commandName: string]: PluginCommand;
 }
 
-interface PluginMetadata {
+export interface PluginMetadata {
 	name?: string;
 	description?: string;
 	commands?: {

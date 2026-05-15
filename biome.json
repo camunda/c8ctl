@@ -5,7 +5,8 @@
 			"src/**/*.ts",
 			"!src/templates",
 			"tests/**/*.ts",
-			"scripts/**/*.ts"
+			"scripts/**/*.ts",
+			"default-plugins/**/*.ts"
 		]
 	},
 	"linter": {
@@ -14,7 +15,8 @@
 			"src/**/*.ts",
 			"!/src/templates/**",
 			"tests/**/*.ts",
-			"scripts/**/*.ts"
+			"scripts/**/*.ts",
+			"default-plugins/**/*.ts"
 		],
 		"rules": {
 			"recommended": true,

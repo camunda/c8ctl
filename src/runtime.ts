@@ -36,6 +36,7 @@ export interface C8ctlDeps {
 	): CamundaClient;
 	resolveTenantId(profileFlag?: string): string;
 	getLogger(mode?: OutputMode): Logger;
+	getUserDataDir(): string;
 }
 
 export interface C8ctlPluginRuntime {
@@ -60,6 +61,14 @@ export interface C8ctlPluginRuntime {
 	): CamundaClient;
 	resolveTenantId(profileFlag?: string): string;
 	getLogger(mode?: OutputMode): Logger;
+	/**
+	 * Cross-platform user data directory:
+	 *   - macOS:  ~/Library/Application Support/c8ctl
+	 *   - Linux:  $XDG_CONFIG_HOME/c8ctl (default ~/.config/c8ctl)
+	 *   - Win32:  %APPDATA%/c8ctl
+	 * Overridable via C8CTL_DATA_DIR.
+	 */
+	getUserDataDir(): string;
 }
 
 declare global {
@@ -138,6 +147,13 @@ class C8ctl implements C8ctlPluginRuntime {
 			throw new Error("c8ctl.init() must be called before getLogger()");
 		}
 		return this._deps.getLogger(mode);
+	}
+
+	getUserDataDir(): string {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before getUserDataDir()");
+		}
+		return this._deps.getUserDataDir();
 	}
 
 	// Expose env properties directly for plugin compatibility

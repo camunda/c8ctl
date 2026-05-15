@@ -20,7 +20,7 @@ import {
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { refreshCompletionsIfStale } from "./completion.ts";
-import { loadSessionState, resolveTenantId } from "./config.ts";
+import { getUserDataDir, loadSessionState, resolveTenantId } from "./config.ts";
 import {
 	showCommandHelp,
 	showHelp,
@@ -375,7 +375,12 @@ async function main() {
 	}
 
 	// Inject dependencies into the runtime (breaks circular imports)
-	c8ctl.init({ createClient, resolveTenantId, getLogger });
+	c8ctl.init({
+		createClient,
+		resolveTenantId,
+		getLogger,
+		getUserDataDir,
+	});
 
 	// Load installed plugins
 	await loadInstalledPlugins();
@@ -462,8 +467,10 @@ async function main() {
 		// mirrors the built-in CommandContext pattern so plugins that
 		// never touch a Camunda client (e.g. local-only utilities) do
 		// not trigger credential resolution by virtue of receiving ctx.
-		const pluginProfile =
-			str(values.profile) ?? c8ctl.activeProfile ?? "default";
+		// Leave undefined when no flag/session profile is set so
+		// resolveClusterConfig() can fall through to CAMUNDA_* env vars,
+		// matching the behaviour of built-in commands.
+		const pluginProfile = str(values.profile) ?? c8ctl.activeProfile;
 		let _pluginClient: ReturnType<typeof createClient> | undefined;
 		const pluginCtx: PluginCtx = {
 			profile: pluginProfile,
@@ -510,7 +517,7 @@ async function main() {
 			// value (#364).
 			const builtinOptions: Record<
 				string,
-				{ type: "string" | "boolean"; short?: string }
+				{ type: "string" | "boolean"; short?: string; multiple?: boolean }
 			> = {};
 			for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
 				const short = "short" in def ? def.short : undefined;
@@ -563,6 +570,7 @@ async function main() {
 				mergedOptions[name] = {
 					type: def.type,
 					...(short && { short }),
+					...(def.multiple && { multiple: true }),
 				};
 			}
 			// Strip blocked-flag tokens from argv before re-parse. Blocked
@@ -596,10 +604,13 @@ async function main() {
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
 				if (blockedFlags.has(flagName)) continue;
 				const raw = pluginParsed.values[flagName];
-				// Repeated string flags arrive as arrays — take the last value
-				// (last-write-wins), matching built-in flag normalization.
+				// multiple:true flags collect all values into an array — preserve
+				// the array so the plugin handler receives every supplied value.
+				// Non-multiple string flags may still arrive as an array when
+				// parseArgs sees the same flag name declared as multiple elsewhere;
+				// take the last value (last-write-wins) in that case.
 				const value =
-					def.type === "string" && Array.isArray(raw)
+					def.type === "string" && Array.isArray(raw) && !def.multiple
 						? (raw.findLast((v) => typeof v === "string") ?? undefined)
 						: raw;
 				if (value !== undefined) {

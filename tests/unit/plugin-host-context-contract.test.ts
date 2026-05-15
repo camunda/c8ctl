@@ -167,6 +167,18 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.strictEqual(parsed.ctx.profile, "myprofile");
 	});
 
+	test("ctx.profile is undefined when no --profile or session profile is set", async () => {
+		// Built-in commands pass `undefined` so resolveClusterConfig() can
+		// fall through to CAMUNDA_* env vars. The plugin host must do the
+		// same — defaulting to "default" would silently pin every plugin to
+		// the local default profile and skip env-var resolution entirely.
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.profile, undefined);
+	});
+
 	test("ctx.outputMode is 'json' when --json is set", async () => {
 		const result = await c8Plugin("echo-ctx", "--json");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);

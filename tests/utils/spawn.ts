@@ -12,6 +12,7 @@
 import {
 	type ExecFileException,
 	execFile as execFileCb,
+	spawn,
 } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -122,4 +123,72 @@ export async function asyncSpawn(
 			status: typeof e.code === "number" ? e.code : 1,
 		};
 	}
+}
+
+/**
+ * Spawn variant that lets callers drive stdin programmatically — needed
+ * for testing pipeline behaviour (slow producers, multi-chunk writes).
+ * The `writeStdin` callback receives the child's stdin stream and is
+ * awaited before stdin is closed via end().
+ */
+export async function asyncSpawnWithStdin(
+	command: string,
+	args: string[],
+	writeStdin: (stdin: NodeJS.WritableStream) => void | Promise<void>,
+	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
+): Promise<SpawnResult> {
+	validateSpawnInputs(command, args, options);
+	const child = spawn(command, args, {
+		stdio: ["pipe", "pipe", "pipe"],
+		cwd: options?.cwd,
+		env: options?.env,
+		...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+	});
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.setEncoding("utf-8");
+	child.stderr?.setEncoding("utf-8");
+	child.stdout?.on("data", (chunk: string) => {
+		stdout += chunk;
+	});
+	child.stderr?.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	const stdin = child.stdin;
+	if (!stdin) throw new Error("child has no stdin");
+	stdin.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EPIPE") {
+			// EPIPE is expected: the child may close stdin before we finish writing
+			// (e.g. when the command rejects input early). Surfacing it would
+			// mask the real test signal in stderr/exit.
+			return;
+		}
+		// All other stdin errors are real failures; surface them in stderr so
+		// they are visible in test output rather than silently swallowed.
+		stderr += `stdin error: ${err.message}\n`;
+	});
+
+	// Create the close/error promise BEFORE awaiting writeStdin so we don't
+	// miss the 'close' event if the child exits early (e.g. rejects input
+	// immediately). Any buffered 'close' emission will be captured by the
+	// already-registered listener rather than being lost between the two awaits.
+	const statusPromise = new Promise<number | null>((resolve, reject) => {
+		child.on("close", (code) => resolve(code));
+		child.on("error", (err) => {
+			stderr += `${err.message}\n`;
+			reject(err);
+		});
+	});
+
+	try {
+		await writeStdin(stdin);
+	} finally {
+		stdin.end();
+	}
+
+	const status = await statusPromise;
+
+	return { stdout, stderr, status };
 }
