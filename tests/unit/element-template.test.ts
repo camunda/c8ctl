@@ -1416,3 +1416,193 @@ describe("CLI behavioural: element-template apply stdin", () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// element-template apply -- --dry-run
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: element-template apply --dry-run", () => {
+	test("text mode: prints dry-run summary without touching the BPMN file", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const tempBpmn = join(tempDir, "test.bpmn");
+		const original = readFileSync(BPMN_FILE, "utf-8");
+		writeFileSync(tempBpmn, original);
+		try {
+			const result = await c8text(
+				"--dry-run",
+				"element-template",
+				"apply",
+				"--in-place",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+				tempBpmn,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.ok(
+				result.stdout.includes("Dry run"),
+				"stdout should contain 'Dry run' summary line",
+			);
+			// The file must not have been modified
+			assert.strictEqual(
+				readFileSync(tempBpmn, "utf-8"),
+				original,
+				"--dry-run must not modify the BPMN file",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("text mode: reports template name, element id, and in-place mode", async () => {
+		const result = await c8text(
+			"--dry-run",
+			"element-template",
+			"apply",
+			"--in-place",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Activity_17s7axj"),
+			"stdout should include the element id",
+		);
+		assert.ok(
+			result.stdout.toLowerCase().includes("in-place"),
+			"stdout should describe in-place mode",
+		);
+	});
+
+	test("text mode: reports stdout mode when --in-place is absent", async () => {
+		const result = await c8text(
+			"--dry-run",
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("stdout"),
+			"stdout should describe stdout (non-in-place) mode",
+		);
+	});
+
+	test("text mode: --set overrides are reflected in the dry-run summary", async () => {
+		const result = await c8text(
+			"--dry-run",
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"method=POST",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("method=POST"),
+			"dry-run summary should list --set overrides",
+		);
+	});
+
+	test("JSON mode: emits structured { dryRun: true, command, template, elementId } object", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({ outputMode: "json" }),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--dry-run",
+					"element-template",
+					"apply",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					BPMN_FILE,
+				],
+				{
+					env: {
+						...process.env,
+						CAMUNDA_BASE_URL: "http://test-cluster/v2",
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = JSON.parse(result.stdout);
+			assert.ok(isRecord(out), "JSON output should be a record");
+			assert.strictEqual(out.dryRun, true, "dryRun must be true");
+			assert.strictEqual(out.command, "element-template apply");
+			assert.strictEqual(out.elementId, "Activity_17s7axj");
+			assert.ok(
+				out.template !== null && typeof out.template === "object",
+				"template must be an object",
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("JSON mode: setOverrides array reflects --set values", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({ outputMode: "json" }),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--dry-run",
+					"element-template",
+					"apply",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					BPMN_FILE,
+					"--set",
+					"method=POST",
+					"--set",
+					"url=https://example.com",
+				],
+				{
+					env: {
+						...process.env,
+						CAMUNDA_BASE_URL: "http://test-cluster/v2",
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = JSON.parse(result.stdout);
+			assert.ok(isRecord(out), "JSON output should be a record");
+			assert.ok(
+				Array.isArray(out.setOverrides),
+				"setOverrides must be an array",
+			);
+			const overrides: string[] = Array.isArray(out.setOverrides)
+				? out.setOverrides.map(String)
+				: [];
+			assert.ok(
+				overrides.includes("method=POST"),
+				"setOverrides should contain method=POST",
+			);
+			assert.ok(
+				overrides.includes("url=https://example.com"),
+				"setOverrides should contain the url override",
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
