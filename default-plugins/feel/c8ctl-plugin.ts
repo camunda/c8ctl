@@ -260,8 +260,9 @@ function setNestedValue(
 	for (let i = 0; i < keys.length - 1; i++) {
 		const key = keys[i];
 		assertSafeKey(key, path);
+		const hasOwn = Object.prototype.hasOwnProperty.call(cursor, key);
 		const existing = cursor[key];
-		if (existing === undefined) {
+		if (!hasOwn || existing === undefined) {
 			const next: Record<string, unknown> = Object.create(null);
 			Object.defineProperty(cursor, key, {
 				value: next,
