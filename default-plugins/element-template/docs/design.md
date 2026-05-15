@@ -65,12 +65,14 @@ We mirror Desktop Modeler's approach
 
 ### Lifecycle
 
-- **First time the index is needed** (search, sync, or `apply`/`get-properties`
-  with an `<id>` arg): bootstrap auto-runs — full fetch, ~459 templates,
-  visible per-template progress.
-- **Local file or URL paths** for `apply`/`get-properties`: never
-  trigger bootstrap. The plugin classifies the template arg before
-  touching the cache.
+- **First time the index is needed** (search, sync, or
+  `apply`/`get-properties`/`info` with an `<id>` arg): bootstrap
+  auto-runs — full fetch, ~459 templates, visible per-template
+  progress. `get` deliberately does NOT bootstrap (its progress
+  logs would corrupt `get <id> > template.json` redirects).
+- **Local file or URL paths** for `apply`/`get-properties`/`info`:
+  never trigger bootstrap. The plugin classifies the template arg
+  before touching the cache.
 - **Stale cache** (>7 days since `fetched-at`): warn-only, suggesting
   `c8ctl element-template sync`. We don't auto-refresh — surprise
   network activity inside `apply` is undesirable and the index is
