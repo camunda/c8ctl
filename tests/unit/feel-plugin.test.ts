@@ -2,8 +2,9 @@
  * Behavioural tests for the feel default plugin (default-plugins/feel/).
  *
  * Local-engine tests run feelin in-process (no cluster needed). One
- * cluster-engine test points at a closed local port to exercise the
- * connection-refused error-classification path.
+ * cluster-engine test stands up a local TCP server that destroys each
+ * accepted socket to provoke a deterministic connection failure and
+ * exercise the error-classification path.
  */
 
 import assert from "node:assert";
