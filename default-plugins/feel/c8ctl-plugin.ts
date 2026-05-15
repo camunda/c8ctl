@@ -403,9 +403,22 @@ function networkErrorMessage(error: unknown): string | undefined {
 			return "Connection to Camunda cluster was reset. Retry the operation.";
 		case "ETIMEDOUT":
 			return "Request to Camunda cluster timed out.";
-		default:
-			return undefined;
 	}
+
+	// Fallback for `TypeError("fetch failed")` with no recognizable
+	// code on the cause chain — observed on Linux CI when a server
+	// destroys the socket mid-request. Treat as a generic connection
+	// failure so the user still gets the local-engine hint.
+	if (
+		isRecord(error) &&
+		error.name === "TypeError" &&
+		typeof error.message === "string" &&
+		error.message.toLowerCase().includes("fetch failed")
+	) {
+		return "Cannot connect to Camunda cluster. Verify the endpoint URL and that the cluster is reachable.";
+	}
+
+	return undefined;
 }
 
 /**
