@@ -25,7 +25,8 @@ import {
 	resolveOotbTemplate,
 } from "../template-ref.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
 
 // Minimal vendor-bundle surface — the bundle is loaded via require() with
@@ -120,6 +121,7 @@ function findExtensionByType(
 	if (!extensionElements) {
 		return undefined;
 	}
+	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
 	const values = extensionElements.get("values") as ModdleElement[] | undefined;
 	return values?.find((v) => v.$type === type);
 }
@@ -149,6 +151,7 @@ function forceSetValues(
 	setArgs: string[],
 ): void {
 	const modeling = modeler.get("modeling");
+	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped ModdleElement
 	const extensionElements = element.businessObject.get("extensionElements") as
 		| ModdleElement
 		| undefined;
@@ -207,6 +210,7 @@ function updateModdleForProperty(
 
 	switch (binding.type) {
 		case "zeebe:input": {
+			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
 			const inputs = (containers.ioMapping?.get("inputParameters") ??
 				[]) as ModdleElement[];
 			const child = inputs.find((p) => p.target === binding.name);
@@ -216,6 +220,7 @@ function updateModdleForProperty(
 			return;
 		}
 		case "zeebe:output": {
+			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
 			const outputs = (containers.ioMapping?.get("outputParameters") ??
 				[]) as ModdleElement[];
 			const child = outputs.find((p) => p.source === binding.source);
@@ -225,6 +230,7 @@ function updateModdleForProperty(
 			return;
 		}
 		case "zeebe:taskHeader": {
+			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
 			const headers = (containers.taskHeaders?.get("values") ??
 				[]) as ModdleElement[];
 			const child = headers.find((h) => h.key === binding.key);
@@ -234,6 +240,7 @@ function updateModdleForProperty(
 			return;
 		}
 		case "zeebe:property": {
+			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
 			const props = (containers.zeebeProperties?.get("properties") ??
 				[]) as ModdleElement[];
 			const child = props.find((p) => p.name === binding.name);

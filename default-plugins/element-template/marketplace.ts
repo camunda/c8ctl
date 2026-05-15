@@ -14,12 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
-import {
-	isRecord,
-	type Logger,
-	type Template,
-	USER_AGENT,
-} from "./helpers.ts";
+import { isRecord, type Logger, type Template, USER_AGENT } from "./helpers.ts";
 
 const DEFAULT_OOTB_URL =
 	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";

@@ -28,7 +28,8 @@ import {
 	pickVersion,
 } from "./marketplace.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 export type BpmnInput = { xml: string; source: string };
 

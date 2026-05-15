@@ -28,7 +28,8 @@ import { infoSubcommand } from "./commands/info.ts";
 import { searchSubcommand } from "./commands/search.ts";
 import { syncSubcommand } from "./commands/sync.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 /**
  * Reinject flags pre-parsed by the host (#366/#367) back into the args

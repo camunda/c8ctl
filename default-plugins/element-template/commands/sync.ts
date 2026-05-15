@@ -6,7 +6,8 @@
 import type {} from "../../../src/runtime.ts";
 import { syncTemplates } from "../marketplace.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 export async function syncSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();

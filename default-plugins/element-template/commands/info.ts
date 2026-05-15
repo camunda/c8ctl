@@ -13,7 +13,8 @@ import type {} from "../../../src/runtime.ts";
 import type { Template } from "../helpers.ts";
 import { loadTemplate } from "../template-ref.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 export type InspectArgs = {
 	templateArg: string;

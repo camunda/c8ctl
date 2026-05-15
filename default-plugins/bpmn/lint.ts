@@ -13,7 +13,8 @@ import type { LintReport, LintResults } from "bpmnlint";
 import type { Logger } from "../../src/logger.ts";
 import type {} from "../../src/runtime.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5,14 +5,15 @@
 
 import { styleText } from "node:util";
 import type {} from "../../../src/runtime.ts";
-import { buildTemplateSummary, formatTemplateHeaderLines } from "./info.ts";
 import {
 	bootstrapIfNeeded,
 	nudgeIfStale,
 	searchTemplates,
 } from "../marketplace.ts";
+import { buildTemplateSummary, formatTemplateHeaderLines } from "./info.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 export async function searchSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();

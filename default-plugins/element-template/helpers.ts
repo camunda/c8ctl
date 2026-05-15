@@ -7,7 +7,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type {} from "../../src/runtime.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 /**
  * User-Agent header sent on every outbound HTTP call this plugin makes
@@ -121,6 +122,7 @@ export type ParsedPluginArgs = {
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
 import type { Logger } from "../../src/logger.ts";
+
 export type { Logger };
 
 // ---------------------------------------------------------------------------

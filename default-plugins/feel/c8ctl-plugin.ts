@@ -21,7 +21,8 @@ import type {
 } from "../../src/plugin-loader.ts";
 import type {} from "../../src/runtime.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 // ---------------------------------------------------------------------------
 // Local types
@@ -621,8 +622,8 @@ async function feelHandler(
 	const subcommand = reinjected[0];
 	const subArgs = reinjected.slice(1);
 
-	const validSubcommands = metadata.commands.feel.subcommands.map(
-		(s) => s.name as string,
+	const validSubcommands: string[] = metadata.commands.feel.subcommands.map(
+		(s) => s.name,
 	);
 	if (!subcommand || !validSubcommands.includes(subcommand)) {
 		const logger = c8ctl.getLogger();

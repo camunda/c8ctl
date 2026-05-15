@@ -14,10 +14,11 @@ import {
 	type Template,
 	type TemplateProperty,
 } from "../helpers.ts";
-import { formatKeyedCard, parseInspectArgs } from "./info.ts";
 import { loadTemplate } from "../template-ref.ts";
+import { formatKeyedCard, parseInspectArgs } from "./info.ts";
 
-const c8ctl = globalThis.c8ctl!;
+if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
+const c8ctl = globalThis.c8ctl;
 
 export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
