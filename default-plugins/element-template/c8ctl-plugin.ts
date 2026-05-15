@@ -203,7 +203,7 @@ export const metadata = {
 					command:
 						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --group authentication --group endpoint",
 					description:
-						"Filter to one or more group ids (use the id, not the label — `info` shows the available group ids)",
+						"Filter to one or more group ids (use the id, not the label — group ids appear as headings in `get-properties` output)",
 				},
 				{
 					command:

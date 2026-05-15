@@ -108,7 +108,8 @@ For `<id>` (no `@<version>`):
   is true. Templates without `engines.camunda` are treated as
   compatible (legacy fallback).
 - `get-properties` has no BPMN context, so it picks the latest version
-  and warns the user to pin with `id@<n>` if they want a specific one.
+  and warns the user to pin with `id@<n>` if they want a specific one
+  (same annotation as `info`).
 
 Errors include the available versions to make the next step obvious:
 
@@ -125,8 +126,7 @@ Output groups by `category.name` to mirror Modeler's UI layout.
 
 ## Plugin dependencies
 
-`semver` is a root dep (added in this work) so the plugin can
-`require('semver')` via `createRequire`. Walking up from the plugin
+`semver` is a root dep (added in this work) imported directly. Walking up from the plugin
 file finds the root `node_modules`. Plugin-local deps would also work
 but the pattern matches how `bpmn-moddle`/`bpmnlint` are consumed
 across plugins.

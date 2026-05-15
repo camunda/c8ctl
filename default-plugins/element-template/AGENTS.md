@@ -54,7 +54,7 @@ version resolution, and the default-plugin-vs-core-command rationale.
 ## Testing
 
 ```bash
-node --experimental-strip-types --test tests/unit/element-template.test.ts
+npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
 ```
 
 Smoke-test against the live marketplace (writes to a throwaway dir):

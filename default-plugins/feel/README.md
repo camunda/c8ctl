@@ -77,9 +77,11 @@ JSON consumers should treat `type` and `position` as engine-conditional.
 | `cluster` (default) | Connected to a Camunda 8.9+ cluster | Uses `POST /v2/expression/evaluation`. Real Zeebe FEEL semantics, full Camunda extensions, supports tenant-scoped cluster variables. |
 | `local` | Offline or no cluster configured | Uses [feelin](https://github.com/nikku/feelin) in-process. Fast, but **does not support all Camunda FEEL extensions** — result may differ from the cluster engine. |
 
-`feel evaluate` exits non-zero only when the expression fails to
-parse — runtime issues are warnings, not failures, because they're
-properly the engine's diagnostic output, not a CLI error.
+`feel evaluate` exits non-zero for CLI/input validation errors (missing
+expression, unknown flag, invalid `--engine`, malformed `--var`, invalid
+`--vars` JSON) and for FEEL parse failures. Runtime evaluation issues
+(e.g. unresolved variables) are warnings in the output, not failures,
+because they're the engine's diagnostic output rather than a CLI error.
 
 ## Error behaviour
 

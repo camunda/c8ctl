@@ -286,7 +286,14 @@ export async function syncTemplates({
 		`Index has ${entries.length} template versions across ${Object.keys(index).length} connectors.`,
 	);
 
-	const existing = loadCache() || [];
+	let existing: Template[];
+	try {
+		existing = loadCache() || [];
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		logger.warn(`Corrupt cache — starting fresh: ${message}`);
+		existing = [];
+	}
 	const byUpstreamRef = new Map<string, Template>();
 	for (const tpl of existing) {
 		const ref = tpl.metadata?.upstreamRef;

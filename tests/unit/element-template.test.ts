@@ -1074,7 +1074,7 @@ describe("CLI behavioural: element-template get-properties", () => {
 		);
 	});
 
-	test("rejects a positional that matches nothing — points at info", async () => {
+	test("rejects a positional that matches nothing — points at get-properties", async () => {
 		const result = await c8text(
 			"element-template",
 			"get-properties",
@@ -1088,8 +1088,8 @@ describe("CLI behavioural: element-template get-properties", () => {
 			"Should report the unknown property",
 		);
 		assert.ok(
-			output.includes("c8ctl element-template info"),
-			"Should redirect to the info command",
+			output.includes("c8ctl element-template get-properties"),
+			"Should redirect to get-properties (not info) to list available properties",
 		);
 		assert.ok(
 			!output.includes("authentication.token") ||

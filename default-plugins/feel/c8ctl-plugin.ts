@@ -103,7 +103,17 @@ function parseArgs(args: string[]): ParsedArgs {
 		}
 
 		if (arg === "--vars" || arg.startsWith("--vars=")) {
-			result.vars = arg.includes("=") ? arg.slice("--vars=".length) : args[++i];
+			if (arg === "--vars") {
+				const next = args[i + 1];
+				if (next === undefined || next.startsWith("-")) {
+					result.error =
+						"--vars requires a JSON object value (e.g. --vars '{\"a\":1}')";
+					return result;
+				}
+				result.vars = args[++i];
+			} else {
+				result.vars = arg.slice("--vars=".length);
+			}
 			continue;
 		}
 
@@ -123,9 +133,16 @@ function parseArgs(args: string[]): ParsedArgs {
 		}
 
 		if (arg === "--tenant" || arg.startsWith("--tenant=")) {
-			result.tenant = arg.includes("=")
-				? arg.slice("--tenant=".length)
-				: args[++i];
+			if (arg === "--tenant") {
+				const next = args[i + 1];
+				if (next === undefined || next.startsWith("-")) {
+					result.error = "--tenant requires a value";
+					return result;
+				}
+				result.tenant = args[++i];
+			} else {
+				result.tenant = arg.slice("--tenant=".length);
+			}
 			continue;
 		}
 

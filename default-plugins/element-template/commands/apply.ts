@@ -380,6 +380,13 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		template = await readTemplateFromPathOrUrl(ref.value);
 	}
 
+	// Validate --set overrides against the template before dry-run or real apply,
+	// so `--dry-run --set notAProperty=x` fails just as the real apply would.
+	let setBindingNames: string[] = [];
+	if (parsed.setArgs.length > 0) {
+		setBindingNames = applySetOverrides(template.properties, parsed.setArgs);
+	}
+
 	// Dry-run: describe what would happen without mutating anything
 	if (c8ctl.dryRun) {
 		const fallbackId = ref.kind === "id" ? ref.id : ref.value;
@@ -417,11 +424,6 @@ export async function applySubcommand(args: string[]): Promise<void> {
 			}
 		}
 		return;
-	}
-
-	let setBindingNames: string[] = [];
-	if (parsed.setArgs.length > 0) {
-		setBindingNames = applySetOverrides(template.properties, parsed.setArgs);
 	}
 
 	let resultXml: string;

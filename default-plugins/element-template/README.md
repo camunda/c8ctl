@@ -41,7 +41,7 @@ c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
 c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url method
 c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 'authentication.*'
 
-# Filter by group id (repeatable; ids come from the `info` card / group headings)
+# Filter by group id (repeatable; ids come from `get-properties` group headings)
 c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 \
   --group authentication --group endpoint
 

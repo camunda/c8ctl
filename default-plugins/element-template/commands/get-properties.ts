@@ -32,8 +32,20 @@ export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 		allowFilters: true,
 	});
 
-	const { template, allDetails, groupLabelMap, sourceByDetail } =
-		await loadTemplate(parsed.templateArg);
+	const {
+		template,
+		allDetails,
+		groupLabelMap,
+		sourceByDetail,
+		autoResolvedVersion,
+	} = await loadTemplate(parsed.templateArg);
+
+	if (autoResolvedVersion) {
+		logger.warn(
+			`Resolved latest version (${template.version}) of ${template.id}. ` +
+				`Use '${template.id}@${template.version}' to pin.`,
+		);
+	}
 
 	// Resolve positional names if any (literals or globs). Each arg must
 	// match at least one property — typos shouldn't silently produce no
@@ -369,7 +381,7 @@ function filterByPropertyArg(
 	});
 	if (matches.length === 0) {
 		const hint = templateArg
-			? `\nRun 'c8ctl element-template info ${templateArg}' to see available properties.`
+			? `\nRun 'c8ctl element-template get-properties ${templateArg}' to list all available properties.`
 			: "";
 		throw new Error(`Property "${propertyArg}" not found.${hint}`);
 	}

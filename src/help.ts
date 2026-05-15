@@ -849,6 +849,7 @@ function showFlagAwarePluginHelp(command: string): void {
 								description: def.description ?? "",
 								...(def.short ? { short: def.short } : {}),
 								...(def.required ? { required: true } : {}),
+								...(def.multiple ? { multiple: true } : {}),
 							},
 						]),
 					)
