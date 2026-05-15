@@ -20,6 +20,7 @@ const DEFAULT_OOTB_URL =
 	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";
 const FETCH_CONCURRENCY = 12;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const FETCH_TIMEOUT_MS = 30_000; // 30 s per HTTP request
 
 // ---------------------------------------------------------------------------
 // Index entry types
@@ -157,6 +158,7 @@ export function nudgeIfStale(logger: Logger): void {
 async function fetchJson(url: string): Promise<unknown> {
 	const response = await fetch(url, {
 		headers: { "User-Agent": USER_AGENT },
+		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 	});
 	if (!response.ok) {
 		throw new Error(
@@ -309,6 +311,7 @@ export async function syncTemplates({
 
 	await pool(toFetch, FETCH_CONCURRENCY, async (entry) => {
 		progress += 1;
+		const myProgress = progress;
 		const label = `${entry.id}@${entry.version}`;
 		try {
 			const template = await fetchTemplate(entry.ref);
@@ -316,16 +319,23 @@ export async function syncTemplates({
 			template.metadata.upstreamRef = entry.ref;
 			fetchedTemplates.push(template);
 			fetched += 1;
-			logger.info(`  [${progress}/${toFetch.length}] ${label}`);
+			logger.info(`  [${myProgress}/${toFetch.length}] ${label}`);
 		} catch (error) {
 			errors += 1;
 			const message = error instanceof Error ? error.message : String(error);
-			logger.warn(`  [${progress}/${toFetch.length}] ${label} — ${message}`);
+			logger.warn(`  [${myProgress}/${toFetch.length}] ${label} — ${message}`);
 		}
 	});
 
 	// Build the new cache: keep cached entries that are still in the index,
-	// plus everything we just fetched.
+	// plus everything we just fetched. Sort fetched entries by id+version so
+	// cache order (and therefore search result order) is deterministic
+	// regardless of network timing.
+	fetchedTemplates.sort((a, b) => {
+		const idCmp = (a.id ?? "").localeCompare(b.id ?? "");
+		if (idCmp !== 0) return idCmp;
+		return (a.version ?? 0) - (b.version ?? 0);
+	});
 	const next: Template[] = [];
 	for (const tpl of existing) {
 		const ref = tpl.metadata?.upstreamRef;

@@ -157,7 +157,7 @@ export const metadata = {
 				{
 					name: "get-properties",
 					description:
-						"Show detail cards for one or more properties (or all if none given)",
+						"List settable properties (use --detailed for full detail cards)",
 				},
 				{
 					name: "apply",

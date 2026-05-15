@@ -60,6 +60,9 @@ export function parseInspectArgs(
 			continue;
 		}
 		if (!afterDoubleDash && (arg === "--detailed" || arg === "-d")) {
+			if (!allowFilters) {
+				throw new Error(`Unknown flag: ${arg}. ${usage}`);
+			}
 			detailed = true;
 			continue;
 		}

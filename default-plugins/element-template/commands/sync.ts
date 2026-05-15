@@ -20,6 +20,13 @@ export async function syncSubcommand(args: string[]): Promise<void> {
 			continue;
 		}
 		if (arg === "--") {
+			// No positional args expected — reject anything after `--`.
+			const rest = args.slice(i + 1);
+			if (rest.length > 0) {
+				throw new Error(
+					`Unexpected argument: ${rest[0]}. Usage: c8ctl element-template sync [--prune]`,
+				);
+			}
 			break;
 		}
 		if (arg.startsWith("-")) {

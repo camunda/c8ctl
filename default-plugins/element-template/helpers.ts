@@ -160,6 +160,7 @@ export async function readFileOrUrl(input: string): Promise<string> {
 		const resolvedUrl = toRawGitHubUrl(input);
 		const response = await fetch(resolvedUrl, {
 			headers: { "User-Agent": USER_AGENT },
+			signal: AbortSignal.timeout(30_000),
 		});
 		if (!response.ok) {
 			throw new Error(

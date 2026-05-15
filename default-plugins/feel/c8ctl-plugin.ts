@@ -262,8 +262,13 @@ function setNestedValue(
 		assertSafeKey(key, path);
 		const existing = cursor[key];
 		if (existing === undefined) {
-			const next: Record<string, unknown> = {};
-			cursor[key] = next;
+			const next: Record<string, unknown> = Object.create(null);
+			Object.defineProperty(cursor, key, {
+				value: next,
+				writable: true,
+				enumerable: true,
+				configurable: true,
+			});
 			cursor = next;
 		} else if (isRecord(existing)) {
 			cursor = existing;
@@ -277,7 +282,12 @@ function setNestedValue(
 
 	const leafKey = keys[keys.length - 1];
 	assertSafeKey(leafKey, path);
-	cursor[leafKey] = value;
+	Object.defineProperty(cursor, leafKey, {
+		value,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
 }
 
 /**
