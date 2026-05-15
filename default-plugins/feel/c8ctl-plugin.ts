@@ -17,6 +17,7 @@ import {
 import type { Logger } from "../../src/logger.ts";
 import type {
 	PluginCommands,
+	PluginCtx,
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
 import type {} from "../../src/runtime.ts";
@@ -277,7 +278,7 @@ function setNestedValue(
 	for (let i = 0; i < keys.length - 1; i++) {
 		const key = keys[i];
 		assertSafeKey(key, path);
-		const hasOwn = Object.prototype.hasOwnProperty.call(cursor, key);
+		const hasOwn = Object.hasOwn(cursor, key);
 		const existing = cursor[key];
 		if (!hasOwn || existing === undefined) {
 			const next: Record<string, unknown> = Object.create(null);
@@ -468,14 +469,16 @@ async function evaluateCluster({
 	expression,
 	variables,
 	tenantId,
+	profile,
 }: {
 	expression: string;
 	variables: Record<string, unknown> | undefined;
 	tenantId: string | undefined;
+	profile: string | undefined;
 }): Promise<EvaluationOutput> {
 	let client: ReturnType<typeof c8ctl.createClient>;
 	try {
-		client = c8ctl.createClient();
+		client = c8ctl.createClient(profile);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`No cluster configured: ${message}\n${LOCAL_HINT}.`);
@@ -587,7 +590,10 @@ function renderJson(logger: Logger, normalized: EvaluationOutput): void {
 // Subcommand: evaluate
 // ---------------------------------------------------------------------------
 
-async function evaluateSubcommand(args: string[]): Promise<void> {
+async function evaluateSubcommand(
+	args: string[],
+	profile: string | undefined,
+): Promise<void> {
 	const logger = c8ctl.getLogger();
 	const parsed = parseArgs(args);
 
@@ -619,6 +625,7 @@ async function evaluateSubcommand(args: string[]): Promise<void> {
 					expression,
 					variables,
 					tenantId: parsed.tenant,
+					profile,
 				})
 			: evaluateLocal({ expression, variables });
 
@@ -667,6 +674,7 @@ function injectFlagsIntoArgs(
 async function feelHandler(
 	args: string[] | undefined,
 	flags?: Record<string, unknown>,
+	ctx?: PluginCtx,
 ): Promise<void> {
 	const reinjected = injectFlagsIntoArgs(args ?? [], flags);
 	const subcommand = reinjected[0];
@@ -687,7 +695,8 @@ async function feelHandler(
 	}
 
 	try {
-		if (subcommand === "evaluate") await evaluateSubcommand(subArgs);
+		if (subcommand === "evaluate")
+			await evaluateSubcommand(subArgs, ctx?.profile);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();
