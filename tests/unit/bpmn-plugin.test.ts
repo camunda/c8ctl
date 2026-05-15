@@ -340,3 +340,50 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// bpmn lint — .bpmnlintrc override
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn lint .bpmnlintrc override", () => {
+	test("respects user .bpmnlintrc that disables a rule", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-rc-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(
+				join(FIXTURES_DIR, "simple-will-create-incident.bpmn"),
+				"utf-8",
+			),
+		);
+		// Disable the label-required rule so the output no longer includes it.
+		// Without this override the default config flags label-required violations.
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "off" },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				!output.includes("label-required"),
+				`label-required should be suppressed by .bpmnlintrc. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+});

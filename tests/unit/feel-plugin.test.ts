@@ -346,22 +346,22 @@ describe("CLI behavioural: feel evaluate text warnings", () => {
 
 describe("CLI behavioural: feel evaluate cluster errors", () => {
 	test("unreachable cluster surfaces 'connection refused' with local-engine hint", async () => {
-		// Bind to port 0 to obtain an OS-assigned ephemeral port, then immediately
-		// close the server. The port is now known-unused on this machine, so a
-		// subsequent connect attempt will get ECONNREFUSED without any chance of
-		// accidentally hitting a real service (unlike a hard-coded port such as 9999).
+		// Keep the server open and immediately destroy every incoming connection.
+		// The child receives a deterministic ECONNRESET rather than ECONNREFUSED,
+		// which avoids the race window that exists when the server is closed before
+		// the child connects (another process can bind the freed port on a busy CI host).
+		const server = new net.Server((socket) => {
+			socket.destroy();
+		});
 		const port = await new Promise<number>((resolve, reject) => {
-			const server = net.createServer();
 			server.listen(0, "127.0.0.1", () => {
 				const addr = server.address();
 				const p = typeof addr === "object" && addr !== null ? addr.port : null;
-				server.close(() => {
-					if (p !== null) {
-						resolve(p);
-					} else {
-						reject(new Error("Could not determine ephemeral port"));
-					}
-				});
+				if (p !== null) {
+					resolve(p);
+				} else {
+					reject(new Error("Could not determine ephemeral port"));
+				}
 			});
 			server.on("error", reject);
 		});
@@ -387,7 +387,9 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 			assert.strictEqual(result.status, 1);
 			const output = result.stdout + result.stderr;
 			assert.ok(
-				output.includes("Cannot connect") || output.includes("refused"),
+				output.includes("Cannot connect") ||
+					output.includes("refused") ||
+					output.includes("reset"),
 				`Should classify network failure. Got: ${output.slice(0, 300)}`,
 			);
 			assert.ok(
@@ -399,6 +401,7 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 				"Hint should note feelin behaviour may differ from the cluster engine",
 			);
 		} finally {
+			server.close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});

@@ -158,10 +158,16 @@ export async function asyncSpawnWithStdin(
 
 	const stdin = child.stdin;
 	if (!stdin) throw new Error("child has no stdin");
-	stdin.on("error", () => {
-		// Ignore EPIPE: the child may close stdin before we finish writing
-		// (e.g. when the command rejects input early). Surfacing it would
-		// mask the real test signal in stderr/exit.
+	stdin.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EPIPE") {
+			// EPIPE is expected: the child may close stdin before we finish writing
+			// (e.g. when the command rejects input early). Surfacing it would
+			// mask the real test signal in stderr/exit.
+			return;
+		}
+		// All other stdin errors are real failures; surface them in stderr so
+		// they are visible in test output rather than silently swallowed.
+		stderr += `stdin error: ${err.message}\n`;
 	});
 
 	// Create the close/error promise BEFORE awaiting writeStdin so we don't

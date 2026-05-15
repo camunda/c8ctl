@@ -273,3 +273,43 @@ describe("CLI behavioural: element-template completions", () => {
 		);
 	});
 });
+
+// ─── feel completions ─────────────────────────────────────────────────────────
+
+describe("CLI behavioural: feel completions", () => {
+	test("bash completion includes feel verb", async () => {
+		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("feel"),
+			"Expected feel verb in bash completions",
+		);
+	});
+
+	test("bash completion includes evaluate subcommand", async () => {
+		const result = await c8("completion", "bash");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("evaluate"),
+			"Expected evaluate subcommand in bash completions",
+		);
+	});
+
+	test("zsh completion includes feel verb", async () => {
+		const result = await c8("completion", "zsh");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("feel"),
+			"Expected feel verb in zsh completions",
+		);
+	});
+
+	test("fish completion includes feel verb", async () => {
+		const result = await c8("completion", "fish");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("feel"),
+			"Expected feel verb in fish completions",
+		);
+	});
+});

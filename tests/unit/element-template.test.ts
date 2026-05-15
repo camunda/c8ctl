@@ -1605,4 +1605,25 @@ describe("CLI behavioural: element-template apply --dry-run", () => {
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
+
+	test("exits non-zero when elementId does not exist in the BPMN", async () => {
+		const result = await c8text(
+			"--dry-run",
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"MissingElement_xyz",
+			BPMN_FILE,
+		);
+		assert.notStrictEqual(
+			result.status,
+			0,
+			"Should exit non-zero for missing element",
+		);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("MissingElement_xyz") && output.includes("not found"),
+			`Should report the missing element id. Got: ${output.slice(0, 300)}`,
+		);
+	});
 });

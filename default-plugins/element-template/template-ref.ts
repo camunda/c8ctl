@@ -142,6 +142,48 @@ export async function getExecutionPlatformVersion(
 	}
 }
 
+/**
+ * Walk the moddle tree returned by bpmn-moddle and check whether any element
+ * carries the given `id`. Used by the dry-run path to surface "element not
+ * found" before reporting a successful preview.
+ */
+function containsId(node: unknown, id: string, seen: Set<object>): boolean {
+	if (node === null || typeof node !== "object") return false;
+	if (seen.has(node)) return false;
+	seen.add(node);
+	// biome-ignore lint/plugin: narrowing unknown to a plain object record for tree traversal
+	const record = node as Record<string, unknown>;
+	if (record.id === id) return true;
+	for (const key of Object.keys(record)) {
+		if (key.startsWith("$")) continue;
+		const value = record[key];
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				if (containsId(item, id, seen)) return true;
+			}
+		} else if (containsId(value, id, seen)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+export async function elementExistsInBpmn(
+	xml: string,
+	elementId: string,
+): Promise<boolean> {
+	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const moddle = new BpmnModdle();
+	try {
+		const { rootElement } = await moddle.fromXML(xml);
+		return containsId(rootElement, elementId, new Set<object>());
+	} catch {
+		// If the XML cannot be parsed at all, let the real apply path
+		// surface the error with full context.
+		return true;
+	}
+}
+
 export async function readTemplateFromPathOrUrl(
 	input: string,
 ): Promise<Template> {

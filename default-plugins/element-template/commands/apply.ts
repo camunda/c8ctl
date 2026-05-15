@@ -18,6 +18,7 @@ import {
 	warnUnmetConditions,
 } from "../helpers.ts";
 import {
+	elementExistsInBpmn,
 	getExecutionPlatformVersion,
 	parseTemplateRef,
 	readBpmnInput,
@@ -389,6 +390,11 @@ export async function applySubcommand(args: string[]): Promise<void> {
 
 	// Dry-run: describe what would happen without mutating anything
 	if (c8ctl.dryRun) {
+		// Validate the target element exists so dry-run only reports a successful
+		// plan when the real apply would also succeed.
+		if (!(await elementExistsInBpmn(input.xml, elementId))) {
+			throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
+		}
 		const fallbackId = ref.kind === "id" ? ref.id : ref.value;
 		const info = {
 			dryRun: true,
