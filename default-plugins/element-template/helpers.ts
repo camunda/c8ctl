@@ -272,7 +272,7 @@ function formatConditionValue(value: unknown): string {
 
 /**
  * Build the structured property descriptor used by both text and JSON
- * output of `list-properties`. Surfaces every field an agent or human
+ * output of `get-properties`. Surfaces every field an agent or human
  * needs to pick a value without re-reading the raw template.
  */
 export function getPropertyDetail(

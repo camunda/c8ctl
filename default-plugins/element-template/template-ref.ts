@@ -177,10 +177,10 @@ export async function elementExistsInBpmn(
 	try {
 		const { rootElement } = await moddle.fromXML(xml);
 		return containsId(rootElement, elementId, new Set<object>());
-	} catch {
-		// If the XML cannot be parsed at all, let the real apply path
-		// surface the error with full context.
-		return true;
+	} catch (error) {
+		// Surface BPMN parse failures so dry-run does not report a successful
+		// plan for invalid XML.
+		throw error;
 	}
 }
 

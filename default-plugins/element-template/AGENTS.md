@@ -2,8 +2,8 @@
 
 Read [docs/design.md](./docs/design.md) before changing this plugin. It
 covers the **why**: vendor bundle, marketplace endpoint choice, cache
-strategy (`upstreamRef`-keyed dedup), lazy bootstrap, semver-based
-version resolution, and the default-plugin-vs-core-command rationale.
+strategy (`upstreamRef`-keyed dedup), lazy bootstrap, and semver-based
+version resolution.
 
 ## Where things live
 
