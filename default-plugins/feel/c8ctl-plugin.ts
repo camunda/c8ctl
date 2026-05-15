@@ -230,6 +230,17 @@ function describeType(value: unknown): string {
  * Replacing an object with a scalar at the leaf is allowed (last
  * write wins) — only nesting into a non-object fails.
  */
+
+const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function assertSafeKey(key: string, path: string): void {
+	if (FORBIDDEN_KEYS.has(key)) {
+		throw new Error(
+			`Cannot set --var ${path}: '${key}' is a reserved property name.`,
+		);
+	}
+}
+
 function setNestedValue(
 	target: Record<string, unknown>,
 	path: string,
@@ -240,6 +251,7 @@ function setNestedValue(
 
 	for (let i = 0; i < keys.length - 1; i++) {
 		const key = keys[i];
+		assertSafeKey(key, path);
 		const existing = cursor[key];
 		if (existing === undefined) {
 			const next: Record<string, unknown> = {};
@@ -255,7 +267,9 @@ function setNestedValue(
 		}
 	}
 
-	cursor[keys[keys.length - 1]] = value;
+	const leafKey = keys[keys.length - 1];
+	assertSafeKey(leafKey, path);
+	cursor[leafKey] = value;
 }
 
 /**
