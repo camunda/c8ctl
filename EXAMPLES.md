@@ -1138,6 +1138,34 @@ Plugins are tracked in a registry file (`~/.config/c8ctl/plugins.json` on Linux)
 
 ---
 
+## MCP Client Integration
+
+Install the c8ctl MCP proxy into a third-party MCP client so the client can talk to the active Camunda 8 cluster.
+
+```bash
+# Install into Claude Desktop using the active profile (then restart Claude)
+c8ctl mcp install claude-desktop
+
+# Install into Cursor using a specific profile
+c8ctl mcp install cursor --profile prod
+
+# Install into VS Code with a custom alias (lets you install multiple profiles side-by-side)
+c8ctl mcp install vscode --alias camunda-prod
+
+# Show every installed entry across known clients
+c8ctl mcp list
+
+# Remove an entry
+c8ctl mcp uninstall claude-desktop --alias camunda-prod
+
+# Preview what would be written without touching the filesystem
+c8ctl mcp install claude-desktop --dry-run
+```
+
+The installed entry forwards your profile's credentials via environment variables, so the proxy authenticates the same way `c8ctl` itself does. Re-running `mcp install` is idempotent — it refreshes the credentials in place.
+
+---
+
 ## Combined Examples
 
 ### Complete Workflow

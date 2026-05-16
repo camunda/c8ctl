@@ -1664,6 +1664,81 @@ export const COMMAND_REGISTRY = {
 		flags: {},
 	},
 
+	mcp: {
+		description:
+			"Install or remove c8ctl MCP proxy entries in MCP client configs",
+		helpDescription:
+			"Install/uninstall/list c8ctl mcp-proxy entries in MCP client configs (Claude Desktop, Cursor, VS Code)",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show mcp install/uninstall/list usage",
+		mutating: true,
+		requiresResource: true,
+		resources: ["install", "uninstall", "list"],
+		flags: {},
+		resourceFlags: {
+			install: {
+				profile: {
+					type: "string",
+					description:
+						"Profile name to embed in the MCP entry (default: active profile, then the bootstrap 'local' profile)",
+				},
+				alias: {
+					type: "string",
+					description:
+						"Alias to use as the entry key in the client's config (default: the resolved profile name)",
+				},
+				force: {
+					type: "boolean",
+					description:
+						"Overwrite an existing entry at the same alias even if it was not installed by c8ctl",
+				},
+			},
+			uninstall: {
+				alias: {
+					type: "string",
+					description:
+						"Alias of the entry to remove (default: active profile name, then 'local', then 'camunda')",
+				},
+				force: {
+					type: "boolean",
+					description:
+						"Remove an entry at the alias even if it does not look like a c8ctl-managed entry",
+				},
+			},
+			list: {},
+		},
+		resourcePositionals: {
+			install: [
+				{ name: "client", required: true },
+			] as const satisfies readonly PositionalDef[],
+			uninstall: [
+				{ name: "client", required: true },
+			] as const satisfies readonly PositionalDef[],
+		},
+		helpExamples: [
+			{
+				command: "c8ctl mcp install claude-desktop",
+				description: "Install c8ctl as an MCP server in Claude Desktop",
+			},
+			{
+				command: "c8ctl mcp install cursor --profile prod",
+				description: "Install in Cursor using the 'prod' profile",
+			},
+			{
+				command: "c8ctl mcp install vscode --alias camunda-prod",
+				description: "Install in VS Code with a custom alias",
+			},
+			{
+				command: "c8ctl mcp list",
+				description: "Show every c8ctl MCP entry across known clients",
+			},
+			{
+				command: "c8ctl mcp uninstall claude-desktop --alias camunda-prod",
+				description: "Remove a previously installed entry",
+			},
+		],
+	},
+
 	feedback: {
 		description: "Open the feedback page to report issues or request features",
 		mutating: false,
