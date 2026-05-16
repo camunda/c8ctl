@@ -34,12 +34,12 @@ jobs:
             subject="$(git log -1 --format=%s "$sha")"
             body="$(git log -1 --format=%b "$sha")"
 
-            if printf '%s\n' "$subject" | grep -Eq '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:'; then
+            if printf '%s\n' "$subject" | grep -Eq '^[[:alpha:]][[:alnum:]-]*(\([^)]+\))?!:[[:space:]]'; then
               offenders+=("${sha}|${subject}")
               continue
             fi
 
-            if printf '%s\n' "$body" | grep -Eiq '(^|[[:space:]])BREAKING[ -]CHANGES?:'; then
+            if printf '%s\n' "$body" | grep -Eiq '^BREAKING CHANGES?:[[:space:]]'; then
               offenders+=("${sha}|${subject}")
             fi
           done <<< "$commits"
