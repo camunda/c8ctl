@@ -421,6 +421,35 @@ describe("CLI behavioural: feel evaluate text warnings", () => {
 });
 
 // ---------------------------------------------------------------------------
+// feel evaluate — --tenant + --engine local warning
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate --tenant + --engine local", () => {
+	test("warns that --tenant is ignored with --engine local but still succeeds", async () => {
+		// Tenant scoping only applies to cluster-side variable resolution.
+		// feelin doesn't know about tenants, so passing --tenant alongside
+		// --engine local is almost certainly a user mistake — surface it
+		// without failing the run.
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--tenant",
+			"acme",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("--tenant has no effect with --engine local"),
+			`expected tenant-ignored warning. Got: ${output}`,
+		);
+		// Evaluation must still proceed.
+		assert.match(result.stdout, /\b3\b/);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // feel evaluate — --dry-run payload format (cluster + local)
 // ---------------------------------------------------------------------------
 
