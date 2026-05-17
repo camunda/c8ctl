@@ -557,7 +557,7 @@ async function evaluateSubcommand(
 	}
 
 	const expression = parsed.positionals[0];
-	if (!expression) {
+	if (!expression?.trim()) {
 		throw new Error(
 			"Missing expression. Usage: c8ctl feel evaluate '<expression>' [...]",
 		);

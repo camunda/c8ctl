@@ -210,6 +210,24 @@ describe("CLI behavioural: feel evaluate (local engine)", () => {
 		assert.ok((result.stdout + result.stderr).includes("Missing expression"));
 	});
 
+	test("whitespace-only expression is rejected with the same error as empty", async () => {
+		// Without the trim, '' produced "Missing expression" but '   ' fell
+		// through to the feelin parser and surfaced a different message.
+		// Pin them to the same CLI error so users see one consistent failure
+		// regardless of incidental whitespace.
+		const result = await feelText("evaluate", "   ", "--engine", "local");
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("Missing expression"),
+			`whitespace expression should hit the same CLI error as empty. Got: ${output}`,
+		);
+		assert.ok(
+			!output.includes("Failed to parse expression"),
+			"whitespace should never reach the feelin parser",
+		);
+	});
+
 	test("rejects invalid --engine value", async () => {
 		const result = await feelText("evaluate", "1", "--engine", "invalid");
 		assert.strictEqual(result.status, 1);
