@@ -5,12 +5,15 @@
 
 import assert from "node:assert";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
@@ -1650,5 +1653,518 @@ describe("CLI behavioural: element-template apply --dry-run", () => {
 			output.includes("MissingElement_xyz") && output.includes("not found"),
 			`Should report the missing element id. Got: ${output.slice(0, 300)}`,
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template — cold-cache failures (no auto-bootstrap)
+// ---------------------------------------------------------------------------
+
+/**
+ * Spawn the CLI against a fresh, empty `C8CTL_DATA_DIR`. The cache
+ * is intentionally absent so we exercise the missing-cache path.
+ * Caller is responsible for cleaning up `dataDir`.
+ */
+async function spawnAgainstEmptyCache(...args: string[]) {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-cold-"));
+	try {
+		const result = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, "element-template", ...args],
+			{
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://test-cluster/v2",
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+		return { ...result, dataDir };
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: element-template cold-cache failures", () => {
+	const COLD_CASES: Array<{ label: string; args: string[] }> = [
+		{ label: "search", args: ["search", "anything"] },
+		{ label: "info", args: ["info", "io.camunda.connectors.HttpJson.v2"] },
+		{
+			label: "get-properties",
+			args: ["get-properties", "io.camunda.connectors.HttpJson.v2"],
+		},
+		{
+			label: "apply",
+			args: [
+				"apply",
+				"io.camunda.connectors.HttpJson.v2",
+				"Activity_17s7axj",
+				BPMN_FILE,
+			],
+		},
+		{ label: "get", args: ["get", "io.camunda.connectors.HttpJson.v2"] },
+	];
+
+	for (const { label, args } of COLD_CASES) {
+		test(`${label}: exits 1 with 'run sync first' hint and no stdout contamination`, async () => {
+			const result = await spawnAgainstEmptyCache(...args);
+			assert.strictEqual(
+				result.status,
+				1,
+				`${label} should exit 1 on cold cache. stderr: ${result.stderr}`,
+			);
+			const combined = result.stdout + result.stderr;
+			assert.ok(
+				combined.includes("element-template sync"),
+				`${label} error should point at 'sync'. Got: ${combined.slice(0, 300)}`,
+			);
+			// Critical pipeline-safety guarantee: a cold-cache failure must
+			// not write any payload (BPMN XML, template JSON, search rows)
+			// to stdout. The error itself goes to stderr via logger.error.
+			assert.strictEqual(
+				result.stdout.trim(),
+				"",
+				`${label} must not write to stdout when the cache is missing. ` +
+					`Got stdout: ${result.stdout.slice(0, 300)}`,
+			);
+		});
+	}
+});
+
+// ---------------------------------------------------------------------------
+// element-template — sync lockfile + --prune count
+// ---------------------------------------------------------------------------
+
+/**
+ * In-process marketplace stub. Serves a configurable
+ * `/ootb-connectors` index and an arbitrary number of per-ref
+ * templates under `/t/<id>@<version>`. Each call to `serveIndex`
+ * swaps the index in place so a test can simulate "the upstream
+ * dropped a template" without restarting the server.
+ */
+type StubServer = {
+	url: string;
+	close: () => Promise<void>;
+	setIndex: (index: Record<string, Array<unknown>>) => void;
+};
+
+/**
+ * Pull the listening port off a Node `http.Server` without an `as`
+ * cast — `server.address()` returns `string | AddressInfo | null` and
+ * the plugin lint forbids the unsafe assertion.
+ */
+function getServerPort(server: Server): number {
+	const addr = server.address();
+	if (isRecord(addr) && typeof addr.port === "number") {
+		return addr.port;
+	}
+	throw new Error("stub server has no port (not listening?)");
+}
+
+async function startMarketplaceStub(
+	templates: Array<Record<string, unknown>>,
+): Promise<StubServer> {
+	type IndexEntry = {
+		version: number;
+		ref: string;
+		engine: { camunda: string };
+	};
+	let currentIndex: Record<string, IndexEntry[]> = {};
+	const templatesByRef = new Map<string, Record<string, unknown>>();
+
+	const buildIndex = (entries: Array<Record<string, unknown>>) => {
+		const idx: Record<string, IndexEntry[]> = {};
+		templatesByRef.clear();
+		for (const tpl of entries) {
+			const id = String(tpl.id);
+			const version = Number(tpl.version);
+			const ref = `/t/${encodeURIComponent(id)}@${version}`;
+			idx[id] = idx[id] || [];
+			idx[id].push({
+				version,
+				ref: `__BASE__${ref}`,
+				engine: { camunda: "^8.0" },
+			});
+			templatesByRef.set(ref, tpl);
+		}
+		return idx;
+	};
+	currentIndex = buildIndex(templates);
+
+	const server: Server = createServer((req, res) => {
+		if (!req.url) {
+			res.statusCode = 400;
+			res.end();
+			return;
+		}
+		if (req.url === "/ootb-connectors") {
+			// Stamp the real listening URL into ref placeholders so the
+			// client follows them back to us.
+			const baseUrl = `http://127.0.0.1:${getServerPort(server)}`;
+			const rewritten: Record<string, IndexEntry[]> = {};
+			for (const [id, versions] of Object.entries(currentIndex)) {
+				rewritten[id] = versions.map((v) => ({
+					...v,
+					ref: v.ref.replace("__BASE__", baseUrl),
+				}));
+			}
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify(rewritten));
+			return;
+		}
+		const tpl = templatesByRef.get(req.url);
+		if (tpl) {
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify(tpl));
+			return;
+		}
+		res.statusCode = 404;
+		res.end();
+	});
+
+	await new Promise<void>((resolveListen, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => resolveListen());
+	});
+	const port = getServerPort(server);
+	return {
+		url: `http://127.0.0.1:${port}/ootb-connectors`,
+		setIndex: (next) => {
+			// Accept the public-facing index shape — caller crafts entries
+			// matching IndexEntry. Currently unused by the tests but kept
+			// on the API so a test can simulate "upstream changed" without
+			// restarting the server.
+			const reshaped: Record<string, IndexEntry[]> = {};
+			for (const [id, versions] of Object.entries(next)) {
+				if (!Array.isArray(versions)) continue;
+				reshaped[id] = versions
+					.filter(isRecord)
+					.filter(
+						(v): v is IndexEntry =>
+							typeof v.version === "number" && typeof v.ref === "string",
+					);
+			}
+			currentIndex = reshaped;
+		},
+		close: () =>
+			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+	};
+}
+
+describe("CLI behavioural: element-template sync lockfile", () => {
+	test("second concurrent sync exits non-zero pointing at the lockfile", async () => {
+		// Pre-seed a live lock owned by THIS test process. The lock helper
+		// recognises an alive PID and refuses to acquire — exactly the
+		// "two shells racing" scenario without the timing flakiness of
+		// actually running two syncs in parallel.
+		const stub = await startMarketplaceStub([
+			{
+				id: "io.example.locked",
+				name: "Locked",
+				version: 1,
+				properties: [],
+			},
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-lock-"));
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		writeFileSync(
+			join(cacheDir, ".sync.lock"),
+			JSON.stringify({ pid: process.pid, startedAt: Date.now() }),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.url,
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				1,
+				`Second sync should fail when a live lock is held. stderr: ${result.stderr}`,
+			);
+			const combined = result.stdout + result.stderr;
+			assert.ok(
+				combined.includes("Another sync is in progress"),
+				`Expected lockfile contention message. Got: ${combined.slice(0, 300)}`,
+			);
+			// Pre-seeded lock must survive the failed attempt.
+			assert.ok(
+				existsSync(join(cacheDir, ".sync.lock")),
+				"Lockfile from the simulated 'live' holder should not be removed by the loser.",
+			);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("stale lock (dead PID) is recovered and sync proceeds", async () => {
+		const stub = await startMarketplaceStub([
+			{
+				id: "io.example.stale",
+				name: "Stale",
+				version: 1,
+				properties: [],
+			},
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-stale-"));
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		// PID 1 (init) is reliably alive on every platform; pick a PID
+		// that won't ever map to a process: process.pid + a huge offset
+		// is the cheap version but we can't guarantee uniqueness. Use a
+		// startedAt 11 minutes in the past so the age-based recovery
+		// path fires regardless of PID liveness.
+		writeFileSync(
+			join(cacheDir, ".sync.lock"),
+			JSON.stringify({
+				pid: process.pid,
+				startedAt: Date.now() - 11 * 60 * 1000,
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.url,
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`Sync should recover from a stale lock. stderr: ${result.stderr}`,
+			);
+			assert.ok(
+				result.stderr.includes("stale sync lock") ||
+					result.stdout.includes("stale sync lock"),
+				`Expected a 'stale sync lock' warning. Got: ${(result.stderr + result.stdout).slice(0, 300)}`,
+			);
+			// And the cache must have been written.
+			assert.ok(
+				existsSync(join(cacheDir, "templates.json")),
+				"templates.json should exist after a successful recovery sync.",
+			);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("CLI behavioural: element-template sync --prune count", () => {
+	test("reports the number of cache entries dropped from the fresh index", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-prune-"));
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		// Seed the cache with TWO entries, one of which the upstream
+		// will drop. Each entry carries `metadata.upstreamRef` matching
+		// the stub's URL scheme so `byUpstreamRef` looks them up cleanly.
+		const stub = await startMarketplaceStub([
+			{
+				id: "io.example.kept",
+				name: "Kept",
+				version: 1,
+				properties: [],
+			},
+			// Note: "dropped" is NOT included here, so the fresh index
+			// will lack it after sync.
+		]);
+		const keptRefUrl = `${stub.url.replace("/ootb-connectors", "")}/t/${encodeURIComponent("io.example.kept")}@1`;
+		const droppedRefUrl = `${stub.url.replace("/ootb-connectors", "")}/t/${encodeURIComponent("io.example.dropped")}@1`;
+		writeFileSync(
+			join(cacheDir, "templates.json"),
+			JSON.stringify(
+				[
+					{
+						id: "io.example.kept",
+						name: "Kept",
+						version: 1,
+						properties: [],
+						metadata: { upstreamRef: keptRefUrl },
+					},
+					{
+						id: "io.example.dropped",
+						name: "Dropped",
+						version: 1,
+						properties: [],
+						metadata: { upstreamRef: droppedRefUrl },
+					},
+				],
+				null,
+				2,
+			),
+		);
+		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+					"--prune",
+				],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.url,
+						C8CTL_OUTPUT_MODE: "json",
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync --prune should succeed. stderr: ${result.stderr}`,
+			);
+			// The summary line is the last JSON object on stdout.
+			const summaryLine = result.stdout
+				.trim()
+				.split("\n")
+				.reverse()
+				.find((line) => line.startsWith("{") && line.includes("pruned"));
+			assert.ok(
+				summaryLine,
+				`expected a summary JSON line. Got stdout: ${result.stdout.slice(0, 500)}`,
+			);
+			const summary = JSON.parse(summaryLine ?? "{}");
+			assert.strictEqual(
+				summary.pruned,
+				1,
+				`Expected pruned=1 (the 'dropped' entry). Got summary: ${summaryLine}`,
+			);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template — atomic in-place write + EPIPE
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: element-template apply --in-place atomicity", () => {
+	test("leaves no .tmp file in the BPMN directory after a successful apply", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-tmp-"));
+		const bpmnDir = mkdtempSync(join(tmpdir(), "c8ctl-et-bpmn-"));
+		const bpmnPath = join(bpmnDir, "process.bpmn");
+		writeFileSync(bpmnPath, readFileSync(BPMN_FILE, "utf-8"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					bpmnPath,
+				],
+				{
+					env: {
+						...process.env,
+						CAMUNDA_BASE_URL: "http://test-cluster/v2",
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`apply -i should succeed. stderr: ${result.stderr}`,
+			);
+			const leftovers = readdirSync(bpmnDir).filter((name) =>
+				name.endsWith(".tmp"),
+			);
+			assert.deepStrictEqual(
+				leftovers,
+				[],
+				`No .tmp file should survive a clean apply. Found: ${leftovers.join(", ")}`,
+			);
+			// And the file must have been updated (contains zeebe namespace
+			// after applying the HTTP JSON connector template).
+			const updated = readFileSync(bpmnPath, "utf-8");
+			assert.ok(
+				updated.includes("zeebe:taskDefinition"),
+				"BPMN file should contain the applied template's zeebe:taskDefinition",
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+			rmSync(bpmnDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("CLI behavioural: element-template stdout EPIPE handling", () => {
+	test("apply: closing the downstream pipe early exits cleanly without an unhandled error stack", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-epipe-"));
+		try {
+			// Use a template file (no cache lookup) so we test the EPIPE
+			// path itself, not the OOTB resolution path.
+			// Pipe the apply output into `head -c 1` to slam the pipe shut
+			// just after the first byte; without the EPIPE handler this
+			// crashes the child process with an 'Unhandled error' stack.
+			const child = await asyncSpawn(
+				"sh",
+				[
+					"-c",
+					[
+						"node",
+						"--experimental-strip-types",
+						CLI,
+						"element-template",
+						"apply",
+						JSON.stringify(TEMPLATE_FILE),
+						"Activity_17s7axj",
+						JSON.stringify(BPMN_FILE),
+						"| head -c 1 > /dev/null",
+					].join(" "),
+				],
+				{
+					env: {
+						...process.env,
+						CAMUNDA_BASE_URL: "http://test-cluster/v2",
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+					},
+				},
+			);
+			// The child invokes node + head; sh's exit status is head's
+			// (always 0 here). What we really care about is no unhandled
+			// error stack on stderr from the node child.
+			assert.ok(
+				!child.stderr.includes("Unhandled"),
+				`stderr should not contain an unhandled-error stack. Got: ${child.stderr.slice(0, 300)}`,
+			);
+			assert.ok(
+				!child.stderr.includes("EPIPE"),
+				`stderr should not surface a raw EPIPE. Got: ${child.stderr.slice(0, 300)}`,
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
 	});
 });
