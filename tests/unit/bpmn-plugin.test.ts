@@ -546,6 +546,75 @@ describe("CLI behavioural: bpmn lint .bpmnlintrc override", () => {
 		}
 	});
 
+	test("non-JSON .bpmnlintrc reports the JSON-only constraint clearly", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-yaml-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			"extends: bpmnlint:recommended\n",
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("only JSON is supported"),
+				`expected JSON-only message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("standalone `bpmnlint` CLI"),
+				"should point users at the upstream CLI for YAML/JS configs",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
+	test("JSON array .bpmnlintrc reports 'must contain a JSON object'", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-arr-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(join(externalDir, ".bpmnlintrc"), JSON.stringify(["foo"]));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("must contain a JSON object"),
+				`expected object-shape message. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
 	test("respects user .bpmnlintrc that disables a rule", async () => {
 		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-rc-"));
 		const file = join(externalDir, "test.bpmn");

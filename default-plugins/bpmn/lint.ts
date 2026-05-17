@@ -145,7 +145,17 @@ function buildLintConfig(
 ): Record<string, unknown> {
 	const rcPath = resolvePath(".bpmnlintrc");
 	if (existsSync(rcPath)) {
-		const parsed: unknown = JSON.parse(readFileSync(rcPath, "utf-8"));
+		const raw = readFileSync(rcPath, "utf-8");
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new Error(
+				`Failed to parse .bpmnlintrc: only JSON is supported (${detail}). ` +
+					"For YAML or JS configs, use the standalone `bpmnlint` CLI.",
+			);
+		}
 		if (!isRecord(parsed)) {
 			throw new Error(".bpmnlintrc must contain a JSON object");
 		}
