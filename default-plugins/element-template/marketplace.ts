@@ -12,12 +12,15 @@
  */
 
 import {
+	closeSync,
 	existsSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	renameSync,
 	unlinkSync,
 	writeFileSync,
+	writeSync,
 } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
@@ -28,6 +31,7 @@ const DEFAULT_OOTB_URL =
 const FETCH_CONCURRENCY = 12;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const FETCH_TIMEOUT_MS = 30_000; // 30 s per HTTP request
+const SYNC_LOCK_STALE_AFTER_MS = 10 * 60 * 1000; // 10 minutes
 
 // ---------------------------------------------------------------------------
 // Index entry types
@@ -79,6 +83,159 @@ function getCachePath(): string {
 
 function getFetchedAtPath(): string {
 	return join(getCacheDir(), "fetched-at");
+}
+
+function getSyncLockPath(): string {
+	return join(getCacheDir(), ".sync.lock");
+}
+
+// ---------------------------------------------------------------------------
+// Sync lock — serialises concurrent `sync` runs so they don't silently
+// undo each other's `--prune` (atomic rename prevents torn files but
+// not stale-read clobbers).
+// ---------------------------------------------------------------------------
+
+type SyncLockPayload = { pid: number; startedAt: number };
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		// Signal 0 doesn't deliver a signal — it just tests permission /
+		// existence. ESRCH means the PID is gone.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		// EPERM means the process exists but we lack permission — still alive.
+		return code === "EPERM";
+	}
+}
+
+function readLockPayload(path: string): SyncLockPayload | null {
+	try {
+		const raw = readFileSync(path, "utf-8");
+		const parsed: unknown = JSON.parse(raw);
+		if (
+			isRecord(parsed) &&
+			typeof parsed.pid === "number" &&
+			typeof parsed.startedAt === "number"
+		) {
+			return { pid: parsed.pid, startedAt: parsed.startedAt };
+		}
+	} catch {
+		// Unreadable / unparsable lock counts as stale.
+	}
+	return null;
+}
+
+function tryCreateLock(path: string, payload: SyncLockPayload): boolean {
+	try {
+		const fd = openSync(path, "wx", 0o644);
+		try {
+			writeSync(fd, JSON.stringify(payload));
+		} finally {
+			closeSync(fd);
+		}
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		throw error;
+	}
+}
+
+/**
+ * Acquire the sync lock or throw with a user-actionable message.
+ *
+ * The lock is a regular file at `<cacheDir>/.sync.lock` holding
+ * `{pid, startedAt}` JSON. We use `openSync("wx")` for atomic create —
+ * two concurrent attempts cannot both win on the same filesystem.
+ *
+ * If an existing lock is from a dead PID or older than
+ * `SYNC_LOCK_STALE_AFTER_MS`, we treat it as stale, log, and retry
+ * the create once. A persistent EEXIST after that is a real race with
+ * another live sync — surface it.
+ */
+function acquireSyncLock(logger: Logger): void {
+	const dir = getCacheDir();
+	mkdirSync(dir, { recursive: true });
+	const path = getSyncLockPath();
+	const payload: SyncLockPayload = {
+		pid: process.pid,
+		startedAt: Date.now(),
+	};
+	if (tryCreateLock(path, payload)) return;
+
+	const existing = readLockPayload(path);
+	const age = existing ? Date.now() - existing.startedAt : Infinity;
+	const stale =
+		existing === null ||
+		!isProcessAlive(existing.pid) ||
+		age > SYNC_LOCK_STALE_AFTER_MS;
+
+	if (stale) {
+		if (existing) {
+			logger.warn(
+				`Removed stale sync lock from pid ${existing.pid} (age ${Math.round(age / 1000)}s).`,
+			);
+		}
+		try {
+			unlinkSync(path);
+		} catch {
+			// Someone else may have just cleaned it up — fine, we'll retry below.
+		}
+		if (tryCreateLock(path, payload)) return;
+	}
+
+	const detail = existing
+		? `pid ${existing.pid}, started ${new Date(existing.startedAt).toISOString()}`
+		: "unknown owner";
+	throw new Error(
+		`Another sync is in progress (${detail}). ` +
+			`Wait for it to finish or remove ${path} if you're sure no other sync is running.`,
+	);
+}
+
+function releaseSyncLock(): void {
+	try {
+		unlinkSync(getSyncLockPath());
+	} catch {
+		// Best-effort — the lock may already be gone if a signal handler
+		// raced with the normal `finally`.
+	}
+}
+
+/**
+ * Run `body` while the sync lock is held. Installs signal handlers
+ * so the lock is released on SIGINT/SIGTERM (otherwise a Ctrl-C
+ * during sync would orphan the lockfile, leaving the next run to
+ * wait the 10-minute stale window). Prior listeners are restored.
+ */
+async function withSyncLock<T>(
+	logger: Logger,
+	body: () => Promise<T>,
+): Promise<T> {
+	acquireSyncLock(logger);
+	const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+	const handlers = new Map<NodeJS.Signals, () => void>();
+	for (const sig of signals) {
+		const handler = () => {
+			releaseSyncLock();
+			// Re-raise the signal with the default action so the process
+			// actually exits with the expected status. Remove our listener
+			// first so we don't recurse.
+			process.removeListener(sig, handler);
+			process.kill(process.pid, sig);
+		};
+		handlers.set(sig, handler);
+		process.on(sig, handler);
+	}
+	try {
+		return await body();
+	} finally {
+		for (const [sig, handler] of handlers) {
+			process.removeListener(sig, handler);
+		}
+		releaseSyncLock();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +462,16 @@ export async function syncTemplates({
 }: {
 	logger: Logger;
 	prune?: boolean;
+}): Promise<SyncSummary> {
+	return withSyncLock(logger, () => syncTemplatesLocked({ logger, prune }));
+}
+
+async function syncTemplatesLocked({
+	logger,
+	prune,
+}: {
+	logger: Logger;
+	prune: boolean;
 }): Promise<SyncSummary> {
 	logger.info(`Fetching index from ${getMarketplaceUrl()} ...`);
 	const index = await fetchIndex();
