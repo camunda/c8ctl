@@ -409,6 +409,140 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 });
 
 // ---------------------------------------------------------------------------
+// bpmn lint — ruleset routing
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn lint ruleset routing", () => {
+	test("Cloud 8.7 file routes to camunda-cloud-8-7", async () => {
+		// Pins the major.minor → ruleset mapping. We assert via --dry-run
+		// because it surfaces the resolved extends list without depending
+		// on which specific rules fire in each version.
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-route-"));
+		const file = join(tempDir, "v87.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="8.7.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.ok(
+				result.stdout.includes("plugin:camunda-compat/camunda-cloud-8-7"),
+				`expected camunda-cloud-8-7 in extends. Got: ${result.stdout}`,
+			);
+			assert.ok(
+				!/camunda-cloud-8-[89]/.test(result.stdout),
+				"should not pull in 8-8 or 8-9 configs",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("Camunda Platform (non-Cloud) file skips camunda-compat", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-platform-"));
+		const file = join(tempDir, "platform.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Platform"
+                  modeler:executionPlatformVersion="7.20.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				out.includes("Platform: Camunda Platform 7.20.0"),
+				"platform line should reflect the declared (non-Cloud) platform",
+			);
+			assert.ok(
+				!out.includes("camunda-compat"),
+				"non-Cloud platform should not add a camunda-compat config",
+			);
+			assert.ok(
+				out.includes("bpmnlint:recommended"),
+				"bpmnlint:recommended should still apply",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("mixed errors + warnings: summary line uses the red branch", async () => {
+		// renderLintText picks ["bold", "red"] when errorCount > 0 and
+		// yellow otherwise. Stand up a fixture + .bpmnlintrc that
+		// produces at least one of each, then assert the summary line
+		// carries the red ANSI escape (\x1b[31m).
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-mixed-"));
+		const file = join(externalDir, "test.bpmn");
+		// duplicate-ids/process-a.bpmn fires both label-required and
+		// no-bpmndi. Demoting one to "warn" gives us one error + one
+		// warning category deterministically.
+		writeFileSync(
+			file,
+			readFileSync(
+				join(FIXTURES_DIR, "duplicate-ids", "process-a.bpmn"),
+				"utf-8",
+			),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "warn" },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{
+					cwd: externalDir,
+					env: { ...process.env, FORCE_COLOR: "1" },
+				},
+			);
+			assert.strictEqual(result.status, 1, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			const summary = out.split("\n").find((l) => l.includes("problem"));
+			if (!summary) {
+				assert.fail(`no summary line in output: ${out.slice(0, 300)}`);
+			}
+			// styleText(["bold", "red"], ...) emits \x1b[1m \x1b[31m around
+			// the summary text. Build the regex from char codes so biome's
+			// noControlCharactersInRegex doesn't flag a literal ESC.
+			const redEsc = `${String.fromCharCode(0x1b)}\\[31m`;
+			assert.ok(
+				new RegExp(redEsc).test(summary),
+				`summary should carry the red ANSI escape. Got: ${JSON.stringify(summary)}`,
+			);
+			assert.ok(
+				/\d+ errors?, \d+ warnings?/.test(summary),
+				"summary should report both error and warning counts",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // bpmn lint — --dry-run
 // ---------------------------------------------------------------------------
 
