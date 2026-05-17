@@ -108,36 +108,59 @@ function detectCamundaCloudVersion(
 	return match ? match[1] : null;
 }
 
-function resolveCamundaCompatConfig(version: string): string | null {
+type ConfigResolution =
+	| { kind: "exact"; config: string }
+	| { kind: "above-range"; config: string; highest: string }
+	| { kind: "below-range"; lowest: string };
+
+function parseVersionParts(s: string): number[] {
+	return s.replace("camunda-cloud-", "").split("-").map(Number);
+}
+
+function compareVersionParts(a: number[], b: number[]): number {
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		const diff = (a[i] || 0) - (b[i] || 0);
+		if (diff !== 0) {
+			return diff;
+		}
+	}
+	return 0;
+}
+
+function resolveCamundaCompatConfig(version: string): ConfigResolution | null {
 	const plugin = require("bpmnlint-plugin-camunda-compat");
 	const configs = plugin.configs;
 
 	const configName = `camunda-cloud-${version.replace(".", "-")}`;
 	if (configName in configs) {
-		return `plugin:camunda-compat/${configName}`;
+		return { kind: "exact", config: `plugin:camunda-compat/${configName}` };
 	}
 
 	const cloudConfigs = Object.keys(configs)
 		.filter((k) => k.startsWith("camunda-cloud-"))
-		.sort((a, b) => {
-			const parse = (s: string) =>
-				s.replace("camunda-cloud-", "").split("-").map(Number);
-			const va = parse(a);
-			const vb = parse(b);
-			for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-				const diff = (va[i] || 0) - (vb[i] || 0);
-				if (diff !== 0) {
-					return diff;
-				}
-			}
-			return 0;
-		});
+		.sort((a, b) =>
+			compareVersionParts(parseVersionParts(a), parseVersionParts(b)),
+		);
 
-	if (cloudConfigs.length > 0) {
-		return `plugin:camunda-compat/${cloudConfigs[cloudConfigs.length - 1]}`;
+	if (cloudConfigs.length === 0) {
+		return null;
 	}
 
-	return null;
+	const requested = parseVersionParts(
+		`camunda-cloud-${version.replace(".", "-")}`,
+	);
+	const lowest = cloudConfigs[0];
+	const highest = cloudConfigs[cloudConfigs.length - 1];
+
+	if (compareVersionParts(requested, parseVersionParts(lowest)) < 0) {
+		return { kind: "below-range", lowest };
+	}
+
+	return {
+		kind: "above-range",
+		config: `plugin:camunda-compat/${highest}`,
+		highest,
+	};
 }
 
 function buildLintConfig(
@@ -166,8 +189,18 @@ function buildLintConfig(
 
 	const version = detectCamundaCloudVersion(rootElement);
 	if (version) {
-		const compatConfig = resolveCamundaCompatConfig(version);
-		if (compatConfig) config.extends.push(compatConfig);
+		const resolution = resolveCamundaCompatConfig(version);
+		if (resolution?.kind === "exact" || resolution?.kind === "above-range") {
+			config.extends.push(resolution.config);
+		}
+		if (resolution?.kind === "above-range") {
+			c8ctl
+				.getLogger()
+				.warn(
+					`No camunda-compat config for ${version}; falling back to ${resolution.highest}. ` +
+						"Update c8ctl for newer rulesets.",
+				);
+		}
 	}
 
 	return config;

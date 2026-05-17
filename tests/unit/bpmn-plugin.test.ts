@@ -141,6 +141,73 @@ describe("CLI behavioural: bpmn lint", () => {
 		);
 	});
 
+	test("below-range Cloud version: falls through to bpmnlint:recommended only", async () => {
+		// 0.5.0 is below the lowest shipped camunda-compat config
+		// (camunda-cloud-1-0). The plugin should skip the Camunda
+		// ruleset entirely rather than silently apply the wrong one.
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-below-"));
+		const file = join(tempDir, "ancient.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="0.5.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				!out.includes("camunda-compat"),
+				`extends should NOT include any camunda-compat config. Got: ${out}`,
+			);
+			assert.ok(
+				!(result.stderr + result.stdout).includes("falling back"),
+				"below-range should fall through silently, no warning",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("above-range Cloud version: warns and uses highest available config", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-above-"));
+		const file = join(tempDir, "future.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="8.99.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const combined = result.stdout + result.stderr;
+			assert.ok(
+				combined.includes("No camunda-compat config for 8.99"),
+				`expected fallback warning. Got: ${combined.slice(0, 400)}`,
+			);
+			assert.ok(
+				combined.includes("Update c8ctl"),
+				"warning should hint that updating c8ctl might help",
+			);
+			assert.ok(
+				/plugin:camunda-compat\/camunda-cloud-\d+-\d+/.test(result.stdout),
+				"dry-run extends should still include a camunda-compat config (the highest)",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("lint invalid XML exits 1", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-test-"));
 		const tempFile = join(tempDir, "invalid.bpmn");
