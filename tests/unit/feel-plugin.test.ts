@@ -9,6 +9,7 @@
 
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as http from "node:http";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -660,6 +661,185 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 		} finally {
 			server.close();
 			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// feel evaluate — cluster engine error classification matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Spin up a tiny http.Server that returns a fixed `status` + ProblemDetail
+ * JSON body on every request. Used to drive each branch of
+ * `classifyClusterError` without needing a real Camunda cluster.
+ */
+async function startMockClusterServer(
+	status: number,
+	problemDetail: Record<string, unknown>,
+): Promise<{ port: number; close: () => Promise<void> }> {
+	const server = http.createServer((_req, res) => {
+		res.writeHead(status, { "content-type": "application/problem+json" });
+		res.end(JSON.stringify(problemDetail));
+	});
+	const port = await new Promise<number>((resolve, reject) => {
+		server.listen(0, "127.0.0.1", () => {
+			const addr = server.address();
+			const p = typeof addr === "object" && addr !== null ? addr.port : null;
+			if (p !== null) {
+				resolve(p);
+			} else {
+				reject(new Error("Could not determine ephemeral port"));
+			}
+		});
+		server.on("error", reject);
+	});
+	return {
+		port,
+		close: () =>
+			new Promise<void>((resolve) => {
+				server.close(() => resolve());
+			}),
+	};
+}
+
+async function feelTextAgainstPort(port: number, ...args: string[]) {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "text" }),
+	);
+	try {
+		return await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, "feel", ...args],
+			{
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: feel evaluate cluster error matrix", () => {
+	test("400: surfaces the cleaned parse-error detail without the Zeebe prefix and without the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(400, {
+			type: "about:blank",
+			title: "INVALID_ARGUMENT",
+			status: 400,
+			detail:
+				"Command 'EVALUATE' rejected with code 'INVALID_ARGUMENT': Failed to parse expression '= 1 +': Incomplete <ArithmeticExpression>",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 +");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Failed to parse expression"),
+				`expected cleaned parse detail. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				!output.includes("Command 'EVALUATE' rejected"),
+				`Zeebe prefix should have been stripped. Got: ${output.slice(0, 400)}`,
+			);
+			// Parse errors are the user's fault — don't suggest the local
+			// engine as a workaround.
+			assert.ok(
+				!output.includes("--engine local"),
+				`400 should not hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("401: surfaces 'Authentication failed' with the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(401, {
+			type: "about:blank",
+			title: "UNAUTHENTICATED",
+			status: 401,
+			detail: "Missing or invalid credentials",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Authentication failed (401)"),
+				`expected auth-failed title. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`401 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("403: surfaces 'Authorization failed' with the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(403, {
+			type: "about:blank",
+			title: "PERMISSION_DENIED",
+			status: 403,
+			detail: "User lacks evaluate-expression permission",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Authorization failed (403)"),
+				`expected authz-failed title. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("not permitted to evaluate expressions"),
+				`expected authz detail. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`403 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("404: notes the 8.9+ requirement and points at the local engine", async () => {
+		const { port, close } = await startMockClusterServer(404, {
+			type: "about:blank",
+			title: "NOT_FOUND",
+			status: 404,
+			detail: "No handler for /v2/expression/evaluation",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("does not support FEEL evaluation"),
+				`expected 8.9+ message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("Camunda 8.9+"),
+				`expected 8.9+ message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`404 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
 		}
 	});
 });
