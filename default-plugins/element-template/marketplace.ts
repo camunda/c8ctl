@@ -11,7 +11,14 @@
  * approach in `app/lib/template-updater/util.js`).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template, USER_AGENT } from "./helpers.ts";
@@ -116,15 +123,35 @@ function loadFetchedAt(): number | null {
 	return Number.isFinite(ms) ? ms : null;
 }
 
+/**
+ * Write `contents` to `target` via a sibling temp file + atomic
+ * `renameSync`. Readers either see the old file or the new file —
+ * never a truncated mid-write state. POSIX `rename` is atomic on the
+ * same filesystem (which a sibling in the same directory always is).
+ */
+function atomicWriteFileSync(target: string, contents: string): void {
+	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	try {
+		writeFileSync(tmp, contents, "utf-8");
+		renameSync(tmp, target);
+	} catch (error) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// Best-effort cleanup — the original error is the one that matters.
+		}
+		throw error;
+	}
+}
+
 function saveCache(templates: Template[]): void {
 	const dir = getCacheDir();
 	mkdirSync(dir, { recursive: true });
-	writeFileSync(
+	atomicWriteFileSync(
 		getCachePath(),
 		`${JSON.stringify(templates, null, 2)}\n`,
-		"utf-8",
 	);
-	writeFileSync(getFetchedAtPath(), String(Date.now()), "utf-8");
+	atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
 }
 
 export function isCacheStale(): boolean {
