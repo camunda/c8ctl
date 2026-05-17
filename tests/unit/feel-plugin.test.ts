@@ -421,6 +421,134 @@ describe("CLI behavioural: feel evaluate text warnings", () => {
 });
 
 // ---------------------------------------------------------------------------
+// feel evaluate — --dry-run payload format (cluster + local)
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate --dry-run", () => {
+	test("cluster dry-run prints endpoint + payload in text mode, skips request", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Dry run — no cluster request sent."),
+			`expected cluster dry-run header. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("POST /v2/expression/evaluation"),
+			`expected endpoint line. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes('"expression": "= 1 + 2"'),
+			`expected normalised expression in payload. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes('"a": 1'),
+			`expected variables in payload. Got: ${result.stdout}`,
+		);
+		// No evaluation ran, so the cluster's "3" result must not appear.
+		assert.ok(!/^3\s*$/m.test(result.stdout), "no result line on dry-run");
+	});
+
+	test("cluster dry-run JSON envelope pins the documented shape", async () => {
+		const result = await feelJson("evaluate", "1 + 2", "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "feel evaluate");
+		assert.strictEqual(parsed.endpoint, "POST /v2/expression/evaluation");
+		assert.ok(parsed.payload, "payload must be present");
+		assert.strictEqual(parsed.payload.expression, "= 1 + 2");
+	});
+
+	test("local dry-run prints engine label + expression + variables in text mode", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Dry run — no expression evaluated."),
+			`expected local dry-run header. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("Engine: local (feelin)"),
+			`expected engine label. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("Expression: = 1 + 2"),
+			`expected normalised expression. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			/"a": 1/.test(result.stdout),
+			`expected variables block. Got: ${result.stdout}`,
+		);
+		// Crucial: feelin must not run; "3" would be the result otherwise.
+		assert.ok(!/^3\s*$/m.test(result.stdout), "no result line on dry-run");
+	});
+
+	test("local dry-run with no --vars shows 'Variables: none'", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Variables: none"),
+			`expected 'Variables: none' when no vars supplied. Got: ${result.stdout}`,
+		);
+	});
+
+	test("local dry-run JSON envelope carries engine + expression + variables", async () => {
+		const result = await feelJson(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "feel evaluate");
+		assert.strictEqual(parsed.engine, "local");
+		assert.strictEqual(parsed.expression, "= 1 + 2");
+		assert.deepStrictEqual(parsed.variables, { a: 1 });
+		// Local dry-run intentionally has no `endpoint` or `payload` keys —
+		// only cluster mode hits an endpoint.
+		assert.ok(!("endpoint" in parsed));
+		assert.ok(!("payload" in parsed));
+	});
+
+	test("local dry-run JSON omits variables when none supplied", async () => {
+		const result = await feelJson(
+			"evaluate",
+			"1 + 2",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0);
+		const parsed = JSON.parse(result.stdout);
+		assert.ok(!("variables" in parsed), "variables key should be absent");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // feel evaluate — cluster engine error classification
 // ---------------------------------------------------------------------------
 
