@@ -15,11 +15,21 @@
  */
 
 import type {} from "../../../src/runtime.ts";
-import { parseTemplateJson, readFileOrUrl, type Template } from "../helpers.ts";
+import {
+	installStdoutEpipeHandler,
+	parseTemplateJson,
+	readFileOrUrl,
+	type Template,
+} from "../helpers.ts";
 import { requireCachePresent } from "../marketplace.ts";
 import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
+	// `get` writes raw template JSON straight to stdout; consumers that
+	// take only a prefix (e.g. `get <id> | head -c N`) close the pipe
+	// early and would otherwise crash the process with an unhandled
+	// EPIPE event.
+	installStdoutEpipeHandler();
 	const usage = "Usage: c8ctl element-template get <template> [--no-icon]";
 
 	let templateArg: string | undefined;

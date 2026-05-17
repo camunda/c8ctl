@@ -3,7 +3,7 @@
  * element via the prebuilt bpmn-js + bpmn-js-element-templates vendor bundle.
  */
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,8 @@ import type {} from "../../../src/runtime.ts";
 import {
 	applySetOverrides,
 	findPropertiesByBindingName,
+	installStdoutEpipeHandler,
+	isRecord,
 	parseArgs,
 	parseSetArg,
 	type Template,
@@ -325,6 +327,10 @@ async function applyElementTemplate(
 
 export async function applySubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
+	// applySubcommand writes BPMN XML to stdout in the non-in-place path;
+	// install the EPIPE handler before any downstream `head -c N` or
+	// `| less` can sever the pipe.
+	installStdoutEpipeHandler();
 	const parsed = parseArgs(args);
 
 	if (parsed.error) {
@@ -453,10 +459,44 @@ export async function applySubcommand(args: string[]): Promise<void> {
 	}
 
 	if (parsed.inPlace && bpmnFilePath) {
-		writeFileSync(resolvePath(bpmnFilePath), resultXml, "utf-8");
+		atomicOverwriteFile(bpmnFilePath, resultXml);
 		logger.info(`Updated ${bpmnFilePath}`);
 		return;
 	}
 
 	process.stdout.write(resultXml);
+}
+
+/**
+ * Overwrite `targetPath` atomically: write to a sibling temp file in
+ * the same directory, then `renameSync` over the target. POSIX
+ * `rename` is atomic on the same filesystem, so a kill mid-write
+ * never destroys the user's BPMN file.
+ *
+ * Falls back to a direct `writeFileSync` if the rename fails with
+ * EXDEV (cross-device link) — vanishingly rare for a file's own
+ * sibling, but covers exotic setups like FUSE mounts.
+ */
+function atomicOverwriteFile(targetPath: string, contents: string): void {
+	const target = resolvePath(targetPath);
+	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	try {
+		writeFileSync(tmp, contents, "utf-8");
+		renameSync(tmp, target);
+	} catch (error) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// Best-effort cleanup — the original error is what matters.
+		}
+		const code =
+			isRecord(error) && typeof error.code === "string"
+				? error.code
+				: undefined;
+		if (code === "EXDEV") {
+			writeFileSync(target, contents, "utf-8");
+			return;
+		}
+		throw error;
+	}
 }
