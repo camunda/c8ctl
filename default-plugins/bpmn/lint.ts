@@ -79,16 +79,31 @@ async function readBpmnInput(
 	return null;
 }
 
+type PlatformInfo = {
+	executionPlatform: string;
+	version: string | null;
+};
+
+function extractPlatformInfo(
+	rootElement: BpmnModdleElement,
+): PlatformInfo | null {
+	const attrs = rootElement.$attrs ?? {};
+	const executionPlatform = attrs["modeler:executionPlatform"];
+	if (!executionPlatform) {
+		return null;
+	}
+	const version = attrs["modeler:executionPlatformVersion"] ?? null;
+	return { executionPlatform, version };
+}
+
 function detectCamundaCloudVersion(
 	rootElement: BpmnModdleElement,
 ): string | null {
-	const attrs = rootElement.$attrs ?? {};
-	const platform = attrs["modeler:executionPlatform"];
-	const version = attrs["modeler:executionPlatformVersion"];
-	if (platform !== "Camunda Cloud" || !version) {
+	const info = extractPlatformInfo(rootElement);
+	if (!info || info.executionPlatform !== "Camunda Cloud" || !info.version) {
 		return null;
 	}
-	const match = version.match(/^(\d+\.\d+)/);
+	const match = info.version.match(/^(\d+\.\d+)/);
 	return match ? match[1] : null;
 }
 
@@ -200,6 +215,37 @@ function collectLintResult(results: LintResults): LintResult {
 	}
 
 	return { rows, issues, errorCount, warningCount };
+}
+
+function renderDryRun(
+	logger: Logger,
+	source: string,
+	platform: PlatformInfo | null,
+	config: Record<string, unknown>,
+): void {
+	const sourceLabel = source === "stdin" ? "stdin" : resolvePath(source);
+	if (c8ctl.outputMode === "json") {
+		logger.json({
+			dryRun: true,
+			command: "bpmn lint",
+			source: sourceLabel,
+			platform,
+			config,
+		});
+		return;
+	}
+
+	const platformLabel = platform
+		? `${platform.executionPlatform}${platform.version ? ` ${platform.version}` : ""}`
+		: "not declared";
+	logger.output("Dry run — no lint performed.");
+	logger.output(`  Source: ${sourceLabel}`);
+	logger.output(`  Platform: ${platformLabel}`);
+	logger.output("  Config:");
+	const configLines = JSON.stringify(config, null, 2).split("\n");
+	for (const line of configLines) {
+		logger.output(`    ${line}`);
+	}
 }
 
 function renderLintJson(
@@ -335,6 +381,17 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 	}
 
 	const config = buildLintConfig(rootElement);
+
+	if (c8ctl.dryRun) {
+		renderDryRun(
+			logger,
+			input.source,
+			extractPlatformInfo(rootElement),
+			config,
+		);
+		return;
+	}
+
 	const { Linter } = require("bpmnlint");
 	const NodeResolver = require("bpmnlint/lib/resolver/node-resolver");
 

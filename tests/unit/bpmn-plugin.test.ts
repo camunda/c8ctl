@@ -342,6 +342,132 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 });
 
 // ---------------------------------------------------------------------------
+// bpmn lint — --dry-run
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn lint --dry-run", () => {
+	test("Cloud file: prints platform, source, and resolved camunda-compat config", async () => {
+		const file = join(FIXTURES_DIR, "simple.bpmn");
+		const result = await c8text("bpmn", "lint", "--dry-run", file);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = result.stdout;
+		assert.ok(
+			out.includes("Dry run — no lint performed."),
+			`dry-run banner missing. Got: ${out}`,
+		);
+		assert.ok(
+			out.includes(`Source: ${file}`),
+			"source line should be absolute",
+		);
+		assert.ok(
+			out.includes("Camunda Cloud 8.8.0"),
+			"platform line should reflect fixture's executionPlatform + version",
+		);
+		assert.ok(
+			out.includes("bpmnlint:recommended"),
+			"extends should include bpmnlint:recommended",
+		);
+		assert.ok(
+			out.includes("plugin:camunda-compat/camunda-cloud-8-8"),
+			"extends should include the resolved camunda-compat config",
+		);
+		assert.ok(
+			!out.includes("No issues found"),
+			"linter must not run under --dry-run",
+		);
+	});
+
+	test("Cloud file: JSON mode emits structured dry-run envelope", async () => {
+		const file = join(FIXTURES_DIR, "simple.bpmn");
+		const result = await c8("bpmn", "lint", "--dry-run", file);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "bpmn lint");
+		assert.strictEqual(parsed.source, file);
+		assert.deepStrictEqual(parsed.platform, {
+			executionPlatform: "Camunda Cloud",
+			version: "8.8.0",
+		});
+		assert.ok(Array.isArray(parsed.config.extends));
+		assert.ok(parsed.config.extends.includes("bpmnlint:recommended"));
+	});
+
+	test("non-Cloud file: platform reported, no camunda-compat in extends", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-dryrun-"));
+		const file = join(tempDir, "no-platform.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <bpmn:process id="p1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				out.includes("Platform: not declared"),
+				`expected 'not declared'. Got: ${out}`,
+			);
+			assert.ok(out.includes("bpmnlint:recommended"));
+			assert.ok(
+				!out.includes("camunda-compat"),
+				"no camunda-compat config should appear for non-Cloud files",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test(".bpmnlintrc override: dry-run reflects the user's config", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-dryrun-rc-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "off" },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					"--dry-run",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(out.includes("Dry run — no lint performed."));
+			assert.ok(
+				out.includes('"label-required": "off"'),
+				"override rule should appear in printed config",
+			);
+			assert.ok(
+				!out.includes("camunda-compat"),
+				".bpmnlintrc takes precedence; no auto-detected compat config",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // bpmn lint — .bpmnlintrc override
 // ---------------------------------------------------------------------------
 
