@@ -97,6 +97,18 @@ function getSyncLockPath(): string {
 
 type SyncLockPayload = { pid: number; startedAt: number };
 
+/**
+ * Read `error.code` if the thrown value carries one. Errors from the
+ * `node:fs` and `node:process` APIs all set `code` to a `string`; this
+ * narrows safely without an `as NodeJS.ErrnoException` cast.
+ */
+function getErrorCode(error: unknown): string | undefined {
+	if (isRecord(error) && typeof error.code === "string") {
+		return error.code;
+	}
+	return undefined;
+}
+
 function isProcessAlive(pid: number): boolean {
 	try {
 		// Signal 0 doesn't deliver a signal — it just tests permission /
@@ -104,9 +116,8 @@ function isProcessAlive(pid: number): boolean {
 		process.kill(pid, 0);
 		return true;
 	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code;
 		// EPERM means the process exists but we lack permission — still alive.
-		return code === "EPERM";
+		return getErrorCode(error) === "EPERM";
 	}
 }
 
@@ -137,7 +148,9 @@ function tryCreateLock(path: string, payload: SyncLockPayload): boolean {
 		}
 		return true;
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		if (getErrorCode(error) === "EEXIST") {
+			return false;
+		}
 		throw error;
 	}
 }
@@ -162,7 +175,9 @@ function acquireSyncLock(logger: Logger): void {
 		pid: process.pid,
 		startedAt: Date.now(),
 	};
-	if (tryCreateLock(path, payload)) return;
+	if (tryCreateLock(path, payload)) {
+		return;
+	}
 
 	const existing = readLockPayload(path);
 	const age = existing ? Date.now() - existing.startedAt : Infinity;
@@ -182,7 +197,9 @@ function acquireSyncLock(logger: Logger): void {
 		} catch {
 			// Someone else may have just cleaned it up — fine, we'll retry below.
 		}
-		if (tryCreateLock(path, payload)) return;
+		if (tryCreateLock(path, payload)) {
+			return;
+		}
 	}
 
 	const detail = existing
@@ -602,7 +619,9 @@ export const CACHE_NOT_FOUND_MESSAGE =
  * command and the error tells the user to run it.
  */
 export function requireCachePresent(): void {
-	if (existsSync(getCachePath())) return;
+	if (existsSync(getCachePath())) {
+		return;
+	}
 	throw new Error(CACHE_NOT_FOUND_MESSAGE);
 }
 
