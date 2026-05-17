@@ -238,6 +238,67 @@ describe("CLI behavioural: feel evaluate (local engine)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// feel evaluate — null sentinel rendering (text vs JSON disambiguation)
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate null sentinel", () => {
+	test("actual null renders as <null> in text mode", async () => {
+		// The FEEL keyword `null` evaluates to JS null.
+		const result = await feelText("evaluate", "null", "--engine", "local");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(
+			result.stdout,
+			/^<null>\s*$/,
+			`actual null should render as <null>. Got: ${result.stdout}`,
+		);
+	});
+
+	test('the FEEL string "null" renders as plain null in text mode', async () => {
+		// Strings stay unquoted so users can pipe them; this collides with
+		// the actual-null case unless we use a sentinel for the latter.
+		const result = await feelText("evaluate", '"null"', "--engine", "local");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(
+			result.stdout,
+			/^null\s*$/,
+			`string "null" should render unquoted. Got: ${result.stdout}`,
+		);
+	});
+
+	test("JSON mode disambiguates without a sentinel", async () => {
+		const nullResult = await feelJson("evaluate", "null", "--engine", "local");
+		assert.strictEqual(nullResult.status, 0);
+		assert.strictEqual(JSON.parse(nullResult.stdout).result, null);
+
+		const stringResult = await feelJson(
+			"evaluate",
+			'"null"',
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(stringResult.status, 0);
+		assert.strictEqual(JSON.parse(stringResult.stdout).result, "null");
+	});
+
+	test("runtime warning falls back to <null> in text mode", async () => {
+		// Pair with the existing warning-rendering tests: when the result is
+		// null because of an unresolved variable, the text output must use
+		// the sentinel rather than the ambiguous bare 'null'.
+		const result = await feelText(
+			"evaluate",
+			"unknownVar",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0);
+		assert.ok(
+			result.stdout.startsWith("<null>"),
+			`unknownVar should render as <null>. Got: ${result.stdout}`,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // feel evaluate — JSON output shape (engine-agnostic)
 // ---------------------------------------------------------------------------
 
