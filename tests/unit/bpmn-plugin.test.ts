@@ -472,6 +472,80 @@ describe("CLI behavioural: bpmn lint --dry-run", () => {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: bpmn lint .bpmnlintrc override", () => {
+	test("warnings-only override surfaces 'warning' in JSON and text", async () => {
+		// Pin the contract that bpmnlint's raw "warn" category is
+		// normalised to "warning" everywhere — JSON output, the text
+		// severity column, and the summary row.
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-warn-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(
+				join(FIXTURES_DIR, "simple-will-create-incident.bpmn"),
+				"utf-8",
+			),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "warn" },
+			}),
+		);
+		try {
+			// JSON mode — category must be "warning", not "warn".
+			const jsonRun = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"--json",
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(jsonRun.status, 0, `stderr: ${jsonRun.stderr}`);
+			const parsed = JSON.parse(jsonRun.stdout);
+			assert.ok(parsed.issues.length > 0, "should have warning-level issues");
+			for (const issue of parsed.issues) {
+				assert.strictEqual(
+					issue.category,
+					"warning",
+					`category should be 'warning', got '${issue.category}'`,
+				);
+			}
+			assert.strictEqual(parsed.errorCount, 0);
+			assert.ok(parsed.warningCount > 0);
+
+			// Text mode — severity column should read "warning" and the
+			// summary line should mention warnings, not errors.
+			const textRun = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(textRun.status, 0, `stderr: ${textRun.stderr}`);
+			assert.ok(
+				/\swarning\s/.test(textRun.stdout),
+				`text output should include 'warning' as severity. Got: ${textRun.stdout.slice(0, 400)}`,
+			);
+			assert.ok(
+				/0 errors, \d+ warnings?/.test(textRun.stdout),
+				"summary should report 0 errors and >=1 warning",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
 	test("respects user .bpmnlintrc that disables a rule", async () => {
 		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-rc-"));
 		const file = join(externalDir, "test.bpmn");

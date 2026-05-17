@@ -23,20 +23,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 type BpmnInput = { xml: string; source: string };
 
+type Severity = "error" | "warning";
+
 type LintIssue = {
 	rule: string;
 	elementId: string | null;
 	message: string;
-	category: string;
+	category: Severity;
 	path?: ReadonlyArray<string | number>;
 };
 
 type LintRow = {
 	elementRef: string;
-	severity: "error" | "warning";
+	severity: Severity;
 	message: string;
 	displayName: string;
-	category: string;
 };
 
 type LintResult = {
@@ -189,27 +190,27 @@ function collectLintResult(results: LintResults): LintResult {
 		for (const report of reports) {
 			const elementRef = formatElementRef(report, pathStringify);
 			const displayName = report.name ?? ruleName;
-			const severity = report.category === "error" ? "error" : "warning";
+			const severity: Severity =
+				report.category === "error" ? "error" : "warning";
 			rows.push({
 				elementRef,
 				severity,
 				message: report.message,
 				displayName,
-				category: report.category,
 			});
 
 			const issue: LintIssue = {
 				rule: report.name ?? ruleName,
 				elementId: report.id || null,
 				message: report.message,
-				category: report.category === "warn" ? "warning" : report.category,
+				category: severity,
 			};
 			if (report.path) {
 				issue.path = report.path;
 			}
 			issues.push(issue);
 
-			if (report.category === "error") errorCount++;
+			if (severity === "error") errorCount++;
 			else warningCount++;
 		}
 	}
@@ -298,7 +299,7 @@ function renderLintText(
 	logger.output("");
 	logger.output(styleText("underline", sourceLabel));
 	for (const r of rows) {
-		const severityColor = r.category === "error" ? "red" : "yellow";
+		const severityColor = r.severity === "error" ? "red" : "yellow";
 		const severityCell = styleText(
 			severityColor,
 			padEnd(r.severity, widths.severity),
