@@ -546,14 +546,16 @@ async function syncTemplatesLocked({
 	}
 	next.push(...fetchedTemplates);
 
+	// `pruned` = cached entries whose upstreamRef no longer appears in the
+	// fresh index (or that never had one). The "without --prune" branch
+	// below preserves these entries; with --prune we drop them, and the
+	// summary line reports that count to the user.
 	let pruned = 0;
 	if (prune) {
-		pruned =
-			existing.length -
-			next.filter((t) => {
-				const ref = t.metadata?.upstreamRef;
-				return ref !== undefined && byUpstreamRef.has(ref);
-			}).length;
+		pruned = existing.filter((t) => {
+			const ref = t.metadata?.upstreamRef;
+			return ref === undefined || !freshRefs.has(ref);
+		}).length;
 	}
 
 	// Without --prune, keep templates whose upstreamRef vanished from the index
