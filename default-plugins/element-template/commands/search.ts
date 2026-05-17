@@ -1,13 +1,14 @@
 /**
  * `c8ctl element-template search` — search the local cache of OOTB
- * element templates by name/id, with auto-bootstrap on first run.
+ * element templates by name/id. Requires the cache to be populated;
+ * run `c8ctl element-template sync` once first.
  */
 
 import { styleText } from "node:util";
 import type {} from "../../../src/runtime.ts";
 import {
-	bootstrapIfNeeded,
 	nudgeIfStale,
+	requireCachePresent,
 	searchTemplates,
 } from "../marketplace.ts";
 import { buildTemplateSummary, formatTemplateHeaderLines } from "./info.ts";
@@ -58,7 +59,7 @@ export async function searchSubcommand(args: string[]): Promise<void> {
 		throw new Error(`Missing query. ${usage}`);
 	}
 
-	await bootstrapIfNeeded({ logger });
+	requireCachePresent();
 	nudgeIfStale(logger);
 
 	// Deprecated filtering and per-id latest-version reduction are done

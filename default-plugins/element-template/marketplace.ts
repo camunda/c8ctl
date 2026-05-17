@@ -585,16 +585,23 @@ async function syncTemplatesLocked({
 }
 
 /**
- * Run a sync if the cache doesn't exist yet. No-op if cache is present.
+ * Sentinel error message used by all subcommands that need the cache
+ * present. Phrased as a directive so callers don't have to invent
+ * their own copy.
  */
-export async function bootstrapIfNeeded({
-	logger,
-}: {
-	logger: Logger;
-}): Promise<void> {
+export const CACHE_NOT_FOUND_MESSAGE =
+	"Element template cache not found. Run 'c8ctl element-template sync' to download it first.";
+
+/**
+ * Throw a uniform error when the cache is missing. We deliberately do
+ * NOT auto-bootstrap — bootstrap progress goes to stdout via
+ * `logger.info`, which would corrupt any pipe the caller has set up
+ * (apply | bpmn lint, get > template.json, ...). Sync is one explicit
+ * command and the error tells the user to run it.
+ */
+export function requireCachePresent(): void {
 	if (existsSync(getCachePath())) return;
-	logger.info("Element template cache not found — running first-time sync...");
-	await syncTemplates({ logger });
+	throw new Error(CACHE_NOT_FOUND_MESSAGE);
 }
 
 // ---------------------------------------------------------------------------

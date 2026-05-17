@@ -16,7 +16,7 @@
 
 import type {} from "../../../src/runtime.ts";
 import { parseTemplateJson, readFileOrUrl, type Template } from "../helpers.ts";
-import { loadCache } from "../marketplace.ts";
+import { requireCachePresent } from "../marketplace.ts";
 import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
@@ -76,15 +76,10 @@ export async function getSubcommand(args: string[]): Promise<void> {
 	}
 
 	// OOTB id: no upstream bytes available — stringify the cached object.
-	// We deliberately do NOT auto-bootstrap here: the bootstrap log lines
-	// would interleave with the JSON payload on stdout and corrupt any
-	// shell redirect (`> template.json`). Surface the missing-cache case
-	// as an explicit error pointing at `sync`.
-	if (loadCache() === null) {
-		throw new Error(
-			"Element template cache not found. Run 'c8ctl element-template sync' first.",
-		);
-	}
+	// `resolveOotbTemplate` calls `requireCachePresent` under the hood, so
+	// a missing cache surfaces with the same "run sync first" message every
+	// other subcommand uses.
+	requireCachePresent();
 	const template = await resolveOotbTemplate(ref);
 
 	// The cache injects `metadata.upstreamRef` (our internal pointer for

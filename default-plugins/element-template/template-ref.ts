@@ -22,10 +22,10 @@ import {
 	type TemplateProperty,
 } from "./helpers.ts";
 import {
-	bootstrapIfNeeded,
 	findById,
 	nudgeIfStale,
 	pickVersion,
+	requireCachePresent,
 } from "./marketplace.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
@@ -203,7 +203,7 @@ export async function resolveOotbTemplate(
 	}: { executionPlatformVersion?: string | null } = {},
 ): Promise<Template> {
 	const logger = c8ctl.getLogger();
-	await bootstrapIfNeeded({ logger });
+	requireCachePresent();
 	nudgeIfStale(logger);
 
 	const candidates = findById(ref.id);
