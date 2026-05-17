@@ -65,14 +65,18 @@ We mirror Desktop Modeler's approach
 
 ### Lifecycle
 
-- **First time the index is needed** (search, sync, or
-  `apply`/`get-properties`/`info` with an `<id>` arg): bootstrap
-  auto-runs — full fetch, ~459 templates, visible per-template
-  progress. `get` deliberately does NOT bootstrap (its progress
-  logs would corrupt `get <id> > template.json` redirects).
+- **Cache must be populated explicitly via `sync`.** Subcommands that
+  need to resolve an OOTB id (`search`, `info`, `get-properties`,
+  `apply <id>`, `get <id>`) fail fast with a one-line error pointing
+  back at `sync` when the cache is absent. We deliberately do not
+  auto-bootstrap: bootstrap progress goes through `logger.info`,
+  which writes to stdout in text mode, and would corrupt the
+  pipelines the README advertises (`apply ... | bpmn lint`,
+  `get <id> > template.json`). It also avoids the concurrent-bootstrap
+  race when several cold-cache invocations land at once.
 - **Local file or URL paths** for `apply`/`get-properties`/`info`:
-  never trigger bootstrap. The plugin classifies the template arg
-  before touching the cache.
+  never touch the cache at all. The plugin classifies the template
+  arg in `parseTemplateRef` before any cache call.
 - **Stale cache** (>7 days since `fetched-at`): warn-only, suggesting
   `c8ctl element-template sync`. We don't auto-refresh — surprise
   network activity inside `apply` is undesirable and the index is
@@ -80,8 +84,16 @@ We mirror Desktop Modeler's approach
 - **`sync`** always re-fetches the index but skips already-cached
   refs. **`sync --prune`** drops cached entries no longer in the
   fresh index (opt-in: a user may keep a legacy version intentionally).
-- **First-run + offline**: hard-fail with a clear message. No bundled
-  fallback.
+- **Atomicity**: `sync` writes `templates.json` and `fetched-at`
+  via a sibling temp file + `renameSync`, so a kill mid-sync leaves
+  the previous cache intact. `apply --in-place` uses the same recipe
+  for the user's BPMN file.
+- **Concurrent syncs** are serialised by an advisory lock
+  (`<cacheDir>/.sync.lock`) holding `{pid, startedAt}`. A second
+  `sync` exits non-zero with a pointer to the lockfile; stale locks
+  (dead PID or > 10 min old) are auto-recovered.
+- **No cache, no network**: hard-fail with a clear message. No
+  bundled fallback — `sync` is the one explicit step.
 
 ### Why not lazy per-template fetch on apply?
 
