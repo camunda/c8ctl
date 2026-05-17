@@ -325,6 +325,26 @@ describe("CLI behavioural: feel evaluate JSON output shape", () => {
 		assert.deepStrictEqual(parsed.warnings, []);
 	});
 
+	test("--vars base + --var overlay also works in JSON mode", async () => {
+		// The text-mode equivalent is pinned in the local-engine block above.
+		// Cover the JSON path explicitly so the overlay contract is visible
+		// in both rendering modes.
+		const result = await feelJson(
+			"evaluate",
+			"a + b",
+			"--vars",
+			'{"a":1,"b":2}',
+			"--var",
+			"b=99",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.result, 100);
+		assert.deepStrictEqual(parsed.warnings, []);
+	});
+
 	test("local engine surfaces runtime warning for unknown var with result null", async () => {
 		const result = await feelJson(
 			"evaluate",
