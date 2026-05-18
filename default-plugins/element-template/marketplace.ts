@@ -224,7 +224,8 @@ function releaseSyncLock(): void {
  * Run `body` while the sync lock is held. Installs signal handlers
  * so the lock is released on SIGINT/SIGTERM (otherwise a Ctrl-C
  * during sync would orphan the lockfile, leaving the next run to
- * wait the 10-minute stale window). Prior listeners are restored.
+ * wait the stale window). Only the lock-release handlers we add are
+ * removed in `finally`; any pre-existing listeners are left untouched.
  */
 async function withSyncLock<T>(
 	logger: Logger,
