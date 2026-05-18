@@ -1663,12 +1663,13 @@ describe("CLI behavioural: element-template apply --dry-run", () => {
 /**
  * Spawn the CLI against a fresh, empty `C8CTL_DATA_DIR`. The cache
  * is intentionally absent so we exercise the missing-cache path.
- * Caller is responsible for cleaning up `dataDir`.
+ * The temp dir is created and removed inside this helper — callers
+ * just consume the spawn result.
  */
 async function spawnAgainstEmptyCache(...args: string[]) {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-cold-"));
 	try {
-		const result = await asyncSpawn(
+		return await asyncSpawn(
 			"node",
 			["--experimental-strip-types", CLI, "element-template", ...args],
 			{
@@ -1680,7 +1681,6 @@ async function spawnAgainstEmptyCache(...args: string[]) {
 				},
 			},
 		);
-		return { ...result, dataDir };
 	} finally {
 		rmSync(dataDir, { recursive: true, force: true });
 	}
