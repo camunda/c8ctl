@@ -18,6 +18,23 @@ import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
 
+/**
+ * Strip CAMUNDA_* from the parent env so a developer or CI runner with
+ * CAMUNDA_CLIENT_ID/SECRET/CLUSTER_ID/AUTH_URL set doesn't push the
+ * client onto an OAuth/basic-auth path before it reaches our mock.
+ * The test then sets the CAMUNDA_* vars it actually wants.
+ */
+function envWithoutCamundaAuth(): NodeJS.ProcessEnv {
+	const out: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (key.startsWith("CAMUNDA_")) {
+			continue;
+		}
+		out[key] = value;
+	}
+	return out;
+}
+
 async function feelText(...args: string[]) {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
 	writeFileSync(
@@ -30,7 +47,7 @@ async function feelText(...args: string[]) {
 			["--experimental-strip-types", CLI, "feel", ...args],
 			{
 				env: {
-					...process.env,
+					...envWithoutCamundaAuth(),
 					CAMUNDA_BASE_URL: "http://test-cluster/v2",
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
@@ -54,7 +71,7 @@ async function feelJson(...args: string[]) {
 			["--experimental-strip-types", CLI, "feel", ...args],
 			{
 				env: {
-					...process.env,
+					...envWithoutCamundaAuth(),
 					CAMUNDA_BASE_URL: "http://test-cluster/v2",
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
@@ -635,7 +652,7 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 				["--experimental-strip-types", CLI, "feel", "evaluate", "1 + 2"],
 				{
 					env: {
-						...process.env,
+						...envWithoutCamundaAuth(),
 						CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
@@ -715,7 +732,7 @@ async function feelTextAgainstPort(port: number, ...args: string[]) {
 			["--experimental-strip-types", CLI, "feel", ...args],
 			{
 				env: {
-					...process.env,
+					...envWithoutCamundaAuth(),
 					CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
