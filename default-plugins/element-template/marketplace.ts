@@ -31,7 +31,10 @@ const DEFAULT_OOTB_URL =
 const FETCH_CONCURRENCY = 12;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const FETCH_TIMEOUT_MS = 30_000; // 30 s per HTTP request
-const SYNC_LOCK_STALE_AFTER_MS = 10 * 60 * 1000; // 10 minutes
+// Backstop for ghost locks left by PID-recycled crashed syncs. Kept
+// well above realistic sync runtimes so a live but slow sync's lock
+// is never reclaimed.
+const SYNC_LOCK_STALE_AFTER_MS = 60 * 60 * 1000; // 60 minutes
 
 // ---------------------------------------------------------------------------
 // Index entry types

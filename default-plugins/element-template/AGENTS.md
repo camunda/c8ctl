@@ -45,7 +45,7 @@ version resolution.
 - **`syncTemplates` is serialised by an advisory lockfile.** The
   helper `withSyncLock` in `marketplace.ts` holds
   `<cacheDir>/.sync.lock` while the body runs, with stale-lock
-  recovery (dead PID or > 10 min old) and signal handlers
+  recovery (dead PID or > 60 min old) and signal handlers
   (SIGINT/SIGTERM/SIGHUP) that release before re-raising. Don't
   bypass it from new code paths.
 - **`apply` and `get` install an EPIPE handler before writing to

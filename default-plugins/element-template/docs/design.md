@@ -91,7 +91,8 @@ We mirror Desktop Modeler's approach
 - **Concurrent syncs** are serialised by an advisory lock
   (`<cacheDir>/.sync.lock`) holding `{pid, startedAt}`. A second
   `sync` exits non-zero with a pointer to the lockfile; stale locks
-  (dead PID or > 10 min old) are auto-recovered.
+  (dead PID, or > 60 min old as a backstop against PID-recycle ghost
+  locks) are auto-recovered.
 - **No cache, no network**: hard-fail with a clear message. No
   bundled fallback — `sync` is the one explicit step.
 

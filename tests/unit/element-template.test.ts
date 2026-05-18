@@ -4,6 +4,7 @@
  */
 
 import assert from "node:assert";
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -1919,16 +1920,18 @@ describe("CLI behavioural: element-template sync lockfile", () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-stale-"));
 		const cacheDir = join(dataDir, "element-templates");
 		mkdirSync(cacheDir, { recursive: true });
-		// PID 1 (init) is reliably alive on every platform; pick a PID
-		// that won't ever map to a process: process.pid + a huge offset
-		// is the cheap version but we can't guarantee uniqueness. Use a
-		// startedAt 11 minutes in the past so the age-based recovery
-		// path fires regardless of PID liveness.
+		// Spawn-then-await a no-op child to obtain a PID that's guaranteed
+		// to have exited by the time we use it. (Hard-coded large PIDs can
+		// collide on some platforms; this is portable across Linux/macOS/
+		// Windows.)
+		const exitedChild = spawnSync(process.execPath, ["-e", ""]);
+		const exitedPid = exitedChild.pid;
+		assert.ok(exitedPid, "Failed to obtain an exited PID for the test");
 		writeFileSync(
 			join(cacheDir, ".sync.lock"),
 			JSON.stringify({
-				pid: process.pid,
-				startedAt: Date.now() - 11 * 60 * 1000,
+				pid: exitedPid,
+				startedAt: Date.now(),
 			}),
 		);
 		try {
