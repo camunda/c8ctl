@@ -510,9 +510,10 @@ function evaluateLocal({
 /**
  * Text-mode rendering. Strings stay unquoted (the README sells
  * `--var name=Alice` → `Alice` as the common case), so we need a
- * sentinel for actual null/undefined that can't collide with the FEEL
- * string `"null"`. `<null>` is unambiguous and matches how other CLIs
- * surface "no value".
+ * sentinel for actual null/undefined that won't collide with the FEEL
+ * string `"null"`. `<null>` matches how other CLIs surface "no value".
+ * The literal FEEL string `"<null>"` would still render identically,
+ * but that's a contrived edge case; JSON mode is the unambiguous path.
  */
 function formatResultForText(result: unknown): string {
 	if (typeof result === "string") {
