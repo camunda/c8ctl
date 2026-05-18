@@ -21,7 +21,6 @@ import {
 	readFileOrUrl,
 	type Template,
 } from "../helpers.ts";
-import { requireCachePresent } from "../marketplace.ts";
 import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
@@ -89,7 +88,6 @@ export async function getSubcommand(args: string[]): Promise<void> {
 	// `resolveOotbTemplate` calls `requireCachePresent` under the hood, so
 	// a missing cache surfaces with the same "run sync first" message every
 	// other subcommand uses.
-	requireCachePresent();
 	const template = await resolveOotbTemplate(ref);
 
 	// The cache injects `metadata.upstreamRef` (our internal pointer for
