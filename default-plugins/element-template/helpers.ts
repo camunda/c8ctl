@@ -17,6 +17,32 @@ const c8ctl = globalThis.c8ctl;
  */
 export const USER_AGENT = `c8ctl-plugin-element-template/${c8ctl.version}`;
 
+/**
+ * Subcommands that write the primary payload to stdout (apply, get)
+ * must call this once before the first write. Closing the downstream
+ * pipe early (e.g. `apply <id> ... | head -c 100`) raises EPIPE on
+ * `process.stdout`; without a listener Node treats it as an
+ * uncaught 'error' event and crashes with a stack trace. Swallow it
+ * and exit cleanly — there's no useful work left to do once the
+ * consumer has gone away.
+ *
+ * Idempotent: the handler is registered at most once per process so
+ * repeated calls from different subcommand modules don't accumulate.
+ */
+let stdoutEpipeInstalled = false;
+export function installStdoutEpipeHandler(): void {
+	if (stdoutEpipeInstalled) {
+		return;
+	}
+	stdoutEpipeInstalled = true;
+	process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EPIPE") {
+			process.exit(0);
+		}
+		throw err;
+	});
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 }

@@ -15,11 +15,20 @@
  */
 
 import type {} from "../../../src/runtime.ts";
-import { parseTemplateJson, readFileOrUrl, type Template } from "../helpers.ts";
-import { loadCache } from "../marketplace.ts";
+import {
+	installStdoutEpipeHandler,
+	parseTemplateJson,
+	readFileOrUrl,
+	type Template,
+} from "../helpers.ts";
 import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
+	// `get` writes raw template JSON straight to stdout; consumers that
+	// take only a prefix (e.g. `get <id> | head -c N`) close the pipe
+	// early and would otherwise crash the process with an unhandled
+	// EPIPE event.
+	installStdoutEpipeHandler();
 	const usage = "Usage: c8ctl element-template get <template> [--no-icon]";
 
 	let templateArg: string | undefined;
@@ -76,15 +85,9 @@ export async function getSubcommand(args: string[]): Promise<void> {
 	}
 
 	// OOTB id: no upstream bytes available — stringify the cached object.
-	// We deliberately do NOT auto-bootstrap here: the bootstrap log lines
-	// would interleave with the JSON payload on stdout and corrupt any
-	// shell redirect (`> template.json`). Surface the missing-cache case
-	// as an explicit error pointing at `sync`.
-	if (loadCache() === null) {
-		throw new Error(
-			"Element template cache not found. Run 'c8ctl element-template sync' first.",
-		);
-	}
+	// `resolveOotbTemplate` calls `requireCachePresent` under the hood, so
+	// a missing cache surfaces with the same "run sync first" message every
+	// other subcommand uses.
 	const template = await resolveOotbTemplate(ref);
 
 	// The cache injects `metadata.upstreamRef` (our internal pointer for

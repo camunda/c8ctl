@@ -26,15 +26,32 @@ version resolution.
   `.camunda-connector-templates.json`.** Don't change the format
   without reason — `metadata.upstreamRef` is the dedup key for
   incremental sync.
-- **`get` deliberately does NOT auto-bootstrap.** Bootstrap progress
+- **No subcommand auto-bootstraps the cache.** OOTB-id resolution
+  is guarded by `requireCachePresent()` in `marketplace.ts`, which
+  throws the shared `CACHE_NOT_FOUND_MESSAGE` when the cache is
+  absent. The reason auto-bootstrap is forbidden: bootstrap progress
   goes through `logger.info`, which writes to stdout in text mode —
-  that would corrupt `get <id> > template.json` redirects. Cache miss
-  surfaces as an explicit error pointing at `sync`. Don't add a
-  bootstrap call to `getSubcommand` without changing the logger story
-  first.
-- **Path/URL apply paths must not trigger the index bootstrap.**
+  it would corrupt `apply | bpmn lint` and `get <id> > template.json`
+  pipelines, and racing cold-cache invocations would both fetch the
+  same ~14 MB index. Don't re-add a bootstrap call to any subcommand
+  without changing the logger story first.
+- **Path/URL apply paths must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
   before any cache call.
+- **`saveCache` and `apply --in-place` writes are atomic.** Both
+  use a sibling temp file + `renameSync`. Anything else that
+  overwrites a user-owned file (cache or BPMN) must follow the same
+  pattern — a kill mid-write must not leave a truncated file.
+- **`syncTemplates` is serialised by an advisory lockfile.** The
+  helper `withSyncLock` in `marketplace.ts` holds
+  `<cacheDir>/.sync.lock` while the body runs, with stale-lock
+  recovery (dead PID or > 60 min old) and signal handlers
+  (SIGINT/SIGTERM/SIGHUP) that release before re-raising. Don't
+  bypass it from new code paths.
+- **`apply` and `get` install an EPIPE handler before writing to
+  stdout** (`installStdoutEpipeHandler()` in `helpers.ts`). New
+  subcommands that write to stdout must do the same — otherwise
+  `... | head -c N` closing the pipe early crashes the process.
 - **JSON output uses element-templates schema field names verbatim.**
   No invented derivations — `binding`, `optional`, `value`, `condition`,
   `group` (id), `elementType: { value }`, `engines: { camunda }`. The

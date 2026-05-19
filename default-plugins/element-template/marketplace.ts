@@ -11,7 +11,17 @@
  * approach in `app/lib/template-updater/util.js`).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template, USER_AGENT } from "./helpers.ts";
@@ -21,6 +31,10 @@ const DEFAULT_OOTB_URL =
 const FETCH_CONCURRENCY = 12;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const FETCH_TIMEOUT_MS = 30_000; // 30 s per HTTP request
+// Backstop for ghost locks left by PID-recycled crashed syncs. Kept
+// well above realistic sync runtimes so a live but slow sync's lock
+// is never reclaimed.
+const SYNC_LOCK_STALE_AFTER_MS = 60 * 60 * 1000; // 60 minutes
 
 // ---------------------------------------------------------------------------
 // Index entry types
@@ -74,6 +88,177 @@ function getFetchedAtPath(): string {
 	return join(getCacheDir(), "fetched-at");
 }
 
+function getSyncLockPath(): string {
+	return join(getCacheDir(), ".sync.lock");
+}
+
+// ---------------------------------------------------------------------------
+// Sync lock — serialises concurrent `sync` runs so they don't silently
+// undo each other's `--prune` (atomic rename prevents torn files but
+// not stale-read clobbers).
+// ---------------------------------------------------------------------------
+
+type SyncLockPayload = { pid: number; startedAt: number };
+
+/**
+ * Read `error.code` if the thrown value carries one. Errors from the
+ * `node:fs` and `node:process` APIs all set `code` to a `string`; this
+ * narrows safely without an `as NodeJS.ErrnoException` cast.
+ */
+function getErrorCode(error: unknown): string | undefined {
+	if (isRecord(error) && typeof error.code === "string") {
+		return error.code;
+	}
+	return undefined;
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		// Signal 0 doesn't deliver a signal — it just tests permission /
+		// existence. ESRCH means the PID is gone.
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// EPERM means the process exists but we lack permission — still alive.
+		return getErrorCode(error) === "EPERM";
+	}
+}
+
+function readLockPayload(path: string): SyncLockPayload | null {
+	try {
+		const raw = readFileSync(path, "utf-8");
+		const parsed: unknown = JSON.parse(raw);
+		if (
+			isRecord(parsed) &&
+			typeof parsed.pid === "number" &&
+			typeof parsed.startedAt === "number"
+		) {
+			return { pid: parsed.pid, startedAt: parsed.startedAt };
+		}
+	} catch {
+		// Unreadable / unparsable lock counts as stale.
+	}
+	return null;
+}
+
+function tryCreateLock(path: string, payload: SyncLockPayload): boolean {
+	try {
+		const fd = openSync(path, "wx", 0o644);
+		try {
+			writeSync(fd, JSON.stringify(payload));
+		} finally {
+			closeSync(fd);
+		}
+		return true;
+	} catch (error) {
+		if (getErrorCode(error) === "EEXIST") {
+			return false;
+		}
+		throw error;
+	}
+}
+
+/**
+ * Acquire the sync lock or throw with a user-actionable message.
+ *
+ * The lock is a regular file at `<cacheDir>/.sync.lock` holding
+ * `{pid, startedAt}` JSON. We use `openSync("wx")` for atomic create —
+ * two concurrent attempts cannot both win on the same filesystem.
+ *
+ * If an existing lock is from a dead PID or older than
+ * `SYNC_LOCK_STALE_AFTER_MS`, we treat it as stale, log, and retry
+ * the create once. A persistent EEXIST after that is a real race with
+ * another live sync — surface it.
+ */
+function acquireSyncLock(logger: Logger): void {
+	const dir = getCacheDir();
+	mkdirSync(dir, { recursive: true });
+	const path = getSyncLockPath();
+	const payload: SyncLockPayload = {
+		pid: process.pid,
+		startedAt: Date.now(),
+	};
+	if (tryCreateLock(path, payload)) {
+		return;
+	}
+
+	const existing = readLockPayload(path);
+	const age = existing ? Date.now() - existing.startedAt : Infinity;
+	const stale =
+		existing === null ||
+		!isProcessAlive(existing.pid) ||
+		age > SYNC_LOCK_STALE_AFTER_MS;
+
+	if (stale) {
+		if (existing) {
+			logger.warn(
+				`Removed stale sync lock from pid ${existing.pid} (age ${Math.round(age / 1000)}s).`,
+			);
+		}
+		try {
+			unlinkSync(path);
+		} catch {
+			// Someone else may have just cleaned it up — fine, we'll retry below.
+		}
+		if (tryCreateLock(path, payload)) {
+			return;
+		}
+	}
+
+	const detail = existing
+		? `pid ${existing.pid}, started ${new Date(existing.startedAt).toISOString()}`
+		: "unknown owner";
+	throw new Error(
+		`Another sync is in progress (${detail}). ` +
+			`Wait for it to finish or remove ${path} if you're sure no other sync is running.`,
+	);
+}
+
+function releaseSyncLock(): void {
+	try {
+		unlinkSync(getSyncLockPath());
+	} catch {
+		// Best-effort — the lock may already be gone if a signal handler
+		// raced with the normal `finally`.
+	}
+}
+
+/**
+ * Run `body` while the sync lock is held. Installs signal handlers
+ * so the lock is released on SIGINT/SIGTERM (otherwise a Ctrl-C
+ * during sync would orphan the lockfile, leaving the next run to
+ * wait the stale window). Only the lock-release handlers we add are
+ * removed in `finally`; any pre-existing listeners are left untouched.
+ */
+async function withSyncLock<T>(
+	logger: Logger,
+	body: () => Promise<T>,
+): Promise<T> {
+	acquireSyncLock(logger);
+	const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+	const handlers = new Map<NodeJS.Signals, () => void>();
+	for (const sig of signals) {
+		const handler = () => {
+			releaseSyncLock();
+			// Re-raise the signal with the default action so the process
+			// actually exits with the expected status. Remove our listener
+			// first so we don't recurse.
+			process.removeListener(sig, handler);
+			process.kill(process.pid, sig);
+		};
+		handlers.set(sig, handler);
+		process.on(sig, handler);
+	}
+	try {
+		return await body();
+	} finally {
+		for (const [sig, handler] of handlers) {
+			process.removeListener(sig, handler);
+		}
+		releaseSyncLock();
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Cache I/O
 // ---------------------------------------------------------------------------
@@ -116,15 +301,35 @@ function loadFetchedAt(): number | null {
 	return Number.isFinite(ms) ? ms : null;
 }
 
+/**
+ * Write `contents` to `target` via a sibling temp file + atomic
+ * `renameSync`. Readers either see the old file or the new file —
+ * never a truncated mid-write state. POSIX `rename` is atomic on the
+ * same filesystem (which a sibling in the same directory always is).
+ */
+function atomicWriteFileSync(target: string, contents: string): void {
+	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	try {
+		writeFileSync(tmp, contents, "utf-8");
+		renameSync(tmp, target);
+	} catch (error) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// Best-effort cleanup — the original error is the one that matters.
+		}
+		throw error;
+	}
+}
+
 function saveCache(templates: Template[]): void {
 	const dir = getCacheDir();
 	mkdirSync(dir, { recursive: true });
-	writeFileSync(
+	atomicWriteFileSync(
 		getCachePath(),
 		`${JSON.stringify(templates, null, 2)}\n`,
-		"utf-8",
 	);
-	writeFileSync(getFetchedAtPath(), String(Date.now()), "utf-8");
+	atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
 }
 
 export function isCacheStale(): boolean {
@@ -279,6 +484,16 @@ export async function syncTemplates({
 	logger: Logger;
 	prune?: boolean;
 }): Promise<SyncSummary> {
+	return withSyncLock(logger, () => syncTemplatesLocked({ logger, prune }));
+}
+
+async function syncTemplatesLocked({
+	logger,
+	prune,
+}: {
+	logger: Logger;
+	prune: boolean;
+}): Promise<SyncSummary> {
 	logger.info(`Fetching index from ${getMarketplaceUrl()} ...`);
 	const index = await fetchIndex();
 	const entries = flattenIndex(index);
@@ -352,14 +567,16 @@ export async function syncTemplates({
 	}
 	next.push(...fetchedTemplates);
 
+	// `pruned` = cached entries whose upstreamRef no longer appears in the
+	// fresh index (or that never had one). The "without --prune" branch
+	// below preserves these entries; with --prune we drop them, and the
+	// summary line reports that count to the user.
 	let pruned = 0;
 	if (prune) {
-		pruned =
-			existing.length -
-			next.filter((t) => {
-				const ref = t.metadata?.upstreamRef;
-				return ref !== undefined && byUpstreamRef.has(ref);
-			}).length;
+		pruned = existing.filter((t) => {
+			const ref = t.metadata?.upstreamRef;
+			return ref === undefined || !freshRefs.has(ref);
+		}).length;
 	}
 
 	// Without --prune, keep templates whose upstreamRef vanished from the index
@@ -391,16 +608,25 @@ export async function syncTemplates({
 }
 
 /**
- * Run a sync if the cache doesn't exist yet. No-op if cache is present.
+ * Sentinel error message used by all subcommands that need the cache
+ * present. Phrased as a directive so callers don't have to invent
+ * their own copy.
  */
-export async function bootstrapIfNeeded({
-	logger,
-}: {
-	logger: Logger;
-}): Promise<void> {
-	if (existsSync(getCachePath())) return;
-	logger.info("Element template cache not found — running first-time sync...");
-	await syncTemplates({ logger });
+export const CACHE_NOT_FOUND_MESSAGE =
+	"Element template cache not found. Run 'c8ctl element-template sync' to download it first.";
+
+/**
+ * Throw a uniform error when the cache is missing. We deliberately do
+ * NOT auto-bootstrap — bootstrap progress goes to stdout via
+ * `logger.info`, which would corrupt any pipe the caller has set up
+ * (apply | bpmn lint, get > template.json, ...). Sync is one explicit
+ * command and the error tells the user to run it.
+ */
+export function requireCachePresent(): void {
+	if (existsSync(getCachePath())) {
+		return;
+	}
+	throw new Error(CACHE_NOT_FOUND_MESSAGE);
 }
 
 // ---------------------------------------------------------------------------

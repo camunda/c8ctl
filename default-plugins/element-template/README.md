@@ -17,11 +17,17 @@ The verb is organized as a workflow: discover → inspect → act → export →
 | `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. |
 | `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
 | `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
-| `sync` | Refresh the local OOTB template cache. |
+| `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
 
 `<template>` is a local path, an `https://` URL, or an OOTB template id
 (optionally pinned: `<id>@<version>`). GitHub blob URLs are
 auto-rewritten to raw content URLs — paste straight from the address bar.
+
+> **First-run setup:** OOTB-id subcommands (`search`, `info`,
+> `get-properties`, `apply <id>`, `get <id>`) need a populated cache.
+> Run `c8ctl element-template sync` once per machine; subsequent commands
+> read from it. A missing cache surfaces a one-line error pointing back
+> at `sync`.
 
 ## Usage
 
@@ -297,22 +303,25 @@ warning at the end (the property won't be applied).
    (`https://marketplace.cloud.camunda.io/api/v1/ootb-connectors`) — the
    same source Desktop Modeler uses. Override via
    `C8CTL_OOTB_ELEMENT_TEMPLATES_URL` for testing.
-2. **First use** of `search`, `info`, `get-properties`, `apply`, or
-   `sync`: a one-shot bootstrap downloads ~459 templates with visible
-   progress; per-template failures are logged but don't abort the run.
-3. **`get` does NOT auto-bootstrap.** It exits with a hint to run
-   `sync` first if the cache is missing — bootstrap progress would
-   otherwise corrupt redirected stdout (`get <id> > template.json`).
-4. **Local file or URL** template args (paths containing `/` or `\`,
+2. **Populate the cache once** via `c8ctl element-template sync`.
+   Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
+   `apply`, `get`) exit non-zero with a hint to run `sync` when the
+   cache is missing — no auto-download. This keeps pipelines clean:
+   bootstrap progress would otherwise land on stdout and corrupt
+   `apply | bpmn lint` or `get <id> > template.json`.
+3. **Local file or URL** template args (paths containing `/` or `\`,
    starting with `.`, ending in `.json`, or starting with `http(s)://`)
    skip the index entirely.
-5. **Version selection** uses `semver.satisfies` against the BPMN's
+4. **Version selection** uses `semver.satisfies` against the BPMN's
    `modeler:executionPlatformVersion` and each template's
    `engines.camunda` constraint. Without `@<version>`, the highest
    compatible version wins.
-6. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
+5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
    refresh — `sync` only fetches refs not already cached (commit-pinned
    URLs make incremental sync free).
+6. **Concurrent syncs** are serialised by an advisory lock at
+   `<cache-dir>/.sync.lock`. A second `sync` started while one is
+   already running exits non-zero rather than racing.
 
 ### Cache locations
 
