@@ -23,20 +23,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 type BpmnInput = { xml: string; source: string };
 
+type Severity = "error" | "warning";
+
 type LintIssue = {
 	rule: string;
 	elementId: string | null;
 	message: string;
-	category: string;
+	category: Severity;
 	path?: ReadonlyArray<string | number>;
 };
 
 type LintRow = {
 	elementRef: string;
-	severity: "error" | "warning";
+	severity: Severity;
 	message: string;
 	displayName: string;
-	category: string;
 };
 
 type LintResult = {
@@ -79,49 +80,87 @@ async function readBpmnInput(
 	return null;
 }
 
+type PlatformInfo = {
+	executionPlatform: string;
+	version: string | null;
+};
+
+function extractPlatformInfo(
+	rootElement: BpmnModdleElement,
+): PlatformInfo | null {
+	const attrs = rootElement.$attrs ?? {};
+	const executionPlatform = attrs["modeler:executionPlatform"];
+	if (!executionPlatform) {
+		return null;
+	}
+	const version = attrs["modeler:executionPlatformVersion"] ?? null;
+	return { executionPlatform, version };
+}
+
 function detectCamundaCloudVersion(
 	rootElement: BpmnModdleElement,
 ): string | null {
-	const attrs = rootElement.$attrs ?? {};
-	const platform = attrs["modeler:executionPlatform"];
-	const version = attrs["modeler:executionPlatformVersion"];
-	if (platform !== "Camunda Cloud" || !version) {
+	const info = extractPlatformInfo(rootElement);
+	if (!info || info.executionPlatform !== "Camunda Cloud" || !info.version) {
 		return null;
 	}
-	const match = version.match(/^(\d+\.\d+)/);
+	const match = info.version.match(/^(\d+\.\d+)/);
 	return match ? match[1] : null;
 }
 
-function resolveCamundaCompatConfig(version: string): string | null {
+type ConfigResolution =
+	| { kind: "exact"; config: string }
+	| { kind: "above-range"; config: string; highest: string }
+	| { kind: "below-range"; lowest: string };
+
+function parseVersionParts(s: string): number[] {
+	return s.replace("camunda-cloud-", "").split("-").map(Number);
+}
+
+function compareVersionParts(a: number[], b: number[]): number {
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		const diff = (a[i] || 0) - (b[i] || 0);
+		if (diff !== 0) {
+			return diff;
+		}
+	}
+	return 0;
+}
+
+function resolveCamundaCompatConfig(version: string): ConfigResolution | null {
 	const plugin = require("bpmnlint-plugin-camunda-compat");
 	const configs = plugin.configs;
 
 	const configName = `camunda-cloud-${version.replace(".", "-")}`;
 	if (configName in configs) {
-		return `plugin:camunda-compat/${configName}`;
+		return { kind: "exact", config: `plugin:camunda-compat/${configName}` };
 	}
 
 	const cloudConfigs = Object.keys(configs)
 		.filter((k) => k.startsWith("camunda-cloud-"))
-		.sort((a, b) => {
-			const parse = (s: string) =>
-				s.replace("camunda-cloud-", "").split("-").map(Number);
-			const va = parse(a);
-			const vb = parse(b);
-			for (let i = 0; i < Math.max(va.length, vb.length); i++) {
-				const diff = (va[i] || 0) - (vb[i] || 0);
-				if (diff !== 0) {
-					return diff;
-				}
-			}
-			return 0;
-		});
+		.sort((a, b) =>
+			compareVersionParts(parseVersionParts(a), parseVersionParts(b)),
+		);
 
-	if (cloudConfigs.length > 0) {
-		return `plugin:camunda-compat/${cloudConfigs[cloudConfigs.length - 1]}`;
+	if (cloudConfigs.length === 0) {
+		return null;
 	}
 
-	return null;
+	const requested = parseVersionParts(
+		`camunda-cloud-${version.replace(".", "-")}`,
+	);
+	const lowest = cloudConfigs[0];
+	const highest = cloudConfigs[cloudConfigs.length - 1];
+
+	if (compareVersionParts(requested, parseVersionParts(lowest)) < 0) {
+		return { kind: "below-range", lowest };
+	}
+
+	return {
+		kind: "above-range",
+		config: `plugin:camunda-compat/${highest}`,
+		highest,
+	};
 }
 
 function buildLintConfig(
@@ -129,7 +168,17 @@ function buildLintConfig(
 ): Record<string, unknown> {
 	const rcPath = resolvePath(".bpmnlintrc");
 	if (existsSync(rcPath)) {
-		const parsed: unknown = JSON.parse(readFileSync(rcPath, "utf-8"));
+		const raw = readFileSync(rcPath, "utf-8");
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (error) {
+			const detail = error instanceof Error ? error.message : String(error);
+			throw new Error(
+				`Failed to parse .bpmnlintrc: only JSON is supported (${detail}). ` +
+					"For YAML or JS configs, use the standalone `bpmnlint` CLI.",
+			);
+		}
 		if (!isRecord(parsed)) {
 			throw new Error(".bpmnlintrc must contain a JSON object");
 		}
@@ -140,8 +189,18 @@ function buildLintConfig(
 
 	const version = detectCamundaCloudVersion(rootElement);
 	if (version) {
-		const compatConfig = resolveCamundaCompatConfig(version);
-		if (compatConfig) config.extends.push(compatConfig);
+		const resolution = resolveCamundaCompatConfig(version);
+		if (resolution?.kind === "exact" || resolution?.kind === "above-range") {
+			config.extends.push(resolution.config);
+		}
+		if (resolution?.kind === "above-range") {
+			c8ctl
+				.getLogger()
+				.warn(
+					`No camunda-compat config for ${version}; falling back to ${resolution.highest}. ` +
+						"Update c8ctl for newer rulesets.",
+				);
+		}
 	}
 
 	return config;
@@ -174,32 +233,63 @@ function collectLintResult(results: LintResults): LintResult {
 		for (const report of reports) {
 			const elementRef = formatElementRef(report, pathStringify);
 			const displayName = report.name ?? ruleName;
-			const severity = report.category === "error" ? "error" : "warning";
+			const severity: Severity =
+				report.category === "error" ? "error" : "warning";
 			rows.push({
 				elementRef,
 				severity,
 				message: report.message,
 				displayName,
-				category: report.category,
 			});
 
 			const issue: LintIssue = {
 				rule: report.name ?? ruleName,
 				elementId: report.id || null,
 				message: report.message,
-				category: report.category === "warn" ? "warning" : report.category,
+				category: severity,
 			};
 			if (report.path) {
 				issue.path = report.path;
 			}
 			issues.push(issue);
 
-			if (report.category === "error") errorCount++;
+			if (severity === "error") errorCount++;
 			else warningCount++;
 		}
 	}
 
 	return { rows, issues, errorCount, warningCount };
+}
+
+function renderDryRun(
+	logger: Logger,
+	source: string,
+	platform: PlatformInfo | null,
+	config: Record<string, unknown>,
+): void {
+	const sourceLabel = source === "stdin" ? "stdin" : resolvePath(source);
+	if (c8ctl.outputMode === "json") {
+		logger.json({
+			dryRun: true,
+			command: "bpmn lint",
+			source: sourceLabel,
+			platform,
+			config,
+		});
+		return;
+	}
+
+	const platformLabel = platform
+		? `${platform.executionPlatform}${platform.version ? ` ${platform.version}` : ""}`
+		: "not declared";
+	logger.output("Dry run — no lint performed.");
+	logger.output(`  Source: ${sourceLabel}`);
+	logger.output(`  Platform: ${platformLabel}`);
+	logger.output("  Config:");
+	const configLines = JSON.stringify(config, null, 2).split("\n");
+	for (const line of configLines) {
+		logger.output(`    ${line}`);
+	}
 }
 
 function renderLintJson(
@@ -252,7 +342,7 @@ function renderLintText(
 	logger.output("");
 	logger.output(styleText("underline", sourceLabel));
 	for (const r of rows) {
-		const severityColor = r.category === "error" ? "red" : "yellow";
+		const severityColor = r.severity === "error" ? "red" : "yellow";
 		const severityCell = styleText(
 			severityColor,
 			padEnd(r.severity, widths.severity),
@@ -335,6 +425,17 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 	}
 
 	const config = buildLintConfig(rootElement);
+
+	if (c8ctl.dryRun) {
+		renderDryRun(
+			logger,
+			input.source,
+			extractPlatformInfo(rootElement),
+			config,
+		);
+		return;
+	}
+
 	const { Linter } = require("bpmnlint");
 	const NodeResolver = require("bpmnlint/lib/resolver/node-resolver");
 

@@ -141,6 +141,73 @@ describe("CLI behavioural: bpmn lint", () => {
 		);
 	});
 
+	test("below-range Cloud version: falls through to bpmnlint:recommended only", async () => {
+		// 0.5.0 is below the lowest shipped camunda-compat config
+		// (camunda-cloud-1-0). The plugin should skip the Camunda
+		// ruleset entirely rather than silently apply the wrong one.
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-below-"));
+		const file = join(tempDir, "ancient.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="0.5.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				!out.includes("camunda-compat"),
+				`extends should NOT include any camunda-compat config. Got: ${out}`,
+			);
+			assert.ok(
+				!(result.stderr + result.stdout).includes("falling back"),
+				"below-range should fall through silently, no warning",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("above-range Cloud version: warns and uses highest available config", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-above-"));
+		const file = join(tempDir, "future.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="8.99.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const combined = result.stdout + result.stderr;
+			assert.ok(
+				combined.includes("No camunda-compat config for 8.99"),
+				`expected fallback warning. Got: ${combined.slice(0, 400)}`,
+			);
+			assert.ok(
+				combined.includes("Update c8ctl"),
+				"warning should hint that updating c8ctl might help",
+			);
+			assert.ok(
+				/plugin:camunda-compat\/camunda-cloud-\d+-\d+/.test(result.stdout),
+				"dry-run extends should still include a camunda-compat config (the highest)",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("lint invalid XML exits 1", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-test-"));
 		const tempFile = join(tempDir, "invalid.bpmn");
@@ -342,10 +409,413 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 });
 
 // ---------------------------------------------------------------------------
+// bpmn lint — ruleset routing
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn lint ruleset routing", () => {
+	test("Cloud 8.7 file routes to camunda-cloud-8-7", async () => {
+		// Pins the major.minor → ruleset mapping. We assert via --dry-run
+		// because it surfaces the resolved extends list without depending
+		// on which specific rules fire in each version.
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-route-"));
+		const file = join(tempDir, "v87.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Cloud"
+                  modeler:executionPlatformVersion="8.7.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.ok(
+				result.stdout.includes("plugin:camunda-compat/camunda-cloud-8-7"),
+				`expected camunda-cloud-8-7 in extends. Got: ${result.stdout}`,
+			);
+			assert.ok(
+				!/camunda-cloud-8-[89]/.test(result.stdout),
+				"should not pull in 8-8 or 8-9 configs",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("Camunda Platform (non-Cloud) file skips camunda-compat", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-platform-"));
+		const file = join(tempDir, "platform.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:modeler="http://camunda.org/schema/modeler/1.0"
+                  modeler:executionPlatform="Camunda Platform"
+                  modeler:executionPlatformVersion="7.20.0">
+  <bpmn:process id="p1" isExecutable="true" />
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				out.includes("Platform: Camunda Platform 7.20.0"),
+				"platform line should reflect the declared (non-Cloud) platform",
+			);
+			assert.ok(
+				!out.includes("camunda-compat"),
+				"non-Cloud platform should not add a camunda-compat config",
+			);
+			assert.ok(
+				out.includes("bpmnlint:recommended"),
+				"bpmnlint:recommended should still apply",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("mixed errors + warnings: summary line uses the red branch", async () => {
+		// renderLintText picks ["bold", "red"] when errorCount > 0 and
+		// yellow otherwise. Stand up a fixture + .bpmnlintrc that
+		// produces at least one of each, then assert the summary line
+		// carries the red ANSI escape (\x1b[31m).
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-mixed-"));
+		const file = join(externalDir, "test.bpmn");
+		// duplicate-ids/process-a.bpmn fires both label-required and
+		// no-bpmndi. Demoting one to "warn" gives us one error + one
+		// warning category deterministically.
+		writeFileSync(
+			file,
+			readFileSync(
+				join(FIXTURES_DIR, "duplicate-ids", "process-a.bpmn"),
+				"utf-8",
+			),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "warn" },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{
+					cwd: externalDir,
+					env: { ...process.env, FORCE_COLOR: "1" },
+				},
+			);
+			assert.strictEqual(result.status, 1, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			const summary = out.split("\n").find((l) => l.includes("problem"));
+			if (!summary) {
+				assert.fail(`no summary line in output: ${out.slice(0, 300)}`);
+			}
+			// styleText(["bold", "red"], ...) emits \x1b[1m \x1b[31m around
+			// the summary text. Build the regex from char codes so biome's
+			// noControlCharactersInRegex doesn't flag a literal ESC.
+			const redEsc = `${String.fromCharCode(0x1b)}\\[31m`;
+			assert.ok(
+				new RegExp(redEsc).test(summary),
+				`summary should carry the red ANSI escape. Got: ${JSON.stringify(summary)}`,
+			);
+			assert.ok(
+				/\d+ errors?, \d+ warnings?/.test(summary),
+				"summary should report both error and warning counts",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// bpmn lint — --dry-run
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn lint --dry-run", () => {
+	test("Cloud file: prints platform, source, and resolved camunda-compat config", async () => {
+		const file = join(FIXTURES_DIR, "simple.bpmn");
+		const result = await c8text("bpmn", "lint", "--dry-run", file);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = result.stdout;
+		assert.ok(
+			out.includes("Dry run — no lint performed."),
+			`dry-run banner missing. Got: ${out}`,
+		);
+		assert.ok(
+			out.includes(`Source: ${file}`),
+			"source line should be absolute",
+		);
+		assert.ok(
+			out.includes("Camunda Cloud 8.8.0"),
+			"platform line should reflect fixture's executionPlatform + version",
+		);
+		assert.ok(
+			out.includes("bpmnlint:recommended"),
+			"extends should include bpmnlint:recommended",
+		);
+		assert.ok(
+			out.includes("plugin:camunda-compat/camunda-cloud-8-8"),
+			"extends should include the resolved camunda-compat config",
+		);
+		assert.ok(
+			!out.includes("No issues found"),
+			"linter must not run under --dry-run",
+		);
+	});
+
+	test("Cloud file: JSON mode emits structured dry-run envelope", async () => {
+		const file = join(FIXTURES_DIR, "simple.bpmn");
+		const result = await c8("bpmn", "lint", "--dry-run", file);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "bpmn lint");
+		assert.strictEqual(parsed.source, file);
+		assert.deepStrictEqual(parsed.platform, {
+			executionPlatform: "Camunda Cloud",
+			version: "8.8.0",
+		});
+		assert.ok(Array.isArray(parsed.config.extends));
+		assert.ok(parsed.config.extends.includes("bpmnlint:recommended"));
+	});
+
+	test("non-Cloud file: platform reported, no camunda-compat in extends", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-dryrun-"));
+		const file = join(tempDir, "no-platform.bpmn");
+		writeFileSync(
+			file,
+			`<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL">
+  <bpmn:process id="p1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+</bpmn:definitions>`,
+		);
+		try {
+			const result = await c8text("bpmn", "lint", "--dry-run", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(
+				out.includes("Platform: not declared"),
+				`expected 'not declared'. Got: ${out}`,
+			);
+			assert.ok(out.includes("bpmnlint:recommended"));
+			assert.ok(
+				!out.includes("camunda-compat"),
+				"no camunda-compat config should appear for non-Cloud files",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test(".bpmnlintrc override: dry-run reflects the user's config", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-dryrun-rc-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "off" },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					"--dry-run",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const out = result.stdout;
+			assert.ok(out.includes("Dry run — no lint performed."));
+			assert.ok(
+				out.includes('"label-required": "off"'),
+				"override rule should appear in printed config",
+			);
+			assert.ok(
+				!out.includes("camunda-compat"),
+				".bpmnlintrc takes precedence; no auto-detected compat config",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // bpmn lint — .bpmnlintrc override
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: bpmn lint .bpmnlintrc override", () => {
+	test("warnings-only override surfaces 'warning' in JSON and text", async () => {
+		// Pin the contract that bpmnlint's raw "warn" category is
+		// normalised to "warning" everywhere — JSON output, the text
+		// severity column, and the summary row.
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-warn-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(
+				join(FIXTURES_DIR, "simple-will-create-incident.bpmn"),
+				"utf-8",
+			),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			JSON.stringify({
+				extends: ["bpmnlint:recommended"],
+				rules: { "label-required": "warn" },
+			}),
+		);
+		try {
+			// JSON mode — category must be "warning", not "warn".
+			const jsonRun = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"--json",
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(jsonRun.status, 0, `stderr: ${jsonRun.stderr}`);
+			const parsed = JSON.parse(jsonRun.stdout);
+			assert.ok(parsed.issues.length > 0, "should have warning-level issues");
+			for (const issue of parsed.issues) {
+				assert.strictEqual(
+					issue.category,
+					"warning",
+					`category should be 'warning', got '${issue.category}'`,
+				);
+			}
+			assert.strictEqual(parsed.errorCount, 0);
+			assert.ok(parsed.warningCount > 0);
+
+			// Text mode — severity column should read "warning" and the
+			// summary line should mention warnings, not errors.
+			const textRun = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(textRun.status, 0, `stderr: ${textRun.stderr}`);
+			assert.ok(
+				/\swarning\s/.test(textRun.stdout),
+				`text output should include 'warning' as severity. Got: ${textRun.stdout.slice(0, 400)}`,
+			);
+			assert.ok(
+				/0 errors, \d+ warnings?/.test(textRun.stdout),
+				"summary should report 0 errors and >=1 warning",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
+	test("non-JSON .bpmnlintrc reports the JSON-only constraint clearly", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-yaml-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(
+			join(externalDir, ".bpmnlintrc"),
+			"extends: bpmnlint:recommended\n",
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("only JSON is supported"),
+				`expected JSON-only message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("standalone `bpmnlint` CLI"),
+				"should point users at the upstream CLI for YAML/JS configs",
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
+	test("JSON array .bpmnlintrc reports 'must contain a JSON object'", async () => {
+		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-arr-"));
+		const file = join(externalDir, "test.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(join(FIXTURES_DIR, "simple.bpmn"), "utf-8"),
+		);
+		writeFileSync(join(externalDir, ".bpmnlintrc"), JSON.stringify(["foo"]));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					join(REPO_ROOT, CLI),
+					"bpmn",
+					"lint",
+					file,
+				],
+				{ cwd: externalDir, env: process.env },
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("must contain a JSON object"),
+				`expected object-shape message. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			rmSync(externalDir, { recursive: true, force: true });
+		}
+	});
+
 	test("respects user .bpmnlintrc that disables a rule", async () => {
 		const externalDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-rc-"));
 		const file = join(externalDir, "test.bpmn");

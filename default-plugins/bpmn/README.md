@@ -51,6 +51,8 @@ c8ctl bpmn lint process.bpmn
 
 1. If a `.bpmnlintrc` is present in the working directory, it's used
    verbatim — same behaviour as the standalone `bpmnlint` CLI.
+   **Only JSON `.bpmnlintrc` is supported**; for YAML or JS configs,
+   run the upstream `bpmnlint` CLI directly.
 2. Otherwise, if the BPMN file has both
    `modeler:executionPlatform="Camunda Cloud"` and a
    `modeler:executionPlatformVersion`, the plugin picks the matching
