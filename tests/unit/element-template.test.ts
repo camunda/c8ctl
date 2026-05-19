@@ -1302,12 +1302,13 @@ describe("CLI behavioural: element-template get-properties --engine-version", ()
 			"8.8.0",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const output = result.stdout + result.stderr;
 		assert.ok(
-			(result.stdout + result.stderr).includes("v1-only"),
+			output.includes("v1-only"),
 			"Expected properties from compatible v1 template",
 		);
 		assert.ok(
-			!(result.stdout + result.stderr).includes("v2-only"),
+			!output.includes("v2-only"),
 			"Should not include properties from incompatible v2 template",
 		);
 	});

@@ -155,7 +155,7 @@ export type ParsedEngineVersionFlag = {
 // We only accept concrete versions for --engine-version. Reject the common
 // semver range operator characters before coercion (e.g. ^8.8, ~8.8, >=8.8,
 // 8.8 || 8.9).
-const ENGINE_VERSION_RANGE_OPERATOR_CHARS = /[~^<>=|\s]/;
+const ENGINE_VERSION_DISALLOWED_CHARS = /[~^<>=|\s]/;
 
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
@@ -642,14 +642,14 @@ export function parseEngineVersionFlag(
 }
 
 function validateEngineVersion(value: string, usage: string): string {
-	if (ENGINE_VERSION_RANGE_OPERATOR_CHARS.test(value)) {
-		throw new Error(
-			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
-		);
-	}
 	if (!value.includes(".")) {
 		throw new Error(
 			`--engine-version must include major and minor (e.g. 8.8.0 or 8.8); got "${value}". ${usage}`,
+		);
+	}
+	if (ENGINE_VERSION_DISALLOWED_CHARS.test(value)) {
+		throw new Error(
+			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
 		);
 	}
 	const coerced = semver.coerce(value);
