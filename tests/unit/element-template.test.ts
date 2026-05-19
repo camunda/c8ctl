@@ -402,6 +402,124 @@ describe("CLI behavioural: element-template apply --set", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	// -------------------------------------------------------------------------
+	// FEEL auto-prepend (feel: required) and whitespace trim
+	// -------------------------------------------------------------------------
+
+	test("--set trims leading/trailing whitespace from value", async () => {
+		// method is a Dropdown with feel: optional; trimming should produce
+		// the valid choice value 'POST' so the whole apply succeeds.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"method=  POST  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "method"), "POST");
+	});
+
+	test("--set preserves internal whitespace in value", async () => {
+		// 'headers' has feel: required — 'hello world' (internal space) should
+		// be auto-prefixed with '=' and stored as '=hello world', not '=helloworld'.
+		// Using a feel:required property ensures we can check the BPMN output
+		// directly without triggering pattern validation that could reject the value.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers=hello world",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		// Internal whitespace preserved; = auto-prepended for feel:required.
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=hello world");
+	});
+
+	test("--set auto-prepends = for feel: required property (no leading =)", async () => {
+		// 'headers' has feel: required; supplying 'myHeaders' (no =) should
+		// produce '=myHeaders' in the output BPMN.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers=myHeaders",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set does not double-prepend = when value already starts with = (feel: required)", async () => {
+		// When the user already wrote the FEEL marker, the auto-prepend is a no-op.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers==myHeaders",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set does not auto-prepend = for feel: optional property", async () => {
+		// 'url' has feel: optional — the raw value must be stored as-is.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"url=https://example.com",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(
+			getInputValue(result.stdout, "url"),
+			"https://example.com",
+		);
+	});
+
+	test("--set combined: whitespace trim + feel: required auto-prepend", async () => {
+		// '  myHeaders  ' trimmed → 'myHeaders', then = prepended → '=myHeaders'
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers=  myHeaders  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set combined: trim after = + no double-prepend for feel: required", async () => {
+		// '=  myHeaders  ' trimmed → '=myHeaders' (trim, then no prepend since starts with =)
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers==  myHeaders  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
 });
 
 // ---------------------------------------------------------------------------

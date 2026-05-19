@@ -13,6 +13,7 @@ import {
 	findPropertiesByBindingName,
 	installStdoutEpipeHandler,
 	isRecord,
+	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
 	type Template,
@@ -184,7 +185,8 @@ function forceSetValues(
 			bindingTypeFilter,
 		);
 		for (const prop of matches) {
-			updateModdleForProperty(modeling, element, prop, value, {
+			const effectiveValue = maybePrependFeel(prop, value);
+			updateModdleForProperty(modeling, element, prop, effectiveValue, {
 				ioMapping,
 				taskHeaders,
 				taskDefinition,
