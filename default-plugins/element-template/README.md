@@ -12,9 +12,9 @@ The verb is organized as a workflow: discover → inspect → act → export →
 
 | Subcommand | Purpose |
 |------------|---------|
-| `search <query>` | Find OOTB templates by keyword (deprecated entries hidden). |
-| `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). |
-| `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. |
+| `search <query>` | Find OOTB templates by keyword (deprecated entries hidden). `--engine-version` narrows to compatible versions. |
+| `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). `--engine-version` resolves the latest compatible version. |
+| `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. `--engine-version` resolves the latest compatible version. |
 | `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
 | `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
 | `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
@@ -36,12 +36,15 @@ auto-rewritten to raw content URLs — paste straight from the address bar.
 c8ctl element-template search "AWS S3"
 c8ctl element-template search "http"
 c8ctl element-template search "AWS" --limit 5      # cap results (default 20)
+c8ctl element-template search "http" --engine-version 8.8.0
 
 # Show the template metadata card
 c8ctl element-template info io.camunda.connectors.HttpJson.v2
+c8ctl element-template info io.camunda.connectors.HttpJson.v2 --engine-version 8.8
 
 # List every settable property as a condensed name + description row
 c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2
+c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 --engine-version 8.8.0
 
 # Filter by name (positional, supports shell-style globs — quote them)
 c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2 url method

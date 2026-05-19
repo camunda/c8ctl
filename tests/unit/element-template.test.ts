@@ -68,6 +68,41 @@ function hasInput(xml: string, target: string): boolean {
 	return new RegExp(`<zeebe:input[^>]+target="${target}"`).test(xml);
 }
 
+function makeVersionedFooTemplates() {
+	return [
+		{
+			id: "io.example.Foo",
+			name: "Foo Connector",
+			version: 1,
+			engines: { camunda: "^8.7" },
+			description: "v1 template",
+			properties: [
+				{
+					id: "v1-only",
+					label: "v1-only",
+					binding: { type: "zeebe:input", name: "v1-only" },
+					type: "String",
+				},
+			],
+		},
+		{
+			id: "io.example.Foo",
+			name: "Foo Connector",
+			version: 2,
+			engines: { camunda: "^8.9" },
+			description: "v2 template",
+			properties: [
+				{
+					id: "v2-only",
+					label: "v2-only",
+					binding: { type: "zeebe:input", name: "v2-only" },
+					type: "String",
+				},
+			],
+		},
+	];
+}
+
 function getTaskDefinitionType(xml: string): string | null {
 	const match = xml.match(/<zeebe:taskDefinition[^>]+type="([^"]*)"/);
 	return match ? match[1] : null;
@@ -547,6 +582,66 @@ describe("CLI behavioural: element-template info", () => {
 		assert.ok(
 			output.includes("not found") || output.includes("Failed"),
 			"Should report missing template",
+		);
+	});
+});
+
+describe("CLI behavioural: element-template info --engine-version", () => {
+	test("selects latest compatible version for unpinned OOTB ids", async () => {
+		const result = await elementTemplateWithSeed(
+			makeVersionedFooTemplates(),
+			"json",
+			"info",
+			"io.example.Foo",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed: unknown = JSON.parse(result.stdout);
+		assert.ok(isRecord(parsed));
+		assert.strictEqual(parsed.id, "io.example.Foo");
+		assert.strictEqual(
+			parsed.version,
+			1,
+			"Should resolve to compatible version",
+		);
+	});
+
+	test("pinned @<version> wins over --engine-version", async () => {
+		const result = await elementTemplateWithSeed(
+			makeVersionedFooTemplates(),
+			"json",
+			"info",
+			"io.example.Foo@2",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed: unknown = JSON.parse(result.stdout);
+		assert.ok(isRecord(parsed));
+		assert.strictEqual(parsed.version, 2);
+		assert.ok(
+			(result.stdout + result.stderr).includes("Ignoring --engine-version"),
+			"Expected warning that pinned version takes precedence",
+		);
+	});
+
+	test("errors with apply-compatible message shape when no compatible version exists", async () => {
+		const result = await elementTemplateWithSeed(
+			makeVersionedFooTemplates(),
+			"text",
+			"info",
+			"io.example.Foo",
+			"--engine-version",
+			"7.0.0",
+		);
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes(
+				"has no version compatible with execution platform 7.0.0. Available:",
+			),
+			`Unexpected error shape: ${output}`,
 		);
 	});
 });
@@ -1196,15 +1291,57 @@ describe("CLI behavioural: element-template get-properties", () => {
 	});
 });
 
+describe("CLI behavioural: element-template get-properties --engine-version", () => {
+	test("selects latest compatible version for unpinned OOTB ids", async () => {
+		const result = await elementTemplateWithSeed(
+			makeVersionedFooTemplates(),
+			"text",
+			"get-properties",
+			"io.example.Foo",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			(result.stdout + result.stderr).includes("v1-only"),
+			"Expected properties from compatible v1 template",
+		);
+		assert.ok(
+			!(result.stdout + result.stderr).includes("v2-only"),
+			"Should not include properties from incompatible v2 template",
+		);
+	});
+
+	test("pinned @<version> wins over --engine-version", async () => {
+		const result = await elementTemplateWithSeed(
+			makeVersionedFooTemplates(),
+			"text",
+			"get-properties",
+			"io.example.Foo@2",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			(result.stdout + result.stderr).includes("v2-only"),
+			"Expected explicitly pinned version properties",
+		);
+		assert.ok(
+			(result.stdout + result.stderr).includes("Ignoring --engine-version"),
+			"Expected warning that pinned version takes precedence",
+		);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // element-template search — --limit (default 20)
 // ---------------------------------------------------------------------------
 
 /**
- * Run search against a pre-seeded cache so we don't hit the live
- * marketplace. Each call gets a fresh tmpdir wiped on completion.
+ * Run an element-template subcommand against a pre-seeded cache so we don't
+ * hit the live marketplace. Each call gets a fresh tmpdir wiped on completion.
  */
-async function searchWithSeed(
+async function elementTemplateWithSeed(
 	templates: Array<Record<string, unknown>>,
 	mode: "text" | "json",
 	...args: string[]
@@ -1224,13 +1361,7 @@ async function searchWithSeed(
 	try {
 		return await asyncSpawn(
 			"node",
-			[
-				"--experimental-strip-types",
-				CLI,
-				"element-template",
-				"search",
-				...args,
-			],
+			["--experimental-strip-types", CLI, "element-template", ...args],
 			{
 				env: {
 					...process.env,
@@ -1245,6 +1376,17 @@ async function searchWithSeed(
 	}
 }
 
+/**
+ * Run search against a pre-seeded cache.
+ */
+async function searchWithSeed(
+	templates: Array<Record<string, unknown>>,
+	mode: "text" | "json",
+	...args: string[]
+) {
+	return elementTemplateWithSeed(templates, mode, "search", ...args);
+}
+
 /** Build N matchable templates with stable shape. */
 function makeTemplates(prefix: string, n: number) {
 	return Array.from({ length: n }, (_, i) => ({
@@ -1257,6 +1399,123 @@ function makeTemplates(prefix: string, n: number) {
 }
 
 describe("CLI behavioural: element-template search", () => {
+	test("filters by --engine-version before per-id latest reduction", async () => {
+		const seeded = [
+			{
+				id: "io.example.Foo",
+				name: "Foo",
+				version: 1,
+				engines: { camunda: "^8.7" },
+				description: "compatible with 8.8",
+				properties: [],
+			},
+			{
+				id: "io.example.Foo",
+				name: "Foo",
+				version: 2,
+				engines: { camunda: "^8.9" },
+				description: "requires 8.9",
+				properties: [],
+			},
+		];
+		const result = await searchWithSeed(
+			seeded,
+			"json",
+			"foo",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed: unknown = JSON.parse(result.stdout);
+		assert.ok(isRecord(parsed));
+		assert.ok(Array.isArray(parsed.matches));
+		const matches = parsed.matches;
+		assert.strictEqual(matches.length, 1, "Expected one compatible version");
+		assert.ok(isRecord(matches[0]));
+		assert.strictEqual(matches[0].id, "io.example.Foo");
+		assert.strictEqual(
+			matches[0].version,
+			1,
+			"Should pick v1, not absolute latest",
+		);
+	});
+
+	test("keeps templates without engines.camunda when --engine-version is set", async () => {
+		const seeded = [
+			{
+				id: "io.example.Legacy",
+				name: "Legacy",
+				version: 3,
+				description: "no engines constraint",
+				properties: [],
+			},
+		];
+		const result = await searchWithSeed(
+			seeded,
+			"json",
+			"legacy",
+			"--engine-version",
+			"8.8.0",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed: unknown = JSON.parse(result.stdout);
+		assert.ok(isRecord(parsed));
+		assert.strictEqual(parsed.count, 1);
+		assert.ok(Array.isArray(parsed.matches));
+		assert.ok(isRecord(parsed.matches[0]));
+		assert.strictEqual(parsed.matches[0].id, "io.example.Legacy");
+	});
+
+	test("--engine-version accepts concrete semver and x.y shorthand", async () => {
+		const seeded = makeTemplates("aws", 1);
+		for (const value of ["8.8.0", "8.8"]) {
+			const result = await searchWithSeed(
+				seeded,
+				"text",
+				"aws",
+				"--engine-version",
+				value,
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`--engine-version ${value} should be accepted. stderr: ${result.stderr}`,
+			);
+		}
+	});
+
+	test("--engine-version rejects ranges, bare majors, and missing values", async () => {
+		const seeded = makeTemplates("aws", 1);
+		const invalid = ["^8.8", "8"];
+		for (const value of invalid) {
+			const result = await searchWithSeed(
+				seeded,
+				"text",
+				"aws",
+				"--engine-version",
+				value,
+			);
+			assert.strictEqual(result.status, 1);
+			assert.ok(
+				(result.stdout + result.stderr).includes("--engine-version"),
+				`Error should mention --engine-version for value ${value}`,
+			);
+		}
+
+		const missing = await searchWithSeed(
+			seeded,
+			"text",
+			"aws",
+			"--engine-version",
+		);
+		assert.strictEqual(missing.status, 1);
+		assert.ok(
+			(missing.stdout + missing.stderr).includes(
+				"--engine-version requires a value",
+			),
+		);
+	});
+
 	test("default limit (20): all results show, no 'Showing X of Y' truncation header", async () => {
 		const result = await searchWithSeed(makeTemplates("aws", 5), "text", "aws");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
@@ -1350,6 +1609,19 @@ describe("CLI behavioural: element-template help", () => {
 		assert.ok(
 			output.includes("get-properties"),
 			"Should mention get-properties",
+		);
+	});
+
+	test("help element-template shows --engine-version scope", async () => {
+		const result = await c8text("help", "element-template");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("--engine-version"),
+			"Help should include --engine-version flag",
+		);
+		assert.ok(
+			result.stdout.includes("[search|info|get-properties]"),
+			"Help should scope --engine-version to discovery commands",
 		);
 	});
 });

@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import semver from "semver";
 import type {} from "../../src/runtime.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
@@ -144,6 +145,11 @@ export type ParsedPluginArgs = {
 	setArgs: string[];
 	positionals: string[];
 	error: string | null;
+};
+
+export type ParsedEngineVersionFlag = {
+	engineVersion: string | null;
+	rest: string[];
 };
 
 // Re-export the host Logger type so call sites in this plugin can refer
@@ -585,6 +591,70 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 	}
 
 	return result;
+}
+
+/**
+ * Parse and remove repeatable `--engine-version` flags from args.
+ * Last flag wins. Content after `--` is treated as positional.
+ */
+export function parseEngineVersionFlag(
+	args: string[],
+	usage: string,
+): ParsedEngineVersionFlag {
+	let engineVersion: string | null = null;
+	const rest: string[] = [];
+	let afterDoubleDash = false;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+
+		if (afterDoubleDash) {
+			rest.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			afterDoubleDash = true;
+			rest.push(arg);
+			continue;
+		}
+		if (arg === "--engine-version" || arg.startsWith("--engine-version=")) {
+			const raw =
+				arg === "--engine-version"
+					? args[++i]
+					: arg.slice("--engine-version=".length);
+			if (raw === undefined || raw === "") {
+				throw new Error(
+					`--engine-version requires a value (e.g. 8.8.0). ${usage}`,
+				);
+			}
+			engineVersion = validateEngineVersion(raw, usage);
+			continue;
+		}
+		rest.push(arg);
+	}
+
+	return { engineVersion, rest };
+}
+
+function validateEngineVersion(value: string, usage: string): string {
+	if (/[~^<>=|\s]/.test(value)) {
+		throw new Error(
+			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
+		);
+	}
+	if (!value.includes(".")) {
+		throw new Error(
+			`--engine-version must include major and minor (e.g. 8.8.0 or 8.8); got "${value}". ${usage}`,
+		);
+	}
+	const coerced = semver.coerce(value);
+	const normalized = coerced ? semver.valid(coerced) : null;
+	if (!normalized) {
+		throw new Error(
+			`--engine-version must be a valid version (e.g. 8.8.0 or 8.8); got "${value}". ${usage}`,
+		);
+	}
+	return normalized;
 }
 
 /**

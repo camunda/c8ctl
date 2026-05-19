@@ -11,6 +11,7 @@ import {
 	globToRegex,
 	type Logger,
 	type PropertyDetail,
+	parseEngineVersionFlag,
 	type Template,
 	type TemplateProperty,
 } from "../helpers.ts";
@@ -23,11 +24,12 @@ const c8ctl = globalThis.c8ctl;
 export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
 	const usage =
-		"Usage: c8ctl element-template get-properties <template> [<name>...] [--group <id>...] [--detailed | -d]\n" +
+		"Usage: c8ctl element-template get-properties <template> [<name>...] [--group <id>...] [--detailed | -d] [--engine-version <x.y.z>]\n" +
 		"  Default: condensed list (name + description). --detailed shows full cards.\n" +
 		"  Names may include shell-style globs — quote to avoid shell expansion: 'auth*'";
+	const { engineVersion, rest } = parseEngineVersionFlag(args, usage);
 
-	const parsed = parseInspectArgs(args, usage, {
+	const parsed = parseInspectArgs(rest, usage, {
 		allowPropertyNames: true,
 		allowFilters: true,
 	});
@@ -38,7 +40,16 @@ export async function getPropertiesSubcommand(args: string[]): Promise<void> {
 		groupLabelMap,
 		sourceByDetail,
 		autoResolvedVersion,
-	} = await loadTemplate(parsed.templateArg);
+		engineVersionIgnoredByPinnedVersion,
+	} = await loadTemplate(parsed.templateArg, {
+		executionPlatformVersion: engineVersion,
+	});
+
+	if (engineVersionIgnoredByPinnedVersion && engineVersion) {
+		logger.warn(
+			`Ignoring --engine-version ${engineVersion} because ${parsed.templateArg} pins a template version.`,
+		);
+	}
 
 	if (autoResolvedVersion) {
 		logger.warn(

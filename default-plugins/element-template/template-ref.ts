@@ -48,6 +48,7 @@ export type LoadedTemplate = {
 	groupLabelMap: Map<string, string>;
 	sourceByDetail: WeakMap<PropertyDetail, TemplateProperty>;
 	autoResolvedVersion: boolean;
+	engineVersionIgnoredByPinnedVersion: boolean;
 };
 
 /**
@@ -262,14 +263,23 @@ export async function resolveOotbTemplate(
  */
 export async function loadTemplate(
 	templateArg: string,
+	{
+		executionPlatformVersion,
+	}: { executionPlatformVersion?: string | null } = {},
 ): Promise<LoadedTemplate> {
 	const ref = parseTemplateRef(templateArg);
 	if (!ref) {
 		throw new Error("Missing template argument.");
 	}
 	let template: Template;
+	let engineVersionIgnoredByPinnedVersion = false;
 	if (ref.kind === "id") {
-		template = await resolveOotbTemplate(ref);
+		engineVersionIgnoredByPinnedVersion =
+			ref.version !== undefined && Boolean(executionPlatformVersion);
+		template = await resolveOotbTemplate(ref, {
+			executionPlatformVersion:
+				ref.version === undefined ? executionPlatformVersion : undefined,
+		});
 	} else {
 		template = await readTemplateFromPathOrUrl(ref.value);
 	}
@@ -293,6 +303,10 @@ export async function loadTemplate(
 		allDetails,
 		groupLabelMap,
 		sourceByDetail,
-		autoResolvedVersion: ref.kind === "id" && ref.version === undefined,
+		autoResolvedVersion:
+			ref.kind === "id" &&
+			ref.version === undefined &&
+			!executionPlatformVersion,
+		engineVersionIgnoredByPinnedVersion,
 	};
 }
