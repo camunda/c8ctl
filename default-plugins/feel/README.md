@@ -38,11 +38,18 @@ still exits 0.
 
 ```text
 $ c8ctl feel evaluate 'unknownVar' --engine local
-null
+<null>
 
 ⚠ 1 warning:
   Variable 'unknownVar' not found (NO_VARIABLE_FOUND)
 ```
+
+Text mode renders actual null/undefined as `<null>` so you can tell
+it apart from the FEEL string `"null"` (which prints as `null`,
+unquoted, like every other string result). JSON mode doesn't need a
+sentinel: actual null serialises as `"result": null` (JSON null),
+while the FEEL string `"null"` serialises as `"result": "null"` (JSON
+string) — the surrounding type disambiguates.
 
 The trailing `(NO_VARIABLE_FOUND)` is the engine's diagnostic type —
 emitted when available (local engine) and omitted when not (cluster).

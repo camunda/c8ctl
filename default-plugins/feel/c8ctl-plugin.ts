@@ -507,12 +507,20 @@ function evaluateLocal({
 // Output rendering
 // ---------------------------------------------------------------------------
 
+/**
+ * Text-mode rendering. Strings stay unquoted (the README sells
+ * `--var name=Alice` → `Alice` as the common case), so we need a
+ * sentinel for actual null/undefined that won't collide with the FEEL
+ * string `"null"`. `<null>` matches how other CLIs surface "no value".
+ * The literal FEEL string `"<null>"` would still render identically,
+ * but that's a contrived edge case; JSON mode is the unambiguous path.
+ */
 function formatResultForText(result: unknown): string {
 	if (typeof result === "string") {
 		return result;
 	}
 	if (result === null || result === undefined) {
-		return "null";
+		return "<null>";
 	}
 	return JSON.stringify(result, null, 2);
 }
@@ -557,7 +565,7 @@ async function evaluateSubcommand(
 	}
 
 	const expression = parsed.positionals[0];
-	if (!expression) {
+	if (!expression?.trim()) {
 		throw new Error(
 			"Missing expression. Usage: c8ctl feel evaluate '<expression>' [...]",
 		);
@@ -583,27 +591,53 @@ async function evaluateSubcommand(
 		logger.warn("--tenant has no effect with --engine local; ignored");
 	}
 
-	// Honour --dry-run for the cluster engine: emit the would-be request
-	// payload and return without hitting the API.
-	if (parsed.engine === "cluster" && c8ctl.dryRun) {
-		const payload = {
-			expression: normalizeExpression(expression),
-			...(variables !== undefined ? { variables } : {}),
-			...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
-		};
-		if (c8ctl.outputMode === "json") {
-			logger.json({
-				dryRun: true,
-				command: "feel evaluate",
-				endpoint: "POST /v2/expression/evaluation",
-				payload,
-			});
+	// Honour --dry-run for both engines: cluster prints the would-be
+	// request payload; local prints the normalised expression + variables
+	// that would be handed to feelin. Either way we return before doing
+	// any actual evaluation.
+	if (c8ctl.dryRun) {
+		const normalizedExpression = normalizeExpression(expression);
+		if (parsed.engine === "cluster") {
+			const payload = {
+				expression: normalizedExpression,
+				...(variables !== undefined ? { variables } : {}),
+				...(effectiveTenantId ? { tenantId: effectiveTenantId } : {}),
+			};
+			if (c8ctl.outputMode === "json") {
+				logger.json({
+					dryRun: true,
+					command: "feel evaluate",
+					endpoint: "POST /v2/expression/evaluation",
+					payload,
+				});
+			} else {
+				logger.output("Dry run — no cluster request sent.");
+				logger.output("  POST /v2/expression/evaluation");
+				logger.output(
+					`  ${JSON.stringify(payload, null, 2).split("\n").join("\n  ")}`,
+				);
+			}
 		} else {
-			logger.output("Dry run — no cluster request sent.");
-			logger.output("  POST /v2/expression/evaluation");
-			logger.output(
-				`  ${JSON.stringify(payload, null, 2).split("\n").join("\n  ")}`,
-			);
+			if (c8ctl.outputMode === "json") {
+				logger.json({
+					dryRun: true,
+					command: "feel evaluate",
+					engine: "local",
+					expression: normalizedExpression,
+					...(variables !== undefined ? { variables } : {}),
+				});
+			} else {
+				logger.output("Dry run — no expression evaluated.");
+				logger.output("  Engine: local (feelin)");
+				logger.output(`  Expression: ${normalizedExpression}`);
+				if (variables !== undefined) {
+					logger.output(
+						`  Variables: ${JSON.stringify(variables, null, 2).split("\n").join("\n  ")}`,
+					);
+				} else {
+					logger.output("  Variables: none");
+				}
+			}
 		}
 		return;
 	}

@@ -9,6 +9,7 @@
 
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import * as http from "node:http";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,23 @@ import { describe, test } from "node:test";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
+
+/**
+ * Strip CAMUNDA_* from the parent env so a developer or CI runner with
+ * CAMUNDA_CLIENT_ID/SECRET/CLUSTER_ID/AUTH_URL set doesn't push the
+ * client onto an OAuth/basic-auth path before it reaches our mock.
+ * The test then sets the CAMUNDA_* vars it actually wants.
+ */
+function envWithoutCamundaAuth(): NodeJS.ProcessEnv {
+	const out: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(process.env)) {
+		if (key.startsWith("CAMUNDA_")) {
+			continue;
+		}
+		out[key] = value;
+	}
+	return out;
+}
 
 async function feelText(...args: string[]) {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
@@ -29,7 +47,7 @@ async function feelText(...args: string[]) {
 			["--experimental-strip-types", CLI, "feel", ...args],
 			{
 				env: {
-					...process.env,
+					...envWithoutCamundaAuth(),
 					CAMUNDA_BASE_URL: "http://test-cluster/v2",
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
@@ -53,7 +71,7 @@ async function feelJson(...args: string[]) {
 			["--experimental-strip-types", CLI, "feel", ...args],
 			{
 				env: {
-					...process.env,
+					...envWithoutCamundaAuth(),
 					CAMUNDA_BASE_URL: "http://test-cluster/v2",
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
@@ -210,11 +228,90 @@ describe("CLI behavioural: feel evaluate (local engine)", () => {
 		assert.ok((result.stdout + result.stderr).includes("Missing expression"));
 	});
 
+	test("whitespace-only expression is rejected with the same error as empty", async () => {
+		// Without the trim, '' produced "Missing expression" but '   ' fell
+		// through to the feelin parser and surfaced a different message.
+		// Pin them to the same CLI error so users see one consistent failure
+		// regardless of incidental whitespace.
+		const result = await feelText("evaluate", "   ", "--engine", "local");
+		assert.strictEqual(result.status, 1);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("Missing expression"),
+			`whitespace expression should hit the same CLI error as empty. Got: ${output}`,
+		);
+		assert.ok(
+			!output.includes("Failed to parse expression"),
+			"whitespace should never reach the feelin parser",
+		);
+	});
+
 	test("rejects invalid --engine value", async () => {
 		const result = await feelText("evaluate", "1", "--engine", "invalid");
 		assert.strictEqual(result.status, 1);
 		assert.ok(
 			(result.stdout + result.stderr).includes("Invalid --engine value"),
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// feel evaluate — null sentinel rendering (text vs JSON disambiguation)
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate null sentinel", () => {
+	test("actual null renders as <null> in text mode", async () => {
+		// The FEEL keyword `null` evaluates to JS null.
+		const result = await feelText("evaluate", "null", "--engine", "local");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(
+			result.stdout,
+			/^<null>\s*$/,
+			`actual null should render as <null>. Got: ${result.stdout}`,
+		);
+	});
+
+	test('the FEEL string "null" renders as plain null in text mode', async () => {
+		// Strings stay unquoted so users can pipe them; this collides with
+		// the actual-null case unless we use a sentinel for the latter.
+		const result = await feelText("evaluate", '"null"', "--engine", "local");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(
+			result.stdout,
+			/^null\s*$/,
+			`string "null" should render unquoted. Got: ${result.stdout}`,
+		);
+	});
+
+	test("JSON mode disambiguates without a sentinel", async () => {
+		const nullResult = await feelJson("evaluate", "null", "--engine", "local");
+		assert.strictEqual(nullResult.status, 0);
+		assert.strictEqual(JSON.parse(nullResult.stdout).result, null);
+
+		const stringResult = await feelJson(
+			"evaluate",
+			'"null"',
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(stringResult.status, 0);
+		assert.strictEqual(JSON.parse(stringResult.stdout).result, "null");
+	});
+
+	test("runtime warning falls back to <null> in text mode", async () => {
+		// Pair with the existing warning-rendering tests: when the result is
+		// null because of an unresolved variable, the text output must use
+		// the sentinel rather than the ambiguous bare 'null'.
+		const result = await feelText(
+			"evaluate",
+			"unknownVar",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0);
+		assert.ok(
+			result.stdout.startsWith("<null>"),
+			`unknownVar should render as <null>. Got: ${result.stdout}`,
 		);
 	});
 });
@@ -243,6 +340,26 @@ describe("CLI behavioural: feel evaluate JSON output shape", () => {
 			"warnings",
 		]);
 		assert.strictEqual(parsed.result, 15);
+		assert.deepStrictEqual(parsed.warnings, []);
+	});
+
+	test("--vars base + --var overlay also works in JSON mode", async () => {
+		// The text-mode equivalent is pinned in the local-engine block above.
+		// Cover the JSON path explicitly so the overlay contract is visible
+		// in both rendering modes.
+		const result = await feelJson(
+			"evaluate",
+			"a + b",
+			"--vars",
+			'{"a":1,"b":2}',
+			"--var",
+			"b=99",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.result, 100);
 		assert.deepStrictEqual(parsed.warnings, []);
 	});
 
@@ -342,6 +459,163 @@ describe("CLI behavioural: feel evaluate text warnings", () => {
 });
 
 // ---------------------------------------------------------------------------
+// feel evaluate — --tenant + --engine local warning
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate --tenant + --engine local", () => {
+	test("warns that --tenant is ignored with --engine local but still succeeds", async () => {
+		// Tenant scoping only applies to cluster-side variable resolution.
+		// feelin doesn't know about tenants, so passing --tenant alongside
+		// --engine local is almost certainly a user mistake — surface it
+		// without failing the run.
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--tenant",
+			"acme",
+			"--engine",
+			"local",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const output = result.stdout + result.stderr;
+		assert.ok(
+			output.includes("--tenant has no effect with --engine local"),
+			`expected tenant-ignored warning. Got: ${output}`,
+		);
+		// Evaluation must still proceed.
+		assert.match(result.stdout, /\b3\b/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// feel evaluate — --dry-run payload format (cluster + local)
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: feel evaluate --dry-run", () => {
+	test("cluster dry-run prints endpoint + payload in text mode, skips request", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Dry run — no cluster request sent."),
+			`expected cluster dry-run header. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("POST /v2/expression/evaluation"),
+			`expected endpoint line. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes('"expression": "= 1 + 2"'),
+			`expected normalised expression in payload. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes('"a": 1'),
+			`expected variables in payload. Got: ${result.stdout}`,
+		);
+		// No evaluation ran, so the cluster's "3" result must not appear.
+		assert.ok(!/^3\s*$/m.test(result.stdout), "no result line on dry-run");
+	});
+
+	test("cluster dry-run JSON envelope pins the documented shape", async () => {
+		const result = await feelJson("evaluate", "1 + 2", "--dry-run");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "feel evaluate");
+		assert.strictEqual(parsed.endpoint, "POST /v2/expression/evaluation");
+		assert.ok(parsed.payload, "payload must be present");
+		assert.strictEqual(parsed.payload.expression, "= 1 + 2");
+	});
+
+	test("local dry-run prints engine label + expression + variables in text mode", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Dry run — no expression evaluated."),
+			`expected local dry-run header. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("Engine: local (feelin)"),
+			`expected engine label. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.stdout.includes("Expression: = 1 + 2"),
+			`expected normalised expression. Got: ${result.stdout}`,
+		);
+		assert.ok(
+			/"a": 1/.test(result.stdout),
+			`expected variables block. Got: ${result.stdout}`,
+		);
+		// Crucial: feelin must not run; "3" would be the result otherwise.
+		assert.ok(!/^3\s*$/m.test(result.stdout), "no result line on dry-run");
+	});
+
+	test("local dry-run with no --vars shows 'Variables: none'", async () => {
+		const result = await feelText(
+			"evaluate",
+			"1 + 2",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.ok(
+			result.stdout.includes("Variables: none"),
+			`expected 'Variables: none' when no vars supplied. Got: ${result.stdout}`,
+		);
+	});
+
+	test("local dry-run JSON envelope carries engine + expression + variables", async () => {
+		const result = await feelJson(
+			"evaluate",
+			"1 + 2",
+			"--var",
+			"a=1",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.strictEqual(parsed.dryRun, true);
+		assert.strictEqual(parsed.command, "feel evaluate");
+		assert.strictEqual(parsed.engine, "local");
+		assert.strictEqual(parsed.expression, "= 1 + 2");
+		assert.deepStrictEqual(parsed.variables, { a: 1 });
+		// Local dry-run intentionally has no `endpoint` or `payload` keys —
+		// only cluster mode hits an endpoint.
+		assert.ok(!("endpoint" in parsed));
+		assert.ok(!("payload" in parsed));
+	});
+
+	test("local dry-run JSON omits variables when none supplied", async () => {
+		const result = await feelJson(
+			"evaluate",
+			"1 + 2",
+			"--engine",
+			"local",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 0);
+		const parsed = JSON.parse(result.stdout);
+		assert.ok(!("variables" in parsed), "variables key should be absent");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // feel evaluate — cluster engine error classification
 // ---------------------------------------------------------------------------
 
@@ -378,7 +652,7 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 				["--experimental-strip-types", CLI, "feel", "evaluate", "1 + 2"],
 				{
 					env: {
-						...process.env,
+						...envWithoutCamundaAuth(),
 						CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
@@ -404,6 +678,185 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 		} finally {
 			server.close();
 			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// feel evaluate — cluster engine error classification matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Spin up a tiny http.Server that returns a fixed `status` + ProblemDetail
+ * JSON body on every request. Used to drive each branch of
+ * `classifyClusterError` without needing a real Camunda cluster.
+ */
+async function startMockClusterServer(
+	status: number,
+	problemDetail: Record<string, unknown>,
+): Promise<{ port: number; close: () => Promise<void> }> {
+	const server = http.createServer((_req, res) => {
+		res.writeHead(status, { "content-type": "application/problem+json" });
+		res.end(JSON.stringify(problemDetail));
+	});
+	const port = await new Promise<number>((resolve, reject) => {
+		server.listen(0, "127.0.0.1", () => {
+			const addr = server.address();
+			const p = typeof addr === "object" && addr !== null ? addr.port : null;
+			if (p !== null) {
+				resolve(p);
+			} else {
+				reject(new Error("Could not determine ephemeral port"));
+			}
+		});
+		server.on("error", reject);
+	});
+	return {
+		port,
+		close: () =>
+			new Promise<void>((resolve) => {
+				server.close(() => resolve());
+			}),
+	};
+}
+
+async function feelTextAgainstPort(port: number, ...args: string[]) {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "text" }),
+	);
+	try {
+		return await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, "feel", ...args],
+			{
+				env: {
+					...envWithoutCamundaAuth(),
+					CAMUNDA_BASE_URL: `http://127.0.0.1:${port}`,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: feel evaluate cluster error matrix", () => {
+	test("400: surfaces the cleaned parse-error detail without the Zeebe prefix and without the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(400, {
+			type: "about:blank",
+			title: "INVALID_ARGUMENT",
+			status: 400,
+			detail:
+				"Command 'EVALUATE' rejected with code 'INVALID_ARGUMENT': Failed to parse expression '= 1 +': Incomplete <ArithmeticExpression>",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 +");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Failed to parse expression"),
+				`expected cleaned parse detail. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				!output.includes("Command 'EVALUATE' rejected"),
+				`Zeebe prefix should have been stripped. Got: ${output.slice(0, 400)}`,
+			);
+			// Parse errors are the user's fault — don't suggest the local
+			// engine as a workaround.
+			assert.ok(
+				!output.includes("--engine local"),
+				`400 should not hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("401: surfaces 'Authentication failed' with the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(401, {
+			type: "about:blank",
+			title: "UNAUTHENTICATED",
+			status: 401,
+			detail: "Missing or invalid credentials",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Authentication failed (401)"),
+				`expected auth-failed title. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`401 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("403: surfaces 'Authorization failed' with the local-engine hint", async () => {
+		const { port, close } = await startMockClusterServer(403, {
+			type: "about:blank",
+			title: "PERMISSION_DENIED",
+			status: 403,
+			detail: "User lacks evaluate-expression permission",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Authorization failed (403)"),
+				`expected authz-failed title. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("not permitted to evaluate expressions"),
+				`expected authz detail. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`403 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
+		}
+	});
+
+	test("404: notes the 8.9+ requirement and points at the local engine", async () => {
+		const { port, close } = await startMockClusterServer(404, {
+			type: "about:blank",
+			title: "NOT_FOUND",
+			status: 404,
+			detail: "No handler for /v2/expression/evaluation",
+			instance: "/v2/expression/evaluation",
+		});
+		try {
+			const result = await feelTextAgainstPort(port, "evaluate", "1 + 2");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("does not support FEEL evaluation"),
+				`expected 8.9+ message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("Camunda 8.9+"),
+				`expected 8.9+ message. Got: ${output.slice(0, 400)}`,
+			);
+			assert.ok(
+				output.includes("--engine local"),
+				`404 should hint at --engine local. Got: ${output.slice(0, 400)}`,
+			);
+		} finally {
+			await close();
 		}
 	});
 });
