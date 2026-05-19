@@ -62,17 +62,17 @@ services:
     networks:
       - zeebe_network
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.18.8
-    profiles: ['elasticsearch']
-    ports:
-      - 5601:5601
-    environment:
-      - elasticsearch.hosts=http://elasticsearch:9200
-    depends_on:
-      - elasticsearch
-    networks:
-      - zeebe_network
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.18.8
+  #   profiles: ['elasticsearch']
+  #   ports:
+  #     - 5601:5601
+  #   environment:
+  #     - elasticsearch.hosts=http://elasticsearch:9200
+  #   depends_on:
+  #     - elasticsearch
+  #   networks:
+  #     - zeebe_network
 
   keycloak:
     depends_on:
