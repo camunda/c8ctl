@@ -12,7 +12,11 @@ import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
 } from "./commands/resource-extensions.ts";
-import { getAllProfiles, resolveClusterConfig, resolveTenantId } from "./config.ts";
+import {
+	getAllProfiles,
+	resolveClusterConfig,
+	resolveTenantId,
+} from "./config.ts";
 import { confirmDeployTarget } from "./confirm.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "./ignore.ts";
@@ -967,8 +971,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
 			const config = resolveClusterConfig(ctx.profile);
-			const profileName =
-				c8ctl.activeProfile ?? "(env / default)";
+			const profileName = c8ctl.activeProfile ?? "(env / default)";
 
 			const confirmed = await confirmDeployTarget({
 				profileName,
@@ -977,7 +980,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			if (!confirmed) {
 				logMessage("Deploy cancelled.");
 				logMessage(
-					'Hint: use --profile=<name> to target a specific cluster, or --yes to skip this prompt.',
+					"Hint: use --profile=<name> to target a specific cluster, or --yes to skip this prompt.",
 				);
 				return { kind: "none" };
 			}
