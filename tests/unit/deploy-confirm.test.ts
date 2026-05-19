@@ -58,10 +58,7 @@ async function c8Deploy(
 		join(dir, "session.json"),
 		JSON.stringify({ outputMode: "json", ...sessionOverrides }),
 	);
-	writeFileSync(
-		join(dir, "profiles.json"),
-		JSON.stringify({ profiles }),
-	);
+	writeFileSync(join(dir, "profiles.json"), JSON.stringify({ profiles }));
 
 	return asyncSpawn(
 		"node",
@@ -105,13 +102,10 @@ describe("deploy confirmation guard (#393)", () => {
 	test("multiple profiles without --yes: shows target in stderr (non-TTY auto-approve)", async () => {
 		// No --dry-run: the confirmation guard runs, then deploy fails (no cluster).
 		// We only assert on the confirmation message in stderr.
-		const result = await c8Deploy(
-			tempDir,
-			[
-				{ name: "local", baseUrl: "http://localhost:8080/v2" },
-				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
-			],
-		);
+		const result = await c8Deploy(tempDir, [
+			{ name: "local", baseUrl: "http://localhost:8080/v2" },
+			{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
+		]);
 
 		// Deploy will fail (no real cluster) — that's expected.
 		assert.ok(
