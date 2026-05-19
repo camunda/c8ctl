@@ -1,7 +1,7 @@
 # c8ctl-plugin-bpmn
 
-A default [c8ctl](https://github.com/camunda/c8ctl) plugin for linting
-BPMN diagrams against [bpmnlint](https://github.com/bpmn-io/bpmnlint)'s
+A default [c8ctl](https://github.com/camunda/c8ctl) plugin for linting and
+formatting BPMN diagrams. Linting uses [bpmnlint](https://github.com/bpmn-io/bpmnlint)'s
 recommended rules plus
 [bpmnlint-plugin-camunda-compat](https://github.com/camunda/bpmnlint-plugin-camunda-compat)'s
 engine-version-specific rules.
@@ -22,6 +22,15 @@ c8ctl bpmn lint -q process.bpmn
 # Compose with other tools — apply a template, then lint the result
 c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
   | c8ctl bpmn lint
+
+# Canonicalize BPMN XML to stdout (same bpmn-moddle formatting bpmn-js emits)
+c8ctl bpmn format process.bpmn
+
+# Canonicalize in place
+c8ctl bpmn format -i process.bpmn
+
+# Format from stdin (lint-style piping)
+cat process.bpmn | c8ctl bpmn format
 ```
 
 Exit code is `0` when there are no errors, `1` otherwise. Warnings do

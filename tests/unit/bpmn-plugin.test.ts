@@ -13,6 +13,15 @@ import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 const FIXTURES_DIR = resolve(import.meta.dirname, "..", "fixtures");
 const CLI = "src/index.ts";
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
+const UNFORMATTED_BPMN =
+	'<?xml version="1.0" encoding="UTF-8"?><bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Defs_1" targetNamespace="http://bpmn.io/schema/bpmn"><bpmn:process id="Process_1" isExecutable="true"><bpmn:startEvent id="StartEvent_1"/></bpmn:process></bpmn:definitions>';
+const CANONICAL_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" id="Defs_1" targetNamespace="http://bpmn.io/schema/bpmn">
+  <bpmn:process id="Process_1" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" />
+  </bpmn:process>
+</bpmn:definitions>
+`;
 
 async function c8text(...args: string[]) {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-test-"));
@@ -55,6 +64,10 @@ describe("CLI behavioural: bpmn verb", () => {
 		assert.ok(
 			output.includes("lint"),
 			"Should list lint as available subcommand",
+		);
+		assert.ok(
+			output.includes("format"),
+			"Should list format as available subcommand",
 		);
 	});
 });
@@ -219,6 +232,77 @@ describe("CLI behavioural: bpmn lint", () => {
 			assert.ok(
 				output.includes("parse") || output.includes("Failed"),
 				"Should report parse error",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// bpmn format
+// ---------------------------------------------------------------------------
+
+describe("CLI behavioural: bpmn format", () => {
+	test("format <file> prints canonical BPMN to stdout without mutating source", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-format-"));
+		const file = join(tempDir, "process.bpmn");
+		writeFileSync(file, UNFORMATTED_BPMN);
+		try {
+			const result = await c8text("bpmn", "format", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(result.stdout, CANONICAL_BPMN);
+			assert.strictEqual(
+				readFileSync(file, "utf-8"),
+				UNFORMATTED_BPMN,
+				"stdout mode should not overwrite the source file",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("format -i rewrites BPMN file in canonical form", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-format-"));
+		const file = join(tempDir, "process.bpmn");
+		writeFileSync(file, UNFORMATTED_BPMN);
+		try {
+			const result = await c8text("bpmn", "format", "-i", file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(
+				readFileSync(file, "utf-8"),
+				CANONICAL_BPMN,
+				"in-place mode should overwrite with canonical BPMN XML",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("format reads from stdin and writes canonical BPMN XML to stdout", async () => {
+		const result = await asyncSpawnWithStdin(
+			"node",
+			["--experimental-strip-types", CLI, "bpmn", "format"],
+			(stdin) => {
+				stdin.write(UNFORMATTED_BPMN);
+			},
+			{ cwd: REPO_ROOT, env: process.env },
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(result.stdout, CANONICAL_BPMN);
+	});
+
+	test("format invalid XML exits 1 with parse-error shape", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-bpmn-format-"));
+		const file = join(tempDir, "invalid.bpmn");
+		writeFileSync(file, "<not-valid-bpmn>broken</not-valid-bpmn>");
+		try {
+			const result = await c8text("bpmn", "format", file);
+			assert.strictEqual(result.status, 1);
+			assert.match(
+				result.stdout + result.stderr,
+				/Failed to parse BPMN:/,
+				"parse failures should match bpmn lint error shape",
 			);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });

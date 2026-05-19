@@ -56,7 +56,7 @@ type LintResult = {
  * is a pipe with no buffered data yet, it throws EAGAIN, which gets
  * swallowed and surfaces as "no input".
  */
-async function readBpmnInput(
+export async function readBpmnInput(
 	filePath: string | undefined,
 ): Promise<BpmnInput | null> {
 	if (filePath) {
@@ -78,6 +78,16 @@ async function readBpmnInput(
 	}
 
 	return null;
+}
+
+export async function createBpmnModdle() {
+	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const zeebeSchema = (
+		await import("zeebe-bpmn-moddle/resources/zeebe.json", {
+			with: { type: "json" },
+		})
+	).default;
+	return new BpmnModdle({ zeebe: zeebeSchema });
 }
 
 type PlatformInfo = {
@@ -406,14 +416,7 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 		);
 	}
 
-	const BpmnModdle = (await import("bpmn-moddle")).default;
-	const zeebeSchema = (
-		await import("zeebe-bpmn-moddle/resources/zeebe.json", {
-			with: { type: "json" },
-		})
-	).default;
-
-	const moddle = new BpmnModdle({ zeebe: zeebeSchema });
+	const moddle = await createBpmnModdle();
 
 	let rootElement: BpmnModdleElement;
 	try {
