@@ -220,7 +220,7 @@ export const GLOBAL_FLAGS = {
 	},
 	yes: {
 		type: "boolean",
-		description: "Skip confirmation prompts (e.g. deploy target)",
+		description: "Skip confirmation prompts",
 		short: "y",
 		agentDescription:
 			"Skip interactive confirmation prompts. When multiple profiles are configured, " +
