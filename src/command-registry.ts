@@ -218,6 +218,16 @@ export const GLOBAL_FLAGS = {
 			"Per-invocation JSON output. Equivalent to setting outputMode=json for one command without mutating session.json.\nPrecedence: --json > C8CTL_OUTPUT_MODE > persisted session state.",
 		agentAppliesTo: "all commands",
 	},
+	yes: {
+		type: "boolean",
+		description: "Skip confirmation prompts (e.g. deploy target)",
+		short: "y",
+		agentDescription:
+			"Skip interactive confirmation prompts. When multiple profiles are configured, " +
+			"mutating commands like deploy prompt for confirmation before proceeding. " +
+			"Pass --yes to skip the prompt (useful for scripts and CI).",
+		agentAppliesTo: "mutating commands (deploy)",
+	},
 } as const satisfies Record<string, FlagDef>;
 
 /**

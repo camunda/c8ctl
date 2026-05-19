@@ -12,7 +12,8 @@ import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
 } from "./commands/resource-extensions.ts";
-import { resolveTenantId } from "./config.ts";
+import { getAllProfiles, resolveClusterConfig, resolveTenantId } from "./config.ts";
+import { confirmDeployTarget } from "./confirm.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "./ignore.ts";
 import { getLogger, isRecord } from "./logger.ts";
@@ -956,6 +957,33 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// table. Keeping the helper self-contained avoids threading
 	// pre-collected state between the handler and the shared helper
 	// used by `watch`.
+
+	// ── Deploy confirmation guard (#393) ──────────────────────────────
+	// When multiple profiles are configured and the user did not
+	// explicitly pass --profile or --yes, prompt for confirmation so
+	// they see exactly which cluster they are deploying to.
+	if (!ctx.yes && !ctx.profile) {
+		const profiles = getAllProfiles();
+		if (profiles.length > 1) {
+			// Resolve the effective profile and URL for the confirmation message.
+			const config = resolveClusterConfig(ctx.profile);
+			const profileName =
+				c8ctl.activeProfile ?? "(env / default)";
+
+			const confirmed = await confirmDeployTarget({
+				profileName,
+				baseUrl: config.baseUrl,
+			});
+			if (!confirmed) {
+				logMessage("Deploy cancelled.");
+				logMessage(
+					'Hint: use --profile=<name> to target a specific cluster, or --yes to skip this prompt.',
+				);
+				return { kind: "none" };
+			}
+		}
+	}
+
 	await deployResources(paths, {
 		profile: ctx.profile,
 		force: flags.force,

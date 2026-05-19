@@ -234,6 +234,7 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 			["verbose", "verbose"],
 			["fields", "fields"],
 			["json", "outputMode"], // --json toggles outputMode
+			["yes", "yes"],
 		]);
 		const missing: string[] = [];
 		for (const name of Object.keys(GLOBAL_FLAGS)) {

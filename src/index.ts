@@ -722,6 +722,7 @@ async function main() {
 			version: parseVersionFlag(values),
 			dryRun: c8ctl.dryRun,
 			profile,
+			yes: bool(values.yes),
 		};
 		await handler.execute(ctx, values, args);
 		return;
