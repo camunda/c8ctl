@@ -378,7 +378,7 @@ export function parseSetArg(arg: string): ParsedSetArg {
 		);
 	}
 
-	const key = arg.slice(0, eqIndex).trim();
+	const key = arg.slice(0, eqIndex);
 	let value = arg.slice(eqIndex + 1).trim();
 	// Normalise FEEL values: strip leading whitespace immediately after the
 	// `=` prefix so `= value` and `=value` are equivalent.

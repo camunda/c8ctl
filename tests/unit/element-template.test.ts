@@ -424,9 +424,10 @@ describe("CLI behavioural: element-template apply --set", () => {
 	});
 
 	test("--set preserves internal whitespace in value", async () => {
-		// url has feel: optional — the value 'hello world' should be stored
-		// verbatim (internal whitespace not stripped), even though the url
-		// validation pattern doesn't match (we just want the value through).
+		// 'headers' has feel: required — 'hello world' (internal space) should
+		// be auto-prefixed with '=' and stored as '=hello world', not '=helloworld'.
+		// Using a feel:required property ensures we can check the BPMN output
+		// directly without triggering pattern validation that could reject the value.
 		const result = await c8text(
 			"element-template",
 			"apply",
@@ -434,25 +435,11 @@ describe("CLI behavioural: element-template apply --set", () => {
 			"Activity_17s7axj",
 			BPMN_FILE,
 			"--set",
-			"url=hello world",
+			"headers=hello world",
 		);
-		// The url pattern validator rejects this, so we just need to confirm
-		// that the error message shows the un-modified value (internal space preserved).
-		// Alternatively check a non-validated property; here we verify the
-		// apply-with-pattern-violation still reports the verbatim value.
-		const output = result.stdout + result.stderr;
-		// Whether it passes or fails, the value stored should be 'hello world',
-		// not 'helloworld'. If the template applies without a pattern-validator
-		// error, check the output directly.
-		if (result.status === 0) {
-			assert.strictEqual(getInputValue(result.stdout, "url"), "hello world");
-		} else {
-			// Pattern validation fired — just ensure the value isn't mangled.
-			assert.ok(
-				!output.includes("helloworld") || output.includes("hello world"),
-				"Internal whitespace must not be stripped",
-			);
-		}
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		// Internal whitespace preserved; = auto-prepended for feel:required.
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=hello world");
 	});
 
 	test("--set auto-prepends = for feel: required property (no leading =)", async () => {

@@ -144,14 +144,17 @@ export const metadata = {
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
 				"is bound across multiple types — e.g. --set input:correlationKey=order-42.\n\n" +
-				"FEEL values: properties with feel=required always store a FEEL expression. " +
-				"c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` and `--set key==orderId` " +
-				"are equivalent for feel=required properties. " +
-				"Three equivalent forms:\n" +
-				"  --set key='=value'    canonical: single-quoted FEEL value\n" +
-				"  --set 'key==value'    compact: whole argument single-quoted\n" +
-				"  --set key=value       shorthand for feel=required (= is auto-prepended)\n" +
-				"Leading/trailing whitespace is stripped from values, so `--set 'key== value'` " +
+				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
+				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
+				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
+				"Properties with feel=optional keep the value verbatim; you must supply the `=` prefix yourself " +
+				"when you want to write a FEEL expression for those. " +
+				"Three forms for feel=required properties:\n" +
+				"  --set key='=value'    canonical: single-quoted FEEL value (explicit =)\n" +
+				"  --set 'key==value'    compact: whole argument single-quoted (explicit =)\n" +
+				"  --set key=value       shorthand: = auto-prepended (feel=required only)\n" +
+				"Leading/trailing whitespace is stripped from values, and whitespace immediately after a " +
+				"FEEL `=` prefix is also stripped, so `--set 'key== value'` " +
 				"is equivalent to `--set 'key==value'`.",
 			subcommands: [
 				{
