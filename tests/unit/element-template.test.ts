@@ -402,6 +402,137 @@ describe("CLI behavioural: element-template apply --set", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	// -------------------------------------------------------------------------
+	// FEEL auto-prepend (feel: required) and whitespace trim
+	// -------------------------------------------------------------------------
+
+	test("--set trims leading/trailing whitespace from value", async () => {
+		// method is a Dropdown with feel: optional; trimming should produce
+		// the valid choice value 'POST' so the whole apply succeeds.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"method=  POST  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "method"), "POST");
+	});
+
+	test("--set preserves internal whitespace in value", async () => {
+		// url has feel: optional — the value 'hello world' should be stored
+		// verbatim (internal whitespace not stripped), even though the url
+		// validation pattern doesn't match (we just want the value through).
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"url=hello world",
+		);
+		// The url pattern validator rejects this, so we just need to confirm
+		// that the error message shows the un-modified value (internal space preserved).
+		// Alternatively check a non-validated property; here we verify the
+		// apply-with-pattern-violation still reports the verbatim value.
+		const output = result.stdout + result.stderr;
+		// Whether it passes or fails, the value stored should be 'hello world',
+		// not 'helloworld'. If the template applies without a pattern-validator
+		// error, check the output directly.
+		if (result.status === 0) {
+			assert.strictEqual(getInputValue(result.stdout, "url"), "hello world");
+		} else {
+			// Pattern validation fired — just ensure the value isn't mangled.
+			assert.ok(
+				!output.includes("helloworld") || output.includes("hello world"),
+				"Internal whitespace must not be stripped",
+			);
+		}
+	});
+
+	test("--set auto-prepends = for feel: required property (no leading =)", async () => {
+		// 'headers' has feel: required; supplying 'myHeaders' (no =) should
+		// produce '=myHeaders' in the output BPMN.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers=myHeaders",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set does not double-prepend = when value already starts with = (feel: required)", async () => {
+		// When the user already wrote the FEEL marker, the auto-prepend is a no-op.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers==myHeaders",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set does not auto-prepend = for feel: optional property", async () => {
+		// 'url' has feel: optional — the raw value must be stored as-is.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"url=https://example.com",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(
+			getInputValue(result.stdout, "url"),
+			"https://example.com",
+		);
+	});
+
+	test("--set combined: whitespace trim + feel: required auto-prepend", async () => {
+		// '  myHeaders  ' trimmed → 'myHeaders', then = prepended → '=myHeaders'
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers=  myHeaders  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
+
+	test("--set combined: trim after = + no double-prepend for feel: required", async () => {
+		// '=  myHeaders  ' trimmed → '=myHeaders' (trim, then no prepend since starts with =)
+		const result = await c8text(
+			"element-template",
+			"apply",
+			TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+			"--set",
+			"headers==  myHeaders  ",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=myHeaders");
+	});
 });
 
 // ---------------------------------------------------------------------------

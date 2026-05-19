@@ -361,6 +361,14 @@ export function globToRegex(pattern: string): RegExp {
 /**
  * Parse a --set key=value string. If key contains a `:` prefix,
  * resolve the binding type shorthand.
+ *
+ * Whitespace normalisation applied to the value:
+ * - Leading and trailing ASCII whitespace is stripped so that
+ *   `--set 'key=  hello  '` is equivalent to `--set key=hello`.
+ * - If the value starts with `=` (a FEEL expression), leading whitespace
+ *   immediately after the `=` prefix is also stripped, so that
+ *   `--set 'key== value'` is equivalent to `--set 'key==value'`.
+ * - Internal whitespace is preserved: `hello world` stays `hello world`.
  */
 export function parseSetArg(arg: string): ParsedSetArg {
 	const eqIndex = arg.indexOf("=");
@@ -370,8 +378,13 @@ export function parseSetArg(arg: string): ParsedSetArg {
 		);
 	}
 
-	const key = arg.slice(0, eqIndex);
-	const value = arg.slice(eqIndex + 1);
+	const key = arg.slice(0, eqIndex).trim();
+	let value = arg.slice(eqIndex + 1).trim();
+	// Normalise FEEL values: strip leading whitespace immediately after the
+	// `=` prefix so `= value` and `=value` are equivalent.
+	if (value.startsWith("=") && value.length > 1) {
+		value = `=${value.slice(1).trimStart()}`;
+	}
 
 	const colonIndex = key.indexOf(":");
 	if (colonIndex !== -1) {
@@ -388,6 +401,26 @@ export function parseSetArg(arg: string): ParsedSetArg {
 	}
 
 	return { bindingTypeFilter: null, name: key, value };
+}
+
+/**
+ * For a property with `feel: "required"`, Modeler always stores the value
+ * as a FEEL expression (prefixed with `=`). Auto-prepend `=` when the
+ * user-supplied value doesn't already start with one, so `--set key=orderId`
+ * behaves like Modeler instead of producing invalid BPMN.
+ *
+ * The prepend is skipped when:
+ *  - `prop.feel` is not `"required"` (no-op for `optional` / `static` / absent)
+ *  - the value is already a FEEL expression (starts with `=`)
+ *  - the value is empty (would produce `=` alone — leave as-is for validation)
+ */
+export function maybePrependFeel(
+	prop: TemplateProperty,
+	value: string,
+): string {
+	if (prop.feel !== "required") return value;
+	if (value === "" || value.startsWith("=")) return value;
+	return `=${value}`;
 }
 
 /**
@@ -486,8 +519,9 @@ export function applySetOverrides(
 		);
 
 		for (const prop of matches) {
-			if (prop.choices) validateDropdownValue(prop, name, value);
-			prop.value = value;
+			const effectiveValue = maybePrependFeel(prop, value);
+			if (prop.choices) validateDropdownValue(prop, name, effectiveValue);
+			prop.value = effectiveValue;
 			setProperties.add(prop);
 		}
 	}
