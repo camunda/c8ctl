@@ -6,6 +6,7 @@
 
 import { styleText } from "node:util";
 import type {} from "../../../src/runtime.ts";
+import { parseEngineVersionFlag } from "../helpers.ts";
 import {
 	nudgeIfStale,
 	requireCachePresent,
@@ -18,22 +19,24 @@ const c8ctl = globalThis.c8ctl;
 
 export async function searchSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
-	const usage = "Usage: c8ctl element-template search <query> [--limit N]";
+	const usage =
+		"Usage: c8ctl element-template search <query> [--limit N] [--engine-version <x.y.z>]";
+	const { engineVersion, rest } = parseEngineVersionFlag(args, usage);
 
 	// Default cap that covers the common "AWS"-shaped query without
 	// dumping the whole catalogue. Pass --limit to widen.
 	const DEFAULT_LIMIT = 20;
 	let limit = DEFAULT_LIMIT;
 	const queryParts: string[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i];
 		if (arg === "--") {
-			queryParts.push(...args.slice(i + 1));
+			queryParts.push(...rest.slice(i + 1));
 			break;
 		}
 		if (arg === "--limit" || arg.startsWith("--limit=")) {
 			const value =
-				arg === "--limit" ? args[++i] : arg.slice("--limit=".length);
+				arg === "--limit" ? rest[++i] : arg.slice("--limit=".length);
 			if (value === undefined || value === "") {
 				throw new Error(
 					`--limit requires a value (positive integer). ${usage}`,
@@ -65,7 +68,9 @@ export async function searchSubcommand(args: string[]): Promise<void> {
 	// Deprecated filtering and per-id latest-version reduction are done
 	// inside searchTemplates() so the latest non-deprecated version of a
 	// connector is still returned when its newest version is deprecated.
-	const allMatches = searchTemplates(query);
+	const allMatches = searchTemplates(query, {
+		executionPlatformVersion: engineVersion,
+	});
 	const total = allMatches.length;
 	const limited = allMatches.slice(0, limit);
 	const truncated = total > limited.length;

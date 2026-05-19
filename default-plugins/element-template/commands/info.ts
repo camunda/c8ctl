@@ -10,7 +10,7 @@
 
 import { styleText } from "node:util";
 import type {} from "../../../src/runtime.ts";
-import type { Template } from "../helpers.ts";
+import { parseEngineVersionFlag, type Template } from "../helpers.ts";
 import { loadTemplate } from "../template-ref.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
@@ -209,16 +209,24 @@ export function formatKeyedCard({
 
 export async function infoSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
-	const usage = "Usage: c8ctl element-template info <template>";
+	const usage =
+		"Usage: c8ctl element-template info <template> [--engine-version <x.y.z>]";
+	const { engineVersion, rest } = parseEngineVersionFlag(args, usage);
 
-	const parsed = parseInspectArgs(args, usage, {
+	const parsed = parseInspectArgs(rest, usage, {
 		allowPropertyNames: false,
 		allowFilters: false,
 	});
 
-	const { template, autoResolvedVersion } = await loadTemplate(
-		parsed.templateArg,
-	);
+	const { template, autoResolvedVersion, engineVersionIgnoredByPinnedVersion } =
+		await loadTemplate(parsed.templateArg, {
+			executionPlatformVersion: engineVersion,
+		});
+	if (engineVersionIgnoredByPinnedVersion && engineVersion) {
+		logger.warn(
+			`Ignoring --engine-version ${engineVersion} because ${parsed.templateArg} pins a template version.`,
+		);
+	}
 
 	if (c8ctl.outputMode === "json") {
 		logger.json(buildTemplateSummary(template));
