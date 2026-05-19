@@ -307,6 +307,7 @@ describe("defineCommand", () => {
 			dateField: undefined,
 			dryRun: undefined,
 			profile: undefined,
+			yes: undefined,
 		};
 
 		await cmd.execute(mockCtx, { xml: true }, ["12345"]);
