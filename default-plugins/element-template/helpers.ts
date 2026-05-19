@@ -152,6 +152,11 @@ export type ParsedEngineVersionFlag = {
 	rest: string[];
 };
 
+// We only accept concrete versions for --engine-version. Reject the common
+// semver range operator characters before coercion (e.g. ^8.8, ~8.8, >=8.8,
+// 8.8 || 8.9).
+const ENGINE_VERSION_RANGE_OPERATOR_CHARS = /[~^<>=|\s]/;
+
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
 import type { Logger } from "../../src/logger.ts";
@@ -637,7 +642,7 @@ export function parseEngineVersionFlag(
 }
 
 function validateEngineVersion(value: string, usage: string): string {
-	if (/[~^<>=|\s]/.test(value)) {
+	if (ENGINE_VERSION_RANGE_OPERATOR_CHARS.test(value)) {
 		throw new Error(
 			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
 		);

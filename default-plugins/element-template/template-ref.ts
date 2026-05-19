@@ -303,6 +303,9 @@ export async function loadTemplate(
 		allDetails,
 		groupLabelMap,
 		sourceByDetail,
+		// Only mark "auto-resolved latest" when no engine constraint was
+		// provided; with --engine-version we resolve the latest compatible
+		// version, which is not necessarily the absolute latest.
 		autoResolvedVersion:
 			ref.kind === "id" &&
 			ref.version === undefined &&

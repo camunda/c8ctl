@@ -1486,7 +1486,7 @@ describe("CLI behavioural: element-template search", () => {
 
 	test("--engine-version rejects ranges, bare majors, and missing values", async () => {
 		const seeded = makeTemplates("aws", 1);
-		const invalid = ["^8.8", "8"];
+		const invalid = ["^8.8", "~8.8", ">=8.8", "8.8 || 8.9", "8"];
 		for (const value of invalid) {
 			const result = await searchWithSeed(
 				seeded,
