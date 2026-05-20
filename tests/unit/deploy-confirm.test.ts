@@ -216,4 +216,29 @@ describe("deploy confirmation guard (#393)", () => {
 			`should show active profile name in confirmation, got: ${result.stderr}`,
 		);
 	});
+
+	test("active session profile + CAMUNDA_BASE_URL: guard still runs (profile overrides env)", async () => {
+		// When both an active session profile and CAMUNDA_BASE_URL are set,
+		// resolveClusterConfig() prefers the session profile. The guard must
+		// still run because CAMUNDA_BASE_URL is NOT the effective target.
+		const result = await c8Deploy(
+			tempDir,
+			[
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "staging", baseUrl: "http://127.0.0.1:2/v2" },
+			],
+			[],
+			{ activeProfile: "staging", outputMode: "text" },
+			{ CAMUNDA_BASE_URL: "http://127.0.0.1:3/v2" },
+		);
+
+		assert.ok(
+			result.stderr.includes("Deploying to profile"),
+			`guard should still run when active profile overrides CAMUNDA_BASE_URL, got: ${result.stderr}`,
+		);
+		assert.ok(
+			result.stderr.includes('"staging"'),
+			`should show session profile name, not env, got: ${result.stderr}`,
+		);
+	});
 });
