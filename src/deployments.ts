@@ -15,6 +15,7 @@ import {
 import {
 	DEFAULT_PROFILE,
 	getAllProfiles,
+	getProfileOrModeler,
 	resolveClusterConfig,
 	resolveTenantId,
 } from "./config.ts";
@@ -972,9 +973,13 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
 			const config = resolveClusterConfig();
+			const { activeProfile } = c8ctl;
 			const profileName =
-				c8ctl.activeProfile ??
-				(process.env.CAMUNDA_BASE_URL ? "(env)" : DEFAULT_PROFILE);
+				activeProfile != null && getProfileOrModeler(activeProfile) != null
+					? activeProfile
+					: process.env.CAMUNDA_BASE_URL
+						? "(env)"
+						: DEFAULT_PROFILE;
 
 			const confirmed = await confirmDeployTarget({
 				profileName,
