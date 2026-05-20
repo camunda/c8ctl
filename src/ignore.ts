@@ -36,6 +36,38 @@ export function loadIgnoreRules(baseDir: string): Ignore {
 }
 
 /**
+ * Load deploy-always rules from `.c8ignore` negation patterns.
+ *
+ * Lines starting with `!` in `.c8ignore` are treated as "always deploy"
+ * overrides. When a file would normally be skipped by extension filtering,
+ * it is included if it matches one of these negated patterns.
+ *
+ * Returns an `Ignore` instance built from the negated patterns (with `!`
+ * stripped), so callers can check `deployAlways.ignores(rel)` to see if
+ * a file should bypass extension filtering.
+ * Returns `null` when no negation patterns exist.
+ */
+export function loadDeployAlwaysRules(baseDir: string): Ignore | null {
+	const ignoreFilePath = join(baseDir, C8IGNORE_FILENAME);
+	if (!existsSync(ignoreFilePath)) return null;
+
+	const content = readFileSync(ignoreFilePath, "utf-8");
+	const patterns: string[] = [];
+
+	for (const raw of content.split("\n")) {
+		const line = raw.trim();
+		if (line.startsWith("!") && line.length > 1) {
+			// Strip the `!` prefix — the remaining pattern is used to
+			// match files that should always be deployed.
+			patterns.push(line.slice(1));
+		}
+	}
+
+	if (patterns.length === 0) return null;
+	return ignore().add(patterns);
+}
+
+/**
  * Check whether a path should be ignored.
  *
  * `filePath` must be an absolute path.

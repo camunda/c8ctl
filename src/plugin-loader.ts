@@ -8,6 +8,7 @@ import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
 import type { FlagDef } from "./command-registry.ts";
 import { ensurePluginsDir } from "./config.ts";
 import { getLogger, type Logger, type OutputMode } from "./logger.ts";
+import type { confirm, select } from "./prompt.ts";
 import { c8ctl } from "./runtime.ts";
 
 /**
@@ -44,12 +45,17 @@ export interface PluginCtx {
 	verbose: boolean;
 	/** Effective output mode (`--json` toggles to `json`). */
 	outputMode: OutputMode;
-	/** True when `--yes` is set. Skips interactive confirmation prompts. */
+	/** True when `--yes` is set. Skip confirmation prompts. */
 	yes: boolean;
 	/** Parsed `--fields a,b,c` list, or undefined when not set. */
 	fields?: string[];
 	/** Host logger — use `logger.json(...)` for structured output. */
 	logger: Logger;
+	/** Interactive prompts — arrow-key menu and yes/no confirmation. */
+	prompt: {
+		select: typeof select;
+		confirm: typeof confirm;
+	};
 	/** Lazily-resolved Camunda client. Reading triggers credential resolution. */
 	readonly client: CamundaClient;
 }

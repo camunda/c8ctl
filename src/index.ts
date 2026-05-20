@@ -37,6 +37,7 @@ import {
 	loadInstalledPlugins,
 	type PluginCtx,
 } from "./plugin-loader.ts";
+import * as prompt from "./prompt.ts";
 import { c8ctl } from "./runtime.ts";
 import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
 
@@ -484,10 +485,11 @@ async function main() {
 			profile: pluginProfile,
 			dryRun: c8ctl.dryRun === true,
 			verbose: c8ctl.verbose === true,
-			yes: bool(values.yes) === true,
 			outputMode: c8ctl.outputMode,
+			yes: bool(values.yes) === true,
 			fields: c8ctl.fields,
 			logger,
+			prompt: { select: prompt.select, confirm: prompt.confirm },
 			get client() {
 				if (!_pluginClient) _pluginClient = createClient(pluginProfile);
 				return _pluginClient;
