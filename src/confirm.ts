@@ -42,8 +42,8 @@ export async function confirmDeployTarget(options: {
 			`Deploying to profile "${profileName}" (${baseUrl})\nContinue? [y/N] `,
 			(answer) => {
 				rl.close();
-				const normalised = answer.trim().toLowerCase();
-				resolve(normalised === "y" || normalised === "yes");
+				const normalized = answer.trim().toLowerCase();
+				resolve(normalized === "y" || normalized === "yes");
 			},
 		);
 	});
