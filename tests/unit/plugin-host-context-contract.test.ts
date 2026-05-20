@@ -194,7 +194,6 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.ok(isRecord(parsed.ctx));
 		assert.strictEqual(parsed.ctx.yes, false);
 	});
-	});
 
 	test("ctx.outputMode is 'json' when --json is set", async () => {
 		const result = await c8Plugin("echo-ctx", "--json");
