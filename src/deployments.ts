@@ -979,9 +979,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			const profileName =
 				activeProfile != null && getProfileOrModeler(activeProfile) != null
 					? activeProfile
-					: process.env.CAMUNDA_BASE_URL
-						? "(env)"
-						: DEFAULT_PROFILE;
+					: DEFAULT_PROFILE;
 
 			const confirmed = await confirmDeployTarget({
 				profileName,

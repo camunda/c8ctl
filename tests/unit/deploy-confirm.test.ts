@@ -69,6 +69,7 @@ async function c8Deploy(
 				C8CTL_MODELER_DIR: join(dir, "no-modeler"),
 				...envOverrides,
 			},
+			timeout: 15_000,
 		},
 	);
 }
