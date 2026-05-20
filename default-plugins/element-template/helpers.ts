@@ -152,10 +152,12 @@ export type ParsedEngineVersionFlag = {
 	rest: string[];
 };
 
-// We only accept concrete versions for --engine-version. Reject the common
-// semver range operator characters before coercion (e.g. ^8.8, ~8.8, >=8.8,
-// 8.8 || 8.9).
-const ENGINE_VERSION_DISALLOWED_CHARS = /[~^<>=|\s]/;
+// Concrete version forms accepted for --engine-version:
+// - x.y
+// - x.y.z
+// - x.y[-prerelease] / x.y.z[-prerelease]
+// Ranges (e.g. ^8.8, >=8.8, 8.8 || 8.9) are intentionally excluded.
+const ENGINE_VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$/;
 
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
@@ -642,12 +644,7 @@ export function parseEngineVersionFlag(
 }
 
 function validateEngineVersion(value: string, usage: string): string {
-	if (!value.includes(".")) {
-		throw new Error(
-			`--engine-version must include major and minor (e.g. 8.8.0 or 8.8); got "${value}". ${usage}`,
-		);
-	}
-	if (ENGINE_VERSION_DISALLOWED_CHARS.test(value)) {
+	if (!ENGINE_VERSION_PATTERN.test(value)) {
 		throw new Error(
 			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
 		);

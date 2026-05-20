@@ -1469,7 +1469,7 @@ describe("CLI behavioural: element-template search", () => {
 
 	test("--engine-version accepts concrete semver and x.y shorthand", async () => {
 		const seeded = makeTemplates("aws", 1);
-		for (const value of ["8.8.0", "8.8"]) {
+		for (const value of ["8.8.0", "8.8", "8.8.0-alpha1"]) {
 			const result = await searchWithSeed(
 				seeded,
 				"text",
