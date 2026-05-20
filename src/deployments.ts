@@ -972,18 +972,18 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// *effective* target — i.e. no active session profile overrides it.
 	// When an active session profile exists, it takes priority over
 	// env vars in resolveClusterConfig(), so the guard must still run.
+	const { activeProfile } = c8ctl;
+	const activeProfileConfig =
+		activeProfile != null ? getProfileOrModeler(activeProfile) : undefined;
 	const envIsEffectiveTarget =
-		!!process.env.CAMUNDA_BASE_URL &&
-		(c8ctl.activeProfile == null ||
-			getProfileOrModeler(c8ctl.activeProfile) == null);
+		!!process.env.CAMUNDA_BASE_URL && activeProfileConfig == null;
 	if (!ctx.yes && !ctx.profile && !envIsEffectiveTarget) {
 		const profiles = getAllProfiles();
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
 			const config = resolveClusterConfig();
-			const { activeProfile } = c8ctl;
 			const profileName =
-				activeProfile != null && getProfileOrModeler(activeProfile) != null
+				activeProfile != null && activeProfileConfig != null
 					? activeProfile
 					: DEFAULT_PROFILE;
 

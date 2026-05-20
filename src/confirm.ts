@@ -12,16 +12,16 @@ import { createInterface } from "node:readline";
 import { c8ctl } from "./runtime.ts";
 
 /**
- * Prompt the user to confirm a deploy target when multiple profiles exist.
+ * Prompt the user to confirm a deploy target.
  *
- * Conditions for prompting (all must be true):
- * - `--yes` / `-y` was NOT passed
- * - `--profile` was NOT explicitly passed
- * - More than one profile is configured
- * - `CAMUNDA_BASE_URL` is NOT set (env-based config)
- * - stdin and stderr are both a TTY (interactive terminal)
+ * The caller decides *when* to call this (e.g. based on `--yes`,
+ * `--profile`, profile count, env vars). This helper handles only
+ * the TTY check and the actual prompting/logging:
  *
- * When stdin or stderr is not a TTY, logs the target and proceeds.
+ * - **Interactive** (stdin + stderr are TTY): asks `Continue? [y/N]`
+ *   and returns the user's answer.
+ * - **Non-interactive** (piped/redirected): logs the target to stderr
+ *   and returns `true` (auto-approve).
  */
 export async function confirmDeployTarget(options: {
 	profileName: string;
