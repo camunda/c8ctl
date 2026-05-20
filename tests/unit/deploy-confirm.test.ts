@@ -88,7 +88,7 @@ describe("deploy confirmation guard (#393)", () => {
 		// Uses --dry-run for a clean exit (confirmation never fires either way).
 		const result = await c8Deploy(
 			tempDir,
-			[{ name: "local", baseUrl: "http://localhost:8080/v2" }],
+			[{ name: "local", baseUrl: "http://127.0.0.1:1/v2" }],
 			["--dry-run"],
 		);
 
@@ -103,8 +103,8 @@ describe("deploy confirmation guard (#393)", () => {
 		// No --dry-run: the confirmation guard runs, then deploy fails (no cluster).
 		// We only assert on the confirmation message in stderr.
 		const result = await c8Deploy(tempDir, [
-			{ name: "local", baseUrl: "http://localhost:8080/v2" },
-			{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
+			{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+			{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
 		]);
 
 		// Deploy will fail (no real cluster) — that's expected.
@@ -120,8 +120,8 @@ describe("deploy confirmation guard (#393)", () => {
 		const result = await c8Deploy(
 			tempDir,
 			[
-				{ name: "local", baseUrl: "http://localhost:8080/v2" },
-				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
 			],
 			["--yes"],
 		);
@@ -136,8 +136,8 @@ describe("deploy confirmation guard (#393)", () => {
 		const result = await c8Deploy(
 			tempDir,
 			[
-				{ name: "local", baseUrl: "http://localhost:8080/v2" },
-				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
 			],
 			["-y"],
 		);
@@ -153,8 +153,8 @@ describe("deploy confirmation guard (#393)", () => {
 		const result = await c8Deploy(
 			tempDir,
 			[
-				{ name: "local", baseUrl: "http://localhost:8080/v2" },
-				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
 			],
 			["--profile=local"],
 		);
@@ -170,8 +170,8 @@ describe("deploy confirmation guard (#393)", () => {
 		const result = await c8Deploy(
 			tempDir,
 			[
-				{ name: "local", baseUrl: "http://localhost:8080/v2" },
-				{ name: "staging", baseUrl: "https://staging.zeebe.camunda.io" },
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "staging", baseUrl: "http://127.0.0.1:2/v2" },
 			],
 			[],
 			{ activeProfile: "staging", outputMode: "text" },
