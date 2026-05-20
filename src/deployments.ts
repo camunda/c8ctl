@@ -971,8 +971,9 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
 			const config = resolveClusterConfig(ctx.profile);
-			const profileName = c8ctl.activeProfile
-				?? (process.env.CAMUNDA_BASE_URL ? "(env)" : "local");
+			const profileName =
+				c8ctl.activeProfile ??
+				(process.env.CAMUNDA_BASE_URL ? "(env)" : "local");
 
 			const confirmed = await confirmDeployTarget({
 				profileName,
