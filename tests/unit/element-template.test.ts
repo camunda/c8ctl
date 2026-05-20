@@ -424,10 +424,10 @@ describe("CLI behavioural: element-template apply --set", () => {
 	});
 
 	test("--set preserves internal whitespace in value", async () => {
-		// 'headers' has feel: required — 'hello world' (internal space) should
-		// be auto-prefixed with '=' and stored as '=hello world', not '=helloworld'.
-		// Using a feel:required property ensures we can check the BPMN output
-		// directly without triggering pattern validation that could reject the value.
+		// Verify that internal whitespace is not stripped. Pass the FEEL
+		// expression `a + b` (spaces around operator) without the `=` prefix;
+		// after auto-prepend for feel:required the stored expression is `=a + b`,
+		// which is valid FEEL and has internal whitespace.
 		const result = await c8text(
 			"element-template",
 			"apply",
@@ -435,11 +435,11 @@ describe("CLI behavioural: element-template apply --set", () => {
 			"Activity_17s7axj",
 			BPMN_FILE,
 			"--set",
-			"headers=hello world",
+			"headers=a + b",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		// Internal whitespace preserved; = auto-prepended for feel:required.
-		assert.strictEqual(getInputValue(result.stdout, "headers"), "=hello world");
+		// = auto-prepended for feel:required; internal whitespace preserved.
+		assert.strictEqual(getInputValue(result.stdout, "headers"), "=a + b");
 	});
 
 	test("--set auto-prepends = for feel: required property (no leading =)", async () => {

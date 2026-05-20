@@ -418,8 +418,12 @@ export function maybePrependFeel(
 	prop: TemplateProperty,
 	value: string,
 ): string {
-	if (prop.feel !== "required") return value;
-	if (value === "" || value.startsWith("=")) return value;
+	if (prop.feel !== "required") {
+		return value;
+	}
+	if (value === "" || value.startsWith("=")) {
+		return value;
+	}
 	return `=${value}`;
 }
 
@@ -520,7 +524,9 @@ export function applySetOverrides(
 
 		for (const prop of matches) {
 			const effectiveValue = maybePrependFeel(prop, value);
-			if (prop.choices) validateDropdownValue(prop, name, effectiveValue);
+			if (prop.choices) {
+				validateDropdownValue(prop, name, effectiveValue);
+			}
 			prop.value = effectiveValue;
 			setProperties.add(prop);
 		}
