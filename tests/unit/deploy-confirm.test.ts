@@ -115,17 +115,17 @@ describe("deploy confirmation guard (#393)", () => {
 	});
 
 	test("multiple profiles with --yes: no confirmation message", async () => {
-		// --yes skips confirmation. Uses --dry-run for clean exit.
+		// --yes skips confirmation. Deploy will fail (no cluster) but
+		// the confirmation guard is exercised before the failure.
 		const result = await c8Deploy(
 			tempDir,
 			[
 				{ name: "local", baseUrl: "http://localhost:8080/v2" },
 				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
 			],
-			["--dry-run", "--yes"],
+			["--yes"],
 		);
 
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assert.ok(
 			!result.stderr.includes("Deploying to profile"),
 			`--yes should skip confirmation, got: ${result.stderr}`,
@@ -139,10 +139,9 @@ describe("deploy confirmation guard (#393)", () => {
 				{ name: "local", baseUrl: "http://localhost:8080/v2" },
 				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
 			],
-			["--dry-run", "-y"],
+			["-y"],
 		);
 
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assert.ok(
 			!result.stderr.includes("Deploying to profile"),
 			`-y should skip confirmation, got: ${result.stderr}`,
@@ -150,17 +149,16 @@ describe("deploy confirmation guard (#393)", () => {
 	});
 
 	test("multiple profiles with explicit --profile: no confirmation message", async () => {
-		// Explicit --profile means the user knows the target. Uses --dry-run.
+		// Explicit --profile means the user knows the target.
 		const result = await c8Deploy(
 			tempDir,
 			[
 				{ name: "local", baseUrl: "http://localhost:8080/v2" },
 				{ name: "production", baseUrl: "https://prod.zeebe.camunda.io" },
 			],
-			["--dry-run", "--profile=local"],
+			["--profile=local"],
 		);
 
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assert.ok(
 			!result.stderr.includes("Deploying to profile"),
 			`explicit --profile should skip confirmation, got: ${result.stderr}`,
@@ -176,7 +174,7 @@ describe("deploy confirmation guard (#393)", () => {
 				{ name: "staging", baseUrl: "https://staging.zeebe.camunda.io" },
 			],
 			[],
-			{ activeProfile: "staging" },
+			{ activeProfile: "staging", outputMode: "text" },
 		);
 
 		assert.ok(

@@ -13,6 +13,7 @@ import {
 	DEPLOYABLE_EXTENSIONS,
 } from "./commands/resource-extensions.ts";
 import {
+	DEFAULT_PROFILE,
 	getAllProfiles,
 	resolveClusterConfig,
 	resolveTenantId,
@@ -970,10 +971,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		const profiles = getAllProfiles();
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
-			const config = resolveClusterConfig(ctx.profile);
+			const config = resolveClusterConfig();
 			const profileName =
 				c8ctl.activeProfile ??
-				(process.env.CAMUNDA_BASE_URL ? "(env)" : "local");
+				(process.env.CAMUNDA_BASE_URL ? "(env)" : DEFAULT_PROFILE);
 
 			const confirmed = await confirmDeployTarget({
 				profileName,

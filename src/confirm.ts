@@ -8,6 +8,7 @@
  */
 
 import { createInterface } from "node:readline";
+import { c8ctl } from "./runtime.ts";
 
 /**
  * Prompt the user to confirm a deploy target when multiple profiles exist.
@@ -25,10 +26,15 @@ export async function confirmDeployTarget(options: {
 	baseUrl: string;
 }): Promise<boolean> {
 	const { profileName, baseUrl } = options;
+	const message = `Deploying to profile "${profileName}" (${baseUrl})`;
 
 	// Non-interactive: log target and proceed
 	if (!process.stdin.isTTY) {
-		console.error(`Deploying to profile "${profileName}" (${baseUrl})`);
+		if (c8ctl.outputMode === "json") {
+			console.error(JSON.stringify({ type: "message", message }));
+		} else {
+			console.error(message);
+		}
 		return true;
 	}
 
