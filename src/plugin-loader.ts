@@ -44,6 +44,8 @@ export interface PluginCtx {
 	verbose: boolean;
 	/** Effective output mode (`--json` toggles to `json`). */
 	outputMode: OutputMode;
+	/** True when `--yes` is set. Skips interactive confirmation prompts. */
+	yes: boolean;
 	/** Parsed `--fields a,b,c` list, or undefined when not set. */
 	fields?: string[];
 	/** Host logger — use `logger.json(...)` for structured output. */

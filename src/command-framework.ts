@@ -247,6 +247,8 @@ export interface CommandContext {
 	dryRun: boolean | undefined;
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
+	/** Whether --yes / -y was set (skip confirmation prompts). */
+	yes: boolean | undefined;
 }
 
 // ─── CommandHandler ──────────────────────────────────────────────────────────

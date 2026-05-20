@@ -476,6 +476,7 @@ async function main() {
 			profile: pluginProfile,
 			dryRun: c8ctl.dryRun === true,
 			verbose: c8ctl.verbose === true,
+			yes: bool(values.yes) === true,
 			outputMode: c8ctl.outputMode,
 			fields: c8ctl.fields,
 			logger,
@@ -722,6 +723,7 @@ async function main() {
 			version: parseVersionFlag(values),
 			dryRun: c8ctl.dryRun,
 			profile,
+			yes: bool(values.yes),
 		};
 		await handler.execute(ctx, values, args);
 		return;

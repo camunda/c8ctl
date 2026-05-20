@@ -23,6 +23,7 @@ export const commands = {
         ? {
             dryRun: ctx.dryRun,
             verbose: ctx.verbose,
+            yes: ctx.yes,
             outputMode: ctx.outputMode,
             fields: ctx.fields ?? null,
             profile: ctx.profile,
