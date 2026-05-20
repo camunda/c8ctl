@@ -45,10 +45,11 @@ let tempDir: string;
  * extraArgs are appended after `deploy <dir>`.
  */
 async function c8Deploy(
-	cwd: string,
+	deployPath: string,
 	profiles: Array<{ name: string; baseUrl: string }>,
 	extraArgs: string[] = [],
 	sessionOverrides: Record<string, unknown> = {},
+	envOverrides: Record<string, string> = {},
 ): Promise<SpawnResult> {
 	const dir = mkdtempSync(join(tempDir, ".c8ctl-data-"));
 	writeFileSync(
@@ -59,12 +60,14 @@ async function c8Deploy(
 
 	return asyncSpawn(
 		"node",
-		["--experimental-strip-types", CLI, "deploy", cwd, ...extraArgs],
+		["--experimental-strip-types", CLI, "deploy", deployPath, ...extraArgs],
 		{
 			env: {
 				PATH: process.env.PATH,
 				HOME: "/tmp/c8ctl-test-nonexistent-home",
 				C8CTL_DATA_DIR: dir,
+				C8CTL_MODELER_DIR: join(dir, "no-modeler"),
+				...envOverrides,
 			},
 		},
 	);
@@ -93,6 +96,39 @@ describe("deploy confirmation guard (#393)", () => {
 		assert.ok(
 			!result.stderr.includes("Deploying to profile"),
 			`should not show confirmation for single profile, got: ${result.stderr}`,
+		);
+	});
+
+	test("single profile without --dry-run: no confirmation message", async () => {
+		// Non-dry-run variant: deploy fails (unreachable) but the guard
+		// should not fire for a single profile.
+		const result = await c8Deploy(tempDir, [
+			{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+		]);
+
+		assert.ok(
+			!result.stderr.includes("Deploying to profile"),
+			`should not show confirmation for single profile, got: ${result.stderr}`,
+		);
+	});
+
+	test("multiple profiles with CAMUNDA_BASE_URL: no confirmation message", async () => {
+		// Env-based config means the user has chosen their target via the
+		// environment — the guard should not fire.
+		const result = await c8Deploy(
+			tempDir,
+			[
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
+			],
+			[],
+			{},
+			{ CAMUNDA_BASE_URL: "http://127.0.0.1:3/v2" },
+		);
+
+		assert.ok(
+			!result.stderr.includes("Deploying to profile"),
+			`CAMUNDA_BASE_URL should skip confirmation, got: ${result.stderr}`,
 		);
 	});
 
