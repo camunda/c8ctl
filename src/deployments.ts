@@ -968,9 +968,15 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// When multiple profiles are configured and the user did not
 	// explicitly pass --profile or --yes, prompt for confirmation so
 	// they see exactly which cluster they are deploying to.
-	// Skip the guard when env-based config (CAMUNDA_BASE_URL) is in use
-	// — the user has already chosen their target via the environment.
-	if (!ctx.yes && !ctx.profile && !process.env.CAMUNDA_BASE_URL) {
+	// Skip the guard when env-based config (CAMUNDA_BASE_URL) is the
+	// *effective* target — i.e. no active session profile overrides it.
+	// When an active session profile exists, it takes priority over
+	// env vars in resolveClusterConfig(), so the guard must still run.
+	const envIsEffectiveTarget =
+		!!process.env.CAMUNDA_BASE_URL &&
+		(c8ctl.activeProfile == null ||
+			getProfileOrModeler(c8ctl.activeProfile) == null);
+	if (!ctx.yes && !ctx.profile && !envIsEffectiveTarget) {
 		const profiles = getAllProfiles();
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
