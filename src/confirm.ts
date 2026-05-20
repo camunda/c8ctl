@@ -28,8 +28,10 @@ export async function confirmDeployTarget(options: {
 	const { profileName, baseUrl } = options;
 	const message = `Deploying to profile "${profileName}" (${baseUrl})`;
 
-	// Non-interactive: log target and proceed
-	if (!process.stdin.isTTY) {
+	// Non-interactive: log target and proceed.
+	// Treat the session as non-interactive unless both stdin AND stderr
+	// are TTY — if stderr is redirected the prompt would be invisible.
+	if (!process.stdin.isTTY || !process.stderr.isTTY) {
 		if (c8ctl.outputMode === "json") {
 			console.error(JSON.stringify({ type: "message", message }));
 		} else {

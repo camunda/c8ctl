@@ -6,13 +6,10 @@
  * --profile or --yes. Since test subprocesses are not a TTY, the
  * confirmation auto-approves but logs the target to stderr.
  *
- * Tests that verify confirmation IS shown do NOT use --dry-run
- * (the guard runs after the dry-run exit). The deploy will fail
- * (no real cluster), but the confirmation message in stderr is
- * what we assert on.
- *
- * Tests that verify confirmation is SKIPPED use --dry-run so the
- * CLI exits cleanly (confirmation never fires either way).
+ * Most tests run without --dry-run so the confirmation guard is
+ * actually exercised (it runs after the dry-run exit). The deploy
+ * will fail (no real cluster / unreachable address), but the
+ * confirmation message in stderr is what we assert on.
  */
 
 import assert from "node:assert";
