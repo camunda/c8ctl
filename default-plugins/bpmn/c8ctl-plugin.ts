@@ -82,8 +82,14 @@ async function bpmnHandler(
 	}
 
 	try {
-		if (subcommand === "lint") await lintSubcommand(subArgs);
-		if (subcommand === "format") await formatSubcommand(subArgs);
+		switch (subcommand) {
+			case "format":
+				await formatSubcommand(subArgs);
+				break;
+			case "lint":
+				await lintSubcommand(subArgs);
+				break;
+		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();
@@ -113,14 +119,13 @@ export const metadata = {
 				"`format` round-trips BPMN through bpmn-moddle to emit canonical XML.",
 			subcommands: [
 				{
+					name: "format",
+					description: "Format according to BPMN.io formatting conventions",
+				},
+				{
 					name: "lint",
 					description:
 						"Lint a BPMN diagram against recommended and Camunda rules",
-				},
-				{
-					name: "format",
-					description:
-						"Round-trip BPMN via bpmn-moddle and emit canonical XML formatting",
 				},
 			],
 			examples: [

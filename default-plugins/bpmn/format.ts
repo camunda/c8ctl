@@ -1,8 +1,5 @@
 import { writeFileSync } from "node:fs";
-import type {} from "../../src/runtime.ts";
 import { createBpmnModdle, readBpmnInput } from "./lint.ts";
-
-if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 
 type ParsedArgs = {
 	inPlace: boolean;
