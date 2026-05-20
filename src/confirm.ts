@@ -3,8 +3,9 @@
  *
  * Uses Node's built-in `readline` — no external dependencies.
  * Returns `true` if the user confirms, `false` otherwise.
- * Automatically skips (returns `true`) when stdin is not a TTY
- * (e.g. piped input, CI), logging the target to stderr instead.
+ * Automatically skips (returns `true`) when stdin or stderr is not
+ * a TTY (e.g. piped input, CI, redirected stderr), logging the
+ * target to stderr instead.
  */
 
 import { createInterface } from "node:readline";
@@ -17,9 +18,10 @@ import { c8ctl } from "./runtime.ts";
  * - `--yes` / `-y` was NOT passed
  * - `--profile` was NOT explicitly passed
  * - More than one profile is configured
- * - stdin is a TTY (interactive terminal)
+ * - `CAMUNDA_BASE_URL` is NOT set (env-based config)
+ * - stdin and stderr are both a TTY (interactive terminal)
  *
- * When stdin is not a TTY, logs the target to stderr and proceeds.
+ * When stdin or stderr is not a TTY, logs the target and proceeds.
  */
 export async function confirmDeployTarget(options: {
 	profileName: string;
