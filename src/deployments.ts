@@ -2,8 +2,14 @@
  * Deployment commands with building-block folder prioritization
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, extname, join, relative } from "node:path";
+import {
+	existsSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "./client.ts";
@@ -92,7 +98,11 @@ function isBuildingBlockFolder(path: string): boolean {
  */
 function hasProcessApplicationFile(dirPath: string): boolean {
 	const paFilePath = join(dirPath, PROCESS_APPLICATION_FILE);
-	return existsSync(paFilePath);
+	try {
+		return statSync(paFilePath).isFile();
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -110,12 +120,6 @@ function findGroupRoot(
 
 	// Traverse up the directory tree until we reach or go outside basePath
 	while (true) {
-		// Check if we've gone outside the basePath
-		const rel = relative(basePath, currentDir);
-		if (rel.startsWith("..") || rel === "") {
-			break;
-		}
-
 		// Check if this directory is a building block
 		if (isBuildingBlockFolder(currentDir)) {
 			return { type: "bb", root: currentDir };
@@ -126,6 +130,12 @@ function findGroupRoot(
 			return { type: "pa", root: currentDir };
 		}
 
+		// Check if we've reached or gone outside the basePath
+		const rel = relative(basePath, currentDir);
+		if (rel.startsWith("..") || rel === "") {
+			break;
+		}
+
 		// Move up one level
 		const parentDir = dirname(currentDir);
 		if (parentDir === currentDir) break; // Reached filesystem root
@@ -133,6 +143,36 @@ function findGroupRoot(
 	}
 
 	return { type: null, root: null };
+}
+
+/**
+ * Walk up from `startDir` looking for a `.process-application` marker
+ * file. Returns the directory that contains the marker, or `null` if
+ * none is found before reaching the filesystem root.
+ *
+ * `startDir` may be a file path — the walk starts from its parent
+ * directory in that case (the initial `hasProcessApplicationFile` call
+ * harmlessly returns false for non-directories).
+ *
+ * Unlike `findGroupRoot()` (which tags individual files for display),
+ * this function determines the *deploy scope*: when a PA root is found,
+ * `collectResourcesForPaths` expands the input to the PA root so that
+ * the entire application is deployed.
+ */
+export function findProcessApplicationRoot(startDir: string): string | null {
+	let currentDir = resolve(startDir);
+
+	while (true) {
+		if (hasProcessApplicationFile(currentDir)) {
+			return currentDir;
+		}
+
+		const parentDir = dirname(currentDir);
+		if (parentDir === currentDir) break; // Reached filesystem root
+		currentDir = parentDir;
+	}
+
+	return null;
 }
 
 /**
@@ -159,12 +199,13 @@ function collectResourceFiles(
 		return collected;
 	}
 
-	// Set basePath to dirPath on first call
-	if (!basePath) {
-		basePath = dirPath;
-	}
-
 	const stat = statSync(dirPath);
+
+	// Set basePath to a directory on first call — when the initial input
+	// is a file, use its parent so findGroupRoot can walk up correctly.
+	if (!basePath) {
+		basePath = stat.isFile() ? dirname(dirPath) : dirPath;
+	}
 
 	if (stat.isFile()) {
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
@@ -311,6 +352,11 @@ function findDuplicateDefinitionIds(
 interface CollectResult {
 	resources: ResourceFile[];
 	skippedExtensions: Set<string>;
+	/** Resolved base paths used for resource collection and display.
+	 *  When PA detection fires, these are expanded to the PA root(s)
+	 *  rather than the user-supplied input paths. Used downstream for
+	 *  `ignoreBaseDir` resolution and `basePaths` in `deployResources`. */
+	effectivePaths: string[];
 }
 
 /**
@@ -336,14 +382,62 @@ function collectResourcesForPaths(
 		);
 	}
 
-	// Load .c8ignore rules from the target directory (not cwd) so that
-	// `c8 deploy <target>` picks up the .c8ignore inside the target. (#258)
-	const ignoreBaseDir = resolveIgnoreBaseDir(paths);
+	// ── Process-application auto-detection (#227) ──────────────────────
+	// For each directory path, walk up looking for a .process-application
+	// marker. If found, expand to the PA root so the entire application
+	// is deployed — matching Desktop Modeler behaviour.
+	// File paths are NOT expanded so that watch-mode single-file deploys
+	// remain scoped to the changed file.
+	const effectivePaths: string[] = [];
+	const seenRoots = new Set<string>();
+	for (const p of paths) {
+		const abs = resolve(p);
+		let isFile = false;
+		try {
+			isFile = statSync(abs).isFile();
+		} catch {
+			// Path does not exist — skip PA detection and keep the
+			// absolute path so collectResourceFiles (which silently
+			// skips missing paths) falls through to the "No deployable
+			// files found" guard.
+			effectivePaths.push(abs);
+			continue;
+		}
+
+		if (isFile) {
+			effectivePaths.push(abs);
+			continue;
+		}
+
+		const paRoot = findProcessApplicationRoot(abs);
+		if (paRoot) {
+			// Deduplicate: multiple input dirs inside the same PA should
+			// only trigger one resource walk from the PA root. Use
+			// realpathSync for the dedup key to handle symlinks/case.
+			let canonical = paRoot;
+			try {
+				canonical = realpathSync(paRoot);
+			} catch {
+				// Best-effort fallback.
+			}
+			if (!seenRoots.has(canonical)) {
+				seenRoots.add(canonical);
+				effectivePaths.push(paRoot);
+			}
+		} else {
+			effectivePaths.push(abs);
+		}
+	}
+
+	// Load .c8ignore rules from the effective target directory (which may
+	// be the PA root) so that `c8 deploy <target>` picks up the .c8ignore
+	// inside the target. (#258)
+	const ignoreBaseDir = resolveIgnoreBaseDir(effectivePaths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
 	const resources: ResourceFile[] = [];
 	const skippedExtensions = new Set<string>();
-	paths.forEach((path) => {
+	effectivePaths.forEach((path) => {
 		collectResourceFiles(
 			path,
 			resources,
@@ -356,12 +450,33 @@ function collectResourcesForPaths(
 		);
 	});
 
-	if (resources.length === 0) {
+	// Deduplicate resources by canonical path — can happen when an explicit
+	// file path is also covered by a PA-root or scoped-directory walk, or
+	// when the same file is reachable via symlinks. The canonical path is
+	// used only as the dedup key; the original path/name are preserved for
+	// display and relative-path calculations.
+	const seen = new Set<string>();
+	const deduped: ResourceFile[] = [];
+	for (const r of resources) {
+		let canonical = r.path;
+		try {
+			canonical = realpathSync(r.path);
+		} catch {
+			// Best-effort: fall back to the original path if realpath
+			// fails (e.g. broken symlink).
+		}
+		if (!seen.has(canonical)) {
+			seen.add(canonical);
+			deduped.push(r);
+		}
+	}
+
+	if (deduped.length === 0) {
 		logSkippedExtensions(skippedExtensions);
 		throw new Error("No deployable files found in the specified paths");
 	}
 
-	return { resources, skippedExtensions };
+	return { resources: deduped, skippedExtensions, effectivePaths };
 }
 
 /**
@@ -404,18 +519,18 @@ export async function deployResources(
 	// HTTP deploy call (further down) is wrapped in a catch that routes
 	// through `handleDeploymentError` for rich Problem-Detail rendering.
 
-	const { resources, skippedExtensions } = collectResourcesForPaths(
-		paths,
-		options.force,
-		options.extensionList ?? DEPLOYABLE_EXTENSIONS,
-	);
+	const { resources, skippedExtensions, effectivePaths } =
+		collectResourcesForPaths(
+			paths,
+			options.force,
+			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
+		);
 
 	logSkippedExtensions(skippedExtensions);
 
-	// Store the base paths for relative path calculation. Safe to assign
-	// directly now: the empty-paths guard inside `collectResourcesForPaths`
-	// has already thrown.
-	const basePaths = paths;
+	// Use the effective paths (which may have been expanded to a PA root)
+	// for relative path calculation so display paths make sense.
+	const basePaths = effectivePaths;
 
 	const client = createClient(options.profile);
 

@@ -2,10 +2,10 @@
  * Watch command - monitor files for changes and auto-deploy
  */
 
-import { existsSync, statSync, watch } from "node:fs";
+import { existsSync, realpathSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
-import { deployResources } from "../deployments.ts";
+import { deployResources, findProcessApplicationRoot } from "../deployments.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
 import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
@@ -64,6 +64,49 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		}
 	}
 
+	// ── Process-application mode (#227) ──────────────────────────────
+	// When --process-application is set, resolve the PA root from the
+	// watched paths and expand the watch scope to the PA root so the
+	// entire process application tree is monitored for changes.
+	const paMode = Boolean(flags["process-application"] || flags.pa);
+	let paRoot: string | null = null;
+	if (paMode) {
+		// Resolve PA root from every watched path and verify they all
+		// belong to the same process application.
+		let resolvedRoot: string | undefined;
+		for (const p of resolvedPaths) {
+			const root = findProcessApplicationRoot(p);
+			if (!root) {
+				throw new Error(
+					`--process-application: no .process-application marker found above ${p}. ` +
+						"Place a .process-application file at the root of your process application.",
+				);
+			}
+			// Normalize via realpathSync so symlinks and equivalent
+			// spellings of the same directory compare as equal.
+			const normalizedRoot = realpathSync(root);
+			if (resolvedRoot && normalizedRoot !== resolvedRoot) {
+				throw new Error(
+					"--process-application: all watched paths must belong to the same " +
+						`process application. Path ${p} resolves to ${normalizedRoot}, ` +
+						`but earlier paths resolved to ${resolvedRoot}`,
+				);
+			}
+			resolvedRoot = normalizedRoot;
+		}
+		// Invariant: resolvedPaths always has ≥1 entry (defaults to ["."]),
+		// so the loop above always runs at least once and sets resolvedRoot.
+		// This guard satisfies the type checker — it cannot fire at runtime.
+		if (!resolvedRoot) {
+			throw new Error("--process-application requires at least one watch path");
+		}
+		paRoot = resolvedRoot;
+		// Replace watched paths with the PA root so we monitor the entire
+		// process application tree, not just the user-specified subdirectory.
+		resolvedPaths.length = 0;
+		resolvedPaths.push(paRoot);
+	}
+
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
@@ -105,40 +148,51 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 					return;
 				}
 
-				// Clear any pending debounce for this file and restart the timer.
+				// In PA mode, key debounce/cooldown by the PA root so that
+				// a burst of changes to different files collapses into a
+				// single full-PA deploy within the debounce window.
+				const debounceKey = paMode && paRoot ? paRoot : fullPath;
+
+				// Clear any pending debounce for this key and restart the timer.
 				// This ensures we wait until the file system is quiet before reading.
-				const existing = debounceTimers.get(fullPath);
+				const existing = debounceTimers.get(debounceKey);
 				if (existing) clearTimeout(existing);
 
 				debounceTimers.set(
-					fullPath,
+					debounceKey,
 					setTimeout(async () => {
-						debounceTimers.delete(fullPath);
+						debounceTimers.delete(debounceKey);
 
 						// SIGINT may have fired between the timer being scheduled
 						// and this callback running. Bail before doing any I/O.
 						if (shuttingDown) return;
 
 						// Check cooldown to prevent duplicate deploys
-						const lastDeploy = recentlyDeployed.get(fullPath);
+						const lastDeploy = recentlyDeployed.get(debounceKey);
 						const now = Date.now();
 						if (lastDeploy && now - lastDeploy < DEPLOY_COOLDOWN) {
 							return;
 						}
 
-						// Check if file still exists (might have been deleted)
-						if (!existsSync(fullPath)) {
+						// Check if file still exists (might have been deleted).
+						// In PA mode, deletions are meaningful changes — the PA
+						// should be redeployed without the removed file.
+						if (!paMode && !existsSync(fullPath)) {
 							logger.info(`⚠️  File deleted, skipping: ${basename(file)}`);
 							return;
 						}
 
 						logger.info(`\n🔄 Change detected: ${basename(file)}`);
-						recentlyDeployed.set(fullPath, Date.now());
+						recentlyDeployed.set(debounceKey, Date.now());
+
+						// In PA mode, deploy the entire PA root instead of the
+						// single changed file.
+						const deployPaths = paMode && paRoot ? [paRoot] : [fullPath];
 
 						const ac = new AbortController();
 						inflightDeploys.add(ac);
 						try {
-							await deployResources([fullPath], {
+							await deployResources(deployPaths, {
 								profile: ctx.profile,
 								continueOnError: flags.force,
 								continueOnUserError: true,
@@ -153,7 +207,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 							// user-visible shutdown signal.
 							if (ac.signal.aborted) return;
 							logger.error(
-								`Failed to deploy ${basename(file)}`,
+								`Failed to deploy ${paMode ? "process application" : basename(file)}`,
 								normalizeToError(error, "Deployment request failed"),
 							);
 						} finally {
@@ -208,6 +262,11 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
 		logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
+		if (paMode && paRoot) {
+			logger.info(
+				`📦 Process application mode: deploying all resources from ${paRoot}`,
+			);
+		}
 		if (flags.force) {
 			logger.info(
 				"🔒 Force mode: will continue watching after deployment errors",
