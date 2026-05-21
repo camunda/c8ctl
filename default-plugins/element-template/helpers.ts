@@ -363,7 +363,7 @@ export function globToRegex(pattern: string): RegExp {
  * resolve the binding type shorthand.
  *
  * Whitespace normalisation applied to the value:
- * - Leading and trailing ASCII whitespace is stripped so that
+ * - Leading and trailing whitespace is stripped so that
  *   `--set 'key=  hello  '` is equivalent to `--set key=hello`.
  * - If the value starts with `=` (a FEEL expression), leading whitespace
  *   immediately after the `=` prefix is also stripped, so that
