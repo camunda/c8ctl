@@ -38,6 +38,9 @@ c8ctl help          # get structured JSON command reference
 | `inc` | incident(s)          |
 | `msg` | message              |
 | `vars`| variable(s)          |
+| `var` | variable             |
+| `auth`| authorization(s)     |
+| `mr`  | mapping-rule(s)      |
 
 ## Agent Flags
 
@@ -59,14 +62,16 @@ Use this to reduce context window size when parsing output programmatically.
 
 ### `--dry-run`
 
-Applies to all **mutating** commands: `create`, `cancel`, `deploy`,
-`complete`, `fail`, `activate`, `resolve`, `publish`, `correlate`.
+Applies to **all** commands — both queries (`list`, `search`, `get`) and
+mutations (`create`, `delete`, `cancel`, `await`, `complete`, `fail`,
+`activate`, `resolve`, `set`, `publish`, `correlate`, `assign`, `unassign`,
+`deploy`, `run`).
 
 In dry-run mode:
 - All inputs are validated
 - The target profile/client is resolved
 - The equivalent API request is emitted as JSON to stdout:
-  `{ "dryRun": true, "command": "...", "method": "POST", "url": "...", "body": {...} }`
+  `{ "dryRun": true, "command": "...", "method": "...", "url": "...", "body": {...} }`
 - The actual API call is **not** executed
 - Exits 0
 
