@@ -62,23 +62,26 @@ Use this to reduce context window size when parsing output programmatically.
 
 ### `--dry-run`
 
-The `--dry-run` flag is accepted globally, but only commands that implement
-dry-run emission return early without executing. Most commands support it,
-including queries (`list`, `search`, `get`) and mutations (`create`, `delete`,
-`cancel`, `await`, `complete`, `fail`, `activate`, `resolve`, `set`, `publish`,
-`correlate`, `assign`, `unassign`, `deploy`, `run`, `open`). Commands that do
-not implement it (e.g. `watch`, `mcp-proxy`) ignore the flag and execute
-normally.
+The `--dry-run` flag is accepted globally. Most commands that call the
+framework `dryRun()` helper emit an API request preview and return early
+without executing. These include queries (`list`, `search`, `get`) and
+mutations (`create`, `delete`, `cancel`, `await`, `complete`, `fail`,
+`activate`, `resolve`, `set`, `publish`, `correlate`, `assign`, `unassign`,
+`deploy`, `run`). Commands that do not implement it (e.g. `watch`, `mcp-proxy`)
+ignore the flag and execute normally.
 
-When dry-run is implemented, the command:
-- Validates all inputs
-- Resolves the target profile/client
-- Emits the equivalent API request as JSON to stdout:
+For commands using the `dryRun()` helper:
+- All inputs are validated
+- The target profile/client is resolved
+- The equivalent API request is emitted as JSON to stdout:
   `{ "dryRun": true, "command": "...", "method": "...", "url": "..." }`
   The `body` field may be present, `null`, or omitted depending on the command
   and HTTP method.
-- Does **not** execute the actual API call
+- The actual API call is **not** executed
 - Exits 0
+
+Some commands have command-specific dry-run behavior instead:
+- `open` — logs the resolved URL but skips opening the browser
 
 **Recommended workflow for mutating operations:**
 1. Run the command with `--dry-run` and inspect the JSON output
