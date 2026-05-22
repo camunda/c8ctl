@@ -426,7 +426,7 @@ c8ctl help
 - Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`
 - Plugins can resolve tenant IDs via `globalThis.c8ctl.resolveTenantId(profile?)`
 - Plugins can access c8ctl output-aware logging via `globalThis.c8ctl.getLogger()`
-- See the bundled `hello-world` plugin in `default-plugins/` for a complete example
+- See the bundled plugins in `default-plugins/` for complete examples
 
 **Plugin Requirements:**
 
