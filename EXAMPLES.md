@@ -752,7 +752,7 @@ c8 set variable 2251799813685249 --variables='{"x":1}' --local
 
 ## Date Range Filtering
 
-The `--between` flag is available on all `list` and `search` commands for date-based filtering.
+The `--between` flag filters results by date range. It is supported by process instances, user tasks, incidents, and jobs. Other search commands accept the flag but do not currently apply date filtering.
 
 ### Relative Date Ranges
 
@@ -897,7 +897,7 @@ c8 search auth --ownerId=john --ownerType=USER
 c8 get auth 2251799813685249
 
 # Create an authorization
-c8 create auth --ownerId=john --ownerType=USER --resourceType=process-definition --resourceId=order-process --permissions=READ,UPDATE
+c8 create auth --ownerId=john --ownerType=USER --resourceType=PROCESS_DEFINITION --resourceId=order-process --permissions=READ,UPDATE
 
 # Delete an authorization
 c8 delete auth 2251799813685249

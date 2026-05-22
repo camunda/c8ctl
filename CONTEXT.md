@@ -71,7 +71,8 @@ In dry-run mode:
 - All inputs are validated
 - The target profile/client is resolved
 - The equivalent API request is emitted as JSON to stdout:
-  `{ "dryRun": true, "command": "...", "method": "...", "url": "...", "body": {...} }`
+  `{ "dryRun": true, "command": "...", "method": "...", "url": "..." }`
+  The `body` field is included only when the command sends a request body (typically POST/PUT/PATCH). GET requests (e.g. `get topology`) omit it.
 - The actual API call is **not** executed
 - Exits 0
 
