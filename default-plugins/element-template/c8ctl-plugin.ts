@@ -5,10 +5,10 @@
  *
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
- *   c8ctl element-template info <template>
- *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed]
+ *   c8ctl element-template info <template> [--engine-version <x.y.z>]
+ *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
  *   c8ctl element-template get <template>
- *   c8ctl element-template search <query>
+ *   c8ctl element-template search <query> [--engine-version <x.y.z>]
  *   c8ctl element-template sync [--prune]
  *
  * <template> can be a local path, an https:// URL, or an OOTB template id
@@ -189,6 +189,12 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template info io.camunda.connectors.HttpJson.v2 --engine-version 8.8.0",
+					description:
+						"Resolve the latest template version compatible with a specific Camunda engine version",
+				},
+				{
+					command:
 						"c8ctl element-template get-properties io.camunda.connectors.HttpJson.v2",
 					description:
 						"List every settable property as a condensed name + description row",
@@ -298,6 +304,11 @@ export const commands = {
 			limit: {
 				type: "string",
 				description: "Cap the number of matches (default 20) [search]",
+			},
+			"engine-version": {
+				type: "string",
+				description:
+					"Filter to template versions compatible with the given Camunda engine version (e.g. 8.8.0) [search|info|get-properties]",
 			},
 		},
 		handler: elementTemplateHandler,

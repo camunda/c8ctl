@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import semver from "semver";
 import type {} from "../../src/runtime.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
@@ -145,6 +146,18 @@ export type ParsedPluginArgs = {
 	positionals: string[];
 	error: string | null;
 };
+
+export type ParsedEngineVersionFlag = {
+	engineVersion: string | null;
+	rest: string[];
+};
+
+// Concrete version forms accepted for --engine-version:
+// - x.y
+// - x.y.z
+// - x.y[-prerelease] / x.y.z[-prerelease]
+// Ranges (e.g. ^8.8, >=8.8, 8.8 || 8.9) are intentionally excluded.
+const ENGINE_VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$/;
 
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
@@ -585,6 +598,65 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 	}
 
 	return result;
+}
+
+/**
+ * Parse and remove repeatable `--engine-version` flags from args.
+ * Last flag wins. Content after `--` is treated as positional.
+ */
+export function parseEngineVersionFlag(
+	args: string[],
+	usage: string,
+): ParsedEngineVersionFlag {
+	let engineVersion: string | null = null;
+	const rest: string[] = [];
+	let afterDoubleDash = false;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+
+		if (afterDoubleDash) {
+			rest.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			afterDoubleDash = true;
+			rest.push(arg);
+			continue;
+		}
+		if (arg === "--engine-version" || arg.startsWith("--engine-version=")) {
+			const raw =
+				arg === "--engine-version"
+					? args[++i]
+					: arg.slice("--engine-version=".length);
+			if (raw === undefined || raw === "") {
+				throw new Error(
+					`--engine-version requires a value (e.g. 8.8.0). ${usage}`,
+				);
+			}
+			engineVersion = validateEngineVersion(raw, usage);
+			continue;
+		}
+		rest.push(arg);
+	}
+
+	return { engineVersion, rest };
+}
+
+function validateEngineVersion(value: string, usage: string): string {
+	if (!ENGINE_VERSION_PATTERN.test(value)) {
+		throw new Error(
+			`--engine-version must be a concrete Camunda version (e.g. 8.8.0 or 8.8), not a range: "${value}". ${usage}`,
+		);
+	}
+	const coerced = semver.coerce(value);
+	const normalized = coerced ? semver.valid(coerced) : null;
+	if (!normalized) {
+		throw new Error(
+			`--engine-version must be a valid version (e.g. 8.8.0 or 8.8); got "${value}". ${usage}`,
+		);
+	}
+	return normalized;
 }
 
 /**
