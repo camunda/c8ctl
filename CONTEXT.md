@@ -62,18 +62,22 @@ Use this to reduce context window size when parsing output programmatically.
 
 ### `--dry-run`
 
-Applies to **all** commands — both queries (`list`, `search`, `get`) and
-mutations (`create`, `delete`, `cancel`, `await`, `complete`, `fail`,
-`activate`, `resolve`, `set`, `publish`, `correlate`, `assign`, `unassign`,
-`deploy`, `run`).
+The `--dry-run` flag is accepted globally, but only commands that implement
+dry-run emission return early without executing. Most commands support it,
+including queries (`list`, `search`, `get`) and mutations (`create`, `delete`,
+`cancel`, `await`, `complete`, `fail`, `activate`, `resolve`, `set`, `publish`,
+`correlate`, `assign`, `unassign`, `deploy`, `run`). Commands that do not
+implement it (e.g. `watch`, `open`, `mcp-proxy`) ignore the flag and execute
+normally.
 
-In dry-run mode:
-- All inputs are validated
-- The target profile/client is resolved
-- The equivalent API request is emitted as JSON to stdout:
+When dry-run is implemented, the command:
+- Validates all inputs
+- Resolves the target profile/client
+- Emits the equivalent API request as JSON to stdout:
   `{ "dryRun": true, "command": "...", "method": "...", "url": "..." }`
-  The `body` field is included only when the command sends a request body (typically POST/PUT/PATCH). GET requests (e.g. `get topology`) omit it.
-- The actual API call is **not** executed
+  The `body` field may be present, `null`, or omitted depending on the command
+  and HTTP method.
+- Does **not** execute the actual API call
 - Exits 0
 
 **Recommended workflow for mutating operations:**

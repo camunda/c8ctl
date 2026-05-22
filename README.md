@@ -641,7 +641,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `search` - Search resources with filters
 - `get` - Get resource by key
 - `create` - Create resource
-- `delete` - Delete a resource
+- `delete` - Delete an identity resource (user, role, group, tenant, authorization, mapping rule)
 - `cancel` - Cancel a process instance
 - `await` - Create and await process instance completion
 - `complete` - Complete a user task or job

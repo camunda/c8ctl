@@ -752,7 +752,7 @@ c8 set variable 2251799813685249 --variables='{"x":1}' --local
 
 ## Date Range Filtering
 
-The `--between` flag filters results by date range. It is supported by process instances, user tasks, incidents, and jobs. Other search commands accept the flag but do not currently apply date filtering.
+The `--between` flag filters results by date range. It is supported by process instances, user tasks, incidents, and jobs. Other list/search commands accept the flag but do not currently apply date filtering.
 
 ### Relative Date Ranges
 
