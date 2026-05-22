@@ -754,17 +754,7 @@ c8 set variable 2251799813685249 --variables='{"x":1}' --local
 
 The `--between` flag filters results by date range. It is supported by process instances, user tasks, incidents, and jobs. Other list/search commands accept the flag but do not currently apply date filtering.
 
-### Relative Date Ranges
-
-```bash
-# Process instances from the last 7 days
-c8 list pi --between=7d
-
-# Process instances from the last 30 days
-c8 search pi --between=30d
-```
-
-### Absolute Date Ranges
+### Date Range Examples
 
 ```bash
 # Process instances between specific dates
@@ -772,15 +762,21 @@ c8 search pi --between=2024-01-01..2024-12-31
 
 # Incidents in a specific date range
 c8 search inc --between=2024-06-01..2024-06-30
+
+# Open-ended range: everything from a date onward
+c8 search pi --between=2024-01-01..
+
+# Open-ended range: everything up to a date
+c8 search pi --between=..2024-12-31
 ```
 
 ### Custom Date Field
 
-By default, `--between` filters on the resource's primary date field. Use `--dateField` to filter on a different field:
+By default, `--between` filters on the resource's primary date field (e.g. `startDate` for process instances, `creationTime` for incidents). Use `--dateField` to filter on a different field. This is supported by process instances, user tasks, and jobs. Incidents always filter on `creationTime`.
 
 ```bash
-# Filter by a specific date field
-c8 search pi --between=7d --dateField=endDate
+# Filter process instances by end date
+c8 search pi --between=2024-01-01..2024-12-31 --dateField=endDate
 ```
 
 ---

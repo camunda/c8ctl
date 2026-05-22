@@ -66,8 +66,8 @@ The `--dry-run` flag is accepted globally, but only commands that implement
 dry-run emission return early without executing. Most commands support it,
 including queries (`list`, `search`, `get`) and mutations (`create`, `delete`,
 `cancel`, `await`, `complete`, `fail`, `activate`, `resolve`, `set`, `publish`,
-`correlate`, `assign`, `unassign`, `deploy`, `run`). Commands that do not
-implement it (e.g. `watch`, `open`, `mcp-proxy`) ignore the flag and execute
+`correlate`, `assign`, `unassign`, `deploy`, `run`, `open`). Commands that do
+not implement it (e.g. `watch`, `mcp-proxy`) ignore the flag and execute
 normally.
 
 When dry-run is implemented, the command:
