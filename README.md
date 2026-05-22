@@ -635,47 +635,51 @@ Run `c8ctl help cluster` for full details. See [EXAMPLES.md](EXAMPLES.md#local-c
 c8ctl <verb> <resource> [arguments] [flags]
 ```
 
+<!-- verb-resource-list:start -->
+<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.
+     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->
+
 **Verbs**:
 
-- `list` - List resources
+- `list` - List resources (process, identity)
 - `search` - Search resources with filters
 - `get` - Get resource by key
 - `create` - Create resource
-- `delete` - Delete an identity resource (user, role, group, tenant, authorization, mapping rule)
-- `cancel` - Cancel a process instance
-- `await` - Create and await process instance completion
-- `complete` - Complete a user task or job
+- `delete` - Delete resource
+- `cancel` - Cancel resource
+- `await` - Create and await completion (alias for create --awaitCompletion)
+- `complete` - Complete resource
 - `fail` - Fail a job
-- `activate` - Activate jobs
-- `resolve` - Resolve an incident
-- `set` - Set variables on a scope
-- `publish` - Publish a message
-- `correlate` - Correlate a message
-- `assign` - Assign a resource to a target
-- `unassign` - Unassign a resource from a target
+- `activate` - Activate jobs by type
+- `resolve` - Resolve incident
+- `publish` - Publish message
+- `correlate` - Correlate message
+- `set` - Set variables on an element instance
 - `deploy` - Deploy resources
 - `run` - Deploy and start process
-- `watch` (alias: `w`) - Watch for changes and auto-deploy
-- `open` - Open Camunda web app in browser
+- `assign` - Assign resource to target
+- `unassign` - Unassign resource from target
+- `watch` (alias: `w`) - Watch files for changes and auto-deploy
+- `open` - Open Camunda web application in browser
 - `add` - Add a profile
-- `remove` (alias: `rm`) - Remove a profile
-- `use` - Set active profile or tenant
-- `which` - Show active profile or output mode
-- `output` - Show or set output format
-- `load` - Load a plugin
-- `unload` - Unload a plugin
+- `remove` (alias: `rm`) - Remove a profile or plugin
+- `load` - Load a c8ctl plugin
+- `unload` (alias: `rm`) - Unload a c8ctl plugin
 - `upgrade` - Upgrade a plugin
-- `downgrade` - Downgrade a plugin
+- `downgrade` - Downgrade a plugin to a specific version
 - `sync` - Synchronize plugins
-- `init` - Create a new plugin from template
-- `doctor` - Surface plugin-loading collisions
-- `mcp-proxy` - Start a STDIO MCP proxy
-- `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list, list-remote)
+- `init` - Create a new plugin from TypeScript template
+- `doctor` - Diagnose plugin loading state and collisions
+- `use` - Set active profile or tenant
+- `output` - Show or set output format
 - `completion` - Generate shell completion script
-- `help` (alias: `menu`) - Show help
+- `mcp-proxy` - Start a STDIO to remote HTTP MCP proxy server
 - `feedback` - Open the feedback page to report issues or request features
+- `help` (alias: `menu`) - Show help
+- `which` - Show active profile or output mode
 
-**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variable (var, vars), message (msg), form, topology, profile, tenant, plugin, user, role, group, authorization (auth), mapping-rule (mr)
+**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars)
+<!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 

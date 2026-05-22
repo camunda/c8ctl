@@ -31,6 +31,8 @@ const DOCS_PATH = resolve(ROOT, "docs", "command-reference.md");
 
 export const START_MARKER = "<!-- command-reference:start -->";
 export const END_MARKER = "<!-- command-reference:end -->";
+export const VRL_START_MARKER = "<!-- verb-resource-list:start -->";
+export const VRL_END_MARKER = "<!-- verb-resource-list:end -->";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -368,6 +370,70 @@ export function filterVerbSpecificFlags(
 	return result;
 }
 
+// ─── Verb / Resource List ────────────────────────────────────────────────────
+
+/**
+ * Generate the verb and resource summary list from COMMAND_REGISTRY.
+ * This populates the <!-- verb-resource-list:start/end --> markers in README.md.
+ */
+export function generateVerbResourceList(): string {
+	const lines: string[] = [];
+	lines.push(
+		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	);
+	lines.push(
+		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
+	);
+	lines.push("");
+
+	// ── Verbs ──
+	lines.push("**Verbs**:");
+	lines.push("");
+
+	const registry: Record<string, CommandDef> = COMMAND_REGISTRY;
+	for (const [verb, def] of Object.entries(registry)) {
+		const aliasStr =
+			def.aliases && def.aliases.length > 0
+				? ` (alias: \`${def.aliases[0]}\`)`
+				: "";
+		lines.push(`- \`${verb}\`${aliasStr} - ${def.description}`);
+	}
+	lines.push("");
+
+	// ── Resources ──
+	// Collect canonical resources from domain verbs only (skip utility verbs
+	// whose "resources" are really subcommand arguments like shell names or app names).
+	const UTILITY_VERBS = new Set([
+		"completion",
+		"output",
+		"open",
+		"cluster",
+		"which",
+	]);
+	const canonicalResources = new Set<string>();
+	for (const [verb, def] of Object.entries(registry)) {
+		if (UTILITY_VERBS.has(verb)) continue;
+		for (const r of def.resources) {
+			const canonical = RESOURCE_ALIASES[r] ?? r;
+			canonicalResources.add(canonical);
+		}
+	}
+
+	// Build display: canonical (alias1, alias2)
+	const resourceEntries: string[] = [];
+	for (const canonical of [...canonicalResources].sort()) {
+		const aliases = aliasesForResource(canonical);
+		if (aliases.length > 0) {
+			resourceEntries.push(`${canonical} (${aliases.join(", ")})`);
+		} else {
+			resourceEntries.push(canonical);
+		}
+	}
+	lines.push(`**Resources**: ${resourceEntries.join(", ")}`);
+
+	return lines.join("\n");
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 function main(): void {
@@ -400,8 +466,20 @@ function main(): void {
 		return;
 	}
 
-	const readme = readFileSync(README_PATH, "utf-8");
+	let readme = readFileSync(README_PATH, "utf-8");
 
+	// ── Sync verb-resource-list section ──
+	const vrlStartIdx = readme.indexOf(VRL_START_MARKER);
+	const vrlEndIdx = readme.indexOf(VRL_END_MARKER);
+
+	if (vrlStartIdx !== -1 && vrlEndIdx !== -1 && vrlStartIdx < vrlEndIdx) {
+		const vrlGenerated = generateVerbResourceList();
+		const vrlBefore = readme.slice(0, vrlStartIdx + VRL_START_MARKER.length);
+		const vrlAfter = readme.slice(vrlEndIdx);
+		readme = `${vrlBefore}\n${vrlGenerated}\n${vrlAfter}`;
+	}
+
+	// ── Sync command-reference section ──
 	const startIdx = readme.indexOf(START_MARKER);
 	const endIdx = readme.indexOf(END_MARKER);
 
