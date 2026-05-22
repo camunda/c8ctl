@@ -9,9 +9,14 @@ declare module "bpmn-moddle" {
 	export type BpmnModdleAttrs = Record<string, string | undefined>;
 	export type BpmnModdleElement = { $attrs?: BpmnModdleAttrs };
 	export type BpmnModdleParseResult = { rootElement: BpmnModdleElement };
+	export type BpmnModdleToXmlResult = { xml: string };
 	export default class BpmnModdle {
 		constructor(extensions?: Record<string, unknown>);
 		fromXML(xml: string): Promise<BpmnModdleParseResult>;
+		toXML(
+			rootElement: BpmnModdleElement,
+			options?: { format?: boolean },
+		): Promise<BpmnModdleToXmlResult>;
 	}
 }
 

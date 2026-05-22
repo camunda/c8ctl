@@ -1,11 +1,13 @@
 /**
  * c8ctl-plugin-bpmn
  *
- * Lint BPMN diagrams against recommended and Camunda rules.
+ * Lint and format BPMN diagrams.
  *
  * Usage:
  *   c8ctl bpmn lint <file.bpmn>
  *   cat file.bpmn | c8ctl bpmn lint
+ *   c8ctl bpmn format <file.bpmn>
+ *   c8ctl bpmn format -i <file.bpmn>
  */
 
 import type {
@@ -13,6 +15,7 @@ import type {
 	PluginMetadata,
 } from "../../src/plugin-loader.ts";
 import type {} from "../../src/runtime.ts";
+import { formatSubcommand } from "./format.ts";
 import { lintSubcommand } from "./lint.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
@@ -79,7 +82,14 @@ async function bpmnHandler(
 	}
 
 	try {
-		if (subcommand === "lint") await lintSubcommand(subArgs);
+		switch (subcommand) {
+			case "format":
+				await formatSubcommand(subArgs);
+				break;
+			case "lint":
+				await lintSubcommand(subArgs);
+				break;
+		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const logger = c8ctl.getLogger();
@@ -94,18 +104,24 @@ async function bpmnHandler(
 
 export const metadata = {
 	name: "bpmn",
-	description: "Lint BPMN diagrams",
+	description: "Lint and format BPMN diagrams",
 	commands: {
 		bpmn: {
-			description: "BPMN tooling — lint diagrams (supports stdin piping)",
+			description:
+				"BPMN tooling — lint/format diagrams (supports stdin piping)",
 			helpDescription:
-				"Lint BPMN diagrams. Supports file paths and stdin piping.\n\n" +
+				"Lint and format BPMN diagrams. Supports file paths and stdin piping.\n\n" +
 				"Rule configuration: a .bpmnlintrc in the working directory takes precedence. " +
 				"Otherwise the linter extends bpmnlint:recommended plus the matching " +
 				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
 				'modeler:executionPlatform="Camunda Cloud" and ' +
-				"modeler:executionPlatformVersion in the BPMN file.",
+				"modeler:executionPlatformVersion in the BPMN file. " +
+				"`format` round-trips BPMN through bpmn-moddle to emit canonical XML.",
 			subcommands: [
+				{
+					name: "format",
+					description: "Format according to BPMN.io formatting conventions",
+				},
 				{
 					name: "lint",
 					description:
@@ -125,6 +141,18 @@ export const metadata = {
 					command: "c8ctl bpmn lint --quiet process.bpmn",
 					description: "Suppress the success line in scripts",
 				},
+				{
+					command: "c8ctl bpmn format process.bpmn",
+					description: "Print canonical BPMN XML to stdout",
+				},
+				{
+					command: "c8ctl bpmn format -i process.bpmn",
+					description: "Rewrite the BPMN file in place using canonical XML",
+				},
+				{
+					command: "cat process.bpmn | c8ctl bpmn format",
+					description: "Format BPMN from stdin and print to stdout",
+				},
 			],
 		},
 	},
@@ -137,6 +165,12 @@ export const commands = {
 				type: "boolean",
 				short: "q",
 				description: 'Suppress the "No issues found." line on a clean lint',
+			},
+			"in-place": {
+				type: "boolean",
+				short: "i",
+				description:
+					"Overwrite input file instead of writing formatted XML to stdout",
 			},
 		},
 		handler: bpmnHandler,
