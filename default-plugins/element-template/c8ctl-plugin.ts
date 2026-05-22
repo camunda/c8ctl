@@ -143,7 +143,19 @@ export const metadata = {
 				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
-				"is bound across multiple types — e.g. --set input:correlationKey=order-42.",
+				"is bound across multiple types — e.g. --set input:correlationKey=order-42.\n\n" +
+				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
+				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
+				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
+				"Properties with feel=optional keep the value verbatim; you must supply the `=` prefix yourself " +
+				"when you want to write a FEEL expression for those. " +
+				"Three forms for feel=required properties:\n" +
+				"  --set key='=value'    canonical: single-quoted FEEL value (explicit =)\n" +
+				"  --set 'key==value'    compact: whole argument single-quoted (explicit =)\n" +
+				"  --set key=value       shorthand: = auto-prepended (feel=required only)\n" +
+				"Leading/trailing whitespace is stripped from values, and whitespace immediately after a " +
+				"FEEL `=` prefix is also stripped, so `--set 'key== value'` " +
+				"is equivalent to `--set 'key==value'`.",
 			subcommands: [
 				{
 					name: "search",
@@ -278,7 +290,7 @@ export const commands = {
 				type: "string",
 				multiple: true,
 				description:
-					"Set a property value: name=value (repeatable; binding name from get-properties) [apply]",
+					"Set a property value: name=value (repeatable; binding name from get-properties; = auto-prepended for feel=required properties) [apply]",
 			},
 			detailed: {
 				type: "boolean",
