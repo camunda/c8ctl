@@ -4,7 +4,6 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 
 ## Features
 
-- **Minimal Dependencies**: Only one runtime dependency (`@camunda8/orchestration-cluster-api`)
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
