@@ -5,12 +5,15 @@
 import { defineCommand } from "../command-framework.ts";
 import {
 	clearActiveProfile,
+	getAllProfiles,
 	getProfileOrModeler,
+	MODELER_PREFIX,
 	setActiveProfile,
 	setActiveTenant,
 	setOutputMode,
 } from "../config.ts";
 import { getLogger } from "../logger.ts";
+import { select } from "../prompt.ts";
 import { c8ctl } from "../runtime.ts";
 
 /**
@@ -100,7 +103,38 @@ export const useProfileCommand = defineCommand(
 			return { kind: "none" };
 		}
 		if (!args.name) {
-			throw new Error("Profile name required. Usage: c8 use profile <name>");
+			// No name provided — show interactive picker
+			const profiles = getAllProfiles();
+			if (profiles.length === 0) {
+				throw new Error(
+					"No profiles configured. Add one with: c8 add profile <name> --url <cluster-url>",
+				);
+			}
+
+			const activeProfile = c8ctl.activeProfile;
+			const defaultIndex = Math.max(
+				0,
+				profiles.findIndex((p) => p.name === activeProfile),
+			);
+
+			const result = await select({
+				message: "Which profile do you want to use?",
+				options: profiles.map((p) => ({
+					label: p.name,
+					description: `${p.baseUrl || "(no URL)"}${p.name.startsWith(MODELER_PREFIX) ? " (Modeler)" : ""}`,
+					value: p.name,
+				})),
+				initialIndex: defaultIndex,
+			});
+
+			if (result.cancelled) {
+				return { kind: "none" };
+			}
+			if (!result.interactive) {
+				throw new Error("Profile name required. Usage: c8 use profile <name>");
+			}
+			useProfile(result.value);
+			return { kind: "none" };
 		}
 		useProfile(args.name);
 		return { kind: "none" };

@@ -1448,7 +1448,7 @@ export const COMMAND_REGISTRY = {
 		aliases: ["rm"],
 		resourcePositionals: {
 			profile: [
-				{ name: "name", required: true },
+				{ name: "name", required: false },
 			] as const satisfies readonly PositionalDef[],
 		},
 	},

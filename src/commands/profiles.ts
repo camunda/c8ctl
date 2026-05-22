@@ -18,6 +18,7 @@ import {
 	removeProfile as removeProfileConfig,
 } from "../config.ts";
 import { getLogger } from "../logger.ts";
+import { confirm, select } from "../prompt.ts";
 import { c8ctl } from "../runtime.ts";
 
 /**
@@ -221,7 +222,49 @@ export const removeProfileCommand = defineCommand(
 	"remove",
 	"profile",
 	async (_ctx, _flags, args) => {
-		removeProfile(args.name);
+		let name = args.name;
+
+		if (!name) {
+			// No name provided — show interactive picker (c8ctl profiles only)
+			const profiles = getAllProfiles().filter(
+				(p) => !p.name.startsWith(MODELER_PREFIX),
+			);
+			if (profiles.length === 0) {
+				throw new Error("No c8ctl profiles to remove");
+			}
+
+			const result = await select({
+				message: "Which profile do you want to remove?",
+				options: profiles.map((p) => ({
+					label: p.name,
+					description: p.baseUrl || "(no URL)",
+					value: p.name,
+				})),
+			});
+
+			if (result.cancelled) {
+				return { kind: "none" };
+			}
+			if (!result.interactive) {
+				throw new Error(
+					"Profile name required. Usage: c8 remove profile <name>",
+				);
+			}
+			name = result.value;
+
+			// Confirm before removing (only when picked interactively)
+			const confirmResult = await confirm({
+				message: `Remove profile '${name}'?`,
+				defaultValue: false,
+			});
+			if (!confirmResult.value) {
+				const logger = getLogger();
+				logger.info("Cancelled");
+				return { kind: "none" };
+			}
+		}
+
+		removeProfile(name);
 		return { kind: "none" };
 	},
 );

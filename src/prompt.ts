@@ -25,6 +25,10 @@
  *     value: p.name,
  *   })),
  * });
+ * if (result.cancelled) {
+ *   // User pressed Escape — handle cancellation
+ *   return;
+ * }
  * if (!result.interactive) {
  *   // Non-TTY: emit hint and proceed with default
  *   logger.info(result.hint);
@@ -81,13 +85,20 @@ export interface SelectConfig<T> {
 
 export interface SelectResultInteractive<T> {
 	interactive: true;
+	cancelled: false;
 	value: T;
 	index: number;
 	label: string;
 }
 
+export interface SelectResultCancelled {
+	interactive: true;
+	cancelled: true;
+}
+
 export interface SelectResultNonInteractive<T> {
 	interactive: false;
+	cancelled: false;
 	value: T;
 	index: number;
 	label: string;
@@ -97,6 +108,7 @@ export interface SelectResultNonInteractive<T> {
 
 export type SelectResult<T> =
 	| SelectResultInteractive<T>
+	| SelectResultCancelled
 	| SelectResultNonInteractive<T>;
 
 export interface ConfirmConfig {
@@ -146,6 +158,7 @@ export async function select<T>(
 		const hint = formatNonInteractiveHint(message, options, idx);
 		return {
 			interactive: false,
+			cancelled: false,
 			value: fallback.value,
 			index: idx,
 			label: fallback.label,
@@ -154,102 +167,104 @@ export async function select<T>(
 	}
 
 	// ── Interactive mode ────────────────────────────────────────
-	return new Promise<SelectResultInteractive<T>>((resolve) => {
-		let cursor = initialIndex;
-		const out = process.stderr;
+	return new Promise<SelectResultInteractive<T> | SelectResultCancelled>(
+		(resolve) => {
+			let cursor = initialIndex;
+			const out = process.stderr;
 
-		// Render the menu
-		function render(firstRender: boolean) {
-			if (!firstRender) {
-				// Move cursor back up to overwrite previous render
-				out.write(CURSOR_UP(options.length));
-			}
-			for (let i = 0; i < options.length; i++) {
-				const opt = options[i];
-				const selected = i === cursor;
-				const pointer = selected ? `${CYAN}❯${RESET}` : " ";
-				const label = selected ? `${BOLD}${opt.label}${RESET}` : opt.label;
-				const desc = opt.description ? ` ${DIM}${opt.description}${RESET}` : "";
-				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${label}${desc}\n`,
-				);
-			}
-		}
-
-		// Print the message header
-		out.write(`${BOLD}${CYAN}?${RESET} ${BOLD}${message}${RESET}\n`);
-		out.write(HIDE_CURSOR);
-		render(true);
-
-		// Enable keypress events BEFORE raw mode so the first
-		// keystroke is captured (order matters).
-		emitKeypressEvents(process.stdin);
-		process.stdin.on("keypress", onKeypress);
-		process.stdin.setRawMode(true);
-		process.stdin.resume();
-
-		function onKeypress(_chunk: Buffer | string, key: Key) {
-			if (!key) return;
-
-			if (key.name === "up" || (key.ctrl && key.name === "p")) {
-				cursor = cursor <= 0 ? options.length - 1 : cursor - 1;
-				render(false);
-			} else if (key.name === "down" || (key.ctrl && key.name === "n")) {
-				cursor = cursor >= options.length - 1 ? 0 : cursor + 1;
-				render(false);
-			} else if (key.name === "return") {
-				cleanup();
-				const chosen = options[cursor];
-				// Replace the menu with the final selection line
-				out.write(CURSOR_UP(options.length));
+			// Render the menu
+			function render(firstRender: boolean) {
+				if (!firstRender) {
+					// Move cursor back up to overwrite previous render
+					out.write(CURSOR_UP(options.length));
+				}
 				for (let i = 0; i < options.length; i++) {
-					out.write(`${CLEAR_LINE}\n`);
+					const opt = options[i];
+					const selected = i === cursor;
+					const pointer = selected ? `${CYAN}❯${RESET}` : " ";
+					const label = selected ? `${BOLD}${opt.label}${RESET}` : opt.label;
+					const desc = opt.description
+						? ` ${DIM}${opt.description}${RESET}`
+						: "";
+					out.write(
+						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${pointer} ${label}${desc}\n`,
+					);
 				}
-				out.write(CURSOR_UP(options.length));
-				out.write(
-					`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${CYAN}${chosen.label}${RESET}`,
-				);
-				if (chosen.description) {
-					out.write(` ${DIM}${chosen.description}${RESET}`);
-				}
-				out.write("\n");
-				resolve({
-					interactive: true,
-					value: chosen.value,
-					index: cursor,
-					label: chosen.label,
-				});
-			} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
-				cleanup();
-				// Clear the menu
-				out.write(CURSOR_UP(options.length));
-				for (let i = 0; i < options.length; i++) {
-					out.write(`${CLEAR_LINE}\n`);
-				}
-				out.write(CURSOR_UP(options.length + 1)); // +1 for the header
-				out.write(`${CLEAR_LINE}\n`);
-				// Ctrl+C: re-raise so the process exits naturally
-				if (key.ctrl && key.name === "c") {
-					process.kill(process.pid, "SIGINT");
-				}
-				// Escape: resolve with the initial selection
-				const fallback = options[initialIndex] ?? options[0];
-				resolve({
-					interactive: true,
-					value: fallback.value,
-					index: initialIndex,
-					label: fallback.label,
-				});
 			}
-		}
 
-		function cleanup() {
-			process.stdin.removeListener("keypress", onKeypress);
-			process.stdin.setRawMode(false);
-			process.stdin.pause();
-			out.write(SHOW_CURSOR);
-		}
-	});
+			// Print the message header
+			out.write(`${BOLD}${CYAN}?${RESET} ${BOLD}${message}${RESET}\n`);
+			out.write(HIDE_CURSOR);
+			render(true);
+
+			// Enable keypress events BEFORE raw mode so the first
+			// keystroke is captured (order matters).
+			emitKeypressEvents(process.stdin);
+			process.stdin.on("keypress", onKeypress);
+			process.stdin.setRawMode(true);
+			process.stdin.resume();
+
+			function onKeypress(_chunk: Buffer | string, key: Key) {
+				if (!key) return;
+
+				if (key.name === "up" || (key.ctrl && key.name === "p")) {
+					cursor = cursor <= 0 ? options.length - 1 : cursor - 1;
+					render(false);
+				} else if (key.name === "down" || (key.ctrl && key.name === "n")) {
+					cursor = cursor >= options.length - 1 ? 0 : cursor + 1;
+					render(false);
+				} else if (key.name === "return") {
+					cleanup();
+					const chosen = options[cursor];
+					// Replace the menu with the final selection line
+					out.write(CURSOR_UP(options.length));
+					for (let i = 0; i < options.length; i++) {
+						out.write(`${CLEAR_LINE}\n`);
+					}
+					out.write(CURSOR_UP(options.length));
+					out.write(
+						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${CYAN}${chosen.label}${RESET}`,
+					);
+					if (chosen.description) {
+						out.write(` ${DIM}${chosen.description}${RESET}`);
+					}
+					out.write("\n");
+					resolve({
+						interactive: true,
+						cancelled: false,
+						value: chosen.value,
+						index: cursor,
+						label: chosen.label,
+					});
+				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
+					cleanup();
+					// Clear the menu
+					out.write(CURSOR_UP(options.length));
+					for (let i = 0; i < options.length; i++) {
+						out.write(`${CLEAR_LINE}\n`);
+					}
+					out.write(CURSOR_UP(options.length + 1)); // +1 for the header
+					out.write(`${CLEAR_LINE}\n`);
+					// Ctrl+C: re-raise so the process exits naturally
+					if (key.ctrl && key.name === "c") {
+						process.kill(process.pid, "SIGINT");
+					}
+					// Escape: resolve as cancelled
+					resolve({
+						interactive: true,
+						cancelled: true,
+					});
+				}
+			}
+
+			function cleanup() {
+				process.stdin.removeListener("keypress", onKeypress);
+				process.stdin.setRawMode(false);
+				process.stdin.pause();
+				out.write(SHOW_CURSOR);
+			}
+		},
+	);
 }
 
 // ── confirm() ─────────────────────────────────────────────────────
