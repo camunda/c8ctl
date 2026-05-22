@@ -7,7 +7,10 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
+- **Identity Management**: Manage users, roles, groups, tenants, authorizations, and mapping rules
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
+- **Local Cluster**: Run a local Camunda 8 instance directly — no Docker required
+- **MCP Proxy**: Bridge local MCP clients to remote Camunda 8 for AI agent integration
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
@@ -16,6 +19,9 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
+- **Shell Completion**: Auto-install completions for bash, zsh, and fish with automatic refresh on upgrade
+- **Agent Flags**: `--dry-run` to preview API requests and `--fields` to filter output columns for AI agents and scripts
+- **Debug Mode**: Enable detailed logging to stderr with `DEBUG=1` or `C8CTL_DEBUG=true`
 
 ## Beware the 🤖
 
@@ -635,28 +641,41 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `search` - Search resources with filters
 - `get` - Get resource by key
 - `create` - Create resource
-- `cancel` - Cancel resource
-- `complete` - Complete resource
+- `delete` - Delete a resource
+- `cancel` - Cancel a process instance
+- `await` - Create and await process instance completion
+- `complete` - Complete a user task or job
 - `fail` - Fail a job
 - `activate` - Activate jobs
-- `resolve` - Resolve incident
-- `publish` - Publish message
-- `correlate` - Correlate message
+- `resolve` - Resolve an incident
+- `set` - Set variables on a scope
+- `publish` - Publish a message
+- `correlate` - Correlate a message
+- `assign` - Assign a resource to a target
+- `unassign` - Unassign a resource from a target
 - `deploy` - Deploy resources
 - `run` - Deploy and start process
 - `watch` (alias: `w`) - Watch for changes and auto-deploy
+- `open` - Open Camunda web app in browser
 - `add` - Add a profile
 - `remove` (alias: `rm`) - Remove a profile
+- `use` - Set active profile or tenant
+- `which` - Show active profile or output mode
+- `output` - Show or set output format
 - `load` - Load a plugin
 - `unload` - Unload a plugin
+- `upgrade` - Upgrade a plugin
+- `downgrade` - Downgrade a plugin
 - `sync` - Synchronize plugins
-- `use` - Set active profile or tenant
-- `output` - Show or set output format
+- `init` - Create a new plugin from template
+- `doctor` - Surface plugin-loading collisions
+- `mcp-proxy` - Start a STDIO MCP proxy
 - `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list, list-remote)
 - `completion` - Generate shell completion script
+- `help` (alias: `menu`) - Show help
 - `feedback` - Open the feedback page to report issues or request features
 
-**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables (vars), message (msg), topology, profile, tenant, plugin
+**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variable (var, vars), message (msg), form, topology, profile, tenant, plugin, user, role, group, authorization (auth), mapping-rule (mr)
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
 
@@ -726,11 +745,13 @@ c8ctl <command>
 
 ### Adding New Commands
 
-1. Create command handler in `src/commands/`
-2. Wire into `src/index.ts` command routing
-3. Add tests in `tests/unit/` and `tests/integration/`
-4. Update help text in `src/commands/help.ts`
+1. Declare the command in `COMMAND_REGISTRY` in `src/command-registry.ts` (flags, resources, help text)
+2. Write the handler with `defineCommand()` in `src/commands/`
+3. Register it in `COMMAND_DISPATCH` in `src/command-dispatch.ts`
+4. Add tests in `tests/unit/` and `tests/integration/`
 5. Document in `EXAMPLES.md`
+
+Help text and shell completions are auto-derived from `COMMAND_REGISTRY` — no manual help updates needed.
 
 ## Environment Variables
 
