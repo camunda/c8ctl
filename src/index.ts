@@ -440,7 +440,11 @@ async function main() {
 	// "rm" → "remove" or "unload" depending on the resource argument).
 	// Must happen before plugin lookup and dispatch so alias verbs are
 	// not mistakenly routed to plugins or rejected as unknown.
-	const verb = resolveVerbAlias(rawVerb, resource);
+	const verb = resolveVerbAlias(
+		rawVerb,
+		resource,
+		new Set(COMMAND_DISPATCH.keys()),
+	);
 
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.

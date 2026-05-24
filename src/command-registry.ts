@@ -1777,10 +1777,17 @@ export function getCommandDef(verb: string): CommandDef | undefined {
  *
  * For multi-target aliases (e.g. "rm" → ["remove", "unload"]),
  * disambiguates using the resource argument: picks the canonical verb
- * whose `resources` list includes `resource`. Falls back to the first
- * target when no resource is given or no match is found.
+ * whose `resources` list includes `resource`. When multiple candidates
+ * match (both `remove` and `unload` declare `plugin`), the optional
+ * `dispatchKeys` set breaks the tie by preferring the candidate with a
+ * live dispatch entry (`verb:resource`). Falls back to the first target
+ * when no resource is given or no match is found.
  */
-export function resolveVerbAlias(verb: string, resource?: string): string {
+export function resolveVerbAlias(
+	verb: string,
+	resource?: string,
+	dispatchKeys?: ReadonlySet<string>,
+): string {
 	// Already a canonical verb — no resolution needed.
 	if (Object.hasOwn(COMMAND_REGISTRY, verb)) return verb;
 
@@ -1794,13 +1801,26 @@ export function resolveVerbAlias(verb: string, resource?: string): string {
 	// Multi-target alias — disambiguate by resource.
 	if (resource) {
 		const normalizedResource = resolveAlias(resource);
+		const resourceMatches: string[] = [];
 		for (const candidate of targets) {
 			// biome-ignore lint/plugin: trust boundary — candidate is a dynamic alias target
 			const def = (COMMAND_REGISTRY as Record<string, CommandDef>)[candidate];
 			if (def?.resources?.includes(normalizedResource)) {
-				return candidate;
+				resourceMatches.push(candidate);
 			}
 		}
+		// Single match — unambiguous.
+		if (resourceMatches.length === 1) return resourceMatches[0];
+		// Multiple matches — prefer the candidate with a dispatch entry.
+		if (resourceMatches.length > 1 && dispatchKeys) {
+			for (const candidate of resourceMatches) {
+				if (dispatchKeys.has(`${candidate}:${normalizedResource}`)) {
+					return candidate;
+				}
+			}
+		}
+		// Return first resource match if any (even without dispatch tiebreak).
+		if (resourceMatches.length > 0) return resourceMatches[0];
 	}
 
 	// Fallback: first target (matches getCommandDef behaviour).

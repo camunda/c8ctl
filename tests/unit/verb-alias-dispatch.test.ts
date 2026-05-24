@@ -50,6 +50,18 @@ describe("verb alias dispatch (#407)", () => {
 		);
 	});
 
+	test("'rm plugin' dispatches to unload handler", async () => {
+		// Both remove and unload declare 'plugin' in their resources, but only
+		// unload:plugin has a dispatch entry. Dispatch-key tiebreaking must
+		// route rm plugin → unload (not remove, which has no plugin handler).
+		const result = await c8("rm", "plugin", "nonexistent-plugin");
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			!result.stderr.includes("Unknown command"),
+			"'rm plugin' should not produce 'Unknown command'",
+		);
+	});
+
 	test("'w --help' exits 0 (not rejected as unknown command)", async () => {
 		const result = await c8("w", "--help");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
