@@ -606,6 +606,10 @@ describe("README.md sync check", () => {
 		const readme = readFileSync(README_PATH, "utf-8");
 		const startIdx = readme.indexOf(VRL_START_MARKER);
 		const endIdx = readme.indexOf(VRL_END_MARKER);
+		assert.ok(
+			startIdx !== -1 && endIdx !== -1,
+			"README.md is missing verb-resource-list markers",
+		);
 
 		const generated = generateVerbResourceList();
 		const before = readme.slice(0, startIdx + VRL_START_MARKER.length);

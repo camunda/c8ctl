@@ -145,18 +145,19 @@ This writes a completion script to the c8ctl data directory and wires it into yo
 
 #### Manual setup
 
-If you prefer to manage the completion script yourself:
+If you prefer to manage the completion script yourself, generate it with
+`c8ctl completion <shell>` (where `<shell>` is `bash`, `zsh`, or `fish`),
+then source or install it:
 
 ```bash
-# Generate a completion script for your shell (bash, zsh, or fish)
+# Bash / Zsh: generate, persist in your RC file, and load
 c8ctl completion bash > ~/.c8ctl-completion.bash
+echo 'source ~/.c8ctl-completion.bash' >> ~/.bashrc
 source ~/.c8ctl-completion.bash
 
-# Or source inline for the current session only
-source <(c8ctl completion bash)
+# Fish: write to the completions directory (auto-loaded on next start)
+c8ctl completion fish > ~/.config/fish/completions/c8ctl.fish
 ```
-
-For fish, write to `~/.config/fish/completions/c8ctl.fish` instead.
 
 ### Credential Resolution
 
@@ -552,41 +553,41 @@ c8ctl <verb> <resource> [arguments] [flags]
 
 **Verbs**:
 
-- `list` - List resources (process, identity)
-- `search` - Search resources with filters
-- `get` - Get resource by key
-- `create` - Create resource
-- `delete` - Delete resource
-- `cancel` - Cancel resource
-- `await` - Create and await completion (alias for create --awaitCompletion)
-- `complete` - Complete resource
-- `fail` - Fail a job
-- `activate` - Activate jobs by type
-- `resolve` - Resolve incident
-- `publish` - Publish message
-- `correlate` - Correlate message
-- `set` - Set variables on an element instance
-- `deploy` - Deploy resources
-- `run` - Deploy and start process
-- `assign` - Assign resource to target
-- `unassign` - Unassign resource from target
+- `list` - List resources
+- `search` - Search resources with filters (wildcards, date ranges, case-insensitive)
+- `get` - Get a resource by key
+- `create` - Create a resource (process instance, identity)
+- `delete` - Delete a resource by key
+- `cancel` - Cancel a process instance
+- `await` - Create and await process instance completion (server-side waiting)
+- `complete` - Complete a user task or job
+- `fail` - Mark a job as failed with optional error message and retry count
+- `activate` - Activate jobs of a specific type for processing
+- `resolve` - Resolve an incident (marks resolved, allows process to continue)
+- `publish` - Publish a message for message correlation
+- `correlate` - Correlate a message to a specific process instance
+- `set` - Set variables on an element instance (process instance or flow element scope). Variables are propagated to the outermost scope by default; use --local to restrict to the specified scope.
+- `deploy` - Deploy files to Camunda (auto-discovers deployable files in directories). When deploying a directory that is inside a process application (a parent directory contains a .process-application marker), the entire application root is deployed. Explicit file paths are not expanded.
+- `run` - Deploy and start a process instance from a BPMN file
+- `assign` - Assign a resource to a target (--to-user, --to-group, etc.)
+- `unassign` - Unassign a resource from a target (--from-user, --from-group, etc.)
 - `watch` (alias: `w`) - Watch files for changes and auto-deploy
-- `open` - Open Camunda web application in browser
+- `open` - Open Camunda web app in browser
 - `add` - Add a profile
-- `remove` (alias: `rm`) - Remove a profile or plugin
-- `load` - Load a c8ctl plugin
-- `unload` (alias: `rm`) - Unload a c8ctl plugin
-- `upgrade` - Upgrade a plugin
+- `remove` (alias: `rm`) - Remove a profile (alias: rm)
+- `load` - Load a c8ctl plugin (npm registry or URL)
+- `unload` (alias: `rm`) - Unload a c8ctl plugin (npm uninstall wrapper)
+- `upgrade` - Upgrade a plugin (respects source type)
 - `downgrade` - Downgrade a plugin to a specific version
-- `sync` - Synchronize plugins
+- `sync` - Synchronize plugins from registry (rebuild/reinstall)
 - `init` - Create a new plugin from TypeScript template
-- `doctor` - Diagnose plugin loading state and collisions
+- `doctor` - Surface plugin-loading collisions detected at startup (#363). Reports loaded plugins with their command names, and any first-registration-wins drops (plugin-name or command-name).
 - `use` - Set active profile or tenant
 - `output` - Show or set output format
 - `completion` - Generate shell completion script
-- `mcp-proxy` - Start a STDIO to remote HTTP MCP proxy server
+- `mcp-proxy` - Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 - `feedback` - Open the feedback page to report issues or request features
-- `help` (alias: `menu`) - Show help
+- `help` (alias: `menu`) - Show help (run 'c8ctl help \<command>' for details)
 - `which` - Show active profile or output mode
 
 **Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars)
