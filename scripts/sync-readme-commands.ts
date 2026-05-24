@@ -396,7 +396,8 @@ export function generateVerbResourceList(): string {
 			def.aliases && def.aliases.length > 0
 				? ` (alias: \`${def.aliases[0]}\`)`
 				: "";
-		lines.push(`- \`${verb}\`${aliasStr} - ${verbDescription(def)}`);
+		const desc = def.description.replace(/`[^`]*`|(<)/g, (match, lt) => (lt ? "\\<" : match));
+		lines.push(`- \`${verb}\`${aliasStr} - ${desc}`);
 	}
 	lines.push("");
 
@@ -466,7 +467,8 @@ function main(): void {
 		return;
 	}
 
-	let readme = readFileSync(README_PATH, "utf-8");
+	const originalReadme = readFileSync(README_PATH, "utf-8");
+	let readme = originalReadme;
 
 	// ── Sync verb-resource-list section ──
 	const vrlStartIdx = readme.indexOf(VRL_START_MARKER);
@@ -503,7 +505,7 @@ function main(): void {
 	const updated = `${before}\n\n${generated}\n\n${after}`;
 
 	if (checkMode) {
-		if (updated !== readme) {
+		if (updated !== originalReadme) {
 			console.error(
 				"README.md command reference is out of sync with COMMAND_REGISTRY.",
 			);

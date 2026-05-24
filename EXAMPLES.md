@@ -21,6 +21,8 @@ Comprehensive examples for all c8ctl operations.
 - [Session Management](#session-management)
 - [Plugin Management](#plugin-management)
 - [Local Cluster](#local-cluster)
+- [Which](#which)
+- [Doctor](#doctor)
 - [Agent / Programmatic Consumption](#agent--programmatic-consumption)
 
 ---
