@@ -396,7 +396,9 @@ export function generateVerbResourceList(): string {
 			def.aliases && def.aliases.length > 0
 				? ` (alias: \`${def.aliases[0]}\`)`
 				: "";
-		const desc = def.description.replace(/`[^`]*`|(<)/g, (match, lt) => (lt ? "\\<" : match));
+		const desc = def.description.replace(/`[^`]*`|(<)/g, (match, lt) =>
+			lt ? "\\<" : match,
+		);
 		lines.push(`- \`${verb}\`${aliasStr} - ${desc}`);
 	}
 	lines.push("");
