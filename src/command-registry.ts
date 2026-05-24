@@ -1784,8 +1784,9 @@ export function resolveVerbAlias(verb: string, resource?: string): string {
 	// Already a canonical verb — no resolution needed.
 	if (Object.hasOwn(COMMAND_REGISTRY, verb)) return verb;
 
+	if (!Object.hasOwn(VERB_ALIASES, verb)) return verb;
 	const targets = VERB_ALIASES[verb];
-	if (!targets || targets.length === 0) return verb;
+	if (!Array.isArray(targets) || targets.length === 0) return verb;
 
 	// Unambiguous alias — single target.
 	if (targets.length === 1) return targets[0];

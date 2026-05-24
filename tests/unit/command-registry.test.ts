@@ -357,6 +357,12 @@ describe("helper functions", () => {
 		assert.strictEqual(resolveVerbAlias("nonexistent"), "nonexistent");
 	});
 
+	test("resolveVerbAlias treats prototype keys as unknown verbs", () => {
+		assert.strictEqual(resolveVerbAlias("__proto__"), "__proto__");
+		assert.strictEqual(resolveVerbAlias("constructor"), "constructor");
+		assert.strictEqual(resolveVerbAlias("__proto__", "profile"), "__proto__");
+	});
+
 	test("resolveVerbAlias resolves single-target alias", () => {
 		assert.strictEqual(resolveVerbAlias("w"), "watch");
 	});
