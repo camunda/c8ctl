@@ -17,6 +17,7 @@ import {
 	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
+	resolveVerbAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { refreshCompletionsIfStale } from "./completion.ts";
@@ -389,10 +390,10 @@ async function main() {
 	refreshCompletionsIfStale();
 
 	// Extract command and resource
-	const [verb, resource, ...args] = positionals;
+	const [rawVerb, resource, ...args] = positionals;
 
 	// Handle global --version flag (only when no verb/command is provided)
-	if (values.version && !verb) {
+	if (values.version && !rawVerb) {
 		showVersion();
 		return;
 	}
@@ -402,17 +403,17 @@ async function main() {
 		return;
 	}
 
-	if (!verb) {
+	if (!rawVerb) {
 		showHelp();
 		return;
 	}
 
 	// Handle help command
 	if (
-		verb === "help" ||
-		verb === "menu" ||
-		verb === "--help" ||
-		verb === "-h"
+		rawVerb === "help" ||
+		rawVerb === "menu" ||
+		rawVerb === "--help" ||
+		rawVerb === "-h"
 	) {
 		// Check if user wants help for a specific command
 		if (resource) {
@@ -431,9 +432,15 @@ async function main() {
 	// (#373) where verbs whose missing-resource guard never fired (deploy,
 	// run, doctor, output, version, …) silently dispatched to the handler.
 	if (values.help) {
-		await showCommandHelp(verb);
+		await showCommandHelp(rawVerb);
 		return;
 	}
+
+	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
+	// "rm" → "remove" or "unload" depending on the resource argument).
+	// Must happen before plugin lookup and dispatch so alias verbs are
+	// not mistakenly routed to plugins or rejected as unknown.
+	const verb = resolveVerbAlias(rawVerb, resource);
 
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.
@@ -496,7 +503,8 @@ async function main() {
 			// skipping leading GLOBAL_FLAGS (consuming string-flag values).
 			// A naive `indexOf(verb)` is unsafe because `verb` may also appear
 			// as the value of a global string flag (e.g. `--profile <verb>`).
-			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), verb);
+			// Use rawVerb here because process.argv contains the original input.
+			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), rawVerb);
 			const forwarded = stripGlobalFlags(rawAfterVerb);
 			await executePluginCommand(verb, forwarded);
 			return;
