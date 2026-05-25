@@ -73,50 +73,6 @@ function listProfiles(): void {
 	}
 }
 
-/**
- * Show profile details
- */
-function showProfile(name: string): void {
-	const logger = getLogger();
-	const profile = getProfileOrModeler(name);
-
-	if (!profile) {
-		throw new Error(`Profile '${name}' not found`);
-	}
-
-	const isModeler = profile.name.startsWith(MODELER_PREFIX);
-
-	logger.info(`Profile: ${profile.name}`);
-	logger.info(
-		`  Source: ${isModeler ? "Camunda Modeler (read-only)" : "c8ctl"}`,
-	);
-	logger.info(`  Base URL: ${profile.baseUrl}`);
-
-	if (profile.username) {
-		logger.info(`  Username: ${profile.username}`);
-		logger.info(`  Password: ${profile.password ? "********" : "(not set)"}`);
-	}
-
-	if (profile.clientId) {
-		logger.info(`  Client ID: ${profile.clientId}`);
-		logger.info(
-			`  Client Secret: ${profile.clientSecret ? "********" : "(not set)"}`,
-		);
-	}
-
-	if (profile.audience) {
-		logger.info(`  Audience: ${profile.audience}`);
-	}
-
-	if (profile.oAuthUrl) {
-		logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
-	}
-
-	if (profile.defaultTenantId) {
-		logger.info(`  Default Tenant: ${profile.defaultTenantId}`);
-	}
-}
-
 interface AddProfileOptions {
 	url?: string;
 	clientId?: string;
