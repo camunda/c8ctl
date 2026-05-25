@@ -115,6 +115,15 @@ function findViolations(absPath: string): Violation[] {
 			) {
 				record(moduleSpec, moduleSpec.text);
 			}
+		} else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+			// export { foo } from "./helpers/..."; or export * from "./helpers/...";
+			const moduleSpec = node.moduleSpecifier;
+			if (
+				ts.isStringLiteral(moduleSpec) &&
+				isHelpersSpecifier(moduleSpec.text)
+			) {
+				record(moduleSpec, moduleSpec.text);
+			}
 		} else if (ts.isCallExpression(node)) {
 			const arg0 = node.arguments[0];
 			if (arg0 && ts.isStringLiteral(arg0) && isHelpersSpecifier(arg0.text)) {
