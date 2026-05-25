@@ -424,6 +424,13 @@ async function main() {
 		return;
 	}
 
+	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
+	// "rm" → "remove" or "unload" depending on the resource argument).
+	// Must happen before --help and plugin lookup so alias verbs are
+	// not mistakenly routed to plugins or rejected as unknown, and so
+	// that `c8ctl rm plugin --help` shows unload help (not remove help).
+	const verb = resolveVerbAlias(rawVerb, resource);
+
 	// `c8ctl <verb> [<resource>] [args] --help` — uniformly route to the help
 	// renderer. Placed AFTER the `help`/`menu` reserved-verb handler and
 	// BEFORE plugin pre-parse so that every verb (built-in or plugin,
@@ -432,15 +439,9 @@ async function main() {
 	// (#373) where verbs whose missing-resource guard never fired (deploy,
 	// run, doctor, output, version, …) silently dispatched to the handler.
 	if (values.help) {
-		await showCommandHelp(rawVerb);
+		await showCommandHelp(verb);
 		return;
 	}
-
-	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
-	// "rm" → "remove" or "unload" depending on the resource argument).
-	// Must happen before plugin lookup and dispatch so alias verbs are
-	// not mistakenly routed to plugins or rejected as unknown.
-	const verb = resolveVerbAlias(rawVerb, resource);
 
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.

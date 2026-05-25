@@ -42,20 +42,34 @@ describe("verb alias dispatch (#407)", () => {
 	});
 
 	test("'rm' without resource shows verb help (not unknown command)", async () => {
-		// rm requires a resource — should show available resources, not "Unknown command"
+		// rm requires a resource — should show available resources, not "Unknown command".
+		// Help text is written to stdout, so check combined output.
 		const result = await c8("rm");
+		assert.strictEqual(
+			result.status,
+			1,
+			`unexpected exit code: ${result.stderr}`,
+		);
+		const combined = result.stdout + result.stderr;
 		assert.ok(
-			!result.stderr.includes("Unknown command"),
+			combined.includes("resources"),
+			`expected verb help with resource list, got: ${combined}`,
+		);
+		assert.ok(
+			!combined.includes("Unknown command"),
 			"verb alias 'rm' without resource should not produce 'Unknown command'",
 		);
 	});
 
 	test("'rm plugin' dispatches to unload handler", async () => {
-		// Both remove and unload declare 'plugin' in their resources, but only
-		// unload:plugin has a dispatch entry. Dispatch-key tiebreaking must
-		// route rm plugin → unload (not remove, which has no plugin handler).
+		// Only unload declares 'plugin' in its resources — rm plugin resolves
+		// unambiguously to unload.
 		const result = await c8("rm", "plugin", "nonexistent-plugin");
 		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Failed to unload plugin"),
+			`expected unload handler error, got: ${result.stderr}`,
+		);
 		assert.ok(
 			!result.stderr.includes("Unknown command"),
 			"'rm plugin' should not produce 'Unknown command'",
