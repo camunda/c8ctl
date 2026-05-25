@@ -5,10 +5,6 @@
 import { existsSync, realpathSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { defineCommand } from "../command-framework.ts";
-import {
-	deployResources,
-	findProcessApplicationRoot,
-} from "../deploy-helpers.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
 import {
@@ -16,6 +12,10 @@ import {
 	DEPLOYABLE_EXTENSIONS,
 } from "../resource-extensions.ts";
 import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
+import {
+	deployResources,
+	findProcessApplicationRoot,
+} from "./helpers/deploy-helpers.ts";
 
 export { DEPLOY_COOLDOWN };
 

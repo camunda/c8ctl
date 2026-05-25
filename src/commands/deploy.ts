@@ -12,14 +12,14 @@
 
 import { defineCommand, dryRun } from "../command-framework.ts";
 import {
-	collectResourcesForPaths,
-	deployResources,
-	logSkippedExtensions,
-} from "../deploy-helpers.ts";
-import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
 } from "../resource-extensions.ts";
+import {
+	collectResourcesForPaths,
+	deployResources,
+	logSkippedExtensions,
+} from "./helpers/deploy-helpers.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 

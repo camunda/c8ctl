@@ -8,7 +8,7 @@
  *
  * `normalizeToError` is the single shared helper used by:
  *   - `handleCommandError` (src/errors.ts)
- *   - the deploy verbose path (src/deploy-helpers.ts)
+ *   - the deploy verbose path (src/commands/helpers/deploy-helpers.ts)
  *   - the watch deploy-failure logger (src/commands/watch.ts)
  *   - the mcp-proxy startup/shutdown failure path (src/commands/mcp-proxy.ts)
  *
