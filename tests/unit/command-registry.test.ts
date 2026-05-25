@@ -370,18 +370,8 @@ describe("helper functions", () => {
 	test("resolveVerbAlias disambiguates multi-target alias by resource", () => {
 		// rm → remove when resource is 'profile' (only remove owns profile)
 		assert.strictEqual(resolveVerbAlias("rm", "profile"), "remove");
-	});
-
-	test("resolveVerbAlias disambiguates with dispatch keys when multiple candidates match", () => {
-		// Both remove and unload declare 'plugin' in their resources list.
-		// Without dispatch keys, first match wins (remove).
-		assert.strictEqual(resolveVerbAlias("rm", "plugin"), "remove");
-		// With dispatch keys, prefer the candidate that is actually dispatchable.
-		const dispatchKeys = new Set(["unload:plugin"]);
-		assert.strictEqual(
-			resolveVerbAlias("rm", "plugin", dispatchKeys),
-			"unload",
-		);
+		// rm → unload when resource is 'plugin' (only unload owns plugin)
+		assert.strictEqual(resolveVerbAlias("rm", "plugin"), "unload");
 	});
 
 	test("resolveVerbAlias falls back to first target without resource", () => {

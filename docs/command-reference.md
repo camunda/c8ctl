@@ -915,12 +915,11 @@ Remove a profile (alias: rm)
 
 **Aliases:** `rm`
 
-**Resources:** profile, plugin
+**Resources:** profile
 
 **Positional arguments:**
 
 - **profile:** `<name>` (required)
-- **plugin:** `<package>` (required)
 
 **Flags:**
 

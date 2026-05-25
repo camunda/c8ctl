@@ -1422,12 +1422,12 @@ export const COMMAND_REGISTRY = {
 	},
 
 	remove: {
-		description: "Remove a profile or plugin",
+		description: "Remove a profile",
 		helpResource: "profile <name>",
 		helpDescription: "Remove a profile (alias: rm)",
 		mutating: false,
 		requiresResource: true,
-		resources: ["profile", "plugin"],
+		resources: ["profile"],
 		flags: {
 			none: {
 				type: "boolean",
@@ -1438,9 +1438,6 @@ export const COMMAND_REGISTRY = {
 		resourcePositionals: {
 			profile: [
 				{ name: "name", required: true },
-			] as const satisfies readonly PositionalDef[],
-			plugin: [
-				{ name: "package", required: true },
 			] as const satisfies readonly PositionalDef[],
 		},
 	},
@@ -1777,17 +1774,15 @@ export function getCommandDef(verb: string): CommandDef | undefined {
  *
  * For multi-target aliases (e.g. "rm" → ["remove", "unload"]),
  * disambiguates using the resource argument: picks the canonical verb
- * whose `resources` list includes `resource`. When multiple candidates
- * match (both `remove` and `unload` declare `plugin`), the optional
- * `dispatchKeys` set breaks the tie by preferring the candidate with a
- * live dispatch entry (`verb:resource`). Falls back to the first target
- * when no resource is given or no match is found.
+ * whose `resources` list includes `resource`. Falls back to the first
+ * target when no resource is given or no match is found.
+ *
+ * Multi-target aliases should be unambiguous at declaration time: each
+ * target verb should own a disjoint set of resources. If two targets
+ * both declare the same resource, the first match wins — fix the
+ * registry to remove the overlap rather than adding runtime tiebreakers.
  */
-export function resolveVerbAlias(
-	verb: string,
-	resource?: string,
-	dispatchKeys?: ReadonlySet<string>,
-): string {
+export function resolveVerbAlias(verb: string, resource?: string): string {
 	// Already a canonical verb — no resolution needed.
 	if (Object.hasOwn(COMMAND_REGISTRY, verb)) return verb;
 
@@ -1801,26 +1796,13 @@ export function resolveVerbAlias(
 	// Multi-target alias — disambiguate by resource.
 	if (resource) {
 		const normalizedResource = resolveAlias(resource);
-		const resourceMatches: string[] = [];
 		for (const candidate of targets) {
 			// biome-ignore lint/plugin: trust boundary — candidate is a dynamic alias target
 			const def = (COMMAND_REGISTRY as Record<string, CommandDef>)[candidate];
 			if (def?.resources?.includes(normalizedResource)) {
-				resourceMatches.push(candidate);
+				return candidate;
 			}
 		}
-		// Single match — unambiguous.
-		if (resourceMatches.length === 1) return resourceMatches[0];
-		// Multiple matches — prefer the candidate with a dispatch entry.
-		if (resourceMatches.length > 1 && dispatchKeys) {
-			for (const candidate of resourceMatches) {
-				if (dispatchKeys.has(`${candidate}:${normalizedResource}`)) {
-					return candidate;
-				}
-			}
-		}
-		// Return first resource match if any (even without dispatch tiebreak).
-		if (resourceMatches.length > 0) return resourceMatches[0];
 	}
 
 	// Fallback: first target (matches getCommandDef behaviour).
