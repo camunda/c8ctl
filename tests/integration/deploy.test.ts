@@ -7,7 +7,7 @@
  */
 
 import assert from "node:assert";
-import { existsSync, mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
