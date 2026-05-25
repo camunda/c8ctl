@@ -7,7 +7,10 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Multi-Tenant Support**: Full support for multi-tenancy across all operations
 - **Profile Management**: Store and manage multiple cluster configurations
 - **Camunda Modeler Integration**: Automatically import and use profiles from Camunda Modeler
+- **Identity Management**: Manage users, roles, groups, tenants, authorizations, and mapping rules
 - **Plugin System**: Extend c8ctl with custom commands via npm packages
+- **Local Cluster**: Run a local Camunda 8 instance directly — no Docker required
+- **MCP Proxy**: Bridge local MCP clients to remote Camunda 8 for AI agent integration
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
 - **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
@@ -16,6 +19,9 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
 - **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
+- **Shell Completion**: Auto-install completions for bash, zsh, and fish with automatic refresh on upgrade
+- **Agent Flags**: `--dry-run` to preview API requests and `--fields` to filter output columns for AI agents and scripts
+- **Debug Mode**: Enable detailed logging to stderr with `DEBUG=1` or `C8CTL_DEBUG=true`
 
 ## Beware the 🤖
 
@@ -137,48 +143,26 @@ c8ctl completion install --shell zsh
 
 This writes a completion script to the c8ctl data directory and wires it into your shell config (RC file for bash/zsh; completions directory for fish). Completions are **automatically refreshed** when c8ctl is upgraded — no manual re-install needed.
 
-#### Manual Setup
+#### Manual setup
 
-If you prefer to manage the completion script yourself:
-
-#### Bash
+If you prefer to manage the completion script yourself, generate it with
+`c8ctl completion <shell>` (where `<shell>` is `bash`, `zsh`, or `fish`),
+then source or install it:
 
 ```bash
-# Generate and source completion script
+# Bash
 c8ctl completion bash > ~/.c8ctl-completion.bash
 echo 'source ~/.c8ctl-completion.bash' >> ~/.bashrc
-source ~/.bashrc
-```
+source ~/.c8ctl-completion.bash
 
-Or for immediate use in the current session:
-
-```bash
-source <(c8ctl completion bash)
-```
-
-#### Zsh
-
-```bash
-# Generate and source completion script
+# Zsh
 c8ctl completion zsh > ~/.c8ctl-completion.zsh
 echo 'source ~/.c8ctl-completion.zsh' >> ~/.zshrc
-source ~/.zshrc
-```
+source ~/.c8ctl-completion.zsh
 
-Or for immediate use in the current session:
-
-```bash
-source <(c8ctl completion zsh)
-```
-
-#### Fish
-
-```bash
-# Generate and install completion script
+# Fish (auto-loaded on next start)
 c8ctl completion fish > ~/.config/fish/completions/c8ctl.fish
 ```
-
-Fish will automatically load the completion on next shell start.
 
 ### Credential Resolution
 
@@ -417,63 +401,9 @@ c8ctl help
   - URL/git source: installs `<source>#<version>`
   - file source (`file://`): version downgrade is not supported; use `load plugin --from` with the desired local plugin checkout
 
-**Plugin Development:**
+When plugins are loaded, their commands automatically appear in `c8ctl help` output.
 
-- Use `c8ctl init plugin <name>` to scaffold a new plugin with TypeScript template
-- Convention over configuration: the directory is always prefixed with `c8ctl-plugin-`, and the plugin is registered by the suffix after the prefix (e.g., `c8ctl init plugin c8ctl-plugin-foo` creates directory `c8ctl-plugin-foo` and registers plugin name `foo`)
-- Generated scaffold includes all necessary files, build configuration, and an `AGENTS.md` guide for autonomous plugin implementation
-- Plugins have access to the c8ctl runtime via `globalThis.c8ctl`
-- Plugins can create SDK clients via `globalThis.c8ctl.createClient(profile?, sdkConfig?)`
-- Plugins can resolve tenant IDs via `globalThis.c8ctl.resolveTenantId(profile?)`
-- Plugins can access c8ctl output-aware logging via `globalThis.c8ctl.getLogger()`
-- See the bundled `hello-world` plugin in `default-plugins/` for a complete example
-
-**Plugin Requirements:**
-
-- Plugin packages must be regular Node.js modules
-- They must include a `c8ctl-plugin.js` or `c8ctl-plugin.ts` file in the root directory
-- The plugin file must export a `commands` object
-- Optionally export a `metadata` object to provide help text
-- Plugins are installed globally and work from any directory
-- The runtime object `c8ctl` provides environment information to plugins
-- The runtime object `c8ctl` exposes `createClient(profile?, sdkConfig?)` for creating Camunda SDK clients from plugins
-- The runtime object `c8ctl` exposes `resolveTenantId(profile?)` using the same fallback logic as built-in commands
-- The runtime object `c8ctl` exposes `getLogger()` returning the c8ctl logger instance (respects current output mode)
-- **Important**: `c8ctl-plugin.js` must be JavaScript. Node.js doesn't support type stripping in `node_modules`. If writing in TypeScript, transpile to JS before publishing.
-
-**TypeScript Plugin Autocomplete:**
-
-```typescript
-import type { C8ctlPluginRuntime } from '@camunda8/cli/runtime';
-
-const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
-const tenantId = c8ctl.resolveTenantId();
-const logger = c8ctl.getLogger();
-logger.info(`Tenant: ${tenantId}`);
-```
-
-**Example Plugin Structure:**
-
-```typescript
-// c8ctl-plugin.ts
-export const metadata = {
-  name: 'my-plugin',
-  description: 'My custom c8ctl plugin',
-  commands: {
-    analyze: {
-      description: 'Analyze BPMN processes'
-    }
-  }
-};
-
-export const commands = {
-  analyze: async (args: string[]) => {
-    console.log('Analyzing...', args);
-  }
-};
-```
-
-When plugins are loaded, their commands automatically appear in `c8ctl help` output. See [PLUGIN-HELP.md](PLUGIN-HELP.md) for detailed documentation on plugin help integration.
+For plugin development (scaffolding, runtime API, flags, TypeScript support), see [PLUGIN-HELP.md](PLUGIN-HELP.md).
 
 ---
 
@@ -616,121 +546,59 @@ Run `c8ctl help cluster` for full details. See [EXAMPLES.md](EXAMPLES.md#local-c
 
 ---
 
-### Core Components
-
-- **Logger** (`src/logger.ts`): Handles output in text or JSON mode
-- **Config** (`src/config.ts`): Manages profiles, session state, and credential resolution
-- **Client** (`src/client.ts`): Factory for creating Camunda 8 SDK clients
-- **Commands** (`src/commands/`): Domain-specific command handlers
-
 ### Command Structure
 
 ```shell
 c8ctl <verb> <resource> [arguments] [flags]
 ```
 
+<!-- verb-resource-list:start -->
+<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.
+     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->
+
 **Verbs**:
 
-- `list` - List resources
+- `list` - List resources (process, identity)
 - `search` - Search resources with filters
 - `get` - Get resource by key
 - `create` - Create resource
+- `delete` - Delete resource
 - `cancel` - Cancel resource
+- `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
 - `fail` - Fail a job
-- `activate` - Activate jobs
+- `activate` - Activate jobs by type
 - `resolve` - Resolve incident
 - `publish` - Publish message
 - `correlate` - Correlate message
+- `set` - Set variables on an element instance
 - `deploy` - Deploy resources
 - `run` - Deploy and start process
-- `watch` (alias: `w`) - Watch for changes and auto-deploy
+- `assign` - Assign resource to target
+- `unassign` - Unassign resource from target
+- `watch` (alias: `w`) - Watch files for changes and auto-deploy
+- `open` - Open Camunda web application in browser
 - `add` - Add a profile
-- `remove` (alias: `rm`) - Remove a profile
-- `load` - Load a plugin
-- `unload` - Unload a plugin
+- `remove` (alias: `rm`) - Remove a profile or plugin
+- `load` - Load a c8ctl plugin
+- `unload` (alias: `rm`) - Unload a c8ctl plugin
+- `upgrade` - Upgrade a plugin
+- `downgrade` - Downgrade a plugin to a specific version
 - `sync` - Synchronize plugins
+- `init` - Create a new plugin from TypeScript template
+- `doctor` - Diagnose plugin loading state and collisions
 - `use` - Set active profile or tenant
 - `output` - Show or set output format
-- `cluster` - Manage local Camunda 8 cluster (start, stop, status, logs, install, delete, list, list-remote)
 - `completion` - Generate shell completion script
+- `mcp-proxy` - Start a STDIO to remote HTTP MCP proxy server
 - `feedback` - Open the feedback page to report issues or request features
+- `help` (alias: `menu`) - Show help
+- `which` - Show active profile or output mode
 
-**Resources**: process-instance (pi), process-definition (pd), user-task (ut), incident (inc), job, jobs, variables (vars), message (msg), topology, profile, tenant, plugin
+**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars)
+<!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
-
-## Testing
-
-### Run All Tests
-
-```bash
-npm test
-```
-
-### Run Unit Tests Only
-
-```bash
-npm run test:unit
-```
-
-### Run Integration Tests
-
-Integration tests require a running Camunda 8 instance at `http://localhost:8080`.
-
-1. Start a local Camunda 8 instance (e.g., using `c8ctl cluster start`)
-2. Run: `npm run test:integration`
-
-## Development
-
-- **Native TypeScript**: Runs directly with Node.js 22.18+ (no compilation needed)
-
-### Project Structure
-
-```shell
-c8ctl/
-├── src/
-│   ├── index.ts              # CLI entry point
-│   ├── logger.ts             # Output handling
-│   ├── config.ts             # Configuration management
-│   ├── client.ts             # SDK client factory
-│   └── commands/             # Command handlers
-│       └── ...
-├── tests/
-│   ├── unit/                 # Unit tests
-│   ├── integration/          # Integration tests
-│   └── fixtures/             # Test fixtures
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
-### Running the CLI
-
-```bash
-# If installed globally
-c8ctl <command>
-# Or using the alias
-c8 <command>
-
-# For local development with Node.js 22.18+ (native TypeScript)
-node src/index.ts <command>
-
-# Testing with npm link (requires build first)
-npm run build
-npm link
-c8ctl <command>
-```
-
-**Note**: The build step is only required for publishing or using `npm link`. Development uses native TypeScript execution via `node src/index.ts`.
-
-### Adding New Commands
-
-1. Create command handler in `src/commands/`
-2. Wire into `src/index.ts` command routing
-3. Add tests in `tests/unit/` and `tests/integration/`
-4. Update help text in `src/commands/help.ts`
-5. Document in `EXAMPLES.md`
 
 ## Environment Variables
 
@@ -820,7 +688,7 @@ These flags are available on `list` and `search` commands.
 | `--asc` | boolean |  | Sort ascending |
 | `--desc` | boolean |  | Sort descending |
 | `--limit` | string |  | Maximum number of results |
-| `--between` | string |  | Date range filter (e.g. 7d, 30d, 2024-01-01..2024-12-31) |
+| `--between` | string |  | Date range filter (e.g. 2024-01-01..2024-12-31, ..2024-12-31, 2024-01-01..) |
 | `--dateField` | string |  | Date field for --between filter |
 
 ### Commands
@@ -1948,4 +1816,4 @@ Apache 2.0 - see LICENSE.md
 
 ## Contributing
 
-See `AGENTS.md` for commit message conventions.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, project structure, and how to add new commands. See [AGENTS.md](AGENTS.md) for commit conventions and coding standards.

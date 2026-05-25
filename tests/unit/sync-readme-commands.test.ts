@@ -20,11 +20,14 @@ import {
 	generate,
 	generateCommandContent,
 	generateDocs,
+	generateVerbResourceList,
 	renderFlagsTable,
 	renderPositionals,
 	resourceDisplay,
 	START_MARKER,
 	uniqueAliases,
+	VRL_END_MARKER,
+	VRL_START_MARKER,
 } from "../../scripts/sync-readme-commands.ts";
 import type { CommandDef } from "../../src/command-registry.ts";
 import {
@@ -554,6 +557,29 @@ describe("README.md markers", () => {
 		const endIdx = readme.indexOf(END_MARKER);
 		assert.ok(startIdx < endIdx, "Start marker must appear before end marker");
 	});
+
+	test("contains verb-resource-list start marker", () => {
+		assert.ok(
+			readme.includes(VRL_START_MARKER),
+			`README.md is missing ${VRL_START_MARKER}`,
+		);
+	});
+
+	test("contains verb-resource-list end marker", () => {
+		assert.ok(
+			readme.includes(VRL_END_MARKER),
+			`README.md is missing ${VRL_END_MARKER}`,
+		);
+	});
+
+	test("verb-resource-list start marker appears before end marker", () => {
+		const startIdx = readme.indexOf(VRL_START_MARKER);
+		const endIdx = readme.indexOf(VRL_END_MARKER);
+		assert.ok(
+			startIdx < endIdx,
+			"VRL start marker must appear before end marker",
+		);
+	});
 });
 
 // ─── README is in sync (same assertion as --check mode) ──────────────────────
@@ -573,6 +599,27 @@ describe("README.md sync check", () => {
 			readme,
 			expected,
 			"README.md command reference is out of sync. Run: npm run sync:readme",
+		);
+	});
+
+	test("verb-resource-list content matches what is in README", () => {
+		const readme = readFileSync(README_PATH, "utf-8");
+		const startIdx = readme.indexOf(VRL_START_MARKER);
+		const endIdx = readme.indexOf(VRL_END_MARKER);
+		assert.ok(
+			startIdx !== -1 && endIdx !== -1,
+			"README.md is missing verb-resource-list markers",
+		);
+
+		const generated = generateVerbResourceList();
+		const before = readme.slice(0, startIdx + VRL_START_MARKER.length);
+		const after = readme.slice(endIdx);
+		const expected = `${before}\n${generated}\n${after}`;
+
+		assert.strictEqual(
+			readme,
+			expected,
+			"README.md verb-resource list is out of sync. Run: npm run sync:readme",
 		);
 	});
 });

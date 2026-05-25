@@ -38,6 +38,9 @@ c8ctl help          # get structured JSON command reference
 | `inc` | incident(s)          |
 | `msg` | message              |
 | `vars`| variable(s)          |
+| `var` | variable             |
+| `auth`| authorization(s)     |
+| `mr`  | mapping-rule(s)      |
 
 ## Agent Flags
 
@@ -59,21 +62,10 @@ Use this to reduce context window size when parsing output programmatically.
 
 ### `--dry-run`
 
-Applies to all **mutating** commands: `create`, `cancel`, `deploy`,
-`complete`, `fail`, `activate`, `resolve`, `publish`, `correlate`.
+Preview the API request without executing it. Supported by most commands.
+Emits a JSON object to stdout and exits 0:
 
-In dry-run mode:
-- All inputs are validated
-- The target profile/client is resolved
-- The equivalent API request is emitted as JSON to stdout:
-  `{ "dryRun": true, "command": "...", "method": "POST", "url": "...", "body": {...} }`
-- The actual API call is **not** executed
-- Exits 0
-
-**Recommended workflow for mutating operations:**
-1. Run the command with `--dry-run` and inspect the JSON output
-2. Confirm the request with the user (or validate programmatically)
-3. Re-run without `--dry-run` to execute
+`{ "dryRun": true, "command": "...", "method": "...", "url": "...", "body": ... }`
 
 ```sh
 c8ctl create pi --id=my-process --dry-run

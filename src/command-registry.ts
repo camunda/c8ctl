@@ -230,7 +230,8 @@ export const SEARCH_FLAGS = {
 	limit: { type: "string", description: "Maximum number of results" },
 	between: {
 		type: "string",
-		description: "Date range filter (e.g. 7d, 30d, 2024-01-01..2024-12-31)",
+		description:
+			"Date range filter (e.g. 2024-01-01..2024-12-31, ..2024-12-31, 2024-01-01..)",
 	},
 	dateField: {
 		type: "string",
