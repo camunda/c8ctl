@@ -68,13 +68,16 @@ function toRelative(absPath: string): string {
 
 /**
  * True iff `spec` is a relative import path that resolves into
- * `commands/helpers/`. Matches patterns like:
+ * `commands/helpers/`. Only matches specifiers starting with `.`
+ * (relative paths), not bare package specifiers. Patterns:
  *   - `./helpers/deploy-helpers.ts` (from within commands/)
  *   - `../commands/helpers/deploy-helpers.ts` (from src/)
  *   - `../../src/commands/helpers/deploy-helpers.ts` (from tests/)
  */
 function isHelpersSpecifier(spec: string): boolean {
-	return /(?:^|\/|\\)commands\/helpers(?:\/|$)/.test(spec);
+	return (
+		spec.startsWith(".") && /(?:^|\/|\\)commands\/helpers(?:\/|$)/.test(spec)
+	);
 }
 
 interface Violation {

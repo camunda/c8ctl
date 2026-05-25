@@ -110,11 +110,10 @@ function formatFlags(flags: readonly string[]): string {
 /**
  * Core assign implementation.
  *
- * Called from per-resource `defineCommand` wrappers below and exercised
- * directly by `tests/unit/identity.test.ts`. All validation errors are
- * raised via `throw` so the framework wrapper can route them through
- * `handleCommandError` and add the `Failed to assign <resource>` prefix.
- * Do NOT reintroduce `process.exit` — the architectural guard in
+ * Called from per-resource `defineCommand` wrappers below. All validation
+ * errors are raised via `throw` so the framework wrapper can route them
+ * through `handleCommandError` and add the `Failed to assign <resource>`
+ * prefix. Do NOT reintroduce `process.exit` — the architectural guard in
  * `tests/unit/no-process-exit-in-handlers.test.ts` will reject it.
  */
 async function handleAssign(
