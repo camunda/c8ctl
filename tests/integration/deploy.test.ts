@@ -8,7 +8,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, test } from "node:test";
 import { getUserDataDir } from "../../src/config.ts";
-import { deployResources as deploy } from "../../src/deployments.ts";
+import { deployResources as deploy } from "../../src/deploy-helpers.ts";
 
 describe("Deployment Integration Tests (requires Camunda 8 at localhost:8080)", () => {
 	beforeEach(() => {
