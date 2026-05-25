@@ -1558,7 +1558,8 @@ Remove a profile (alias: rm)
 
 **Positional arguments:**
 
-- **profile:** `<name>` (required)
+- **profile:** `<name>` (optional)
+- **plugin:** `<package>` (required)
 
 **Flags:**
 
