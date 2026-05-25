@@ -39,10 +39,14 @@ const MINIMAL_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
 </bpmn:definitions>`;
 
 let tempDir: string;
+const dataDirs: string[] = [];
 
 /**
  * Spawn the CLI with a custom data dir containing the given profiles.
  * extraArgs are appended after `deploy <dir>`.
+ *
+ * The data dir is created outside the deploy target so its JSON files
+ * don't pollute directory scanning.
  */
 async function c8Deploy(
 	deployPath: string,
@@ -51,7 +55,8 @@ async function c8Deploy(
 	sessionOverrides: Record<string, unknown> = {},
 	envOverrides: Record<string, string> = {},
 ): Promise<SpawnResult> {
-	const dir = mkdtempSync(join(tempDir, ".c8ctl-data-"));
+	const dir = mkdtempSync(join(tmpdir(), ".c8ctl-data-"));
+	dataDirs.push(dir);
 	writeFileSync(
 		join(dir, "session.json"),
 		JSON.stringify({ outputMode: "json", ...sessionOverrides }),
@@ -82,6 +87,10 @@ describe("deploy confirmation guard (#393)", () => {
 
 	afterEach(() => {
 		rmSync(tempDir, { recursive: true, force: true });
+		for (const d of dataDirs) {
+			rmSync(d, { recursive: true, force: true });
+		}
+		dataDirs.length = 0;
 	});
 
 	test("single profile: no confirmation message in stderr", async () => {
