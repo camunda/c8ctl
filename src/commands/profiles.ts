@@ -11,7 +11,6 @@ import {
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
-	getProfileOrModeler,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
