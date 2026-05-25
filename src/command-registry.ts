@@ -1748,7 +1748,8 @@ export const VERB_ALIASES: Record<string, string[]> = (() => {
  * Returns the input unchanged if no alias exists.
  */
 export function resolveAlias(resource: string): string {
-	return RESOURCE_ALIASES[resource] ?? resource;
+	if (!Object.hasOwn(RESOURCE_ALIASES, resource)) return resource;
+	return RESOURCE_ALIASES[resource];
 }
 
 /**

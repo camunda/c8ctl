@@ -426,9 +426,9 @@ async function main() {
 
 	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
 	// "rm" → "remove" or "unload" depending on the resource argument).
-	// Must happen before --help and plugin lookup so alias verbs are
-	// not mistakenly routed to plugins or rejected as unknown, and so
-	// that `c8ctl rm plugin --help` shows unload help (not remove help).
+	// Must happen before --help and dispatch so the dispatch key uses the
+	// canonical verb (not the raw alias) and `c8ctl rm plugin --help`
+	// shows unload help (not remove help).
 	const verb = resolveVerbAlias(rawVerb, resource);
 
 	// `c8ctl <verb> [<resource>] [args] --help` — uniformly route to the help
