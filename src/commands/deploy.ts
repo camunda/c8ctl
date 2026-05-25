@@ -19,7 +19,7 @@ import {
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
-} from "./resource-extensions.ts";
+} from "../resource-extensions.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 

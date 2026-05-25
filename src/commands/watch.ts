@@ -11,11 +11,11 @@ import {
 } from "../deploy-helpers.ts";
 import { normalizeToError } from "../errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
-import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
-} from "./resource-extensions.ts";
+} from "../resource-extensions.ts";
+import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
 
 export { DEPLOY_COOLDOWN };
 
