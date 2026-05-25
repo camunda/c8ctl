@@ -579,7 +579,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `watch` (alias: `w`) - Watch files for changes and auto-deploy
 - `open` - Open Camunda web application in browser
 - `add` - Add a profile
-- `remove` (alias: `rm`) - Remove a profile or plugin
+- `remove` (alias: `rm`) - Remove a profile
 - `load` - Load a c8ctl plugin
 - `unload` (alias: `rm`) - Unload a c8ctl plugin
 - `upgrade` - Upgrade a plugin
