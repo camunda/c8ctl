@@ -196,11 +196,15 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 			: (s: string) => s;
 	const segments = dirs.map((d) => d.split(sep));
 
-	const common = segments[0].filter(
-		(seg, i) =>
-			i < Math.min(...segments.map((s) => s.length)) &&
-			segments.every((s) => caseFold(s[i]) === caseFold(seg)),
-	);
+	const common: string[] = [];
+	const maxCommonLength = Math.min(...segments.map((s) => s.length));
+	for (let i = 0; i < maxCommonLength; i++) {
+		const seg = segments[0][i];
+		if (!segments.every((s) => caseFold(s[i]) === caseFold(seg))) {
+			break;
+		}
+		common.push(seg);
+	}
 
 	if (common.length === 0) return resolve(process.cwd());
 
