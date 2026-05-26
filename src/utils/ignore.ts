@@ -11,7 +11,7 @@
  * target is specified. See #258.
  *
  * Pattern matching is implemented using `node:path#matchesGlob` (Node ≥ 21)
- * with the same semantics as the gitignore spec.
+ * and supports the subset of gitignore-style rules documented below.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
