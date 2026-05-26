@@ -16,13 +16,13 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import type { Ignore } from "ignore";
 import { createClient } from "../../core/client.ts";
 import { resolveTenantId } from "../../core/config.ts";
 import { normalizeToError, SilentError } from "../../core/errors.ts";
 import { getLogger, isRecord } from "../../core/logger.ts";
 import { c8ctl } from "../../core/runtime.ts";
 import {
+	type Ignore,
 	isIgnored,
 	loadIgnoreRules,
 	resolveIgnoreBaseDir,
