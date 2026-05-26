@@ -21,6 +21,7 @@ const pluginsBase = existsSync("default-plugins")
 	: join("dist", "default-plugins");
 
 if (!existsSync(pluginsBase)) {
+	console.log(`  no default-plugins directory found at '${pluginsBase}', skipping plugin dependency installation`);
 	process.exit(0);
 }
 
@@ -43,7 +44,7 @@ for (const name of readdirSync(pluginsBase).sort()) {
 
 	const pluginDir = join(pluginsBase, name);
 	console.log(`  installing deps for default plugin: ${name}`);
-	execSync("npm install --no-package-lock", {
+	execSync("npm install --no-package-lock --ignore-scripts", {
 		cwd: pluginDir,
 		stdio: "inherit",
 	});
