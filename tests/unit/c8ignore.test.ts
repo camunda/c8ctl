@@ -349,6 +349,33 @@ describe(".c8ignore", () => {
 			assert.strictEqual(ig.ignores("src/main.ts"), false);
 		});
 
+		test("anchored /dist/ only matches dist at ignore base", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "/dist/\n");
+			const ig = loadIgnoreRules(testDir);
+			assert.strictEqual(ig.ignores("dist"), true);
+			assert.strictEqual(ig.ignores("dist/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/dist"), false);
+			assert.strictEqual(ig.ignores("nested/dist/output.js"), false);
+		});
+
+		test("non-anchored dist/ matches dist at any depth", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "dist/\n");
+			const ig = loadIgnoreRules(testDir);
+			assert.strictEqual(ig.ignores("dist"), true);
+			assert.strictEqual(ig.ignores("dist/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/dist"), true);
+			assert.strictEqual(ig.ignores("nested/dist/output.js"), true);
+		});
+
+		test("embedded slash pattern src/build is anchored to base", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "src/build\n");
+			const ig = loadIgnoreRules(testDir);
+			assert.strictEqual(ig.ignores("src/build"), true);
+			assert.strictEqual(ig.ignores("src/build/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/src/build"), false);
+			assert.strictEqual(ig.ignores("nested/src/build/output.js"), false);
+		});
+
 		test("isIgnored handles paths relative to baseDir", () => {
 			const ig = loadIgnoreRules(testDir);
 			const full = join(testDir, "node_modules", "pkg", "file.bpmn");
