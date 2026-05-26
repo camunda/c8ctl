@@ -50,7 +50,7 @@ These flags are available on `list` and `search` commands.
 | `--asc` | boolean |  | Sort ascending |
 | `--desc` | boolean |  | Sort descending |
 | `--limit` | string |  | Maximum number of results |
-| `--between` | string |  | Date range filter (e.g. 7d, 30d, 2024-01-01..2024-12-31) |
+| `--between` | string |  | Date range filter (e.g. 2024-01-01..2024-12-31, ..2024-12-31, 2024-01-01..) |
 | `--dateField` | string |  | Date field for --between filter |
 
 ## Commands
