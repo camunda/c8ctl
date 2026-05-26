@@ -147,5 +147,8 @@ vite.config.ts.timestamp-*
 c8ctl-test-*
 test-plugin-temp
 
+# Dependencies installed into individual default-plugin dirs by postinstall
+default-plugins/*/node_modules
+
 # Temp tsconfig created by .githooks/pre-commit
 .tsconfig.pre-commit.*.json
