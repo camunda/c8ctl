@@ -55,6 +55,8 @@ export interface C8ctlPluginRuntime {
 	dryRun?: boolean;
 	/** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
 	verbose?: boolean;
+	/** When true, skip confirmation prompts without asking (persisted preference). */
+	skipConfirmation?: boolean;
 	createClient(
 		profileFlag?: string,
 		additionalSdkConfig?: Partial<CamundaOptions>,
@@ -102,6 +104,7 @@ class C8ctl implements C8ctlPluginRuntime {
 	private _dryRun?: boolean;
 	private _verbose?: boolean;
 	private _resolvedBaseUrl?: string;
+	private _skipConfirmation?: boolean;
 	private _deps?: C8ctlDeps;
 
 	readonly env: C8ctlEnv = {
@@ -231,6 +234,14 @@ class C8ctl implements C8ctlPluginRuntime {
 
 	set resolvedBaseUrl(value: string | undefined) {
 		this._resolvedBaseUrl = value;
+	}
+
+	get skipConfirmation(): boolean | undefined {
+		return this._skipConfirmation;
+	}
+
+	set skipConfirmation(value: boolean | undefined) {
+		this._skipConfirmation = value;
 	}
 }
 

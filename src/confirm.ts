@@ -2,14 +2,16 @@
  * Interactive confirmation prompt for mutating commands.
  *
  * Uses Node's built-in `readline` — no external dependencies.
- * Returns `true` if the user confirms, `false` otherwise.
- * Automatically skips (returns `true`) when stdin or stderr is not
+ * Returns `"yes"`, `"no"`, or `"always"`.
+ * Automatically skips (returns `"yes"`) when stdin or stderr is not
  * a TTY (e.g. piped input, CI, redirected stderr), logging the
  * target to stderr instead.
  */
 
 import { createInterface } from "node:readline";
 import { c8ctl } from "./runtime.ts";
+
+export type ConfirmResult = "yes" | "no" | "always";
 
 /**
  * Prompt the user to confirm a deploy target.
@@ -18,15 +20,15 @@ import { c8ctl } from "./runtime.ts";
  * `--profile`, profile count, env vars). This helper handles only
  * the TTY check and the actual prompting/logging:
  *
- * - **Interactive** (stdin + stderr are TTY): asks `Continue? [y/N]`
+ * - **Interactive** (stdin + stderr are TTY): asks `Continue? [y/N/a]`
  *   and returns the user's answer.
  * - **Non-interactive** (piped/redirected): logs the target to stderr
- *   and returns `true` (auto-approve).
+ *   and returns `"yes"` (auto-approve).
  */
 export async function confirmDeployTarget(options: {
 	profileName: string;
 	baseUrl: string;
-}): Promise<boolean> {
+}): Promise<ConfirmResult> {
 	const { profileName, baseUrl } = options;
 	const message = `Deploying to profile "${profileName}" (${baseUrl})`;
 
@@ -39,21 +41,27 @@ export async function confirmDeployTarget(options: {
 		} else {
 			console.error(message);
 		}
-		return true;
+		return "yes";
 	}
 
-	return new Promise<boolean>((resolve) => {
+	return new Promise<ConfirmResult>((resolve) => {
 		const rl = createInterface({
 			input: process.stdin,
 			output: process.stderr,
 		});
 
 		rl.question(
-			`Deploying to profile "${profileName}" (${baseUrl})\nContinue? [y/N] `,
+			`Deploying to profile "${profileName}" (${baseUrl})\nContinue? [y/N/a] (a = always, don't prompt again) `,
 			(answer) => {
 				rl.close();
 				const normalized = answer.trim().toLowerCase();
-				resolve(normalized === "y" || normalized === "yes");
+				if (normalized === "a" || normalized === "always") {
+					resolve("always");
+				} else if (normalized === "y" || normalized === "yes") {
+					resolve("yes");
+				} else {
+					resolve("no");
+				}
 			},
 		);
 	});

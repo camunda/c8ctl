@@ -241,4 +241,23 @@ describe("deploy confirmation guard (#393)", () => {
 			`should show session profile name, not env, got: ${result.stderr}`,
 		);
 	});
+
+	test("multiple profiles with skipConfirmation persisted: no confirmation message", async () => {
+		// When skipConfirmation is persisted in session.json, the guard
+		// should not fire — equivalent to always passing --yes.
+		const result = await c8Deploy(
+			tempDir,
+			[
+				{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
+				{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
+			],
+			[],
+			{ skipConfirmation: true },
+		);
+
+		assert.ok(
+			!result.stderr.includes("Deploying to profile"),
+			`skipConfirmation should skip confirmation, got: ${result.stderr}`,
+		);
+	});
 });

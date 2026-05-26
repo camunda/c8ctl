@@ -667,7 +667,7 @@ to prevent deploying to the wrong cluster:
 
 ```bash
 # Shows: Deploying to profile "production" (https://prod.zeebe.camunda.io)
-#        Continue? [y/N]
+#        Continue? [y/N/a] (a = always, don't prompt again)
 c8 deploy ./process.bpmn
 
 # Skip confirmation with --yes / -y
@@ -677,6 +677,10 @@ c8 deploy ./process.bpmn -y
 # Explicit --profile also skips confirmation (target is unambiguous)
 c8 deploy ./process.bpmn --profile=staging
 ```
+
+Answering `a` (always) persists the preference in your session so future
+deploys proceed without prompting. To re-enable prompts, remove the
+`skipConfirmation` key from your `session.json`.
 
 In non-interactive environments (CI, piped input), the confirmation is
 skipped automatically and the target is logged to stderr.

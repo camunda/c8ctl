@@ -18,6 +18,7 @@ import {
 	getProfileOrModeler,
 	resolveClusterConfig,
 	resolveTenantId,
+	setSkipConfirmation,
 } from "./config.ts";
 import { confirmDeployTarget } from "./confirm.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
@@ -972,12 +973,19 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// *effective* target — i.e. no active session profile overrides it.
 	// When an active session profile exists, it takes priority over
 	// env vars in resolveClusterConfig(), so the guard must still run.
+	// Also skip when the user has persisted skipConfirmation (via the
+	// "always" prompt option or equivalent).
 	const { activeProfile } = c8ctl;
 	const activeProfileConfig =
 		activeProfile != null ? getProfileOrModeler(activeProfile) : undefined;
 	const envIsEffectiveTarget =
 		!!process.env.CAMUNDA_BASE_URL && activeProfileConfig == null;
-	if (!ctx.yes && !ctx.profile && !envIsEffectiveTarget) {
+	if (
+		!ctx.yes &&
+		!c8ctl.skipConfirmation &&
+		!ctx.profile &&
+		!envIsEffectiveTarget
+	) {
 		const profiles = getAllProfiles();
 		if (profiles.length > 1) {
 			// Resolve the effective profile and URL for the confirmation message.
@@ -987,11 +995,13 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 					? activeProfile
 					: DEFAULT_PROFILE;
 
-			const confirmed = await confirmDeployTarget({
+			const result = await confirmDeployTarget({
 				profileName,
 				baseUrl: config.baseUrl,
 			});
-			if (!confirmed) {
+			if (result === "always") {
+				setSkipConfirmation(true);
+			} else if (result === "no") {
 				logMessage("Deploy cancelled.");
 				logMessage(
 					"Hint: use --profile=<name> to target a specific cluster, or --yes to skip this prompt.",

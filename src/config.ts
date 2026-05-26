@@ -97,6 +97,7 @@ export interface SessionState {
 	activeProfile?: string;
 	activeTenant?: string;
 	outputMode: OutputMode;
+	skipConfirmation?: boolean;
 }
 
 /**
@@ -648,11 +649,16 @@ export function loadSessionState(): SessionState {
 			typeof state.activeTenant === "string" ? state.activeTenant : undefined;
 		c8ctl.outputMode = state.outputMode === "json" ? "json" : "text";
 		persistedOutputMode = c8ctl.outputMode;
+		c8ctl.skipConfirmation =
+			typeof state.skipConfirmation === "boolean"
+				? state.skipConfirmation
+				: undefined;
 
 		return {
 			activeProfile: c8ctl.activeProfile,
 			activeTenant: c8ctl.activeTenant,
 			outputMode: c8ctl.outputMode,
+			skipConfirmation: c8ctl.skipConfirmation,
 		};
 	} catch {
 		return {
@@ -674,6 +680,7 @@ export function saveSessionState(state?: SessionState): void {
 		activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
 		activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
 		outputMode: state?.outputMode ?? persistedOutputMode,
+		skipConfirmation: state?.skipConfirmation ?? c8ctl.skipConfirmation,
 	};
 
 	if (state) {
@@ -681,6 +688,7 @@ export function saveSessionState(state?: SessionState): void {
 		c8ctl.activeTenant = state.activeTenant;
 		c8ctl.outputMode = state.outputMode;
 		persistedOutputMode = state.outputMode;
+		c8ctl.skipConfirmation = state.skipConfirmation;
 	}
 
 	const path = getSessionStatePath();
@@ -717,6 +725,14 @@ export function setActiveTenant(tenantId: string): void {
 export function setOutputMode(mode: OutputMode): void {
 	c8ctl.outputMode = mode;
 	persistedOutputMode = mode;
+	saveSessionState();
+}
+
+/**
+ * Set skipConfirmation preference in session and persist to disk
+ */
+export function setSkipConfirmation(skip: boolean): void {
+	c8ctl.skipConfirmation = skip;
 	saveSessionState();
 }
 
