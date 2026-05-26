@@ -47,8 +47,9 @@ interface ParsedPattern {
  * - Otherwise the pattern matches at any depth.
  */
 function parsePattern(raw: string): ParsedPattern | null {
-	// Trim trailing whitespace (leading whitespace is significant in gitignore,
-	// but trailing spaces are ignored unless escaped — we just trimEnd).
+	// Trim trailing whitespace. The full gitignore spec allows a trailing `\ `
+	// to preserve spaces, but that edge case is not needed here — we
+	// deliberately omit it for simplicity.
 	let pattern = raw.trimEnd();
 	if (!pattern || pattern.startsWith("#")) return null;
 
@@ -95,11 +96,27 @@ function parsePattern(raw: string): ParsedPattern | null {
 function buildIgnoreChecker(
 	patterns: ParsedPattern[],
 ): (path: string) => boolean {
+	// Pre-compute whether any negate pattern exists at or after each index.
+	// This lets the inner loop short-circuit: once a pattern matches and no
+	// later negation can undo it, we can return immediately.
+	const hasNegateAtOrAfter = new Uint8Array(patterns.length);
+	for (let i = patterns.length - 1; i >= 0; i--) {
+		hasNegateAtOrAfter[i] =
+			patterns[i].negate ||
+			(i < patterns.length - 1 ? hasNegateAtOrAfter[i + 1] : 0)
+				? 1
+				: 0;
+	}
+
 	return function ignoresPath(rel: string): boolean {
 		let ignored = false;
-		for (const { negate, globs } of patterns) {
+		for (let i = 0; i < patterns.length; i++) {
+			const { negate, globs } = patterns[i];
 			if (globs.some((g) => matchesGlob(rel, g))) {
 				ignored = !negate;
+				// If we just confirmed "ignored" and no later pattern can negate it,
+				// there is no point iterating further.
+				if (ignored && !hasNegateAtOrAfter[i + 1]) return true;
 			}
 		}
 		return ignored;
