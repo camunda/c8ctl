@@ -18,6 +18,7 @@ import {
 	getCommandDef,
 	isValidCommand,
 	resolveAlias,
+	resolveVerbAlias,
 	SEARCH_FLAGS,
 	VERB_ALIASES,
 } from "../../src/command-registry.ts";
@@ -342,6 +343,51 @@ describe("helper functions", () => {
 		assert.ok(!isValidCommand("nonexistent", "pi"));
 		assert.ok(!isValidCommand("cancel", "user")); // cancel only supports pi
 		assert.ok(!isValidCommand("fail", "pi")); // fail only supports job
+	});
+
+	// ── resolveVerbAlias ─────────────────────────────────────────────────────
+
+	test("resolveVerbAlias returns canonical verbs unchanged", () => {
+		assert.strictEqual(resolveVerbAlias("list"), "list");
+		assert.strictEqual(resolveVerbAlias("watch"), "watch");
+		assert.strictEqual(resolveVerbAlias("remove"), "remove");
+	});
+
+	test("resolveVerbAlias returns unknown verbs unchanged", () => {
+		assert.strictEqual(resolveVerbAlias("nonexistent"), "nonexistent");
+	});
+
+	test("resolveVerbAlias treats prototype keys as unknown verbs", () => {
+		assert.strictEqual(resolveVerbAlias("__proto__"), "__proto__");
+		assert.strictEqual(resolveVerbAlias("constructor"), "constructor");
+		assert.strictEqual(resolveVerbAlias("__proto__", "profile"), "__proto__");
+	});
+
+	test("resolveVerbAlias resolves single-target alias", () => {
+		assert.strictEqual(resolveVerbAlias("w"), "watch");
+	});
+
+	test("resolveVerbAlias disambiguates multi-target alias by resource", () => {
+		// rm → remove when resource is 'profile' (only remove owns profile)
+		assert.strictEqual(resolveVerbAlias("rm", "profile"), "remove");
+		// rm → unload when resource is 'plugin' (only unload owns plugin)
+		assert.strictEqual(resolveVerbAlias("rm", "plugin"), "unload");
+	});
+
+	test("resolveVerbAlias falls back to first target without resource", () => {
+		const targets = VERB_ALIASES.rm;
+		assert.ok(targets && targets.length > 1, "rm should have multiple targets");
+		assert.strictEqual(resolveVerbAlias("rm"), targets[0]);
+	});
+
+	test("every verb alias resolves to a canonical registry entry", () => {
+		for (const alias of Object.keys(VERB_ALIASES)) {
+			const resolved = resolveVerbAlias(alias);
+			assert.ok(
+				Object.hasOwn(COMMAND_REGISTRY, resolved),
+				`alias "${alias}" resolved to "${resolved}" which is not in COMMAND_REGISTRY`,
+			);
+		}
 	});
 
 	test("deriveParseArgsOptions produces flat options for parseArgs", () => {

@@ -2,10 +2,8 @@
  * Integration tests for process instances
  * NOTE: These tests require a running Camunda 8 instance at http://localhost:8080
  *
- * These tests primarily validate end-to-end CLI behaviour. The setup phase
- * imports the internal `deployResources` helper from `src/deployments.ts`
- * to seed process definitions before each test, but every assertion exercises
- * the CLI subprocess.
+ * All assertions and setup drive the CLI via the subprocess helper — no
+ * direct imports from `src/commands/**`.
  */
 
 import assert from "node:assert";
@@ -21,7 +19,6 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/client.ts";
-import { deployResources as deploy } from "../../src/deployments.ts";
 import { todayRange } from "../utils/date-helpers.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
@@ -48,6 +45,17 @@ function cli(dataDir: string, ...args: string[]) {
 		cwd: PROJECT_ROOT,
 		env: makeTestEnv({ C8CTL_DATA_DIR: dataDir }),
 	});
+}
+
+/** Deploy a fixture and assert the command succeeded. */
+async function deploy(dataDir: string, ...paths: string[]) {
+	const result = await cli(dataDir, "deploy", ...paths);
+	assert.strictEqual(
+		result.status,
+		0,
+		`deploy setup failed (status ${result.status}). stderr: ${result.stderr}`,
+	);
+	return result;
 }
 
 function parseItems<T>(stdout: string): T[] {
@@ -78,7 +86,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 	test("create process instance returns key", async () => {
 		// First deploy a process to ensure it exists
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 
 		// Create process instance using the SDK client directly
 		const result = await client.createProcessInstance({
@@ -99,7 +107,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	});
 
 	test("list process instances filters by process definition via CLI", async () => {
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
@@ -121,7 +129,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	});
 
 	test("list process instances respects --limit via CLI", async () => {
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
@@ -155,7 +163,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		// Deploy v1
 		const v1Path = join(testDir, "v1.bpmn");
 		writeFileSync(v1Path, baseBpmn);
-		await deploy([v1Path], {});
+		await deploy(testDir, v1Path);
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists(uniqueId),
 		});
@@ -167,7 +175,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		);
 		const v2Path = join(testDir, "v2.bpmn");
 		writeFileSync(v2Path, v2Bpmn);
-		await deploy([v2Path], {});
+		await deploy(testDir, v2Path);
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists(uniqueId),
 		});
@@ -250,7 +258,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	});
 
 	test("list process instances --limit via CLI produces correct output", async () => {
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
@@ -272,7 +280,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 	test("cancel process instance CLI handles errors gracefully", async () => {
 		// Deploy and create an instance
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 		const result = await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
@@ -306,7 +314,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 	test("create with awaitCompletion returns completed result with variables", async () => {
 		// Deploy a simple process first
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 
 		// Test with awaitCompletion flag using the SDK client directly
 		const result = await client.createProcessInstance({
@@ -325,7 +333,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 
 	test("create with awaitCompletion CLI output includes completed and variables", async () => {
 		// Deploy a simple process first
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 
 		// Reset to text mode for this test which checks text output
 		await cli(testDir, "output", "text");
@@ -374,7 +382,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	});
 
 	test("list pi --between spanning today finds recently created instance via CLI", async () => {
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 		await client.createProcessInstance({
 			processDefinitionId: ProcessDefinitionId.assumeExists("simple-process"),
 		});
@@ -408,7 +416,7 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 	});
 
 	test("list pi --between in far past returns no instances via CLI", async () => {
-		await deploy(["tests/fixtures/simple.bpmn"], {});
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
 
 		const result = await cli(
 			testDir,

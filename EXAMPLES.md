@@ -13,10 +13,16 @@ Comprehensive examples for all c8ctl operations.
 - [Deployments](#deployments)
 - [Forms](#forms)
 - [Topology](#topology)
+- [Variables](#variables)
+- [Date Range Filtering](#date-range-filtering)
+- [Identity Management](#identity-management)
+- [Open Camunda Applications](#open-camunda-applications)
 - [Profile Management](#profile-management)
 - [Session Management](#session-management)
 - [Plugin Management](#plugin-management)
 - [Local Cluster](#local-cluster)
+- [Which](#which)
+- [Doctor](#doctor)
 - [Agent / Programmatic Consumption](#agent--programmatic-consumption)
 
 ---
@@ -486,8 +492,11 @@ c8 publish msg order-placed --correlationKey=order-12345 --timeToLive=3600000
 
 ### Correlate Message
 
+Correlate delivers a message to a specific waiting process instance. Unlike
+`publish` (where `--correlationKey` is optional), `correlate` requires it.
+
 ```bash
-# Correlate is an alias for publish
+# Correlate a message to a specific process instance
 c8 correlate msg payment-received --correlationKey=order-12345 --variables='{"amount":250.00}'
 ```
 
@@ -723,6 +732,229 @@ c8 get form 2251799813685252 --pd --profile prod
 
 ```bash
 c8 get topology
+```
+
+---
+
+## Variables
+
+### Set Variables
+
+Set variables on a process instance or flow element scope. Variables propagate to the outermost scope by default.
+
+```bash
+# Set variables on a process instance
+c8 set variable 2251799813685249 --variables='{"status":"approved"}'
+
+# Set variables in local scope only (no propagation)
+c8 set variable 2251799813685249 --variables='{"x":1}' --local
+```
+
+---
+
+## Date Range Filtering
+
+Use `--between=<from>..<to>` to filter by date range (process instances, user tasks, incidents, jobs). Either side can be omitted for open-ended ranges.
+
+```bash
+# Process instances between specific dates
+c8 search pi --between=2024-01-01..2024-12-31
+
+# Open-ended: everything from a date onward
+c8 search pi --between=2024-01-01..
+
+# Open-ended: everything up to a date
+c8 search pi --between=..2024-12-31
+
+# Use --dateField to filter on a different field (not supported by incidents)
+c8 search pi --between=2024-01-01..2024-12-31 --dateField=endDate
+```
+
+---
+
+## Identity Management
+
+c8ctl supports managing identity resources: users, roles, groups, tenants, authorizations, and mapping rules.
+
+### Users
+
+```bash
+# List users
+c8 list users
+
+# Search users
+c8 search users --username=john
+c8 search users --name=John --email=john@example.com
+
+# Get user by username
+c8 get user john
+
+# Create a user
+c8 create user --username=john --name='John Doe' --email=john@example.com --password=secret
+
+# Delete a user
+c8 delete user john
+```
+
+### Roles
+
+```bash
+# List roles
+c8 list roles
+
+# Search roles
+c8 search roles --name=admin
+
+# Get role by ID
+c8 get role admin
+
+# Create a role
+c8 create role --roleId=viewer --name=Viewer
+
+# Delete a role
+c8 delete role viewer
+
+# Assign a role to a user
+c8 assign role admin --to-user=john
+
+# Unassign a role from a user
+c8 unassign role admin --from-user=john
+
+# Assign a role to a group
+c8 assign role admin --to-group=engineering
+```
+
+### Groups
+
+```bash
+# List groups
+c8 list groups
+
+# Search groups
+c8 search groups --name=engineering
+
+# Get group by ID
+c8 get group engineering
+
+# Create a group
+c8 create group --groupId=engineering --name=Engineering
+
+# Delete a group
+c8 delete group engineering
+
+# Assign a user to a group
+c8 assign user john --to-group=engineering
+
+# Unassign a user from a group
+c8 unassign user john --from-group=engineering
+```
+
+### Tenants
+
+```bash
+# List tenants
+c8 list tenants
+
+# Search tenants
+c8 search tenants --name=production
+
+# Get tenant by ID
+c8 get tenant production
+
+# Create a tenant
+c8 create tenant --tenantId=production --name=Production
+
+# Delete a tenant
+c8 delete tenant production
+
+# Assign a group to a tenant
+c8 assign group engineering --to-tenant=production
+```
+
+### Authorizations
+
+```bash
+# List authorizations
+c8 list auth
+
+# Search authorizations
+c8 search auth --ownerId=john --ownerType=USER
+
+# Get authorization by key
+c8 get auth 2251799813685249
+
+# Create an authorization
+c8 create auth --ownerId=john --ownerType=USER --resourceType=PROCESS_DEFINITION --resourceId=order-process --permissions=READ,UPDATE
+
+# Delete an authorization
+c8 delete auth 2251799813685249
+```
+
+### Mapping Rules
+
+```bash
+# List mapping rules
+c8 list mapping-rules
+
+# Search mapping rules
+c8 search mapping-rules --claimName=groups --claimValue=admins
+
+# Get mapping rule by ID
+c8 get mapping-rule my-rule
+
+# Create a mapping rule
+c8 create mapping-rule --mappingRuleId=my-rule --name='Admin Mapping' --claimName=groups --claimValue=admins
+
+# Delete a mapping rule
+c8 delete mapping-rule my-rule
+
+# Assign a mapping rule to a tenant
+c8 assign mapping-rule my-rule --to-tenant=production
+```
+
+---
+
+## Which
+
+Show the currently active profile or output mode:
+
+```bash
+# Show active profile
+c8 which profile
+
+# Show current output mode
+c8 which output
+```
+
+---
+
+## Doctor
+
+Surface plugin-loading collisions detected at startup:
+
+```bash
+# List loaded plugins and any collisions
+c8 doctor plugin
+
+# Machine-readable output
+c8 doctor plugin --json
+```
+
+---
+
+## Watch with Process Applications
+
+Watch mode supports process application deployment with `--process-application` (or `--pa`):
+
+```bash
+# Watch and deploy the entire process application
+c8 watch --process-application
+
+# Short form
+c8 watch --pa
+
+# Watch a specific directory as a process application
+c8 watch ./my-app --pa
 ```
 
 ---

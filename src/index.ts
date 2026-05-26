@@ -17,6 +17,7 @@ import {
 	GLOBAL_FLAGS,
 	getCommandDef,
 	resolveAlias,
+	resolveVerbAlias,
 } from "./command-registry.ts";
 import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
 import { refreshCompletionsIfStale } from "./completion.ts";
@@ -389,10 +390,10 @@ async function main() {
 	refreshCompletionsIfStale();
 
 	// Extract command and resource
-	const [verb, resource, ...args] = positionals;
+	const [rawVerb, resource, ...args] = positionals;
 
 	// Handle global --version flag (only when no verb/command is provided)
-	if (values.version && !verb) {
+	if (values.version && !rawVerb) {
 		showVersion();
 		return;
 	}
@@ -402,17 +403,17 @@ async function main() {
 		return;
 	}
 
-	if (!verb) {
+	if (!rawVerb) {
 		showHelp();
 		return;
 	}
 
 	// Handle help command
 	if (
-		verb === "help" ||
-		verb === "menu" ||
-		verb === "--help" ||
-		verb === "-h"
+		rawVerb === "help" ||
+		rawVerb === "menu" ||
+		rawVerb === "--help" ||
+		rawVerb === "-h"
 	) {
 		// Check if user wants help for a specific command
 		if (resource) {
@@ -422,6 +423,13 @@ async function main() {
 		}
 		return;
 	}
+
+	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
+	// "rm" → "remove" or "unload" depending on the resource argument).
+	// Must happen before --help and dispatch so the dispatch key uses the
+	// canonical verb (not the raw alias) and `c8ctl rm plugin --help`
+	// shows unload help (not remove help).
+	const verb = resolveVerbAlias(rawVerb, resource);
 
 	// `c8ctl <verb> [<resource>] [args] --help` — uniformly route to the help
 	// renderer. Placed AFTER the `help`/`menu` reserved-verb handler and
@@ -496,7 +504,8 @@ async function main() {
 			// skipping leading GLOBAL_FLAGS (consuming string-flag values).
 			// A naive `indexOf(verb)` is unsafe because `verb` may also appear
 			// as the value of a global string flag (e.g. `--profile <verb>`).
-			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), verb);
+			// Use rawVerb here because process.argv contains the original input.
+			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), rawVerb);
 			const forwarded = stripGlobalFlags(rawAfterVerb);
 			await executePluginCommand(verb, forwarded);
 			return;
