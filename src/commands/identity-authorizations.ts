@@ -158,7 +158,7 @@ export interface CreateAuthorizationInput {
  * Returns a fully validated and type-narrowed input object.
  * Exits with code 1 on invalid input.
  */
-export function validateCreateAuthorizationOptions(options: {
+function validateCreateAuthorizationOptions(options: {
 	profile?: string;
 	ownerId?: string;
 	ownerType?: string;

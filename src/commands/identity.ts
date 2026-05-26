@@ -15,7 +15,6 @@ export {
 	getIdentityAuthorizationCommand,
 	listAuthorizationsCommand,
 	searchIdentityAuthorizationsCommand,
-	validateCreateAuthorizationOptions,
 } from "./identity-authorizations.ts";
 export {
 	createIdentityGroupCommand,
@@ -111,14 +110,13 @@ function formatFlags(flags: readonly string[]): string {
 /**
  * Core assign implementation.
  *
- * Called from per-resource `defineCommand` wrappers below and exercised
- * directly by `tests/unit/identity.test.ts`. All validation errors are
- * raised via `throw` so the framework wrapper can route them through
- * `handleCommandError` and add the `Failed to assign <resource>` prefix.
- * Do NOT reintroduce `process.exit` — the architectural guard in
+ * Called from per-resource `defineCommand` wrappers below. All validation
+ * errors are raised via `throw` so the framework wrapper can route them
+ * through `handleCommandError` and add the `Failed to assign <resource>`
+ * prefix. Do NOT reintroduce `process.exit` — the architectural guard in
  * `tests/unit/no-process-exit-in-handlers.test.ts` will reject it.
  */
-export async function handleAssign(
+async function handleAssign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
@@ -276,7 +274,7 @@ export async function handleAssign(
  * Core unassign implementation. See `handleAssign` docstring for the
  * error-handling contract (throw, do not `process.exit`).
  */
-export async function handleUnassign(
+async function handleUnassign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,

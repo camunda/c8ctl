@@ -11,7 +11,6 @@ import {
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
-	getProfileOrModeler,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
@@ -24,7 +23,7 @@ import { c8ctl } from "../runtime.ts";
 /**
  * List all profiles (c8ctl + Modeler)
  */
-export function listProfiles(): void {
+function listProfiles(): void {
 	const logger = getLogger();
 	const profiles = getAllProfiles();
 
@@ -73,51 +72,7 @@ export function listProfiles(): void {
 	}
 }
 
-/**
- * Show profile details
- */
-export function showProfile(name: string): void {
-	const logger = getLogger();
-	const profile = getProfileOrModeler(name);
-
-	if (!profile) {
-		throw new Error(`Profile '${name}' not found`);
-	}
-
-	const isModeler = profile.name.startsWith(MODELER_PREFIX);
-
-	logger.info(`Profile: ${profile.name}`);
-	logger.info(
-		`  Source: ${isModeler ? "Camunda Modeler (read-only)" : "c8ctl"}`,
-	);
-	logger.info(`  Base URL: ${profile.baseUrl}`);
-
-	if (profile.username) {
-		logger.info(`  Username: ${profile.username}`);
-		logger.info(`  Password: ${profile.password ? "********" : "(not set)"}`);
-	}
-
-	if (profile.clientId) {
-		logger.info(`  Client ID: ${profile.clientId}`);
-		logger.info(
-			`  Client Secret: ${profile.clientSecret ? "********" : "(not set)"}`,
-		);
-	}
-
-	if (profile.audience) {
-		logger.info(`  Audience: ${profile.audience}`);
-	}
-
-	if (profile.oAuthUrl) {
-		logger.info(`  OAuth URL: ${profile.oAuthUrl}`);
-	}
-
-	if (profile.defaultTenantId) {
-		logger.info(`  Default Tenant: ${profile.defaultTenantId}`);
-	}
-}
-
-export interface AddProfileOptions {
+interface AddProfileOptions {
 	url?: string;
 	clientId?: string;
 	clientSecret?: string;
@@ -143,7 +98,7 @@ function describeAuth(profile: Profile): string {
 /**
  * Add a c8ctl profile
  */
-export function addProfile(name: string, options: AddProfileOptions): void {
+function addProfile(name: string, options: AddProfileOptions): void {
 	const logger = getLogger();
 
 	// Prevent adding profiles with "modeler:" prefix
@@ -212,7 +167,7 @@ export function addProfile(name: string, options: AddProfileOptions): void {
 /**
  * Remove a c8ctl profile
  */
-export function removeProfile(name: string): void {
+function removeProfile(name: string): void {
 	const logger = getLogger();
 
 	// Prevent removing Modeler profiles
@@ -232,7 +187,7 @@ export function removeProfile(name: string): void {
 /**
  * Show which profile is currently active
  */
-export function whichProfile(): void {
+function whichProfile(): void {
 	const logger = getLogger();
 	const active = c8ctl.activeProfile;
 	if (!active) {
