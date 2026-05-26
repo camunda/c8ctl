@@ -9,30 +9,121 @@
  * The `.c8ignore` file is resolved from the deploy/watch target directory
  * (via `resolveIgnoreBaseDir`), falling back to `process.cwd()` when no
  * target is specified. See #258.
+ *
+ * Pattern matching is implemented using `node:path#matchesGlob` (Node ≥ 21)
+ * with the same semantics as the gitignore spec, removing the need for the
+ * `ignore` npm package.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import ignore, { type Ignore } from "ignore";
+import { dirname, join, matchesGlob, relative, resolve, sep } from "node:path";
 
 const DEFAULT_PATTERNS = ["node_modules/", "target/", ".git/"];
 
 const C8IGNORE_FILENAME = ".c8ignore";
+
+/** A compiled set of .c8ignore / default patterns. */
+export interface Ignore {
+	ignores(path: string): boolean;
+}
+
+interface ParsedPattern {
+	negate: boolean;
+	globs: string[];
+}
+
+/**
+ * Translate a single gitignore-style line into one or more glob patterns
+ * suitable for `path.matchesGlob`.
+ *
+ * Rules applied (subset of gitignore spec):
+ * - Lines starting with `#` and blank lines are skipped.
+ * - A leading `!` negates the pattern.
+ * - A trailing `/` restricts matching to directory contents only
+ *   (the directory entry itself is not matched — consistent with how the
+ *   deploy/watch scanner calls `isIgnored` with trailing-slash paths that
+ *   are then stripped by `path.relative`).
+ * - A leading `/` or an embedded `/` anchors the pattern to the base dir.
+ * - Otherwise the pattern matches at any depth.
+ */
+function parsePattern(raw: string): ParsedPattern | null {
+	// Trim trailing whitespace (leading whitespace is significant in gitignore,
+	// but trailing spaces are ignored unless escaped — we just trimEnd).
+	let pattern = raw.trimEnd();
+	if (!pattern || pattern.startsWith("#")) return null;
+
+	const negate = pattern.startsWith("!");
+	if (negate) pattern = pattern.slice(1);
+	if (!pattern) return null;
+
+	// Trailing slash: match only contents, not the directory entry itself.
+	const trailingSlash = pattern.endsWith("/");
+	if (trailingSlash) pattern = pattern.slice(0, -1);
+	if (!pattern) return null;
+
+	// Leading slash: pattern is anchored to the base directory.
+	const leadingSlash = pattern.startsWith("/");
+	if (leadingSlash) pattern = pattern.slice(1);
+
+	const hasEmbeddedSlash = pattern.includes("/");
+
+	let globs: string[];
+	if (leadingSlash || hasEmbeddedSlash) {
+		// Anchored to root.
+		if (trailingSlash) {
+			// e.g. `/dist/` → only contents of root `dist/`
+			globs = [`${pattern}/**`];
+		} else {
+			// e.g. `/src` or `src/build` → the entry itself and its contents
+			globs = [pattern, `${pattern}/**`];
+		}
+	} else {
+		// Not anchored: match at any depth.
+		if (trailingSlash) {
+			// e.g. `node_modules/` → contents of any `node_modules` dir, not
+			// the directory entry itself (mirrors `ignore` package behaviour).
+			globs = [`${pattern}/**`, `**/${pattern}/**`];
+		} else {
+			// e.g. `*.log` or `target` → the entry and its contents at any depth
+			globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
+		}
+	}
+
+	return { negate, globs };
+}
+
+function buildIgnoreChecker(
+	patterns: ParsedPattern[],
+): (path: string) => boolean {
+	return function ignoresPath(rel: string): boolean {
+		let ignored = false;
+		for (const { negate, globs } of patterns) {
+			if (globs.some((g) => matchesGlob(rel, g))) {
+				ignored = !negate;
+			}
+		}
+		return ignored;
+	};
+}
 
 /**
  * Load ignore rules from the `.c8ignore` file in `baseDir` (if present)
  * merged with built-in default patterns.
  */
 export function loadIgnoreRules(baseDir: string): Ignore {
-	const ig = ignore().add(DEFAULT_PATTERNS);
+	const lines = [...DEFAULT_PATTERNS];
 
 	const ignoreFilePath = join(baseDir, C8IGNORE_FILENAME);
 	if (existsSync(ignoreFilePath)) {
 		const content = readFileSync(ignoreFilePath, "utf-8");
-		ig.add(content);
+		lines.push(...content.split("\n"));
 	}
 
-	return ig;
+	const patterns = lines
+		.map(parsePattern)
+		.filter((p): p is ParsedPattern => p !== null);
+
+	return { ignores: buildIgnoreChecker(patterns) };
 }
 
 /**
