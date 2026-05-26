@@ -48,41 +48,29 @@ function parsePattern(raw: string): ParsedPattern | null {
 	// Trim trailing whitespace. The full gitignore spec allows a trailing `\ `
 	// to preserve spaces, but that edge case is not needed here — we
 	// deliberately omit it for simplicity.
-	let pattern = raw.trimEnd();
-	if (!pattern || pattern.startsWith("#")) return null;
+	const trimmed = raw.trimEnd();
+	if (!trimmed || trimmed.startsWith("#")) return null;
 
-	const negate = pattern.startsWith("!");
-	if (negate) pattern = pattern.slice(1);
+	const negate = trimmed.startsWith("!");
+	const withoutNegate = negate ? trimmed.slice(1) : trimmed;
+	const withoutTrailing = withoutNegate.replace(/\/$/, "");
+	const pattern = withoutTrailing.replace(/^\//, "");
 	if (!pattern) return null;
 
 	// Trailing slash: restricts matching to directories. We still include the
 	// directory entry itself so that callers can prune traversal early (e.g.
 	// `isIgnored(dir)` returns true for `node_modules` without a trailing slash).
-	const trailingSlash = pattern.endsWith("/");
-	if (trailingSlash) pattern = pattern.slice(0, -1);
-	if (!pattern) return null;
-
 	// Leading slash: pattern is anchored to the base directory.
-	const leadingSlash = pattern.startsWith("/");
-	if (leadingSlash) pattern = pattern.slice(1);
+	const anchored = withoutNegate.startsWith("/") || pattern.includes("/");
 
-	const hasEmbeddedSlash = pattern.includes("/");
-
-	let globs: string[];
-	if (leadingSlash || hasEmbeddedSlash) {
-		// Anchored to root: match the entry itself and its contents.
-		// e.g. `/dist/`, `/src`, `src/build`
-		globs = [pattern, `${pattern}/**`];
-	} else {
-		// Not anchored: match at any depth.
-		if (trailingSlash) {
-			// e.g. `node_modules/` → the directory entry and its contents at any depth
-			globs = [pattern, `${pattern}/**`, `**/${pattern}`, `**/${pattern}/**`];
-		} else {
-			// e.g. `*.log` or `target` → the entry and its contents at any depth
-			globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
-		}
-	}
+	// Anchored to root: match the entry itself and its contents.
+	// e.g. `/dist/`, `/src`, `src/build`
+	// Not anchored: match at any depth.
+	// e.g. `node_modules/` → the directory entry and its contents at any depth
+	// e.g. `*.log` or `target` → the entry and its contents at any depth
+	const globs = anchored
+		? [pattern, `${pattern}/**`]
+		: [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
 
 	return { negate, globs };
 }
@@ -90,58 +78,40 @@ function parsePattern(raw: string): ParsedPattern | null {
 function buildIgnoreChecker(
 	patterns: ParsedPattern[],
 ): (path: string) => boolean {
-	// Pre-compute whether any negate pattern exists at or after each index.
-	// This lets the inner loop short-circuit: once a pattern matches and no
-	// later negation can undo it, we can return immediately.
-	// Allocate one extra element so hasNegateAtOrAfter[patterns.length] is a
-	// safe zero read when checking the last pattern.
-	const hasNegateAtOrAfter = new Uint8Array(patterns.length + 1);
-	for (let i = patterns.length - 1; i >= 0; i--) {
-		hasNegateAtOrAfter[i] =
-			patterns[i].negate || hasNegateAtOrAfter[i + 1] ? 1 : 0;
-	}
+	const matches = (path: string, { globs }: ParsedPattern) =>
+		globs.some((g) => matchesGlob(path, g));
 
 	// gitignore rule: you cannot re-include a file if a parent directory of
 	// that file is excluded. Returns true when any ancestor of `rel` is
 	// ignored by the first `upTo` patterns (last-match-wins for ancestors).
-	function ancestorIgnored(rel: string, upTo: number): boolean {
-		const parts = rel.split("/");
-		for (let depth = 1; depth < parts.length; depth++) {
-			const ancestor = parts.slice(0, depth).join("/");
-			let result = false;
-			for (let i = 0; i < upTo; i++) {
-				const { negate, globs } = patterns[i];
-				if (globs.some((g) => matchesGlob(ancestor, g))) {
-					result = !negate;
-				}
-			}
-			if (result) return true;
-		}
-		return false;
-	}
+	const ancestorIgnored = (rel: string, upTo: number): boolean =>
+		rel
+			.split("/")
+			.slice(1)
+			.some((_, depth) => {
+				const ancestor = rel
+					.split("/")
+					.slice(0, depth + 1)
+					.join("/");
+				return patterns
+					.slice(0, upTo)
+					.reduce(
+						(ignored, p) => (matches(ancestor, p) ? !p.negate : ignored),
+						false,
+					);
+			});
 
-	return function ignoresPath(rel: string): boolean {
-		let ignored = false;
-		for (let i = 0; i < patterns.length; i++) {
-			const { negate, globs } = patterns[i];
-			if (globs.some((g) => matchesGlob(rel, g))) {
-				if (negate) {
-					// A negation can only un-ignore a path if no parent directory is
-					// currently excluded (gitignore rule: excluded dirs cannot be
-					// re-included via negation on their descendants).
-					if (!ancestorIgnored(rel, i)) {
-						ignored = false;
-					}
-				} else {
-					ignored = true;
-					// If we just confirmed "ignored" and no later pattern can negate it,
-					// there is no point iterating further.
-					if (!hasNegateAtOrAfter[i + 1]) return true;
-				}
+	return (rel: string): boolean =>
+		patterns.reduce<boolean>((ignored, p, i) => {
+			if (!matches(rel, p)) return ignored;
+			if (p.negate) {
+				// A negation can only un-ignore a path if no parent directory is
+				// currently excluded (gitignore rule: excluded dirs cannot be
+				// re-included via negation on their descendants).
+				return ancestorIgnored(rel, i) ? ignored : false;
 			}
-		}
-		return ignored;
-	};
+			return true;
+		}, false);
 }
 
 /**
@@ -204,7 +174,7 @@ export function isIgnored(
 export function resolveIgnoreBaseDir(paths: string[]): string {
 	if (paths.length === 0) return resolve(process.cwd());
 
-	const dirs = paths.map((p) => {
+	const toDir = (p: string): string => {
 		const abs = resolve(p);
 		try {
 			return statSync(abs).isDirectory() ? abs : dirname(abs);
@@ -212,8 +182,9 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 			// Path may not exist yet; use parent directory
 			return dirname(abs);
 		}
-	});
+	};
 
+	const dirs = paths.map(toDir);
 	if (dirs.length === 1) return dirs[0];
 
 	// Multiple paths: find deepest common ancestor.
@@ -224,15 +195,12 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 			? (s: string) => s.toLowerCase()
 			: (s: string) => s;
 	const segments = dirs.map((d) => d.split(sep));
-	const minLen = Math.min(...segments.map((s) => s.length));
-	const common: string[] = [];
-	for (let i = 0; i < minLen; i++) {
-		if (segments.every((s) => caseFold(s[i]) === caseFold(segments[0][i]))) {
-			common.push(segments[0][i]);
-		} else {
-			break;
-		}
-	}
+
+	const common = segments[0].filter(
+		(seg, i) =>
+			i < Math.min(...segments.map((s) => s.length)) &&
+			segments.every((s) => caseFold(s[i]) === caseFold(seg)),
+	);
 
 	if (common.length === 0) return resolve(process.cwd());
 
