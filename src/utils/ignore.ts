@@ -54,7 +54,7 @@ function parsePattern(raw: string): ParsedPattern | null {
 	const negate = trimmed.startsWith("!");
 	const withoutNegate = negate ? trimmed.slice(1) : trimmed;
 	const withoutTrailing = withoutNegate.replace(/\/$/, "");
-	const pattern = withoutTrailing.replace(/^\//, "");
+	const pattern = withoutTrailing.replace(/^\//, ""); // a leading / anchors the pattern to the base directory — the slash is a positional marker, not part of the glob itself
 	if (!pattern) return null;
 
 	// Trailing slash: restricts matching to directories. We still include the
