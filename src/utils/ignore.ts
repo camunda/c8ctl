@@ -97,9 +97,8 @@ function buildIgnoreChecker(
 	// safe zero read when checking the last pattern.
 	const hasNegateAtOrAfter = new Uint8Array(patterns.length + 1);
 	for (let i = patterns.length - 1; i >= 0; i--) {
-		hasNegateAtOrAfter[i] = (patterns[i].negate || hasNegateAtOrAfter[i + 1])
-			? 1
-			: 0;
+		hasNegateAtOrAfter[i] =
+			patterns[i].negate || hasNegateAtOrAfter[i + 1] ? 1 : 0;
 	}
 
 	// gitignore rule: you cannot re-include a file if a parent directory of

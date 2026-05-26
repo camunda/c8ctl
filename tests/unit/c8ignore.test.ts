@@ -435,10 +435,7 @@ describe(".c8ignore", () => {
 		});
 
 		test("negation works normally when no parent directory is excluded", () => {
-			writeFileSync(
-				join(testDir, ".c8ignore"),
-				"*.log\n!keep.log\n",
-			);
+			writeFileSync(join(testDir, ".c8ignore"), "*.log\n!keep.log\n");
 			const ig = loadIgnoreRules(testDir);
 			// Normal negation: no parent directory excluded, so it works.
 			assert.strictEqual(ig.ignores("keep.log"), false);
