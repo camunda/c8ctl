@@ -38,10 +38,9 @@ interface ParsedPattern {
  * Rules applied (subset of gitignore spec):
  * - Lines starting with `#` and blank lines are skipped.
  * - A leading `!` negates the pattern.
- * - A trailing `/` restricts matching to directory contents only
- *   (the directory entry itself is not matched — consistent with how the
- *   deploy/watch scanner calls `isIgnored` with trailing-slash paths that
- *   are then stripped by `path.relative`).
+ * - A trailing `/` restricts matching to directories: both the directory
+ *   entry itself and its contents are matched, so callers can prune
+ *   directory traversal by calling `isIgnored` on the directory entry.
  * - A leading `/` or an embedded `/` anchors the pattern to the base dir.
  * - Otherwise the pattern matches at any depth.
  */
@@ -56,7 +55,9 @@ function parsePattern(raw: string): ParsedPattern | null {
 	if (negate) pattern = pattern.slice(1);
 	if (!pattern) return null;
 
-	// Trailing slash: match only contents, not the directory entry itself.
+	// Trailing slash: restricts matching to directories. We still include the
+	// directory entry itself so that callers can prune traversal early (e.g.
+	// `isIgnored(dir)` returns true for `node_modules` without a trailing slash).
 	const trailingSlash = pattern.endsWith("/");
 	if (trailingSlash) pattern = pattern.slice(0, -1);
 	if (!pattern) return null;
@@ -71,8 +72,8 @@ function parsePattern(raw: string): ParsedPattern | null {
 	if (leadingSlash || hasEmbeddedSlash) {
 		// Anchored to root.
 		if (trailingSlash) {
-			// e.g. `/dist/` → only contents of root `dist/`
-			globs = [`${pattern}/**`];
+			// e.g. `/dist/` → the root `dist/` entry and its contents
+			globs = [pattern, `${pattern}/**`];
 		} else {
 			// e.g. `/src` or `src/build` → the entry itself and its contents
 			globs = [pattern, `${pattern}/**`];
@@ -80,9 +81,8 @@ function parsePattern(raw: string): ParsedPattern | null {
 	} else {
 		// Not anchored: match at any depth.
 		if (trailingSlash) {
-			// e.g. `node_modules/` → contents of any `node_modules` dir, not
-			// the directory entry itself (mirrors `ignore` package behaviour).
-			globs = [`${pattern}/**`, `**/${pattern}/**`];
+			// e.g. `node_modules/` → the directory entry and its contents at any depth
+			globs = [pattern, `${pattern}/**`, `**/${pattern}`, `**/${pattern}/**`];
 		} else {
 			// e.g. `*.log` or `target` → the entry and its contents at any depth
 			globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
