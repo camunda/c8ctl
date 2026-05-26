@@ -67,24 +67,34 @@ const MIN_EXTENDED_EXTENSIONS_VERSION = [8, 10];
 /**
  * Check whether the connected Camunda server supports extended file extensions.
  * Returns `true` for 8.10+, `false` for older versions.
- * Falls back to `true` on any error (network, auth) so the menu is shown
- * rather than silently suppressed.
+ * Falls back to `true` on any error (network, auth, unparseable version)
+ * so the skipped-files menu is shown rather than silently suppressing it.
  */
 export async function checkServerSupportsExtensions(
 	client: CamundaClient,
 ): Promise<boolean> {
+	const logger = getLogger();
 	try {
 		const topology = await client.getTopology();
 		const version = String(topology.gatewayVersion ?? "");
 		const parts = version.split(".").map(Number);
 		if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
-			return true; // Can't parse — assume supported
+			logger.warn(
+				`Could not parse server version "${version}" — assuming extended extensions are supported.`,
+			);
+			return true;
 		}
 		const [major, minor] = parts;
 		const [reqMajor, reqMinor] = MIN_EXTENDED_EXTENSIONS_VERSION;
 		return major > reqMajor || (major === reqMajor && minor >= reqMinor);
 	} catch {
-		// Network/auth error — show the menu anyway rather than hiding it
+		logger.warn(
+			"Could not reach the server to check its version (topology call failed).",
+		);
+		logger.warn(
+			"This can happen with OAuth/SaaS clusters before the first token is fetched, " +
+				"or if the server is not yet ready. Assuming extended extensions are supported.",
+		);
 		return true;
 	}
 }
@@ -692,8 +702,12 @@ export async function deployResources(
 	// Create a mapping from definition ID to resource file for later reference
 	const definitionIdToResource = new Map<string, ResourceFile>();
 	const formNameToResource = new Map<string, ResourceFile>();
+	const resourceNameToResource = new Map<string, ResourceFile>();
 
 	resources.forEach((r) => {
+		// Map by filename so decisionRequirements/resources entries can be resolved
+		resourceNameToResource.set(r.name, r);
+
 		const ext = extname(r.path);
 		if (ext === ".bpmn" || ext === ".dmn") {
 			const defId = extractDefinitionId(r.content, ext);
@@ -701,8 +715,17 @@ export async function deployResources(
 				definitionIdToResource.set(defId, r);
 			}
 		} else if (ext === ".form") {
-			// Forms are matched by filename (without extension)
-			const formId = basename(r.name, ".form");
+			// Forms are matched by their internal ID from the JSON content.
+			// Fall back to filename (without extension) if the ID can't be parsed.
+			let formId = basename(r.name, ".form");
+			try {
+				const parsed: unknown = JSON.parse(r.content.toString("utf-8"));
+				if (isRecord(parsed) && typeof parsed.id === "string") {
+					formId = parsed.id;
+				}
+			} catch {
+				// Not valid JSON — use filename
+			}
 			formNameToResource.set(formId, r);
 		}
 	});
@@ -789,28 +812,78 @@ export async function deployResources(
 	};
 
 	// Normalize all deployed resources into a common structure
+	const knownResources = new Set<ResourceFile>();
 	const allResources = [
-		...result.processes.map((proc) => ({
-			type: "Process" as const,
-			id: proc.processDefinitionId,
-			version: proc.processDefinitionVersion,
-			key: proc.processDefinitionKey.toString(),
-			resource: definitionIdToResource.get(proc.processDefinitionId),
-		})),
-		...result.decisions.map((dec) => ({
-			type: "Decision" as const,
-			id: dec.decisionDefinitionId || "-",
-			version: dec.version ?? "-",
-			key: dec.decisionDefinitionKey?.toString() || "-",
-			resource: definitionIdToResource.get(dec.decisionDefinitionId || ""),
-		})),
-		...result.forms.map((form) => ({
-			type: "Form" as const,
-			id: form.formId || "-",
-			version: form.version ?? "-",
-			key: form.formKey?.toString() || "-",
-			resource: formNameToResource.get(form.formId || ""),
-		})),
+		...result.processes.map((proc) => {
+			const resource = definitionIdToResource.get(proc.processDefinitionId);
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Process" as const,
+				id: proc.processDefinitionId,
+				version: proc.processDefinitionVersion,
+				key: proc.processDefinitionKey.toString(),
+				resource,
+			};
+		}),
+		...result.decisions.map((dec) => {
+			const resource = definitionIdToResource.get(
+				dec.decisionDefinitionId || "",
+			);
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Decision" as const,
+				id: dec.decisionDefinitionId || "-",
+				version: dec.version ?? "-",
+				key: dec.decisionDefinitionKey?.toString() || "-",
+				resource,
+			};
+		}),
+		...result.decisionRequirements.map((dr) => {
+			const resource = resourceNameToResource.get(dr.resourceName || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Decision Requirements" as const,
+				id: dr.decisionRequirementsId || "-",
+				version: dr.version ?? "-",
+				key: dr.decisionRequirementsKey?.toString() || "-",
+				resource,
+			};
+		}),
+		...result.forms.map((form) => {
+			const resource = formNameToResource.get(form.formId || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Form" as const,
+				id: form.formId || "-",
+				version: form.version ?? "-",
+				key: form.formKey?.toString() || "-",
+				resource,
+			};
+		}),
+		// Generic resources (not processes, decisions, or forms)
+		// are returned in the `resources` array by 8.10+.
+		...result.resources.map((res) => {
+			const resource = resourceNameToResource.get(res.resourceName || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Resource" as const,
+				id: res.resourceId || "-",
+				version: res.version ?? "-",
+				key: res.resourceKey?.toString() || "-",
+				resource,
+			};
+		}),
+		// Supplementary resources not returned in any response array.
+		// Show them in the table so the user knows they were deployed.
+		...resources
+			.filter((r) => !knownResources.has(r))
+			.map((r) => ({
+				type: "Resource" as const,
+				id: "-",
+				version: "-" as const,
+				key: "-",
+				resource: r,
+			})),
 	];
 
 	const tableData: ResourceRow[] = allResources.map(
