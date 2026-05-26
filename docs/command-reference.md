@@ -1140,6 +1140,52 @@ Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
 ---
 
+### `mcp`
+
+Install/uninstall/list c8ctl mcp-proxy entries in MCP client configs (Claude Desktop, Cursor, VS Code)
+
+**Resources:** install, uninstall, list
+
+**Positional arguments:**
+
+- **install:** `<client>` (required)
+- **uninstall:** `<client>` (required)
+
+**Resource-specific flags:**
+
+<details>
+<summary><code>install</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--profile` | string |  | Profile name to embed in the MCP entry (default: active profile, then the bootstrap 'local' profile) |
+| `--alias` | string |  | Alias to use as the entry key in the client's config (default: the resolved profile name) |
+| `--force` | boolean |  | Overwrite an existing entry at the same alias even if it was not installed by c8ctl |
+
+</details>
+
+<details>
+<summary><code>uninstall</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--alias` | string |  | Alias of the entry to remove (default: active profile name, then 'local', then 'camunda') |
+| `--force` | boolean |  | Remove an entry at the alias even if it does not look like a c8ctl-managed entry |
+
+</details>
+
+**Examples:**
+
+```bash
+c8ctl mcp install claude-desktop                            # Install c8ctl as an MCP server in Claude Desktop
+c8ctl mcp install cursor --profile prod                     # Install in Cursor using the 'prod' profile
+c8ctl mcp install vscode --alias camunda-prod               # Install in VS Code with a custom alias
+c8ctl mcp list                                              # Show every c8ctl MCP entry across known clients
+c8ctl mcp uninstall claude-desktop --alias camunda-prod     # Remove a previously installed entry
+```
+
+---
+
 ### `feedback`
 
 Open the feedback page to report issues or request features
