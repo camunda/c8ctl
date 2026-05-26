@@ -93,13 +93,13 @@ function buildIgnoreChecker(
 	// Pre-compute whether any negate pattern exists at or after each index.
 	// This lets the inner loop short-circuit: once a pattern matches and no
 	// later negation can undo it, we can return immediately.
-	const hasNegateAtOrAfter = new Uint8Array(patterns.length);
+	// Allocate one extra element so hasNegateAtOrAfter[patterns.length] is a
+	// safe zero read when checking the last pattern.
+	const hasNegateAtOrAfter = new Uint8Array(patterns.length + 1);
 	for (let i = patterns.length - 1; i >= 0; i--) {
-		hasNegateAtOrAfter[i] =
-			patterns[i].negate ||
-			(i < patterns.length - 1 ? hasNegateAtOrAfter[i + 1] : 0)
-				? 1
-				: 0;
+		hasNegateAtOrAfter[i] = (patterns[i].negate || hasNegateAtOrAfter[i + 1])
+			? 1
+			: 0;
 	}
 
 	// gitignore rule: you cannot re-include a file if a parent directory of

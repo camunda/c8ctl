@@ -422,6 +422,12 @@ describe(".c8ignore", () => {
 				true,
 				"negation cannot re-include a file inside an excluded directory",
 			);
+			// Deeper nesting: ancestor check must walk multiple levels.
+			assert.strictEqual(
+				ig.ignores("ignored/subdir/deep.bpmn"),
+				true,
+				"negation cannot re-include a file nested deeper inside an excluded directory",
+			);
 			// Other files inside the excluded directory are also ignored.
 			assert.strictEqual(ig.ignores("ignored/other.bpmn"), true);
 			// Files outside the excluded directory are unaffected.
