@@ -62,7 +62,7 @@ export async function confirmDeployTarget(options: {
 		});
 
 		rl.question(
-			`Deploying to profile "${profileName}" (${baseUrl})\nContinue? [y/N/a] (a = always, don't prompt again) `,
+			`${message}\nContinue? [y/N/a] (a = always, don't prompt again) `,
 			(answer) => {
 				answered = true;
 				rl.close();
