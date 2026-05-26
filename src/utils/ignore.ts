@@ -102,15 +102,43 @@ function buildIgnoreChecker(
 				: 0;
 	}
 
+	// gitignore rule: you cannot re-include a file if a parent directory of
+	// that file is excluded. Returns true when any ancestor of `rel` is
+	// ignored by the first `upTo` patterns (last-match-wins for ancestors).
+	function ancestorIgnored(rel: string, upTo: number): boolean {
+		const parts = rel.split("/");
+		for (let depth = 1; depth < parts.length; depth++) {
+			const ancestor = parts.slice(0, depth).join("/");
+			let result = false;
+			for (let i = 0; i < upTo; i++) {
+				const { negate, globs } = patterns[i];
+				if (globs.some((g) => matchesGlob(ancestor, g))) {
+					result = !negate;
+				}
+			}
+			if (result) return true;
+		}
+		return false;
+	}
+
 	return function ignoresPath(rel: string): boolean {
 		let ignored = false;
 		for (let i = 0; i < patterns.length; i++) {
 			const { negate, globs } = patterns[i];
 			if (globs.some((g) => matchesGlob(rel, g))) {
-				ignored = !negate;
-				// If we just confirmed "ignored" and no later pattern can negate it,
-				// there is no point iterating further.
-				if (ignored && !hasNegateAtOrAfter[i + 1]) return true;
+				if (negate) {
+					// A negation can only un-ignore a path if no parent directory is
+					// currently excluded (gitignore rule: excluded dirs cannot be
+					// re-included via negation on their descendants).
+					if (!ancestorIgnored(rel, i)) {
+						ignored = false;
+					}
+				} else {
+					ignored = true;
+					// If we just confirmed "ignored" and no later pattern can negate it,
+					// there is no point iterating further.
+					if (!hasNegateAtOrAfter[i + 1]) return true;
+				}
 			}
 		}
 		return ignored;

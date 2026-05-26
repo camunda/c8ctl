@@ -407,6 +407,37 @@ describe(".c8ignore", () => {
 				"should return common ancestor of sibling paths",
 			);
 		});
+
+		test("negation cannot re-include a file whose parent directory is excluded", () => {
+			// gitignore rule: if a parent directory is excluded, negation patterns
+			// on files within it have no effect.
+			writeFileSync(
+				join(testDir, ".c8ignore"),
+				"ignored/\n!ignored/keep.bpmn\n",
+			);
+			const ig = loadIgnoreRules(testDir);
+			// The parent directory is excluded, so the file stays ignored.
+			assert.strictEqual(
+				ig.ignores("ignored/keep.bpmn"),
+				true,
+				"negation cannot re-include a file inside an excluded directory",
+			);
+			// Other files inside the excluded directory are also ignored.
+			assert.strictEqual(ig.ignores("ignored/other.bpmn"), true);
+			// Files outside the excluded directory are unaffected.
+			assert.strictEqual(ig.ignores("allowed/keep.bpmn"), false);
+		});
+
+		test("negation works normally when no parent directory is excluded", () => {
+			writeFileSync(
+				join(testDir, ".c8ignore"),
+				"*.log\n!keep.log\n",
+			);
+			const ig = loadIgnoreRules(testDir);
+			// Normal negation: no parent directory excluded, so it works.
+			assert.strictEqual(ig.ignores("keep.log"), false);
+			assert.strictEqual(ig.ignores("debug.log"), true);
+		});
 	});
 
 	// ── Target-directory resolution (#258) ───────────────────────────
