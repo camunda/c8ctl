@@ -45,14 +45,26 @@ export async function confirmDeployTarget(options: {
 	}
 
 	return new Promise<ConfirmResult>((resolve) => {
+		let answered = false;
 		const rl = createInterface({
 			input: process.stdin,
 			output: process.stderr,
 		});
 
+		// Safety net: if stdin closes (Ctrl+D / EOF) or SIGINT fires
+		// before a line is submitted, the question callback never runs.
+		// Treat that as "no" so the promise always resolves.
+		rl.on("close", () => {
+			if (!answered) {
+				answered = true;
+				resolve("no");
+			}
+		});
+
 		rl.question(
 			`Deploying to profile "${profileName}" (${baseUrl})\nContinue? [y/N/a] (a = always, don't prompt again) `,
 			(answer) => {
+				answered = true;
 				rl.close();
 				const normalized = answer.trim().toLowerCase();
 				if (normalized === "a" || normalized === "always") {
