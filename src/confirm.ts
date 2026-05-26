@@ -9,7 +9,7 @@
  */
 
 import { createInterface } from "node:readline";
-import { c8ctl } from "./runtime.ts";
+import { logStderrMessage } from "./logger.ts";
 
 export type ConfirmResult = "yes" | "no" | "always";
 
@@ -36,11 +36,7 @@ export async function confirmDeployTarget(options: {
 	// Treat the session as non-interactive unless both stdin AND stderr
 	// are TTY — if stderr is redirected the prompt would be invisible.
 	if (!process.stdin.isTTY || !process.stderr.isTTY) {
-		if (c8ctl.outputMode === "json") {
-			console.error(JSON.stringify({ type: "message", message }));
-		} else {
-			console.error(message);
-		}
+		logStderrMessage(message);
 		return "yes";
 	}
 

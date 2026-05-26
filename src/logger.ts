@@ -433,3 +433,19 @@ export function getLogger(mode?: OutputMode): Logger {
 	}
 	return loggerInstance;
 }
+
+/**
+ * Log a message to stderr, respecting the current output mode.
+ * In JSON mode, emits a structured `{ type: "message", message }` record.
+ * In text mode, emits the plain message string.
+ *
+ * Use this for informational messages that should not appear in stdout
+ * (e.g. confirmation prompts, deploy progress).
+ */
+export function logStderrMessage(message: string): void {
+	if (c8ctl.outputMode === "json") {
+		console.error(JSON.stringify({ type: "message", message }));
+	} else {
+		console.error(message);
+	}
+}

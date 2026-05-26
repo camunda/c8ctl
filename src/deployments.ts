@@ -23,7 +23,7 @@ import {
 import { confirmDeployTarget } from "./confirm.ts";
 import { normalizeToError, SilentError } from "./errors.ts";
 import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "./ignore.ts";
-import { getLogger, isRecord } from "./logger.ts";
+import { getLogger, isRecord, logStderrMessage } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
@@ -32,11 +32,7 @@ const PROCESS_APPLICATION_FILE = ".process-application";
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
  */
 function logMessage(message: string): void {
-	if (c8ctl.outputMode === "json") {
-		console.error(JSON.stringify({ type: "message", message }));
-	} else {
-		console.error(message);
-	}
+	logStderrMessage(message);
 }
 
 /**
