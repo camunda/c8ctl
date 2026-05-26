@@ -15,6 +15,7 @@ import {
 	statSync,
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
 import { createClient } from "../../client.ts";
@@ -22,6 +23,7 @@ import { resolveTenantId } from "../../config.ts";
 import { normalizeToError, SilentError } from "../../errors.ts";
 import {
 	isIgnored,
+	loadDeployAlwaysRules,
 	loadIgnoreRules,
 	resolveIgnoreBaseDir,
 } from "../../ignore.ts";
@@ -54,6 +56,37 @@ export function logSkippedExtensions(skippedExtensions: Set<string>): void {
 		`Skipped files with extensions not in the allow-list (${exts}). ` +
 			`Use --extensions=<ext> to add specific types, or --all-extensions to include all server-supported types.`,
 	);
+}
+
+/**
+ * Minimum Camunda version that supports deploying additional file extensions
+ * beyond .bpmn, .dmn, and .form.
+ */
+const MIN_EXTENDED_EXTENSIONS_VERSION = [8, 10];
+
+/**
+ * Check whether the connected Camunda server supports extended file extensions.
+ * Returns `true` for 8.10+, `false` for older versions.
+ * Falls back to `true` on any error (network, auth) so the menu is shown
+ * rather than silently suppressed.
+ */
+export async function checkServerSupportsExtensions(
+	client: CamundaClient,
+): Promise<boolean> {
+	try {
+		const topology = await client.getTopology();
+		const version = String(topology.gatewayVersion ?? "");
+		const parts = version.split(".").map(Number);
+		if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
+			return true; // Can't parse — assume supported
+		}
+		const [major, minor] = parts;
+		const [reqMajor, reqMinor] = MIN_EXTENDED_EXTENSIONS_VERSION;
+		return major > reqMajor || (major === reqMajor && minor >= reqMinor);
+	} catch {
+		// Network/auth error — show the menu anyway rather than hiding it
+		return true;
+	}
 }
 
 /**
@@ -199,6 +232,8 @@ function collectResourceFiles(
 	force?: boolean,
 	extensionList?: readonly string[],
 	skippedExtensions?: Set<string>,
+	skippedFiles?: string[],
+	deployAlways?: Ignore,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -277,9 +312,22 @@ function collectResourceFiles(
 					extensionList &&
 					!extensionList.includes(extname(fullPath))
 				) {
+					// Check deploy-always negation rules from .c8ignore
+					if (
+						deployAlways &&
+						ignoreBaseDir &&
+						isIgnored(deployAlways, fullPath, ignoreBaseDir)
+					) {
+						// File matches a !path negation — include it
+						files.push(fullPath);
+						return;
+					}
 					if (skippedExtensions) {
 						const ext = extname(fullPath);
 						skippedExtensions.add(ext || "<no extension>");
+					}
+					if (skippedFiles) {
+						skippedFiles.push(fullPath);
 					}
 					return;
 				}
@@ -311,6 +359,8 @@ function collectResourceFiles(
 				force,
 				extensionList,
 				skippedExtensions,
+				skippedFiles,
+				deployAlways,
 			);
 		});
 
@@ -325,6 +375,8 @@ function collectResourceFiles(
 				force,
 				extensionList,
 				skippedExtensions,
+				skippedFiles,
+				deployAlways,
 			);
 		});
 	}
@@ -357,6 +409,7 @@ function findDuplicateDefinitionIds(
 interface CollectResult {
 	resources: ResourceFile[];
 	skippedExtensions: Set<string>;
+	skippedFiles: string[];
 	/** Resolved base paths used for resource collection and display.
 	 *  When PA detection fires, these are expanded to the PA root(s)
 	 *  rather than the user-supplied input paths. Used downstream for
@@ -380,6 +433,9 @@ export function collectResourcesForPaths(
 	paths: string[],
 	force?: boolean,
 	extensionList: readonly string[] = DEPLOYABLE_EXTENSIONS,
+	/** When false, skip loading deploy-always negation rules from .c8ignore.
+	 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
+	loadDeployAlways = true,
 ): CollectResult {
 	if (paths.length === 0) {
 		throw new Error(
@@ -440,8 +496,16 @@ export function collectResourcesForPaths(
 	const ignoreBaseDir = resolveIgnoreBaseDir(effectivePaths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
+	// Load !path negation patterns from .c8ignore. Files matching a
+	// negation bypass extension filtering ("deploy them always").
+	// Skipped on servers <8.10 where extended extensions aren't supported.
+	const deployAlways = loadDeployAlways
+		? loadDeployAlwaysRules(ignoreBaseDir)
+		: null;
+
 	const resources: ResourceFile[] = [];
 	const skippedExtensions = new Set<string>();
+	const skippedFiles: string[] = [];
 	effectivePaths.forEach((path) => {
 		collectResourceFiles(
 			path,
@@ -452,6 +516,8 @@ export function collectResourcesForPaths(
 			force,
 			extensionList,
 			skippedExtensions,
+			skippedFiles,
+			deployAlways ?? undefined,
 		);
 	});
 
@@ -481,7 +547,12 @@ export function collectResourcesForPaths(
 		throw new Error("No deployable files found in the specified paths");
 	}
 
-	return { resources: deduped, skippedExtensions, effectivePaths };
+	return {
+		resources: deduped,
+		skippedExtensions,
+		skippedFiles,
+		effectivePaths,
+	};
 }
 
 /**
@@ -513,6 +584,14 @@ export async function deployResources(
 		 * Callers do not need their own try/catch to suppress aborts.
 		 */
 		signal?: AbortSignal;
+		/** When true, skip the skipped-extensions log (caller already handled it). */
+		suppressSkippedLog?: boolean;
+		/** When false, skip loading deploy-always negation rules from .c8ignore.
+		 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
+		loadDeployAlways?: boolean;
+		/** Override base path for relative path display. When set, used instead
+		 *  of inferring from paths (avoids regression when extra file paths are appended). */
+		basePath?: string;
 	},
 ): Promise<void> {
 	const logger = getLogger();
@@ -529,9 +608,12 @@ export async function deployResources(
 			paths,
 			options.force,
 			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
+			options.loadDeployAlways ?? true,
 		);
 
-	logSkippedExtensions(skippedExtensions);
+	if (!options.suppressSkippedLog) {
+		logSkippedExtensions(skippedExtensions);
+	}
 
 	// Use the effective paths (which may have been expanded to a PA root)
 	// for relative path calculation so display paths make sense.
@@ -540,7 +622,8 @@ export async function deployResources(
 	const client = createClient(options.profile);
 
 	// Calculate relative paths for display
-	const basePath = basePaths.length === 1 ? basePaths[0] : process.cwd();
+	const basePath =
+		options.basePath ?? (basePaths.length === 1 ? basePaths[0] : process.cwd());
 	resources.forEach((r) => {
 		r.relativePath = relative(basePath, r.path) || r.name;
 	});
