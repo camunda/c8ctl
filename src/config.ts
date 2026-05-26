@@ -97,6 +97,8 @@ export interface SessionState {
 	activeProfile?: string;
 	activeTenant?: string;
 	outputMode: OutputMode;
+	/** When true, deploy skips the profile-selection prompt and uses the active profile. */
+	skipDeployConfirm?: boolean;
 }
 
 /**
@@ -653,6 +655,7 @@ export function loadSessionState(): SessionState {
 			activeProfile: c8ctl.activeProfile,
 			activeTenant: c8ctl.activeTenant,
 			outputMode: c8ctl.outputMode,
+			skipDeployConfirm: state.skipDeployConfirm === true,
 		};
 	} catch {
 		return {
@@ -664,16 +667,67 @@ export function loadSessionState(): SessionState {
 }
 
 /**
+ * Read `skipDeployConfirm` from the persisted session file without
+ * side effects.
+ *
+ * Unlike `loadSessionState()` this does NOT update `c8ctl.*` or
+ * `persistedOutputMode`, so it is safe to call mid-handler without
+ * clobbering per-invocation overrides like `--json`.
+ */
+export function readSkipDeployConfirm(): boolean {
+	try {
+		const data = readFileSync(getSessionStatePath(), "utf-8");
+		const state: Record<string, unknown> = JSON.parse(data);
+		return state.skipDeployConfirm === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Write `skipDeployConfirm` to the session file without clobbering
+ * any other field.  Uses `saveSessionState()` (no-arg form) which
+ * merges with `c8ctl.*` / `persistedOutputMode` so per-invocation
+ * overrides like `--json` never leak to disk.
+ */
+export function saveSkipDeployConfirm(value: boolean): void {
+	// saveSessionState (no-arg) now preserves skipDeployConfirm from disk
+	// via readSessionFlag, but we need to override it.  Temporarily write
+	// the flag into the session file first, then let the normal save flow
+	// merge it with the runtime values.
+	//
+	// Simplest approach: read → patch → write directly.
+	const path = getSessionStatePath();
+	try {
+		const data = readFileSync(path, "utf-8");
+		const state: Record<string, unknown> = JSON.parse(data);
+		state.skipDeployConfirm = value;
+		writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
+	} catch {
+		// File may not exist yet — create with the flag
+		writeFileSync(
+			path,
+			JSON.stringify({ skipDeployConfirm: value }, null, 2),
+			"utf-8",
+		);
+	}
+}
+
+/**
  * Save session state from c8ctl runtime object to disk
  */
 export function saveSessionState(state?: SessionState): void {
 	// Use persistedOutputMode (the on-disk value) by default, NOT
 	// c8ctl.outputMode — the latter may carry a per-invocation override
 	// from --json or C8CTL_OUTPUT_MODE that must not leak to disk (#356).
+	//
+	// When called without explicit state (e.g. from setActiveProfile),
+	// preserve skipDeployConfirm from disk rather than silently dropping it.
 	const stateToSave: SessionState = {
 		activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
 		activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
 		outputMode: state?.outputMode ?? persistedOutputMode,
+		skipDeployConfirm: state?.skipDeployConfirm ?? readSkipDeployConfirm(),
 	};
 
 	if (state) {
@@ -696,10 +750,17 @@ export function saveSessionState(state?: SessionState): void {
 }
 
 /**
- * Set active profile/connection in session and persist to disk
+ * Set active profile/connection in session and persist to disk.
+ *
+ * Clears `skipDeployConfirm` so the deploy profile selector re-appears
+ * after a profile switch (the user told the prompt "always use X", but
+ * now the active profile has changed).
  */
 export function setActiveProfile(name: string): void {
 	c8ctl.activeProfile = name;
+	// Clear skipDeployConfirm on disk before saving so the merged
+	// saveSessionState doesn't preserve the stale flag.
+	saveSkipDeployConfirm(false);
 	saveSessionState();
 }
 
@@ -799,9 +860,11 @@ export function envVarsToProfile(
 
 /**
  * Clear the active session profile and persist to disk.
+ * Also clears `skipDeployConfirm` (same rationale as `setActiveProfile`).
  */
 export function clearActiveProfile(): void {
 	c8ctl.activeProfile = undefined;
+	saveSkipDeployConfirm(false);
 	saveSessionState();
 }
 

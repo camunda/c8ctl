@@ -142,18 +142,18 @@ describe("deploy confirmation guard (#393)", () => {
 		);
 	});
 
-	test("multiple profiles without --yes: shows target in stderr (non-TTY auto-approve)", async () => {
-		// No --dry-run: the confirmation guard runs, then deploy fails (no cluster).
-		// We only assert on the confirmation message in stderr.
+	test("multiple profiles without --yes: fails in non-interactive mode", async () => {
+		// Non-interactive (no TTY) with multiple profiles and no --profile/--yes
+		// should fail with guidance rather than silently deploying.
 		const result = await c8Deploy(tempDir, [
 			{ name: "local", baseUrl: "http://127.0.0.1:1/v2" },
 			{ name: "production", baseUrl: "http://127.0.0.1:2/v2" },
 		]);
 
-		// Deploy will fail (no real cluster) — that's expected.
+		assert.strictEqual(result.status, 1, `should fail in non-interactive mode`);
 		assert.ok(
-			result.stderr.includes("Deploying to profile"),
-			`should show deploy target when multiple profiles exist, got: ${result.stderr}`,
+			result.stderr.includes("Multiple profiles configured"),
+			`should show guidance, got: ${result.stderr}`,
 		);
 	});
 
@@ -208,8 +208,9 @@ describe("deploy confirmation guard (#393)", () => {
 		);
 	});
 
-	test("multiple profiles with active session profile: shows profile name in confirmation", async () => {
-		// No --dry-run: confirmation runs and shows the active profile name.
+	test("multiple profiles with active session profile: bails with error in non-interactive mode", async () => {
+		// Non-interactive (no TTY) with multiple profiles and no --profile/--yes
+		// should fail with guidance, even with an active session profile.
 		const result = await c8Deploy(
 			tempDir,
 			[
@@ -220,16 +221,17 @@ describe("deploy confirmation guard (#393)", () => {
 			{ activeProfile: "staging", outputMode: "text" },
 		);
 
+		assert.strictEqual(result.status, 1, `should fail in non-interactive mode`);
 		assert.ok(
-			result.stderr.includes('"staging"'),
-			`should show active profile name in confirmation, got: ${result.stderr}`,
+			result.stderr.includes("Multiple profiles configured"),
+			`should show guidance, got: ${result.stderr}`,
 		);
 	});
 
-	test("active session profile + CAMUNDA_BASE_URL: guard still runs (profile overrides env)", async () => {
+	test("active session profile + CAMUNDA_BASE_URL: non-interactive fails with guidance", async () => {
 		// When both an active session profile and CAMUNDA_BASE_URL are set,
-		// resolveClusterConfig() prefers the session profile. The guard must
-		// still run because CAMUNDA_BASE_URL is NOT the effective target.
+		// resolveClusterConfig() prefers the session profile. In non-interactive
+		// mode with multiple profiles, the CLI should fail with guidance.
 		const result = await c8Deploy(
 			tempDir,
 			[
@@ -241,13 +243,10 @@ describe("deploy confirmation guard (#393)", () => {
 			{ CAMUNDA_BASE_URL: "http://127.0.0.1:3/v2" },
 		);
 
+		assert.strictEqual(result.status, 1, `should fail in non-interactive mode`);
 		assert.ok(
-			result.stderr.includes("Deploying to profile"),
-			`guard should still run when active profile overrides CAMUNDA_BASE_URL, got: ${result.stderr}`,
-		);
-		assert.ok(
-			result.stderr.includes('"staging"'),
-			`should show session profile name, not env, got: ${result.stderr}`,
+			result.stderr.includes("Multiple profiles configured"),
+			`should show guidance, got: ${result.stderr}`,
 		);
 	});
 });

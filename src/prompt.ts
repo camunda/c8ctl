@@ -127,7 +127,23 @@ export interface ConfirmResult {
 
 // ── TTY detection ─────────────────────────────────────────────────
 
-function isInteractive(): boolean {
+/**
+ * Determine whether the session supports interactive prompts.
+ *
+ * Checks (in order of precedence):
+ * 1. `C8CTL_INTERACTIVE=false` — explicit opt-out (e.g. in CI or scripts)
+ * 2. `C8CTL_INTERACTIVE=true`  — explicit opt-in (force prompts even in CI)
+ * 3. `CI=true`                 — standard CI signal → non-interactive
+ * 4. stdin + stderr must both be TTY
+ */
+export function isInteractive(): boolean {
+	const explicit = process.env.C8CTL_INTERACTIVE?.toLowerCase();
+	if (explicit === "false" || explicit === "0") return false;
+	if (explicit === "true" || explicit === "1") return true;
+
+	// Standard CI env var — most CI systems set CI=true
+	if (process.env.CI?.toLowerCase() === "true") return false;
+
 	return !!process.stdin.isTTY && !!process.stderr.isTTY;
 }
 
