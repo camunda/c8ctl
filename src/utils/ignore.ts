@@ -70,14 +70,9 @@ function parsePattern(raw: string): ParsedPattern | null {
 
 	let globs: string[];
 	if (leadingSlash || hasEmbeddedSlash) {
-		// Anchored to root.
-		if (trailingSlash) {
-			// e.g. `/dist/` → the root `dist/` entry and its contents
-			globs = [pattern, `${pattern}/**`];
-		} else {
-			// e.g. `/src` or `src/build` → the entry itself and its contents
-			globs = [pattern, `${pattern}/**`];
-		}
+		// Anchored to root: match the entry itself and its contents.
+		// e.g. `/dist/`, `/src`, `src/build`
+		globs = [pattern, `${pattern}/**`];
 	} else {
 		// Not anchored: match at any depth.
 		if (trailingSlash) {
