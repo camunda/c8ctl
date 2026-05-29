@@ -116,6 +116,9 @@ export const metadata = {
 				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
 				'modeler:executionPlatform="Camunda Cloud" and ' +
 				"modeler:executionPlatformVersion in the BPMN file. " +
+				"Only the bundled bpmnlint:recommended and camunda-compat rulesets are " +
+				"available; a .bpmnlintrc that extends a third-party bpmnlint plugin is " +
+				"not supported — use the standalone `bpmnlint` CLI for those. " +
 				"`format` round-trips BPMN through bpmn-moddle to emit canonical XML.",
 			subcommands: [
 				{
