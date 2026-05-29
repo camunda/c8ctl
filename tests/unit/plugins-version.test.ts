@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import {
 	getInstalledPluginVersion,
 	getVersionFromSource,
-} from "../../src/plugin-version.ts";
+} from "../../src/framework/plugin-version.ts";
 
 describe("Plugin Version Helpers", () => {
 	let tempDir: string;

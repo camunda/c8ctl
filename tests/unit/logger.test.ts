@@ -4,8 +4,8 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { getLogger, Logger, sortTableData } from "../../src/logger.ts";
-import { c8ctl } from "../../src/runtime.ts";
+import { getLogger, Logger, sortTableData } from "../../src/core/logger.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("Logger Module", () => {
 	let consoleLogSpy: string[];

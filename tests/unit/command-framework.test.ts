@@ -24,8 +24,8 @@ import {
 	type InferPositionals,
 	type ResolvedFlags,
 	type ResolvedPositionals,
-} from "../../src/command-framework.ts";
-import type { FlagDef } from "../../src/command-registry.ts";
+} from "../../src/framework/command-framework.ts";
+import type { FlagDef } from "../../src/framework/command-registry.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 // ─── Test flag schemas ───────────────────────────────────────────────────────

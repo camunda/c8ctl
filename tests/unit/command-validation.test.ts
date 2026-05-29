@@ -14,7 +14,7 @@ import {
 	requireOneOf,
 	requireOption,
 	requirePositional,
-} from "../../src/command-validation.ts";
+} from "../../src/framework/command-validation.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 // A minimal enum-like object matching the SDK pattern
@@ -251,13 +251,16 @@ describe("requireOneOf", () => {
 
 // ─── validateFlags ───────────────────────────────────────────────────────────
 
-import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
+import type {
+	CommandDef,
+	FlagDef,
+} from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	resolveAlias,
-} from "../../src/command-registry.ts";
-import { validateFlags } from "../../src/command-validation.ts";
+} from "../../src/framework/command-registry.ts";
+import { validateFlags } from "../../src/framework/command-validation.ts";
 
 /** Widened read-only view of COMMAND_REGISTRY for iterating with index signatures. */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
@@ -437,7 +440,7 @@ describe("validateFlags behaviour", () => {
 function effectiveFlags(
 	def: CommandDef,
 	resource: string | undefined,
-): Record<string, import("../../src/command-registry.ts").FlagDef> {
+): Record<string, import("../../src/framework/command-registry.ts").FlagDef> {
 	if (def.resourceFlags && resource && def.resourceFlags[resource]) {
 		return def.resourceFlags[resource];
 	}
@@ -618,7 +621,7 @@ describe("validateFlags handles repeated-flag arrays", () => {
 
 	const requiredFlag: Record<
 		string,
-		import("../../src/command-registry.ts").FlagDef
+		import("../../src/framework/command-registry.ts").FlagDef
 	> = {
 		owner: { type: "string", description: "Owner", required: true },
 	};
@@ -637,7 +640,7 @@ describe("validateFlags handles repeated-flag arrays", () => {
 
 	const validatedFlag: Record<
 		string,
-		import("../../src/command-registry.ts").FlagDef
+		import("../../src/framework/command-registry.ts").FlagDef
 	> = {
 		num: {
 			type: "string",

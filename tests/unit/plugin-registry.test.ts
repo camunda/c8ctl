@@ -6,7 +6,7 @@ import assert from "node:assert";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { after, beforeEach, describe, test } from "node:test";
-import { getUserDataDir } from "../../src/config.ts";
+import { getUserDataDir } from "../../src/core/config.ts";
 import {
 	addPluginToRegistry,
 	clearRegistryCache,
@@ -14,7 +14,7 @@ import {
 	getRegisteredPlugins,
 	isPluginRegistered,
 	removePluginFromRegistry,
-} from "../../src/plugin-registry.ts";
+} from "../../src/framework/plugin-registry.ts";
 
 // Test registry path
 const testRegistryPath = join(getUserDataDir(), "plugins.json");

@@ -19,7 +19,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { normalizeToError } from "../../src/errors.ts";
+import { normalizeToError } from "../../src/core/errors.ts";
 
 describe("normalizeToError — Error inputs pass through unchanged", () => {
 	test("plain Error is returned by reference (no wrapping)", () => {

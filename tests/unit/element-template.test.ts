@@ -18,7 +18,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
-import { isRecord } from "../../src/logger.ts";
+import { isRecord } from "../../src/core/logger.ts";
 import { c8 } from "../utils/cli.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 

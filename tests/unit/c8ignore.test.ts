@@ -321,12 +321,12 @@ describe(".c8ignore", () => {
 
 	describe("ignore module (unit)", () => {
 		// Import the module functions directly
-		let loadIgnoreRules: typeof import("../../src/ignore.ts").loadIgnoreRules;
-		let isIgnored: typeof import("../../src/ignore.ts").isIgnored;
-		let resolveIgnoreBaseDir: typeof import("../../src/ignore.ts").resolveIgnoreBaseDir;
+		let loadIgnoreRules: typeof import("../../src/utils/ignore.ts").loadIgnoreRules;
+		let isIgnored: typeof import("../../src/utils/ignore.ts").isIgnored;
+		let resolveIgnoreBaseDir: typeof import("../../src/utils/ignore.ts").resolveIgnoreBaseDir;
 
 		beforeEach(async () => {
-			const mod = await import("../../src/ignore.ts");
+			const mod = await import("../../src/utils/ignore.ts");
 			loadIgnoreRules = mod.loadIgnoreRules;
 			isIgnored = mod.isIgnored;
 			resolveIgnoreBaseDir = mod.resolveIgnoreBaseDir;

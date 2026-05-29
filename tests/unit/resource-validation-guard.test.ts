@@ -11,8 +11,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { CommandDef } from "../../src/command-registry.ts";
-import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
+import type { CommandDef } from "../../src/framework/command-registry.ts";
+import { COMMAND_REGISTRY } from "../../src/framework/command-registry.ts";
 
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;
 

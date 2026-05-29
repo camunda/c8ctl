@@ -4,7 +4,7 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { showCompletion } from "../../src/completion.ts";
+import { showCompletion } from "../../src/framework/completion.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 describe("Completion Module", () => {

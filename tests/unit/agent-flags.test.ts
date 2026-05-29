@@ -4,8 +4,8 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { Logger } from "../../src/logger.ts";
-import { c8ctl } from "../../src/runtime.ts";
+import { Logger } from "../../src/core/logger.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("--fields flag (output field filtering)", () => {
 	let consoleLogSpy: string[];
