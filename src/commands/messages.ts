@@ -3,8 +3,8 @@
  */
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { resolveTenantId } from "../config.ts";
+import { resolveTenantId } from "../core/config.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 /**
  * Publish message

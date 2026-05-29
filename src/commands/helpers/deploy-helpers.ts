@@ -17,17 +17,17 @@ import {
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import type { Ignore } from "ignore";
-import { createClient } from "../../client.ts";
-import { resolveTenantId } from "../../config.ts";
-import { normalizeToError, SilentError } from "../../errors.ts";
+import { createClient } from "../../core/client.ts";
+import { resolveTenantId } from "../../core/config.ts";
+import { normalizeToError, SilentError } from "../../core/errors.ts";
+import { getLogger, isRecord } from "../../core/logger.ts";
+import { c8ctl } from "../../core/runtime.ts";
 import {
 	isIgnored,
 	loadIgnoreRules,
 	resolveIgnoreBaseDir,
-} from "../../ignore.ts";
-import { getLogger, isRecord } from "../../logger.ts";
-import { DEPLOYABLE_EXTENSIONS } from "../../resource-extensions.ts";
-import { c8ctl } from "../../runtime.ts";
+} from "../../utils/ignore.ts";
+import { DEPLOYABLE_EXTENSIONS } from "../../utils/resource-extensions.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
 

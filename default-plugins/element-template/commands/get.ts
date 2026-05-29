@@ -14,7 +14,7 @@
  * payload.
  */
 
-import type {} from "../../../src/runtime.ts";
+import type {} from "../../../src/core/runtime.ts";
 import {
 	installStdoutEpipeHandler,
 	parseTemplateJson,

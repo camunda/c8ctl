@@ -10,11 +10,11 @@
  *   c8ctl bpmn format -i <file.bpmn>
  */
 
+import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
-} from "../../src/plugin-loader.ts";
-import type {} from "../../src/runtime.ts";
+} from "../../src/framework/plugin-loader.ts";
 import { formatSubcommand } from "./format.ts";
 import { lintSubcommand } from "./lint.ts";
 

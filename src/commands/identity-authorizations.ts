@@ -10,14 +10,14 @@ import {
 	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { fetchAllPages } from "../core/client.ts";
+import { sortTableData } from "../core/logger.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 import {
 	requireCsvEnum,
 	requireEnum,
 	requireOption,
-} from "../command-validation.ts";
-import { sortTableData } from "../logger.ts";
+} from "../framework/command-validation.ts";
 
 /**
  * List all authorizations

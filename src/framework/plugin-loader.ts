@@ -5,10 +5,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
+import { ensurePluginsDir } from "../core/config.ts";
+import { getLogger, type Logger, type OutputMode } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
 import type { FlagDef } from "./command-registry.ts";
-import { ensurePluginsDir } from "./config.ts";
-import { getLogger, type Logger, type OutputMode } from "./logger.ts";
-import { c8ctl } from "./runtime.ts";
 
 /**
  * Typed, documented host context passed to plugin command handlers as
@@ -319,11 +319,11 @@ async function loadDefaultPlugins(): Promise<void> {
 		const __dirname = dirname(__filename);
 
 		// Check both possible locations:
-		// In development: src/plugin-loader.ts -> ../default-plugins
-		// In production: dist/plugin-loader.js -> dist/default-plugins
+		// In development: src/framework/plugin-loader.ts -> ../../default-plugins
+		// In production: dist/framework/plugin-loader.js -> dist/default-plugins
 		const possiblePaths = [
-			join(__dirname, "default-plugins"), // Production path
-			join(__dirname, "..", "default-plugins"), // Development path
+			join(__dirname, "..", "..", "default-plugins"), // Production path
+			join(__dirname, "..", "..", "default-plugins"), // Development path
 		];
 
 		let defaultPluginsDir: string | null = null;

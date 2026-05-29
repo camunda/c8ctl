@@ -12,8 +12,8 @@ import { styleText } from "node:util";
 import { pathStringify } from "@bpmn-io/moddle-utils";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-import type { Logger } from "../../src/logger.ts";
-import type {} from "../../src/runtime.ts";
+import type { Logger } from "../../src/core/logger.ts";
+import type {} from "../../src/core/runtime.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;

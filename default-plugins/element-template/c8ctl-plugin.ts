@@ -16,11 +16,11 @@
  * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
  */
 
+import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
-} from "../../src/plugin-loader.ts";
-import type {} from "../../src/runtime.ts";
+} from "../../src/framework/plugin-loader.ts";
 import { applySubcommand } from "./commands/apply.ts";
 import { getSubcommand } from "./commands/get.ts";
 import { getPropertiesSubcommand } from "./commands/get-properties.ts";

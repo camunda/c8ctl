@@ -3,11 +3,11 @@
  */
 
 import { TenantId, Username } from "@camunda8/orchestration-cluster-api";
-import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { resolveClusterConfig } from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+import { createClient } from "../core/client.ts";
+import { resolveClusterConfig } from "../core/config.ts";
+import { getLogger } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
+import { defineCommand } from "../framework/command-framework.ts";
 
 export {
 	createIdentityAuthorizationCommand,

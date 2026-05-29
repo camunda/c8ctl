@@ -2,8 +2,8 @@
  * Process definition commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { fetchAllPages } from "../core/client.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 // ─── get pd ──────────────────────────────────────────────────────────────────
 

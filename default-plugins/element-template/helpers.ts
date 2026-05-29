@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../src/core/runtime.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -161,7 +161,7 @@ const ENGINE_VERSION_PATTERN = /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?$/;
 
 // Re-export the host Logger type so call sites in this plugin can refer
 // to it without each importing from the host.
-import type { Logger } from "../../src/logger.ts";
+import type { Logger } from "../../src/core/logger.ts";
 
 export type { Logger };
 

@@ -2,16 +2,16 @@
  * Session management commands (use profile, use tenant, output mode)
  */
 
-import { defineCommand } from "../command-framework.ts";
 import {
 	clearActiveProfile,
 	getProfileOrModeler,
 	setActiveProfile,
 	setActiveTenant,
 	setOutputMode,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../core/config.ts";
+import { getLogger } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
+import { defineCommand } from "../framework/command-framework.ts";
 
 /**
  * Set active profile

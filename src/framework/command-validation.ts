@@ -9,12 +9,12 @@
  * handlers receive already-validated types and need no internal guards.
  */
 
+import { getLogger } from "../core/logger.ts";
 import {
 	type FlagDef,
 	GLOBAL_FLAGS,
 	getCommandDef,
 } from "./command-registry.ts";
-import { getLogger } from "./logger.ts";
 
 /**
  * Validate that a required CLI option is present and non-empty.
