@@ -26,8 +26,8 @@ import {
 	isIgnored,
 	loadIgnoreRules,
 	resolveIgnoreBaseDir,
-} from "../../utils/ignore.ts";
-import { DEPLOYABLE_EXTENSIONS } from "../../utils/resource-extensions.ts";
+} from "../../utils/shared/ignore.ts";
+import { DEPLOYABLE_EXTENSIONS } from "../../utils/shared/resource-extensions.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
 

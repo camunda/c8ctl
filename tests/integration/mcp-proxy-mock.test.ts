@@ -11,7 +11,7 @@ import {
 } from "node:http";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import type { Logger } from "../../src/core/logger.ts";
-import { createCamundaFetch } from "../../src/utils/mcp-proxy-helpers.ts";
+import { createCamundaFetch } from "../../src/utils/command-local/mcp-proxy-helpers.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("MCP Proxy Mock Server Integration Tests", () => {

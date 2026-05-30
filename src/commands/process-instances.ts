@@ -10,7 +10,7 @@ import {
 import { fetchAllPages } from "../core/client.ts";
 import { handleCommandError } from "../core/errors.ts";
 import { defineCommand, dryRun } from "../framework/command-framework.ts";
-import { buildDateFilter, parseBetween } from "../utils/date-filter.ts";
+import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
 
 /**
  * List process instances

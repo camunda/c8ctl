@@ -19,7 +19,7 @@ import { getVersion } from "../framework/ui/help.ts";
 import {
 	createCamundaFetch,
 	normalizeRemoteMcpUrl,
-} from "../utils/mcp-proxy-helpers.ts";
+} from "../utils/command-local/mcp-proxy-helpers.ts";
 
 /**
  * MCP Proxy that bridges STDIO (local) to HTTP (remote) with Camunda authentication.

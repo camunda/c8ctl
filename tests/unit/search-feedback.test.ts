@@ -19,7 +19,7 @@ import { detectUnknownFlags } from "../../src/framework/command-validation.ts";
 import {
 	logNoResults,
 	logResultCount,
-} from "../../src/utils/search-helpers.ts";
+} from "../../src/utils/command-local/search-helpers.ts";
 
 /** Create a Logger whose output is captured into arrays for assertions. */
 function createTestLogger(): {

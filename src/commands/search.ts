@@ -5,7 +5,6 @@
 import { DEFAULT_PAGE_SIZE, fetchAllPages } from "../core/client.ts";
 import { type Logger, sortTableData } from "../core/logger.ts";
 import { defineCommand, dryRun } from "../framework/command-framework.ts";
-import { buildDateFilter, parseBetween } from "../utils/date-filter.ts";
 import {
 	API_DEFAULT_PAGE_SIZE,
 	hasUnescapedWildcard,
@@ -15,7 +14,8 @@ import {
 	matchesCaseSensitive,
 	toStringFilter,
 	wildcardToRegex,
-} from "../utils/search-helpers.ts";
+} from "../utils/command-local/search-helpers.ts";
+import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
 
 export {
 	API_DEFAULT_PAGE_SIZE,
