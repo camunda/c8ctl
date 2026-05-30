@@ -2,9 +2,9 @@
  * User task commands
  */
 
-import { fetchAllPages } from "../core/client.ts";
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
-import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
+import { fetchAllPages } from "../core/index.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
+import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
  * List user tasks

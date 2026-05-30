@@ -5,9 +5,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { ensurePluginsDir } from "../../core/config.ts";
-import { getLogger, type Logger, type OutputMode } from "../../core/logger.ts";
-import { c8ctl } from "../../core/runtime.ts";
+import {
+	c8ctl,
+	ensurePluginsDir,
+	getLogger,
+	type Logger,
+	type OutputMode,
+} from "../../core/index.ts";
 import type { FlagDef } from "../command-registry.ts";
 
 /**
@@ -52,7 +56,7 @@ export interface PluginCtx {
 	readonly client: CamundaClient;
 }
 
-export type CommandHandler = (
+export type PluginCommandHandler = (
 	args: string[],
 	flags?: Record<string, unknown>,
 	ctx?: PluginCtx,
@@ -60,10 +64,10 @@ export type CommandHandler = (
 
 export interface CommandWithFlags {
 	flags: Record<string, FlagDef>;
-	handler: CommandHandler;
+	handler: PluginCommandHandler;
 }
 
-export type PluginCommand = CommandHandler | CommandWithFlags;
+export type PluginCommand = PluginCommandHandler | CommandWithFlags;
 
 export interface PluginCommands {
 	[commandName: string]: PluginCommand;

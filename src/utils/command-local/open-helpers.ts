@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
-import { getLogger } from "../../core/logger.ts";
+import { getLogger } from "../../core/index.ts";
 import { requireOneOf, requirePositional } from "../shared/validation.ts";
 
 export const OPEN_APPS = [

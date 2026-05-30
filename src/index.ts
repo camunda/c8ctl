@@ -8,47 +8,40 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { COMMAND_DISPATCH } from "./command-dispatch.ts";
-import { createClient } from "./core/client.ts";
 import {
+	c8ctl,
+	createClient,
+	getLogger,
 	getUserDataDir,
 	loadSessionState,
-	resolveTenantId,
-} from "./core/config.ts";
-import { getLogger, type SortOrder } from "./core/logger.ts";
-import { c8ctl } from "./core/runtime.ts";
-import {
 	printUpdateNotification,
+	resolveTenantId,
+	type SortOrder,
 	startUpdateCheck,
-} from "./core/update-check.ts";
-import type { CommandContext } from "./framework/command-framework.ts";
+} from "./core/index.ts";
 import {
 	COMMAND_REGISTRY,
+	type CommandContext,
 	type CommandDef,
 	deriveParseArgsOptions,
+	detectUnknownFlags,
+	executePluginCommand,
 	GLOBAL_FLAGS,
 	getCommandDef,
-	resolveAlias,
-	resolveVerbAlias,
-} from "./framework/command-registry.ts";
-import {
-	detectUnknownFlags,
-	validateFlags,
-} from "./framework/command-validation.ts";
-import {
-	executePluginCommand,
 	getPluginCommands,
 	getPluginVersionForCommand,
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
-} from "./framework/plugins/plugin-loader.ts";
-import { refreshCompletionsIfStale } from "./framework/ui/completion.ts";
-import {
+	refreshCompletionsIfStale,
+	resolveAlias,
+	resolveVerbAlias,
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "./framework/ui/help.ts";
+	validateFlags,
+} from "./framework/index.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.

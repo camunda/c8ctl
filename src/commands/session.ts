@@ -3,15 +3,15 @@
  */
 
 import {
+	c8ctl,
 	clearActiveProfile,
+	getLogger,
 	getProfileOrModeler,
 	setActiveProfile,
 	setActiveTenant,
 	setOutputMode,
-} from "../core/config.ts";
-import { getLogger } from "../core/logger.ts";
-import { c8ctl } from "../core/runtime.ts";
-import { defineCommand } from "../framework/command-framework.ts";
+} from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * Set active profile

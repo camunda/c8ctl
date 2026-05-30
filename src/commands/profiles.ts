@@ -7,18 +7,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
 	addProfile as addProfileConfig,
+	c8ctl,
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
+	getLogger,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
 	removeProfile as removeProfileConfig,
-} from "../core/config.ts";
-import { getLogger } from "../core/logger.ts";
-import { c8ctl } from "../core/runtime.ts";
-import { defineCommand } from "../framework/command-framework.ts";
+} from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)

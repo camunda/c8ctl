@@ -7,7 +7,7 @@
  * them without importing the `framework/` layer.
  */
 
-import { getLogger } from "../../core/logger.ts";
+import { getLogger } from "../../core/index.ts";
 
 /**
  * Validate that a positional argument is present and non-empty.

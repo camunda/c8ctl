@@ -10,11 +10,11 @@
  * uses for change-triggered re-deploys.
  */
 
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
-} from "../utils/shared/resource-extensions.ts";
+} from "../utils/index.ts";
 import {
 	collectResourcesForPaths,
 	deployResources,
