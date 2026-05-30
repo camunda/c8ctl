@@ -11,7 +11,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import type { CommandContext } from "../../src/command-framework.ts";
+import type { CommandContext } from "../../src/framework/command-framework.ts";
 
 describe("Lazy client getter", () => {
 	/**

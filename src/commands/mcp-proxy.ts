@@ -10,16 +10,16 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { normalizeToError } from "../errors.ts";
-import { getVersion } from "../help.ts";
-import { Logger, type LogWriter } from "../logger.ts";
+import { createClient } from "../core/client.ts";
+import { normalizeToError } from "../core/errors.ts";
+import { Logger, type LogWriter } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
+import { defineCommand } from "../framework/command-framework.ts";
+import { getVersion } from "../framework/help.ts";
 import {
 	createCamundaFetch,
 	normalizeRemoteMcpUrl,
-} from "../mcp-proxy-helpers.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../utils/mcp-proxy-helpers.ts";
 
 /**
  * MCP Proxy that bridges STDIO (local) to HTTP (remote) with Camunda authentication.

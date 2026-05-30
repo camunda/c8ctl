@@ -2,8 +2,8 @@
  * Variable commands
  */
 
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { isRecord } from "../logger.ts";
+import { isRecord } from "../core/logger.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 /**
  * Set variables on an element instance (process instance or flow element).

@@ -26,8 +26,8 @@ import {
 	saveProfiles,
 	setActiveProfile,
 	TARGET_TYPES,
-} from "../../src/config.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/core/config.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("Config Module", () => {
 	test("getUserDataDir returns platform-specific path", () => {

@@ -4,15 +4,15 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
+import { GLOBAL_FLAGS } from "../../src/framework/command-registry.ts";
 import {
 	getVersion,
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "../../src/help.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/framework/help.ts";
 
 describe("Help Module", () => {
 	let consoleLogSpy: string[];

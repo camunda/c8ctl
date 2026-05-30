@@ -7,9 +7,20 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createClient } from "./client.ts";
 import { COMMAND_DISPATCH } from "./command-dispatch.ts";
-import type { CommandContext } from "./command-framework.ts";
+import { createClient } from "./core/client.ts";
+import {
+	getUserDataDir,
+	loadSessionState,
+	resolveTenantId,
+} from "./core/config.ts";
+import { getLogger, type SortOrder } from "./core/logger.ts";
+import { c8ctl } from "./core/runtime.ts";
+import {
+	printUpdateNotification,
+	startUpdateCheck,
+} from "./core/update-check.ts";
+import type { CommandContext } from "./framework/command-framework.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
@@ -18,17 +29,18 @@ import {
 	getCommandDef,
 	resolveAlias,
 	resolveVerbAlias,
-} from "./command-registry.ts";
-import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
-import { refreshCompletionsIfStale } from "./completion.ts";
-import { getUserDataDir, loadSessionState, resolveTenantId } from "./config.ts";
+} from "./framework/command-registry.ts";
+import {
+	detectUnknownFlags,
+	validateFlags,
+} from "./framework/command-validation.ts";
+import { refreshCompletionsIfStale } from "./framework/completion.ts";
 import {
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "./help.ts";
-import { getLogger, type SortOrder } from "./logger.ts";
+} from "./framework/help.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
@@ -36,9 +48,7 @@ import {
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
-} from "./plugin-loader.ts";
-import { c8ctl } from "./runtime.ts";
-import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
+} from "./framework/plugin-loader.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.

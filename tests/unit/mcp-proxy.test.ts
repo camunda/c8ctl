@@ -4,7 +4,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { normalizeRemoteMcpUrl } from "../../src/mcp-proxy-helpers.ts";
+import { normalizeRemoteMcpUrl } from "../../src/utils/mcp-proxy-helpers.ts";
 
 describe("normalizeRemoteMcpUrl", () => {
 	const mcpServerPath = "/mcp/cluster";

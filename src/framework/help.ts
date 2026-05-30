@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getLogger } from "../core/logger.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
@@ -14,7 +15,6 @@ import {
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
 } from "./command-registry.ts";
-import { getLogger } from "./logger.ts";
 import {
 	getPluginCommandsInfo,
 	isPluginCommand,
@@ -197,7 +197,7 @@ function buildHelpJson(
  * Get package version
  */
 export function getVersion(): string {
-	const packagePath = join(__dirname, "../package.json");
+	const packagePath = join(__dirname, "../../package.json");
 	const packageJson = JSON.parse(readFileSync(packagePath, "utf-8"));
 	return packageJson.version;
 }

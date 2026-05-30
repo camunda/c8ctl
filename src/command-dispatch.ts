@@ -8,7 +8,6 @@
  * lived in index.ts.
  */
 
-import type { AnyCommandHandler } from "./command-framework.ts";
 import { completionCommand } from "./commands/completion.ts";
 import { deployCommand } from "./commands/deploy.ts";
 import { getFormCommand } from "./commands/forms.ts";
@@ -120,6 +119,7 @@ import {
 } from "./commands/user-tasks.ts";
 import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
+import type { AnyCommandHandler } from "./framework/command-framework.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".

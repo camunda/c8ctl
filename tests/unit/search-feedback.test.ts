@@ -9,14 +9,17 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
+import { Logger, type LogWriter } from "../../src/core/logger.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	SEARCH_FLAGS,
-} from "../../src/command-registry.ts";
-import { detectUnknownFlags } from "../../src/command-validation.ts";
-import { Logger, type LogWriter } from "../../src/logger.ts";
-import { logNoResults, logResultCount } from "../../src/search-helpers.ts";
+} from "../../src/framework/command-registry.ts";
+import { detectUnknownFlags } from "../../src/framework/command-validation.ts";
+import {
+	logNoResults,
+	logResultCount,
+} from "../../src/utils/search-helpers.ts";
 
 /** Create a Logger whose output is captured into arrays for assertions. */
 function createTestLogger(): {

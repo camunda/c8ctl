@@ -2,7 +2,7 @@
  * Topology commands
  */
 
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 /**
  * Get cluster topology

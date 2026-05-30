@@ -2,9 +2,9 @@
  * Identity group commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { sortTableData } from "../logger.ts";
+import { fetchAllPages } from "../core/client.ts";
+import { sortTableData } from "../core/logger.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 import { toStringFilter } from "./search.ts";
 
 /**

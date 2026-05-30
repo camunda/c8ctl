@@ -14,13 +14,13 @@ import {
 	type EvaluationResult,
 	evaluate as feelinEvaluate,
 } from "feelin";
-import type { Logger } from "../../src/logger.ts";
+import type { Logger } from "../../src/core/logger.ts";
+import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginCtx,
 	PluginMetadata,
-} from "../../src/plugin-loader.ts";
-import type {} from "../../src/runtime.ts";
+} from "../../src/framework/plugin-loader.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;

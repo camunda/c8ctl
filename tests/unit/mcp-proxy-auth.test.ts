@@ -4,8 +4,8 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import type { Logger } from "../../src/logger.ts";
-import { createCamundaFetch } from "../../src/mcp-proxy-helpers.ts";
+import type { Logger } from "../../src/core/logger.ts";
+import { createCamundaFetch } from "../../src/utils/mcp-proxy-helpers.ts";
 import { makeMockClient, makeMockLogger } from "../utils/mocks.ts";
 
 describe("createCamundaFetch", () => {

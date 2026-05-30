@@ -5,7 +5,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { defineCommand } from "../command-framework.ts";
 import {
 	addProfile as addProfileConfig,
 	DEFAULT_PROFILE,
@@ -16,9 +15,10 @@ import {
 	type Profile,
 	parseEnvFile,
 	removeProfile as removeProfileConfig,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../core/config.ts";
+import { getLogger } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
+import { defineCommand } from "../framework/command-framework.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)

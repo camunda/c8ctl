@@ -14,22 +14,21 @@
  */
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-
+import { resolveClusterConfig } from "../core/config.ts";
+import { handleCommandError } from "../core/errors.ts";
+import {
+	getLogger,
+	type Logger,
+	type SortOrder,
+	sortTableData,
+} from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	type FlagDef,
 	type PositionalDef,
 } from "./command-registry.ts";
-import { resolveClusterConfig } from "./config.ts";
-import { handleCommandError } from "./errors.ts";
-import {
-	getLogger,
-	type Logger,
-	type SortOrder,
-	sortTableData,
-} from "./logger.ts";
-import { c8ctl } from "./runtime.ts";
 
 export type { PositionalDef };
 

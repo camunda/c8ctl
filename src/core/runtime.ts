@@ -82,7 +82,7 @@ declare global {
  */
 function getVersion(): string {
 	try {
-		const packageJsonPath = join(__dirname, "..", "package.json");
+		const packageJsonPath = join(__dirname, "..", "..", "package.json");
 		const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
 		return packageJson.version || "0.0.0";
 	} catch {
@@ -110,7 +110,7 @@ class C8ctl implements C8ctlPluginRuntime {
 		platform: process.platform,
 		arch: process.arch,
 		cwd: process.cwd(),
-		rootDir: join(__dirname, ".."),
+		rootDir: join(__dirname, "..", ".."),
 	};
 
 	/**

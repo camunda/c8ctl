@@ -13,14 +13,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { c8ctl } from "../../src/runtime.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 import {
 	_resetForTesting,
 	detectChannel,
 	isNewer,
 	printUpdateNotification,
 	startUpdateCheck,
-} from "../../src/update-check.ts";
+} from "../../src/core/update-check.ts";
 
 // ── Pure function tests ─────────────────────────────────────────────────────
 

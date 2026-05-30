@@ -31,8 +31,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
-import { isRecord } from "../../src/logger.ts";
+import { isRecord } from "../../src/core/logger.ts";
+import { GLOBAL_FLAGS } from "../../src/framework/command-registry.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const FIXTURE_DIR = join(

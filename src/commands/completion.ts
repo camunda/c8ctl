@@ -8,8 +8,8 @@
  * verb at runtime.
  */
 
-import { defineCommand } from "../command-framework.ts";
-import { installCompletion, showCompletion } from "../completion.ts";
+import { defineCommand } from "../framework/command-framework.ts";
+import { installCompletion, showCompletion } from "../framework/completion.ts";
 
 /**
  * `completion` verb dispatcher.

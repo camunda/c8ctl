@@ -20,8 +20,8 @@ import {
 	loadSessionState,
 	parseEnvFile,
 	resolveClusterConfig,
-} from "../../src/config.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/core/config.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
 

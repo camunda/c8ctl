@@ -2,9 +2,9 @@
  * Incident commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { buildDateFilter, parseBetween } from "../date-filter.ts";
+import { fetchAllPages } from "../core/client.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { buildDateFilter, parseBetween } from "../utils/date-filter.ts";
 
 /**
  * List incidents

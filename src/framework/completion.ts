@@ -5,6 +5,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { getUserDataDir } from "../core/config.ts";
+import { getLogger } from "../core/logger.ts";
+import { c8ctl } from "../core/runtime.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
@@ -12,13 +15,10 @@ import {
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
 } from "./command-registry.ts";
-import { getUserDataDir } from "./config.ts";
-import { getLogger } from "./logger.ts";
 import {
 	getPluginCommandsInfo,
 	type PluginCommandInfo,
 } from "./plugin-loader.ts";
-import { c8ctl } from "./runtime.ts";
 
 // ─── Typed helpers (same pattern as help.ts) ─────────────────────────────────
 
