@@ -19,7 +19,14 @@
  *   - framework/ → core, utils, framework (never commands)
  *   - commands/  → core, utils, framework, commands
  *   - src/*.ts   → anything               (composition root: index.ts,
- *                                          command-dispatch.ts)
+ *                                          command-dispatch.ts — top-level
+ *                                          files only, never a subdirectory)
+ *
+ * Only top-level `src/*.ts` files are the unconstrained composition root.
+ * Any *subdirectory* must be an explicit layer: a new, unrecognised
+ * subdirectory fails the guard rather than silently inheriting the
+ * root's "anything goes" rule. Non-runtime scaffolding (`src/templates/`)
+ * is excluded via SKIP_DIRS.
  *
  * This keeps the dependency graph acyclic and prevents the layering
  * from silently rotting back into a flat structure. If you hit a
@@ -45,6 +52,11 @@ import ts from "typescript";
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const SRC_DIR = resolve(PROJECT_ROOT, "src");
 
+// Scaffold templates shipped to `c8ctl plugin init`. They are not part of
+// the CLI runtime (excluded from tsconfig.check.json) and must not be
+// constrained by the layer guard.
+const SKIP_DIRS: ReadonlySet<string> = new Set([resolve(SRC_DIR, "templates")]);
+
 type Layer = "core" | "utils" | "framework" | "commands" | "root";
 
 /** Each layer maps to the set of layers it is allowed to import from. */
@@ -58,20 +70,31 @@ const ALLOWED: Record<Layer, ReadonlySet<Layer>> = {
 	root: new Set<Layer>(["core", "utils", "framework", "commands", "root"]),
 };
 
-/** Determine which layer an absolute path under src/ belongs to. */
-function layerOf(absPath: string): Layer {
+/**
+ * Classify an absolute path under src/.
+ *
+ * Only top-level `src/*.ts` files are the unconstrained composition root.
+ * Any *subdirectory* must be an explicit layer — a new, unrecognised
+ * subdirectory returns `"unknown"` so the guard fails loudly rather than
+ * silently treating it as root and bypassing the boundary checks.
+ */
+function layerOf(absPath: string): Layer | "unknown" {
 	const rel = relative(SRC_DIR, absPath).split(/[\\/]/).join("/");
-	if (rel.startsWith("core/")) return "core";
-	if (rel.startsWith("utils/")) return "utils";
-	if (rel.startsWith("framework/")) return "framework";
-	if (rel.startsWith("commands/")) return "commands";
-	return "root";
+	// Top-level src/*.ts files (no path separator) are the composition root.
+	if (!rel.includes("/")) return "root";
+	const segment = rel.slice(0, rel.indexOf("/"));
+	if (segment === "core") return "core";
+	if (segment === "utils") return "utils";
+	if (segment === "framework") return "framework";
+	if (segment === "commands") return "commands";
+	return "unknown";
 }
 
-/** Recursively list all `.ts` files under `dir`, sorted. */
+/** Recursively list all `.ts` files under `dir`, sorted, skipping SKIP_DIRS. */
 function listTsFiles(dir: string): string[] {
 	const out: string[] = [];
 	function walk(d: string): void {
+		if (SKIP_DIRS.has(d)) return;
 		const entries = readdirSync(d, { withFileTypes: true }).sort((a, b) =>
 			a.name.localeCompare(b.name),
 		);
@@ -98,11 +121,13 @@ interface Violation {
 	fromLayer: Layer;
 	line: number;
 	specifier: string;
-	toLayer: Layer;
+	toLayer: Layer | "unknown";
 }
 
 function findViolations(absPath: string): Violation[] {
 	const fromLayer = layerOf(absPath);
+	// Unclassified files are reported separately; don't scan their edges.
+	if (fromLayer === "unknown") return [];
 	const allowed = ALLOWED[fromLayer];
 	const source = readFileSync(absPath, "utf8");
 	const sf = ts.createSourceFile(
@@ -123,7 +148,7 @@ function findViolations(absPath: string): Violation[] {
 		const rel = relative(SRC_DIR, target);
 		if (rel.startsWith("..")) return;
 		const toLayer = layerOf(target);
-		if (!allowed.has(toLayer)) {
+		if (toLayer === "unknown" || !allowed.has(toLayer)) {
 			const { line } = sf.getLineAndCharacterOfPosition(specNode.getStart(sf));
 			out.push({
 				file: toRelative(absPath),
@@ -166,6 +191,22 @@ function findViolations(absPath: string): Violation[] {
 
 describe("architectural guard: src/ layered architecture (#414)", () => {
 	const files = listTsFiles(SRC_DIR);
+
+	test("every src/ file belongs to a known layer (no silent bypass)", () => {
+		const unclassified = files
+			.filter((f) => layerOf(f) === "unknown")
+			.map(toRelative);
+
+		assert.strictEqual(
+			unclassified.length,
+			0,
+			`Found ${unclassified.length} src/ file(s) in an unrecognised subdirectory:\n${unclassified
+				.map((f) => `  ${f}`)
+				.join(
+					"\n",
+				)}\n\nA new src/ subdirectory must be assigned to a layer in layerOf()/ALLOWED (or added to SKIP_DIRS if it is non-runtime). Leaving it unclassified would let it bypass the boundary checks.`,
+		);
+	});
 
 	test("each layer only imports from layers at or below it", () => {
 		const violations: Violation[] = [];
