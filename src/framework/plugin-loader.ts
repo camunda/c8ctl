@@ -306,6 +306,29 @@ function isDuplicatePluginName(pluginName: string): boolean {
 }
 
 /**
+ * Compute the candidate `default-plugins` directories, relative to the
+ * directory containing this loader module.
+ *
+ * The loader sits one directory below the project/dist root:
+ *   - Development: `src/framework/plugin-loader.ts`
+ *       → `../../default-plugins`  = `<repo>/default-plugins`
+ *   - Production:  `dist/framework/plugin-loader.js`
+ *       → `../default-plugins`     = `<repo>/dist/default-plugins`
+ *
+ * Both candidates are returned (production first); the first one that
+ * exists on disk wins. Keeping this pure and exported lets the unit
+ * suite — which always runs from the TS sources (dev layout) — still
+ * guard the production-layout resolution that real `dist/` runs depend
+ * on.
+ */
+export function defaultPluginsCandidateDirs(loaderDir: string): string[] {
+	return [
+		join(loaderDir, "..", "default-plugins"), // Production: dist/framework -> dist/default-plugins
+		join(loaderDir, "..", "..", "default-plugins"), // Development: src/framework -> <repo>/default-plugins
+	];
+}
+
+/**
  * Load default plugins bundled with c8ctl
  */
 async function loadDefaultPlugins(): Promise<void> {
@@ -318,13 +341,7 @@ async function loadDefaultPlugins(): Promise<void> {
 		const __filename = fileURLToPath(import.meta.url);
 		const __dirname = dirname(__filename);
 
-		// Check both possible locations:
-		// In development: src/framework/plugin-loader.ts -> ../../default-plugins
-		// In production: dist/framework/plugin-loader.js -> dist/default-plugins
-		const possiblePaths = [
-			join(__dirname, "..", "..", "default-plugins"), // Production path
-			join(__dirname, "..", "..", "default-plugins"), // Development path
-		];
+		const possiblePaths = defaultPluginsCandidateDirs(__dirname);
 
 		let defaultPluginsDir: string | null = null;
 		for (const path of possiblePaths) {
