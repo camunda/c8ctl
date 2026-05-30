@@ -193,8 +193,9 @@ Never skip the lint and type-check steps before pushing.
 
 - `npm run typecheck` — runs `tsc --noEmit -p tsconfig.check.json` over `src/` and `tests/`
 - `npx biome check --fix` — lints and formats `src/` and `tests/` per `biome.json` (includes the `no-unsafe-type-assertion` plugin)
+- `npm run check:layering` — runs the architectural layering guard (`tests/unit/layering-import-boundary.test.ts`) in isolation: layer-direction rules plus the per-layer barrel rules (#414/#424). Fast (~1s); use it to check import boundaries without running the whole unit suite.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
-- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
+- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). When any `src/` file is staged it also runs the layering guard (`check:layering`) against the working tree, so import-boundary regressions are caught at commit time instead of in CI. Skips biome, tsc, or the guard individually if the toolchain is not installed locally.
 
 #### Test process isolation — `--experimental-test-isolation=none` for integration tests
 
