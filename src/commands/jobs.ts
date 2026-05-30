@@ -4,7 +4,7 @@
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
@@ -42,7 +42,7 @@ export const listJobsCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list jobs",
 			method: "POST",
 			endpoint: "/jobs/search",
@@ -96,7 +96,7 @@ export const activateJobsCommand = defineCommand(
 			throw new Error("--timeout must be a positive integer (milliseconds)");
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "activate jobs",
 			method: "POST",
 			endpoint: "/jobs/activation",
@@ -157,7 +157,7 @@ export const completeJobCommand = defineCommand(
 			body.variables = variables;
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "complete job",
 			method: "POST",
 			endpoint: `/jobs/${key}/completion`,
@@ -190,7 +190,7 @@ export const failJobCommand = defineCommand(
 			throw new Error("--retries must be a non-negative integer");
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "fail job",
 			method: "POST",
 			endpoint: `/jobs/${key}/failure`,

@@ -55,7 +55,7 @@ Key components:
 
 - `src/framework/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
 - `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions (composition root, top-level)
-- `src/framework/command-framework.ts` — provides `defineCommand()` and the `dryRun()` helper
+- `src/framework/command-framework.ts` — provides `defineCommand()`, the `CommandContext` type, and the `createDryRun()` factory behind `ctx.dryRun()`
 - `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers (composition root, top-level)
 - `src/core/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
 - `src/core/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
@@ -95,6 +95,18 @@ Two conventions worth internalising:
 
 - **`utils/shared/` vs `utils/command-local/`** — the split axis is "command-agnostic reusable leaf" vs "the guts of one command". `command-local` helpers stay test-visible (not moved into `commands/**`) deliberately: their logic is pure and cross-platform and is better covered by direct unit tests than by coarser `c8()` subprocess tests.
 - **`utils/command-local/` vs `commands/helpers/`** — both hold command-specific support code, but `command-local` is test-visible (tests import it directly) while `commands/helpers/` is command-private and test-invisible (driven only through the `c8()` subprocess helper, per #291).
+
+##### Per-invocation flags come from `ctx`, not the global runtime (#424)
+
+The `c8ctl` runtime singleton (`src/core/runtime.ts`) stays — it is the irreducible plugin SDK exposed on `globalThis.c8ctl` (every default plugin and the scaffold template read it via `globalThis.c8ctl`), and `src/core/**` legitimately owns and wraps it (the core error handler and SDK client read `c8ctl.verbose`/`c8ctl.dryRun` directly; the composition root writes them). What shrank is its *mutable surface as seen from the layers above core*.
+
+Per-invocation request state — whether `--dry-run` / `--verbose` were passed — is resolved once at the composition root (`src/index.ts`) and threaded into handlers through the typed `CommandContext`:
+
+- **`ctx.dryRun({ command, method, endpoint, profile, body? })`** — the bound dry-run helper. Returns a `DryRunResult` when dry-run is active (return it to short-circuit), else `null`. Built by `createDryRun(isDryRun)` at the composition root. This replaces the old free `dryRun()` helper that read the global.
+- **`ctx.isDryRun`** — the raw boolean, for the handful of handlers that emit a *custom* dry-run payload (`deploy`, `identity`) rather than the framework's standard `DryRunResult`.
+- **`ctx.verbose`** — whether `--verbose` was passed.
+
+`src/commands/**` and `src/framework/**` must obtain these from `ctx` (handlers) or an explicit parameter (non-handler framework entry points such as `installCompletion`/`refreshCompletionsIfStale`), and must **not** read `c8ctl.dryRun` or `c8ctl.verbose` back off the global. This is guarded by [`tests/unit/no-runtime-global-reads-in-handlers.test.ts`](tests/unit/no-runtime-global-reads-in-handlers.test.ts) (AST-based, so the field names are safe to mention in comments and strings). `c8ctl.outputMode` is *session display state*, not a per-invocation request flag — read it via `logger.mode` where a logger is in scope; the `session` command reads it directly because managing session state is its job.
 
 ### Commit message guidelines
 
@@ -341,14 +353,16 @@ Every command handler in `src/commands/**` follows the same shape. Pattern-match
 #### Canonical shape
 
 ```ts
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flags, args) => {
   const { client, profile, logger } = ctx;
 
   // 1. Dry-run check — must come BEFORE any I/O. Returns a DryRunResult
-  //    if `--dry-run` was passed, or `null` to continue.
-  const dr = dryRun({
+  //    if `--dry-run` was passed, or `null` to continue. The helper is
+  //    bound to this invocation's flag and lives on `ctx`, so handlers
+  //    never read dry-run state off the global runtime.
+  const dr = ctx.dryRun({
     command: "myverb my-resource",
     method: "POST",
     endpoint: "/my-resources",
@@ -401,10 +415,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 ```
 
 ```ts
-// ✅ Canonical shape — body inline, dryRun() helper, throws on failure,
+// ✅ Canonical shape — body inline, ctx.dryRun() helper, throws on failure,
 //    returns a CommandResult.
 export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
-  const dr = dryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: ctx.profile });
+  const dr = ctx.dryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: ctx.profile });
   if (dr) return dr;
 
   if (ctx.positionals.length === 0) {
@@ -526,7 +540,7 @@ Create a handler file in `src/commands/`:
 
 ```typescript
 // src/commands/my-resource.ts
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 export const myverbMyResourceCommand = defineCommand(
   "myverb",
@@ -539,7 +553,7 @@ export const myverbMyResourceCommand = defineCommand(
     // args.key     → MyBrandedKey (required positional, branded)
 
     // Dry-run support (required for all commands)
-    const dr = dryRun({
+    const dr = ctx.dryRun({
       command: "myverb my-resource",
       method: "POST",
       endpoint: "/my-resources",
@@ -567,7 +581,7 @@ export const myverbMyResourceCommand = defineCommand(
 | `success` | Mutation confirmation | `{ message }` |
 | `no-result` | Nothing to display | — |
 
-The `dryRun()` helper checks the `--dry-run` flag and returns a `DryRunResult` if set, or `undefined` to continue.
+The `ctx.dryRun()` helper checks the `--dry-run` flag (captured once at the composition root) and returns a `DryRunResult` if set, or `null` to continue. The raw boolean is also available as `ctx.isDryRun` for handlers that emit a custom dry-run payload (`deploy`, `identity`).
 
 ##### 5. Register in `COMMAND_DISPATCH`
 
@@ -600,7 +614,7 @@ By adding the registry entry and dispatch wiring, these features are automatical
 - `c8ctl completion bash/zsh/fish` includes the verb, resource, and all flags
 - `parseArgs` accepts the declared flags with correct types
 - Flag validation runs at the boundary (branded types enforced)
-- `--dry-run` support (via `dryRun()` helper)
+- `--dry-run` support (via the `ctx.dryRun()` helper)
 - Output rendering (JSON, table, fields filtering) handled by the framework
 - Resource alias resolution (`mr` → `my-resource`) works everywhere
 

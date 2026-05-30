@@ -5,12 +5,12 @@
  * table output.
  *
  * The body lives directly in the handler (per #288): argument-shape
- * resolution, dry-run preview via the framework's `dryRun()` helper,
+ * resolution, dry-run preview via the context's `ctx.dryRun()` helper,
  * and the call into the shared `deployResources` helper that watch also
  * uses for change-triggered re-deploys.
  */
 
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
@@ -76,15 +76,15 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// Dry-run preview. Collect resources first so the preview body
 	// reflects what would actually be sent — and so the empty-paths /
 	// no-files guards still surface as thrown errors before we emit.
-	// Uses `ctx.dryRun` and `ctx.tenantId` from the framework rather
+	// Uses `ctx.isDryRun` and `ctx.tenantId` from the framework rather
 	// than reaching into the global runtime/config layer.
-	if (ctx.dryRun) {
+	if (ctx.isDryRun) {
 		const { resources: previewResources, skippedExtensions } =
 			collectResourcesForPaths(paths, flags.force, extensionList);
 
 		logSkippedExtensions(skippedExtensions);
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "deploy",
 			method: "POST",
 			endpoint: "/deployments",
@@ -107,6 +107,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		profile: ctx.profile,
 		force: flags.force,
 		extensionList,
+		verbose: ctx.verbose,
 	});
 	return { kind: "none" };
 });

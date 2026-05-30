@@ -3,7 +3,7 @@
  */
 
 import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * List all tenants
@@ -14,7 +14,7 @@ export const listTenantsCommand = defineCommand(
 	async (ctx) => {
 		const { client, profile, limit } = ctx;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list tenants",
 			method: "POST",
 			endpoint: "/tenants/search",
@@ -56,7 +56,7 @@ export const searchIdentityTenantsCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search tenants",
 			method: "POST",
 			endpoint: "/tenants/search",
@@ -97,7 +97,7 @@ export const getIdentityTenantCommand = defineCommand(
 		const { client, profile } = ctx;
 		const tenantId = args.tenantId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get tenant",
 			method: "GET",
 			endpoint: `/tenants/${tenantId}`,
@@ -134,7 +134,7 @@ export const createIdentityTenantCommand = defineCommand(
 			name: flags.name,
 		};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create tenant",
 			method: "POST",
 			endpoint: "/tenants",
@@ -158,7 +158,7 @@ export const deleteIdentityTenantCommand = defineCommand(
 		const { client, profile } = ctx;
 		const tenantId = args.tenantId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete tenant",
 			method: "DELETE",
 			endpoint: `/tenants/${encodeURIComponent(String(tenantId))}`,

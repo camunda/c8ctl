@@ -3,7 +3,7 @@
  */
 
 import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import { toStringFilter } from "./search.ts";
 
 /**
@@ -12,7 +12,7 @@ import { toStringFilter } from "./search.ts";
 export const listGroupsCommand = defineCommand("list", "group", async (ctx) => {
 	const { client, profile, limit } = ctx;
 
-	const dr = dryRun({
+	const dr = ctx.dryRun({
 		command: "list groups",
 		method: "POST",
 		endpoint: "/groups/search",
@@ -53,7 +53,7 @@ export const searchIdentityGroupsCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search groups",
 			method: "POST",
 			endpoint: "/groups/search",
@@ -94,7 +94,7 @@ export const getIdentityGroupCommand = defineCommand(
 		const { client, profile } = ctx;
 		const groupId = args.groupId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get group",
 			method: "GET",
 			endpoint: `/groups/${groupId}`,
@@ -128,7 +128,7 @@ export const createIdentityGroupCommand = defineCommand(
 
 		const body = { groupId: flags.groupId, name: flags.name };
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create group",
 			method: "POST",
 			endpoint: "/groups",
@@ -152,7 +152,7 @@ export const deleteIdentityGroupCommand = defineCommand(
 		const { client, profile } = ctx;
 		const groupId = args.groupId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete group",
 			method: "DELETE",
 			endpoint: `/groups/${encodeURIComponent(groupId)}`,

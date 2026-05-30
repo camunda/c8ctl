@@ -3,7 +3,7 @@
  */
 
 import { fetchAllPages, sortTableData } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import { toStringFilter } from "./search.ts";
 
 /**
@@ -12,7 +12,7 @@ import { toStringFilter } from "./search.ts";
 export const listUsersCommand = defineCommand("list", "user", async (ctx) => {
 	const { client, profile, limit } = ctx;
 
-	const dr = dryRun({
+	const dr = ctx.dryRun({
 		command: "list users",
 		method: "POST",
 		endpoint: "/users/search",
@@ -55,7 +55,7 @@ export const searchIdentityUsersCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search users",
 			method: "POST",
 			endpoint: "/users/search",
@@ -96,7 +96,7 @@ export const getIdentityUserCommand = defineCommand(
 		const { client, profile } = ctx;
 		const username = args.username;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get user",
 			method: "GET",
 			endpoint: `/users/${username}`,
@@ -135,7 +135,7 @@ export const createIdentityUserCommand = defineCommand(
 			...(flags.email ? { email: flags.email } : {}),
 		};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create user",
 			method: "POST",
 			endpoint: "/users",
@@ -159,7 +159,7 @@ export const deleteIdentityUserCommand = defineCommand(
 		const { client, profile } = ctx;
 		const username = args.username;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete user",
 			method: "DELETE",
 			endpoint: `/users/${encodeURIComponent(String(username))}`,

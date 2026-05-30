@@ -17,7 +17,6 @@ import {
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import {
-	c8ctl,
 	createClient,
 	getLogger,
 	isRecord,
@@ -39,7 +38,7 @@ const PROCESS_APPLICATION_FILE = ".process-application";
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
  */
 function logMessage(message: string): void {
-	if (c8ctl.outputMode === "json") {
+	if (getLogger().mode === "json") {
 		console.error(JSON.stringify({ type: "message", message }));
 	} else {
 		console.error(message);
@@ -493,8 +492,8 @@ export function collectResourcesForPaths(
  * result table. Used by `deployCommand` (the standard CLI entry point)
  * and by `watchCommand` (for change-triggered re-deploys).
  *
- * Does NOT consult `c8ctl.dryRun` — dry-run handling lives in the
- * `deployCommand` handler so the framework's `dryRun()` helper owns
+ * Does NOT consult dry-run state — dry-run handling lives in the
+ * `deployCommand` handler so the context's `ctx.dryRun()` helper owns
  * preview emission. Watch never triggers a dry-run, so this split also
  * removes a footgun where a stale dry-run flag could suppress a watch
  * deploy.
@@ -517,6 +516,8 @@ export async function deployResources(
 		 * Callers do not need their own try/catch to suppress aborts.
 		 */
 		signal?: AbortSignal;
+		/** Whether --verbose was set (surfaces raw errors with stack traces). */
+		verbose?: boolean;
 	},
 ): Promise<void> {
 	const logger = getLogger();
@@ -689,6 +690,7 @@ export async function deployResources(
 			logger,
 			options.continueOnError,
 			options.continueOnUserError,
+			options.verbose === true,
 		);
 		// `handleDeploymentError` either throws (terminal) or returns
 		// (continue-on-error). On the continue path, skip the success
@@ -790,6 +792,7 @@ function handleDeploymentError(
 	logger: ReturnType<typeof getLogger>,
 	continueOnError?: boolean,
 	continueOnUserError?: boolean,
+	verbose?: boolean,
 ): void {
 	// Extract problem title early to determine whether this is a user-fixable error
 	const raw: Record<string, unknown> = isRecord(error) ? error : {};
@@ -798,7 +801,7 @@ function handleDeploymentError(
 	const shouldContinue =
 		continueOnError || (continueOnUserError && isUserFixable);
 
-	if (c8ctl.verbose) {
+	if (verbose) {
 		if (shouldContinue) {
 			throw error;
 		}
