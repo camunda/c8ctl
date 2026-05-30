@@ -352,7 +352,10 @@ describe(".c8ignore", () => {
 		test("anchored /dist/ only matches dist at ignore base", () => {
 			writeFileSync(join(testDir, ".c8ignore"), "/dist/\n");
 			const ig = loadIgnoreRules(testDir);
-			assert.strictEqual(ig.ignores("dist"), true);
+			// A directory-only pattern does not match a bare path of the same
+			// name (gitignore treats `dist` without a trailing slash as a file).
+			assert.strictEqual(ig.ignores("dist"), false);
+			assert.strictEqual(ig.ignores("dist/"), true);
 			assert.strictEqual(ig.ignores("dist/output.js"), true);
 			assert.strictEqual(ig.ignores("nested/dist"), false);
 			assert.strictEqual(ig.ignores("nested/dist/output.js"), false);
@@ -361,9 +364,12 @@ describe(".c8ignore", () => {
 		test("non-anchored dist/ matches dist at any depth", () => {
 			writeFileSync(join(testDir, ".c8ignore"), "dist/\n");
 			const ig = loadIgnoreRules(testDir);
-			assert.strictEqual(ig.ignores("dist"), true);
+			// Directory-only pattern: matches the directory entry (with trailing
+			// slash) and its contents, but not a bare same-named path.
+			assert.strictEqual(ig.ignores("dist"), false);
+			assert.strictEqual(ig.ignores("dist/"), true);
 			assert.strictEqual(ig.ignores("dist/output.js"), true);
-			assert.strictEqual(ig.ignores("nested/dist"), true);
+			assert.strictEqual(ig.ignores("nested/dist"), false);
 			assert.strictEqual(ig.ignores("nested/dist/output.js"), true);
 		});
 

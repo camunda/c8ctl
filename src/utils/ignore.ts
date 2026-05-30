@@ -35,12 +35,17 @@ interface ParsedPattern {
  * Translate a single gitignore-style line into one or more glob patterns
  * suitable for `path.matchesGlob`.
  *
- * Rules applied (subset of gitignore spec):
+ * Rules applied (subset of gitignore spec). These mirror the behaviour of the
+ * `ignore` npm package — see the `c8ignore-parity` regression guard:
  * - Lines starting with `#` and blank lines are skipped.
  * - A leading `!` negates the pattern.
- * - A trailing `/` restricts matching to directories: both the directory
- *   entry itself and its contents are matched, so callers can prune
- *   directory traversal by calling `isIgnored` on the directory entry.
+ * - A trailing `/` restricts matching to directories: the pattern matches the
+ *   directory entry (a path queried *with* a trailing slash, e.g. `build/`)
+ *   and its contents, but NOT a bare path of the same name (`build`), which
+ *   gitignore would treat as a file. The directory walker queries directory
+ *   entries with a trailing slash, so traversal pruning still works.
+ * - A trailing `/**` (e.g. `foo/**`) matches everything *inside* the directory
+ *   but not the directory entry itself.
  * - A leading `/` or an embedded `/` anchors the pattern to the base dir.
  * - Otherwise the pattern matches at any depth.
  */
@@ -53,24 +58,41 @@ function parsePattern(raw: string): ParsedPattern | null {
 
 	const negate = trimmed.startsWith("!");
 	const withoutNegate = negate ? trimmed.slice(1) : trimmed;
+
+	// A trailing slash restricts the pattern to directories.
+	const dirOnly = withoutNegate.endsWith("/");
 	const withoutTrailing = withoutNegate.replace(/\/$/, "");
-	const pattern = withoutTrailing.replace(/^\//, ""); // a leading / anchors the pattern to the base directory — the slash is a positional marker, not part of the glob itself
+	// A leading / anchors the pattern to the base directory — the slash is a
+	// positional marker, not part of the glob itself.
+	const pattern = withoutTrailing.replace(/^\//, "");
 	if (!pattern) return null;
 
-	// Trailing slash: restricts matching to directories. We still include the
-	// directory entry itself so that callers can prune traversal early (e.g.
-	// `isIgnored(dir)` returns true for `node_modules` without a trailing slash).
-	// Leading slash: pattern is anchored to the base directory.
+	// Anchored: a leading slash, or any embedded slash, pins the pattern to the
+	// base directory. Otherwise it matches at any depth.
 	const anchored = withoutNegate.startsWith("/") || pattern.includes("/");
 
-	// Anchored to root: match the entry itself and its contents.
-	// e.g. `/dist/`, `/src`, `src/build`
-	// Not anchored: match at any depth.
-	// e.g. `node_modules/` → the directory entry and its contents at any depth
-	// e.g. `*.log` or `target` → the entry and its contents at any depth
-	const globs = anchored
-		? [pattern, `${pattern}/**`]
-		: [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
+	let globs: string[];
+	if (dirOnly) {
+		// Directory-only (`dir/`): match the directory entry (queried with a
+		// trailing slash) and everything under it, but NOT a bare path of the
+		// same name. `dir/**` matches `dir/` and `dir/child`, never bare `dir`.
+		globs = anchored
+			? [`${pattern}/**`]
+			: [`${pattern}/**`, `**/${pattern}/**`];
+	} else if (pattern.endsWith("/**")) {
+		// Contents-only (`dir/**`): match everything inside the directory but
+		// not the directory entry itself.
+		const core = pattern.slice(0, -3);
+		globs = [`${core}/*`, `${core}/*/**`];
+	} else if (anchored) {
+		// Anchored entry: match the entry itself (file or directory) and its
+		// contents. e.g. `/src`, `src/build`.
+		globs = [pattern, `${pattern}/**`];
+	} else {
+		// Unanchored entry: match as a file or directory at any depth.
+		// e.g. `*.log` or `target` → the entry and its contents at any depth.
+		globs = [pattern, `**/${pattern}`, `${pattern}/**`, `**/${pattern}/**`];
+	}
 
 	return { negate, globs };
 }
@@ -84,15 +106,17 @@ function buildIgnoreChecker(
 	// gitignore rule: you cannot re-include a file if a parent directory of
 	// that file is excluded. Returns true when any ancestor of `rel` is
 	// ignored by the first `upTo` patterns (last-match-wins for ancestors).
+	// Ancestors are directories, so they are queried with a trailing slash —
+	// otherwise directory-only patterns (`dir/`) would not match them.
 	const ancestorIgnored = (rel: string, upTo: number): boolean =>
 		rel
 			.split("/")
 			.slice(1)
 			.some((_, depth) => {
-				const ancestor = rel
+				const ancestor = `${rel
 					.split("/")
 					.slice(0, depth + 1)
-					.join("/");
+					.join("/")}/`;
 				return patterns
 					.slice(0, upTo)
 					.reduce(
