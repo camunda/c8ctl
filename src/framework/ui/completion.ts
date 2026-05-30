@@ -5,20 +5,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { getUserDataDir } from "../core/config.ts";
-import { getLogger } from "../core/logger.ts";
-import { c8ctl } from "../core/runtime.ts";
+import { getUserDataDir } from "../../core/config.ts";
+import { getLogger } from "../../core/logger.ts";
+import { c8ctl } from "../../core/runtime.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
-} from "./command-registry.ts";
+} from "../command-registry.ts";
 import {
 	getPluginCommandsInfo,
 	type PluginCommandInfo,
-} from "./plugin-loader.ts";
+} from "../plugins/plugin-loader.ts";
 
 // ─── Typed helpers (same pattern as help.ts) ─────────────────────────────────
 

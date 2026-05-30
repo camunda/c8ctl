@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getLogger } from "../core/logger.ts";
+import { getLogger } from "../../core/logger.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
@@ -14,12 +14,12 @@ import {
 	getCommandDef,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
-} from "./command-registry.ts";
+} from "../command-registry.ts";
 import {
 	getPluginCommandsInfo,
 	isPluginCommand,
 	type PluginCommandInfo,
-} from "./plugin-loader.ts";
+} from "../plugins/plugin-loader.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -197,7 +197,7 @@ function buildHelpJson(
  * Get package version
  */
 export function getVersion(): string {
-	const packagePath = join(__dirname, "../../package.json");
+	const packagePath = join(__dirname, "../../../package.json");
 	const packageJson = JSON.parse(readFileSync(packagePath, "utf-8"));
 	return packageJson.version;
 }

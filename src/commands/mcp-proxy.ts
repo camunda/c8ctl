@@ -15,7 +15,7 @@ import { normalizeToError } from "../core/errors.ts";
 import { Logger, type LogWriter } from "../core/logger.ts";
 import { c8ctl } from "../core/runtime.ts";
 import { defineCommand } from "../framework/command-framework.ts";
-import { getVersion } from "../framework/help.ts";
+import { getVersion } from "../framework/ui/help.ts";
 import {
 	createCamundaFetch,
 	normalizeRemoteMcpUrl,

@@ -34,13 +34,6 @@ import {
 	detectUnknownFlags,
 	validateFlags,
 } from "./framework/command-validation.ts";
-import { refreshCompletionsIfStale } from "./framework/completion.ts";
-import {
-	showCommandHelp,
-	showHelp,
-	showVerbResources,
-	showVersion,
-} from "./framework/help.ts";
 import {
 	executePluginCommand,
 	getPluginCommands,
@@ -48,7 +41,14 @@ import {
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
-} from "./framework/plugin-loader.ts";
+} from "./framework/plugins/plugin-loader.ts";
+import { refreshCompletionsIfStale } from "./framework/ui/completion.ts";
+import {
+	showCommandHelp,
+	showHelp,
+	showVerbResources,
+	showVersion,
+} from "./framework/ui/help.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.

@@ -14,7 +14,7 @@ import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
-} from "../../src/framework/plugin-loader.ts";
+} from "../../src/framework/plugins/plugin-loader.ts";
 import { formatSubcommand } from "./format.ts";
 import { lintSubcommand } from "./lint.ts";
 

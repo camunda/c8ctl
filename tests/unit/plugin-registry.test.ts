@@ -14,7 +14,7 @@ import {
 	getRegisteredPlugins,
 	isPluginRegistered,
 	removePluginFromRegistry,
-} from "../../src/framework/plugin-registry.ts";
+} from "../../src/framework/plugins/plugin-registry.ts";
 
 // Test registry path
 const testRegistryPath = join(getUserDataDir(), "plugins.json");
