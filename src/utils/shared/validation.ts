@@ -3,8 +3,8 @@
  *
  * These narrow raw CLI strings to validated values and exit with code 1 on
  * invalid input. They live in `utils/` (leaf layer, core-only deps) so that
- * non-command modules — e.g. `utils/open-helpers.ts` — can reuse them without
- * importing the `framework/` layer.
+ * non-command modules — e.g. `utils/command-local/open-helpers.ts` — can reuse
+ * them without importing the `framework/` layer.
  */
 
 import { getLogger } from "../../core/logger.ts";

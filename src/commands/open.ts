@@ -2,8 +2,8 @@
  * Open command - opens Camunda web applications in a browser
  *
  * Pure helpers (URL derivation, platform browser detection, validation,
- * `openUrl`) live in `src/open-helpers.ts` so they can be unit-tested
- * without violating the test→commands import boundary (#291).
+ * `openUrl`) live in `src/utils/command-local/open-helpers.ts` so they can be
+ * unit-tested without violating the test→commands import boundary (#291).
  */
 
 import { resolveClusterConfig } from "../core/config.ts";
