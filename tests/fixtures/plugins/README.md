@@ -14,7 +14,7 @@ TypeScript implementation demonstrating:
 
 **Usage in plugins:**
 ```typescript
-// c8ctl runtime is available as a global variable (typed in src/runtime.ts)
+// c8ctl runtime is available as a global variable (typed in src/core/runtime.ts)
 const c8ctl = globalThis.c8ctl;
 if (!c8ctl) throw new Error("c8ctl runtime is not available");
 

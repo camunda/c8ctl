@@ -22,8 +22,16 @@ The following are upstream dependencies — when they misbehave, report it. Do n
 
 | Path | Ownership and intent |
 | --- | --- |
-| `src/` | Production TypeScript code, primary edit surface |
+| `src/` | Production TypeScript code, primary edit surface. Organised into an enforced layered architecture — see [Source layout & layering](#source-layout--layering) |
+| `src/core/` | Foundational leaf layer — `config`, `logger`, `runtime`, client wiring. Imports nothing from the layers above it |
+| `src/framework/` | Command machinery — `command-registry`, `command-framework`, `command-validation` |
+| `src/framework/plugins/` | Plugin system — `plugin-loader`, `plugin-registry`, `plugin-version` |
+| `src/framework/ui/` | User-facing rendering — `help`, `completion` |
+| `src/utils/` | Leaf-layer helpers (alongside `core`; never import `framework`/`commands`) |
+| `src/utils/shared/` | Genuine cross-cutting leaves — `date-filter`, `resource-extensions`, `ignore`, `validation` |
+| `src/utils/command-local/` | Pure helpers that are the guts of a single command, kept test-visible — `open-helpers`, `search-helpers`, `mcp-proxy-helpers`, `watch-constants` |
 | `src/commands/` | Command handler implementations |
+| `src/commands/helpers/` | Command-private helpers, test-invisible (guarded by `helpers-import-boundary.test.ts`) |
 | `src/templates/` | Plugin scaffold templates — do not edit directly |
 | `tests/unit/` | Unit tests |
 | `tests/integration/` | Integration tests (require live Camunda or Docker) |
@@ -45,14 +53,39 @@ COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
 
 Key components:
 
-- `src/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
-- `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions
-- `src/command-framework.ts` — provides `defineCommand()` and the `dryRun()` helper
-- `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers
-- `src/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
-- `src/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
+- `src/framework/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
+- `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions (composition root, top-level)
+- `src/framework/command-framework.ts` — provides `defineCommand()` and the `dryRun()` helper
+- `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers (composition root, top-level)
+- `src/core/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
+- `src/core/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
+- `src/core/runtime.ts` — global runtime singleton (`c8ctl`) exposed to plugins; `getUserDataDir()` resolution
 - `src/commands/` — per-resource command handler files
 - `default-plugins/` — built-in embedded plugins (JavaScript or TypeScript; `.ts` files are typechecked and linted alongside `src/`)
+
+#### Source layout & layering
+
+`src/` follows a strict, acyclic, **enforced** layered architecture (introduced in #414, sub-grouped in #427/#428). A file may only import from layers at or below its own:
+
+```
+composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  framework  →  core
+                                                                          utils (leaf)
+```
+
+| Layer | May import from |
+| --- | --- |
+| `core/` | `core` |
+| `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
+| `framework/` | `core`, `utils`, `framework` (never `commands`) |
+| `commands/` | `core`, `utils`, `framework`, `commands` |
+| composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
+
+This is guarded by [`tests/unit/layering-import-boundary.test.ts`](tests/unit/layering-import-boundary.test.ts). The guard classifies a file by its **first** path segment, so sub-directories (`framework/plugins/`, `framework/ui/`, `utils/shared/`, `utils/command-local/`) inherit their parent layer — sub-grouping is free w.r.t. the guard. The composition root is pinned to an explicit allow-list (`src/index.ts`, `src/command-dispatch.ts`); any *new* top-level `src/*.ts` file fails the guard until it is deliberately classified.
+
+Two conventions worth internalising:
+
+- **`utils/shared/` vs `utils/command-local/`** — the split axis is "command-agnostic reusable leaf" vs "the guts of one command". `command-local` helpers stay test-visible (not moved into `commands/**`) deliberately: their logic is pure and cross-platform and is better covered by direct unit tests than by coarser `c8()` subprocess tests.
+- **`utils/command-local/` vs `commands/helpers/`** — both hold command-specific support code, but `command-local` is test-visible (tests import it directly) while `commands/helpers/` is command-private and test-invisible (driven only through the `c8()` subprocess helper, per #291).
 
 ### Commit message guidelines
 
@@ -180,7 +213,7 @@ The flag is **not** applied to `test:unit` because the unit suite has 66 files a
 
 ### Help output: flag scoping rule
 
-`c8ctl --help` (top-level) lists **only** the flags in `GLOBAL_FLAGS` (`src/command-registry.ts`). Verb- and resource-specific flags appear under `c8ctl help <verb>` only.
+`c8ctl --help` (top-level) lists **only** the flags in `GLOBAL_FLAGS` (`src/framework/command-registry.ts`). Verb- and resource-specific flags appear under `c8ctl help <verb>` only.
 
 There is **no opt-in mechanism** for promoting a verb-specific flag into the top-level Flags section. The previous `FlagDef.showInTopLevelHelp` field and the `(use with 'verb resource')` parenthetical workaround were removed in [#321](https://github.com/camunda/c8ctl/issues/321) / [#322](https://github.com/camunda/c8ctl/pull/322) because they produced misleading output: a flag listed at the root looks like it applies to every command.
 
@@ -298,7 +331,7 @@ Every command handler in `src/commands/**` follows the same shape. Pattern-match
 #### Canonical shape
 
 ```ts
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flags, args) => {
   const { client, profile, logger } = ctx;
@@ -392,7 +425,7 @@ Long-running handlers — currently `watch` and `mcp-proxy` — correctly return
 
 ### Adding a new command
 
-Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
+Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/framework/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
 
 #### Architecture overview
 
@@ -406,7 +439,7 @@ COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
 
 ##### 1. Declare the command in `COMMAND_REGISTRY`
 
-Add or extend a verb entry in `src/command-registry.ts`:
+Add or extend a verb entry in `src/framework/command-registry.ts`:
 
 ```typescript
 // In COMMAND_REGISTRY:
@@ -483,7 +516,7 @@ Create a handler file in `src/commands/`:
 
 ```typescript
 // src/commands/my-resource.ts
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand, dryRun } from "../framework/command-framework.ts";
 
 export const myverbMyResourceCommand = defineCommand(
   "myverb",
