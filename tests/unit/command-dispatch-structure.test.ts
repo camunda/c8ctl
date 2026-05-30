@@ -17,7 +17,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 
-import { COMMAND_DISPATCH } from "../../src/framework/command-dispatch.ts";
+import { COMMAND_DISPATCH } from "../../src/command-dispatch.ts";
 import {
 	DEFINE_COMMAND_MARKER,
 	isDefinedCommand,

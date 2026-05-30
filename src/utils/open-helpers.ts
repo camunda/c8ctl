@@ -8,10 +8,7 @@
 import { spawn } from "node:child_process";
 import { platform } from "node:os";
 import { getLogger } from "../core/logger.ts";
-import {
-	requireOneOf,
-	requirePositional,
-} from "../framework/command-validation.ts";
+import { requireOneOf, requirePositional } from "./validation.ts";
 
 export const OPEN_APPS = [
 	"operate",

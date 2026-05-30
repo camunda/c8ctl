@@ -7,6 +7,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { COMMAND_DISPATCH } from "./command-dispatch.ts";
 import { createClient } from "./core/client.ts";
 import {
 	getUserDataDir,
@@ -19,7 +20,6 @@ import {
 	printUpdateNotification,
 	startUpdateCheck,
 } from "./core/update-check.ts";
-import { COMMAND_DISPATCH } from "./framework/command-dispatch.ts";
 import type { CommandContext } from "./framework/command-framework.ts";
 import {
 	COMMAND_REGISTRY,

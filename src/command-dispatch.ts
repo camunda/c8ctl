@@ -8,9 +8,9 @@
  * lived in index.ts.
  */
 
-import { completionCommand } from "../commands/completion.ts";
-import { deployCommand } from "../commands/deploy.ts";
-import { getFormCommand } from "../commands/forms.ts";
+import { completionCommand } from "./commands/completion.ts";
+import { deployCommand } from "./commands/deploy.ts";
+import { getFormCommand } from "./commands/forms.ts";
 import {
 	assignFallbackCommand,
 	assignGroupCommand,
@@ -52,24 +52,24 @@ import {
 	unassignMappingRuleCommand,
 	unassignRoleCommand,
 	unassignUserCommand,
-} from "../commands/identity.ts";
+} from "./commands/identity.ts";
 import {
 	getIncidentCommand,
 	listIncidentsCommand,
 	resolveIncidentCommand,
-} from "../commands/incidents.ts";
+} from "./commands/incidents.ts";
 import {
 	activateJobsCommand,
 	completeJobCommand,
 	failJobCommand,
 	listJobsCommand,
-} from "../commands/jobs.ts";
-import { mcpProxyCommand } from "../commands/mcp-proxy.ts";
+} from "./commands/jobs.ts";
+import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
 	publishMessageCommand,
-} from "../commands/messages.ts";
-import { feedbackCommand, openAppCommand } from "../commands/open.ts";
+} from "./commands/messages.ts";
+import { feedbackCommand, openAppCommand } from "./commands/open.ts";
 import {
 	doctorPluginCommand,
 	downgradePluginCommand,
@@ -79,25 +79,25 @@ import {
 	syncPluginsCommand,
 	unloadPluginCommand,
 	upgradePluginCommand,
-} from "../commands/plugins.ts";
+} from "./commands/plugins.ts";
 import {
 	getProcessDefinitionCommand,
 	listProcessDefinitionsCommand,
-} from "../commands/process-definitions.ts";
+} from "./commands/process-definitions.ts";
 import {
 	awaitProcessInstanceCommand,
 	cancelProcessInstanceCommand,
 	createProcessInstanceCommand,
 	getProcessInstanceCommand,
 	listProcessInstancesCommand,
-} from "../commands/process-instances.ts";
+} from "./commands/process-instances.ts";
 import {
 	addProfileCommand,
 	listProfileCommand,
 	removeProfileCommand,
 	whichProfileCommand,
-} from "../commands/profiles.ts";
-import { runCommand } from "../commands/run.ts";
+} from "./commands/profiles.ts";
+import { runCommand } from "./commands/run.ts";
 import {
 	searchIncidentsCommand,
 	searchJobsCommand,
@@ -105,21 +105,21 @@ import {
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
 	searchVariablesCommand,
-} from "../commands/search.ts";
+} from "./commands/search.ts";
 import {
 	outputCommand,
 	useProfileCommand,
 	useTenantCommand,
 	whichOutputCommand,
-} from "../commands/session.ts";
-import { getTopologyCommand } from "../commands/topology.ts";
+} from "./commands/session.ts";
+import { getTopologyCommand } from "./commands/topology.ts";
 import {
 	completeUserTaskCommand,
 	listUserTasksCommand,
-} from "../commands/user-tasks.ts";
-import { setVariableCommand } from "../commands/variables.ts";
-import { watchCommand } from "../commands/watch.ts";
-import type { AnyCommandHandler } from "./command-framework.ts";
+} from "./commands/user-tasks.ts";
+import { setVariableCommand } from "./commands/variables.ts";
+import { watchCommand } from "./commands/watch.ts";
+import type { AnyCommandHandler } from "./framework/command-framework.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".
