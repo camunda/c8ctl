@@ -25,7 +25,6 @@ const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CORE_DEPENDENCIES = [
 	"@camunda8/orchestration-cluster-api",
 	"@modelcontextprotocol/sdk",
-	"ignore",
 ];
 
 /** Default plugins that declare their own runtime dependencies. */
