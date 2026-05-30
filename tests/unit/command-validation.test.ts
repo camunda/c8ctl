@@ -13,7 +13,10 @@ import {
 	requireEnum,
 	requireOption,
 } from "../../src/framework/command-validation.ts";
-import { requireOneOf, requirePositional } from "../../src/utils/validation.ts";
+import {
+	requireOneOf,
+	requirePositional,
+} from "../../src/utils/shared/validation.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 // A minimal enum-like object matching the SDK pattern

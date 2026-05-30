@@ -14,7 +14,7 @@ import { defineCommand, dryRun } from "../framework/command-framework.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
-} from "../utils/resource-extensions.ts";
+} from "../utils/shared/resource-extensions.ts";
 import {
 	collectResourcesForPaths,
 	deployResources,

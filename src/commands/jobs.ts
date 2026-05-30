@@ -5,7 +5,7 @@
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages } from "../core/client.ts";
 import { defineCommand, dryRun } from "../framework/command-framework.ts";
-import { buildDateFilter, parseBetween } from "../utils/date-filter.ts";
+import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
 
 /**
  * List jobs

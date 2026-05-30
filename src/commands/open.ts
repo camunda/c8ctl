@@ -12,7 +12,7 @@ import {
 	deriveAppUrl,
 	openUrl,
 	validateOpenAppOptions,
-} from "../utils/open-helpers.ts";
+} from "../utils/command-local/open-helpers.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 

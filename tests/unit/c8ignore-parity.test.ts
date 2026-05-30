@@ -3,7 +3,7 @@
  *
  * Background
  * ----------
- * `src/utils/ignore.ts` is the single place that decides which files `deploy` and
+ * `src/utils/shared/ignore.ts` is the single place that decides which files `deploy` and
  * `watch` skip. It is the project's interpretation of `.gitignore` semantics.
  * This suite pins that interpretation against the canonical gitignore rules so
  * that any reimplementation of the matcher (for example, replacing the
@@ -40,7 +40,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { isIgnored, loadIgnoreRules } from "../../src/utils/ignore.ts";
+import { isIgnored, loadIgnoreRules } from "../../src/utils/shared/ignore.ts";
 
 /**
  * A single parity case: a `.c8ignore` rule set plus the expected
