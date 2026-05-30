@@ -19,14 +19,16 @@
  *   - framework/ → core, utils, framework (never commands)
  *   - commands/  → core, utils, framework, commands
  *   - src/*.ts   → anything               (composition root: index.ts,
- *                                          command-dispatch.ts — top-level
- *                                          files only, never a subdirectory)
+ *                                          command-dispatch.ts — an explicit
+ *                                          allow-list, never a subdirectory)
  *
- * Only top-level `src/*.ts` files are the unconstrained composition root.
- * Any *subdirectory* must be an explicit layer: a new, unrecognised
- * subdirectory fails the guard rather than silently inheriting the
- * root's "anything goes" rule. Non-runtime scaffolding (`src/templates/`)
- * is excluded via SKIP_DIRS.
+ * The unconstrained composition root is an explicit allow-list of top-level
+ * `src/*.ts` files (ROOT_FILES) — currently `index.ts` and
+ * `command-dispatch.ts`. Any *other* top-level file, and any file in an
+ * unrecognised *subdirectory*, fails the guard rather than silently
+ * inheriting the root's "anything goes" rule. Adding a new unconstrained
+ * root file must therefore be a deliberate, reviewed edit to ROOT_FILES.
+ * Non-runtime scaffolding (`src/templates/`) is excluded via SKIP_DIRS.
  *
  * This keeps the dependency graph acyclic and prevents the layering
  * from silently rotting back into a flat structure. If you hit a
@@ -57,6 +59,15 @@ const SRC_DIR = resolve(PROJECT_ROOT, "src");
 // constrained by the layer guard.
 const SKIP_DIRS: ReadonlySet<string> = new Set([resolve(SRC_DIR, "templates")]);
 
+// The composition root is an explicit allow-list of top-level src/*.ts files.
+// These wire every layer together and are intentionally unconstrained. Any
+// other top-level file is classified "unknown" so the guard fails loudly:
+// adding a new unconstrained root must be a deliberate edit here.
+const ROOT_FILES: ReadonlySet<string> = new Set([
+	"index.ts",
+	"command-dispatch.ts",
+]);
+
 type Layer = "core" | "utils" | "framework" | "commands" | "root";
 
 /** Each layer maps to the set of layers it is allowed to import from. */
@@ -73,15 +84,17 @@ const ALLOWED: Record<Layer, ReadonlySet<Layer>> = {
 /**
  * Classify an absolute path under src/.
  *
- * Only top-level `src/*.ts` files are the unconstrained composition root.
- * Any *subdirectory* must be an explicit layer — a new, unrecognised
- * subdirectory returns `"unknown"` so the guard fails loudly rather than
- * silently treating it as root and bypassing the boundary checks.
+ * The unconstrained composition root is an explicit allow-list of top-level
+ * `src/*.ts` files (ROOT_FILES). Any *other* top-level file, and any file in
+ * an unrecognised *subdirectory*, returns `"unknown"` so the guard fails
+ * loudly rather than silently treating it as root and bypassing the boundary
+ * checks.
  */
 function layerOf(absPath: string): Layer | "unknown" {
 	const rel = relative(SRC_DIR, absPath).split(/[\\/]/).join("/");
-	// Top-level src/*.ts files (no path separator) are the composition root.
-	if (!rel.includes("/")) return "root";
+	// Top-level src/*.ts files (no path separator) are the composition root
+	// only if explicitly allow-listed; everything else is "unknown".
+	if (!rel.includes("/")) return ROOT_FILES.has(rel) ? "root" : "unknown";
 	const segment = rel.slice(0, rel.indexOf("/"));
 	if (segment === "core") return "core";
 	if (segment === "utils") return "utils";
@@ -200,11 +213,11 @@ describe("architectural guard: src/ layered architecture (#414)", () => {
 		assert.strictEqual(
 			unclassified.length,
 			0,
-			`Found ${unclassified.length} src/ file(s) in an unrecognised subdirectory:\n${unclassified
+			`Found ${unclassified.length} src/ file(s) in an unrecognised location:\n${unclassified
 				.map((f) => `  ${f}`)
 				.join(
 					"\n",
-				)}\n\nA new src/ subdirectory must be assigned to a layer in layerOf()/ALLOWED (or added to SKIP_DIRS if it is non-runtime). Leaving it unclassified would let it bypass the boundary checks.`,
+				)}\n\nA new src/ subdirectory must be assigned to a layer in layerOf()/ALLOWED (or added to SKIP_DIRS if it is non-runtime). A new top-level src/*.ts file must be added to ROOT_FILES only if it is a deliberate, unconstrained composition-root file. Leaving it unclassified would let it bypass the boundary checks.`,
 		);
 	});
 
