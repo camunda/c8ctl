@@ -12,7 +12,7 @@ import {
 	showHelp,
 	showVerbResources,
 	showVersion,
-} from "../../src/framework/help.ts";
+} from "../../src/framework/ui/help.ts";
 
 describe("Help Module", () => {
 	let consoleLogSpy: string[];

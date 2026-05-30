@@ -14,18 +14,18 @@ import {
 	clearLoadedPlugins,
 	getLoadedPluginSummaries,
 	getPluginCollisions,
-} from "../framework/plugin-loader.ts";
+} from "../framework/plugins/plugin-loader.ts";
 import {
 	addPluginToRegistry,
 	getPluginEntry,
 	getRegisteredPlugins,
 	isPluginRegistered,
 	removePluginFromRegistry,
-} from "../framework/plugin-registry.ts";
+} from "../framework/plugins/plugin-registry.ts";
 import {
 	getInstalledPluginVersion,
 	getVersionFromSource,
-} from "../framework/plugin-version.ts";
+} from "../framework/plugins/plugin-version.ts";
 
 export { getInstalledPluginVersion, getVersionFromSource };
 

@@ -23,7 +23,7 @@ import {
 	getShellRcFile,
 	installCompletion,
 	refreshCompletionsIfStale,
-} from "../../src/framework/completion.ts";
+} from "../../src/framework/ui/completion.ts";
 
 // ─── detectShell ─────────────────────────────────────────────────────────────
 

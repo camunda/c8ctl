@@ -20,7 +20,7 @@ import type {
 	PluginCommands,
 	PluginCtx,
 	PluginMetadata,
-} from "../../src/framework/plugin-loader.ts";
+} from "../../src/framework/plugins/plugin-loader.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;

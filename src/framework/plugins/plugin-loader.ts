@@ -5,10 +5,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { ensurePluginsDir } from "../core/config.ts";
-import { getLogger, type Logger, type OutputMode } from "../core/logger.ts";
-import { c8ctl } from "../core/runtime.ts";
-import type { FlagDef } from "./command-registry.ts";
+import { ensurePluginsDir } from "../../core/config.ts";
+import { getLogger, type Logger, type OutputMode } from "../../core/logger.ts";
+import { c8ctl } from "../../core/runtime.ts";
+import type { FlagDef } from "../command-registry.ts";
 
 /**
  * Typed, documented host context passed to plugin command handlers as
@@ -310,7 +310,7 @@ function isDuplicatePluginName(pluginName: string): boolean {
  * directory containing this loader module.
  *
  * The loader sits one directory below the project/dist root:
- *   - Development: `src/framework/plugin-loader.ts`
+ *   - Development: `src/framework/plugins/plugin-loader.ts`
  *       → `../../default-plugins`  = `<repo>/default-plugins`
  *   - Production:  `dist/framework/plugin-loader.js`
  *       → `../default-plugins`     = `<repo>/dist/default-plugins`
@@ -323,8 +323,10 @@ function isDuplicatePluginName(pluginName: string): boolean {
  */
 export function defaultPluginsCandidateDirs(loaderDir: string): string[] {
 	return [
-		join(loaderDir, "..", "default-plugins"), // Production: dist/framework -> dist/default-plugins
-		join(loaderDir, "..", "..", "default-plugins"), // Development: src/framework -> <repo>/default-plugins
+		// Production: dist/framework/plugins -> dist/default-plugins
+		join(loaderDir, "..", "..", "default-plugins"),
+		// Development: src/framework/plugins -> <repo>/default-plugins
+		join(loaderDir, "..", "..", "..", "default-plugins"),
 	];
 }
 

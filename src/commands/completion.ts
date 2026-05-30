@@ -9,7 +9,10 @@
  */
 
 import { defineCommand } from "../framework/command-framework.ts";
-import { installCompletion, showCompletion } from "../framework/completion.ts";
+import {
+	installCompletion,
+	showCompletion,
+} from "../framework/ui/completion.ts";
 
 /**
  * `completion` verb dispatcher.

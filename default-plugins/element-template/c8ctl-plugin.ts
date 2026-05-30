@@ -20,7 +20,7 @@ import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
-} from "../../src/framework/plugin-loader.ts";
+} from "../../src/framework/plugins/plugin-loader.ts";
 import { applySubcommand } from "./commands/apply.ts";
 import { getSubcommand } from "./commands/get.ts";
 import { getPropertiesSubcommand } from "./commands/get-properties.ts";
