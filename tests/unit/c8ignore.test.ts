@@ -349,6 +349,39 @@ describe(".c8ignore", () => {
 			assert.strictEqual(ig.ignores("src/main.ts"), false);
 		});
 
+		test("anchored /dist/ only matches dist at ignore base", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "/dist/\n");
+			const ig = loadIgnoreRules(testDir);
+			// A directory-only pattern does not match a bare path of the same
+			// name (gitignore treats `dist` without a trailing slash as a file).
+			assert.strictEqual(ig.ignores("dist"), false);
+			assert.strictEqual(ig.ignores("dist/"), true);
+			assert.strictEqual(ig.ignores("dist/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/dist"), false);
+			assert.strictEqual(ig.ignores("nested/dist/output.js"), false);
+		});
+
+		test("non-anchored dist/ matches dist at any depth", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "dist/\n");
+			const ig = loadIgnoreRules(testDir);
+			// Directory-only pattern: matches the directory entry (with trailing
+			// slash) and its contents, but not a bare same-named path.
+			assert.strictEqual(ig.ignores("dist"), false);
+			assert.strictEqual(ig.ignores("dist/"), true);
+			assert.strictEqual(ig.ignores("dist/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/dist"), false);
+			assert.strictEqual(ig.ignores("nested/dist/output.js"), true);
+		});
+
+		test("embedded slash pattern src/build is anchored to base", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "src/build\n");
+			const ig = loadIgnoreRules(testDir);
+			assert.strictEqual(ig.ignores("src/build"), true);
+			assert.strictEqual(ig.ignores("src/build/output.js"), true);
+			assert.strictEqual(ig.ignores("nested/src/build"), false);
+			assert.strictEqual(ig.ignores("nested/src/build/output.js"), false);
+		});
+
 		test("isIgnored handles paths relative to baseDir", () => {
 			const ig = loadIgnoreRules(testDir);
 			const full = join(testDir, "node_modules", "pkg", "file.bpmn");
@@ -406,6 +439,40 @@ describe(".c8ignore", () => {
 				testDir,
 				"should return common ancestor of sibling paths",
 			);
+		});
+
+		test("negation cannot re-include a file whose parent directory is excluded", () => {
+			// gitignore rule: if a parent directory is excluded, negation patterns
+			// on files within it have no effect.
+			writeFileSync(
+				join(testDir, ".c8ignore"),
+				"ignored/\n!ignored/keep.bpmn\n",
+			);
+			const ig = loadIgnoreRules(testDir);
+			// The parent directory is excluded, so the file stays ignored.
+			assert.strictEqual(
+				ig.ignores("ignored/keep.bpmn"),
+				true,
+				"negation cannot re-include a file inside an excluded directory",
+			);
+			// Deeper nesting: ancestor check must walk multiple levels.
+			assert.strictEqual(
+				ig.ignores("ignored/subdir/deep.bpmn"),
+				true,
+				"negation cannot re-include a file nested deeper inside an excluded directory",
+			);
+			// Other files inside the excluded directory are also ignored.
+			assert.strictEqual(ig.ignores("ignored/other.bpmn"), true);
+			// Files outside the excluded directory are unaffected.
+			assert.strictEqual(ig.ignores("allowed/keep.bpmn"), false);
+		});
+
+		test("negation works normally when no parent directory is excluded", () => {
+			writeFileSync(join(testDir, ".c8ignore"), "*.log\n!keep.log\n");
+			const ig = loadIgnoreRules(testDir);
+			// Normal negation: no parent directory excluded, so it works.
+			assert.strictEqual(ig.ignores("keep.log"), false);
+			assert.strictEqual(ig.ignores("debug.log"), true);
 		});
 	});
 
