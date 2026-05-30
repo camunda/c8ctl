@@ -8,7 +8,7 @@ import {
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages, handleCommandError } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
@@ -66,7 +66,7 @@ export const listProcessInstancesCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list process-instances",
 			method: "POST",
 			endpoint: "/process-instances/search",
@@ -111,7 +111,7 @@ export const getProcessInstanceCommand = defineCommand(
 		// but used as a boolean toggle for get pi. Check argv directly.
 		const includeVariables = process.argv.includes("--variables");
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get process-instance",
 			method: "GET",
 			endpoint: `/process-instances/${key}`,
@@ -183,7 +183,7 @@ export const createProcessInstanceCommand = defineCommand(
 		if (awaitCompletion) body.awaitCompletion = true;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create process-instance",
 			method: "POST",
 			endpoint: "/process-instances",
@@ -286,7 +286,7 @@ export const awaitProcessInstanceCommand = defineCommand(
 		if (flags.variables) body.variables = JSON.parse(flags.variables);
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "await process-instance",
 			method: "POST",
 			endpoint: "/process-instances",
@@ -348,7 +348,7 @@ export const cancelProcessInstanceCommand = defineCommand(
 		const { client, profile } = ctx;
 		const key = args.key;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "cancel process-instance",
 			method: "POST",
 			endpoint: `/process-instances/${key}/cancellation`,

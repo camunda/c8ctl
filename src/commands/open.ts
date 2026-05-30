@@ -26,7 +26,7 @@ import {
 export const openAppCommand = defineCommand("open", "", async (ctx) => {
 	const { app, profile, dryRun } = validateOpenAppOptions(ctx.resource, {
 		profile: ctx.profile,
-		dryRun: ctx.dryRun,
+		dryRun: ctx.isDryRun,
 	});
 
 	const config = resolveClusterConfig(profile);

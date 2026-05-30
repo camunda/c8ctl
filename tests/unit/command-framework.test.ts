@@ -18,6 +18,7 @@ import {
 import {
 	type CommandContext,
 	type CommandResult,
+	createDryRun,
 	defineCommand,
 	deserializeFlags,
 	type InferFlags,
@@ -305,7 +306,10 @@ describe("defineCommand", () => {
 			all: undefined,
 			between: undefined,
 			dateField: undefined,
-			dryRun: undefined,
+			version: undefined,
+			isDryRun: false,
+			dryRun: createDryRun(false),
+			verbose: false,
 			profile: undefined,
 		};
 

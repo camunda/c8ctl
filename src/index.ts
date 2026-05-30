@@ -23,6 +23,7 @@ import {
 	COMMAND_REGISTRY,
 	type CommandContext,
 	type CommandDef,
+	createDryRun,
 	deriveParseArgsOptions,
 	detectUnknownFlags,
 	executePluginCommand,
@@ -390,7 +391,7 @@ async function main() {
 	await loadInstalledPlugins();
 
 	// Auto-refresh installed completions if CLI version changed
-	refreshCompletionsIfStale();
+	refreshCompletionsIfStale(c8ctl.dryRun ?? false);
 
 	// Extract command and resource
 	const [rawVerb, resource, ...args] = positionals;
@@ -732,7 +733,9 @@ async function main() {
 			between: str(values.between),
 			dateField: str(values.dateField),
 			version: parseVersionFlag(values),
-			dryRun: c8ctl.dryRun,
+			isDryRun: c8ctl.dryRun ?? false,
+			dryRun: createDryRun(c8ctl.dryRun ?? false),
+			verbose: c8ctl.verbose ?? false,
 			profile,
 		};
 		await handler.execute(ctx, values, args);

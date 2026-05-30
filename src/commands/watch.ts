@@ -202,6 +202,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 								continueOnError: flags.force,
 								continueOnUserError: true,
 								signal: ac.signal,
+								verbose: ctx.verbose,
 							});
 						} catch (error) {
 							// `deployResources()` normally returns early when its signal

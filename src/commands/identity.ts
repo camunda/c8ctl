@@ -4,7 +4,6 @@
 
 import { TenantId, Username } from "@camunda8/orchestration-cluster-api";
 import {
-	c8ctl,
 	createClient,
 	getLogger,
 	resolveClusterConfig,
@@ -122,7 +121,7 @@ async function handleAssign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string },
+	options: { profile?: string; isDryRun: boolean },
 ): Promise<void> {
 	const logger = getLogger();
 	const allowedTargets = ALLOWED_ASSIGN_TARGETS[resource];
@@ -154,7 +153,7 @@ async function handleAssign(
 	const resourcePath = RESOURCE_PATHS[resource];
 	const targetPath = `${targetFlag.replace(/^to-/, "")}s`;
 
-	if (c8ctl.dryRun) {
+	if (options.isDryRun) {
 		const config = resolveClusterConfig(options.profile);
 		logger.json({
 			dryRun: true,
@@ -280,7 +279,7 @@ async function handleUnassign(
 	resource: string,
 	id: string,
 	values: Record<string, unknown>,
-	options: { profile?: string },
+	options: { profile?: string; isDryRun: boolean },
 ): Promise<void> {
 	const logger = getLogger();
 	const allowedSources = ALLOWED_UNASSIGN_SOURCES[resource];
@@ -312,7 +311,7 @@ async function handleUnassign(
 	const resourcePath = RESOURCE_PATHS[resource];
 	const sourcePath = `${sourceFlag.replace(/^from-/, "")}s`;
 
-	if (c8ctl.dryRun) {
+	if (options.isDryRun) {
 		const config = resolveClusterConfig(options.profile);
 		logger.json({
 			dryRun: true,
@@ -461,6 +460,7 @@ function makeAssignCommand<
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -478,6 +478,7 @@ function makeUnassignCommand<
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -517,6 +518,7 @@ export const assignFallbackCommand = defineCommand(
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;
@@ -538,6 +540,7 @@ export const unassignFallbackCommand = defineCommand(
 			{ ...flags },
 			{
 				profile: ctx.profile,
+				isDryRun: ctx.isDryRun,
 			},
 		);
 		return undefined;

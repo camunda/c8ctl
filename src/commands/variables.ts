@@ -3,7 +3,7 @@
  */
 
 import { isRecord } from "../core/index.ts";
-import { defineCommand, dryRun } from "../framework/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * Set variables on an element instance (process instance or flow element).
@@ -40,7 +40,7 @@ export const setVariableCommand = defineCommand(
 
 		const local = flags.local === true;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "set variable",
 			method: "PUT",
 			endpoint: `/element-instances/${key}/variables`,

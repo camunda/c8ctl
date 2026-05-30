@@ -11,7 +11,6 @@ import {
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
-	c8ctl,
 	createClient,
 	Logger,
 	type LogWriter,
@@ -267,9 +266,9 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 
 		// In verbose mode users want the full stack trace, so re-throw and
 		// let Node print it to stderr. The framework's default error handler
-		// short-circuits to a plain rethrow when `c8ctl.verbose` is set
+		// short-circuits to a plain rethrow when verbose is set
 		// (see src/errors.ts), so no stdout hint is emitted in that path.
-		if (c8ctl.verbose) {
+		if (ctx.verbose) {
 			throw normalizedError;
 		}
 
