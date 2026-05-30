@@ -35,6 +35,22 @@
  * violation, the fix is almost always to move the shared code *down*
  * to the lowest layer that needs it — not to widen the rule.
  *
+ * Module encapsulation (issue #424)
+ * ---------------------------------
+ *
+ * The barreled layers (`core`, `utils`, `framework`) each expose a single
+ * public entry point, `<layer>/index.ts`. Two further rules keep that
+ * encapsulation honest:
+ *
+ *   - Rule A — a *cross-layer* import into a barreled layer MUST target the
+ *     barrel (`../core/index.ts`), never a deep file (`../core/logger.ts`).
+ *   - Rule B — an *intra-layer* import within a barreled layer MUST target a
+ *     sibling file directly (`./logger.ts`), never the layer's own barrel
+ *     (avoids self-referential cycles and keeps module-eval order obvious).
+ *
+ * `commands` is deliberately NOT barreled: it is consumed only by the
+ * composition root, which is allowed to reach deep command files.
+ *
  * Detection
  * ---------
  *
@@ -129,6 +145,81 @@ function toRelative(absPath: string): string {
 	return relative(PROJECT_ROOT, absPath).split(/[\\/]/).join("/");
 }
 
+// Barreled layers expose a single public entry point (`<layer>/index.ts`).
+// Cross-layer imports must go through the barrel; intra-layer imports must not
+// (issue #424). `commands` is intentionally NOT barreled: nothing imports it
+// cross-layer except the composition root, which may reach deep command files.
+const BARRELED_LAYERS: ReadonlySet<string> = new Set<string>([
+	"core",
+	"utils",
+	"framework",
+]);
+
+interface Edge {
+	line: number;
+	specifier: string;
+	/** Resolved absolute path of the import target inside src/. */
+	target: string;
+	toLayer: Layer | "unknown";
+}
+
+/** Collect every relative import/export edge that resolves inside src/. */
+function collectEdges(absPath: string, sf: ts.SourceFile): Edge[] {
+	const edges: Edge[] = [];
+
+	const record = (specNode: ts.Node, spec: string): void => {
+		// Only relative specifiers point inside src/.
+		if (!spec.startsWith(".")) return;
+		const target = resolve(dirname(absPath), spec);
+		// Ignore imports that resolve outside src/ (e.g. into tests/ — none
+		// today — or sibling roots). Those are not layer edges.
+		const rel = relative(SRC_DIR, target);
+		if (rel.startsWith("..")) return;
+		const { line } = sf.getLineAndCharacterOfPosition(specNode.getStart(sf));
+		edges.push({
+			line: line + 1,
+			specifier: spec,
+			target,
+			toLayer: layerOf(target),
+		});
+	};
+
+	const visit = (node: ts.Node): void => {
+		if (
+			ts.isImportDeclaration(node) &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			record(node.moduleSpecifier, node.moduleSpecifier.text);
+		} else if (
+			ts.isExportDeclaration(node) &&
+			node.moduleSpecifier &&
+			ts.isStringLiteral(node.moduleSpecifier)
+		) {
+			record(node.moduleSpecifier, node.moduleSpecifier.text);
+		} else if (ts.isCallExpression(node)) {
+			const arg0 = node.arguments[0];
+			if (arg0 && ts.isStringLiteral(arg0)) {
+				const isDynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+				const isRequire =
+					ts.isIdentifier(node.expression) &&
+					node.expression.text === "require";
+				if (isDynamic || isRequire) record(arg0, arg0.text);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(sf);
+
+	return edges;
+}
+
+/** True when an edge resolves to a barreled layer's `index.ts` entry point. */
+function isBarrelTarget(target: string): boolean {
+	const rel = relative(SRC_DIR, target).split(/[\\/]/).join("/");
+	const segment = rel.includes("/") ? rel.slice(0, rel.indexOf("/")) : "";
+	return BARRELED_LAYERS.has(layerOf(target)) && rel === `${segment}/index.ts`;
+}
+
 interface Violation {
 	file: string;
 	fromLayer: Layer;
@@ -151,54 +242,71 @@ function findViolations(absPath: string): Violation[] {
 		ts.ScriptKind.TS,
 	);
 	const out: Violation[] = [];
-
-	const check = (specNode: ts.Node, spec: string): void => {
-		// Only relative specifiers point inside src/.
-		if (!spec.startsWith(".")) return;
-		const target = resolve(dirname(absPath), spec);
-		// Ignore imports that resolve outside src/ (e.g. into tests/ — none
-		// today — or sibling roots). Those are not layer edges.
-		const rel = relative(SRC_DIR, target);
-		if (rel.startsWith("..")) return;
-		const toLayer = layerOf(target);
-		if (toLayer === "unknown" || !allowed.has(toLayer)) {
-			const { line } = sf.getLineAndCharacterOfPosition(specNode.getStart(sf));
+	for (const edge of collectEdges(absPath, sf)) {
+		if (edge.toLayer === "unknown" || !allowed.has(edge.toLayer)) {
 			out.push({
 				file: toRelative(absPath),
 				fromLayer,
-				line: line + 1,
-				specifier: spec,
-				toLayer,
+				line: edge.line,
+				specifier: edge.specifier,
+				toLayer: edge.toLayer,
 			});
 		}
-	};
+	}
+	return out;
+}
 
-	const visit = (node: ts.Node): void => {
-		if (
-			ts.isImportDeclaration(node) &&
-			ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			check(node.moduleSpecifier, node.moduleSpecifier.text);
-		} else if (
-			ts.isExportDeclaration(node) &&
-			node.moduleSpecifier &&
-			ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			check(node.moduleSpecifier, node.moduleSpecifier.text);
-		} else if (ts.isCallExpression(node)) {
-			const arg0 = node.arguments[0];
-			if (arg0 && ts.isStringLiteral(arg0)) {
-				const isDynamic = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-				const isRequire =
-					ts.isIdentifier(node.expression) &&
-					node.expression.text === "require";
-				if (isDynamic || isRequire) check(arg0, arg0.text);
-			}
+interface BarrelViolation {
+	file: string;
+	line: number;
+	rule: "cross-layer-must-use-barrel" | "intra-layer-must-be-direct";
+	specifier: string;
+	message: string;
+}
+
+/**
+ * Enforce per-layer module encapsulation (issue #424):
+ *
+ *   Rule A — a cross-layer import into a barreled layer MUST target the
+ *            layer's `index.ts` barrel, never a deep file.
+ *   Rule B — an intra-layer import within a barreled layer MUST target a
+ *            sibling file directly, never the layer's own barrel (keeps the
+ *            module-eval order obvious and avoids self-referential cycles).
+ */
+function findBarrelViolations(absPath: string): BarrelViolation[] {
+	const fromLayer = layerOf(absPath);
+	if (fromLayer === "unknown") return [];
+	const source = readFileSync(absPath, "utf8");
+	const sf = ts.createSourceFile(
+		absPath,
+		source,
+		ts.ScriptTarget.Latest,
+		true,
+		ts.ScriptKind.TS,
+	);
+	const out: BarrelViolation[] = [];
+	for (const edge of collectEdges(absPath, sf)) {
+		if (edge.toLayer === "unknown") continue;
+		if (!BARRELED_LAYERS.has(edge.toLayer)) continue;
+		const barrel = isBarrelTarget(edge.target);
+		if (edge.toLayer !== fromLayer && !barrel) {
+			out.push({
+				file: toRelative(absPath),
+				line: edge.line,
+				rule: "cross-layer-must-use-barrel",
+				specifier: edge.specifier,
+				message: `cross-layer import into '${edge.toLayer}' must go through '${edge.toLayer}/index.ts', not a deep file`,
+			});
+		} else if (edge.toLayer === fromLayer && barrel) {
+			out.push({
+				file: toRelative(absPath),
+				line: edge.line,
+				rule: "intra-layer-must-be-direct",
+				specifier: edge.specifier,
+				message: `intra-'${fromLayer}' import must target a sibling file directly, not the '${fromLayer}/index.ts' barrel`,
+			});
 		}
-		ts.forEachChild(node, visit);
-	};
-	visit(sf);
-
+	}
 	return out;
 }
 
@@ -238,6 +346,26 @@ describe("architectural guard: src/ layered architecture (#414)", () => {
 				.join(
 					"\n",
 				)}\n\nFix by moving the shared code down to the lowest layer that needs it, not by widening the rule.`,
+		);
+	});
+
+	test("barreled layers are imported through their barrel (#424)", () => {
+		const violations: BarrelViolation[] = [];
+		for (const abs of files) {
+			violations.push(...findBarrelViolations(abs));
+		}
+
+		assert.strictEqual(
+			violations.length,
+			0,
+			`Found ${violations.length} module-encapsulation violation(s):\n${violations
+				.map(
+					(v) =>
+						`  ${v.file}:${v.line}  [${v.rule}]  ${v.specifier}\n      ${v.message}`,
+				)
+				.join(
+					"\n",
+				)}\n\nBarreled layers (${[...BARRELED_LAYERS].join(", ")}) expose a single public entry point '<layer>/index.ts'. Import across layers via the barrel; import within a layer via direct sibling paths.`,
 		);
 	});
 });

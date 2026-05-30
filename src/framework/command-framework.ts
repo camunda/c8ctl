@@ -14,15 +14,15 @@
  */
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { resolveClusterConfig } from "../core/config.ts";
-import { handleCommandError } from "../core/errors.ts";
 import {
+	c8ctl,
 	getLogger,
+	handleCommandError,
 	type Logger,
+	resolveClusterConfig,
 	type SortOrder,
 	sortTableData,
-} from "../core/logger.ts";
-import { c8ctl } from "../core/runtime.ts";
+} from "../core/index.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,

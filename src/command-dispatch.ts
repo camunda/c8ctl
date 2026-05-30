@@ -119,7 +119,7 @@ import {
 } from "./commands/user-tasks.ts";
 import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
-import type { AnyCommandHandler } from "./framework/command-framework.ts";
+import type { AnyCommandHandler } from "./framework/index.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".

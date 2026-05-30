@@ -2,20 +2,25 @@
  * Search commands
  */
 
-import { DEFAULT_PAGE_SIZE, fetchAllPages } from "../core/client.ts";
-import { type Logger, sortTableData } from "../core/logger.ts";
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import {
+	DEFAULT_PAGE_SIZE,
+	fetchAllPages,
+	type Logger,
+	sortTableData,
+} from "../core/index.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 import {
 	API_DEFAULT_PAGE_SIZE,
+	buildDateFilter,
 	hasUnescapedWildcard,
 	logNoResults,
 	logResultCount,
 	matchesCaseInsensitive,
 	matchesCaseSensitive,
+	parseBetween,
 	toStringFilter,
 	wildcardToRegex,
-} from "../utils/command-local/search-helpers.ts";
-import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
+} from "../utils/index.ts";
 
 export {
 	API_DEFAULT_PAGE_SIZE,

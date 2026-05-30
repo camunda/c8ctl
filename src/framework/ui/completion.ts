@@ -5,9 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { getUserDataDir } from "../../core/config.ts";
-import { getLogger } from "../../core/logger.ts";
-import { c8ctl } from "../../core/runtime.ts";
+import { c8ctl, getLogger, getUserDataDir } from "../../core/index.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,

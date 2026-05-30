@@ -8,11 +8,11 @@
  * verb at runtime.
  */
 
-import { defineCommand } from "../framework/command-framework.ts";
 import {
+	defineCommand,
 	installCompletion,
 	showCompletion,
-} from "../framework/ui/completion.ts";
+} from "../framework/index.ts";
 
 /**
  * `completion` verb dispatcher.

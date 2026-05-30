@@ -34,6 +34,7 @@
     "lint": "biome check src/ tests/ scripts/ default-plugins/",
     "lint:src": "biome check src/ scripts/",
     "typecheck": "tsc --noEmit -p tsconfig.check.json",
+  "check:layering": "node --experimental-strip-types --test tests/unit/layering-import-boundary.test.ts",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "copy-plugins": "node -e \"const fs=require('fs');const src='default-plugins';const dest='dist/default-plugins';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true,filter:(s)=>!s.endsWith('.ts')})}\"",
     "copy-templates": "node -e \"const fs=require('fs');const src='src/templates';const dest='dist/templates';if(fs.existsSync(src)){fs.cpSync(src,dest,{recursive:true})}\"",

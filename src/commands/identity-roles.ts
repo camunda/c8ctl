@@ -2,9 +2,8 @@
  * Identity role commands
  */
 
-import { fetchAllPages } from "../core/client.ts";
-import { sortTableData } from "../core/logger.ts";
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { fetchAllPages, sortTableData } from "../core/index.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 
 /**
  * List all roles

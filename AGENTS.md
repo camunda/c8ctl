@@ -82,6 +82,15 @@ composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  fr
 
 This is guarded by [`tests/unit/layering-import-boundary.test.ts`](tests/unit/layering-import-boundary.test.ts). The guard classifies a file by its **first** path segment, so sub-directories (`framework/plugins/`, `framework/ui/`, `utils/shared/`, `utils/command-local/`) inherit their parent layer — sub-grouping is free w.r.t. the guard. The composition root is pinned to an explicit allow-list (`src/index.ts`, `src/command-dispatch.ts`); any *new* top-level `src/*.ts` file fails the guard until it is deliberately classified.
 
+##### Per-layer barrels (module encapsulation, #424)
+
+The three barreled layers — `core`, `utils`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
+
+- **Rule A — cross-layer imports go through the barrel.** A file importing *into* a barreled layer must target `../core/index.ts`, never a deep file like `../core/logger.ts`. This holds for `commands/**` and the composition root alike.
+- **Rule B — intra-layer imports stay direct.** A file *within* a barreled layer imports its siblings by direct path (`./logger.ts`), never via its own barrel — this keeps module-eval order obvious and avoids self-referential cycles. (The barrel file re-exporting siblings via `./file.ts` is itself an intra-layer direct import, so it is allowed.)
+
+`commands/` is deliberately **not** barreled: nothing imports it cross-layer except the composition root, which is allowed to reach deep command files (it eager-loads every handler in `command-dispatch.ts`). To widen a barreled layer's public surface, add the symbol's source file to that layer's `index.ts`.
+
 Two conventions worth internalising:
 
 - **`utils/shared/` vs `utils/command-local/`** — the split axis is "command-agnostic reusable leaf" vs "the guts of one command". `command-local` helpers stay test-visible (not moved into `commands/**`) deliberately: their logic is pure and cross-platform and is better covered by direct unit tests than by coarser `c8()` subprocess tests.
@@ -184,8 +193,9 @@ Never skip the lint and type-check steps before pushing.
 
 - `npm run typecheck` — runs `tsc --noEmit -p tsconfig.check.json` over `src/` and `tests/`
 - `npx biome check --fix` — lints and formats `src/` and `tests/` per `biome.json` (includes the `no-unsafe-type-assertion` plugin)
+- `npm run check:layering` — runs the architectural layering guard (`tests/unit/layering-import-boundary.test.ts`) in isolation: layer-direction rules plus the per-layer barrel rules (#414/#424). Fast (~1s); use it to check import boundaries without running the whole unit suite.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
-- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
+- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). When any `src/` file is staged it also runs the layering guard (`check:layering`) against the working tree, so import-boundary regressions are caught at commit time instead of in CI. Skips biome, tsc, or the guard individually if the toolchain is not installed locally.
 
 #### Test process isolation — `--experimental-test-isolation=none` for integration tests
 
@@ -331,7 +341,7 @@ Every command handler in `src/commands/**` follows the same shape. Pattern-match
 #### Canonical shape
 
 ```ts
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 
 export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flags, args) => {
   const { client, profile, logger } = ctx;
@@ -516,7 +526,7 @@ Create a handler file in `src/commands/`:
 
 ```typescript
 // src/commands/my-resource.ts
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 
 export const myverbMyResourceCommand = defineCommand(
   "myverb",

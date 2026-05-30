@@ -7,10 +7,9 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../core/client.ts";
-import { handleCommandError } from "../core/errors.ts";
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
-import { buildDateFilter, parseBetween } from "../utils/shared/date-filter.ts";
+import { fetchAllPages, handleCommandError } from "../core/index.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
+import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
  * List process instances

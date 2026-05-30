@@ -9,7 +9,7 @@
  * handlers receive already-validated types and need no internal guards.
  */
 
-import { getLogger } from "../core/logger.ts";
+import { getLogger } from "../core/index.ts";
 import {
 	type FlagDef,
 	GLOBAL_FLAGS,

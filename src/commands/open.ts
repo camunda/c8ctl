@@ -6,13 +6,13 @@
  * unit-tested without violating the test→commands import boundary (#291).
  */
 
-import { resolveClusterConfig } from "../core/config.ts";
-import { defineCommand } from "../framework/command-framework.ts";
+import { resolveClusterConfig } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	deriveAppUrl,
 	openUrl,
 	validateOpenAppOptions,
-} from "../utils/command-local/open-helpers.ts";
+} from "../utils/index.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 

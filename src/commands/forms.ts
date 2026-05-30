@@ -7,12 +7,12 @@ import {
 	ProcessDefinitionKey,
 	UserTaskKey,
 } from "@camunda8/orchestration-cluster-api";
-import { isRecord } from "../core/logger.ts";
+import { isRecord } from "../core/index.ts";
 import {
 	type CommandResult,
 	defineCommand,
 	dryRun,
-} from "../framework/command-framework.ts";
+} from "../framework/index.ts";
 
 /** Extract HTTP status code from an unknown error (SDK errors expose statusCode or status). */
 function getErrorStatus(error: unknown): number | undefined {

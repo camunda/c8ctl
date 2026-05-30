@@ -13,8 +13,8 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { resolveTenantId } from "../core/config.ts";
-import { defineCommand, dryRun } from "../framework/command-framework.ts";
+import { resolveTenantId } from "../core/index.ts";
+import { defineCommand, dryRun } from "../framework/index.ts";
 
 /**
  * Extract process ID from BPMN file content.
