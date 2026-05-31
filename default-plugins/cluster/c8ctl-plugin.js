@@ -179,8 +179,12 @@ function readLocalAliasMapping(cacheDir, alias) {
     // "8.9.5"). This prevents re-downloading a rolling alias when a compatible
     // pinned version is already installed locally (#431).
     if (isMinorVersionPattern(value)) {
-      const installedVersions = getInstalledVersionsList(cacheDir);
-      const match = installedVersions.find((v) => v.startsWith(value + '.'));
+      const installedVersions = getInstalledVersionsList(cacheDir)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const match = installedVersions
+        .filter((v) => v.startsWith(value + '.'))
+        .reverse()
+        .find((v) => isC8RunInstalled({ cacheDir, version: v }));
       if (match) return match;
     }
 
