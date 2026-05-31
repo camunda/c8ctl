@@ -1058,6 +1058,38 @@ describe("Cluster Plugin – resolveVersion", () => {
 		});
 		assert.strictEqual(resolved, "8.8.5", "non-alias should pass through");
 	});
+
+	test("preferLocal matches installed minor prefix when alias resolves to rolling version (#431)", async () => {
+		// Simulate: alias "stable" → "8.9" (minor/rolling), but installed version is "8.9.5".
+		// The cache dir has c8run-8.9.5, NOT c8run-8.9.
+		// Current bug: readLocalAliasMapping does an exact match on "8.9" → not found → re-downloads.
+		// Fix: should find c8run-8.9.5 because it starts with "8.9."
+		const cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		try {
+			// Simulate installed version 8.9.5 (full semver directory)
+			const installDir = join(cacheDir, "c8run-8.9.5", "c8run-8.9.5");
+			mkdirSync(installDir, { recursive: true });
+			writeFileSync(join(installDir, "c8run"), "fake");
+
+			// Simulate the alias cache: stable → 8.9 (minor version pattern)
+			plugin.storeLocalAliasMapping(cacheDir, "stable", "8.9");
+
+			// Remote is unreachable — preferLocal should still find the installed version
+			mockFetchOffline();
+
+			const resolved = await plugin.resolveVersion("stable", {
+				preferLocal: true,
+				cacheDir,
+			});
+			assert.strictEqual(
+				resolved,
+				"8.9.5",
+				"should find installed 8.9.5 when alias maps to rolling 8.9",
+			);
+		} finally {
+			rmSync(cacheDir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------

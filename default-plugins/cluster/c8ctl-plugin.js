@@ -172,7 +172,23 @@ function readLocalAliasMapping(cacheDir, alias) {
     const value = readFileSync(filePath, 'utf-8').trim();
     // Only use the cached mapping if the version is actually installed
     const config = { cacheDir, version: value };
-    return isC8RunInstalled(config) ? value : null;
+    if (isC8RunInstalled(config)) return value;
+
+    // For rolling versions (minor version patterns like "8.9"), check if any
+    // installed version matches the minor version prefix (e.g. "8.9" matches
+    // "8.9.5"). This prevents re-downloading a rolling alias when a compatible
+    // pinned version is already installed locally (#431).
+    if (isMinorVersionPattern(value)) {
+      const installedVersions = getInstalledVersionsList(cacheDir)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const match = installedVersions
+        .filter((v) => v.startsWith(value + '.'))
+        .reverse()
+        .find((v) => isC8RunInstalled({ cacheDir, version: v }));
+      if (match) return match;
+    }
+
+    return null;
   } catch {
     return null;
   }
