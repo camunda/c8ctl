@@ -707,11 +707,19 @@ export async function deployResources(
 	// Create a mapping from definition ID to resource file for later reference
 	const definitionIdToResource = new Map<string, ResourceFile>();
 	const formNameToResource = new Map<string, ResourceFile>();
-	const resourceNameToResource = new Map<string, ResourceFile>();
+	// Map basename → ResourceFile[]: multiple files can share a basename
+	// across directories (e.g. sub-a/model.dmn, sub-b/model.dmn). When
+	// the API returns a resourceName, we pop the first matching entry so
+	// each response record resolves to a distinct local file.
+	const resourcesByName = new Map<string, ResourceFile[]>();
 
 	resources.forEach((r) => {
-		// Map by filename so decisionRequirements/resources entries can be resolved
-		resourceNameToResource.set(r.name, r);
+		const existing = resourcesByName.get(r.name);
+		if (existing) {
+			existing.push(r);
+		} else {
+			resourcesByName.set(r.name, [r]);
+		}
 
 		const ext = extname(r.path);
 		if (ext === ".bpmn" || ext === ".dmn") {
@@ -734,6 +742,13 @@ export async function deployResources(
 			formNameToResource.set(formId, r);
 		}
 	});
+
+	/** Pop the first resource with a matching basename, or return undefined. */
+	function popResourceByName(name: string): ResourceFile | undefined {
+		const bucket = resourcesByName.get(name);
+		if (!bucket || bucket.length === 0) return undefined;
+		return bucket.shift();
+	}
 
 	// ─── API call ────────────────────────────────────────────────────────
 	// Only this section is wrapped in a catch that routes through
@@ -845,7 +860,7 @@ export async function deployResources(
 			};
 		}),
 		...result.decisionRequirements.map((dr) => {
-			const resource = resourceNameToResource.get(dr.resourceName || "");
+			const resource = popResourceByName(dr.resourceName || "");
 			if (resource) knownResources.add(resource);
 			return {
 				type: "Decision Requirements" as const,
@@ -869,7 +884,7 @@ export async function deployResources(
 		// Generic resources (not processes, decisions, or forms)
 		// are returned in the `resources` array by 8.10+.
 		...result.resources.map((res) => {
-			const resource = resourceNameToResource.get(res.resourceName || "");
+			const resource = popResourceByName(res.resourceName || "");
 			if (resource) knownResources.add(resource);
 			return {
 				type: "Resource" as const,
