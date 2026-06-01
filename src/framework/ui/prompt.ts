@@ -48,7 +48,6 @@
 
 import type { Key } from "node:readline";
 import { createInterface, emitKeypressEvents } from "node:readline";
-import { c8ctl } from "../../core/index.ts";
 
 // ── ANSI helpers ──────────────────────────────────────────────────
 
@@ -317,11 +316,6 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 
 	if (!isInteractive()) {
 		const hint = `${message} — auto-${defaultValue ? "approved" : "declined"} (non-interactive)`;
-		if (c8ctl.outputMode === "json") {
-			console.error(JSON.stringify({ type: "message", message: hint }));
-		} else {
-			console.error(hint);
-		}
 		return { interactive: false, value: defaultValue, hint };
 	}
 

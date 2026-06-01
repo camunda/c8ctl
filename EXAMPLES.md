@@ -671,24 +671,23 @@ c8 watch
 
 ### Deploy Confirmation
 
-When multiple profiles are configured, `c8 deploy` prompts for confirmation
-to prevent deploying to the wrong cluster:
+When multiple profiles are configured, `c8 deploy` presents an interactive
+profile picker to prevent deploying to the wrong cluster:
 
 ```bash
-# Shows: Deploying to profile "production" (https://prod.zeebe.camunda.io)
-#        Continue? [y/N]
+# Shows an interactive profile selection menu
 c8 deploy ./process.bpmn
 
-# Skip confirmation with --yes / -y
+# Skip the prompt with --yes / -y (uses active profile)
 c8 deploy ./process.bpmn --yes
 c8 deploy ./process.bpmn -y
 
-# Explicit --profile also skips confirmation (target is unambiguous)
+# Explicit --profile also skips the prompt (target is unambiguous)
 c8 deploy ./process.bpmn --profile=staging
 ```
 
-In non-interactive environments (CI, piped input), the confirmation is
-skipped automatically and the target is logged to stderr.
+In non-interactive environments (CI, piped input), the deploy fails with
+guidance to use `--profile` or `--yes` to make the target explicit.
 
 ### Run (Deploy + Start)
 
