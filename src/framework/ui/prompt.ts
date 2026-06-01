@@ -188,11 +188,26 @@ export async function select<T>(
 			let cursor = initialIndex;
 			const out = process.stderr;
 
+			// Pre-compute the number of physical terminal lines the menu
+			// occupies. When an option line is wider than the terminal, it
+			// wraps to multiple physical lines. CURSOR_UP must move by
+			// physical lines, not logical option count, or previous
+			// renders bleed through.
+			const cols = out.columns || 80;
+			const physicalLines = options.reduce((sum, opt) => {
+				// Visible width: "  ❯ " (4 chars) + label + optional " " + description
+				const visible =
+					4 +
+					opt.label.length +
+					(opt.description ? 1 + opt.description.length : 0);
+				return sum + Math.max(1, Math.ceil(visible / cols));
+			}, 0);
+
 			// Render the menu
 			function render(firstRender: boolean) {
 				if (!firstRender) {
 					// Move cursor back up to overwrite previous render
-					out.write(CURSOR_UP(options.length));
+					out.write(CURSOR_UP(physicalLines));
 				}
 				for (let i = 0; i < options.length; i++) {
 					const opt = options[i];
@@ -233,11 +248,11 @@ export async function select<T>(
 					cleanup();
 					const chosen = options[cursor];
 					// Replace the menu with the final selection line
-					out.write(CURSOR_UP(options.length));
-					for (let i = 0; i < options.length; i++) {
+					out.write(CURSOR_UP(physicalLines));
+					for (let i = 0; i < physicalLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(options.length));
+					out.write(CURSOR_UP(physicalLines));
 					out.write(
 						`${CLEAR_LINE}${CURSOR_TO_COL(1)}  ${CYAN}${chosen.label}${RESET}`,
 					);
@@ -255,11 +270,11 @@ export async function select<T>(
 				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 					cleanup();
 					// Clear the menu
-					out.write(CURSOR_UP(options.length));
-					for (let i = 0; i < options.length; i++) {
+					out.write(CURSOR_UP(physicalLines));
+					for (let i = 0; i < physicalLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(options.length + 1)); // +1 for the header
+					out.write(CURSOR_UP(physicalLines + 1)); // +1 for the header
 					out.write(`${CLEAR_LINE}\n`);
 					// Ctrl+C: re-raise so the process exits naturally
 					if (key.ctrl && key.name === "c") {
