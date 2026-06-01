@@ -48,7 +48,7 @@
 
 import type { Key } from "node:readline";
 import { createInterface, emitKeypressEvents } from "node:readline";
-import { c8ctl } from "./runtime.ts";
+import { c8ctl } from "../../core/index.ts";
 
 // ── ANSI helpers ──────────────────────────────────────────────────
 

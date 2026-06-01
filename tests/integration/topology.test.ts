@@ -7,8 +7,8 @@ import assert from "node:assert";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, test } from "node:test";
-import { createClient } from "../../src/client.ts";
-import { getUserDataDir } from "../../src/config.ts";
+import { createClient } from "../../src/core/client.ts";
+import { getUserDataDir } from "../../src/core/config.ts";
 
 describe("Topology Integration Tests (requires Camunda 8 at localhost:8080)", () => {
 	beforeEach(() => {
@@ -40,7 +40,7 @@ describe("Topology Integration Tests (requires Camunda 8 at localhost:8080)", ()
 
 		try {
 			// Re-import to pick up new env
-			const { createClient } = await import("../../src/client.ts");
+			const { createClient } = await import("../../src/core/client.ts");
 			const badClient = createClient();
 
 			// Should throw an error when trying to connect to non-existent server

@@ -5,22 +5,21 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { defineCommand } from "../command-framework.ts";
 import {
 	addProfile as addProfileConfig,
+	c8ctl,
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
+	getLogger,
 	getProfileOrModeler,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
 	removeProfile as removeProfileConfig,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { confirm, select } from "../prompt.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../core/index.ts";
+import { confirm, defineCommand, select } from "../framework/index.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)

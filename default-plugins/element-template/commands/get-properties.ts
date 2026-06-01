@@ -5,7 +5,7 @@
  */
 
 import { styleText } from "node:util";
-import type {} from "../../../src/runtime.ts";
+import type {} from "../../../src/core/runtime.ts";
 import {
 	BINDING_TYPE_SHORTHANDS,
 	globToRegex,

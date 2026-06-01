@@ -47,9 +47,9 @@ c8ctl/
 
 ### Core components
 
-- **Logger** (`src/logger.ts`): Handles output in text or JSON mode
-- **Config** (`src/config.ts`): Manages profiles, session state, and credential resolution
-- **Client** (`src/client.ts`): Factory for creating Camunda 8 SDK clients
+- **Logger** (`src/core/logger.ts`): Handles output in text or JSON mode
+- **Config** (`src/core/config.ts`): Manages profiles, session state, and credential resolution
+- **Client** (`src/core/client.ts`): Factory for creating Camunda 8 SDK clients
 - **Commands** (`src/commands/`): Domain-specific command handlers
 
 ## Testing
@@ -75,7 +75,7 @@ Integration tests require a running Camunda 8 instance at `http://localhost:8080
 
 ## Adding new commands
 
-1. Declare the command in `COMMAND_REGISTRY` in `src/command-registry.ts` (flags, resources, help text)
+1. Declare the command in `COMMAND_REGISTRY` in `src/framework/command-registry.ts` (flags, resources, help text)
 2. Write the handler with `defineCommand()` in `src/commands/`
 3. Register it in `COMMAND_DISPATCH` in `src/command-dispatch.ts`
 4. Add tests in `tests/unit/` and `tests/integration/`

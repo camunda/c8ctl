@@ -4,14 +4,16 @@
 
 import { existsSync, realpathSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { defineCommand } from "../command-framework.ts";
-import { normalizeToError } from "../errors.ts";
-import { isIgnored, loadIgnoreRules, resolveIgnoreBaseDir } from "../ignore.ts";
+import { normalizeToError } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
+	DEPLOY_COOLDOWN,
 	DEPLOYABLE_EXTENSIONS,
-} from "../resource-extensions.ts";
-import { DEPLOY_COOLDOWN } from "../watch-constants.ts";
+	isIgnored,
+	loadIgnoreRules,
+	resolveIgnoreBaseDir,
+} from "../utils/index.ts";
 import {
 	deployResources,
 	findProcessApplicationRoot,
@@ -200,6 +202,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 								continueOnError: flags.force,
 								continueOnUserError: true,
 								signal: ac.signal,
+								verbose: ctx.verbose,
 							});
 						} catch (error) {
 							// `deployResources()` normally returns early when its signal

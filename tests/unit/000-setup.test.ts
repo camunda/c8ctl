@@ -6,8 +6,8 @@
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { after, before } from "node:test";
-import { getUserDataDir } from "../../src/config.ts";
-import { clearLoadedPlugins } from "../../src/plugin-loader.ts";
+import { getUserDataDir } from "../../src/core/config.ts";
+import { clearLoadedPlugins } from "../../src/framework/plugins/plugin-loader.ts";
 
 // Store original environment
 const originalEnv = { ...process.env };

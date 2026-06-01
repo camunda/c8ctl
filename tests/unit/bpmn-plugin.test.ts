@@ -473,6 +473,7 @@ describe("CLI behavioural: bpmn lint output formatting", () => {
 				["--experimental-strip-types", CLI, "bpmn", "lint", file],
 				{
 					cwd: REPO_ROOT,
+					color: true,
 					env: { ...process.env, FORCE_COLOR: "1", C8CTL_DATA_DIR: dataDir },
 				},
 			);
@@ -599,6 +600,7 @@ describe("CLI behavioural: bpmn lint ruleset routing", () => {
 				],
 				{
 					cwd: externalDir,
+					color: true,
 					env: { ...process.env, FORCE_COLOR: "1" },
 				},
 			);

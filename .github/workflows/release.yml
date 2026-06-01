@@ -131,3 +131,15 @@ jobs:
           # Disabled while repo is private. See: https://github.com/camunda/c8ctl/issues/12
           NPM_CONFIG_PROVENANCE: 'false' 
         run: NODE_AUTH_TOKEN="" npx semantic-release
+
+  notify-release-failure:
+    needs: [test, release]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    permissions: {}
+    uses: camunda/sdk-infra/.github/workflows/sdk-slack-notify.yml@v1
+    with:
+      repo-name: c8ctl
+      workflow-name: Release
+      mention-group: ${{ vars.SLACK_MENTION_GROUP }}
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_SDK_ALERTS }}

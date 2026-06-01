@@ -2,7 +2,7 @@
  * Topology commands
  */
 
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * Get cluster topology
@@ -13,7 +13,7 @@ export const getTopologyCommand = defineCommand(
 	async (ctx) => {
 		const { client, profile } = ctx;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get topology",
 			method: "GET",
 			endpoint: "/topology",

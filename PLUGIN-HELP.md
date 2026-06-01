@@ -381,7 +381,7 @@ The plugin loader ([src/plugin-loader.ts](src/plugin-loader.ts)) provides:
 
 ### Help Command
 
-The help command ([src/commands/help.ts](src/commands/help.ts)):
+The help command ([src/framework/ui/help.ts](src/framework/ui/help.ts)):
 
 1. Calls `getPluginCommandsInfo()` to retrieve plugin information
 2. Builds a "Plugin Commands" section if plugins are loaded

@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
-import { getUserDataDir } from "../../src/config.ts";
+import { getUserDataDir } from "../../src/core/config.ts";
 import { getExecErrorOutput, getExecField } from "../utils/guards.ts";
 
 describe("Plugin Lifecycle Integration Tests", () => {

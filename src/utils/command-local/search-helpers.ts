@@ -5,7 +5,7 @@
  * these.
  */
 
-import type { Logger } from "./logger.ts";
+import type { Logger } from "../../core/index.ts";
 
 /** Default page size the Camunda REST API uses when no explicit limit is set */
 export const API_DEFAULT_PAGE_SIZE = 100;

@@ -3,8 +3,8 @@
  */
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { resolveTenantId } from "../config.ts";
+import { resolveTenantId } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * Publish message
@@ -39,7 +39,7 @@ export const publishMessageCommand = defineCommand(
 			body.timeToLive = timeToLive;
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "publish message",
 			method: "POST",
 			endpoint: "/messages/publication",
@@ -94,7 +94,7 @@ export const correlateMessageCommand = defineCommand(
 			body.timeToLive = timeToLive;
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "correlate message",
 			method: "POST",
 			endpoint: "/messages/correlation",

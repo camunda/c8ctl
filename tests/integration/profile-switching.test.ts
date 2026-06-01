@@ -32,7 +32,7 @@ describe("Profile Switching Integration Tests", () => {
 		process.env.C8CTL_DATA_DIR = testDir;
 
 		// Create test profiles in-process (CLI `add profile` doesn't wire --username/--password)
-		const { addProfile } = await import("../../src/config.ts");
+		const { addProfile } = await import("../../src/core/config.ts");
 
 		addProfile({
 			name: "one",
@@ -155,9 +155,9 @@ describe("Profile Switching Integration Tests", () => {
 
 	test("switching profiles affects cluster resolution", async () => {
 		const { loadSessionState, resolveClusterConfig } = await import(
-			"../../src/config.ts"
+			"../../src/core/config.ts"
 		);
-		const { c8ctl } = await import("../../src/runtime.ts");
+		const { c8ctl } = await import("../../src/core/runtime.ts");
 
 		// Drive profile switches via the CLI (writes session state to disk),
 		// then reload session state in-process so resolveClusterConfig() and

@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { c8ctl } from "../../src/core/runtime.ts";
 import {
 	detectShell,
 	extractCompletionVersion,
@@ -22,8 +23,7 @@ import {
 	getShellRcFile,
 	installCompletion,
 	refreshCompletionsIfStale,
-} from "../../src/completion.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/framework/ui/completion.ts";
 
 // ─── detectShell ─────────────────────────────────────────────────────────────
 

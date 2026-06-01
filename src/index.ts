@@ -7,39 +7,44 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { createClient } from "./client.ts";
 import { COMMAND_DISPATCH } from "./command-dispatch.ts";
-import type { CommandContext } from "./command-framework.ts";
+import {
+	c8ctl,
+	createClient,
+	getLogger,
+	getUserDataDir,
+	loadSessionState,
+	printUpdateNotification,
+	resolveTenantId,
+	type SortOrder,
+	startUpdateCheck,
+} from "./core/index.ts";
 import {
 	COMMAND_REGISTRY,
+	type CommandContext,
 	type CommandDef,
+	createDryRun,
 	deriveParseArgsOptions,
+	detectUnknownFlags,
+	executePluginCommand,
 	GLOBAL_FLAGS,
 	getCommandDef,
-	resolveAlias,
-	resolveVerbAlias,
-} from "./command-registry.ts";
-import { detectUnknownFlags, validateFlags } from "./command-validation.ts";
-import { refreshCompletionsIfStale } from "./completion.ts";
-import { getUserDataDir, loadSessionState, resolveTenantId } from "./config.ts";
-import {
-	showCommandHelp,
-	showHelp,
-	showVerbResources,
-	showVersion,
-} from "./help.ts";
-import { getLogger, type SortOrder } from "./logger.ts";
-import {
-	executePluginCommand,
 	getPluginCommands,
 	getPluginVersionForCommand,
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
-} from "./plugin-loader.ts";
-import * as prompt from "./prompt.ts";
-import { c8ctl } from "./runtime.ts";
-import { printUpdateNotification, startUpdateCheck } from "./update-check.ts";
+	confirm as promptConfirm,
+	select as promptSelect,
+	refreshCompletionsIfStale,
+	resolveAlias,
+	resolveVerbAlias,
+	showCommandHelp,
+	showHelp,
+	showVerbResources,
+	showVersion,
+	validateFlags,
+} from "./framework/index.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.
@@ -388,7 +393,7 @@ async function main() {
 	await loadInstalledPlugins();
 
 	// Auto-refresh installed completions if CLI version changed
-	refreshCompletionsIfStale();
+	refreshCompletionsIfStale(c8ctl.dryRun ?? false);
 
 	// Extract command and resource
 	const [rawVerb, resource, ...args] = positionals;
@@ -489,7 +494,7 @@ async function main() {
 			yes: bool(values.yes) === true,
 			fields: c8ctl.fields,
 			logger,
-			prompt: { select: prompt.select, confirm: prompt.confirm },
+			prompt: { select: promptSelect, confirm: promptConfirm },
 			get client() {
 				if (!_pluginClient) _pluginClient = createClient(pluginProfile);
 				return _pluginClient;
@@ -732,7 +737,9 @@ async function main() {
 			between: str(values.between),
 			dateField: str(values.dateField),
 			version: parseVersionFlag(values),
-			dryRun: c8ctl.dryRun,
+			isDryRun: c8ctl.dryRun ?? false,
+			dryRun: createDryRun(c8ctl.dryRun ?? false),
+			verbose: c8ctl.verbose ?? false,
 			profile,
 			yes: bool(values.yes),
 		};

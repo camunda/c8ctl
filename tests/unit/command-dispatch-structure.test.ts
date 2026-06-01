@@ -21,7 +21,7 @@ import { COMMAND_DISPATCH } from "../../src/command-dispatch.ts";
 import {
 	DEFINE_COMMAND_MARKER,
 	isDefinedCommand,
-} from "../../src/command-framework.ts";
+} from "../../src/framework/command-framework.ts";
 
 describe("COMMAND_DISPATCH structural invariant (#290)", () => {
 	test("every dispatch entry is produced by defineCommand()", () => {

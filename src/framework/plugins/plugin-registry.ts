@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getUserDataDir } from "./config.ts";
+import { getUserDataDir } from "../../core/index.ts";
 
 export interface PluginEntry {
 	name: string;

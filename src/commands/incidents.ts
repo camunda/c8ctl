@@ -2,9 +2,9 @@
  * Incident commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { buildDateFilter, parseBetween } from "../date-filter.ts";
+import { fetchAllPages } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
+import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
  * List incidents
@@ -40,7 +40,7 @@ export const listIncidentsCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list incidents",
 			method: "POST",
 			endpoint: "/incidents/search",
@@ -82,7 +82,7 @@ export const getIncidentCommand = defineCommand(
 		const { client, profile } = ctx;
 		const key = args.key;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get incident",
 			method: "GET",
 			endpoint: `/incidents/${key}`,
@@ -108,7 +108,7 @@ export const resolveIncidentCommand = defineCommand(
 		const { client, profile } = ctx;
 		const key = args.key;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "resolve incident",
 			method: "POST",
 			endpoint: `/incidents/${key}/resolution`,

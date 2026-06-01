@@ -2,17 +2,17 @@
  * Open command - opens Camunda web applications in a browser
  *
  * Pure helpers (URL derivation, platform browser detection, validation,
- * `openUrl`) live in `src/open-helpers.ts` so they can be unit-tested
- * without violating the test→commands import boundary (#291).
+ * `openUrl`) live in `src/utils/command-local/open-helpers.ts` so they can be
+ * unit-tested without violating the test→commands import boundary (#291).
  */
 
-import { defineCommand } from "../command-framework.ts";
-import { resolveClusterConfig } from "../config.ts";
+import { resolveClusterConfig } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	deriveAppUrl,
 	openUrl,
 	validateOpenAppOptions,
-} from "../open-helpers.ts";
+} from "../utils/index.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ import {
 export const openAppCommand = defineCommand("open", "", async (ctx) => {
 	const { app, profile, dryRun } = validateOpenAppOptions(ctx.resource, {
 		profile: ctx.profile,
-		dryRun: ctx.dryRun,
+		dryRun: ctx.isDryRun,
 	});
 
 	const config = resolveClusterConfig(profile);

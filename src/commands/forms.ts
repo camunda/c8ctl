@@ -7,12 +7,12 @@ import {
 	ProcessDefinitionKey,
 	UserTaskKey,
 } from "@camunda8/orchestration-cluster-api";
+import { isRecord } from "../core/index.ts";
 import {
 	type CommandResult,
+	type DryRunFn,
 	defineCommand,
-	dryRun,
-} from "../command-framework.ts";
-import { isRecord } from "../logger.ts";
+} from "../framework/index.ts";
 
 /** Extract HTTP status code from an unknown error (SDK errors expose statusCode or status). */
 function getErrorStatus(error: unknown): number | undefined {
@@ -45,12 +45,12 @@ export const getFormCommand = defineCommand(
 		}
 
 		if (isUserTask) {
-			return handleUserTaskForm(key, profile, client);
+			return handleUserTaskForm(key, profile, client, ctx.dryRun);
 		}
 		if (isProcessDefinition) {
-			return handleStartForm(key, profile, client);
+			return handleStartForm(key, profile, client, ctx.dryRun);
 		}
-		return handleFormBoth(key, profile, client);
+		return handleFormBoth(key, profile, client, ctx.dryRun);
 	},
 );
 
@@ -58,6 +58,7 @@ async function handleUserTaskForm(
 	userTaskKey: string,
 	profile: string | undefined,
 	client: CamundaClient,
+	dryRun: DryRunFn,
 ): Promise<CommandResult> {
 	const dr = dryRun({
 		command: "get form --userTask",
@@ -94,6 +95,7 @@ async function handleStartForm(
 	processDefinitionKey: string,
 	profile: string | undefined,
 	client: CamundaClient,
+	dryRun: DryRunFn,
 ): Promise<CommandResult> {
 	const dr = dryRun({
 		command: "get form --processDefinition",
@@ -133,6 +135,7 @@ async function handleFormBoth(
 	key: string,
 	profile: string | undefined,
 	client: CamundaClient,
+	dryRun: DryRunFn,
 ): Promise<CommandResult> {
 	const dr = dryRun({
 		command: "get form",

@@ -3,7 +3,7 @@
  * cache from the marketplace.
  */
 
-import type {} from "../../../src/runtime.ts";
+import type {} from "../../../src/core/runtime.ts";
 import { syncTemplates } from "../marketplace.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");

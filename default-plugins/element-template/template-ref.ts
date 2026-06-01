@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../src/core/runtime.ts";
 import {
 	getPropertyDetail,
 	getSettableProperties,
@@ -175,14 +175,8 @@ export async function elementExistsInBpmn(
 ): Promise<boolean> {
 	const BpmnModdle = (await import("bpmn-moddle")).default;
 	const moddle = new BpmnModdle();
-	try {
-		const { rootElement } = await moddle.fromXML(xml);
-		return containsId(rootElement, elementId, new Set<object>());
-	} catch (error) {
-		// Surface BPMN parse failures so dry-run does not report a successful
-		// plan for invalid XML.
-		throw error;
-	}
+	const { rootElement } = await moddle.fromXML(xml);
+	return containsId(rootElement, elementId, new Set<object>());
 }
 
 export async function readTemplateFromPathOrUrl(

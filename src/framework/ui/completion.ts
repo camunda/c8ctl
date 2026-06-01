@@ -5,20 +5,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { c8ctl, getLogger, getUserDataDir } from "../../core/index.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
-} from "./command-registry.ts";
-import { getUserDataDir } from "./config.ts";
-import { getLogger } from "./logger.ts";
+} from "../command-registry.ts";
 import {
 	getPluginCommandsInfo,
 	type PluginCommandInfo,
-} from "./plugin-loader.ts";
-import { c8ctl } from "./runtime.ts";
+} from "../plugins/plugin-loader.ts";
 
 // ─── Typed helpers (same pattern as help.ts) ─────────────────────────────────
 
@@ -899,7 +897,10 @@ export function extractCompletionVersion(filePath: string): string | undefined {
  *
  * Supports --dry-run via the c8ctl runtime flag.
  */
-export function installCompletion(shellOverride?: string): void {
+export function installCompletion(
+	shellOverride?: string,
+	isDryRun = false,
+): void {
 	const logger = getLogger();
 	const shell = shellOverride?.toLowerCase() ?? detectShell();
 
@@ -922,7 +923,7 @@ export function installCompletion(shellOverride?: string): void {
 		: true;
 
 	// Dry-run support
-	if (c8ctl.dryRun) {
+	if (isDryRun) {
 		const result: Record<string, unknown> = {
 			dryRun: true,
 			detectedShell: shell,
@@ -992,9 +993,9 @@ export function installCompletion(shellOverride?: string): void {
  * or if the embedded version matches the running CLI version.
  * Synchronous write (~1ms for a few KB).
  */
-export function refreshCompletionsIfStale(): void {
+export function refreshCompletionsIfStale(isDryRun = false): void {
 	// Skip in dry-run mode — refresh is a side effect
-	if (c8ctl.dryRun) return;
+	if (isDryRun) return;
 
 	// Use the same source of truth as generateForShell() for version headers
 	const currentVersion = c8ctl.version;

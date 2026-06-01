@@ -2,9 +2,8 @@
  * Identity mapping rule commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { sortTableData } from "../logger.ts";
+import { fetchAllPages, sortTableData } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * List all mapping rules
@@ -15,7 +14,7 @@ export const listMappingRulesCommand = defineCommand(
 	async (ctx) => {
 		const { client, profile, limit } = ctx;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list mapping-rules",
 			method: "POST",
 			endpoint: "/mapping-rules/search",
@@ -60,7 +59,7 @@ export const searchIdentityMappingRulesCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search mapping-rules",
 			method: "POST",
 			endpoint: "/mapping-rules/search",
@@ -102,7 +101,7 @@ export const getIdentityMappingRuleCommand = defineCommand(
 		const { client, profile } = ctx;
 		const mappingRuleId = args.mappingRuleId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get mapping-rule",
 			method: "GET",
 			endpoint: `/mapping-rules/${mappingRuleId}`,
@@ -147,7 +146,7 @@ export const createIdentityMappingRuleCommand = defineCommand(
 			claimValue: flags.claimValue,
 		};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create mapping-rule",
 			method: "POST",
 			endpoint: "/mapping-rules",
@@ -171,7 +170,7 @@ export const deleteIdentityMappingRuleCommand = defineCommand(
 		const { client, profile } = ctx;
 		const mappingRuleId = args.mappingRuleId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete mapping-rule",
 			method: "DELETE",
 			endpoint: `/mapping-rules/${encodeURIComponent(mappingRuleId)}`,

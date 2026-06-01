@@ -9,7 +9,10 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import type { CommandDef, FlagDef } from "../../src/command-registry.ts";
+import type {
+	CommandDef,
+	FlagDef,
+} from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	deriveParseArgsOptions,
@@ -21,7 +24,7 @@ import {
 	resolveVerbAlias,
 	SEARCH_FLAGS,
 	VERB_ALIASES,
-} from "../../src/command-registry.ts";
+} from "../../src/framework/command-registry.ts";
 
 /** Widened read-only views for iterating with index signatures. */
 const REGISTRY: Readonly<Record<string, CommandDef>> = COMMAND_REGISTRY;

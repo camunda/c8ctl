@@ -14,22 +14,20 @@
  */
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-
+import {
+	getLogger,
+	handleCommandError,
+	type Logger,
+	resolveClusterConfig,
+	type SortOrder,
+	sortTableData,
+} from "../core/index.ts";
 import {
 	COMMAND_REGISTRY,
 	type CommandDef,
 	type FlagDef,
 	type PositionalDef,
 } from "./command-registry.ts";
-import { resolveClusterConfig } from "./config.ts";
-import { handleCommandError } from "./errors.ts";
-import {
-	getLogger,
-	type Logger,
-	type SortOrder,
-	sortTableData,
-} from "./logger.ts";
-import { c8ctl } from "./runtime.ts";
 
 export type { PositionalDef };
 
@@ -243,8 +241,16 @@ export interface CommandContext {
 	dateField: string | undefined;
 	/** Version filter (parsed from --version flag). */
 	version?: number | undefined;
-	/** Whether --dry-run was set. */
-	dryRun: boolean | undefined;
+	/** Whether --dry-run was set (for handlers that emit a custom dry-run payload). */
+	isDryRun: boolean;
+	/**
+	 * Dry-run helper bound to this invocation: returns a `DryRunResult` when
+	 * --dry-run is active, else null. Captures the flag at construction, so
+	 * handlers never read dry-run state off the global runtime.
+	 */
+	dryRun: DryRunFn;
+	/** Whether --verbose was set. */
+	verbose: boolean;
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
 	/** Whether --yes was set (skip confirmation prompts). */
@@ -559,33 +565,40 @@ function renderResult(result: CommandResult, ctx: CommandContext): void {
 // ─── dryRun ──────────────────────────────────────────────────────────────────
 
 /**
- * Check if dry-run mode is active and return a `DryRunResult` if so.
+ * Build the `ctx.dryRun()` helper bound to this invocation's --dry-run state.
+ *
+ * When dry-run is active it returns a `DryRunResult` describing the request
+ * that *would* be sent; otherwise it returns null so the handler proceeds. The
+ * dry-run flag is captured once at context construction (the composition root),
+ * so handlers obtain it from `ctx` and never read it off the global runtime.
  *
  * Usage in handlers:
  * ```ts
- * const dr = dryRun({ command: "list pi", method: "POST", endpoint: "/process-instances/search", profile, body: filter });
+ * const dr = ctx.dryRun({ command: "list pi", method: "POST", endpoint: "/process-instances/search", profile: ctx.profile, body: filter });
  * if (dr) return dr;
  * ```
- *
- * Replaces the old `emitDryRun()` side-effecting pattern.
  */
-export function dryRun(opts: {
+export type DryRunFn = (opts: {
 	command: string;
 	method: string;
 	endpoint: string;
 	profile?: string;
 	body?: unknown;
-}): DryRunResult | null {
-	if (!c8ctl.dryRun) return null;
-	const config = resolveClusterConfig(opts.profile);
-	return {
-		kind: "dryRun",
-		info: {
-			dryRun: true,
-			command: opts.command,
-			method: opts.method,
-			url: `${config.baseUrl}${opts.endpoint}`,
-			...(opts.body !== undefined && { body: opts.body }),
-		},
+}) => DryRunResult | null;
+
+export function createDryRun(isDryRun: boolean): DryRunFn {
+	return (opts) => {
+		if (!isDryRun) return null;
+		const config = resolveClusterConfig(opts.profile);
+		return {
+			kind: "dryRun",
+			info: {
+				dryRun: true,
+				command: opts.command,
+				method: opts.method,
+				url: `${config.baseUrl}${opts.endpoint}`,
+				...(opts.body !== undefined && { body: opts.body }),
+			},
+		};
 	};
 }

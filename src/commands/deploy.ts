@@ -5,29 +5,28 @@
  * table output.
  *
  * The body lives directly in the handler (per #288): argument-shape
- * resolution, dry-run preview via the framework's `dryRun()` helper,
+ * resolution, dry-run preview via the context's `ctx.dryRun()` helper,
  * and the call into the shared `deployResources` helper that watch also
  * uses for change-triggered re-deploys.
  */
 
 import { appendFileSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
-import { createClient } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
 import {
+	c8ctl,
+	createClient,
 	DEFAULT_PROFILE,
 	getAllProfiles,
 	getProfileOrModeler,
 	readSkipDeployConfirm,
 	saveSkipDeployConfirm,
-} from "../config.ts";
-import { resolveIgnoreBaseDir } from "../ignore.ts";
-import { select } from "../prompt.ts";
+} from "../core/index.ts";
+import { defineCommand, select } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
-} from "../resource-extensions.ts";
-import { c8ctl } from "../runtime.ts";
+	resolveIgnoreBaseDir,
+} from "../utils/index.ts";
 import {
 	checkServerSupportsExtensions,
 	collectResourcesForPaths,
@@ -303,14 +302,18 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		}
 	}
 
-	// Dry-run preview.
-	if (ctx.dryRun) {
+	// Dry-run preview. Collect resources first so the preview body
+	// reflects what would actually be sent — and so the empty-paths /
+	// no-files guards still surface as thrown errors before we emit.
+	// Uses `ctx.isDryRun` and `ctx.tenantId` from the framework rather
+	// than reaching into the global runtime/config layer.
+	if (ctx.isDryRun) {
 		const { resources: previewResources, skippedExtensions } =
 			collectResourcesForPaths(paths, flags.force, extensionList);
 
 		logSkippedExtensions(skippedExtensions);
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "deploy",
 			method: "POST",
 			endpoint: "/deployments",
@@ -355,6 +358,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		suppressSkippedLog: skippedFiles.length > 0,
 		loadDeployAlways: serverSupportsExtensions,
 		basePath: paths.length === 1 ? paths[0] : undefined,
+		verbose: ctx.verbose,
 	});
 	return { kind: "none" };
 });

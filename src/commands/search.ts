@@ -2,20 +2,25 @@
  * Search commands
  */
 
-import { DEFAULT_PAGE_SIZE, fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { buildDateFilter, parseBetween } from "../date-filter.ts";
-import { type Logger, sortTableData } from "../logger.ts";
+import {
+	DEFAULT_PAGE_SIZE,
+	fetchAllPages,
+	type Logger,
+	sortTableData,
+} from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 import {
 	API_DEFAULT_PAGE_SIZE,
+	buildDateFilter,
 	hasUnescapedWildcard,
 	logNoResults,
 	logResultCount,
 	matchesCaseInsensitive,
 	matchesCaseSensitive,
+	parseBetween,
 	toStringFilter,
 	wildcardToRegex,
-} from "../search-helpers.ts";
+} from "../utils/index.ts";
 
 export {
 	API_DEFAULT_PAGE_SIZE,
@@ -155,7 +160,7 @@ export const searchProcessDefinitionsCommand = defineCommand(
 			filter.filter.processDefinitionKey = flags.key;
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search process-definitions",
 			method: "POST",
 			endpoint: "/process-definitions/search",
@@ -314,7 +319,7 @@ export const searchProcessInstancesCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search process-instances",
 			method: "POST",
 			endpoint: "/process-instances/search",
@@ -443,7 +448,7 @@ export const searchUserTasksCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search user-tasks",
 			method: "POST",
 			endpoint: "/user-tasks/search",
@@ -595,7 +600,7 @@ export const searchIncidentsCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search incidents",
 			method: "POST",
 			endpoint: "/incidents/search",
@@ -732,7 +737,7 @@ export const searchJobsCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search jobs",
 			method: "POST",
 			endpoint: "/jobs/search",
@@ -843,7 +848,7 @@ export const searchVariablesCommand = defineCommand(
 		// By default, truncate values unless --fullValue is specified
 		const truncateValues = !flags.fullValue;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search variables",
 			method: "POST",
 			endpoint: "/variables/search",
