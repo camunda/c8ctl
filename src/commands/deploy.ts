@@ -369,7 +369,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		serverSupportsExtensions &&
 		isInteractive()
 	) {
-		const basePath = paths.length === 1 ? paths[0] : process.cwd();
+		const basePath = resolveIgnoreBaseDir(paths);
 		extraPaths = await handleSkippedFiles(
 			skippedFiles,
 			skippedExtensions,
@@ -385,7 +385,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		extensionList: effectiveExtensions,
 		suppressSkippedLog: skippedFiles.length > 0,
 		loadDeployAlways: serverSupportsExtensions,
-		basePath: paths.length === 1 ? paths[0] : undefined,
+		basePath: resolveIgnoreBaseDir(paths),
 		verbose: ctx.verbose,
 	});
 	return { kind: "none" };

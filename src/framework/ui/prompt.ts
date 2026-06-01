@@ -131,14 +131,19 @@ export interface ConfirmResult {
  *
  * Checks (in order of precedence):
  * 1. `C8CTL_INTERACTIVE=false` — explicit opt-out (e.g. in CI or scripts)
- * 2. `C8CTL_INTERACTIVE=true`  — explicit opt-in (force prompts even in CI)
+ * 2. `C8CTL_NON_INTERACTIVE=true` — convenience alias for scripts
  * 3. `CI=true`                 — standard CI signal → non-interactive
  * 4. stdin + stderr must both be TTY
+ *
+ * `C8CTL_INTERACTIVE=true` overrides CI detection but still requires
+ * real TTY capabilities — it cannot force raw-mode on a pipe.
  */
 export function isInteractive(): boolean {
+	const hasTTY = !!process.stdin.isTTY && !!process.stderr.isTTY;
+
 	const explicit = process.env.C8CTL_INTERACTIVE?.toLowerCase();
 	if (explicit === "false" || explicit === "0") return false;
-	if (explicit === "true" || explicit === "1") return true;
+	if (explicit === "true" || explicit === "1") return hasTTY;
 
 	// C8CTL_NON_INTERACTIVE is a convenience alias for scripts
 	const nonInteractive = process.env.C8CTL_NON_INTERACTIVE?.toLowerCase();
@@ -147,7 +152,7 @@ export function isInteractive(): boolean {
 	// Standard CI env var — most CI systems set CI=true
 	if (process.env.CI?.toLowerCase() === "true") return false;
 
-	return !!process.stdin.isTTY && !!process.stderr.isTTY;
+	return hasTTY;
 }
 
 // ── select() ──────────────────────────────────────────────────────
