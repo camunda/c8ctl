@@ -141,6 +141,10 @@ export function isInteractive(): boolean {
 	if (explicit === "false" || explicit === "0") return false;
 	if (explicit === "true" || explicit === "1") return true;
 
+	// C8CTL_NON_INTERACTIVE is a convenience alias for scripts
+	const nonInteractive = process.env.C8CTL_NON_INTERACTIVE?.toLowerCase();
+	if (nonInteractive === "true" || nonInteractive === "1") return false;
+
 	// Standard CI env var — most CI systems set CI=true
 	if (process.env.CI?.toLowerCase() === "true") return false;
 

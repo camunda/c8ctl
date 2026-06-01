@@ -13,7 +13,12 @@ import {
 	type OutputMode,
 } from "../../core/index.ts";
 import type { FlagDef } from "../command-registry.ts";
-import type { confirm, select } from "../ui/prompt.ts";
+import type {
+	ConfirmConfig,
+	ConfirmResult,
+	SelectConfig,
+	SelectResult,
+} from "../ui/prompt.ts";
 
 /**
  * Typed, documented host context passed to plugin command handlers as
@@ -57,8 +62,8 @@ export interface PluginCtx {
 	logger: Logger;
 	/** Interactive prompts — arrow-key menu and yes/no confirmation. */
 	prompt: {
-		select: typeof select;
-		confirm: typeof confirm;
+		select: <T>(config: SelectConfig<T>) => Promise<SelectResult<T>>;
+		confirm: (config: ConfirmConfig) => Promise<ConfirmResult>;
 	};
 	/** Lazily-resolved Camunda client. Reading triggers credential resolution. */
 	readonly client: CamundaClient;

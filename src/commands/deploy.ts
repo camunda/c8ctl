@@ -21,7 +21,7 @@ import {
 	readSkipDeployConfirm,
 	saveSkipDeployConfirm,
 } from "../core/index.ts";
-import { defineCommand, select } from "../framework/index.ts";
+import { defineCommand, isInteractive, select } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	DEPLOYABLE_EXTENSIONS,
@@ -188,8 +188,19 @@ async function handleSkippedFiles(
 			skippedFiles.map((f) => dirname(f)),
 		);
 		const c8ignorePath = join(ignoreBaseDir, ".c8ignore");
-		const patterns = [...skippedExtensions].sort().map((ext) => `*${ext}`);
-		const block = `\n# Auto-added by c8ctl — ignore ${[...skippedExtensions].join(", ")} files\n${patterns.join("\n")}\n`;
+		// Filter out the "<no extension>" sentinel — it has no valid glob representation
+		const realExtensions = [...skippedExtensions]
+			.filter((ext) => ext !== "<no extension>")
+			.sort();
+		if (realExtensions.length === 0) {
+			logMessage(
+				"\nAll skipped files have no extension — cannot auto-ignore by extension.",
+			);
+			logMessage("Add specific file patterns to .c8ignore manually.\n");
+			return [];
+		}
+		const patterns = realExtensions.map((ext) => `*${ext}`);
+		const block = `\n# Auto-added by c8ctl — ignore ${realExtensions.join(", ")} files\n${patterns.join("\n")}\n`;
 
 		appendFileSync(c8ignorePath, block);
 		logMessage(
@@ -340,14 +351,19 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	);
 
 	let extraPaths: string[] = [];
-	if (skippedFiles.length > 0 && !ctx.yes && serverSupportsExtensions) {
+	if (
+		skippedFiles.length > 0 &&
+		!ctx.yes &&
+		serverSupportsExtensions &&
+		isInteractive()
+	) {
 		const basePath = paths.length === 1 ? paths[0] : process.cwd();
 		extraPaths = await handleSkippedFiles(
 			skippedFiles,
 			skippedExtensions,
 			basePath,
 		);
-	} else if (skippedFiles.length > 0 && serverSupportsExtensions) {
+	} else if (skippedFiles.length > 0) {
 		logSkippedExtensions(skippedExtensions);
 	}
 

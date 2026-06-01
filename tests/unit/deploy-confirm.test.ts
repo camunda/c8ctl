@@ -4,7 +4,8 @@
  * Verifies that `c8 deploy` prompts for confirmation when multiple
  * profiles are configured and the user did not explicitly pass
  * --profile or --yes. Since test subprocesses are not a TTY, the
- * confirmation auto-approves but logs the target to stderr.
+ * prompt falls back to non-interactive mode and the deploy fails
+ * with actionable guidance (use --profile or --yes).
  *
  * Most tests run without --dry-run so the confirmation guard is
  * actually exercised (it runs after the dry-run exit). The deploy
