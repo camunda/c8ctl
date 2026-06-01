@@ -318,6 +318,12 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// no-files guards still surface as thrown errors before we emit.
 	// Uses `ctx.isDryRun` and `ctx.tenantId` from the framework rather
 	// than reaching into the global runtime/config layer.
+	//
+	// Note: dry-run runs before the server version check, so on clusters
+	// <8.10 the preview may include extended-extension resources or
+	// deploy-always negation rules that the real deploy path would
+	// exclude. This is acceptable — dry-run is a best-effort preview
+	// and avoids an unnecessary HTTP call when only previewing.
 	if (ctx.isDryRun) {
 		const { resources: previewResources, skippedExtensions } =
 			collectResourcesForPaths(paths, flags.force, extensionList);
@@ -343,10 +349,16 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	);
 
 	// ── Collect resources and handle skipped files interactively ──
+	// Fall back to the default allow-list on servers that don't support
+	// extended extensions (<8.10) — prevents deploying unsupported types.
+	const effectiveExtensions = serverSupportsExtensions
+		? extensionList
+		: DEPLOYABLE_EXTENSIONS;
+
 	const { skippedFiles, skippedExtensions } = collectResourcesForPaths(
 		paths,
 		flags.force,
-		extensionList,
+		effectiveExtensions,
 		serverSupportsExtensions,
 	);
 
@@ -370,7 +382,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	await deployResources([...paths, ...extraPaths], {
 		profile: ctx.profile,
 		force: flags.force,
-		extensionList,
+		extensionList: effectiveExtensions,
 		suppressSkippedLog: skippedFiles.length > 0,
 		loadDeployAlways: serverSupportsExtensions,
 		basePath: paths.length === 1 ? paths[0] : undefined,

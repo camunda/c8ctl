@@ -256,7 +256,7 @@ export function loadDeployAlwaysRules(baseDir: string): Ignore | null {
 	const positivePatterns: ParsedPattern[] = [];
 
 	for (const raw of content.split("\n")) {
-		const trimmed = raw.trim();
+		const trimmed = raw.trimEnd();
 		if (!trimmed.startsWith("!") || trimmed.length <= 1) continue;
 		// Strip the `!` and parse the remaining pattern as a positive match.
 		const parsed = parsePattern(trimmed.slice(1));

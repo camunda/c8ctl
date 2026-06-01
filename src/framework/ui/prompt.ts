@@ -14,7 +14,7 @@
  * ## Usage in command handlers
  *
  * ```ts
- * import { select, confirm } from "../prompt.ts";
+ * import { select, confirm } from "../framework/index.ts";
  *
  * // Single selection — arrow keys + enter
  * const result = await select({
