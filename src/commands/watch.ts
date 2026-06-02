@@ -118,20 +118,6 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		createClient(ctx.profile),
 	);
 
-	// Fall back to default extensions on servers <8.10, same as deploy.
-	const userRequestedExtensions =
-		!!flags["all-extensions"] || !!flags.extensions;
-	const effectiveExtensions = serverSupportsExtensions
-		? watchedExtensions
-		: DEPLOYABLE_EXTENSIONS;
-
-	if (!serverSupportsExtensions && userRequestedExtensions) {
-		logger.warn(
-			`Server does not support extended extensions (requires 8.10+). ` +
-				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}).`,
-		);
-	}
-
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
@@ -162,7 +148,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const file = filename;
 
 				const ext = extname(filename);
-				if (!effectiveExtensions.includes(ext)) {
+				if (!watchedExtensions.includes(ext)) {
 					return;
 				}
 
