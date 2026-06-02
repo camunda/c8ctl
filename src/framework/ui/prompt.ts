@@ -352,13 +352,23 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 		});
 
 		let settled = false;
+		let sigint = false;
 
-		// If the user presses Ctrl+C, readline closes without invoking
-		// the question callback. Settle the promise so the command
+		// Track Ctrl+C so the close handler can re-raise SIGINT
+		// instead of silently treating it as "no".
+		rl.on("SIGINT", () => {
+			sigint = true;
+		});
+
+		// If the readline closes without the question callback firing
+		// (Ctrl+C, stream end), settle the promise so the command
 		// doesn't hang.
 		rl.on("close", () => {
 			if (!settled) {
 				settled = true;
+				if (sigint) {
+					process.kill(process.pid, "SIGINT");
+				}
 				resolve({ interactive: true, value: false });
 			}
 		});

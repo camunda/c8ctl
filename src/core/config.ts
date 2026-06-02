@@ -714,7 +714,10 @@ export function saveSkipDeployConfirm(value: boolean): void {
 /**
  * Save session state from c8ctl runtime object to disk
  */
-export function saveSessionState(state?: SessionState): void {
+export function saveSessionState(
+	state?: SessionState,
+	overrides?: { skipDeployConfirm?: boolean },
+): void {
 	// Use persistedOutputMode (the on-disk value) by default, NOT
 	// c8ctl.outputMode — the latter may carry a per-invocation override
 	// from --json or C8CTL_OUTPUT_MODE that must not leak to disk (#356).
@@ -725,7 +728,10 @@ export function saveSessionState(state?: SessionState): void {
 		activeProfile: state?.activeProfile ?? c8ctl.activeProfile,
 		activeTenant: state?.activeTenant ?? c8ctl.activeTenant,
 		outputMode: state?.outputMode ?? persistedOutputMode,
-		skipDeployConfirm: state?.skipDeployConfirm ?? readSkipDeployConfirm(),
+		skipDeployConfirm:
+			overrides?.skipDeployConfirm ??
+			state?.skipDeployConfirm ??
+			readSkipDeployConfirm(),
 	};
 
 	if (state) {
@@ -756,10 +762,7 @@ export function saveSessionState(state?: SessionState): void {
  */
 export function setActiveProfile(name: string): void {
 	c8ctl.activeProfile = name;
-	// Clear skipDeployConfirm on disk before saving so the merged
-	// saveSessionState doesn't preserve the stale flag.
-	saveSkipDeployConfirm(false);
-	saveSessionState();
+	saveSessionState(undefined, { skipDeployConfirm: false });
 }
 
 /**
@@ -862,8 +865,7 @@ export function envVarsToProfile(
  */
 export function clearActiveProfile(): void {
 	c8ctl.activeProfile = undefined;
-	saveSkipDeployConfirm(false);
-	saveSessionState();
+	saveSessionState(undefined, { skipDeployConfirm: false });
 }
 
 /**
