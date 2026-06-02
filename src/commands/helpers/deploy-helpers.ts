@@ -70,8 +70,8 @@ const MIN_EXTENDED_EXTENSIONS_VERSION = [8, 10];
 /**
  * Check whether the connected Camunda server supports extended file extensions.
  * Returns `true` for 8.10+, `false` for older versions.
- * Falls back to `true` on any error (network, auth, unparseable version)
- * so the skipped-files menu is shown rather than silently suppressing it.
+ * Falls back to `false` on any error (network, auth, unparseable version)
+ * so unsupported resource types are not deployed to older clusters.
  */
 export async function checkServerSupportsExtensions(
 	client: CamundaClient,
@@ -83,9 +83,9 @@ export async function checkServerSupportsExtensions(
 		const parts = version.split(".").map(Number);
 		if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
 			logger.warn(
-				`Could not parse server version "${version}" — assuming extended extensions are supported.`,
+				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
 			);
-			return true;
+			return false;
 		}
 		const [major, minor] = parts;
 		const [reqMajor, reqMinor] = MIN_EXTENDED_EXTENSIONS_VERSION;
@@ -96,9 +96,9 @@ export async function checkServerSupportsExtensions(
 		);
 		logger.warn(
 			"This can happen with OAuth/SaaS clusters before the first token is fetched, " +
-				"or if the server is not yet ready. Assuming extended extensions are supported.",
+				"or if the server is not yet ready. Assuming extended extensions are NOT supported.",
 		);
-		return true;
+		return false;
 	}
 }
 
