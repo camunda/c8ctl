@@ -695,7 +695,8 @@ export function saveSkipDeployConfirm(value: boolean): void {
 	const path = getSessionStatePath();
 	try {
 		const data = readFileSync(path, "utf-8");
-		const state: Record<string, unknown> = JSON.parse(data);
+		const parsed: unknown = JSON.parse(data);
+		const state = isRecord(parsed) ? parsed : {};
 		state.skipDeployConfirm = value;
 		writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
 	} catch (err: unknown) {
