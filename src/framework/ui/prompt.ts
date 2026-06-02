@@ -358,6 +358,7 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 		// instead of silently treating it as "no".
 		rl.on("SIGINT", () => {
 			sigint = true;
+			rl.close();
 		});
 
 		// If the readline closes without the question callback firing

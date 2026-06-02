@@ -358,9 +358,19 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// ── Collect resources and handle skipped files interactively ──
 	// Fall back to the default allow-list on servers that don't support
 	// extended extensions (<8.10) — prevents deploying unsupported types.
+	const userRequestedExtensions =
+		!!flags["all-extensions"] || !!flags.extensions;
 	const effectiveExtensions = serverSupportsExtensions
 		? extensionList
 		: DEPLOYABLE_EXTENSIONS;
+
+	if (!serverSupportsExtensions && userRequestedExtensions && !flags.force) {
+		logMessage(
+			`Warning: server does not support extended extensions (requires 8.10+). ` +
+				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}). ` +
+				`Use --force to deploy all files regardless.`,
+		);
+	}
 
 	const {
 		skippedFiles,
