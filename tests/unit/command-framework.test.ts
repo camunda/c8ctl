@@ -311,7 +311,7 @@ describe("defineCommand", () => {
 			dryRun: createDryRun(false),
 			verbose: false,
 			profile: undefined,
-			yes: undefined,
+			yes: false,
 		};
 
 		await cmd.execute(mockCtx, { xml: true }, ["12345"]);

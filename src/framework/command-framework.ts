@@ -254,7 +254,7 @@ export interface CommandContext {
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
 	/** Whether --yes was set (skip confirmation prompts). */
-	yes: boolean | undefined;
+	yes: boolean;
 }
 
 // ─── CommandHandler ──────────────────────────────────────────────────────────

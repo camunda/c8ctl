@@ -351,9 +351,22 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 			output: process.stderr,
 		});
 
+		let settled = false;
+
+		// If the user presses Ctrl+C, readline closes without invoking
+		// the question callback. Settle the promise so the command
+		// doesn't hang.
+		rl.on("close", () => {
+			if (!settled) {
+				settled = true;
+				resolve({ interactive: true, value: false });
+			}
+		});
+
 		rl.question(
 			`${BOLD}${CYAN}?${RESET} ${BOLD}${message}${RESET} ${DIM}${suffix}${RESET} `,
 			(answer: string) => {
+				settled = true;
 				rl.close();
 				const normalized = answer.trim().toLowerCase();
 				let value: boolean;

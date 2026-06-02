@@ -741,7 +741,7 @@ async function main() {
 			dryRun: createDryRun(c8ctl.dryRun ?? false),
 			verbose: c8ctl.verbose ?? false,
 			profile,
-			yes: bool(values.yes),
+			yes: bool(values.yes) === true,
 		};
 		await handler.execute(ctx, values, args);
 		return;
