@@ -164,8 +164,11 @@ async function handleSkippedFiles(
 
 	if (action === "deploy-always") {
 		const c8ignorePath = join(basePath, ".c8ignore");
+		// Prefix with "/" to anchor patterns to the .c8ignore base dir.
+		// Without anchoring, a root-level file like "notes.md" would
+		// match at any depth (e.g. subdir/notes.md).
 		const patterns = skippedFiles.map(
-			(f) => `!${relative(basePath, f).split(sep).join("/")}`,
+			(f) => `!/${relative(basePath, f).split(sep).join("/")}`,
 		);
 		const block = `\n# Auto-added by c8ctl — always deploy these files\n${patterns.join("\n")}\n`;
 
