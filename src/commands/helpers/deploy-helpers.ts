@@ -559,7 +559,7 @@ export function collectResourcesForPaths(
 		logSkippedExtensions(skippedExtensions);
 		throw new Error(
 			skippedFiles.length > 0
-				? `No files with allowed extensions found. ${skippedFiles.length} file(s) were skipped (${[...skippedExtensions].sort().join(", ")}). Use --force to include all files, or configure extensions in .c8ignore.`
+				? `No files with allowed extensions found. ${skippedFiles.length} file(s) were skipped (${[...skippedExtensions].sort().join(", ")}). Use --force to include all files, or --extensions to expand the allow-list.`
 				: "No deployable files found in the specified paths",
 		);
 	}

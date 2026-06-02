@@ -351,12 +351,20 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		? extensionList
 		: DEPLOYABLE_EXTENSIONS;
 
-	const { skippedFiles, skippedExtensions } = collectResourcesForPaths(
+	const {
+		skippedFiles,
+		skippedExtensions,
+		effectivePaths: resolvedPaths,
+	} = collectResourcesForPaths(
 		paths,
 		flags.force,
 		effectiveExtensions,
 		serverSupportsExtensions,
 	);
+
+	// Use the effective (possibly PA-expanded) paths for .c8ignore and
+	// display-path resolution so patterns align with the scan root.
+	const basePath = resolveIgnoreBaseDir(resolvedPaths);
 
 	let extraPaths: string[] = [];
 	if (
@@ -365,7 +373,6 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		serverSupportsExtensions &&
 		isInteractive()
 	) {
-		const basePath = resolveIgnoreBaseDir(paths);
 		extraPaths = await handleSkippedFiles(
 			skippedFiles,
 			skippedExtensions,
@@ -381,7 +388,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		extensionList: effectiveExtensions,
 		suppressSkippedLog: skippedFiles.length > 0,
 		loadDeployAlways: serverSupportsExtensions,
-		basePath: resolveIgnoreBaseDir(paths),
+		basePath,
 		verbose: ctx.verbose,
 	});
 	return { kind: "none" };
