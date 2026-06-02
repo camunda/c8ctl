@@ -4,7 +4,7 @@
 
 import { existsSync, realpathSync, statSync, watch } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { normalizeToError } from "../core/index.ts";
+import { createClient, normalizeToError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
@@ -15,6 +15,7 @@ import {
 	resolveIgnoreBaseDir,
 } from "../utils/index.ts";
 import {
+	checkServerSupportsExtensions,
 	deployResources,
 	findProcessApplicationRoot,
 } from "./helpers/deploy-helpers.ts";
@@ -112,6 +113,25 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		resolvedPaths.push(paRoot);
 	}
 
+	// ── Pre-flight version check ──
+	const serverSupportsExtensions = await checkServerSupportsExtensions(
+		createClient(ctx.profile),
+	);
+
+	// Fall back to default extensions on servers <8.10, same as deploy.
+	const userRequestedExtensions =
+		!!flags["all-extensions"] || !!flags.extensions;
+	const effectiveExtensions = serverSupportsExtensions
+		? watchedExtensions
+		: DEPLOYABLE_EXTENSIONS;
+
+	if (!serverSupportsExtensions && userRequestedExtensions) {
+		logger.warn(
+			`Server does not support extended extensions (requires 8.10+). ` +
+				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}).`,
+		);
+	}
+
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
@@ -142,7 +162,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const file = filename;
 
 				const ext = extname(filename);
-				if (!watchedExtensions.includes(ext)) {
+				if (!effectiveExtensions.includes(ext)) {
 					return;
 				}
 
@@ -203,6 +223,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 								continueOnUserError: true,
 								signal: ac.signal,
 								verbose: ctx.verbose,
+								loadDeployAlways: serverSupportsExtensions,
 							});
 						} catch (error) {
 							// `deployResources()` normally returns early when its signal
