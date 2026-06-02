@@ -153,6 +153,15 @@ async function handleSkippedFiles(
 	}
 
 	if (action === "deploy-always") {
+		// Guard against writing to a root-level .c8ignore when multiple
+		// unrelated deploy paths resolve the base to a filesystem root.
+		if (basePath === "/" || /^[A-Za-z]:\\?$/.test(basePath)) {
+			logMessage(
+				"\nCannot auto-update .c8ignore at the filesystem root." +
+					" Run deploy from a single project directory or edit .c8ignore manually.",
+			);
+			return skippedFiles;
+		}
 		const c8ignorePath = join(basePath, ".c8ignore");
 		// Prefix with "/" to anchor patterns to the .c8ignore base dir.
 		// Without anchoring, a root-level file like "notes.md" would
@@ -176,6 +185,15 @@ async function handleSkippedFiles(
 	}
 
 	if (action === "ignore-always") {
+		// Guard against writing to a root-level .c8ignore when multiple
+		// unrelated deploy paths resolve the base to a filesystem root.
+		if (basePath === "/" || /^[A-Za-z]:\\?$/.test(basePath)) {
+			logMessage(
+				"\nCannot auto-update .c8ignore at the filesystem root." +
+					" Run deploy from a single project directory or edit .c8ignore manually.",
+			);
+			return [];
+		}
 		const c8ignorePath = join(basePath, ".c8ignore");
 		// Filter out the "<no extension>" sentinel — it has no valid glob representation
 		const realExtensions = [...skippedExtensions]
