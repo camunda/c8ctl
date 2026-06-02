@@ -115,11 +115,11 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	}
 
 	// ── Pre-flight version check ──
-	// Skip the topology call when --force is set — extension filtering
-	// is bypassed entirely, so the result is unused.
-	const serverSupportsExtensions = flags.force
-		? true
-		: await checkServerSupportsExtensions(createClient(ctx.profile));
+	// Always perform the topology check — --force means "continue after
+	// deploy errors", not "bypass extension filtering".
+	const serverSupportsExtensions = await checkServerSupportsExtensions(
+		createClient(ctx.profile),
+	);
 
 	// Clamp watched extensions on servers that don't support extended types.
 	// Note: explicit file paths bypass extension filtering by design, so
@@ -133,8 +133,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	if (!serverSupportsExtensions && userRequestedExtensions) {
 		logMessage(
 			`Warning: server does not support extended extensions (requires 8.10+). ` +
-				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}). ` +
-				`Use --force to deploy all files regardless.`,
+				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}).`,
 		);
 	}
 

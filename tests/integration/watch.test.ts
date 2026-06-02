@@ -294,52 +294,60 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 
 	test("watch --extensions merges custom extensions with defaults", async () => {
 		const testWatchDir = mkdtempSync(join(tmpdir(), "c8ctl-watch-ext-"));
-		// --extensions=.xml merges with defaults (.bpmn, .dmn, .form)
-		// --force bypasses the server version check so the extension is
-		// honoured regardless of the cluster version running in CI.
-		const watch = startWatch(testWatchDir, dataDir, [
-			"--extensions=.xml",
-			"--force",
-		]);
+		// --extensions=.xml merges with defaults (.bpmn, .dmn, .form).
+		// On servers <8.10, extensions are clamped to defaults and a
+		// warning is shown — the test asserts that fallback instead.
+		const watch = startWatch(testWatchDir, dataDir, ["--extensions=.xml"]);
 
 		try {
+			// Wait for the watcher to initialise
 			const initialized = await pollUntil(
-				async () =>
-					watch.getOutput().includes("Monitoring extensions:") &&
-					watch.getOutput().includes(".xml"),
+				async () => watch.getOutput().includes("Monitoring extensions:"),
 				5000,
 				POLL_INTERVAL_MS,
 			);
 			assert.ok(
 				initialized,
-				`Expected watcher to show .xml in monitored extensions.\nActual output:\n${watch.getOutput()}`,
+				`Expected watcher to show monitored extensions.\nActual output:\n${watch.getOutput()}`,
 			);
 
-			// --extensions merges with defaults, so .bpmn is still watched.
-			// Verify that .xml files (the added extension) are detected and deployed.
+			const output = watch.getOutput();
+			const supportsExtended = output.includes(".xml");
 
-			// Copy a valid BPMN as a .xml file — this SHOULD be detected and deployed
-			copyFileSync(VALID_BPMN, join(testWatchDir, "process.xml"));
-			const detected = await pollUntil(
-				async () => watch.getOutput().includes("Change detected: process.xml"),
-				POLL_TIMEOUT_MS,
-				POLL_INTERVAL_MS,
-			);
-			assert.ok(
-				detected,
-				`Expected watcher to detect .xml file change.\nActual output:\n${watch.getOutput()}`,
-			);
+			if (supportsExtended) {
+				// Server ≥8.10: .xml is accepted and merged with defaults
+				copyFileSync(VALID_BPMN, join(testWatchDir, "process.xml"));
+				const detected = await pollUntil(
+					async () =>
+						watch.getOutput().includes("Change detected: process.xml"),
+					POLL_TIMEOUT_MS,
+					POLL_INTERVAL_MS,
+				);
+				assert.ok(
+					detected,
+					`Expected watcher to detect .xml file change.\nActual output:\n${watch.getOutput()}`,
+				);
 
-			// Step 3: verify that the .xml file was successfully deployed
-			const deployed = await pollUntil(
-				async () => watch.getOutput().includes("Deployment successful"),
-				POLL_TIMEOUT_MS,
-				POLL_INTERVAL_MS,
-			);
-			assert.ok(
-				deployed,
-				`Expected successful deployment of .xml file.\nActual output:\n${watch.getOutput()}`,
-			);
+				const deployed = await pollUntil(
+					async () => watch.getOutput().includes("Deployment successful"),
+					POLL_TIMEOUT_MS,
+					POLL_INTERVAL_MS,
+				);
+				assert.ok(
+					deployed,
+					`Expected successful deployment of .xml file.\nActual output:\n${watch.getOutput()}`,
+				);
+			} else {
+				// Server <8.10: extensions clamped to defaults, warning shown
+				assert.ok(
+					output.includes("does not support extended extensions"),
+					`Expected fallback warning on <8.10 server.\nActual output:\n${output}`,
+				);
+				assert.ok(
+					output.includes(".bpmn"),
+					`Expected default extensions in monitoring list.\nActual output:\n${output}`,
+				);
+			}
 		} finally {
 			await watch.kill();
 			rmSync(testWatchDir, { recursive: true, force: true });
