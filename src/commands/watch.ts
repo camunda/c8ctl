@@ -18,6 +18,7 @@ import {
 	checkServerSupportsExtensions,
 	deployResources,
 	findProcessApplicationRoot,
+	logMessage,
 } from "./helpers/deploy-helpers.ts";
 
 export { DEPLOY_COOLDOWN };
@@ -118,6 +119,23 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		createClient(ctx.profile),
 	);
 
+	// Clamp watched extensions on servers that don't support extended types.
+	// Note: explicit file paths bypass extension filtering by design, so
+	// this only gates which fs events trigger a deploy.
+	const userRequestedExtensions =
+		!!flags["all-extensions"] || !!flags.extensions;
+	const effectiveExtensions = serverSupportsExtensions
+		? watchedExtensions
+		: DEPLOYABLE_EXTENSIONS;
+
+	if (!serverSupportsExtensions && userRequestedExtensions) {
+		logMessage(
+			`Warning: server does not support extended extensions (requires 8.10+). ` +
+				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}). ` +
+				`Use --force to deploy all files regardless.`,
+		);
+	}
+
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
@@ -148,7 +166,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const file = filename;
 
 				const ext = extname(filename);
-				if (!watchedExtensions.includes(ext)) {
+				if (!effectiveExtensions.includes(ext)) {
 					return;
 				}
 
@@ -274,7 +292,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// FSEvents on macOS, ReadDirectoryChangesW on Windows) and the
 		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-		logger.info(`📋 Monitoring extensions: ${watchedExtensions.join(", ")}`);
+		logger.info(`📋 Monitoring extensions: ${effectiveExtensions.join(", ")}`);
 		if (paMode && paRoot) {
 			logger.info(
 				`📦 Process application mode: deploying all resources from ${paRoot}`,
