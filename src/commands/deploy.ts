@@ -250,6 +250,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	const extensionList = resolveExtensionList(flags);
 
 	// ── Deploy target confirmation (interactive profile selector) ─────
+	let deployProfile = ctx.profile;
 	const ALWAYS_ACTIVE = Symbol("alwaysActive");
 	if (!ctx.yes && !ctx.profile) {
 		const profiles = getAllProfiles();
@@ -312,7 +313,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 						typeof result.value === "string" &&
 						result.value !== effectiveName
 					) {
-						ctx.profile = result.value;
+						deployProfile = result.value;
 					}
 				}
 			}
@@ -340,7 +341,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			command: "deploy",
 			method: "POST",
 			endpoint: "/deployments",
-			profile: ctx.profile,
+			profile: deployProfile,
 			body: {
 				tenantId: ctx.tenantId,
 				resources: previewResources.map((r) => ({ name: r.name })),
@@ -351,7 +352,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 
 	// ── Pre-flight version check ──
 	const serverSupportsExtensions = await checkServerSupportsExtensions(
-		createClient(ctx.profile),
+		createClient(deployProfile),
 	);
 
 	// ── Collect resources and handle skipped files interactively ──
@@ -393,7 +394,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	}
 
 	await deployResources([...paths, ...extraPaths], {
-		profile: ctx.profile,
+		profile: deployProfile,
 		force: flags.force,
 		extensionList: effectiveExtensions,
 		suppressSkippedLog: skippedFiles.length > 0,
