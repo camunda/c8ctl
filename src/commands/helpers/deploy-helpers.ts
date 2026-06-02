@@ -80,14 +80,17 @@ export async function checkServerSupportsExtensions(
 	try {
 		const topology = await client.getTopology();
 		const version = String(topology.gatewayVersion ?? "");
-		const parts = version.split(".").map(Number);
-		if (parts.length < 2 || Number.isNaN(parts[0]) || Number.isNaN(parts[1])) {
+		// Extract leading major.minor, ignoring pre-release/build suffixes
+		// like "8.10.0-alpha1" or "8.10-SNAPSHOT".
+		const match = version.match(/^(\d+)\.(\d+)/);
+		if (!match) {
 			logger.warn(
 				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
 			);
 			return false;
 		}
-		const [major, minor] = parts;
+		const major = Number(match[1]);
+		const minor = Number(match[2]);
 		const [reqMajor, reqMinor] = MIN_EXTENDED_EXTENSIONS_VERSION;
 		return major > reqMajor || (major === reqMajor && minor >= reqMinor);
 	} catch {
