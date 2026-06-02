@@ -280,7 +280,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 					}));
 					profileOptions.push({
 						label: `Always use "${effectiveName}" (don't ask again)`,
-						description: "Persists to session — reset with: c8ctl use profile",
+						description: "Persists to session — reset with: c8 use profile",
 						value: ALWAYS_ACTIVE,
 					});
 
@@ -303,7 +303,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 					} else if (result.value === ALWAYS_ACTIVE) {
 						saveSkipDeployConfirm(true);
 						logMessage(
-							`Future deploys will use the active profile without prompting. Reset with: c8ctl use profile <name>`,
+							`Future deploys will use the active profile without prompting. Reset with: c8 use profile <name>`,
 						);
 					} else if (
 						typeof result.value === "string" &&
