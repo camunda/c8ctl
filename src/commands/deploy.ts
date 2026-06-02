@@ -247,7 +247,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	const extensionList = resolveExtensionList(flags);
 
 	// ── Deploy target confirmation (interactive profile selector) ─────
-	const ALWAYS_ACTIVE = "__always_active__";
+	const ALWAYS_ACTIVE = Symbol("alwaysActive");
 	if (!ctx.yes && !ctx.profile) {
 		const profiles = getAllProfiles();
 		if (profiles.length > 1) {
@@ -269,7 +269,11 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 						profiles.findIndex((p) => p.name === effectiveName),
 					);
 
-					const profileOptions = profiles.map((p) => ({
+					const profileOptions: Array<{
+						label: string;
+						description: string | undefined;
+						value: string | symbol;
+					}> = profiles.map((p) => ({
 						label: p.name,
 						description: p.baseUrl,
 						value: p.name,
@@ -301,7 +305,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 						logMessage(
 							`Future deploys will use the active profile without prompting. Reset with: c8ctl use profile <name>`,
 						);
-					} else if (result.value !== effectiveName) {
+					} else if (
+						typeof result.value === "string" &&
+						result.value !== effectiveName
+					) {
 						ctx.profile = result.value;
 					}
 				}

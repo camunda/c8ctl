@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { OutputMode } from "./logger.ts";
-import { getLogger } from "./logger.ts";
+import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 // ============================================================================
@@ -696,13 +696,18 @@ export function saveSkipDeployConfirm(value: boolean): void {
 		const state: Record<string, unknown> = JSON.parse(data);
 		state.skipDeployConfirm = value;
 		writeFileSync(path, JSON.stringify(state, null, 2), "utf-8");
-	} catch {
-		// File may not exist yet — create with the flag
-		writeFileSync(
-			path,
-			JSON.stringify({ skipDeployConfirm: value }, null, 2),
-			"utf-8",
-		);
+	} catch (err: unknown) {
+		// Missing file — create with the flag. Any other IO or parse
+		// error is unexpected and must not silently clobber the file.
+		if (isRecord(err) && err.code === "ENOENT") {
+			writeFileSync(
+				path,
+				JSON.stringify({ skipDeployConfirm: value }, null, 2),
+				"utf-8",
+			);
+			return;
+		}
+		throw err;
 	}
 }
 
