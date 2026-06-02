@@ -2,16 +2,16 @@
  * Unit tests for isInteractive() env-var precedence.
  *
  * isInteractive() is a pure function of process.env + TTY state.
- * Since test subprocesses are never TTY, all tests here exercise the
- * env-var paths and verify the TTY gate.
+ * Tests use env vars to exercise the priority logic. The actual
+ * TTY state varies between CI (piped) and local terminals, so
+ * assertions that depend on it use the runtime hasTTY value.
  */
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import { isInteractive } from "../../src/framework/index.ts";
 
-// In test subprocesses, stdin/stderr are NOT TTYs, so the baseline
-// return value (no env overrides) is always false.
+const hasTTY = !!process.stdin.isTTY && !!process.stderr.isTTY;
 
 describe("isInteractive()", () => {
 	// Save and restore env vars around each test
@@ -47,9 +47,9 @@ describe("isInteractive()", () => {
 		CI: undefined,
 	};
 
-	test("returns false when no env vars and no TTY", () => {
+	test("returns hasTTY when no env vars are set", () => {
 		withEnv(clean, () => {
-			assert.strictEqual(isInteractive(), false);
+			assert.strictEqual(isInteractive(), hasTTY);
 		});
 	});
 
@@ -65,10 +65,10 @@ describe("isInteractive()", () => {
 		});
 	});
 
-	test("C8CTL_INTERACTIVE=true still returns false without TTY", () => {
+	test("C8CTL_INTERACTIVE=true returns hasTTY", () => {
 		withEnv({ ...clean, C8CTL_INTERACTIVE: "true" }, () => {
-			// Even with explicit opt-in, no TTY means non-interactive
-			assert.strictEqual(isInteractive(), false);
+			// Opt-in still requires actual TTY capability
+			assert.strictEqual(isInteractive(), hasTTY);
 		});
 	});
 

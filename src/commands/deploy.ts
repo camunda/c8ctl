@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { basename, dirname, join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import {
 	c8ctl,
 	createClient,
@@ -163,12 +163,9 @@ async function handleSkippedFiles(
 	}
 
 	if (action === "deploy-always") {
-		const ignoreBaseDir = resolveIgnoreBaseDir(
-			skippedFiles.map((f) => dirname(f)),
-		);
-		const c8ignorePath = join(ignoreBaseDir, ".c8ignore");
+		const c8ignorePath = join(basePath, ".c8ignore");
 		const patterns = skippedFiles.map(
-			(f) => `!${relative(ignoreBaseDir, f).split(sep).join("/")}`,
+			(f) => `!${relative(basePath, f).split(sep).join("/")}`,
 		);
 		const block = `\n# Auto-added by c8ctl — always deploy these files\n${patterns.join("\n")}\n`;
 
@@ -184,10 +181,7 @@ async function handleSkippedFiles(
 	}
 
 	if (action === "ignore-always") {
-		const ignoreBaseDir = resolveIgnoreBaseDir(
-			skippedFiles.map((f) => dirname(f)),
-		);
-		const c8ignorePath = join(ignoreBaseDir, ".c8ignore");
+		const c8ignorePath = join(basePath, ".c8ignore");
 		// Filter out the "<no extension>" sentinel — it has no valid glob representation
 		const realExtensions = [...skippedExtensions]
 			.filter((ext) => ext !== "<no extension>")

@@ -265,7 +265,7 @@ export const whichProfileCommand = defineCommand(
 export const removeProfileCommand = defineCommand(
 	"remove",
 	"profile",
-	async (_ctx, _flags, args) => {
+	async (ctx, _flags, args) => {
 		let name = args.name;
 
 		if (!name) {
@@ -297,14 +297,16 @@ export const removeProfileCommand = defineCommand(
 			name = result.value;
 
 			// Confirm before removing (only when picked interactively)
-			const confirmResult = await confirm({
-				message: `Remove profile '${name}'?`,
-				defaultValue: false,
-			});
-			if (!confirmResult.value) {
-				const logger = getLogger();
-				logger.info("Cancelled");
-				return { kind: "none" };
+			if (!ctx.yes) {
+				const confirmResult = await confirm({
+					message: `Remove profile '${name}'?`,
+					defaultValue: false,
+				});
+				if (!confirmResult.value) {
+					const logger = getLogger();
+					logger.info("Cancelled");
+					return { kind: "none" };
+				}
 			}
 		}
 
