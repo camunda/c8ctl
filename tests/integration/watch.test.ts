@@ -295,7 +295,12 @@ describe("Watch Command Integration Tests (requires Camunda 8 at localhost:8080)
 	test("watch --extensions merges custom extensions with defaults", async () => {
 		const testWatchDir = mkdtempSync(join(tmpdir(), "c8ctl-watch-ext-"));
 		// --extensions=.xml merges with defaults (.bpmn, .dmn, .form)
-		const watch = startWatch(testWatchDir, dataDir, ["--extensions=.xml"]);
+		// --force bypasses the server version check so the extension is
+		// honoured regardless of the cluster version running in CI.
+		const watch = startWatch(testWatchDir, dataDir, [
+			"--extensions=.xml",
+			"--force",
+		]);
 
 		try {
 			const initialized = await pollUntil(

@@ -115,9 +115,11 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	}
 
 	// ── Pre-flight version check ──
-	const serverSupportsExtensions = await checkServerSupportsExtensions(
-		createClient(ctx.profile),
-	);
+	// Skip the topology call when --force is set — extension filtering
+	// is bypassed entirely, so the result is unused.
+	const serverSupportsExtensions = flags.force
+		? true
+		: await checkServerSupportsExtensions(createClient(ctx.profile));
 
 	// Clamp watched extensions on servers that don't support extended types.
 	// Note: explicit file paths bypass extension filtering by design, so
