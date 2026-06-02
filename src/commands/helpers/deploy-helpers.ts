@@ -31,6 +31,7 @@ import {
 	isIgnored,
 	loadDeployAlwaysRules,
 	loadIgnoreRules,
+	meetsMinExtensionVersion,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
 
@@ -62,12 +63,6 @@ export function logSkippedExtensions(skippedExtensions: Set<string>): void {
 }
 
 /**
- * Minimum Camunda version that supports deploying additional file extensions
- * beyond .bpmn, .dmn, and .form.
- */
-const MIN_EXTENDED_EXTENSIONS_VERSION = [8, 10];
-
-/**
  * Check whether the connected Camunda server supports extended file extensions.
  * Returns `true` for 8.10+, `false` for older versions.
  * Falls back to `false` on any error (network, auth, unparseable version)
@@ -80,19 +75,14 @@ export async function checkServerSupportsExtensions(
 	try {
 		const topology = await client.getTopology();
 		const version = String(topology.gatewayVersion ?? "");
-		// Extract leading major.minor, ignoring pre-release/build suffixes
-		// like "8.10.0-alpha1" or "8.10-SNAPSHOT".
-		const match = version.match(/^(\d+)\.(\d+)/);
-		if (!match) {
+		const result = meetsMinExtensionVersion(version);
+		if (result === null) {
 			logger.warn(
 				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
 			);
 			return false;
 		}
-		const major = Number(match[1]);
-		const minor = Number(match[2]);
-		const [reqMajor, reqMinor] = MIN_EXTENDED_EXTENSIONS_VERSION;
-		return major > reqMajor || (major === reqMajor && minor >= reqMinor);
+		return result;
 	} catch {
 		logger.warn(
 			"Could not reach the server to check its version (topology call failed).",
