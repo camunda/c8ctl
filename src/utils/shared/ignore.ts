@@ -257,10 +257,12 @@ export function loadDeployAlwaysRules(baseDir: string): Ignore | null {
 
 	for (const raw of content.split("\n")) {
 		const trimmed = raw.trimEnd();
-		if (!trimmed.startsWith("!") || trimmed.length <= 1) continue;
-		// Strip the `!` and parse the remaining pattern as a positive match.
-		const parsed = parsePattern(trimmed.slice(1));
-		if (parsed) {
+		// Parse the full line so `parsePattern` handles comment detection,
+		// negation stripping, and anchoring correctly. A manual `!` strip
+		// before parsing would mis-classify patterns like `!#file` (the `#`
+		// would be treated as a comment after the `!` is removed).
+		const parsed = parsePattern(trimmed);
+		if (parsed?.negate) {
 			positivePatterns.push({ ...parsed, negate: false });
 		}
 	}
