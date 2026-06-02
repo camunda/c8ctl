@@ -219,6 +219,7 @@ export async function select<T>(
 			// physical lines, not logical option count, or previous
 			// renders bleed through.
 			const cols = out.columns || 80;
+			const headerLines = Math.max(1, Math.ceil((2 + message.length) / cols));
 			const physicalLines = options.reduce((sum, opt) => {
 				// Visible width: "  ❯ " (4 chars) + label + optional " " + description
 				const visible =
@@ -294,13 +295,16 @@ export async function select<T>(
 					});
 				} else if (key.name === "escape" || (key.ctrl && key.name === "c")) {
 					cleanup();
-					// Clear the menu
+					// Clear the menu and header
 					out.write(CURSOR_UP(physicalLines));
 					for (let i = 0; i < physicalLines; i++) {
 						out.write(`${CLEAR_LINE}\n`);
 					}
-					out.write(CURSOR_UP(physicalLines + 1)); // +1 for the header
-					out.write(`${CLEAR_LINE}\n`);
+					out.write(CURSOR_UP(physicalLines + headerLines));
+					for (let i = 0; i < headerLines; i++) {
+						out.write(`${CLEAR_LINE}\n`);
+					}
+					out.write(CURSOR_UP(headerLines));
 					// Ctrl+C: re-raise so the process exits naturally
 					if (key.ctrl && key.name === "c") {
 						process.kill(process.pid, "SIGINT");
