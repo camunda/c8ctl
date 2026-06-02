@@ -40,7 +40,7 @@ const PROCESS_APPLICATION_FILE = ".process-application";
 /**
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
  */
-function logMessage(message: string): void {
+export function logMessage(message: string): void {
 	if (getLogger().mode === "json") {
 		console.error(JSON.stringify({ type: "message", message }));
 	} else {

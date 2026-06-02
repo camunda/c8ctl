@@ -31,6 +31,7 @@ import {
 	checkServerSupportsExtensions,
 	collectResourcesForPaths,
 	deployResources,
+	logMessage,
 	logSkippedExtensions,
 } from "./helpers/deploy-helpers.ts";
 
@@ -81,17 +82,6 @@ type SkippedFilesAction =
 	| "deploy-always"
 	| "ignore-always"
 	| "instructions";
-
-/**
- * Helper to output messages that respect JSON mode for Unix pipe compatibility
- */
-function logMessage(message: string): void {
-	if (c8ctl.outputMode === "json") {
-		console.error(JSON.stringify({ type: "message", message }));
-	} else {
-		console.error(message);
-	}
-}
 
 /**
  * Present an interactive menu when files are skipped during deployment
