@@ -351,7 +351,8 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 
 	// ── Collect resources and handle skipped files interactively ──
 	// Fall back to the default allow-list on servers that don't support
-	// extended extensions (<8.10) — prevents deploying unsupported types.
+	// extended extensions (<8.10). Note: explicit file paths bypass
+	// extension filtering by design, so this only gates directory scans.
 	const userRequestedExtensions =
 		!!flags["all-extensions"] || !!flags.extensions;
 	const effectiveExtensions = serverSupportsExtensions
