@@ -125,7 +125,8 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	// Note: explicit file paths bypass extension filtering by design, so
 	// this only gates which fs events trigger a deploy.
 	const userRequestedExtensions =
-		!!flags["all-extensions"] || !!flags.extensions;
+		!!flags["all-extensions"] ||
+		!!(flags.extensions && String(flags.extensions).trim());
 	const effectiveExtensions = serverSupportsExtensions
 		? watchedExtensions
 		: DEPLOYABLE_EXTENSIONS;

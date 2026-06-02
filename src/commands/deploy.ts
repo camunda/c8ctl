@@ -384,7 +384,8 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// extended extensions (<8.10). Note: explicit file paths bypass
 	// extension filtering by design, so this only gates directory scans.
 	const userRequestedExtensions =
-		!!flags["all-extensions"] || !!flags.extensions;
+		!!flags["all-extensions"] ||
+		!!(flags.extensions && String(flags.extensions).trim());
 	const effectiveExtensions = serverSupportsExtensions
 		? extensionList
 		: DEPLOYABLE_EXTENSIONS;
