@@ -370,7 +370,7 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 				if (sigint) {
 					process.kill(process.pid, "SIGINT");
 				}
-				resolve({ interactive: true, value: false });
+				resolve({ interactive: true, value: defaultValue });
 			}
 		});
 

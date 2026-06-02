@@ -180,7 +180,9 @@ async function handleSkippedFiles(
 			logMessage(`  ${p}`);
 		}
 		logMessage("\nFuture deploys will include these files automatically.\n");
-		return [];
+		// Include the skipped files in this deploy as well — the label
+		// says "Deploy them always", which implies "starting now".
+		return skippedFiles;
 	}
 
 	if (action === "ignore-always") {
@@ -351,9 +353,11 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	}
 
 	// ── Pre-flight version check ──
-	const serverSupportsExtensions = await checkServerSupportsExtensions(
-		createClient(deployProfile),
-	);
+	// Skip the topology call when --force is set — extension filtering
+	// is bypassed entirely, so the result is unused.
+	const serverSupportsExtensions = flags.force
+		? true
+		: await checkServerSupportsExtensions(createClient(deployProfile));
 
 	// ── Collect resources and handle skipped files interactively ──
 	// Fall back to the default allow-list on servers that don't support
@@ -364,7 +368,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		? extensionList
 		: DEPLOYABLE_EXTENSIONS;
 
-	if (!serverSupportsExtensions && userRequestedExtensions && !flags.force) {
+	if (!serverSupportsExtensions && userRequestedExtensions) {
 		logMessage(
 			`Warning: server does not support extended extensions (requires 8.10+). ` +
 				`Falling back to default extensions (${DEPLOYABLE_EXTENSIONS.join(", ")}). ` +

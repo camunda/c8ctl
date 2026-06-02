@@ -667,12 +667,14 @@ export function loadSessionState(): SessionState {
 }
 
 /**
- * Read `skipDeployConfirm` from the persisted session file without
- * side effects.
+ * Read `skipDeployConfirm` from the persisted session file.
  *
  * Unlike `loadSessionState()` this does NOT update `c8ctl.*` or
  * `persistedOutputMode`, so it is safe to call mid-handler without
  * clobbering per-invocation overrides like `--json`.
+ *
+ * Note: calls `getSessionStatePath()` which may create the user
+ * data directory as a side effect via `ensureUserDataDir()`.
  */
 export function readSkipDeployConfirm(): boolean {
 	try {
