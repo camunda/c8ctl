@@ -686,17 +686,10 @@ export function readSkipDeployConfirm(): boolean {
 
 /**
  * Write `skipDeployConfirm` to the session file without clobbering
- * any other field.  Uses `saveSessionState()` (no-arg form) which
- * merges with `c8ctl.*` / `persistedOutputMode` so per-invocation
- * overrides like `--json` never leak to disk.
+ * any other field.  Reads the existing session file, patches the
+ * flag, and writes it back.  Creates the file if it does not exist.
  */
 export function saveSkipDeployConfirm(value: boolean): void {
-	// saveSessionState (no-arg) now preserves skipDeployConfirm from disk
-	// via readSessionFlag, but we need to override it.  Temporarily write
-	// the flag into the session file first, then let the normal save flow
-	// merge it with the runtime values.
-	//
-	// Simplest approach: read → patch → write directly.
 	const path = getSessionStatePath();
 	try {
 		const data = readFileSync(path, "utf-8");

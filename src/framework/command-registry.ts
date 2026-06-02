@@ -223,10 +223,11 @@ export const GLOBAL_FLAGS = {
 		description: "Skip confirmation prompts",
 		short: "y",
 		agentDescription:
-			"Skip interactive confirmation prompts. When multiple profiles are configured, " +
-			"mutating commands like deploy prompt for confirmation before proceeding. " +
-			"Pass --yes to skip the prompt (useful for scripts and CI).",
-		agentAppliesTo: "mutating commands (deploy)",
+			"Skip interactive confirmation prompts. Mutating commands may prompt " +
+			"for confirmation before proceeding (e.g. deploy with multiple profiles, " +
+			"removing a profile). Pass --yes to skip all such prompts " +
+			"(useful for scripts and CI).",
+		agentAppliesTo: "mutating commands",
 	},
 } as const satisfies Record<string, FlagDef>;
 
