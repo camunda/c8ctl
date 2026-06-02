@@ -90,6 +90,18 @@ describe("isInteractive()", () => {
 		});
 	});
 
+	test("CI=1 forces non-interactive", () => {
+		withEnv({ ...clean, CI: "1" }, () => {
+			assert.strictEqual(isInteractive(), false);
+		});
+	});
+
+	test("any non-empty CI value forces non-interactive", () => {
+		withEnv({ ...clean, CI: "yes" }, () => {
+			assert.strictEqual(isInteractive(), false);
+		});
+	});
+
 	test("C8CTL_INTERACTIVE=false takes precedence over CI=true", () => {
 		withEnv({ ...clean, C8CTL_INTERACTIVE: "false", CI: "true" }, () => {
 			assert.strictEqual(isInteractive(), false);

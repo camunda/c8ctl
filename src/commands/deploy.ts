@@ -290,6 +290,8 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 						message: "Which profile do you want to deploy to?",
 						options: profileOptions,
 						initialIndex: defaultIndex,
+						nonInteractiveHint:
+							"Hint: run interactively to choose, or use --profile=<name> to specify.",
 					});
 
 					if (result.cancelled) {

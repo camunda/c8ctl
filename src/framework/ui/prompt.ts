@@ -80,6 +80,11 @@ export interface SelectConfig<T> {
 	options: ReadonlyArray<SelectOption<T>>;
 	/** Index of the initially highlighted option (default: 0). */
 	initialIndex?: number;
+	/**
+	 * Hint appended to non-interactive fallback output.
+	 * Defaults to "Hint: run interactively to choose."
+	 */
+	nonInteractiveHint?: string;
 }
 
 export interface SelectResultInteractive<T> {
@@ -132,7 +137,7 @@ export interface ConfirmResult {
  * Checks (in order of precedence):
  * 1. `C8CTL_INTERACTIVE=false` — explicit opt-out (e.g. in CI or scripts)
  * 2. `C8CTL_NON_INTERACTIVE=true` — convenience alias for scripts
- * 3. `CI=true`                 — standard CI signal → non-interactive
+ * 3. `CI` set to any non-empty value — standard CI signal → non-interactive
  * 4. stdin + stderr must both be TTY
  *
  * `C8CTL_INTERACTIVE=true` overrides CI detection but still requires
@@ -149,8 +154,9 @@ export function isInteractive(): boolean {
 	const nonInteractive = process.env.C8CTL_NON_INTERACTIVE?.toLowerCase();
 	if (nonInteractive === "true" || nonInteractive === "1") return false;
 
-	// Standard CI env var — most CI systems set CI=true
-	if (process.env.CI?.toLowerCase() === "true") return false;
+	// Standard CI env var — most CI systems set CI to "true", "1",
+	// or any non-empty value. Treat any non-empty CI as non-interactive.
+	if (process.env.CI) return false;
 
 	return hasTTY;
 }
@@ -168,7 +174,13 @@ export function isInteractive(): boolean {
 export async function select<T>(
 	config: SelectConfig<T>,
 ): Promise<SelectResult<T>> {
-	const { message, options, initialIndex = 0 } = config;
+	const { message, options, nonInteractiveHint } = config;
+	// Clamp initialIndex to valid range so out-of-bounds values
+	// (e.g. stale index after filtering) don't cause crashes.
+	const initialIndex = Math.max(
+		0,
+		Math.min(config.initialIndex ?? 0, options.length - 1),
+	);
 
 	if (options.length === 0) {
 		throw new Error("select() requires at least one option");
@@ -179,7 +191,12 @@ export async function select<T>(
 		const fallback = options[initialIndex] ?? options[0];
 		const idx = options.indexOf(fallback);
 
-		const hint = formatNonInteractiveHint(message, options, idx);
+		const hint = formatNonInteractiveHint(
+			message,
+			options,
+			idx,
+			nonInteractiveHint,
+		);
 		return {
 			interactive: false,
 			cancelled: false,
@@ -353,6 +370,7 @@ function formatNonInteractiveHint<T>(
 	message: string,
 	options: ReadonlyArray<SelectOption<T>>,
 	selectedIndex: number,
+	customHint?: string,
 ): string {
 	const lines: string[] = [`${message} (non-interactive, using default)`];
 	for (let i = 0; i < options.length; i++) {
@@ -362,8 +380,6 @@ function formatNonInteractiveHint<T>(
 		lines.push(`  ${marker} ${opt.label}${desc}`);
 	}
 	lines.push("");
-	lines.push(
-		"Hint: run interactively to choose, or use --profile=<name> to specify.",
-	);
+	lines.push(customHint ?? "Hint: run interactively to choose.");
 	return lines.join("\n");
 }
