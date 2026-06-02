@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
 	c8ctl,
 	createClient,
@@ -166,9 +166,21 @@ async function handleSkippedFiles(
 		// Prefix with "/" to anchor patterns to the .c8ignore base dir.
 		// Without anchoring, a root-level file like "notes.md" would
 		// match at any depth (e.g. subdir/notes.md).
-		const patterns = skippedFiles.map(
-			(f) => `!/${relative(basePath, f).split(sep).join("/")}`,
-		);
+		// Skip files that are not under basePath — relative() would yield
+		// ".." segments or absolute paths that produce invalid patterns.
+		const patterns: string[] = [];
+		for (const f of skippedFiles) {
+			const rel = relative(basePath, f);
+			if (rel.startsWith("..") || isAbsolute(rel)) continue;
+			patterns.push(`!/${rel.split(sep).join("/")}`);
+		}
+		if (patterns.length === 0) {
+			logMessage(
+				"\nSkipped files are outside the project directory." +
+					" Edit .c8ignore manually to add negation patterns.",
+			);
+			return skippedFiles;
+		}
 		const block = `\n# Auto-added by c8ctl — always deploy these files\n${patterns.join("\n")}\n`;
 
 		appendFileSync(c8ignorePath, block);
