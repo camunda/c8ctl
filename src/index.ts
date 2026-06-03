@@ -34,6 +34,8 @@ import {
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
+	confirm as promptConfirm,
+	select as promptSelect,
 	refreshCompletionsIfStale,
 	resolveAlias,
 	resolveVerbAlias,
@@ -489,8 +491,10 @@ async function main() {
 			dryRun: c8ctl.dryRun === true,
 			verbose: c8ctl.verbose === true,
 			outputMode: c8ctl.outputMode,
+			yes: bool(values.yes) === true,
 			fields: c8ctl.fields,
 			logger,
+			prompt: { select: promptSelect, confirm: promptConfirm },
 			get client() {
 				if (!_pluginClient) _pluginClient = createClient(pluginProfile);
 				return _pluginClient;
@@ -737,6 +741,7 @@ async function main() {
 			dryRun: createDryRun(c8ctl.dryRun ?? false),
 			verbose: c8ctl.verbose ?? false,
 			profile,
+			yes: bool(values.yes) === true,
 		};
 		await handler.execute(ctx, values, args);
 		return;

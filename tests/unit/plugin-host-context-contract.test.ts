@@ -179,6 +179,22 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.strictEqual(parsed.ctx.profile, undefined);
 	});
 
+	test("ctx.yes reflects --yes", async () => {
+		const result = await c8Plugin("echo-ctx", "--yes");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, true);
+	});
+
+	test("ctx.yes is false when --yes is omitted", async () => {
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, false);
+	});
+
 	test("ctx.outputMode is 'json' when --json is set", async () => {
 		const result = await c8Plugin("echo-ctx", "--json");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
@@ -234,6 +250,7 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 			["verbose", "verbose"],
 			["fields", "fields"],
 			["json", "outputMode"], // --json toggles outputMode
+			["yes", "yes"],
 		]);
 		const missing: string[] = [];
 		for (const name of Object.keys(GLOBAL_FLAGS)) {

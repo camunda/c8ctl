@@ -236,3 +236,37 @@ export function resolveIgnoreBaseDir(paths: string[]): string {
 	const joined = common.join(sep);
 	return joined === "" || joined.endsWith(":") ? resolve(joined + sep) : joined;
 }
+
+/**
+ * Load "deploy-always" rules from a `.c8ignore` file.
+ *
+ * Reads only the negation patterns (`!pattern`) and builds a positive
+ * matcher from them — stripping the `!` prefix. The resulting `Ignore`
+ * matches files that should always be deployed (regardless of the
+ * extension allow-list) because the user negated them in `.c8ignore`.
+ *
+ * Returns `null` when no `.c8ignore` exists or it contains no negation
+ * patterns.
+ */
+export function loadDeployAlwaysRules(baseDir: string): Ignore | null {
+	const ignoreFilePath = join(baseDir, C8IGNORE_FILENAME);
+	if (!existsSync(ignoreFilePath)) return null;
+
+	const content = readFileSync(ignoreFilePath, "utf-8");
+	const positivePatterns: ParsedPattern[] = [];
+
+	for (const raw of content.split("\n")) {
+		const trimmed = raw.trimEnd();
+		// Parse the full line so `parsePattern` handles comment detection,
+		// negation stripping, and anchoring correctly. A manual `!` strip
+		// before parsing would mis-classify patterns like `!#file` (the `#`
+		// would be treated as a comment after the `!` is removed).
+		const parsed = parsePattern(trimmed);
+		if (parsed?.negate) {
+			positivePatterns.push({ ...parsed, negate: false });
+		}
+	}
+
+	if (positivePatterns.length === 0) return null;
+	return { ignores: buildIgnoreChecker(positivePatterns) };
+}

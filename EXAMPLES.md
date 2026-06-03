@@ -669,6 +669,26 @@ c8 deploy
 c8 watch
 ```
 
+### Deploy Confirmation
+
+When multiple profiles are configured, `c8 deploy` presents an interactive
+profile picker to prevent deploying to the wrong cluster:
+
+```bash
+# Shows an interactive profile selection menu
+c8 deploy ./process.bpmn
+
+# Skip the prompt with --yes / -y (uses active profile)
+c8 deploy ./process.bpmn --yes
+c8 deploy ./process.bpmn -y
+
+# Explicit --profile also skips the prompt (target is unambiguous)
+c8 deploy ./process.bpmn --profile=staging
+```
+
+In non-interactive environments (CI, piped input), the deploy fails with
+guidance to use `--profile` or `--yes` to make the target explicit.
+
 ### Run (Deploy + Start)
 
 ```bash

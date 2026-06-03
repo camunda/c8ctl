@@ -15,6 +15,7 @@ import {
 	statSync,
 } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import {
 	createClient,
@@ -28,7 +29,9 @@ import {
 	DEPLOYABLE_EXTENSIONS,
 	type Ignore,
 	isIgnored,
+	loadDeployAlwaysRules,
 	loadIgnoreRules,
+	meetsMinExtensionVersion,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
 
@@ -37,7 +40,7 @@ const PROCESS_APPLICATION_FILE = ".process-application";
 /**
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
  */
-function logMessage(message: string): void {
+export function logMessage(message: string): void {
 	if (getLogger().mode === "json") {
 		console.error(JSON.stringify({ type: "message", message }));
 	} else {
@@ -57,6 +60,39 @@ export function logSkippedExtensions(skippedExtensions: Set<string>): void {
 		`Skipped files with extensions not in the allow-list (${exts}). ` +
 			`Use --extensions=<ext> to add specific types, or --all-extensions to include all server-supported types.`,
 	);
+}
+
+/**
+ * Check whether the connected Camunda server supports extended file extensions.
+ * Returns `true` for 8.10+, `false` for older versions.
+ * Falls back to `false` on any error (network, auth, unparseable version)
+ * so unsupported resource types are not deployed to older clusters.
+ */
+export async function checkServerSupportsExtensions(
+	client: CamundaClient,
+): Promise<boolean> {
+	const logger = getLogger();
+	try {
+		const topology = await client.getTopology();
+		const version = String(topology.gatewayVersion ?? "");
+		const result = meetsMinExtensionVersion(version);
+		if (result === null) {
+			logger.warn(
+				`Could not parse server version "${version}" — assuming extended extensions are NOT supported.`,
+			);
+			return false;
+		}
+		return result;
+	} catch {
+		logger.warn(
+			"Could not reach the server to check its version (topology call failed).",
+		);
+		logger.warn(
+			"This can happen with OAuth/SaaS clusters before the first token is fetched, " +
+				"or if the server is not yet ready. Assuming extended extensions are NOT supported.",
+		);
+		return false;
+	}
 }
 
 /**
@@ -202,6 +238,8 @@ function collectResourceFiles(
 	force?: boolean,
 	extensionList?: readonly string[],
 	skippedExtensions?: Set<string>,
+	skippedFiles?: string[],
+	deployAlways?: Ignore,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -280,9 +318,22 @@ function collectResourceFiles(
 					extensionList &&
 					!extensionList.includes(extname(fullPath))
 				) {
+					// Check deploy-always negation rules from .c8ignore
+					if (
+						deployAlways &&
+						ignoreBaseDir &&
+						isIgnored(deployAlways, fullPath, ignoreBaseDir)
+					) {
+						// File matches a !path negation — include it
+						files.push(fullPath);
+						return;
+					}
 					if (skippedExtensions) {
 						const ext = extname(fullPath);
 						skippedExtensions.add(ext || "<no extension>");
+					}
+					if (skippedFiles) {
+						skippedFiles.push(fullPath);
 					}
 					return;
 				}
@@ -314,6 +365,8 @@ function collectResourceFiles(
 				force,
 				extensionList,
 				skippedExtensions,
+				skippedFiles,
+				deployAlways,
 			);
 		});
 
@@ -328,6 +381,8 @@ function collectResourceFiles(
 				force,
 				extensionList,
 				skippedExtensions,
+				skippedFiles,
+				deployAlways,
 			);
 		});
 	}
@@ -360,6 +415,7 @@ function findDuplicateDefinitionIds(
 interface CollectResult {
 	resources: ResourceFile[];
 	skippedExtensions: Set<string>;
+	skippedFiles: string[];
 	/** Resolved base paths used for resource collection and display.
 	 *  When PA detection fires, these are expanded to the PA root(s)
 	 *  rather than the user-supplied input paths. Used downstream for
@@ -383,6 +439,9 @@ export function collectResourcesForPaths(
 	paths: string[],
 	force?: boolean,
 	extensionList: readonly string[] = DEPLOYABLE_EXTENSIONS,
+	/** When false, skip loading deploy-always negation rules from .c8ignore.
+	 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
+	loadDeployAlways = true,
 ): CollectResult {
 	if (paths.length === 0) {
 		throw new Error(
@@ -443,8 +502,16 @@ export function collectResourcesForPaths(
 	const ignoreBaseDir = resolveIgnoreBaseDir(effectivePaths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
+	// Load !path negation patterns from .c8ignore. Files matching a
+	// negation bypass extension filtering ("deploy them always").
+	// Skipped on servers <8.10 where extended extensions aren't supported.
+	const deployAlways = loadDeployAlways
+		? loadDeployAlwaysRules(ignoreBaseDir)
+		: null;
+
 	const resources: ResourceFile[] = [];
 	const skippedExtensions = new Set<string>();
+	const skippedFiles: string[] = [];
 	effectivePaths.forEach((path) => {
 		collectResourceFiles(
 			path,
@@ -455,6 +522,8 @@ export function collectResourcesForPaths(
 			force,
 			extensionList,
 			skippedExtensions,
+			skippedFiles,
+			deployAlways ?? undefined,
 		);
 	});
 
@@ -481,10 +550,19 @@ export function collectResourcesForPaths(
 
 	if (deduped.length === 0) {
 		logSkippedExtensions(skippedExtensions);
-		throw new Error("No deployable files found in the specified paths");
+		throw new Error(
+			skippedFiles.length > 0
+				? `No files with allowed extensions found. ${skippedFiles.length} file(s) were skipped (${[...skippedExtensions].sort().join(", ")}). Use --force to include all files, or --extensions to expand the allow-list.`
+				: "No deployable files found in the specified paths",
+		);
 	}
 
-	return { resources: deduped, skippedExtensions, effectivePaths };
+	return {
+		resources: deduped,
+		skippedExtensions,
+		skippedFiles,
+		effectivePaths,
+	};
 }
 
 /**
@@ -516,6 +594,14 @@ export async function deployResources(
 		 * Callers do not need their own try/catch to suppress aborts.
 		 */
 		signal?: AbortSignal;
+		/** When true, skip the skipped-extensions log (caller already handled it). */
+		suppressSkippedLog?: boolean;
+		/** When false, skip loading deploy-always negation rules from .c8ignore.
+		 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
+		loadDeployAlways?: boolean;
+		/** Override base path for relative path display. When set, used instead
+		 *  of inferring from paths (avoids regression when extra file paths are appended). */
+		basePath?: string;
 		/** Whether --verbose was set (surfaces raw errors with stack traces). */
 		verbose?: boolean;
 	},
@@ -534,9 +620,12 @@ export async function deployResources(
 			paths,
 			options.force,
 			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
+			options.loadDeployAlways ?? true,
 		);
 
-	logSkippedExtensions(skippedExtensions);
+	if (!options.suppressSkippedLog) {
+		logSkippedExtensions(skippedExtensions);
+	}
 
 	// Use the effective paths (which may have been expanded to a PA root)
 	// for relative path calculation so display paths make sense.
@@ -545,7 +634,8 @@ export async function deployResources(
 	const client = createClient(options.profile);
 
 	// Calculate relative paths for display
-	const basePath = basePaths.length === 1 ? basePaths[0] : process.cwd();
+	const basePath =
+		options.basePath ?? (basePaths.length === 1 ? basePaths[0] : process.cwd());
 	resources.forEach((r) => {
 		r.relativePath = relative(basePath, r.path) || r.name;
 	});
@@ -614,8 +704,20 @@ export async function deployResources(
 	// Create a mapping from definition ID to resource file for later reference
 	const definitionIdToResource = new Map<string, ResourceFile>();
 	const formNameToResource = new Map<string, ResourceFile>();
+	// Map basename → ResourceFile[]: multiple files can share a basename
+	// across directories (e.g. sub-a/model.dmn, sub-b/model.dmn). When
+	// the API returns a resourceName, we pop the first matching entry so
+	// each response record resolves to a distinct local file.
+	const resourcesByName = new Map<string, ResourceFile[]>();
 
 	resources.forEach((r) => {
+		const existing = resourcesByName.get(r.name);
+		if (existing) {
+			existing.push(r);
+		} else {
+			resourcesByName.set(r.name, [r]);
+		}
+
 		const ext = extname(r.path);
 		if (ext === ".bpmn" || ext === ".dmn") {
 			const defId = extractDefinitionId(r.content, ext);
@@ -623,11 +725,27 @@ export async function deployResources(
 				definitionIdToResource.set(defId, r);
 			}
 		} else if (ext === ".form") {
-			// Forms are matched by filename (without extension)
-			const formId = basename(r.name, ".form");
+			// Forms are matched by their internal ID from the JSON content.
+			// Fall back to filename (without extension) if the ID can't be parsed.
+			let formId = basename(r.name, ".form");
+			try {
+				const parsed: unknown = JSON.parse(r.content.toString("utf-8"));
+				if (isRecord(parsed) && typeof parsed.id === "string") {
+					formId = parsed.id;
+				}
+			} catch {
+				// Not valid JSON — use filename
+			}
 			formNameToResource.set(formId, r);
 		}
 	});
+
+	/** Pop the first resource with a matching basename, or return undefined. */
+	function popResourceByName(name: string): ResourceFile | undefined {
+		const bucket = resourcesByName.get(name);
+		if (!bucket || bucket.length === 0) return undefined;
+		return bucket.shift();
+	}
 
 	// ─── API call ────────────────────────────────────────────────────────
 	// Only this section is wrapped in a catch that routes through
@@ -712,28 +830,78 @@ export async function deployResources(
 	};
 
 	// Normalize all deployed resources into a common structure
+	const knownResources = new Set<ResourceFile>();
 	const allResources = [
-		...result.processes.map((proc) => ({
-			type: "Process" as const,
-			id: proc.processDefinitionId,
-			version: proc.processDefinitionVersion,
-			key: proc.processDefinitionKey.toString(),
-			resource: definitionIdToResource.get(proc.processDefinitionId),
-		})),
-		...result.decisions.map((dec) => ({
-			type: "Decision" as const,
-			id: dec.decisionDefinitionId || "-",
-			version: dec.version ?? "-",
-			key: dec.decisionDefinitionKey?.toString() || "-",
-			resource: definitionIdToResource.get(dec.decisionDefinitionId || ""),
-		})),
-		...result.forms.map((form) => ({
-			type: "Form" as const,
-			id: form.formId || "-",
-			version: form.version ?? "-",
-			key: form.formKey?.toString() || "-",
-			resource: formNameToResource.get(form.formId || ""),
-		})),
+		...result.processes.map((proc) => {
+			const resource = definitionIdToResource.get(proc.processDefinitionId);
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Process" as const,
+				id: proc.processDefinitionId,
+				version: proc.processDefinitionVersion,
+				key: proc.processDefinitionKey.toString(),
+				resource,
+			};
+		}),
+		...result.decisions.map((dec) => {
+			const resource = definitionIdToResource.get(
+				dec.decisionDefinitionId || "",
+			);
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Decision" as const,
+				id: dec.decisionDefinitionId || "-",
+				version: dec.version ?? "-",
+				key: dec.decisionDefinitionKey?.toString() || "-",
+				resource,
+			};
+		}),
+		...result.decisionRequirements.map((dr) => {
+			const resource = popResourceByName(dr.resourceName || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Decision Requirements" as const,
+				id: dr.decisionRequirementsId || "-",
+				version: dr.version ?? "-",
+				key: dr.decisionRequirementsKey?.toString() || "-",
+				resource,
+			};
+		}),
+		...result.forms.map((form) => {
+			const resource = formNameToResource.get(form.formId || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Form" as const,
+				id: form.formId || "-",
+				version: form.version ?? "-",
+				key: form.formKey?.toString() || "-",
+				resource,
+			};
+		}),
+		// Generic resources (not processes, decisions, or forms)
+		// are returned in the `resources` array by 8.10+.
+		...result.resources.map((res) => {
+			const resource = popResourceByName(res.resourceName || "");
+			if (resource) knownResources.add(resource);
+			return {
+				type: "Resource" as const,
+				id: res.resourceId || "-",
+				version: res.version ?? "-",
+				key: res.resourceKey?.toString() || "-",
+				resource,
+			};
+		}),
+		// Supplementary resources not returned in any response array.
+		// Show them in the table so the user knows they were deployed.
+		...resources
+			.filter((r) => !knownResources.has(r))
+			.map((r) => ({
+				type: "Resource" as const,
+				id: "-",
+				version: "-" as const,
+				key: "-",
+				resource: r,
+			})),
 	];
 
 	const tableData: ResourceRow[] = allResources.map(

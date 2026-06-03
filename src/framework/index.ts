@@ -12,3 +12,4 @@ export * from "./plugins/plugin-registry.ts";
 export * from "./plugins/plugin-version.ts";
 export * from "./ui/completion.ts";
 export * from "./ui/help.ts";
+export * from "./ui/prompt.ts";

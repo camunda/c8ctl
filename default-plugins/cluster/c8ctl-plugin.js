@@ -822,15 +822,26 @@ async function startC8Run(config, debug = false) {
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   if (existsSync(markerFile)) {
-    logger.warn('A cluster appears to be running already.');
-    if (existsSync(versionFile)) {
-      const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-      if (runningVersion) {
-        logger.info(`Detected running version marker: ${runningVersion}`);
+    // Check whether actual cluster processes are still alive.
+    // If they are, refuse to start a second instance.
+    // If not, the marker is stale (e.g. crash, WSL restart, force-kill)
+    // — clean it up automatically and proceed with the start.
+    if (hasRunningClusterPidfiles(config.cacheDir)) {
+      logger.warn('A cluster appears to be running already.');
+      if (existsSync(versionFile)) {
+        const runningVersion = readFileSync(versionFile, 'utf-8').trim();
+        if (runningVersion) {
+          logger.info(`Detected running version marker: ${runningVersion}`);
+        }
       }
+      logger.info('Use "c8ctl cluster stop" to stop it first.');
+      return;
     }
-    logger.info('Use "c8ctl cluster stop" to stop it first.');
-    return;
+
+    // Stale marker — no live processes found. Clean up and continue.
+    logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
+    if (existsSync(markerFile)) rmSync(markerFile);
+    if (existsSync(versionFile)) rmSync(versionFile);
   }
 
   logger.info('Starting Camunda 8 local cluster...');

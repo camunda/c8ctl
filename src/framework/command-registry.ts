@@ -218,6 +218,17 @@ export const GLOBAL_FLAGS = {
 			"Per-invocation JSON output. Equivalent to setting outputMode=json for one command without mutating session.json.\nPrecedence: --json > C8CTL_OUTPUT_MODE > persisted session state.",
 		agentAppliesTo: "all commands",
 	},
+	yes: {
+		type: "boolean",
+		description: "Skip confirmation prompts",
+		short: "y",
+		agentDescription:
+			"Skip interactive confirmation prompts. Mutating commands may prompt " +
+			"for confirmation before proceeding (e.g. deploy with multiple profiles, " +
+			"removing a profile). Pass --yes to skip all such prompts " +
+			"(useful for scripts and CI).",
+		agentAppliesTo: "mutating commands",
+	},
 } as const satisfies Record<string, FlagDef>;
 
 /**
@@ -1438,7 +1449,7 @@ export const COMMAND_REGISTRY = {
 		aliases: ["rm"],
 		resourcePositionals: {
 			profile: [
-				{ name: "name", required: true },
+				{ name: "name", required: false },
 			] as const satisfies readonly PositionalDef[],
 		},
 	},
