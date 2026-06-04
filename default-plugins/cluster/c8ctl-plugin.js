@@ -58,6 +58,36 @@ export function isRollingVersion(versionSpec) {
 }
 
 /**
+ * Extract the leading major.minor pair from a version string.
+ * Accepts minor patterns ("8.10") and concrete versions ("8.10.0-alpha1").
+ * Returns { major, minor } or null if the string has no major.minor prefix.
+ */
+export function majorMinorOf(version) {
+  const match = /^(\d+)\.(\d+)/.exec(version);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+/**
+ * True when the remote alias target is a strictly newer minor line than the
+ * locally resolved version. The remote alias always resolves to a major.minor
+ * pattern (e.g. "8.10"), whereas the resolved version may be a concrete pin
+ * (e.g. "8.10.0-alpha1") within that same minor line. Comparing the raw
+ * strings produces false positives (#434): "8.10" !== "8.10.0-alpha1" even
+ * though no newer release exists. Compare at the major.minor level instead.
+ */
+export function isRemoteMinorNewer(remoteVersion, resolvedVersion) {
+  const remote = majorMinorOf(remoteVersion);
+  const resolved = majorMinorOf(resolvedVersion);
+  // If either side is unparseable, fall back to the previous behavior (string inequality).
+  if (!remote || !resolved) return remoteVersion !== resolvedVersion;
+  return (
+    remote.major > resolved.major ||
+    (remote.major === resolved.major && remote.minor > resolved.minor)
+  );
+}
+
+/**
  * Fetch the c8run download directory listing and discover the latest
  * stable and alpha minor versions.
  *
@@ -244,7 +274,7 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
         if (html) {
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && remoteVersion !== resolvedVersion) {
+          if (remoteVersion && isRemoteMinorNewer(remoteVersion, resolvedVersion)) {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
               `Install it with: c8ctl cluster install ${versionSpec}`,

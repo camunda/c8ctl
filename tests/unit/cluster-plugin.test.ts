@@ -1146,6 +1146,27 @@ describe("Cluster Plugin – checkBackgroundAliasFreshness", () => {
 		);
 	});
 
+	test("does not print hint when resolved version is a concrete pin in the same minor (#434)", async () => {
+		// Remote alpha train: 8.10 has alpha dirs but no GA yet → alpha alias = 8.10.
+		// Local alpha resolved to the concrete pin 8.10.0-alpha1 (same minor line).
+		// @ts-expect-error — mock fetch
+		globalThis.fetch = async () => ({
+			ok: true,
+			text: async () => `
+        <a href="8.9/">8.9</a><a href="8.9.0/">8.9.0</a>
+        <a href="8.10/">8.10</a><a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+      `,
+		});
+
+		await plugin.checkBackgroundAliasFreshness("alpha", "8.10.0-alpha1");
+
+		assert.strictEqual(
+			loggedMessages.filter((m: string) => m.includes("newer")).length,
+			0,
+			"Should not print upgrade hint when the resolved pin is in the same minor line",
+		);
+	});
+
 	test("does not print hint when remote alias matches resolved version", async () => {
 		// @ts-expect-error — mock fetch
 		globalThis.fetch = async () => ({
@@ -1980,6 +2001,31 @@ describe("Cluster Plugin – isRollingVersion", () => {
 		assert.strictEqual(plugin.isRollingVersion("8.9.0-alpha5"), false);
 		assert.strictEqual(plugin.isRollingVersion("8.8.1"), false);
 		assert.strictEqual(plugin.isRollingVersion("latest"), false);
+	});
+});
+
+describe("Cluster Plugin – isRemoteMinorNewer", () => {
+	test("true when remote minor is strictly newer", () => {
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.8"), true);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.10", "8.9"), true);
+		assert.strictEqual(plugin.isRemoteMinorNewer("9.0", "8.99"), true);
+	});
+
+	test("false when remote minor matches resolved minor line (#434)", () => {
+		assert.strictEqual(
+			plugin.isRemoteMinorNewer("8.10", "8.10.0-alpha1"),
+			false,
+		);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.9"), false);
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.9", "8.9.0"), false);
+	});
+
+	test("false when remote minor is older", () => {
+		assert.strictEqual(plugin.isRemoteMinorNewer("8.8", "8.9"), false);
+		assert.strictEqual(
+			plugin.isRemoteMinorNewer("8.9", "8.10.0-alpha1"),
+			false,
+		);
 	});
 });
 
