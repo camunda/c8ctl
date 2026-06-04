@@ -79,7 +79,7 @@ export function majorMinorOf(version) {
 export function isRemoteMinorNewer(remoteVersion, resolvedVersion) {
   const remote = majorMinorOf(remoteVersion);
   const resolved = majorMinorOf(resolvedVersion);
-  // If either side is unparseable, fall back to a conservative string compare.
+  // If either side is unparseable, fall back to the previous behavior (string inequality).
   if (!remote || !resolved) return remoteVersion !== resolvedVersion;
   return (
     remote.major > resolved.major ||
