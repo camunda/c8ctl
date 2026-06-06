@@ -61,6 +61,8 @@ Examples:
 - `feat: ...` → minor
 - `feat!: ...` or `BREAKING CHANGE: ...` → major
 
+PR CI also checks commit messages for breaking-change markers (`!` and `BREAKING CHANGE:`) and fails if it finds them, so maintainers can rewrite PR history before merge.
+
 If you merge commits that don’t follow Conventional Commits, semantic-release may do **no release**.
 
 ---
