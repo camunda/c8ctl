@@ -8,7 +8,7 @@ import {
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
 import { resolveClusterConfig } from "./config.ts";
-import { getLogger } from "./logger.ts";
+import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 /**
@@ -173,4 +173,65 @@ export function emitDryRun(opts: {
 		...(opts.body !== undefined && { body: opts.body }),
 	});
 	return true;
+}
+
+/**
+ * Make an authenticated POST request to a Camunda REST endpoint that is not yet
+ * covered by the SDK. Reconstructs auth from the resolved cluster config.
+ *
+ * Returns the parsed JSON response.
+ */
+export async function rawPost(
+	client: CamundaClient,
+	endpoint: string,
+	body: unknown,
+	profile?: string,
+): Promise<unknown> {
+	const baseUrl = client.config.restAddress;
+	const config = resolveClusterConfig(profile);
+
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+
+	// Reconstruct auth headers based on cluster config
+	if (config.clientId && config.clientSecret) {
+		// OAuth: fetch token from OAuth URL
+		const tokenUrl = config.oAuthUrl ?? "";
+		const audience = config.audience ?? "";
+		const tokenRes = await fetch(tokenUrl, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams({
+				grant_type: "client_credentials",
+				client_id: config.clientId,
+				client_secret: config.clientSecret,
+				audience,
+			}),
+		});
+		if (tokenRes.ok) {
+			const tokenData: unknown = await tokenRes.json();
+			if (isRecord(tokenData) && typeof tokenData.access_token === "string") {
+				headers.Authorization = `Bearer ${tokenData.access_token}`;
+			}
+		}
+	} else if (config.username && config.password) {
+		// Basic auth
+		const encoded = Buffer.from(
+			`${config.username}:${config.password}`,
+		).toString("base64");
+		headers.Authorization = `Basic ${encoded}`;
+	}
+
+	const res = await fetch(`${baseUrl}${endpoint}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+	});
+
+	if (!res.ok) {
+		throw new Error(`API request failed: ${res.status} ${res.statusText}`);
+	}
+
+	return res.json();
 }

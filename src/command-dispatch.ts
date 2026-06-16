@@ -105,6 +105,7 @@ import {
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
 	searchVariablesCommand,
+	searchWaitStatesCommand,
 } from "./commands/search.ts";
 import {
 	outputCommand,
@@ -196,6 +197,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["search:tenant", searchIdentityTenantsCommand],
 	["search:authorization", searchIdentityAuthorizationsCommand],
 	["search:mapping-rule", searchIdentityMappingRulesCommand],
+	["search:wait-state", searchWaitStatesCommand],
 
 	// ── Identity: list ─────────────────────────────────────────────────
 	["list:user", listUsersCommand],

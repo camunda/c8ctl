@@ -25,6 +25,7 @@ These flags are accepted by every command.
 | `--verbose` | boolean |  | Show verbose output |
 | `--fields` | string |  | Comma-separated list of fields to display |
 | `--json` | boolean |  | Force JSON output for this invocation (does not persist; overrides session state and C8CTL_OUTPUT_MODE) |
+| `--yes` / `-y` | boolean |  | Skip confirmation prompts |
 
 ## Resource Aliases
 
@@ -39,6 +40,7 @@ These flags are accepted by every command.
 | `ut` | `user-task` |
 | `vars` | `variable` |
 | `var` | `variable` |
+| `ws` | `wait-state` |
 
 ## Search Flags
 
@@ -224,7 +226,7 @@ c8ctl list users                                            # List users
 
 Search resources with filters (wildcards, date ranges, case-insensitive)
 
-**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule)
+**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), wait-state
 
 **Resource-specific flags:**
 
@@ -384,6 +386,20 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 </details>
 
+<details>
+<summary><code>wait-state</code> (<code>ws</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processInstanceKey` / `-k` | string |  | Filter by process instance key |
+| `--rootProcessInstanceKey` / `-r` | string |  | Filter by root process instance key |
+| `--elementInstanceKey` / `-e` | string |  | Filter by element instance key |
+| `--elementId` | string |  | Filter by element ID (supports wildcards, e.g. *Task*) |
+| `--elementType` | string |  | Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY) |
+| `--waitStateType` | string |  | Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL) |
+
+</details>
+
 **Examples:**
 
 ```bash
@@ -399,6 +415,8 @@ c8ctl search variables --value=foo                          # Search for variabl
 c8ctl search variables --processInstanceKey=123 --fullValue  # Search variables with full values
 c8ctl search pd --iname='*order*'                           # Case-insensitive search by name
 c8ctl search ut --iassignee=John                            # Case-insensitive search by assignee
+c8ctl search ws --waitStateType=JOB                         # Search wait states of type JOB
+c8ctl search ws --elementType=SERVICE_TASK                  # Search wait states on service tasks
 ```
 
 ---
@@ -919,7 +937,7 @@ Remove a profile (alias: rm)
 
 **Positional arguments:**
 
-- **profile:** `<name>` (required)
+- **profile:** `<name>` (optional)
 
 **Flags:**
 
