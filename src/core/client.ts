@@ -209,11 +209,18 @@ export async function rawPost(
 				audience,
 			}),
 		});
-		if (tokenRes.ok) {
-			const tokenData: unknown = await tokenRes.json();
-			if (isRecord(tokenData) && typeof tokenData.access_token === "string") {
-				headers.Authorization = `Bearer ${tokenData.access_token}`;
-			}
+		if (!tokenRes.ok) {
+			throw new Error(
+				`OAuth token request failed: ${tokenRes.status} ${tokenRes.statusText} (token URL: ${tokenUrl})`,
+			);
+		}
+		const tokenData: unknown = await tokenRes.json();
+		if (isRecord(tokenData) && typeof tokenData.access_token === "string") {
+			headers.Authorization = `Bearer ${tokenData.access_token}`;
+		} else {
+			throw new Error(
+				"OAuth token response did not contain a valid access_token",
+			);
 		}
 	} else if (config.username && config.password) {
 		// Basic auth
@@ -230,7 +237,16 @@ export async function rawPost(
 	});
 
 	if (!res.ok) {
-		throw new Error(`API request failed: ${res.status} ${res.statusText}`);
+		let detail = "";
+		try {
+			const text = await res.text();
+			if (text) detail = ` — ${text.slice(0, 500)}`;
+		} catch {
+			// ignore body read failure
+		}
+		throw new Error(
+			`API request failed: ${res.status} ${res.statusText}${detail}`,
+		);
 	}
 
 	return res.json();
