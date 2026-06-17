@@ -271,4 +271,43 @@ describe("CLI behavioural: update job", () => {
 		assert.strictEqual(result.status, 1);
 		assert.ok(result.stderr.includes("--timeout"), `stderr: ${result.stderr}`);
 	});
+
+	test("--dry-run includes operationReference in body when provided", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"3",
+			"--operationReference",
+			"9999",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assert.strictEqual(out.method, "PATCH");
+		assert.ok(getUrl(out).includes("/jobs/77777"));
+		const body = asRecord(out.body, "dry-run body");
+		assert.strictEqual(body.operationReference, 9999);
+	});
+
+	test("rejects invalid --operationReference value with exit code 1", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"3",
+			"--operationReference",
+			"not-a-number",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--operationReference"),
+			`stderr: ${result.stderr}`,
+		);
+	});
 });
