@@ -161,3 +161,153 @@ describe("CLI behavioural: fail job", () => {
 		);
 	});
 });
+
+// ─── update job ──────────────────────────────────────────────────────────────
+
+describe("CLI behavioural: update job", () => {
+	test("--dry-run emits PATCH to /jobs/:key with retries", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"3",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "PATCH");
+		assert.ok(getUrl(out).includes("/jobs/77777"));
+
+		const body = asRecord(out.body, "dry-run body");
+		const changeset = asRecord(body.changeset, "changeset");
+		assert.strictEqual(changeset.retries, 3);
+		assert.strictEqual(changeset.timeout, undefined);
+	});
+
+	test("--dry-run emits PATCH to /jobs/:key with timeout", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--timeout",
+			"60000",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		const changeset = asRecord(body.changeset, "changeset");
+		assert.strictEqual(changeset.timeout, 60000);
+		assert.strictEqual(changeset.retries, undefined);
+	});
+
+	test("--dry-run accepts both --retries and --timeout", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"5",
+			"--timeout",
+			"30000",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		const changeset = asRecord(body.changeset, "changeset");
+		assert.strictEqual(changeset.retries, 5);
+		assert.strictEqual(changeset.timeout, 30000);
+	});
+
+	test("rejects missing job key with exit code 1", async () => {
+		const result = await c8("update", "job");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Job key required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects missing --retries and --timeout with exit code 1", async () => {
+		const result = await c8("update", "job", "--dry-run", "77777");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--retries or --timeout"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects invalid --retries value with exit code 1", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"abc",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(result.stderr.includes("--retries"), `stderr: ${result.stderr}`);
+	});
+
+	test("rejects invalid --timeout value with exit code 1", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--timeout",
+			"0",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(result.stderr.includes("--timeout"), `stderr: ${result.stderr}`);
+	});
+
+	test("--dry-run includes operationReference in body when provided", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"3",
+			"--operationReference",
+			"9999",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assert.strictEqual(out.method, "PATCH");
+		assert.ok(getUrl(out).includes("/jobs/77777"));
+		const body = asRecord(out.body, "dry-run body");
+		assert.strictEqual(body.operationReference, 9999);
+	});
+
+	test("rejects invalid --operationReference value with exit code 1", async () => {
+		const result = await c8(
+			"update",
+			"job",
+			"--dry-run",
+			"77777",
+			"--retries",
+			"3",
+			"--operationReference",
+			"not-a-number",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--operationReference"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+});

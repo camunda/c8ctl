@@ -63,6 +63,7 @@ import {
 	completeJobCommand,
 	failJobCommand,
 	listJobsCommand,
+	updateJobCommand,
 } from "./commands/jobs.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
@@ -174,6 +175,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["activate:jobs", activateJobsCommand],
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
+	["update:job", updateJobCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],

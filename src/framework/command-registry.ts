@@ -1089,6 +1089,50 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	update: {
+		description: "Update a job",
+		helpDescription:
+			"Update the retries or timeout of a job. At least one of --retries or --timeout must be provided.",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show update command with all flags",
+		mutating: true,
+		requiresResource: true,
+		resources: ["job"],
+		flags: {
+			retries: {
+				type: "string",
+				description: "New number of retries for the job",
+			},
+			timeout: {
+				type: "string",
+				description: "New job timeout in milliseconds",
+			},
+			operationReference: {
+				type: "string",
+				description: "Optional operation reference (long integer)",
+			},
+		},
+		resourcePositionals: {
+			job: [
+				{
+					name: "key",
+					required: true,
+					validate: JobKey.assumeExists,
+				},
+			] as const satisfies readonly PositionalDef[],
+		},
+		helpExamples: [
+			{
+				command: "c8ctl update job 12345 --retries 3",
+				description: "Set the retry count for a job",
+			},
+			{
+				command: "c8ctl update job 12345 --timeout 60000",
+				description: "Set the job timeout to 60 seconds",
+			},
+		],
+	},
+
 	activate: {
 		description: "Activate jobs by type",
 		helpDescription: "Activate jobs of a specific type for processing",

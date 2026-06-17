@@ -445,6 +445,16 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--errorMessage"));
 	});
 
+	test("showCommandHelp shows update help", () => {
+		showCommandHelp("update");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl update"));
+		assert.ok(output.includes("job"));
+		assert.ok(output.includes("--retries"));
+		assert.ok(output.includes("--timeout"));
+	});
+
 	test("showCommandHelp shows activate help", () => {
 		showCommandHelp("activate");
 
@@ -496,6 +506,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("c8ctl help resolve"));
 		assert.ok(output.includes("c8ctl help fail"));
 		assert.ok(output.includes("c8ctl help activate"));
+		assert.ok(output.includes("c8ctl help update"));
 		assert.ok(output.includes("c8ctl help publish"));
 		assert.ok(output.includes("c8ctl help correlate"));
 		assert.ok(output.includes("c8ctl help profiles"));
@@ -522,6 +533,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("resolve"));
 		assert.ok(output.includes("fail"));
 		assert.ok(output.includes("activate"));
+		assert.ok(output.includes("update"));
 		assert.ok(output.includes("publish"));
 		assert.ok(output.includes("correlate"));
 		assert.ok(output.includes("profiles"));
