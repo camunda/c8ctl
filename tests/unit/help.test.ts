@@ -231,6 +231,33 @@ describe("Help Module", () => {
 		assert.ok(output.includes("fish"));
 	});
 
+	test("showVerbResources shows argument placeholder for run (resources: [], requiresResource: true)", () => {
+		showVerbResources("run");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl run"), "should show usage line");
+		assert.ok(
+			output.includes("Argument:"),
+			"should show Argument section, not empty Available resources",
+		);
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
+	test("showVerbResources shows argument placeholder for deploy (resources: [], requiresResource: false)", () => {
+		showVerbResources("deploy");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl deploy"), "should show usage line");
+		assert.ok(output.includes("Argument:"), "should show Argument section");
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
 	test("showHelp includes completion command", () => {
 		showHelp();
 
