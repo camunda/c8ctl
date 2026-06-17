@@ -241,6 +241,10 @@ describe("Help Module", () => {
 			"should show Argument section, not empty Available resources",
 		);
 		assert.ok(
+			output.includes("<path>"),
+			"should show <path> placeholder from helpResource",
+		);
+		assert.ok(
 			!output.includes("Available resources:"),
 			"should not show empty Available resources list",
 		);
@@ -252,6 +256,10 @@ describe("Help Module", () => {
 		const output = consoleLogSpy.join("\n");
 		assert.ok(output.includes("c8ctl deploy"), "should show usage line");
 		assert.ok(output.includes("Argument:"), "should show Argument section");
+		assert.ok(
+			output.includes("[path...]"),
+			"should show [path...] placeholder from helpResource",
+		);
 		assert.ok(
 			!output.includes("Available resources:"),
 			"should not show empty Available resources list",
