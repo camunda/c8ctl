@@ -1272,12 +1272,11 @@ Mark a job as failed with optional error message and retry count
 
 Update the retries or timeout of a job. At least one of --retries or --timeout must be provided.
 
-**Resources:** job, jobs
+**Resources:** job
 
 **Positional arguments:**
 
 - **job:** `<key>` (required)
-- **jobs:** `<key>` (required)
 
 **Flags:**
 
@@ -1292,7 +1291,6 @@ Update the retries or timeout of a job. At least one of --retries or --timeout m
 ```bash
 c8ctl update job 12345 --retries 3                          # Set the retry count for a job
 c8ctl update job 12345 --timeout 60000                      # Set the job timeout to 60 seconds
-c8ctl update jobs 12345 --retries 3 --timeout 30000         # Update both retries and timeout (jobs alias)
 ```
 
 ---

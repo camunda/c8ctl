@@ -224,27 +224,6 @@ describe("CLI behavioural: update job", () => {
 		assert.strictEqual(changeset.timeout, 30000);
 	});
 
-	test("'update jobs' alias routes to the same handler", async () => {
-		const result = await c8(
-			"update",
-			"jobs",
-			"--dry-run",
-			"77777",
-			"--retries",
-			"2",
-		);
-
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const out = parseJson(result);
-		assert.strictEqual(out.method, "PATCH");
-		assert.ok(getUrl(out).includes("/jobs/77777"));
-		const changeset = asRecord(
-			asRecord(out.body, "dry-run body").changeset,
-			"changeset",
-		);
-		assert.strictEqual(changeset.retries, 2);
-	});
-
 	test("rejects missing job key with exit code 1", async () => {
 		const result = await c8("update", "job");
 

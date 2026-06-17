@@ -1097,7 +1097,7 @@ export const COMMAND_REGISTRY = {
 		helpFooterLabel: "Show update command with all flags",
 		mutating: true,
 		requiresResource: true,
-		resources: ["job", "jobs"],
+		resources: ["job"],
 		flags: {
 			retries: {
 				type: "string",
@@ -1120,13 +1120,6 @@ export const COMMAND_REGISTRY = {
 					validate: JobKey.assumeExists,
 				},
 			] as const satisfies readonly PositionalDef[],
-			jobs: [
-				{
-					name: "key",
-					required: true,
-					validate: JobKey.assumeExists,
-				},
-			] as const satisfies readonly PositionalDef[],
 		},
 		helpExamples: [
 			{
@@ -1136,10 +1129,6 @@ export const COMMAND_REGISTRY = {
 			{
 				command: "c8ctl update job 12345 --timeout 60000",
 				description: "Set the job timeout to 60 seconds",
-			},
-			{
-				command: "c8ctl update jobs 12345 --retries 3 --timeout 30000",
-				description: "Update both retries and timeout (jobs alias)",
 			},
 		],
 	},

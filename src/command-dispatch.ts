@@ -176,7 +176,6 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
 	["update:job", updateJobCommand],
-	["update:jobs", updateJobCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],
