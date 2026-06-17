@@ -25,6 +25,7 @@ These flags are accepted by every command.
 | `--verbose` | boolean |  | Show verbose output |
 | `--fields` | string |  | Comma-separated list of fields to display |
 | `--json` | boolean |  | Force JSON output for this invocation (does not persist; overrides session state and C8CTL_OUTPUT_MODE) |
+| `--yes` / `-y` | boolean |  | Skip confirmation prompts |
 
 ## Resource Aliases
 
@@ -628,6 +629,35 @@ Mark a job as failed with optional error message and retry count
 
 ---
 
+### `update`
+
+Update the retries or timeout of a job. At least one of --retries or --timeout must be provided.
+
+**Resources:** job, jobs
+
+**Positional arguments:**
+
+- **job:** `<key>` (required)
+- **jobs:** `<key>` (required)
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--retries` | string |  | New number of retries for the job |
+| `--timeout` | string |  | New job timeout in milliseconds |
+| `--operationReference` | string |  | Optional operation reference (long integer) |
+
+**Examples:**
+
+```bash
+c8ctl update job 12345 --retries 3                          # Set the retry count for a job
+c8ctl update job 12345 --timeout 60000                      # Set the job timeout to 60 seconds
+c8ctl update jobs 12345 --retries 3 --timeout 30000         # Update both retries and timeout (jobs alias)
+```
+
+---
+
 ### `activate`
 
 Activate jobs of a specific type for processing
@@ -919,7 +949,7 @@ Remove a profile (alias: rm)
 
 **Positional arguments:**
 
-- **profile:** `<name>` (required)
+- **profile:** `<name>` (optional)
 
 **Flags:**
 

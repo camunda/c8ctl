@@ -44,6 +44,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"await",
 		"complete",
 		"fail",
+		"update",
 		"activate",
 		"resolve",
 		"publish",

@@ -207,3 +207,66 @@ export const failJobCommand = defineCommand(
 		return { kind: "success", message: `Job ${key} failed` };
 	},
 );
+
+/**
+ * Update job
+ */
+export const updateJobCommand = defineCommand(
+	"update",
+	"job",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+
+		const retries =
+			flags.retries !== undefined ? parseInt(flags.retries, 10) : undefined;
+		const timeout =
+			flags.timeout !== undefined ? parseInt(flags.timeout, 10) : undefined;
+		const operationReference =
+			flags.operationReference !== undefined
+				? parseInt(flags.operationReference, 10)
+				: undefined;
+
+		if (retries !== undefined && (Number.isNaN(retries) || retries < 0)) {
+			throw new Error("--retries must be a non-negative integer");
+		}
+		if (timeout !== undefined && (Number.isNaN(timeout) || timeout < 1)) {
+			throw new Error("--timeout must be a positive integer (milliseconds)");
+		}
+		if (retries === undefined && timeout === undefined) {
+			throw new Error(
+				"At least one of --retries or --timeout must be provided",
+			);
+		}
+		if (
+			operationReference !== undefined &&
+			(Number.isNaN(operationReference) || operationReference < 0)
+		) {
+			throw new Error("--operationReference must be a non-negative integer");
+		}
+
+		const changeset: { retries?: number; timeout?: number } = {};
+		if (retries !== undefined) changeset.retries = retries;
+		if (timeout !== undefined) changeset.timeout = timeout;
+
+		const body: Record<string, unknown> = { changeset };
+		if (operationReference !== undefined)
+			body.operationReference = operationReference;
+
+		const dr = ctx.dryRun({
+			command: "update job",
+			method: "PATCH",
+			endpoint: `/jobs/${key}`,
+			profile,
+			body,
+		});
+		if (dr) return dr;
+
+		await client.updateJob({
+			jobKey: key,
+			changeset,
+			...(operationReference !== undefined && { operationReference }),
+		});
+		return { kind: "success", message: `Job ${key} updated` };
+	},
+);
