@@ -27,8 +27,8 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Affected endpoint:** `POST /v2/element-instances/wait-states/search`
   - **Missing:** No SDK method for the wait-states search endpoint
   - **Available in:** Camunda 8.8+ REST API
-  - **Impact:** `c8ctl search wait-state` cannot use the SDK client directly; uses `rawPost()` helper to make authenticated HTTP requests.
-  - **Remediation:** Upgrade SDK when a release ships with `searchElementInstanceWaitStates`; replace `rawPost()` call with the SDK method.
+  - **Impact:** `c8ctl search wait-state` cannot use the SDK client directly; uses `resolveAuthHeaders()` + `rawPostWithHeaders()` to make authenticated HTTP requests.
+  - **Remediation:** Upgrade SDK when a release ships with `searchElementInstanceWaitStates`; replace `rawPostWithHeaders()` call with the SDK method.
 
 - [ ] **`WaitStateType` enum not exported from SDK**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
