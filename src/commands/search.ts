@@ -1026,7 +1026,11 @@ export const searchWaitStatesCommand = defineCommand(
 					items,
 					page: {
 						totalItems:
-							typeof page.totalItems === "number" ? page.totalItems : 0,
+							typeof page.totalItems === "number"
+								? page.totalItems
+								: Number.isFinite(Number(page.totalItems))
+									? Number(page.totalItems)
+									: Number.POSITIVE_INFINITY,
 						endCursor:
 							typeof page.endCursor === "string" ? page.endCursor : null,
 						startCursor:
