@@ -261,7 +261,7 @@ export async function rawPostWithHeaders(
 	body: unknown,
 	headers: Record<string, string>,
 ): Promise<unknown> {
-	const baseUrl = client.config.restAddress;
+	const baseUrl = client.getConfig().restAddress;
 
 	const res = await fetch(`${baseUrl}${endpoint}`, {
 		method: "POST",

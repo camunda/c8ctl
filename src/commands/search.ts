@@ -21,6 +21,7 @@ import {
 	matchesCaseInsensitive,
 	matchesCaseSensitive,
 	parseBetween,
+	renderWaitStateDetails,
 	toStringFilter,
 	wildcardToRegex,
 } from "../utils/index.ts";
@@ -1070,14 +1071,3 @@ export const searchWaitStatesCommand = defineCommand(
 		}
 	},
 );
-
-function renderWaitStateDetails(details: unknown): string {
-	if (!isRecord(details)) return "-";
-	if (details.waitStateType === "JOB") {
-		return typeof details.jobType === "string" ? details.jobType : "-";
-	}
-	if (details.waitStateType === "MESSAGE") {
-		return typeof details.messageName === "string" ? details.messageName : "-";
-	}
-	return "-";
-}

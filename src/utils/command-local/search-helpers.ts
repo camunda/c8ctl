@@ -5,7 +5,7 @@
  * these.
  */
 
-import type { Logger } from "../../core/index.ts";
+import { isRecord, type Logger } from "../../core/index.ts";
 
 /** Default page size the Camunda REST API uses when no explicit limit is set */
 export const API_DEFAULT_PAGE_SIZE = 100;
@@ -119,5 +119,50 @@ export function logResultCount(
 		logger.warn(
 			`Result count equals the API default page size (${API_DEFAULT_PAGE_SIZE}). There may be more results.`,
 		);
+	}
+}
+
+/**
+ * Render a human-readable summary of a wait-state's type-specific details.
+ *
+ * Each wait-state type carries a different payload in the `details` object.
+ * This function extracts the most useful field for display in the CLI table.
+ */
+export function renderWaitStateDetails(details: unknown): string {
+	if (!isRecord(details)) return "-";
+	switch (details.waitStateType) {
+		case "JOB":
+			return typeof details.jobType === "string" ? details.jobType : "-";
+		case "MESSAGE":
+			return typeof details.messageName === "string"
+				? details.messageName
+				: "-";
+		case "TIMER": {
+			if (typeof details.dueDate !== "number") return "-";
+			const due = new Date(details.dueDate).toISOString();
+			if (
+				typeof details.repetitions === "number" &&
+				details.repetitions !== 0
+			) {
+				const reps =
+					details.repetitions === -1
+						? "\u221E"
+						: `\u00D7${details.repetitions}`;
+				return `${due} (${reps})`;
+			}
+			return due;
+		}
+		case "USER_TASK":
+			return details.taskKey !== undefined ? String(details.taskKey) : "-";
+		case "SIGNAL":
+			return typeof details.signalName === "string" ? details.signalName : "-";
+		case "CONDITION": {
+			if (typeof details.expression !== "string") return "-";
+			return details.expression.length > 40
+				? `${details.expression.slice(0, 40)}\u2026`
+				: details.expression;
+		}
+		default:
+			return "-";
 	}
 }

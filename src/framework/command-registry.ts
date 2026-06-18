@@ -486,8 +486,8 @@ const WAIT_STATE_ELEMENT_TYPE_ENUM = {
 	USER_TASK: "USER_TASK",
 } as const;
 
-// JOB and MESSAGE are in the current OpenAPI spec; TIMER/CONDITION/USER_TASK/SIGNAL
-// are ahead of the spec — tracked in .github/SDK_GAPS.md.
+// All six wait-state types are fully supported by the CLI.
+// CONDITION is not yet exported from the SDK — tracked in .github/SDK_GAPS.md.
 const WAIT_STATE_TYPE_ENUM = {
 	JOB: "JOB",
 	MESSAGE: "MESSAGE",
