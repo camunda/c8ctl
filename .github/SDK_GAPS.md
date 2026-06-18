@@ -34,7 +34,7 @@ When a new SDK limitation is discovered during development, add it here followin
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
   - **Affected type:** `WaitStateType` (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)
   - **Missing:** No enum or type definition for wait state types
-  - **Impact:** `c8ctl` defines a local `WAIT_STATE_TYPE_ENUM` array for flag validation. If the API adds new types, the CLI must be updated manually.
+  - **Impact:** `c8ctl` defines a local `WAIT_STATE_TYPE_ENUM` object literal for flag validation. If the API adds new types, the CLI must be updated manually.
   - **Remediation:** Import the enum from the SDK when available; remove local definition.
 
 ---

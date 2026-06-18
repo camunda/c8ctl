@@ -7,7 +7,8 @@ import {
 	fetchAllPages,
 	isRecord,
 	type Logger,
-	rawPost,
+	rawPostWithHeaders,
+	resolveAuthHeaders,
 	sortTableData,
 } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
@@ -931,10 +932,10 @@ export const searchVariablesCommand = defineCommand(
 
 /**
  * Search wait states (element instances currently waiting for an external event).
- * API: POST /v2/element-instances/wait-states/search (added in Camunda 8.10).
+ * API: POST /v2/element-instances/wait-states/search
  *
  * The SDK (v9.1.0) does not yet expose this endpoint — tracked in .github/SDK_GAPS.md.
- * We use a raw fetch call with the client's auth headers.
+ * We use rawPostWithHeaders() to make authenticated requests via resolveAuthHeaders().
  */
 export const searchWaitStatesCommand = defineCommand(
 	"search",
@@ -1003,13 +1004,16 @@ export const searchWaitStatesCommand = defineCommand(
 
 		logSearchCriteria(logger, "Wait States", criteria);
 
+		// Resolve auth once before pagination to avoid repeated token fetches
+		const authHeaders = await resolveAuthHeaders(profile);
+
 		const allItems = await fetchAllPages<Record<string, unknown>>(
 			async (f, _opts) => {
-				const result = await rawPost(
+				const result = await rawPostWithHeaders(
 					client,
 					"/element-instances/wait-states/search",
 					f,
-					profile,
+					authHeaders,
 				);
 				if (!isRecord(result)) {
 					throw new Error("Unexpected response shape from wait states search");
@@ -1043,7 +1047,10 @@ export const searchWaitStatesCommand = defineCommand(
 				"Root PI Key": ws.rootProcessInstanceKey ?? "-",
 				"Element ID": ws.elementId,
 				"Element Type": ws.elementType,
-				"Wait State": isRecord(ws.details) ? ws.details.waitStateType : "-",
+				"Wait State":
+					isRecord(ws.details) && typeof ws.details.waitStateType === "string"
+						? ws.details.waitStateType
+						: "-",
 				Details: renderWaitStateDetails(ws.details),
 			}));
 			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);

@@ -176,38 +176,40 @@ export function emitDryRun(opts: {
 }
 
 /**
- * Make an authenticated POST request to a Camunda REST endpoint that is not yet
- * covered by the SDK. Reconstructs auth from the resolved cluster config.
+ * Resolve authentication headers for a given profile. Returns a
+ * Record<string, string> containing the Authorization header (and
+ * Content-Type). Acquires an OAuth token if OAuth credentials are configured.
  *
- * Returns the parsed JSON response.
+ * Call once per command invocation and reuse across paginated requests to avoid
+ * redundant token fetches.
  */
-export async function rawPost(
-	client: CamundaClient,
-	endpoint: string,
-	body: unknown,
+export async function resolveAuthHeaders(
 	profile?: string,
-): Promise<unknown> {
-	const baseUrl = client.config.restAddress;
+): Promise<Record<string, string>> {
 	const config = resolveClusterConfig(profile);
-
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 	};
 
-	// Reconstruct auth headers based on cluster config
 	if (config.clientId && config.clientSecret) {
-		// OAuth: fetch token from OAuth URL
-		const tokenUrl = config.oAuthUrl ?? "";
-		const audience = config.audience ?? "";
+		const tokenUrl = config.oAuthUrl;
+		if (!tokenUrl) {
+			throw new Error(
+				"OAuth credentials are configured but oAuthUrl is missing — cannot acquire token",
+			);
+		}
+		const params: Record<string, string> = {
+			grant_type: "client_credentials",
+			client_id: config.clientId,
+			client_secret: config.clientSecret,
+		};
+		if (config.audience) {
+			params.audience = config.audience;
+		}
 		const tokenRes = await fetch(tokenUrl, {
 			method: "POST",
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				grant_type: "client_credentials",
-				client_id: config.clientId,
-				client_secret: config.clientSecret,
-				audience,
-			}),
+			body: new URLSearchParams(params),
 		});
 		if (!tokenRes.ok) {
 			throw new Error(
@@ -223,12 +225,43 @@ export async function rawPost(
 			);
 		}
 	} else if (config.username && config.password) {
-		// Basic auth
 		const encoded = Buffer.from(
 			`${config.username}:${config.password}`,
 		).toString("base64");
 		headers.Authorization = `Basic ${encoded}`;
 	}
+
+	return headers;
+}
+
+/**
+ * Make an authenticated POST request to a Camunda REST endpoint that is not yet
+ * covered by the SDK. Resolves auth from the cluster config on each call.
+ *
+ * For paginated calls, prefer resolving auth once with `resolveAuthHeaders()`
+ * and calling `rawPostWithHeaders()` to avoid repeated token fetches.
+ */
+export async function rawPost(
+	client: CamundaClient,
+	endpoint: string,
+	body: unknown,
+	profile?: string,
+): Promise<unknown> {
+	const headers = await resolveAuthHeaders(profile);
+	return rawPostWithHeaders(client, endpoint, body, headers);
+}
+
+/**
+ * Make a POST request using pre-resolved auth headers. Use this inside
+ * pagination loops after calling `resolveAuthHeaders()` once.
+ */
+export async function rawPostWithHeaders(
+	client: CamundaClient,
+	endpoint: string,
+	body: unknown,
+	headers: Record<string, string>,
+): Promise<unknown> {
+	const baseUrl = client.config.restAddress;
 
 	const res = await fetch(`${baseUrl}${endpoint}`, {
 		method: "POST",
