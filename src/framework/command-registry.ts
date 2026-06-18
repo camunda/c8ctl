@@ -518,7 +518,7 @@ const WAIT_STATE_SEARCH_FLAGS = {
 	},
 	elementId: {
 		type: "string",
-		description: "Filter by element ID (supports wildcards, e.g. *Task*)",
+		description: "Filter by element ID (supports wildcards, e.g. `*Task*`)",
 	},
 	elementType: {
 		type: "string",

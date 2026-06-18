@@ -394,7 +394,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 | `--processInstanceKey` / `-k` | string |  | Filter by process instance key |
 | `--rootProcessInstanceKey` / `-r` | string |  | Filter by root process instance key |
 | `--elementInstanceKey` / `-e` | string |  | Filter by element instance key |
-| `--elementId` | string |  | Filter by element ID (supports wildcards, e.g. *Task*) |
+| `--elementId` | string |  | Filter by element ID (supports wildcards, e.g. `*Task*`) |
 | `--elementType` | string |  | Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY) |
 | `--waitStateType` | string |  | Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL) |
 
