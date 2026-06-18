@@ -486,8 +486,8 @@ const WAIT_STATE_ELEMENT_TYPE_ENUM = {
 	USER_TASK: "USER_TASK",
 } as const;
 
-// All six wait-state types are fully supported by the CLI.
-// CONDITION is not yet exported from the SDK — tracked in .github/SDK_GAPS.md.
+// The SDK does not export a WaitStateType enum — all six values are declared
+// inline here. Tracked in .github/SDK_GAPS.md.
 const WAIT_STATE_TYPE_ENUM = {
 	JOB: "JOB",
 	MESSAGE: "MESSAGE",
