@@ -30,10 +30,10 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Impact:** `c8ctl search wait-state` cannot use the SDK client directly; uses `resolveAuthHeaders()` + `rawPostWithHeaders()` to make authenticated HTTP requests.
   - **Remediation:** Upgrade SDK when a release ships with `searchElementInstanceWaitStates`; replace `rawPostWithHeaders()` call with the SDK method.
 
-- [ ] **`WaitStateType` enum not exported from SDK — `CONDITION` not covered**
+- [ ] **`WaitStateType` enum not exported from SDK**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
   - **Affected type:** `WaitStateType` (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)
-  - **Missing:** No enum or type definition for wait state types. Five of the six values (JOB, MESSAGE, TIMER, USER_TASK, SIGNAL) are present in the OpenAPI spec; CONDITION is not yet documented.
+  - **Missing:** The SDK does not export any WaitStateType enum or type definition. Five of the six values (JOB, MESSAGE, TIMER, USER_TASK, SIGNAL) are present in the OpenAPI spec; CONDITION is not yet documented.
   - **Impact:** `c8ctl` defines a local `WAIT_STATE_TYPE_ENUM` object literal for flag validation. The CONDITION value was added ahead of the spec based on API behaviour.
   - **Remediation:** Import the enum from the SDK when available; remove local definition.
 
