@@ -9,7 +9,11 @@ import {
 } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages, handleCommandError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
-import { buildDateFilter, parseBetween } from "../utils/index.ts";
+import {
+	buildDateFilter,
+	parseBetween,
+	processInstancesEmptyMessage,
+} from "../utils/index.ts";
 
 /**
  * List process instances
@@ -92,7 +96,7 @@ export const listProcessInstancesCommand = defineCommand(
 				"Start Date": pi.startDate || "-",
 				"Tenant ID": pi.tenantId,
 			})),
-			emptyMessage: "No process instances found",
+			emptyMessage: processInstancesEmptyMessage(filter.filter),
 		};
 	},
 );
