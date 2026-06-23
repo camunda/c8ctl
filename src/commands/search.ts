@@ -5,7 +5,10 @@
 import {
 	DEFAULT_PAGE_SIZE,
 	fetchAllPages,
+	isRecord,
 	type Logger,
+	rawPostWithHeaders,
+	resolveAuthHeaders,
 	sortTableData,
 } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
@@ -18,6 +21,7 @@ import {
 	matchesCaseInsensitive,
 	matchesCaseSensitive,
 	parseBetween,
+	renderWaitStateDetails,
 	toStringFilter,
 	wildcardToRegex,
 } from "../utils/index.ts";
@@ -923,6 +927,149 @@ export const searchVariablesCommand = defineCommand(
 			}
 		} else {
 			logNoResults(logger, "variables", criteria.length > 0);
+		}
+	},
+);
+
+/**
+ * Search wait states (element instances currently waiting for an external event).
+ * API: POST /v2/element-instances/wait-states/search
+ *
+ * The SDK (v9.1.0) does not yet expose this endpoint — tracked in .github/SDK_GAPS.md.
+ * We use rawPostWithHeaders() to make authenticated requests via resolveAuthHeaders().
+ */
+export const searchWaitStatesCommand = defineCommand(
+	"search",
+	"wait-state",
+	async (ctx, flags, _args) => {
+		const { client, logger, tenantId, profile } = ctx;
+
+		const criteria: string[] = [];
+		if (flags.processInstanceKey) {
+			criteria.push(
+				formatCriterion("Process Instance Key", flags.processInstanceKey),
+			);
+		}
+		if (flags.rootProcessInstanceKey) {
+			criteria.push(
+				formatCriterion(
+					"Root Process Instance Key",
+					flags.rootProcessInstanceKey,
+				),
+			);
+		}
+		if (flags.elementInstanceKey) {
+			criteria.push(
+				formatCriterion("Element Instance Key", flags.elementInstanceKey),
+			);
+		}
+		if (flags.elementId) {
+			criteria.push(formatCriterion("Element ID", flags.elementId));
+		}
+		if (flags.elementType) {
+			criteria.push(formatCriterion("Element Type", flags.elementType));
+		}
+		if (flags.waitStateType) {
+			criteria.push(formatCriterion("Wait State Type", flags.waitStateType));
+		}
+
+		const filter: { filter: Record<string, unknown> } = {
+			filter: { tenantId },
+		};
+
+		if (flags.processInstanceKey) {
+			filter.filter.processInstanceKey = flags.processInstanceKey;
+		}
+		if (flags.rootProcessInstanceKey) {
+			filter.filter.rootProcessInstanceKey = flags.rootProcessInstanceKey;
+		}
+		if (flags.elementInstanceKey) {
+			filter.filter.elementInstanceKey = flags.elementInstanceKey;
+		}
+		if (flags.elementId) {
+			filter.filter.elementId = toStringFilter(flags.elementId);
+		}
+		if (flags.elementType) {
+			filter.filter.elementType = flags.elementType;
+		}
+		if (flags.waitStateType) {
+			filter.filter.waitStateType = flags.waitStateType;
+		}
+
+		const dr = ctx.dryRun({
+			command: "search wait-state",
+			method: "POST",
+			endpoint: "/element-instances/wait-states/search",
+			profile,
+			body: filter,
+		});
+		if (dr) return dr;
+
+		logSearchCriteria(logger, "Wait States", criteria);
+
+		// Resolve auth once before pagination to avoid repeated token fetches
+		const authHeaders = await resolveAuthHeaders(profile);
+
+		const allItems = await fetchAllPages<Record<string, unknown>>(
+			async (f, _opts) => {
+				const result = await rawPostWithHeaders(
+					client,
+					"/element-instances/wait-states/search",
+					f,
+					authHeaders,
+				);
+				if (!isRecord(result)) {
+					throw new Error("Unexpected response shape from wait states search");
+				}
+				const items: Record<string, unknown>[] = Array.isArray(result.items)
+					? result.items.filter(isRecord)
+					: [];
+				const page = isRecord(result.page) ? result.page : {};
+				return {
+					items,
+					page: {
+						totalItems:
+							typeof page.totalItems === "number"
+								? page.totalItems
+								: Number.isFinite(Number(page.totalItems))
+									? Number(page.totalItems)
+									: Number.POSITIVE_INFINITY,
+						endCursor:
+							typeof page.endCursor === "string" ? page.endCursor : null,
+						startCursor:
+							typeof page.startCursor === "string" ? page.startCursor : null,
+						hasMoreTotalItems: page.hasMoreTotalItems === true,
+					},
+				};
+			},
+			filter,
+			DEFAULT_PAGE_SIZE,
+			ctx.limit,
+		);
+
+		if (allItems.length > 0) {
+			let tableData = allItems.map((ws) => ({
+				"Element Instance Key": ws.elementInstanceKey,
+				"Process Instance Key": ws.processInstanceKey,
+				"Root PI Key": ws.rootProcessInstanceKey ?? "-",
+				"Element ID": ws.elementId,
+				"Element Type": ws.elementType,
+				"Wait State":
+					isRecord(ws.details) && typeof ws.details.waitStateType === "string"
+						? ws.details.waitStateType
+						: "-",
+				Details: renderWaitStateDetails(ws.details),
+			}));
+			tableData = sortTableData(tableData, ctx.sortBy, logger, ctx.sortOrder);
+			logger.table(tableData);
+			logResultCount(
+				logger,
+				allItems.length,
+				"wait state(s)",
+				criteria.length > 0,
+			);
+		} else {
+			logNoResults(logger, "wait states", criteria.length > 0);
 		}
 	},
 );

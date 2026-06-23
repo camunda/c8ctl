@@ -267,6 +267,7 @@ c8 search pd --id='process-v?'
 | Incidents | `--errorMessage`, `--id` (processDefinitionId) |
 | Jobs | `--type` |
 | Variables | `--name`, `--value` |
+| Wait States | `--elementId` |
 
 ### Case-Insensitive Search
 
@@ -451,6 +452,32 @@ c8 search variables --name=orderPayload --processInstanceKey=2251799813685249 --
 ```
 
 **Note**: By default, long variable values are truncated in the output. Truncated values are marked with a `✓` in the "Truncated" column. Use `--fullValue` to see the complete values.
+
+### Search Wait States
+
+```bash
+# Search all wait states
+c8 search wait-state
+
+# Search wait states by type
+c8 search ws --waitStateType=JOB
+c8 search ws --waitStateType=MESSAGE
+c8 search ws --waitStateType=TIMER
+
+# Search wait states by BPMN element type
+c8 search ws --elementType=SERVICE_TASK
+c8 search ws --elementType=USER_TASK
+
+# Filter by process instance
+c8 search ws --processInstanceKey=2251799813685249
+
+# Filter by element ID
+c8 search ws --elementId=serviceTask1
+
+# Combine filters
+c8 search ws --processInstanceKey=2251799813685249 --waitStateType=JOB
+c8 search ws --elementType=SERVICE_TASK --waitStateType=JOB
+```
 
 ### Search Output
 

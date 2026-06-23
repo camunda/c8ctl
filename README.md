@@ -17,7 +17,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Watch Mode**: Monitors a folder for file changes and auto-redeploys (configurable extensions via `--extensions`)
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
 - **Open Applications**: Open Camunda web applications (Operate, Tasklist, Modeler, Optimize) in the browser directly from the CLI
-- **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, and variables with filter, wildcard, and case-insensitive support
+- **Search**: Powerful search across process definitions, process instances, user tasks, incidents, jobs, variables, and wait states with filter, wildcard, and case-insensitive support
 - **Flexible Output**: Switch between human-readable text and JSON output modes
 - **Shell Completion**: Auto-install completions for bash, zsh, and fish with automatic refresh on upgrade
 - **Agent Flags**: `--dry-run` to preview API requests and `--fields` to filter output columns for AI agents and scripts
@@ -596,7 +596,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode
 
-**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars)
+**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
 <!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
@@ -679,6 +679,7 @@ These flags are accepted by every command.
 | `ut` | `user-task` |
 | `vars` | `variable` |
 | `var` | `variable` |
+| `ws` | `wait-state` |
 
 ### Search Flags
 
@@ -864,7 +865,7 @@ c8ctl list users                                            # List users
 
 Search resources with filters (wildcards, date ranges, case-insensitive)
 
-**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule)
+**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), wait-state
 
 **Resource-specific flags:**
 
@@ -1024,6 +1025,20 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 </details>
 
+<details>
+<summary><code>wait-state</code> (<code>ws</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processInstanceKey` / `-k` | string |  | Filter by process instance key |
+| `--rootProcessInstanceKey` / `-r` | string |  | Filter by root process instance key |
+| `--elementInstanceKey` / `-e` | string |  | Filter by element instance key |
+| `--elementId` | string |  | Filter by element ID (supports wildcards, e.g. `*Task*`) |
+| `--elementType` | string |  | Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY) |
+| `--waitStateType` | string |  | Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL) |
+
+</details>
+
 **Examples:**
 
 ```bash
@@ -1039,6 +1054,8 @@ c8ctl search variables --value=foo                          # Search for variabl
 c8ctl search variables --processInstanceKey=123 --fullValue  # Search variables with full values
 c8ctl search pd --iname='*order*'                           # Case-insensitive search by name
 c8ctl search ut --iassignee=John                            # Case-insensitive search by assignee
+c8ctl search ws --waitStateType=JOB                         # Search wait states of type JOB
+c8ctl search ws --elementType=SERVICE_TASK                  # Search wait states on service tasks
 ```
 
 ---

@@ -333,6 +333,10 @@ describe("Help Module", () => {
 			output.includes("--dateField"),
 			"search help should include --dateField flag",
 		);
+		assert.ok(
+			output.includes("wait-state"),
+			"search help should include wait-state resource",
+		);
 	});
 
 	test("showCommandHelp shows deploy help", () => {

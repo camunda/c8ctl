@@ -179,6 +179,8 @@ export const RESOURCE_ALIASES: Record<string, string> = {
 	roles: "role",
 	groups: "group",
 	tenants: "tenant",
+	ws: "wait-state",
+	"wait-states": "wait-state",
 };
 
 // ─── Global Flags ────────────────────────────────────────────────────────────
@@ -452,6 +454,86 @@ const MR_SEARCH_FLAGS = {
 	claimValue: { type: "string", description: "Filter by claim value" },
 } as const satisfies Record<string, FlagDef>;
 
+// ── Wait State enums ──────────────────────────────────────────────────────────
+
+const WAIT_STATE_ELEMENT_TYPE_ENUM = {
+	AD_HOC_SUB_PROCESS: "AD_HOC_SUB_PROCESS",
+	AD_HOC_SUB_PROCESS_INNER_INSTANCE: "AD_HOC_SUB_PROCESS_INNER_INSTANCE",
+	BOUNDARY_EVENT: "BOUNDARY_EVENT",
+	BUSINESS_RULE_TASK: "BUSINESS_RULE_TASK",
+	CALL_ACTIVITY: "CALL_ACTIVITY",
+	END_EVENT: "END_EVENT",
+	EVENT_BASED_GATEWAY: "EVENT_BASED_GATEWAY",
+	EVENT_SUB_PROCESS: "EVENT_SUB_PROCESS",
+	EXCLUSIVE_GATEWAY: "EXCLUSIVE_GATEWAY",
+	INCLUSIVE_GATEWAY: "INCLUSIVE_GATEWAY",
+	INTERMEDIATE_CATCH_EVENT: "INTERMEDIATE_CATCH_EVENT",
+	INTERMEDIATE_THROW_EVENT: "INTERMEDIATE_THROW_EVENT",
+	MANUAL_TASK: "MANUAL_TASK",
+	MULTI_INSTANCE_BODY: "MULTI_INSTANCE_BODY",
+	PARALLEL_GATEWAY: "PARALLEL_GATEWAY",
+	PROCESS: "PROCESS",
+	RECEIVE_TASK: "RECEIVE_TASK",
+	SCRIPT_TASK: "SCRIPT_TASK",
+	SEND_TASK: "SEND_TASK",
+	SEQUENCE_FLOW: "SEQUENCE_FLOW",
+	SERVICE_TASK: "SERVICE_TASK",
+	START_EVENT: "START_EVENT",
+	SUB_PROCESS: "SUB_PROCESS",
+	TASK: "TASK",
+	UNKNOWN: "UNKNOWN",
+	UNSPECIFIED: "UNSPECIFIED",
+	USER_TASK: "USER_TASK",
+} as const;
+
+// The SDK does not export a WaitStateType enum — all six values are declared
+// inline here. Tracked in .github/SDK_GAPS.md.
+const WAIT_STATE_TYPE_ENUM = {
+	JOB: "JOB",
+	MESSAGE: "MESSAGE",
+	TIMER: "TIMER",
+	CONDITION: "CONDITION",
+	USER_TASK: "USER_TASK",
+	SIGNAL: "SIGNAL",
+} as const;
+
+const WAIT_STATE_SEARCH_FLAGS = {
+	processInstanceKey: {
+		type: "string",
+		description: "Filter by process instance key",
+		short: "k",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+	rootProcessInstanceKey: {
+		type: "string",
+		description: "Filter by root process instance key",
+		short: "r",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+	elementInstanceKey: {
+		type: "string",
+		description: "Filter by element instance key",
+		short: "e",
+		validate: ElementInstanceKey.assumeExists,
+	},
+	elementId: {
+		type: "string",
+		description: "Filter by element ID (supports wildcards, e.g. `*Task*`)",
+	},
+	elementType: {
+		type: "string",
+		description:
+			"Filter by BPMN element type (e.g. SERVICE_TASK, USER_TASK, CALL_ACTIVITY)",
+		enum: WAIT_STATE_ELEMENT_TYPE_ENUM,
+	},
+	waitStateType: {
+		type: "string",
+		description:
+			"Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)",
+		enum: WAIT_STATE_TYPE_ENUM,
+	},
+} as const satisfies Record<string, FlagDef>;
+
 const ASSIGN_FLAGS = {
 	"to-user": { type: "string", description: "Target user ID" },
 	"to-group": { type: "string", description: "Target group ID" },
@@ -706,6 +788,14 @@ export const COMMAND_REGISTRY = {
 				command: "c8ctl search ut --iassignee=John",
 				description: "Case-insensitive search by assignee",
 			},
+			{
+				command: "c8ctl search ws --waitStateType=JOB",
+				description: "Search wait states of type JOB",
+			},
+			{
+				command: "c8ctl search ws --elementType=SERVICE_TASK",
+				description: "Search wait states on service tasks",
+			},
 		],
 		resources: [
 			"pi",
@@ -720,6 +810,7 @@ export const COMMAND_REGISTRY = {
 			"tenants",
 			"auth",
 			"mapping-rules",
+			"wait-state",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
@@ -743,6 +834,7 @@ export const COMMAND_REGISTRY = {
 			tenant: TENANT_SEARCH_FLAGS,
 			authorization: AUTH_SEARCH_FLAGS,
 			"mapping-rule": MR_SEARCH_FLAGS,
+			"wait-state": WAIT_STATE_SEARCH_FLAGS,
 		},
 	},
 

@@ -8,7 +8,7 @@ import {
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
 import { resolveClusterConfig } from "./config.ts";
-import { getLogger } from "./logger.ts";
+import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
 /**
@@ -173,4 +173,114 @@ export function emitDryRun(opts: {
 		...(opts.body !== undefined && { body: opts.body }),
 	});
 	return true;
+}
+
+/**
+ * Resolve authentication headers for a given profile. Returns a
+ * Record<string, string> containing the Authorization header (and
+ * Content-Type). Acquires an OAuth token if OAuth credentials are configured.
+ *
+ * Call once per command invocation and reuse across paginated requests to avoid
+ * redundant token fetches.
+ */
+export async function resolveAuthHeaders(
+	profile?: string,
+): Promise<Record<string, string>> {
+	const config = resolveClusterConfig(profile);
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+
+	if (config.clientId && config.clientSecret) {
+		const tokenUrl = config.oAuthUrl;
+		if (!tokenUrl) {
+			throw new Error(
+				"OAuth credentials are configured but oAuthUrl is missing — cannot acquire token",
+			);
+		}
+		const params: Record<string, string> = {
+			grant_type: "client_credentials",
+			client_id: config.clientId,
+			client_secret: config.clientSecret,
+		};
+		if (config.audience) {
+			params.audience = config.audience;
+		}
+		const tokenRes = await fetch(tokenUrl, {
+			method: "POST",
+			headers: { "Content-Type": "application/x-www-form-urlencoded" },
+			body: new URLSearchParams(params),
+		});
+		if (!tokenRes.ok) {
+			throw new Error(
+				`OAuth token request failed: ${tokenRes.status} ${tokenRes.statusText} (token URL: ${tokenUrl})`,
+			);
+		}
+		const tokenData: unknown = await tokenRes.json();
+		if (isRecord(tokenData) && typeof tokenData.access_token === "string") {
+			headers.Authorization = `Bearer ${tokenData.access_token}`;
+		} else {
+			throw new Error(
+				"OAuth token response did not contain a valid access_token",
+			);
+		}
+	} else if (config.username && config.password) {
+		const encoded = Buffer.from(
+			`${config.username}:${config.password}`,
+		).toString("base64");
+		headers.Authorization = `Basic ${encoded}`;
+	}
+
+	return headers;
+}
+
+/**
+ * Make an authenticated POST request to a Camunda REST endpoint that is not yet
+ * covered by the SDK. Resolves auth from the cluster config on each call.
+ *
+ * For paginated calls, prefer resolving auth once with `resolveAuthHeaders()`
+ * and calling `rawPostWithHeaders()` to avoid repeated token fetches.
+ */
+export async function rawPost(
+	client: CamundaClient,
+	endpoint: string,
+	body: unknown,
+	profile?: string,
+): Promise<unknown> {
+	const headers = await resolveAuthHeaders(profile);
+	return rawPostWithHeaders(client, endpoint, body, headers);
+}
+
+/**
+ * Make a POST request using pre-resolved auth headers. Use this inside
+ * pagination loops after calling `resolveAuthHeaders()` once.
+ */
+export async function rawPostWithHeaders(
+	client: CamundaClient,
+	endpoint: string,
+	body: unknown,
+	headers: Record<string, string>,
+): Promise<unknown> {
+	const baseUrl = client.getConfig().restAddress;
+
+	const res = await fetch(`${baseUrl}${endpoint}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+	});
+
+	if (!res.ok) {
+		let detail = "";
+		try {
+			const text = await res.text();
+			if (text) detail = ` — ${text.slice(0, 500)}`;
+		} catch {
+			// ignore body read failure
+		}
+		throw new Error(
+			`API request failed: ${res.status} ${res.statusText}${detail}`,
+		);
+	}
+
+	return res.json();
 }
