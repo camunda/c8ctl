@@ -4,6 +4,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
+import { processInstancesEmptyMessage } from "../../src/utils/index.ts";
 
 describe("Process Instances Table Formatting", () => {
 	/**
@@ -82,5 +83,60 @@ describe("Process Instances Table Formatting", () => {
 			state: "ACTIVE",
 		});
 		assert.strictEqual(row.Key, "⚠ 444555666");
+	});
+});
+
+describe("processInstancesEmptyMessage", () => {
+	test("surfaces the default ACTIVE state filter", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({ tenantId: "<default>", state: "ACTIVE" }),
+			"No ACTIVE process instances found",
+		);
+	});
+
+	test("surfaces an explicit state filter (e.g. COMPLETED)", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({ state: "COMPLETED" }),
+			"No COMPLETED process instances found",
+		);
+	});
+
+	test("omits the state adjective when no state filter is applied (--all)", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({ tenantId: "<default>" }),
+			"No process instances found",
+		);
+	});
+
+	test("appends process id and version qualifiers", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({
+				state: "ACTIVE",
+				processDefinitionId: "order-process",
+				processDefinitionVersion: 2,
+			}),
+			'No ACTIVE process instances found for process "order-process", version 2',
+		);
+	});
+
+	test("includes a non-default tenant but not the default tenant", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({ state: "ACTIVE", tenantId: "acme" }),
+			'No ACTIVE process instances found for tenant "acme"',
+		);
+		assert.strictEqual(
+			processInstancesEmptyMessage({ state: "ACTIVE", tenantId: "<default>" }),
+			"No ACTIVE process instances found",
+		);
+	});
+
+	test("notes an applied date range", () => {
+		assert.strictEqual(
+			processInstancesEmptyMessage({
+				state: "ACTIVE",
+				startDate: { $gt: "2024-01-01" },
+			}),
+			"No ACTIVE process instances found for startDate within the given range",
+		);
 	});
 });
