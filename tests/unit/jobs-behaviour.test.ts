@@ -73,6 +73,28 @@ describe("CLI behavioural: activate jobs", () => {
 			`stderr: ${result.stderr}`,
 		);
 	});
+
+	test("--dry-run does not include customHeaders by default", async () => {
+		const result = await c8("activate", "jobs", "--dry-run", "my-job-type");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.customHeaders, undefined);
+	});
+
+	test("--dry-run includes customHeaders when --customHeaders is passed", async () => {
+		const result = await c8(
+			"activate",
+			"jobs",
+			"--dry-run",
+			"my-job-type",
+			"--customHeaders",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.customHeaders, true);
+	});
 });
 
 // ─── complete job ────────────────────────────────────────────────────────────

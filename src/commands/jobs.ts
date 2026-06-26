@@ -107,6 +107,7 @@ export const activateJobsCommand = defineCommand(
 				maxJobsToActivate,
 				timeout,
 				worker,
+				...(flags.customHeaders && { customHeaders: true }),
 			},
 		});
 		if (dr) return dr;
@@ -129,7 +130,9 @@ export const activateJobsCommand = defineCommand(
 					Type: job.type,
 					Retries: job.retries,
 					"Process Instance": job.processInstanceKey,
-					"Custom Headers": JSON.stringify(job.customHeaders),
+					...(flags.customHeaders && {
+						"Custom Headers": JSON.stringify(job.customHeaders),
+					}),
 				})),
 				emptyMessage: "",
 			};
