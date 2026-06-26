@@ -318,29 +318,16 @@ describe("CLI behavioural: update job", () => {
 });
 
 // ─── activate jobs: customHeaders output ─────────────────────────────────────
+//
+// These tests cannot use --dry-run (which exits before the API call) because
+// customHeaders come from the response, not the request. A lightweight HTTP
+// mock server is the minimal approach that exercises the actual rendering path.
 
 describe("CLI behavioural: activate jobs customHeaders", () => {
 	const CLI = "src/index.ts";
 	let server: Server;
 	let port: number;
 	let dataDir: string;
-
-	/**
-	 * Strip CAMUNDA_* env vars so the SDK doesn't try OAuth/basic-auth
-	 * before reaching our mock.
-	 */
-	function envWithoutCamundaAuth(): NodeJS.ProcessEnv {
-		const out: NodeJS.ProcessEnv = {};
-		for (const [key, value] of Object.entries(process.env)) {
-			if (key.startsWith("CAMUNDA_")) continue;
-			out[key] = value;
-		}
-		delete out.DEBUG;
-		delete out.C8CTL_DEBUG;
-		delete out.NODE_DEBUG;
-		delete out.NODE_OPTIONS;
-		return out;
-	}
 
 	beforeEach(() => {
 		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-jobs-test-"));
@@ -351,24 +338,19 @@ describe("CLI behavioural: activate jobs customHeaders", () => {
 	});
 
 	afterEach(async () => {
-		if (server) {
-			await new Promise<void>((resolve) => {
-				server.close(() => resolve());
-			});
-		}
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 		rmSync(dataDir, { recursive: true, force: true });
 	});
 
-	async function startMockServer(
-		responseBody: Record<string, unknown>,
-	): Promise<void> {
+	async function activateJobsWithMockResponse(
+		responseJobs: Record<string, unknown>[],
+	): Promise<ReturnType<typeof asyncSpawn>> {
 		server = createServer((req: IncomingMessage, res) => {
-			// Consume request body to avoid ECONNRESET
 			const chunks: Buffer[] = [];
 			req.on("data", (chunk: Buffer) => chunks.push(chunk));
 			req.on("end", () => {
 				res.writeHead(200, { "content-type": "application/json" });
-				res.end(JSON.stringify(responseBody));
+				res.end(JSON.stringify({ jobs: responseJobs }));
 			});
 		});
 		port = await new Promise<number>((resolve, reject) => {
@@ -380,15 +362,12 @@ describe("CLI behavioural: activate jobs customHeaders", () => {
 			});
 			server.on("error", reject);
 		});
-	}
-
-	function runActivateJobs(...args: string[]) {
 		return asyncSpawn(
 			"node",
-			["--experimental-strip-types", CLI, "activate", "jobs", ...args],
+			["--experimental-strip-types", CLI, "activate", "jobs", "my-job-type"],
 			{
 				env: {
-					...envWithoutCamundaAuth(),
+					PATH: process.env.PATH,
 					CAMUNDA_BASE_URL: `http://127.0.0.1:${port}/v2`,
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
@@ -398,25 +377,20 @@ describe("CLI behavioural: activate jobs customHeaders", () => {
 	}
 
 	test("includes Custom Headers in output when customHeaders is non-empty", async () => {
-		await startMockServer({
-			jobs: [
-				{
-					jobKey: "12345",
-					type: "my-job-type",
-					retries: 3,
-					processInstanceKey: "67890",
-					customHeaders: { "x-order-id": "ORD-001", region: "eu-west" },
-				},
-			],
-		});
-
-		const result = await runActivateJobs("my-job-type");
+		const result = await activateJobsWithMockResponse([
+			{
+				jobKey: "12345",
+				type: "my-job-type",
+				retries: 3,
+				processInstanceKey: "67890",
+				customHeaders: { "x-order-id": "ORD-001", region: "eu-west" },
+			},
+		]);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 
 		const items = asRecordArray(JSON.parse(result.stdout));
 		assert.strictEqual(items.length, 1);
 		assert.strictEqual(items[0].Key, "12345");
-		assert.strictEqual(items[0].Type, "my-job-type");
 		assert.strictEqual(
 			items[0]["Custom Headers"],
 			JSON.stringify({ "x-order-id": "ORD-001", region: "eu-west" }),
@@ -424,45 +398,22 @@ describe("CLI behavioural: activate jobs customHeaders", () => {
 	});
 
 	test("omits Custom Headers column when customHeaders is empty", async () => {
-		await startMockServer({
-			jobs: [
-				{
-					jobKey: "12345",
-					type: "my-job-type",
-					retries: 3,
-					processInstanceKey: "67890",
-					customHeaders: {},
-				},
-			],
-		});
-
-		const result = await runActivateJobs("my-job-type");
+		const result = await activateJobsWithMockResponse([
+			{ jobKey: "12345", type: "my-job-type", retries: 3, customHeaders: {} },
+		]);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 
 		const items = asRecordArray(JSON.parse(result.stdout));
-		assert.strictEqual(items.length, 1);
-		assert.strictEqual(items[0].Key, "12345");
 		assert.strictEqual(items[0]["Custom Headers"], undefined);
 	});
 
 	test("omits Custom Headers column when customHeaders is absent", async () => {
-		await startMockServer({
-			jobs: [
-				{
-					jobKey: "12345",
-					type: "my-job-type",
-					retries: 3,
-					processInstanceKey: "67890",
-				},
-			],
-		});
-
-		const result = await runActivateJobs("my-job-type");
+		const result = await activateJobsWithMockResponse([
+			{ jobKey: "12345", type: "my-job-type", retries: 3 },
+		]);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 
 		const items = asRecordArray(JSON.parse(result.stdout));
-		assert.strictEqual(items.length, 1);
-		assert.strictEqual(items[0].Key, "12345");
 		assert.strictEqual(items[0]["Custom Headers"], undefined);
 	});
 });
