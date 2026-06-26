@@ -129,6 +129,9 @@ export const activateJobsCommand = defineCommand(
 					Type: job.type,
 					Retries: job.retries,
 					"Process Instance": job.processInstanceKey,
+					...(flags.customHeaders && {
+						"Custom Headers": job.customHeaders,
+					}),
 				})),
 				emptyMessage: "",
 			};
