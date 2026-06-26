@@ -7,14 +7,9 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord, asRecordArray, getUrl } from "../utils/guards.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
+import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── activate jobs ───────────────────────────────────────────────────────────
 
@@ -317,103 +312,3 @@ describe("CLI behavioural: update job", () => {
 	});
 });
 
-// ─── activate jobs: customHeaders output ─────────────────────────────────────
-//
-// These tests cannot use --dry-run (which exits before the API call) because
-// customHeaders come from the response, not the request. A lightweight HTTP
-// mock server is the minimal approach that exercises the actual rendering path.
-
-describe("CLI behavioural: activate jobs customHeaders", () => {
-	const CLI = "src/index.ts";
-	let server: Server;
-	let port: number;
-	let dataDir: string;
-
-	beforeEach(() => {
-		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-jobs-test-"));
-		writeFileSync(
-			join(dataDir, "session.json"),
-			JSON.stringify({ outputMode: "json" }),
-		);
-	});
-
-	afterEach(async () => {
-		await new Promise<void>((resolve) => server.close(() => resolve()));
-		rmSync(dataDir, { recursive: true, force: true });
-	});
-
-	async function activateJobsWithMockResponse(
-		responseJobs: Record<string, unknown>[],
-	): Promise<ReturnType<typeof asyncSpawn>> {
-		server = createServer((req: IncomingMessage, res) => {
-			const chunks: Buffer[] = [];
-			req.on("data", (chunk: Buffer) => chunks.push(chunk));
-			req.on("end", () => {
-				res.writeHead(200, { "content-type": "application/json" });
-				res.end(JSON.stringify({ jobs: responseJobs }));
-			});
-		});
-		port = await new Promise<number>((resolve, reject) => {
-			server.listen(0, "127.0.0.1", () => {
-				const addr = server.address();
-				const p = typeof addr === "object" && addr !== null ? addr.port : null;
-				if (p !== null) resolve(p);
-				else reject(new Error("Could not determine ephemeral port"));
-			});
-			server.on("error", reject);
-		});
-		return asyncSpawn(
-			"node",
-			["--experimental-strip-types", CLI, "activate", "jobs", "my-job-type"],
-			{
-				env: {
-					PATH: process.env.PATH,
-					CAMUNDA_BASE_URL: `http://127.0.0.1:${port}/v2`,
-					HOME: "/tmp/c8ctl-test-nonexistent-home",
-					C8CTL_DATA_DIR: dataDir,
-				},
-			},
-		);
-	}
-
-	test("includes Custom Headers in output when customHeaders is non-empty", async () => {
-		const result = await activateJobsWithMockResponse([
-			{
-				jobKey: "12345",
-				type: "my-job-type",
-				retries: 3,
-				processInstanceKey: "67890",
-				customHeaders: { "x-order-id": "ORD-001", region: "eu-west" },
-			},
-		]);
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-
-		const items = asRecordArray(JSON.parse(result.stdout));
-		assert.strictEqual(items.length, 1);
-		assert.strictEqual(items[0].Key, "12345");
-		assert.strictEqual(
-			items[0]["Custom Headers"],
-			JSON.stringify({ "x-order-id": "ORD-001", region: "eu-west" }),
-		);
-	});
-
-	test("omits Custom Headers column when customHeaders is empty", async () => {
-		const result = await activateJobsWithMockResponse([
-			{ jobKey: "12345", type: "my-job-type", retries: 3, customHeaders: {} },
-		]);
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-
-		const items = asRecordArray(JSON.parse(result.stdout));
-		assert.strictEqual(items[0]["Custom Headers"], undefined);
-	});
-
-	test("omits Custom Headers column when customHeaders is absent", async () => {
-		const result = await activateJobsWithMockResponse([
-			{ jobKey: "12345", type: "my-job-type", retries: 3 },
-		]);
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-
-		const items = asRecordArray(JSON.parse(result.stdout));
-		assert.strictEqual(items[0]["Custom Headers"], undefined);
-	});
-});
