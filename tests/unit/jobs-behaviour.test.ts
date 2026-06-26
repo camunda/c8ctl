@@ -311,4 +311,3 @@ describe("CLI behavioural: update job", () => {
 		);
 	});
 });
-
