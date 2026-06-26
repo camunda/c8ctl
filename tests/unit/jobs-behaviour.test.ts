@@ -7,14 +7,13 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, test } from "node:test";
-import { isRecord } from "../../src/core/logger.ts";
 import { c8, parseJson } from "../utils/cli.ts";
-import { asRecord, asRecordArray, getUrl } from "../utils/guards.ts";
+import { asRecord, asRecordArray, getUrl, isRecord } from "../utils/guards.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
@@ -65,14 +64,22 @@ async function c8WithMockServer(
 		join(dataDir, "session.json"),
 		JSON.stringify({ outputMode: "json" }),
 	);
-	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
-		env: {
-			PATH: process.env.PATH,
-			CAMUNDA_BASE_URL: mockBaseUrl,
-			HOME: "/tmp/c8ctl-test-nonexistent-home",
-			C8CTL_DATA_DIR: dataDir,
-		},
-	});
+	try {
+		return await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, ...args],
+			{
+				env: {
+					PATH: process.env.PATH,
+					CAMUNDA_BASE_URL: mockBaseUrl,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
 }
 
 // ─── activate jobs ───────────────────────────────────────────────────────────
