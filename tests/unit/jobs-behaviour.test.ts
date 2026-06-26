@@ -82,7 +82,7 @@ describe("CLI behavioural: activate jobs", () => {
 		assert.strictEqual(body.customHeaders, undefined);
 	});
 
-	test("--dry-run includes customHeaders when --customHeaders is passed", async () => {
+	test("--customHeaders flag is accepted without error", async () => {
 		const result = await c8(
 			"activate",
 			"jobs",
@@ -93,7 +93,8 @@ describe("CLI behavioural: activate jobs", () => {
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const body = asRecord(parseJson(result).body, "dry-run body");
-		assert.strictEqual(body.customHeaders, true);
+		// --customHeaders is a display flag only; it must not appear in the API body
+		assert.strictEqual(body.customHeaders, undefined);
 	});
 });
 

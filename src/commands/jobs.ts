@@ -107,7 +107,6 @@ export const activateJobsCommand = defineCommand(
 				maxJobsToActivate,
 				timeout,
 				worker,
-				...(flags.customHeaders && { customHeaders: true }),
 			},
 		});
 		if (dr) return dr;
