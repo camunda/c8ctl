@@ -1243,6 +1243,10 @@ export const COMMAND_REGISTRY = {
 				description: "Job timeout in milliseconds",
 			},
 			worker: { type: "string", description: "Worker name" },
+			customHeaders: {
+				type: "boolean",
+				description: "Include custom headers in output",
+			},
 		},
 		resourcePositionals: {
 			jobs: [
