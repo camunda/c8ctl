@@ -82,6 +82,37 @@ async function c8WithMockServer(
 	}
 }
 
+/**
+ * Spawn the CLI against a mock server URL with output mode set to TEXT.
+ * No credentials are supplied so the SDK uses CAMUNDA_AUTH_STRATEGY=NONE.
+ */
+async function c8WithMockServerText(
+	mockBaseUrl: string,
+	...args: string[]
+): ReturnType<typeof asyncSpawn> {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-jobs-mock-text-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "text" }),
+	);
+	try {
+		return await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, ...args],
+			{
+				env: {
+					PATH: process.env.PATH,
+					CAMUNDA_BASE_URL: mockBaseUrl,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
 // ─── activate jobs ───────────────────────────────────────────────────────────
 
 describe("CLI behavioural: activate jobs", () => {
@@ -499,6 +530,64 @@ describe("CLI behavioural: update job", () => {
 		assert.ok(
 			result.stderr.includes("--operationReference"),
 			`stderr: ${result.stderr}`,
+		);
+	});
+});
+
+// ─── activate jobs --customHeaders text-mode rendering ───────────────────────
+//
+// Verifies that object-valued cells (customHeaders) are JSON-stringified in
+// text mode rather than rendered as "[object Object]".
+
+describe("CLI behavioural: activate jobs --customHeaders text-mode rendering", () => {
+	let server: { url: string; close: () => Promise<void> } | null = null;
+
+	afterEach(async () => {
+		if (server) {
+			await server.close();
+			server = null;
+		}
+	});
+
+	test("Custom Headers column contains JSON-stringified object in text output", async () => {
+		const mockJob = {
+			jobKey: "123456",
+			type: "my-job-type",
+			retries: 3,
+			processInstanceKey: "789",
+			customHeaders: { "x-foo": "bar", "x-count": 42 },
+			worker: "c8ctl",
+			deadline: Date.now() + 60000,
+			elementId: "task1",
+			processDefinitionId: "process1",
+			processDefinitionVersion: 1,
+			processDefinitionKey: "pd1",
+			tenantId: "<default>",
+			variables: {},
+		};
+		server = await startMockServer((_req, res) => {
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ jobs: [mockJob] }));
+		});
+
+		const result = await c8WithMockServerText(
+			server.url,
+			"activate",
+			"jobs",
+			"--customHeaders",
+			"my-job-type",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		// Text mode: look for the JSON-stringified value in stdout lines
+		assert.ok(
+			result.stdout.includes('{"x-foo":"bar","x-count":42}'),
+			`Expected JSON-stringified customHeaders in text output, got:\n${result.stdout}`,
+		);
+		// Ensure the old broken rendering is gone
+		assert.ok(
+			!result.stdout.includes("[object Object]"),
+			`Expected no [object Object] in text output, got:\n${result.stdout}`,
 		);
 	});
 });
