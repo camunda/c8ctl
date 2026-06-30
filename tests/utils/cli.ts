@@ -70,6 +70,22 @@ export async function c8(...args: string[]): Promise<SpawnResult> {
 }
 
 /**
+ * Like `c8()`, but merges `extraEnv` over the deterministic test env.
+ * Use this to point the CLI at a local stub server (override
+ * `CAMUNDA_BASE_URL`) so error paths that need a real HTTP response —
+ * e.g. an HTTP 413 from the cluster ingress — can be exercised without a
+ * live cluster.
+ */
+export async function c8WithEnv(
+	extraEnv: Record<string, string>,
+	...args: string[]
+): Promise<SpawnResult> {
+	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+		env: { ...buildChildEnv(), ...extraEnv },
+	});
+}
+
+/**
  * Like `c8()`, but accepts a `timeout` (and any future options). Use this
  * for invocations that could hang under regression so the test fails fast
  * instead of stalling the suite (e.g. long-running verbs against the --help
