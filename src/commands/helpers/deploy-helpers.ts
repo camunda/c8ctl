@@ -859,8 +859,17 @@ function handleDeploymentError(
 	const detail = typeof raw.detail === "string" ? raw.detail : undefined;
 	const status = typeof raw.status === "number" ? raw.status : undefined;
 
+	// HTTP 413 is raised by the cluster ingress (body-size limit), not the
+	// engine — it arrives as a bare "HTTP 413" with no Problem-Detail body.
+	// Give it a self-explanatory title so the "Deployment failed" line and
+	// the rethrown SilentError both read clearly. The actionable detail
+	// (payload size, largest file, how to split) is added by
+	// `printDeploymentHints`, keyed off `status === 413`.
+	const effectiveTitle =
+		status === 413 ? "Payload too large (HTTP 413)" : title;
+
 	// Display the main error
-	logger.error("Deployment failed", new Error(title));
+	logger.error("Deployment failed", new Error(effectiveTitle));
 
 	// Display the detailed error message if available
 	if (detail) {
@@ -878,7 +887,24 @@ function handleDeploymentError(
 	// Pre-rendered the rich error context above; throw a SilentError so
 	// `handleCommandError` exits non-zero without re-rendering a
 	// duplicate "Failed to deploy: <message>" summary line.
-	throw new SilentError(title);
+	throw new SilentError(effectiveTitle);
+}
+
+/**
+ * Format a byte count as a human-readable size (e.g. "1.5 MB").
+ * Used by the HTTP 413 hint so the user sees roughly how large the
+ * rejected payload was.
+ */
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	const units = ["KB", "MB", "GB", "TB"];
+	let value = bytes / 1024;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex++;
+	}
+	return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 /**
@@ -948,6 +974,28 @@ function printDeploymentHints(
 	} else if (title === "RESOURCE_EXHAUSTED") {
 		hints.push("💡 The server is under heavy load (backpressure).");
 		hints.push("   Wait a moment and retry the deployment.");
+	} else if (status === 413) {
+		const totalBytes = resources.reduce(
+			(sum, r) => sum + r.content.byteLength,
+			0,
+		);
+		hints.push(
+			`💡 The deployment payload (~${formatBytes(totalBytes)} across ${resources.length} resource(s)) exceeded the cluster's request body-size limit.`,
+		);
+		hints.push(
+			"   This limit is enforced by the cluster ingress, not the engine, so the whole deployment was rejected before reaching Camunda — nothing was deployed.",
+		);
+		if (resources.length > 0) {
+			const largest = resources.reduce((max, r) =>
+				r.content.byteLength > max.content.byteLength ? r : max,
+			);
+			hints.push(
+				`   Largest single resource: ${largest.relativePath || largest.name} (~${formatBytes(largest.content.byteLength)}).`,
+			);
+		}
+		hints.push(
+			"   Split the resources across multiple `c8 deploy` runs so each request stays under the limit.",
+		);
 	} else if (title === "NOT_FOUND" || status === 404) {
 		hints.push(
 			"💡 The Camunda server could not be reached or the endpoint was not found.",
