@@ -517,6 +517,12 @@ c8ctl cluster install 8.9
 
 # Remove a cached version
 c8ctl cluster delete 8.9
+
+# Purge history and journal data for a version (binary stays intact)
+c8ctl cluster purge 8.9
+
+# Stop cluster and purge its runtime data in one step
+c8ctl cluster stop --purge
 ```
 
 #### Version Aliases
