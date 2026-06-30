@@ -1233,6 +1233,26 @@ c8 cluster install alpha
 c8 cluster delete 8.8
 ```
 
+### Purge Cluster Data
+
+Wipe history and journal data while keeping the downloaded binary intact.
+The next `cluster start` begins with a fresh empty state without re-downloading anything.
+
+```bash
+# Purge data for a specific version (version required, like delete)
+c8 cluster purge 8.9
+c8 cluster purge 8.9.0-alpha5
+
+# Stop the running cluster and purge its data in one step
+c8 cluster stop --purge
+```
+
+If the target version is currently running, stop it first with `cluster stop`
+(or use `cluster stop --purge` to stop and purge in one step).
+
+`cluster stop --purge` is the recommended way to reset a running cluster:
+it captures the running version, stops it, then purges the data atomically.
+
 ### Typical Local Development Workflow
 
 ```bash

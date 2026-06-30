@@ -68,7 +68,7 @@ describe("Cluster Plugin – metadata", () => {
 		}
 	});
 
-	test("examples include start, stop, status, list, logs, list-remote, install, and delete commands", () => {
+	test("examples include start, stop, status, list, logs, list-remote, install, delete, and purge commands", () => {
 		const examples = plugin.metadata.commands.cluster.examples;
 		const cmds = examples.map((e: { command: string }) => e.command);
 		assert.ok(
@@ -104,6 +104,10 @@ describe("Cluster Plugin – metadata", () => {
 		assert.ok(
 			cmds.some((c: string) => c.includes("delete")),
 			"Should have a delete example",
+		);
+		assert.ok(
+			cmds.some((c: string) => c.includes("purge")),
+			"Should have a purge example",
 		);
 	});
 });
@@ -301,6 +305,17 @@ describe("Cluster Plugin – parsePluginArgs", () => {
 	test("parses --debug flag", () => {
 		const result = plugin.parsePluginArgs(["start", "--debug"]);
 		assert.strictEqual(result.debug, true);
+	});
+
+	test("parses --purge flag", () => {
+		const result = plugin.parsePluginArgs(["stop", "--purge"]);
+		assert.strictEqual(result.subcommand, "stop");
+		assert.strictEqual(result.purge, true);
+	});
+
+	test("purge defaults to false when flag absent", () => {
+		const result = plugin.parsePluginArgs(["stop"]);
+		assert.strictEqual(result.purge, false);
 	});
 
 	test("throws when --c8-version has no value (end of args)", () => {
@@ -1577,6 +1592,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 	let captured: string[];
 	let originalLog: typeof console.log;
 	let originalWarn: typeof console.warn;
+	let originalError: typeof console.error;
 	let originalExit: typeof process.exit;
 
 	beforeEach(() => {
@@ -1584,11 +1600,15 @@ describe("Cluster Plugin – deleteVersion", () => {
 		captured = [];
 		originalLog = console.log;
 		originalWarn = console.warn;
+		originalError = console.error;
 		originalExit = process.exit;
 		console.log = (...args: unknown[]) => {
 			captured.push(args.map(String).join(" "));
 		};
 		console.warn = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+		console.error = (...args: unknown[]) => {
 			captured.push(args.map(String).join(" "));
 		};
 	});
@@ -1597,6 +1617,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
 		console.log = originalLog;
 		console.warn = originalWarn;
+		console.error = originalError;
 		process.exit = originalExit;
 	});
 
@@ -1630,6 +1651,8 @@ describe("Cluster Plugin – deleteVersion", () => {
 		writeFileSync(join(binaryDir, "c8run"), "");
 		writeFileSync(join(tempDir, "cluster.active"), "running");
 		writeFileSync(join(tempDir, "cluster.version"), "8.8");
+		// Live pidfile so isVersionRunning() returns true
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
 
 		let exitCalled = false;
 		const restoreExit = mockProcessExit(() => {
@@ -1645,6 +1668,345 @@ describe("Cluster Plugin – deleteVersion", () => {
 		} finally {
 			restoreExit();
 		}
+	});
+
+	test("prevents deleting when pidfiles indicate a running cluster but marker is missing", async () => {
+		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, "c8run"), "");
+		// No marker files — only a live pidfile
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+
+		try {
+			await plugin.deleteVersion(tempDir, "8.8").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when processes are detected",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("prevents deleting when cluster.active exists but cluster.version is missing and pidfiles present", async () => {
+		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, "c8run"), "");
+		// Partial marker state: active exists but version file is absent
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+
+		try {
+			await plugin.deleteVersion(tempDir, "8.8").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when cluster.version is absent",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// purgeClusterData
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – purgeClusterData", () => {
+	let tempDir: string;
+	let captured: string[];
+	let originalLog: typeof console.log;
+	let originalWarn: typeof console.warn;
+	let originalError: typeof console.error;
+	let originalExit: typeof process.exit;
+
+	function makeFakeInstall(
+		cacheDir: string,
+		version: string,
+		versionDir: string,
+	) {
+		const binaryDir = join(cacheDir, `c8run-${version}`, versionDir);
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, "c8run"), "");
+		// camunda-data dir (history data + app state)
+		mkdirSync(join(binaryDir, "camunda-data"), { recursive: true });
+		writeFileSync(join(binaryDir, "camunda-data", "elasticsearch.db"), "data");
+		// camunda-zeebe-* dir with data subdir (Zeebe journal)
+		const zeebeDir = join(binaryDir, `camunda-zeebe-${versionDir}`);
+		mkdirSync(join(zeebeDir, "data"), { recursive: true });
+		writeFileSync(join(zeebeDir, "data", "raft.log"), "journal");
+		mkdirSync(join(zeebeDir, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir, "lib", "zeebe.jar"), "binary");
+		return binaryDir;
+	}
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		captured = [];
+		originalLog = console.log;
+		originalWarn = console.warn;
+		originalError = console.error;
+		originalExit = process.exit;
+		console.log = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+		console.warn = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+		console.error = (...args: unknown[]) =>
+			captured.push(args.map(String).join(" "));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+		console.log = originalLog;
+		console.warn = originalWarn;
+		console.error = originalError;
+		process.exit = originalExit;
+	});
+
+	test("deletes camunda-data and zeebe data dirs, preserves binary and zeebe lib", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data should be removed",
+		);
+		const zeebeDataDir = join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data");
+		assert.strictEqual(
+			existsSync(zeebeDataDir),
+			false,
+			"zeebe data dir should be removed",
+		);
+		assert.ok(
+			existsSync(join(binaryDir, "c8run")),
+			"binary should be preserved",
+		);
+		assert.ok(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "lib")),
+			"zeebe lib should be preserved",
+		);
+	});
+
+	test("logs what was deleted and what was preserved", async () => {
+		makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("purged") ||
+				output.includes("deleted") ||
+				output.includes("Purged") ||
+				output.includes("Deleted"),
+			"Should log what was deleted",
+		);
+		assert.ok(
+			output.includes("preserved") ||
+				output.includes("intact") ||
+				output.includes("binary"),
+			"Should mention what was preserved",
+		);
+	});
+
+	test("errors and exits when version is not installed", async () => {
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await assert.rejects(
+				() => plugin.purgeClusterData(tempDir, "9.9"),
+				/exit/,
+			);
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("not installed") || output.includes("9.9"),
+				"Should report version not found",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("works when camunda-data does not exist (e.g. never started)", async () => {
+		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, "c8run"), "");
+
+		// Should not throw even with no data dirs to delete
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		const output = captured.join("\n");
+		assert.ok(output.length > 0, "Should produce some output");
+	});
+
+	test("rejects invalid version spec (path traversal attempt)", async () => {
+		await assert.rejects(
+			() => plugin.purgeClusterData(tempDir, "../evil"),
+			/Invalid version/,
+		);
+	});
+
+	test("rejects version spec with double-dot sequence", async () => {
+		await assert.rejects(
+			() => plugin.purgeClusterData(tempDir, "8..9"),
+			/Invalid version/,
+		);
+	});
+
+	test("purges successfully even when a different version is currently running", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Simulate version 8.10 running (different from the 8.9 we are purging)
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.10");
+		const runningVersionDir = join(tempDir, "c8run-8.10");
+		mkdirSync(runningVersionDir, { recursive: true });
+		writeFileSync(
+			join(runningVersionDir, "camunda.process"),
+			String(process.pid),
+		);
+
+		// 8.9's data dirs should be deleted without error
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"8.9 camunda-data should be purged regardless of 8.10 running",
+		);
+		// 8.10's directory should be untouched
+		assert.ok(
+			existsSync(runningVersionDir),
+			"Running version directory should be untouched",
+		);
+	});
+
+	test("errors and exits when the target version is currently running", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9");
+		// Live pidfile so isVersionRunning() returns true
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await assert.rejects(
+				() => plugin.purgeClusterData(tempDir, "8.9"),
+				/exit/,
+			);
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("running") || output.includes("Stop"),
+				"Should tell the user to stop the cluster first",
+			);
+			assert.ok(
+				output.includes("--purge"),
+				"Should hint at cluster stop --purge",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("purges successfully when marker is stale (no live process)", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Marker files exist but no .process file → cluster is not actually running
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data should be deleted despite stale marker",
+		);
+	});
+
+	test("prevents purge when pidfiles indicate a running cluster but marker is missing", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// No marker files — only a live pidfile
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await plugin.purgeClusterData(tempDir, "8.9").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when processes are detected",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("prevents purge when cluster.active exists but cluster.version is missing and pidfiles present", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Partial marker state: active exists but version file is absent
+		writeFileSync(join(tempDir, "cluster.active"), "");
+		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
+
+		const restoreExit = mockProcessExit(() => {});
+		try {
+			await plugin.purgeClusterData(tempDir, "8.9").catch(() => {});
+			const output = captured.join("\n");
+			assert.ok(
+				output.includes("marker is missing"),
+				"Should error about missing marker when cluster.version is absent",
+			);
+		} finally {
+			restoreExit();
+		}
+	});
+
+	test("deletes data dirs from multiple camunda-zeebe-* subdirectories", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Add a second zeebe distribution dir
+		const zeebeDir2 = join(binaryDir, "camunda-zeebe-connector-8.9.9");
+		mkdirSync(join(zeebeDir2, "data"), { recursive: true });
+		writeFileSync(join(zeebeDir2, "data", "raft.log"), "journal");
+		mkdirSync(join(zeebeDir2, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir2, "lib", "connector.jar"), "binary");
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data")),
+			false,
+			"First zeebe data dir should be deleted",
+		);
+		assert.strictEqual(
+			existsSync(join(zeebeDir2, "data")),
+			false,
+			"Second zeebe data dir should also be deleted",
+		);
+		assert.ok(
+			existsSync(join(zeebeDir2, "lib")),
+			"Second zeebe lib dir should be preserved",
+		);
+	});
+
+	test("handles camunda-zeebe-* dir that has no data subdir (lib-only)", async () => {
+		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
+		mkdirSync(binaryDir, { recursive: true });
+		writeFileSync(join(binaryDir, "c8run"), "");
+		const zeebeDir = join(binaryDir, "camunda-zeebe-8.9.9");
+		mkdirSync(join(zeebeDir, "lib"), { recursive: true });
+		writeFileSync(join(zeebeDir, "lib", "zeebe.jar"), "binary");
+		// No data subdir created
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.ok(
+			existsSync(join(zeebeDir, "lib")),
+			"zeebe lib should remain untouched",
+		);
 	});
 });
 
@@ -1962,6 +2324,21 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			"delete without version should prompt for one",
 		);
 	});
+
+	test("--purge on non-stop subcommand exits with error", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["start", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("--purge can only be used with the stop subcommand"),
+			"--purge on start should error",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2239,7 +2616,7 @@ describe("Cluster Plugin – stopC8Run", () => {
 		writeFileSync(join(tempDir, "cluster.version"), "8.8.1");
 
 		const config = { cacheDir: tempDir, version: "8.8" };
-		await plugin.stopC8Run(config);
+		const result = await plugin.stopC8Run(config);
 
 		const output = captured.join("\n");
 		assert.ok(
@@ -2255,6 +2632,12 @@ describe("Cluster Plugin – stopC8Run", () => {
 		assert.ok(
 			!existsSync(join(tempDir, "cluster.version")),
 			"Version marker should be removed",
+		);
+		// Return value should carry the version so stop --purge can proceed
+		assert.strictEqual(
+			result,
+			"8.8.1",
+			"Should return the stale version so stop --purge can purge it",
 		);
 	});
 });
