@@ -942,7 +942,7 @@ export const searchWaitStatesCommand = defineCommand(
 	"search",
 	"wait-state",
 	async (ctx, flags, _args) => {
-		const { client, logger, tenantId, profile } = ctx;
+		const { client, logger, profile } = ctx;
 
 		const criteria: string[] = [];
 		if (flags.processInstanceKey) {
@@ -974,7 +974,7 @@ export const searchWaitStatesCommand = defineCommand(
 		}
 
 		const filter: { filter: Record<string, unknown> } = {
-			filter: { tenantId },
+			filter: {},
 		};
 
 		if (flags.processInstanceKey) {
