@@ -560,6 +560,7 @@ const PROFILE_CONNECTION_FLAGS = {
 	clientSecret: { type: "string", description: "OAuth client secret" },
 	audience: { type: "string", description: "OAuth audience" },
 	oAuthUrl: { type: "string", description: "OAuth token URL" },
+	scope: { type: "string", description: "OAuth scope (space-separated)" },
 	defaultTenantId: { type: "string", description: "Default tenant ID" },
 	username: { type: "string", description: "Basic auth username" },
 	password: { type: "string", description: "Basic auth password" },

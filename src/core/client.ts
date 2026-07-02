@@ -36,6 +36,9 @@ export function createClient(
 		if (config.oAuthUrl) {
 			sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
 		}
+		if (config.scope) {
+			sdkConfig.CAMUNDA_OAUTH_SCOPE = config.scope;
+		}
 	}
 	// Add Basic auth configuration if present
 	else if (config.username && config.password) {
@@ -205,6 +208,9 @@ export async function resolveAuthHeaders(
 		};
 		if (config.audience) {
 			params.audience = config.audience;
+		}
+		if (config.scope) {
+			params.scope = config.scope;
 		}
 		const tokenRes = await fetch(tokenUrl, {
 			method: "POST",

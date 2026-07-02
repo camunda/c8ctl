@@ -1028,7 +1028,7 @@ c8 help profiles
 - **Optional with defaults**:
   - `--baseUrl` (default: `http://localhost:8080/v2`)
   - `--defaultTenantId` (runtime default tenant: `<default>`)
-- **Optional without c8ctl defaults**: `--audience`, `--oAuthUrl`
+- **Optional without c8ctl defaults**: `--audience`, `--oAuthUrl`, `--scope`
 - **Import shortcuts**: `--from-file <path>`, `--from-env`
 
 ```bash
@@ -1051,6 +1051,14 @@ c8 add profile prod \
   --clientSecret=your-client-secret \
   --audience=camunda-api \
   --oAuthUrl=https://auth.example.com/oauth/token
+
+# OAuth profile against an IdP that requires an explicit scope (e.g. Microsoft Entra ID)
+c8 add profile prod \
+  --baseUrl=https://camunda.example.com \
+  --clientId=your-client-id \
+  --clientSecret=your-client-secret \
+  --oAuthUrl=https://login.microsoftonline.com/your-tenant-id/oauth2/v2.0/token \
+  --scope=api://your-app-id/.default
 
 # Add profile with default tenant
 c8 add profile dev \
