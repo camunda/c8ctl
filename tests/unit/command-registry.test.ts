@@ -491,6 +491,7 @@ describe("helper functions", () => {
 			"clientSecret",
 			"audience",
 			"oAuthUrl",
+			"scope",
 			"defaultTenantId",
 			"from-file",
 			"from-env",

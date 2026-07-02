@@ -74,6 +74,7 @@ describe("Profile management", () => {
 				CAMUNDA_CLIENT_SECRET: "secret",
 				CAMUNDA_OAUTH_URL: "https://auth.example.com/token",
 				CAMUNDA_TOKEN_AUDIENCE: "zeebe.example.com",
+				CAMUNDA_OAUTH_SCOPE: "api://my-app/.default",
 				UNRELATED_VAR: "ignored",
 			});
 			assert.strictEqual(profile.name, "test");
@@ -82,6 +83,7 @@ describe("Profile management", () => {
 			assert.strictEqual(profile.clientSecret, "secret");
 			assert.strictEqual(profile.oAuthUrl, "https://auth.example.com/token");
 			assert.strictEqual(profile.audience, "zeebe.example.com");
+			assert.strictEqual(profile.scope, "api://my-app/.default");
 		});
 
 		test("maps Basic auth vars", () => {

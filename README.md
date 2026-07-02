@@ -614,10 +614,25 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `CAMUNDA_CLIENT_SECRET`: OAuth client secret
 - `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
+- `CAMUNDA_OAUTH_SCOPE`: OAuth scope (space-separated), maps to the `--scope` flag on `c8ctl add profile`. Needed for IdPs such as Microsoft Entra ID that require an explicit scope (e.g. `api://<app-id>/.default`)
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 - `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`. See [Per-invocation output override](#per-invocation-output-override).
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
 - `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr.
+
+### Running behind a proxy
+
+c8ctl is a plain Node.js process, so outbound HTTP(S) requests (to the Camunda 8 REST API and OAuth token endpoint) follow Node's own proxy and TLS trust settings, not c8ctl-specific configuration. When running behind a corporate proxy, set these Node.js environment variables:
+
+- `NODE_USE_ENV_PROXY=1`: Makes Node's `fetch`/`http`/`https` respect the standard `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` environment variables.
+- `NODE_USE_SYSTEM_CA=1`: Makes Node trust the OS-provided CA certificate store, in addition to its bundled CAs. Required when the proxy performs TLS interception with an internal/corporate root CA.
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+export NODE_USE_ENV_PROXY=1
+export NODE_USE_SYSTEM_CA=1
+```
 
 ## Configuration Files
 
@@ -1590,6 +1605,7 @@ Add a profile
 | `--clientSecret` | string |  | OAuth client secret |
 | `--audience` | string |  | OAuth audience |
 | `--oAuthUrl` | string |  | OAuth token URL |
+| `--scope` | string |  | OAuth scope (space-separated) |
 | `--defaultTenantId` | string |  | Default tenant ID |
 | `--username` | string |  | Basic auth username |
 | `--password` | string |  | Basic auth password |

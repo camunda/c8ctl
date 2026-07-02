@@ -78,6 +78,7 @@ interface AddProfileOptions {
 	clientSecret?: string;
 	audience?: string;
 	oauthUrl?: string;
+	scope?: string;
 	username?: string;
 	password?: string;
 	tenantId?: string;
@@ -155,6 +156,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 			clientSecret: options.clientSecret,
 			audience: options.audience,
 			oAuthUrl: options.oauthUrl,
+			scope: options.scope,
 			username: options.username,
 			password: options.password,
 			defaultTenantId: options.tenantId,
@@ -280,6 +282,7 @@ export const addProfileCommand = defineCommand(
 			clientSecret: flags.clientSecret,
 			audience: flags.audience,
 			oauthUrl: flags.oAuthUrl,
+			scope: flags.scope,
 			tenantId: flags.defaultTenantId,
 			username: flags.username,
 			password: flags.password,
