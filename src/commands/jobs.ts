@@ -88,6 +88,12 @@ export const activateJobsCommand = defineCommand(
 			: 10;
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
+		// `--variables` is registered as a string type in parseArgs (for
+		// `complete`/`fail`/`publish job --variables '{...}'`, which
+		// `deriveParseArgsOptions` promotes globally) but is used here as a
+		// boolean display toggle. Read argv directly so detection is
+		// position-independent (mirrors `get pi --variables`).
+		const includeVariables = process.argv.includes("--variables");
 
 		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
 			throw new Error("--maxJobsToActivate must be a positive integer");
@@ -132,6 +138,9 @@ export const activateJobsCommand = defineCommand(
 					"Element Instance": job.elementInstanceKey,
 					...(flags.customHeaders && {
 						"Custom Headers": job.customHeaders,
+					}),
+					...(includeVariables && {
+						Variables: job.variables,
 					}),
 				})),
 				emptyMessage: "",

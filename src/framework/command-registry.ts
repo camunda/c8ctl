@@ -1248,6 +1248,10 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description: "Include custom headers in output",
 			},
+			variables: {
+				type: "boolean",
+				description: "Include variables in output",
+			},
 		},
 		resourcePositionals: {
 			jobs: [

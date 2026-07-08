@@ -198,6 +198,21 @@ describe("CLI behavioural: activate jobs", () => {
 		// --customHeaders is a display flag only; it must not appear in the API body
 		assert.strictEqual(body.customHeaders, undefined);
 	});
+
+	test("--variables flag is accepted without error", async () => {
+		const result = await c8(
+			"activate",
+			"jobs",
+			"--dry-run",
+			"my-job-type",
+			"--variables",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		// --variables is a display flag only; it must not appear in the API body
+		assert.strictEqual(body.variables, undefined);
+	});
 });
 
 // ─── activate jobs with customHeaders response ───────────────────────────────
@@ -293,6 +308,160 @@ describe("CLI behavioural: activate jobs --customHeaders rendering", () => {
 			row["Custom Headers"],
 			undefined,
 			"Custom Headers should be absent when --customHeaders flag is not passed",
+		);
+	});
+});
+
+// ─── activate jobs with variables response ────────────────────────────────────
+//
+// --variables comes from the API response, so these tests require a mock
+// HTTP server: --dry-run exits before the API call and cannot exercise the
+// rendering path.
+
+describe("CLI behavioural: activate jobs --variables rendering", () => {
+	let server: { url: string; close: () => Promise<void> } | null = null;
+
+	afterEach(async () => {
+		if (server) {
+			await server.close();
+			server = null;
+		}
+	});
+
+	test("--variables includes variables as an object in JSON output", async () => {
+		const mockJob = {
+			jobKey: "123456",
+			type: "my-job-type",
+			retries: 3,
+			processInstanceKey: "789",
+			customHeaders: {},
+			worker: "c8ctl",
+			deadline: Date.now() + 60000,
+			elementId: "task1",
+			processDefinitionId: "process1",
+			processDefinitionVersion: 1,
+			processDefinitionKey: "pd1",
+			tenantId: "<default>",
+			variables: {
+				scopeInput: { processName: "Loan Approval" },
+				projectName: "loan",
+			},
+		};
+		server = await startMockServer((_req, res) => {
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ jobs: [mockJob] }));
+		});
+
+		const result = await c8WithMockServer(
+			server.url,
+			"activate",
+			"jobs",
+			"my-job-type",
+			"--variables",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const rows = asRecordArray(JSON.parse(result.stdout), "output rows");
+		assert.ok(rows.length > 0, "expected at least one row");
+		const row = asRecord(rows[0], "first row");
+		// "Variables" must be a plain object, not a JSON string
+		assert.deepStrictEqual(row.Variables, {
+			scopeInput: { processName: "Loan Approval" },
+			projectName: "loan",
+		});
+	});
+
+	test("without --variables the field is absent from output", async () => {
+		const mockJob = {
+			jobKey: "123456",
+			type: "my-job-type",
+			retries: 3,
+			processInstanceKey: "789",
+			customHeaders: {},
+			worker: "c8ctl",
+			deadline: Date.now() + 60000,
+			elementId: "task1",
+			processDefinitionId: "process1",
+			processDefinitionVersion: 1,
+			processDefinitionKey: "pd1",
+			tenantId: "<default>",
+			variables: { scopeInput: { processName: "Loan Approval" } },
+		};
+		server = await startMockServer((_req, res) => {
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ jobs: [mockJob] }));
+		});
+
+		const result = await c8WithMockServer(
+			server.url,
+			"activate",
+			"jobs",
+			"my-job-type",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const rows = asRecordArray(JSON.parse(result.stdout), "output rows");
+		assert.ok(rows.length > 0, "expected at least one row");
+		const row = asRecord(rows[0], "first row");
+		assert.strictEqual(
+			row.Variables,
+			undefined,
+			"Variables should be absent when --variables flag is not passed",
+		);
+	});
+
+	test("--variables is detected even when not the final argument", async () => {
+		// `variables` is globally promoted to a `string` flag by
+		// `deriveParseArgsOptions` (for `complete`/`fail`/`publish job
+		// --variables '{...}'`), so parseArgs assigns the following token as
+		// its value rather than returning a boolean. Detection therefore reads
+		// `process.argv` directly (mirroring `get pi --variables`) so the flag
+		// works regardless of position. (Note: the following token is still
+		// consumed by parseArgs — a shared framework limitation — so
+		// `--variables` should be placed last in practice.)
+		const mockJob = {
+			jobKey: "123456",
+			type: "my-job-type",
+			retries: 3,
+			processInstanceKey: "789",
+			customHeaders: {},
+			worker: "c8ctl",
+			deadline: Date.now() + 60000,
+			elementId: "task1",
+			processDefinitionId: "process1",
+			processDefinitionVersion: 1,
+			processDefinitionKey: "pd1",
+			tenantId: "<default>",
+			variables: { scopeInput: { processName: "Loan Approval" } },
+		};
+		server = await startMockServer((_req, res) => {
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify({ jobs: [mockJob] }));
+		});
+
+		const result = await c8WithMockServer(
+			server.url,
+			"activate",
+			"jobs",
+			"my-job-type",
+			"--variables",
+			"--customHeaders",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const rows = asRecordArray(JSON.parse(result.stdout), "output rows");
+		assert.ok(rows.length > 0, "expected at least one row");
+		const row = asRecord(rows[0], "first row");
+		assert.deepStrictEqual(row.Variables, {
+			scopeInput: { processName: "Loan Approval" },
+		});
+		// parseArgs treats `--variables` as a string option, so the following
+		// `--customHeaders` token is swallowed as its value rather than parsed
+		// as a boolean flag — the documented "place --variables last" caveat.
+		assert.strictEqual(
+			row["Custom Headers"],
+			undefined,
+			"--customHeaders is swallowed as --variables' value when not placed last",
 		);
 	});
 });
