@@ -691,7 +691,7 @@ Activate jobs of a specific type for processing
 | `--timeout` | string |  | Job timeout in milliseconds |
 | `--worker` | string |  | Worker name |
 | `--customHeaders` | boolean |  | Include custom headers in output |
-| `--variables` | boolean |  | Include variables in output |
+| `--fetchVariable` | string |  | Comma-separated variable names to fetch from the server and include in output |
 
 ---
 

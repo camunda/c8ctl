@@ -1248,9 +1248,10 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description: "Include custom headers in output",
 			},
-			variables: {
-				type: "boolean",
-				description: "Include variables in output",
+			fetchVariable: {
+				type: "string",
+				description:
+					"Comma-separated variable names to fetch from the server and include in output",
 			},
 		},
 		resourcePositionals: {
