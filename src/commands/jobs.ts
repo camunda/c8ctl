@@ -88,14 +88,21 @@ export const activateJobsCommand = defineCommand(
 			: 10;
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
-		const fetchVariableNames = flags.fetchVariable
-			?.split(",")
-			.map((name) => name.trim())
-			.filter(Boolean);
-		const fetchVariable =
-			fetchVariableNames && fetchVariableNames.length > 0
-				? fetchVariableNames
-				: undefined;
+		// --fetchVariable restricts which variables the server returns. Per the
+		// REST spec an *empty* list means "return all visible variables", which
+		// defeats the point of the flag, so if the flag is provided but resolves
+		// to no usable names we reject it rather than silently fetching all.
+		let fetchVariable: string[] | undefined;
+		if (flags.fetchVariable !== undefined) {
+			const fetchVariableNames = flags.fetchVariable
+				.split(",")
+				.map((name) => name.trim())
+				.filter(Boolean);
+			if (fetchVariableNames.length === 0) {
+				throw new Error("--fetchVariable was given no valid variable names");
+			}
+			fetchVariable = fetchVariableNames;
+		}
 
 		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
 			throw new Error("--maxJobsToActivate must be a positive integer");
