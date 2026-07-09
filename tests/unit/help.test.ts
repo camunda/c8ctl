@@ -504,7 +504,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--timeout"));
 		assert.ok(output.includes("--worker"));
 		assert.ok(output.includes("--customHeaders"));
-		assert.ok(output.includes("--variables"));
+		assert.ok(output.includes("--fetchVariable"));
 	});
 
 	test("showCommandHelp shows publish help", () => {

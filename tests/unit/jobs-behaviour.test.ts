@@ -199,19 +199,29 @@ describe("CLI behavioural: activate jobs", () => {
 		assert.strictEqual(body.customHeaders, undefined);
 	});
 
-	test("--variables flag is accepted without error", async () => {
+	test("--dry-run does not include fetchVariable by default", async () => {
+		const result = await c8("activate", "jobs", "--dry-run", "my-job-type");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.fetchVariable, undefined);
+	});
+
+	test("--dry-run sends --fetchVariable as a trimmed name array in the body", async () => {
 		const result = await c8(
 			"activate",
 			"jobs",
 			"--dry-run",
 			"my-job-type",
-			"--variables",
+			"--fetchVariable",
+			"scopeInput, projectName",
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const body = asRecord(parseJson(result).body, "dry-run body");
-		// --variables is a display flag only; it must not appear in the API body
-		assert.strictEqual(body.variables, undefined);
+		// --fetchVariable is a real API parameter (server-side variable filter),
+		// so it MUST appear in the request body, split into a trimmed array.
+		assert.deepStrictEqual(body.fetchVariable, ["scopeInput", "projectName"]);
 	});
 });
 
@@ -312,13 +322,13 @@ describe("CLI behavioural: activate jobs --customHeaders rendering", () => {
 	});
 });
 
-// ─── activate jobs with variables response ────────────────────────────────────
+// ─── activate jobs with fetchVariable ─────────────────────────────────────────
 //
-// --variables comes from the API response, so these tests require a mock
-// HTTP server: --dry-run exits before the API call and cannot exercise the
-// rendering path.
+// --fetchVariable filters variables server-side and surfaces the returned
+// values in the output, so these tests require a mock HTTP server: --dry-run
+// exits before the API call and cannot exercise the request/rendering path.
 
-describe("CLI behavioural: activate jobs --variables rendering", () => {
+describe("CLI behavioural: activate jobs --fetchVariable rendering", () => {
 	let server: { url: string; close: () => Promise<void> } | null = null;
 
 	afterEach(async () => {
@@ -328,7 +338,7 @@ describe("CLI behavioural: activate jobs --variables rendering", () => {
 		}
 	});
 
-	test("--variables includes variables as an object in JSON output", async () => {
+	test("--fetchVariable includes the returned variables as an object in JSON output", async () => {
 		const mockJob = {
 			jobKey: "123456",
 			type: "my-job-type",
@@ -357,7 +367,8 @@ describe("CLI behavioural: activate jobs --variables rendering", () => {
 			"activate",
 			"jobs",
 			"my-job-type",
-			"--variables",
+			"--fetchVariable",
+			"scopeInput,projectName",
 		);
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
@@ -371,7 +382,50 @@ describe("CLI behavioural: activate jobs --variables rendering", () => {
 		});
 	});
 
-	test("without --variables the field is absent from output", async () => {
+	test("--fetchVariable is sent to the server in the request body", async () => {
+		let receivedBody = "";
+		const mockJob = {
+			jobKey: "123456",
+			type: "my-job-type",
+			retries: 3,
+			processInstanceKey: "789",
+			customHeaders: {},
+			worker: "c8ctl",
+			deadline: Date.now() + 60000,
+			elementId: "task1",
+			processDefinitionId: "process1",
+			processDefinitionVersion: 1,
+			processDefinitionKey: "pd1",
+			tenantId: "<default>",
+			variables: { scopeInput: { processName: "Loan Approval" } },
+		};
+		server = await startMockServer((req, res) => {
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				receivedBody = Buffer.concat(chunks).toString("utf8");
+				res.setHeader("content-type", "application/json");
+				res.end(JSON.stringify({ jobs: [mockJob] }));
+			});
+		});
+
+		const result = await c8WithMockServer(
+			server.url,
+			"activate",
+			"jobs",
+			"my-job-type",
+			"--fetchVariable",
+			"scopeInput",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		// The server-side filter must reach the wire: the request body carries
+		// fetchVariable so the server only returns the requested variables.
+		const sent = asRecord(JSON.parse(receivedBody), "request body");
+		assert.deepStrictEqual(sent.fetchVariable, ["scopeInput"]);
+	});
+
+	test("without --fetchVariable the field is absent from output", async () => {
 		const mockJob = {
 			jobKey: "123456",
 			type: "my-job-type",
@@ -406,62 +460,7 @@ describe("CLI behavioural: activate jobs --variables rendering", () => {
 		assert.strictEqual(
 			row.Variables,
 			undefined,
-			"Variables should be absent when --variables flag is not passed",
-		);
-	});
-
-	test("--variables is detected even when not the final argument", async () => {
-		// `variables` is globally promoted to a `string` flag by
-		// `deriveParseArgsOptions` (for `complete`/`fail`/`publish job
-		// --variables '{...}'`), so parseArgs assigns the following token as
-		// its value rather than returning a boolean. Detection therefore reads
-		// `process.argv` directly (mirroring `get pi --variables`) so the flag
-		// works regardless of position. (Note: the following token is still
-		// consumed by parseArgs — a shared framework limitation — so
-		// `--variables` should be placed last in practice.)
-		const mockJob = {
-			jobKey: "123456",
-			type: "my-job-type",
-			retries: 3,
-			processInstanceKey: "789",
-			customHeaders: {},
-			worker: "c8ctl",
-			deadline: Date.now() + 60000,
-			elementId: "task1",
-			processDefinitionId: "process1",
-			processDefinitionVersion: 1,
-			processDefinitionKey: "pd1",
-			tenantId: "<default>",
-			variables: { scopeInput: { processName: "Loan Approval" } },
-		};
-		server = await startMockServer((_req, res) => {
-			res.setHeader("content-type", "application/json");
-			res.end(JSON.stringify({ jobs: [mockJob] }));
-		});
-
-		const result = await c8WithMockServer(
-			server.url,
-			"activate",
-			"jobs",
-			"my-job-type",
-			"--variables",
-			"--customHeaders",
-		);
-
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const rows = asRecordArray(JSON.parse(result.stdout), "output rows");
-		assert.ok(rows.length > 0, "expected at least one row");
-		const row = asRecord(rows[0], "first row");
-		assert.deepStrictEqual(row.Variables, {
-			scopeInput: { processName: "Loan Approval" },
-		});
-		// parseArgs treats `--variables` as a string option, so the following
-		// `--customHeaders` token is swallowed as its value rather than parsed
-		// as a boolean flag — the documented "place --variables last" caveat.
-		assert.strictEqual(
-			row["Custom Headers"],
-			undefined,
-			"--customHeaders is swallowed as --variables' value when not placed last",
+			"Variables should be absent when --fetchVariable flag is not passed",
 		);
 	});
 });

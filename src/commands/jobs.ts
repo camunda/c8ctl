@@ -88,12 +88,19 @@ export const activateJobsCommand = defineCommand(
 			: 10;
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
-		// `--variables` is registered as a string type in parseArgs (for
-		// `complete`/`fail`/`publish job --variables '{...}'`, which
-		// `deriveParseArgsOptions` promotes globally) but is used here as a
-		// boolean display toggle. Read argv directly so detection is
-		// position-independent (mirrors `get pi --variables`).
-		const includeVariables = process.argv.includes("--variables");
+		// `--fetchVariable` maps to the Activate Jobs API's `fetchVariable`
+		// field: a list of variable names the server should return for each
+		// activated job (empty ⇒ all). Passing it filters the payload
+		// server-side rather than merely trimming the display. When present,
+		// the requested variables are also surfaced in the output.
+		const fetchVariableNames = flags.fetchVariable
+			?.split(",")
+			.map((name) => name.trim())
+			.filter(Boolean);
+		const fetchVariable =
+			fetchVariableNames && fetchVariableNames.length > 0
+				? fetchVariableNames
+				: undefined;
 
 		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
 			throw new Error("--maxJobsToActivate must be a positive integer");
@@ -113,6 +120,7 @@ export const activateJobsCommand = defineCommand(
 				maxJobsToActivate,
 				timeout,
 				worker,
+				...(fetchVariable && { fetchVariable }),
 			},
 		});
 		if (dr) return dr;
@@ -125,6 +133,7 @@ export const activateJobsCommand = defineCommand(
 			maxJobsToActivate,
 			timeout,
 			worker,
+			...(fetchVariable && { fetchVariable }),
 		});
 
 		if (result.jobs && result.jobs.length > 0) {
@@ -139,7 +148,7 @@ export const activateJobsCommand = defineCommand(
 					...(flags.customHeaders && {
 						"Custom Headers": job.customHeaders,
 					}),
-					...(includeVariables && {
+					...(fetchVariable && {
 						Variables: job.variables,
 					}),
 				})),
