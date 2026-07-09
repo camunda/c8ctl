@@ -222,7 +222,21 @@ describe("CLI behavioural: activate jobs", () => {
 		assert.deepStrictEqual(body.fetchVariable, ["scopeInput", "projectName"]);
 	});
 
-	test("--dry-run omits fetchVariable when the value is an empty string", async () => {
+	test("--dry-run accepts --fetchVariable=value (equals form)", async () => {
+		const result = await c8(
+			"activate",
+			"jobs",
+			"--dry-run",
+			"my-job-type",
+			"--fetchVariable=scopeInput",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.deepStrictEqual(body.fetchVariable, ["scopeInput"]);
+	});
+
+	test("--fetchVariable with an empty string is treated as unset (framework normalizes it away)", async () => {
 		const result = await c8(
 			"activate",
 			"jobs",
@@ -232,12 +246,17 @@ describe("CLI behavioural: activate jobs", () => {
 			"",
 		);
 
+		// The framework's deserializeFlags normalizes an empty-string flag value
+		// to `undefined` before the handler runs, so `--fetchVariable ""` is
+		// indistinguishable from omitting the flag: no filter, field absent. A
+		// non-empty-but-empty-after-parse value (e.g. " , , ") does reach the
+		// handler and is rejected — see the next test.
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const body = asRecord(parseJson(result).body, "dry-run body");
 		assert.strictEqual(body.fetchVariable, undefined);
 	});
 
-	test("--dry-run omits fetchVariable when the value is only whitespace and commas", async () => {
+	test("--fetchVariable errors when the value is only whitespace and commas", async () => {
 		const result = await c8(
 			"activate",
 			"jobs",
@@ -247,10 +266,13 @@ describe("CLI behavioural: activate jobs", () => {
 			" , , ",
 		);
 
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const body = asRecord(parseJson(result).body, "dry-run body");
-		// Every token trims to empty, so nothing survives filtering.
-		assert.strictEqual(body.fetchVariable, undefined);
+		// Every token trims to empty, so nothing survives filtering: providing the
+		// flag with no usable names is rejected rather than fetching all variables.
+		assert.notStrictEqual(result.status, 0, "expected a non-zero exit");
+		assert.match(
+			result.stderr,
+			/--fetchVariable was given no valid variable names/,
+		);
 	});
 
 	test("--dry-run drops empty tokens from --fetchVariable and keeps the rest", async () => {
