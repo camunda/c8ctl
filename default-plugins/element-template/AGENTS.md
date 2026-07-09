@@ -10,10 +10,12 @@ version resolution.
 | File | Purpose |
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
-| `commands/<name>.ts` | One file per subcommand: `apply`, `get`, `get-properties`, `info`, `search`, `sync` |
+| `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
 | `marketplace.ts` | Cache I/O, `/ootb-connectors` fetch, sync, search, version resolution |
-| `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings |
+| `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
+| `binding.ts` | Binding-target resolution shared by `apply`/`edit` — which moddle child + property a `zeebe:input`/etc. binding writes to. Hand-rolled stand-in for bpmn-js-element-templates' internal `setPropertyValue`; see the note at the top of the file about replacing it once bpmn-io/bpmn-js-element-templates#236 ships. |
+| `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
 | `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
 
 ## Things to know before editing
@@ -48,10 +50,23 @@ version resolution.
   recovery (dead PID or > 60 min old) and signal handlers
   (SIGINT/SIGTERM/SIGHUP) that release before re-raising. Don't
   bypass it from new code paths.
-- **`apply` and `get` install an EPIPE handler before writing to
-  stdout** (`installStdoutEpipeHandler()` in `helpers.ts`). New
+- **`apply`, `edit`, and `get` install an EPIPE handler before writing
+  to stdout** (`installStdoutEpipeHandler()` in `helpers.ts`). New
   subcommands that write to stdout must do the same — otherwise
   `... | head -c N` closing the pipe early crashes the process.
+- **`apply` vs `edit`: applying a template is not the same operation as
+  editing one property on an already-applied element.** `apply` calls
+  `elementTemplates.applyTemplate()`, which unconditionally resets every
+  `Hidden`-typed template property to its template default on *every*
+  call — correct for first-time application or a version upgrade, but
+  it silently clobbers any hand-authored customization layered into a
+  Hidden-owned extension attribute (see c8ctl#466). `edit` never calls
+  `applyTemplate()` — it only writes into moddle children that already
+  exist via `modeling.updateModdleProperties`, so it can't create a
+  property whose gating condition wasn't previously met, but it also
+  can't reset anything the template doesn't explicitly touch. Don't
+  collapse these back into one code path without re-solving that
+  tension.
 - **JSON output uses element-templates schema field names verbatim.**
   No invented derivations — `binding`, `optional`, `value`, `condition`,
   `group` (id), `elementType: { value }`, `engines: { camunda }`. The
