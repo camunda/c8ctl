@@ -88,11 +88,6 @@ export const activateJobsCommand = defineCommand(
 			: 10;
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
-		// `--fetchVariable` maps to the Activate Jobs API's `fetchVariable`
-		// field: a list of variable names the server should return for each
-		// activated job (empty ⇒ all). Passing it filters the payload
-		// server-side rather than merely trimming the display. When present,
-		// the requested variables are also surfaced in the output.
 		const fetchVariableNames = flags.fetchVariable
 			?.split(",")
 			.map((name) => name.trim())
