@@ -74,10 +74,12 @@ describe("generate() README pointer", () => {
 	});
 
 	test("links to the command reference on docs.camunda.io", () => {
-		assert.ok(
-			output.includes(
-				"https://docs.camunda.io/docs/next/apis-tools/c8ctl/command-reference/",
-			),
+		// Use a regex match rather than String.includes on a URL literal to avoid
+		// CodeQL's js/incomplete-url-substring-sanitization false positive — this is
+		// a docs-link presence assertion, not URL validation.
+		assert.match(
+			output,
+			/docs\.camunda\.io\/docs\/next\/apis-tools\/c8ctl\/command-reference/,
 		);
 	});
 
