@@ -79,7 +79,7 @@ Integration tests require a running Camunda 8 instance at `http://localhost:8080
 2. Write the handler with `defineCommand()` in `src/commands/`
 3. Register it in `COMMAND_DISPATCH` in `src/command-dispatch.ts`
 4. Add tests in `tests/unit/` and `tests/integration/`
-5. Document in `EXAMPLES.md`
+5. Document it in the relevant page under [`docs/`](docs/) (the single source of truth for user docs, synced to camunda-docs)
 
 Help text and shell completions are auto-derived from `COMMAND_REGISTRY` — no manual help updates needed.
 

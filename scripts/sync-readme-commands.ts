@@ -289,21 +289,38 @@ export function generateCommandContent(
 	return lines;
 }
 
-/** Generate the README command reference section (nested under ## Command Reference). */
+/**
+ * Generate the README command reference section (a short pointer).
+ *
+ * The full, per-command reference lives in docs/command-reference.md — the source of
+ * truth that is synced to camunda-docs. The README intentionally keeps only the compact
+ * verb/resource list (see generateVerbResourceList) plus this pointer, to avoid
+ * duplicating ~1000 lines of generated content.
+ */
 export function generate(): string {
 	const lines: string[] = [];
 
 	lines.push("## Command Reference");
 	lines.push("");
-	lines.push(
-		"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
-	);
+	lines.push("<!-- Auto-generated pointer. Do not edit manually.");
 	lines.push(
 		"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts -->",
 	);
 	lines.push("");
-
-	lines.push(...generateCommandContent(3));
+	lines.push(
+		"A compact list of every verb and resource is in [Command Structure](#command-structure) above.",
+	);
+	lines.push("");
+	lines.push(
+		"For the complete reference of every command, flag, resource, and alias, see:",
+	);
+	lines.push("");
+	lines.push(
+		"- [`docs/command-reference.md`](docs/command-reference.md) in this repository, or",
+	);
+	lines.push(
+		"- the [c8ctl command reference](https://docs.camunda.io/docs/next/apis-tools/c8ctl/command-reference/) on docs.camunda.io.",
+	);
 
 	return lines.join("\n");
 }
@@ -318,7 +335,8 @@ export const DOCS_FRONTMATTER = [
 ].join("\n");
 
 export const DOCS_PREAMBLE = [
-	"<!-- Auto-generated from COMMAND_REGISTRY. Do not edit manually.",
+	"<!-- Auto-generated from COMMAND_REGISTRY in the c8ctl repo. Do not edit manually or in camunda-docs.",
+	"     This page is the source of truth in c8ctl and is synced to camunda-docs automatically.",
 	"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts --docs -->",
 	"",
 	":::warning Alpha feature",
@@ -483,45 +501,43 @@ function main(): void {
 		readme = `${vrlBefore}\n${vrlGenerated}\n${vrlAfter}`;
 	}
 
-	// ── Sync command-reference section ──
+	// ── Sync command-reference section (optional / legacy) ──
+	// The full command reference now lives in docs/command-reference.md (the source of
+	// truth that is synced to camunda-docs). The README keeps only the compact
+	// verb/resource list above. If the legacy command-reference markers are still
+	// present in the README, keep them in sync for backward compatibility; otherwise
+	// skip silently.
 	const startIdx = readme.indexOf(START_MARKER);
 	const endIdx = readme.indexOf(END_MARKER);
 
-	if (startIdx === -1 || endIdx === -1) {
+	if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
+		const generated = generate();
+		const before = readme.slice(0, startIdx + START_MARKER.length);
+		const after = readme.slice(endIdx);
+		readme = `${before}\n\n${generated}\n\n${after}`;
+	} else if (startIdx !== -1 || endIdx !== -1) {
 		console.error(
-			`ERROR: README.md is missing ${START_MARKER} and/or ${END_MARKER} markers.`,
+			`ERROR: README.md has a mismatched command-reference marker (found only one of ${START_MARKER} / ${END_MARKER}).`,
 		);
 		process.exit(1);
 	}
 
-	if (startIdx >= endIdx) {
-		console.error(
-			`ERROR: ${START_MARKER} must appear before ${END_MARKER} in README.md.`,
-		);
-		process.exit(1);
-	}
-
-	const generated = generate();
-	const before = readme.slice(0, startIdx + START_MARKER.length);
-	const after = readme.slice(endIdx);
-	const updated = `${before}\n\n${generated}\n\n${after}`;
+	const updated = readme;
 
 	if (checkMode) {
 		if (updated !== originalReadme) {
-			console.error(
-				"README.md command reference is out of sync with COMMAND_REGISTRY.",
-			);
+			console.error("README.md is out of sync with COMMAND_REGISTRY.");
 			console.error(
 				"Run: node --experimental-strip-types scripts/sync-readme-commands.ts",
 			);
 			process.exit(1);
 		}
-		console.log("README.md command reference is up to date.");
+		console.log("README.md is up to date.");
 		return;
 	}
 
 	writeFileSync(README_PATH, updated, "utf-8");
-	console.log("README.md command reference updated.");
+	console.log("README.md updated.");
 }
 
 // Only run when executed directly (not when imported by tests)
