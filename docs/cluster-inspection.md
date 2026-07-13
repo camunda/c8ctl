@@ -26,7 +26,7 @@ description: "Use c8ctl to list, search, and manage process instances, user task
 | `authorization(s)`      | `auth`        |
 | `mapping-rule(s)`       | `mr`          |
 
-Available verbs: `list`, `search`, `get`, `create`, `delete`, `set`, `cancel`, `complete`, `fail`, `activate`, `resolve`, `publish`, `correlate`, `assign`, `unassign`.
+Available verbs: `list`, `search`, `get`, `create`, `await`, `delete`, `set`, `cancel`, `complete`, `fail`, `activate`, `update`, `resolve`, `publish`, `correlate`, `assign`, `unassign`.
 
 :::tip
 All commands respect the active profile and tenant. Pass `--profile` to override the profile for a single command:

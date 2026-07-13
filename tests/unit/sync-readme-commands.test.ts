@@ -140,7 +140,7 @@ describe("generateCommandContent(3) output structure", () => {
 
 // ─── Every verb in the registry appears in generated output ──────────────────
 
-describe("generate() includes all registry verbs", () => {
+describe("generateCommandContent(3) includes all registry verbs", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const verb of Object.keys(REGISTRY)) {
@@ -155,7 +155,7 @@ describe("generate() includes all registry verbs", () => {
 
 // ─── Every verb description appears ─────────────────────────────────────────
 
-describe("generate() includes verb descriptions", () => {
+describe("generateCommandContent(3) includes verb descriptions", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
@@ -208,7 +208,7 @@ describe("verbDescription escapes bare angle brackets for MDX", () => {
 
 // ─── Global flags all appear ─────────────────────────────────────────────────
 
-describe("generate() includes all global flags", () => {
+describe("generateCommandContent(3) includes all global flags", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const flagName of Object.keys(GLOBAL_FLAGS)) {
@@ -223,7 +223,7 @@ describe("generate() includes all global flags", () => {
 
 // ─── Search flags all appear ─────────────────────────────────────────────────
 
-describe("generate() includes all search flags", () => {
+describe("generateCommandContent(3) includes all search flags", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const flagName of Object.keys(SEARCH_FLAGS)) {
@@ -238,7 +238,7 @@ describe("generate() includes all search flags", () => {
 
 // ─── Resource aliases appear ─────────────────────────────────────────────────
 
-describe("generate() includes resource aliases", () => {
+describe("generateCommandContent(3) includes resource aliases", () => {
 	const output = generateCommandContent(3).join("\n");
 	const aliases = uniqueAliases();
 
@@ -254,7 +254,7 @@ describe("generate() includes resource aliases", () => {
 
 // ─── Verbs with aliases show them ────────────────────────────────────────────
 
-describe("generate() shows verb aliases", () => {
+describe("generateCommandContent(3) shows verb aliases", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
@@ -273,7 +273,7 @@ describe("generate() shows verb aliases", () => {
 
 // ─── Verbs with examples show them ───────────────────────────────────────────
 
-describe("generate() includes help examples", () => {
+describe("generateCommandContent(3) includes help examples", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
@@ -292,7 +292,7 @@ describe("generate() includes help examples", () => {
 
 // ─── Verbs with positionals show them ────────────────────────────────────────
 
-describe("generate() includes positional arguments", () => {
+describe("generateCommandContent(3) includes positional arguments", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
@@ -313,7 +313,7 @@ describe("generate() includes positional arguments", () => {
 
 // ─── Verbs with resource-specific flags show them ────────────────────────────
 
-describe("generate() includes resource-specific flags", () => {
+describe("generateCommandContent(3) includes resource-specific flags", () => {
 	const output = generateCommandContent(3).join("\n");
 
 	for (const [verb, def] of Object.entries(REGISTRY)) {
@@ -655,7 +655,7 @@ describe("README.md sync check", () => {
 
 // ─── No verb in the registry is missing from the generated output ────────────
 
-describe("generate() completeness guard", () => {
+describe("generateCommandContent(3) completeness guard", () => {
 	const output = generateCommandContent(3).join("\n");
 	const verbHeadings = [...output.matchAll(/^#### `(\S+)`$/gm)].map(
 		(m) => m[1],
