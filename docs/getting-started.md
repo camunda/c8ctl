@@ -104,6 +104,12 @@ c8 cluster install 8.8
 
 # Remove a locally cached version
 c8 cluster delete 8.8
+
+# Delete a version's runtime data but keep the binary (the next start is fresh)
+c8 cluster purge 8.8
+
+# Or stop the running cluster and purge its runtime data in one step
+c8 cluster stop --purge
 ```
 
 ### Version aliases
@@ -225,13 +231,14 @@ c8 add profile prod \
   --clientId=your-client-id \
   --clientSecret=your-client-secret
 
-# With explicit OAuth endpoint and audience
+# With explicit OAuth endpoint, audience, and scope
 c8 add profile prod \
   --baseUrl=https://camunda.example.com \
   --clientId=your-client-id \
   --clientSecret=your-client-secret \
   --audience=camunda-api \
-  --oAuthUrl=https://auth.example.com/oauth/token
+  --oAuthUrl=https://auth.example.com/oauth/token \
+  --scope="my-oauth-scope"
 
 # With a default tenant
 c8 add profile dev \
@@ -403,6 +410,7 @@ c8 output text    # back to formatted tables (default)
 | `CAMUNDA_CLIENT_SECRET`     | OAuth client secret  |
 | `CAMUNDA_TOKEN_AUDIENCE`    | OAuth token audience |
 | `CAMUNDA_OAUTH_URL`         | OAuth token endpoint |
+| `CAMUNDA_OAUTH_SCOPE`       | OAuth scope (space-separated) |
 | `CAMUNDA_DEFAULT_TENANT_ID` | Default tenant ID    |
 
 Environment variable conventions follow the [`@camunda8/orchestration-cluster-api`](https://www.npmjs.com/package/@camunda8/orchestration-cluster-api) module.

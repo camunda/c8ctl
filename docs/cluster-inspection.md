@@ -178,7 +178,12 @@ c8 activate jobs email-service
 
 # With options
 c8 activate jobs email-service --maxJobsToActivate=20 --timeout=120000 --worker=my-worker
+
+# Include custom headers and fetch specific variables in the output
+c8 activate jobs email-service --customHeaders --fetchVariable=orderId,amount
 ```
+
+Use `--customHeaders` to include each job's custom headers in the output, and `--fetchVariable` to fetch a comma-separated list of variable names from the server and include them.
 
 ### Complete a job
 
@@ -196,6 +201,18 @@ c8 fail job 2251799813685252
 
 # With retries and error message
 c8 fail job 2251799813685252 --retries=3 --errorMessage="Email service unavailable"
+```
+
+### Update a job
+
+Update a job's retries or timeout. At least one of `--retries` or `--timeout` is required:
+
+```bash
+# Reset the retry count (for example, to make a failed job activatable again)
+c8 update job 2251799813685252 --retries=3
+
+# Extend the job timeout to 60 seconds
+c8 update job 2251799813685252 --timeout=60000
 ```
 
 ## Search
@@ -394,6 +411,22 @@ c8 search variables --name=orderPayload --fullValue
 ```
 
 By default, long variable values are truncated. Truncated values show a `✓` in the "Truncated" column. Use `--fullValue` to see complete values.
+
+### Search wait states
+
+Wait states are the points where a process instance is waiting — an open job, a message subscription, a timer, a condition, a user task, or a signal. Use `search wait-state` (alias `ws`) to find them:
+
+```bash
+# All wait states for a process instance
+c8 search ws --processInstanceKey=2251799813685249
+
+# Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)
+c8 search ws --waitStateType=JOB
+
+# Filter by BPMN element type, or by element ID (supports wildcards)
+c8 search ws --elementType=SERVICE_TASK
+c8 search ws --elementId='*Approve*'
+```
 
 ## Variables
 

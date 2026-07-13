@@ -30,6 +30,10 @@ c8 watch --profile=local
 
 Deploy resources to the active cluster.
 
+:::note
+When more than one profile is configured and you don't pass `--profile`, `c8ctl` prompts you to confirm which cluster to deploy to — a safety check against deploying to the wrong environment. Pass `--yes` (or `-y`) to skip the prompt in scripts and CI.
+:::
+
 ### Deploy a single file
 
 ```bash
