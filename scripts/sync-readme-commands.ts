@@ -501,33 +501,31 @@ function main(): void {
 		readme = `${vrlBefore}\n${vrlGenerated}\n${vrlAfter}`;
 	}
 
-	// ── Sync command-reference section (optional / legacy) ──
-	// The full command reference now lives in docs/command-reference.md (the source of
-	// truth that is synced to camunda-docs). The README keeps only the compact
-	// verb/resource list above. If the legacy command-reference markers are still
-	// present in the README, keep them in sync for backward compatibility; otherwise
-	// skip silently.
+	// ── Sync command-reference section ──
+	// The full command reference lives in docs/command-reference.md (the source of truth
+	// synced to camunda-docs); the README keeps only a short pointer inside the
+	// command-reference markers. The markers are required so that an accidental deletion of
+	// the block is caught by the sync check instead of silently passing.
 	const startIdx = readme.indexOf(START_MARKER);
 	const endIdx = readme.indexOf(END_MARKER);
 
-	if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
-		const generated = generate();
-		const before = readme.slice(0, startIdx + START_MARKER.length);
-		const after = readme.slice(endIdx);
-		readme = `${before}\n\n${generated}\n\n${after}`;
-	} else if (startIdx !== -1 && endIdx !== -1) {
-		// Both markers are present but out of order (start appears after end).
+	if (startIdx === -1 || endIdx === -1) {
+		console.error(
+			`ERROR: README.md is missing ${START_MARKER} and/or ${END_MARKER}.`,
+		);
+		process.exit(1);
+	}
+	if (startIdx > endIdx) {
 		console.error(
 			`ERROR: ${START_MARKER} must appear before ${END_MARKER} in README.md.`,
 		);
 		process.exit(1);
-	} else if (startIdx !== -1 || endIdx !== -1) {
-		// Exactly one of the two markers is present.
-		console.error(
-			`ERROR: README.md has a mismatched command-reference marker (found only one of ${START_MARKER} / ${END_MARKER}).`,
-		);
-		process.exit(1);
 	}
+
+	const generated = generate();
+	const before = readme.slice(0, startIdx + START_MARKER.length);
+	const after = readme.slice(endIdx);
+	readme = `${before}\n\n${generated}\n\n${after}`;
 
 	const updated = readme;
 
