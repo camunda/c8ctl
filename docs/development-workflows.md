@@ -74,10 +74,16 @@ Use `--all-extensions` to include every server-supported type (`.md`, `.txt`, `.
 c8 deploy ./my-project --all-extensions
 ```
 
-Explicitly named files bypass the extension filter. Use `--force` to deploy a named file with any extension:
+Explicitly named files are always deployed regardless of extension — the extension filter only applies when scanning directories:
 
 ```bash
-c8 deploy ./custom-resource.unsupported --force
+c8 deploy ./custom-resource.unsupported
+```
+
+Use `--force` to disable extension filtering during directory discovery, deploying every file found regardless of extension:
+
+```bash
+c8 deploy ./my-project --force
 ```
 
 ### Building blocks and process applications
