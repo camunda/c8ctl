@@ -4,13 +4,13 @@ title: "c8ctl CLI"
 description: "Use the c8ctl CLI to inspect your Camunda 8 clusters, deploy resources, and manage process automation from the terminal."
 ---
 
-{/* This page is maintained in the c8ctl repository (https://github.com/camunda/c8ctl, in docs/) and
-    is synced to camunda-docs automatically. Do not edit it in camunda-docs — changes will be
-    overwritten. Edit the source in the c8ctl repo instead. */}
-
 import Tabs from "@theme/Tabs";
 import TabItem from "@theme/TabItem";
 import PageDescription from '@site/src/components/PageDescription';
+
+<!-- This page is maintained in the c8ctl repository (https://github.com/camunda/c8ctl, in docs/) and
+     is synced to camunda-docs automatically. Do not edit it in camunda-docs — changes will be
+     overwritten. Edit the source in the c8ctl repo instead. -->
 
 <PageDescription />
 
