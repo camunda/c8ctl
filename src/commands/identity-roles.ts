@@ -2,9 +2,8 @@
  * Identity role commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { sortTableData } from "../logger.ts";
+import { fetchAllPages, sortTableData } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 /**
  * List all roles
@@ -12,7 +11,7 @@ import { sortTableData } from "../logger.ts";
 export const listRolesCommand = defineCommand("list", "role", async (ctx) => {
 	const { client, profile, limit } = ctx;
 
-	const dr = dryRun({
+	const dr = ctx.dryRun({
 		command: "list roles",
 		method: "POST",
 		endpoint: "/roles/search",
@@ -53,7 +52,7 @@ export const searchIdentityRolesCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search roles",
 			method: "POST",
 			endpoint: "/roles/search",
@@ -94,7 +93,7 @@ export const getIdentityRoleCommand = defineCommand(
 		const { client, profile } = ctx;
 		const roleId = args.roleId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get role",
 			method: "GET",
 			endpoint: `/roles/${roleId}`,
@@ -128,7 +127,7 @@ export const createIdentityRoleCommand = defineCommand(
 
 		const body = { roleId: flags.roleId, name: flags.name };
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create role",
 			method: "POST",
 			endpoint: "/roles",
@@ -152,7 +151,7 @@ export const deleteIdentityRoleCommand = defineCommand(
 		const { client, profile } = ctx;
 		const roleId = args.roleId;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete role",
 			method: "DELETE",
 			endpoint: `/roles/${encodeURIComponent(roleId)}`,

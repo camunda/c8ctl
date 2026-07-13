@@ -4,7 +4,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { c8ctl } from "../../src/runtime.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("c8ctl Runtime", () => {
 	test("should have env property", () => {

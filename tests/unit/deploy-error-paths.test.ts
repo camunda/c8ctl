@@ -1,9 +1,9 @@
 /**
  * Class-of-defect regression guards for `c8 deploy` error paths.
  *
- * Issue #288: every error path in `src/commands/helpers/deploy-helpers.ts` and
- * `src/commands/deploy.ts` must
- * `throw`, never `process.exit()`. Bypassing the framework's
+ * Issue #288: every error path in `src/commands/deploy.ts` and
+ * `src/commands/helpers/deploy-helpers.ts` must `throw`, never
+ * `process.exit()`. Bypassing the framework's
  * `handleCommandError` pipeline breaks two invariants:
  *   1. `--verbose` cannot rethrow the error to surface a stack trace.
  *   2. The framework cannot consistently format the failure with
@@ -11,8 +11,8 @@
  *
  * This file pairs a STRUCTURAL guard with BEHAVIOURAL guards:
  *
- *   - Structural: parse `src/commands/helpers/deploy-helpers.ts` and `src/commands/deploy.ts`
- *     with the
+ *   - Structural: parse `src/commands/deploy.ts` and
+ *     `src/commands/helpers/deploy-helpers.ts` with the
  *     TypeScript compiler and walk the AST for any
  *     `process.exit(...)` CallExpression. Any future regression that
  *     adds a `process.exit(...)` call into the deploy logic fails
@@ -39,6 +39,7 @@ import { c8 } from "../utils/cli.ts";
 import { findProcessExitCalls } from "../utils/no-process-exit.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
+const DEPLOY_TS = join(PROJECT_ROOT, "src", "commands", "deploy.ts");
 const DEPLOY_HELPERS_TS = join(
 	PROJECT_ROOT,
 	"src",
@@ -46,7 +47,6 @@ const DEPLOY_HELPERS_TS = join(
 	"helpers",
 	"deploy-helpers.ts",
 );
-const DEPLOY_COMMAND_TS = join(PROJECT_ROOT, "src", "commands", "deploy.ts");
 
 const DUP_BPMN_TEMPLATE = (
 	id: string,
@@ -65,12 +65,12 @@ const DUP_BPMN_TEMPLATE = (
 const FRAMEWORK_PREFIX = "Failed to deploy";
 
 describe("deploy: structural guard — no process.exit in deploy files", () => {
-	test("src/commands/helpers/deploy-helpers.ts contains no `process.exit(...)` calls", () => {
-		const calls = findProcessExitCalls(DEPLOY_HELPERS_TS);
+	test("src/commands/deploy.ts contains no `process.exit(...)` calls", () => {
+		const calls = findProcessExitCalls(DEPLOY_TS);
 		assert.strictEqual(
 			calls.length,
 			0,
-			`Expected zero \`process.exit(...)\` calls in deploy-helpers.ts, found ${calls.length}:\n` +
+			`Expected zero \`process.exit(...)\` calls in deploy.ts, found ${calls.length}:\n` +
 				calls
 					.map((c) => `  - line ${c.line}:${c.column} — ${c.text}`)
 					.join("\n") +
@@ -78,12 +78,12 @@ describe("deploy: structural guard — no process.exit in deploy files", () => {
 		);
 	});
 
-	test("src/commands/deploy.ts contains no `process.exit(...)` calls", () => {
-		const calls = findProcessExitCalls(DEPLOY_COMMAND_TS);
+	test("src/commands/helpers/deploy-helpers.ts contains no `process.exit(...)` calls", () => {
+		const calls = findProcessExitCalls(DEPLOY_HELPERS_TS);
 		assert.strictEqual(
 			calls.length,
 			0,
-			`Expected zero \`process.exit(...)\` calls in commands/deploy.ts, found ${calls.length}:\n` +
+			`Expected zero \`process.exit(...)\` calls in deploy-helpers.ts, found ${calls.length}:\n` +
 				calls
 					.map((c) => `  - line ${c.line}:${c.column} — ${c.text}`)
 					.join("\n") +
@@ -130,9 +130,10 @@ describe("deploy: behavioural — error paths flow through the framework", () =>
 		// framework's `handleCommandError` exits non-zero WITHOUT adding a
 		// "Failed to deploy: ..." summary line on top.
 		//
-		// The structural guard above (zero `process.exit` in deploy files)
-		// is the durable class-of-defect catch for this path. The behavioural
-		// assertions below confirm the SilentError pipeline works:
+		// The structural guard above (zero `process.exit` in deploy.ts /
+		// deploy-helpers.ts) is the durable class-of-defect catch for this
+		// path. The behavioural assertions below confirm the SilentError
+		// pipeline works:
 		//   - exit code 1 (the only signal that *something* terminated us)
 		//   - rich pre-rendered detail still emitted
 		//   - NO duplicated "Failed to deploy: ..." summary (the framework

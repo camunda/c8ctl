@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
+	AUTH_TYPES,
 	addProfile,
 	connectionToClusterConfig,
 	DEFAULT_PROFILE,
@@ -26,8 +27,8 @@ import {
 	saveProfiles,
 	setActiveProfile,
 	TARGET_TYPES,
-} from "../../src/config.ts";
-import { c8ctl } from "../../src/runtime.ts";
+} from "../../src/core/config.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 
 describe("Config Module", () => {
 	test("getUserDataDir returns platform-specific path", () => {
@@ -240,6 +241,7 @@ describe("Config Module", () => {
 			process.env.CAMUNDA_CLIENT_SECRET = "test-secret";
 			process.env.CAMUNDA_TOKEN_AUDIENCE = "test-audience";
 			process.env.CAMUNDA_OAUTH_URL = "https://oauth.example.com/token";
+			process.env.CAMUNDA_OAUTH_SCOPE = "api://my-app/.default";
 
 			const config = resolveClusterConfig();
 
@@ -248,6 +250,7 @@ describe("Config Module", () => {
 			assert.strictEqual(config.clientSecret, "test-secret");
 			assert.strictEqual(config.audience, "test-audience");
 			assert.strictEqual(config.oAuthUrl, "https://oauth.example.com/token");
+			assert.strictEqual(config.scope, "api://my-app/.default");
 		});
 
 		test("resolveClusterConfig reads basic auth config from environment variables", () => {
@@ -269,6 +272,7 @@ describe("Config Module", () => {
 			delete process.env.CAMUNDA_CLIENT_SECRET;
 			delete process.env.CAMUNDA_TOKEN_AUDIENCE;
 			delete process.env.CAMUNDA_OAUTH_URL;
+			delete process.env.CAMUNDA_OAUTH_SCOPE;
 			delete process.env.CAMUNDA_USERNAME;
 			delete process.env.CAMUNDA_PASSWORD;
 
@@ -312,6 +316,20 @@ describe("Config Module", () => {
 			});
 
 			assert.strictEqual(config.audience, "zeebe.camunda.io");
+		});
+
+		test("connectionToClusterConfig preserves explicit OAuth scope (self-hosted)", () => {
+			const config = connectionToClusterConfig({
+				id: "self-hosted-1",
+				targetType: TARGET_TYPES.SELF_HOSTED,
+				contactPoint: "http://localhost:8080/v2",
+				authType: AUTH_TYPES.OAUTH,
+				clientId: "client-id",
+				clientSecret: "client-secret",
+				scope: "api://my-app/.default",
+			});
+
+			assert.strictEqual(config.scope, "api://my-app/.default");
 		});
 	});
 

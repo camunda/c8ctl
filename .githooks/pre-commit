@@ -5,6 +5,9 @@
 #    no-unsafe-type-assertion plugin applies to both.
 # 2. Run tsc --noEmit -p tsconfig.check.json to catch type/parse errors in
 #    both src/ and tests/ before they hit CI.
+# 3. When src/ files are staged, run the architectural layering guard so
+#    cross-/intra-layer import violations (issue #414/#424) are caught at
+#    commit time rather than in CI.
 
 # --- Collect staged src files ---
 staged_src=()
@@ -87,6 +90,26 @@ EOF
   [ $TSC_EXIT -ne 0 ] && EXIT_CODE=$TSC_EXIT
 elif [ ${#all_staged[@]} -gt 0 ]; then
   echo "pre-commit: Skipping tsc — not installed locally. Run npm install first."
+fi
+
+# --- Architectural layering guard ---
+# When any src/ file is staged, verify the layered-architecture import
+# boundaries (issues #414 / #424) before the change can leak into CI. The guard
+# is a fast (~1s) whole-tree structural scan, so — unlike the scoped tsc step
+# above — it inspects the working-tree src/, not just the staged set. The
+# dirty-file check above guarantees staged files match disk; only unstaged WIP
+# in *other* src files could surface here, which is an acceptable trade for
+# catching layering regressions at commit time instead of in CI. Needs the
+# TypeScript compiler API, so it shares the tsc availability gate.
+if [ ${#staged_src[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1; then
+  guard_output=$(node --experimental-strip-types --test tests/unit/layering-import-boundary.test.ts 2>&1)
+  if [ $? -ne 0 ]; then
+    echo "pre-commit: architectural layering guard failed (npm run check:layering):"
+    echo "$guard_output"
+    EXIT_CODE=1
+  fi
+elif [ ${#staged_src[@]} -gt 0 ]; then
+  echo "pre-commit: Skipping layering guard — tsc not installed locally. Run npm install first."
 fi
 
 exit $EXIT_CODE

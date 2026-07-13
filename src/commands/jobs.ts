@@ -3,9 +3,9 @@
  */
 
 import { TenantId } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
-import { buildDateFilter, parseBetween } from "../date-filter.ts";
+import { fetchAllPages } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
+import { buildDateFilter, parseBetween } from "../utils/index.ts";
 
 /**
  * List jobs
@@ -42,7 +42,7 @@ export const listJobsCommand = defineCommand(
 			}
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list jobs",
 			method: "POST",
 			endpoint: "/jobs/search",
@@ -88,6 +88,21 @@ export const activateJobsCommand = defineCommand(
 			: 10;
 		const timeout = flags.timeout ? parseInt(flags.timeout, 10) : 60000;
 		const worker = flags.worker || "c8ctl";
+		// --fetchVariable restricts which variables the server returns. Per the
+		// REST spec an *empty* list means "return all visible variables", which
+		// defeats the point of the flag, so if the flag is provided but resolves
+		// to no usable names we reject it rather than silently fetching all.
+		let fetchVariable: string[] | undefined;
+		if (flags.fetchVariable !== undefined) {
+			const fetchVariableNames = flags.fetchVariable
+				.split(",")
+				.map((name) => name.trim())
+				.filter(Boolean);
+			if (fetchVariableNames.length === 0) {
+				throw new Error("--fetchVariable was given no valid variable names");
+			}
+			fetchVariable = fetchVariableNames;
+		}
 
 		if (Number.isNaN(maxJobsToActivate) || maxJobsToActivate < 1) {
 			throw new Error("--maxJobsToActivate must be a positive integer");
@@ -96,7 +111,7 @@ export const activateJobsCommand = defineCommand(
 			throw new Error("--timeout must be a positive integer (milliseconds)");
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "activate jobs",
 			method: "POST",
 			endpoint: "/jobs/activation",
@@ -107,6 +122,7 @@ export const activateJobsCommand = defineCommand(
 				maxJobsToActivate,
 				timeout,
 				worker,
+				...(fetchVariable && { fetchVariable }),
 			},
 		});
 		if (dr) return dr;
@@ -119,6 +135,7 @@ export const activateJobsCommand = defineCommand(
 			maxJobsToActivate,
 			timeout,
 			worker,
+			...(fetchVariable && { fetchVariable }),
 		});
 
 		if (result.jobs && result.jobs.length > 0) {
@@ -129,6 +146,13 @@ export const activateJobsCommand = defineCommand(
 					Type: job.type,
 					Retries: job.retries,
 					"Process Instance": job.processInstanceKey,
+					"Element Instance": job.elementInstanceKey,
+					...(flags.customHeaders && {
+						"Custom Headers": job.customHeaders,
+					}),
+					...(fetchVariable && {
+						Variables: job.variables,
+					}),
 				})),
 				emptyMessage: "",
 			};
@@ -157,7 +181,7 @@ export const completeJobCommand = defineCommand(
 			body.variables = variables;
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "complete job",
 			method: "POST",
 			endpoint: `/jobs/${key}/completion`,
@@ -190,7 +214,7 @@ export const failJobCommand = defineCommand(
 			throw new Error("--retries must be a non-negative integer");
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "fail job",
 			method: "POST",
 			endpoint: `/jobs/${key}/failure`,
@@ -205,5 +229,68 @@ export const failJobCommand = defineCommand(
 			errorMessage,
 		});
 		return { kind: "success", message: `Job ${key} failed` };
+	},
+);
+
+/**
+ * Update job
+ */
+export const updateJobCommand = defineCommand(
+	"update",
+	"job",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+
+		const retries =
+			flags.retries !== undefined ? parseInt(flags.retries, 10) : undefined;
+		const timeout =
+			flags.timeout !== undefined ? parseInt(flags.timeout, 10) : undefined;
+		const operationReference =
+			flags.operationReference !== undefined
+				? parseInt(flags.operationReference, 10)
+				: undefined;
+
+		if (retries !== undefined && (Number.isNaN(retries) || retries < 0)) {
+			throw new Error("--retries must be a non-negative integer");
+		}
+		if (timeout !== undefined && (Number.isNaN(timeout) || timeout < 1)) {
+			throw new Error("--timeout must be a positive integer (milliseconds)");
+		}
+		if (retries === undefined && timeout === undefined) {
+			throw new Error(
+				"At least one of --retries or --timeout must be provided",
+			);
+		}
+		if (
+			operationReference !== undefined &&
+			(Number.isNaN(operationReference) || operationReference < 0)
+		) {
+			throw new Error("--operationReference must be a non-negative integer");
+		}
+
+		const changeset: { retries?: number; timeout?: number } = {};
+		if (retries !== undefined) changeset.retries = retries;
+		if (timeout !== undefined) changeset.timeout = timeout;
+
+		const body: Record<string, unknown> = { changeset };
+		if (operationReference !== undefined)
+			body.operationReference = operationReference;
+
+		const dr = ctx.dryRun({
+			command: "update job",
+			method: "PATCH",
+			endpoint: `/jobs/${key}`,
+			profile,
+			body,
+		});
+		if (dr) return dr;
+
+		await client.updateJob({
+			jobKey: key,
+			changeset,
+			...(operationReference !== undefined && { operationReference }),
+		});
+		return { kind: "success", message: `Job ${key} updated` };
 	},
 );

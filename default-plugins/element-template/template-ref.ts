@@ -11,7 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import type {} from "../../src/runtime.ts";
+import type {} from "../../src/core/runtime.ts";
 import {
 	getPropertyDetail,
 	getSettableProperties,

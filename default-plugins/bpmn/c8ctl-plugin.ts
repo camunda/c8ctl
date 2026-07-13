@@ -10,11 +10,11 @@
  *   c8ctl bpmn format -i <file.bpmn>
  */
 
+import type {} from "../../src/core/runtime.ts";
 import type {
 	PluginCommands,
 	PluginMetadata,
-} from "../../src/plugin-loader.ts";
-import type {} from "../../src/runtime.ts";
+} from "../../src/framework/plugins/plugin-loader.ts";
 import { formatSubcommand } from "./format.ts";
 import { lintSubcommand } from "./lint.ts";
 
@@ -116,6 +116,9 @@ export const metadata = {
 				"camunda-compat/camunda-cloud-<version> ruleset, auto-detected from " +
 				'modeler:executionPlatform="Camunda Cloud" and ' +
 				"modeler:executionPlatformVersion in the BPMN file. " +
+				"Only the bundled bpmnlint:recommended and camunda-compat rulesets are " +
+				"available; a .bpmnlintrc that extends a third-party bpmnlint plugin is " +
+				"not supported — use the standalone `bpmnlint` CLI for those. " +
 				"`format` round-trips BPMN through bpmn-moddle to emit canonical XML.",
 			subcommands: [
 				{

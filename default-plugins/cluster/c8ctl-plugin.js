@@ -58,6 +58,36 @@ export function isRollingVersion(versionSpec) {
 }
 
 /**
+ * Extract the leading major.minor pair from a version string.
+ * Accepts minor patterns ("8.10") and concrete versions ("8.10.0-alpha1").
+ * Returns { major, minor } or null if the string has no major.minor prefix.
+ */
+export function majorMinorOf(version) {
+  const match = /^(\d+)\.(\d+)/.exec(version);
+  if (!match) return null;
+  return { major: Number(match[1]), minor: Number(match[2]) };
+}
+
+/**
+ * True when the remote alias target is a strictly newer minor line than the
+ * locally resolved version. The remote alias always resolves to a major.minor
+ * pattern (e.g. "8.10"), whereas the resolved version may be a concrete pin
+ * (e.g. "8.10.0-alpha1") within that same minor line. Comparing the raw
+ * strings produces false positives (#434): "8.10" !== "8.10.0-alpha1" even
+ * though no newer release exists. Compare at the major.minor level instead.
+ */
+export function isRemoteMinorNewer(remoteVersion, resolvedVersion) {
+  const remote = majorMinorOf(remoteVersion);
+  const resolved = majorMinorOf(resolvedVersion);
+  // If either side is unparseable, fall back to the previous behavior (string inequality).
+  if (!remote || !resolved) return remoteVersion !== resolvedVersion;
+  return (
+    remote.major > resolved.major ||
+    (remote.major === resolved.major && remote.minor > resolved.minor)
+  );
+}
+
+/**
  * Fetch the c8run download directory listing and discover the latest
  * stable and alpha minor versions.
  *
@@ -172,7 +202,23 @@ function readLocalAliasMapping(cacheDir, alias) {
     const value = readFileSync(filePath, 'utf-8').trim();
     // Only use the cached mapping if the version is actually installed
     const config = { cacheDir, version: value };
-    return isC8RunInstalled(config) ? value : null;
+    if (isC8RunInstalled(config)) return value;
+
+    // For rolling versions (minor version patterns like "8.9"), check if any
+    // installed version matches the minor version prefix (e.g. "8.9" matches
+    // "8.9.5"). This prevents re-downloading a rolling alias when a compatible
+    // pinned version is already installed locally (#431).
+    if (isMinorVersionPattern(value)) {
+      const installedVersions = getInstalledVersionsList(cacheDir)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const match = installedVersions
+        .filter((v) => v.startsWith(value + '.'))
+        .reverse()
+        .find((v) => isC8RunInstalled({ cacheDir, version: v }));
+      if (match) return match;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -228,7 +274,7 @@ export function checkBackgroundAliasFreshness(versionSpec, resolvedVersion) {
         if (html) {
           const remote = parseVersionsFromHtml(html);
           const remoteVersion = remote?.[versionSpec];
-          if (remoteVersion && remoteVersion !== resolvedVersion) {
+          if (remoteVersion && isRemoteMinorNewer(remoteVersion, resolvedVersion)) {
             logger.info(
               `A newer "${versionSpec}" release is available (${remoteVersion}). ` +
               `Install it with: c8ctl cluster install ${versionSpec}`,
@@ -274,6 +320,7 @@ export const metadata = {
         { name: 'delete', description: 'Remove a cached version' },
         { name: 'log', description: 'Stream cluster logs' },
         { name: 'logs', description: 'Stream cluster logs' },
+        { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -286,6 +333,8 @@ export const metadata = {
         { command: 'c8ctl cluster list-remote', description: 'List all versions available on the remote download server' },
         { command: 'c8ctl cluster install 8.8', description: 'Download a version without starting it' },
         { command: 'c8ctl cluster delete 8.8', description: 'Remove a locally cached version' },
+        { command: 'c8ctl cluster purge 8.8', description: 'Delete runtime data for a version (binary stays intact)' },
+        { command: 'c8ctl cluster stop --purge', description: 'Stop the running cluster and delete its runtime data' },
       ],
     },
   },
@@ -806,15 +855,26 @@ async function startC8Run(config, debug = false) {
   const versionFile = join(config.cacheDir, VERSION_MARKER_FILE);
 
   if (existsSync(markerFile)) {
-    logger.warn('A cluster appears to be running already.');
-    if (existsSync(versionFile)) {
-      const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-      if (runningVersion) {
-        logger.info(`Detected running version marker: ${runningVersion}`);
+    // Check whether actual cluster processes are still alive.
+    // If they are, refuse to start a second instance.
+    // If not, the marker is stale (e.g. crash, WSL restart, force-kill)
+    // — clean it up automatically and proceed with the start.
+    if (hasRunningClusterPidfiles(config.cacheDir)) {
+      logger.warn('A cluster appears to be running already.');
+      if (existsSync(versionFile)) {
+        const runningVersion = readFileSync(versionFile, 'utf-8').trim();
+        if (runningVersion) {
+          logger.info(`Detected running version marker: ${runningVersion}`);
+        }
       }
+      logger.info('Use "c8ctl cluster stop" to stop it first.');
+      return;
     }
-    logger.info('Use "c8ctl cluster stop" to stop it first.');
-    return;
+
+    // Stale marker — no live processes found. Clean up and continue.
+    logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
+    if (existsSync(markerFile)) rmSync(markerFile);
+    if (existsSync(versionFile)) rmSync(versionFile);
   }
 
   logger.info('Starting Camunda 8 local cluster...');
@@ -986,13 +1046,16 @@ export async function stopC8Run(config, debug = false) {
     logger.warn(
       'Cluster marker file found, but no running cluster processes detected. Cleaning up stale marker.',
     );
+    let staleVersion = null;
+    if (existsSync(versionFile)) {
+      const v = readFileSync(versionFile, 'utf-8').trim();
+      if (v) staleVersion = v;
+      rmSync(versionFile);
+    }
     if (existsSync(markerFile)) {
       rmSync(markerFile);
     }
-    if (existsSync(versionFile)) {
-      rmSync(versionFile);
-    }
-    return;
+    return staleVersion;
   }
 
   if (!markerExists && clusterAppearsRunning) {
@@ -1012,10 +1075,12 @@ export async function stopC8Run(config, debug = false) {
     : [];
 
   const versionsToTry = [];
+  let stoppedVersion = null;
 
   if (existsSync(versionFile)) {
     const markerVersion = readFileSync(versionFile, 'utf-8').trim();
     if (markerVersion) {
+      stoppedVersion = markerVersion;
       versionsToTry.push(markerVersion);
     }
   }
@@ -1129,6 +1194,7 @@ export async function stopC8Run(config, debug = false) {
   }
 
   logger.info('Cluster stopped.');
+  return stoppedVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,6 +1379,37 @@ export async function listRemoteVersions() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helpers for delete / purge
+// ---------------------------------------------------------------------------
+
+// Validate and resolve a version spec to the locally installed version name.
+// Aliases (stable, alpha) are resolved preferring the local cache so that
+// delete/purge operate on what is actually installed.
+async function resolveVersionArg(cacheDir, versionSpec) {
+  validateVersionSpec(versionSpec);
+  return isVersionAlias(versionSpec)
+    ? await resolveVersion(versionSpec, { preferLocal: true, cacheDir })
+    : versionSpec;
+}
+
+// Return true if the given version appears to be currently running.
+// Requires both marker files to identify the running version, then confirms
+// with live .process pidfiles. Without markers we cannot attribute any
+// running process to a specific version, so we return false — consistent
+// with stopC8Run treating marker absence as "not running".
+function isVersionRunning(cacheDir, version) {
+  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
+
+  if (!existsSync(markerFile) || !existsSync(versionFile)) return false;
+
+  const markerVersion = readFileSync(versionFile, 'utf-8').trim();
+  if (markerVersion !== version) return false;
+
+  return hasRunningClusterPidfiles(cacheDir);
+}
+
+// ---------------------------------------------------------------------------
 // Delete cached version
 // ---------------------------------------------------------------------------
 
@@ -1324,28 +1421,28 @@ export async function deleteVersion(cacheDir, versionSpec) {
     process.exit(1);
   }
 
-  validateVersionSpec(versionSpec);
-
-  // Resolve named aliases (stable/alpha) to the actual cached version name.
-  // Use preferLocal so we delete the version that's actually installed,
-  // not whatever the remote currently resolves the alias to.
   // Major.minor patterns like 8.8 are used as-is since the cache dir is named c8run-8.8.
-  const resolvedVersion = isVersionAlias(versionSpec)
-    ? await resolveVersion(versionSpec, { preferLocal: true, cacheDir })
-    : versionSpec;
+  const resolvedVersion = await resolveVersionArg(cacheDir, versionSpec);
 
   // Prevent deleting a currently running version
-  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
-  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  if (isVersionRunning(cacheDir, resolvedVersion)) {
+    logger.error(
+      `Version ${resolvedVersion} is currently running. Stop it first with: c8ctl cluster stop`
+    );
+    process.exit(1);
+  }
 
-  if (existsSync(markerFile) && existsSync(versionFile)) {
-    const runningVersion = readFileSync(versionFile, 'utf-8').trim();
-    if (runningVersion === resolvedVersion) {
-      logger.error(
-        `Version ${resolvedVersion} is currently running. Stop it first with: c8ctl cluster stop`
-      );
-      process.exit(1);
-    }
+  // Safety backstop: if processes are running but either marker is absent we
+  // cannot confirm the version, so refuse rather than risk deleting a live install.
+  if (
+    (!existsSync(join(cacheDir, ACTIVE_MARKER_FILE)) || !existsSync(join(cacheDir, VERSION_MARKER_FILE))) &&
+    hasRunningClusterPidfiles(cacheDir)
+  ) {
+    logger.error(
+      'A cluster appears to be running (processes detected) but the cluster marker is missing. ' +
+      'Run c8ctl cluster stop first.'
+    );
+    process.exit(1);
   }
 
   const config = { cacheDir, version: resolvedVersion };
@@ -1357,6 +1454,79 @@ export async function deleteVersion(cacheDir, versionSpec) {
 
   purgeInstalledVersion(config, { reason: 'as requested' });
   logger.info(`Version ${versionSpec} has been deleted.`);
+}
+
+// ---------------------------------------------------------------------------
+// Purge cluster data
+// ---------------------------------------------------------------------------
+
+export async function purgeClusterData(cacheDir, versionSpec) {
+  const logger = getLogger();
+
+  const resolvedVersion = await resolveVersionArg(cacheDir, versionSpec);
+
+  // Prevent purging a currently running version
+  if (isVersionRunning(cacheDir, resolvedVersion)) {
+    logger.error(
+      `Version ${resolvedVersion} is currently running. ` +
+      'Stop it first with: c8ctl cluster stop\n' +
+      `Or stop and purge in one step: c8ctl cluster stop --purge`
+    );
+    process.exit(1);
+  }
+
+  // Safety backstop: if processes are running but either marker is absent we
+  // cannot confirm the version, so refuse rather than risk purging a live cluster.
+  if (
+    (!existsSync(join(cacheDir, ACTIVE_MARKER_FILE)) || !existsSync(join(cacheDir, VERSION_MARKER_FILE))) &&
+    hasRunningClusterPidfiles(cacheDir)
+  ) {
+    logger.error(
+      'A cluster appears to be running (processes detected) but the cluster marker is missing. ' +
+      'Run c8ctl cluster stop first.'
+    );
+    process.exit(1);
+  }
+
+  const config = { cacheDir, version: resolvedVersion };
+  if (!isC8RunInstalled(config)) {
+    logger.error(`Version ${resolvedVersion} is not installed locally.`);
+    process.exit(1);
+  }
+
+  const binaryPath = getC8RunBinaryPath(config);
+  const binaryDir = dirname(binaryPath);
+
+  const deleted = [];
+
+  // Delete camunda-data (history data + application state)
+  const camundaDataDir = join(binaryDir, 'camunda-data');
+  if (existsSync(camundaDataDir)) {
+    rmSync(camundaDataDir, { recursive: true });
+    deleted.push('camunda-data');
+  }
+
+  // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
+  if (existsSync(binaryDir)) {
+    for (const entry of readdirSync(binaryDir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
+      const dataDir = join(binaryDir, entry.name, 'data');
+      if (existsSync(dataDir)) {
+        rmSync(dataDir, { recursive: true });
+        deleted.push(join(entry.name, 'data'));
+      }
+    }
+  }
+
+  if (deleted.length > 0) {
+    logger.info(`Purged runtime data for ${resolvedVersion}:`);
+    for (const d of deleted) {
+      logger.info(`  deleted: ${d}`);
+    }
+  } else {
+    logger.info(`No runtime data found for ${resolvedVersion} — nothing to delete.`);
+  }
+  logger.info(`Binary and installed files preserved. Start fresh with: c8ctl cluster start ${resolvedVersion}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1442,7 +1612,7 @@ export async function streamLogs(cacheDir) {
 // ---------------------------------------------------------------------------
 
 export function parsePluginArgs(args) {
-  const result = { subcommand: null, version: null, debug: false };
+  const result = { subcommand: null, version: null, debug: false, purge: false };
 
   let i = 0;
   while (i < args.length) {
@@ -1462,6 +1632,12 @@ export function parsePluginArgs(args) {
 
     if (arg === '--debug') {
       result.debug = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg === '--purge') {
+      result.purge = true;
       i += 1;
       continue;
     }
@@ -1489,7 +1665,7 @@ export function parsePluginArgs(args) {
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'log', 'logs'];
+const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'purge', 'log', 'logs'];
 
 export const commands = {
   'cluster': async (args) => {
@@ -1499,28 +1675,31 @@ export const commands = {
     if (!parsed.subcommand || !VALID_SUBCOMMANDS.includes(parsed.subcommand)) {
       console.log('Usage:');
       console.log('  c8ctl cluster start [<version>] [--debug]');
-      console.log('  c8ctl cluster stop');
+      console.log('  c8ctl cluster stop [--purge]');
       console.log('  c8ctl cluster status');
       console.log('  c8ctl cluster logs              (alias: log)');
       console.log('  c8ctl cluster list');
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install <version>');
       console.log('  c8ctl cluster delete <version>');
+      console.log('  c8ctl cluster purge <version>');
       console.log('');
       console.log('Subcommands:');
       console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
-      console.log('  stop         Stop the running local Camunda 8 cluster');
+      console.log('  stop         Stop the running local Camunda 8 cluster (--purge also deletes runtime data)');
       console.log('  status       Show whether a cluster is running and connection details');
       console.log('  logs         Stream log output from the running cluster');
       console.log('  list         List locally cached versions and available version aliases');
       console.log('  list-remote  List all versions available on the remote download server');
       console.log('  install      Download a version without starting it');
       console.log('  delete       Remove a locally cached version to reclaim disk space');
+      console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
+      console.log('  --purge                (stop only) also delete runtime data after stopping');
       console.log('');
       console.log('A <version> can be:');
       console.log('  stable / alpha         Named aliases');
@@ -1547,7 +1726,14 @@ export const commands = {
       console.log('  c8ctl cluster list-remote');
       console.log('  c8ctl cluster install 8.8');
       console.log('  c8ctl cluster delete 8.8');
+      console.log('  c8ctl cluster purge 8.8          # Delete runtime data, keep binary');
+      console.log('  c8ctl cluster stop --purge        # Stop cluster and delete its runtime data');
       return;
+    }
+
+    if (parsed.purge && parsed.subcommand !== 'stop') {
+      logger.error('--purge can only be used with the stop subcommand. Example: c8ctl cluster stop --purge');
+      process.exit(1);
     }
 
     if (parsed.subcommand === 'status') {
@@ -1590,11 +1776,14 @@ export const commands = {
       return;
     }
 
-    // install and delete require an explicit version argument
-    if (!parsed.version && (parsed.subcommand === 'install' || parsed.subcommand === 'delete')) {
-      const example = parsed.subcommand === 'delete'
-        ? 'c8ctl cluster delete 8.8'
-        : 'c8ctl cluster install stable';
+    // install, delete, and purge require an explicit version argument
+    if (!parsed.version && (parsed.subcommand === 'install' || parsed.subcommand === 'delete' || parsed.subcommand === 'purge')) {
+      const example =
+        parsed.subcommand === 'delete'
+          ? 'c8ctl cluster delete 8.8'
+          : parsed.subcommand === 'purge'
+            ? 'c8ctl cluster purge 8.8'
+            : 'c8ctl cluster install stable';
       logger.error(`Please specify a version. Example: ${example}`);
       process.exit(1);
     }
@@ -1604,6 +1793,16 @@ export const commands = {
         await deleteVersion(getCacheDir(), parsed.version);
       } catch (error) {
         logger.error(`Failed to delete version: ${error}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (parsed.subcommand === 'purge') {
+      try {
+        await purgeClusterData(getCacheDir(), parsed.version);
+      } catch (error) {
+        logger.error(`Failed to purge cluster data: ${error}`);
         process.exit(1);
       }
       return;
@@ -1656,7 +1855,15 @@ export const commands = {
       }
     } else if (parsed.subcommand === 'stop') {
       try {
-        await stopC8Run(config, parsed.debug);
+        const stoppedVersion = await stopC8Run(config, parsed.debug);
+        if (parsed.purge) {
+          if (!stoppedVersion) {
+            logger.warn('Cannot determine which version to purge (version marker is missing). ' +
+                'To purge manually, run: c8ctl cluster purge <version>');
+          } else {
+            await purgeClusterData(theCacheDir, stoppedVersion);
+          }
+        }
       } catch (error) {
         logger.error(`Failed to stop cluster: ${error}`);
         process.exit(1);

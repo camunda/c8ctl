@@ -10,14 +10,13 @@ import {
 	type ResourceTypeEnum,
 	ResourceTypeEnum as ResourceTypeValues,
 } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { fetchAllPages, sortTableData } from "../core/index.ts";
 import {
+	defineCommand,
 	requireCsvEnum,
 	requireEnum,
 	requireOption,
-} from "../command-validation.ts";
-import { sortTableData } from "../logger.ts";
+} from "../framework/index.ts";
 
 /**
  * List all authorizations
@@ -28,7 +27,7 @@ export const listAuthorizationsCommand = defineCommand(
 	async (ctx) => {
 		const { client, profile, limit } = ctx;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list authorizations",
 			method: "POST",
 			endpoint: "/authorizations/search",
@@ -77,7 +76,7 @@ export const searchIdentityAuthorizationsCommand = defineCommand(
 
 		const searchFilter = Object.keys(filter).length > 0 ? { filter } : {};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "search authorizations",
 			method: "POST",
 			endpoint: "/authorizations/search",
@@ -123,7 +122,7 @@ export const getIdentityAuthorizationCommand = defineCommand(
 		const { client, profile } = ctx;
 		const authorizationKey = args.authorizationKey;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get authorization",
 			method: "GET",
 			endpoint: `/authorizations/${authorizationKey}`,
@@ -214,7 +213,7 @@ export const createIdentityAuthorizationCommand = defineCommand(
 			permissionTypes: validated.permissionTypes,
 		};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "create authorization",
 			method: "POST",
 			endpoint: "/authorizations",
@@ -238,7 +237,7 @@ export const deleteIdentityAuthorizationCommand = defineCommand(
 		const { client, profile } = ctx;
 		const authorizationKey = args.authorizationKey;
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "delete authorization",
 			method: "DELETE",
 			endpoint: `/authorizations/${encodeURIComponent(String(authorizationKey))}`,

@@ -6,26 +6,24 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineCommand } from "../command-framework.ts";
-import { ensurePluginsDir } from "../config.ts";
-import { handleCommandError } from "../errors.ts";
-import { getLogger } from "../logger.ts";
 import {
-	clearLoadedPlugins,
-	getLoadedPluginSummaries,
-	getPluginCollisions,
-} from "../plugin-loader.ts";
+	ensurePluginsDir,
+	getLogger,
+	handleCommandError,
+} from "../core/index.ts";
 import {
 	addPluginToRegistry,
+	clearLoadedPlugins,
+	defineCommand,
+	getInstalledPluginVersion,
+	getLoadedPluginSummaries,
+	getPluginCollisions,
 	getPluginEntry,
 	getRegisteredPlugins,
+	getVersionFromSource,
 	isPluginRegistered,
 	removePluginFromRegistry,
-} from "../plugin-registry.ts";
-import {
-	getInstalledPluginVersion,
-	getVersionFromSource,
-} from "../plugin-version.ts";
+} from "../framework/index.ts";
 
 export { getInstalledPluginVersion, getVersionFromSource };
 

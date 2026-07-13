@@ -4,9 +4,9 @@
 
 import assert from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { handleCommandError } from "../../src/errors.ts";
-import { isRecord, Logger } from "../../src/logger.ts";
-import { c8ctl } from "../../src/runtime.ts";
+import { handleCommandError } from "../../src/core/errors.ts";
+import { isRecord, Logger } from "../../src/core/logger.ts";
+import { c8ctl } from "../../src/core/runtime.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 
 describe("handleCommandError", () => {

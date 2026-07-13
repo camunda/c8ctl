@@ -19,7 +19,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { sanitizeForLogging } from "../../src/logger.ts";
+import { sanitizeForLogging } from "../../src/core/logger.ts";
 import { asRecord } from "../utils/guards.ts";
 
 describe("sanitizeForLogging — credential redaction", () => {

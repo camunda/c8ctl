@@ -151,7 +151,7 @@ across plugins.
 ## Plugin runtime extension
 
 Plugins previously had to duplicate the cross-platform user-data-dir
-logic from `src/config.ts`. We added `getUserDataDir()` to
+logic from `src/core/config.ts`. We added `getUserDataDir()` to
 `C8ctlPluginRuntime` and wired it through `C8ctlDeps.init()` so the
 plugin can ask the runtime for the path (and pick up the
 `C8CTL_DATA_DIR` override) without re-implementing the platform

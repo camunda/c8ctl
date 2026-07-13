@@ -26,8 +26,8 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { COMMAND_REGISTRY } from "../../src/command-registry.ts";
-import { isRecord } from "../../src/logger.ts";
+import { isRecord } from "../../src/core/logger.ts";
+import { COMMAND_REGISTRY } from "../../src/framework/command-registry.ts";
 import { c8, c8WithOptions } from "../utils/cli.ts";
 
 /** Parse stdout as JSON and narrow to a record, or fail with context. */

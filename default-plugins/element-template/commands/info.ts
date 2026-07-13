@@ -9,7 +9,7 @@
  */
 
 import { styleText } from "node:util";
-import type {} from "../../../src/runtime.ts";
+import type {} from "../../../src/core/runtime.ts";
 import { parseEngineVersionFlag, type Template } from "../helpers.ts";
 import { loadTemplate } from "../template-ref.ts";
 

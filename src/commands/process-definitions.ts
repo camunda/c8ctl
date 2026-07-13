@@ -2,8 +2,8 @@
  * Process definition commands
  */
 
-import { fetchAllPages } from "../client.ts";
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { fetchAllPages } from "../core/index.ts";
+import { defineCommand } from "../framework/index.ts";
 
 // ─── get pd ──────────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ export const getProcessDefinitionCommand = defineCommand(
 		const key = args.key;
 
 		if (flags.xml) {
-			const dr = dryRun({
+			const dr = ctx.dryRun({
 				command: "get process-definition xml",
 				method: "GET",
 				endpoint: `/process-definitions/${key}/xml`,
@@ -30,7 +30,7 @@ export const getProcessDefinitionCommand = defineCommand(
 			return { kind: "raw", content: result };
 		}
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "get process-definition",
 			method: "GET",
 			endpoint: `/process-definitions/${key}`,
@@ -61,7 +61,7 @@ export const listProcessDefinitionsCommand = defineCommand(
 			},
 		};
 
-		const dr = dryRun({
+		const dr = ctx.dryRun({
 			command: "list process-definitions",
 			method: "POST",
 			endpoint: "/process-definitions/search",

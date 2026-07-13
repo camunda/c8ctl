@@ -5,20 +5,20 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { defineCommand } from "../command-framework.ts";
 import {
 	addProfile as addProfileConfig,
+	c8ctl,
 	DEFAULT_PROFILE,
 	envVarsToProfile,
 	getAllProfiles,
+	getLogger,
 	hasCamundaEnvVars,
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
 	removeProfile as removeProfileConfig,
-} from "../config.ts";
-import { getLogger } from "../logger.ts";
-import { c8ctl } from "../runtime.ts";
+} from "../core/index.ts";
+import { confirm, defineCommand, select } from "../framework/index.ts";
 
 /**
  * List all profiles (c8ctl + Modeler)
@@ -78,6 +78,7 @@ interface AddProfileOptions {
 	clientSecret?: string;
 	audience?: string;
 	oauthUrl?: string;
+	scope?: string;
 	username?: string;
 	password?: string;
 	tenantId?: string;
@@ -155,6 +156,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 			clientSecret: options.clientSecret,
 			audience: options.audience,
 			oAuthUrl: options.oauthUrl,
+			scope: options.scope,
 			username: options.username,
 			password: options.password,
 			defaultTenantId: options.tenantId,
@@ -220,8 +222,52 @@ export const whichProfileCommand = defineCommand(
 export const removeProfileCommand = defineCommand(
 	"remove",
 	"profile",
-	async (_ctx, _flags, args) => {
-		removeProfile(args.name);
+	async (ctx, _flags, args) => {
+		let name = args.name;
+
+		if (!name) {
+			// No name provided — show interactive picker (c8ctl profiles only)
+			const profiles = getAllProfiles().filter(
+				(p) => !p.name.startsWith(MODELER_PREFIX),
+			);
+			if (profiles.length === 0) {
+				throw new Error("No c8ctl profiles to remove");
+			}
+
+			const result = await select({
+				message: "Which profile do you want to remove?",
+				options: profiles.map((p) => ({
+					label: p.name,
+					description: p.baseUrl || "(no URL)",
+					value: p.name,
+				})),
+			});
+
+			if (result.cancelled) {
+				return { kind: "none" };
+			}
+			if (!result.interactive) {
+				throw new Error(
+					"Profile name required. Usage: c8 remove profile <name>",
+				);
+			}
+			name = result.value;
+
+			// Confirm before removing (only when picked interactively)
+			if (!ctx.yes) {
+				const confirmResult = await confirm({
+					message: `Remove profile '${name}'?`,
+					defaultValue: false,
+				});
+				if (!confirmResult.value) {
+					const logger = getLogger();
+					logger.info("Cancelled");
+					return { kind: "none" };
+				}
+			}
+		}
+
+		removeProfile(name);
 		return { kind: "none" };
 	},
 );
@@ -236,6 +282,7 @@ export const addProfileCommand = defineCommand(
 			clientSecret: flags.clientSecret,
 			audience: flags.audience,
 			oauthUrl: flags.oAuthUrl,
+			scope: flags.scope,
 			tenantId: flags.defaultTenantId,
 			username: flags.username,
 			password: flags.password,

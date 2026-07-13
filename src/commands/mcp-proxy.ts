@@ -10,16 +10,14 @@ import {
 	CallToolRequestSchema,
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createClient } from "../client.ts";
-import { defineCommand } from "../command-framework.ts";
-import { normalizeToError } from "../errors.ts";
-import { getVersion } from "../help.ts";
-import { Logger, type LogWriter } from "../logger.ts";
 import {
-	createCamundaFetch,
-	normalizeRemoteMcpUrl,
-} from "../mcp-proxy-helpers.ts";
-import { c8ctl } from "../runtime.ts";
+	createClient,
+	Logger,
+	type LogWriter,
+	normalizeToError,
+} from "../core/index.ts";
+import { defineCommand, getVersion } from "../framework/index.ts";
+import { createCamundaFetch, normalizeRemoteMcpUrl } from "../utils/index.ts";
 
 /**
  * MCP Proxy that bridges STDIO (local) to HTTP (remote) with Camunda authentication.
@@ -268,9 +266,9 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 
 		// In verbose mode users want the full stack trace, so re-throw and
 		// let Node print it to stderr. The framework's default error handler
-		// short-circuits to a plain rethrow when `c8ctl.verbose` is set
+		// short-circuits to a plain rethrow when verbose is set
 		// (see src/errors.ts), so no stdout hint is emitted in that path.
-		if (c8ctl.verbose) {
+		if (ctx.verbose) {
 			throw normalizedError;
 		}
 

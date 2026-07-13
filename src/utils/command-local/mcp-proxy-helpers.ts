@@ -5,7 +5,7 @@
  */
 
 import type { CamundaClient } from "@camunda8/orchestration-cluster-api";
-import { isRecord, type Logger } from "./logger.ts";
+import { isRecord, type Logger } from "../../core/index.ts";
 
 /**
  * Creates a custom fetch function that injects Camunda authentication headers

@@ -31,8 +31,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { GLOBAL_FLAGS } from "../../src/command-registry.ts";
-import { isRecord } from "../../src/logger.ts";
+import { isRecord } from "../../src/core/logger.ts";
+import { GLOBAL_FLAGS } from "../../src/framework/command-registry.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const FIXTURE_DIR = join(
@@ -179,6 +179,22 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.strictEqual(parsed.ctx.profile, undefined);
 	});
 
+	test("ctx.yes reflects --yes", async () => {
+		const result = await c8Plugin("echo-ctx", "--yes");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, true);
+	});
+
+	test("ctx.yes is false when --yes is omitted", async () => {
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.yes, false);
+	});
+
 	test("ctx.outputMode is 'json' when --json is set", async () => {
 		const result = await c8Plugin("echo-ctx", "--json");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
@@ -234,6 +250,7 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 			["verbose", "verbose"],
 			["fields", "fields"],
 			["json", "outputMode"], // --json toggles outputMode
+			["yes", "yes"],
 		]);
 		const missing: string[] = [];
 		for (const name of Object.keys(GLOBAL_FLAGS)) {

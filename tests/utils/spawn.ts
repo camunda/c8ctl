@@ -54,6 +54,48 @@ function assertNoControlChars(value: string, fieldName: string): void {
 	}
 }
 
+/**
+ * Options accepted by the spawn helpers.
+ *
+ * `color` opts the child *in* to colored output. By default the helpers
+ * neutralise color-forcing environment variables (see {@link resolveSpawnEnv})
+ * so output is deterministic regardless of the developer's shell. Set
+ * `color: true` only for the rare test that asserts ANSI escapes are present.
+ */
+export interface SpawnOptions {
+	cwd?: string;
+	env?: NodeJS.ProcessEnv;
+	timeout?: number;
+	color?: boolean;
+}
+
+/**
+ * Build the environment passed to a spawned child.
+ *
+ * Unless `color: true` is requested, this strips the color-forcing variables
+ * (`FORCE_COLOR`, `CLICOLOR_FORCE`, `CLICOLOR`) inherited from the caller's
+ * shell and sets `NO_COLOR=1`. `node:util`'s `styleText` (and the CLI's
+ * formatters built on it) only emit ANSI escapes when the stream reports color
+ * support; a developer who exports `FORCE_COLOR` would otherwise force color
+ * into the piped child and break assertions that match plain text (e.g.
+ * `/\swarning\s/` or `^\s+ID\s+…`). CI doesn't set those variables, so this
+ * keeps local runs deterministic and aligned with CI.
+ *
+ * When `color: true`, the caller's env is passed through untouched so tests
+ * that explicitly set `FORCE_COLOR` can assert on the escapes.
+ */
+function resolveSpawnEnv(options?: SpawnOptions): NodeJS.ProcessEnv {
+	const base = options?.env ?? process.env;
+	if (options?.color) {
+		return { ...base };
+	}
+	const env: NodeJS.ProcessEnv = { ...base, NO_COLOR: "1" };
+	delete env.FORCE_COLOR;
+	delete env.CLICOLOR_FORCE;
+	delete env.CLICOLOR;
+	return env;
+}
+
 function validateSpawnInputs(
 	command: string,
 	args: string[],
@@ -104,12 +146,14 @@ export interface SpawnResult {
 export async function asyncSpawn(
 	command: string,
 	args: string[],
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
+	options?: SpawnOptions,
 ): Promise<SpawnResult> {
-	validateSpawnInputs(command, args, options);
+	const env = resolveSpawnEnv(options);
+	validateSpawnInputs(command, args, { ...options, env });
 	try {
 		const { stdout, stderr } = await execFile(command, args, {
-			...options,
+			cwd: options?.cwd,
+			env,
 			maxBuffer: 10 * 1024 * 1024,
 			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
 		});
@@ -135,13 +179,14 @@ export async function asyncSpawnWithStdin(
 	command: string,
 	args: string[],
 	writeStdin: (stdin: NodeJS.WritableStream) => void | Promise<void>,
-	options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number },
+	options?: SpawnOptions,
 ): Promise<SpawnResult> {
-	validateSpawnInputs(command, args, options);
+	const env = resolveSpawnEnv(options);
+	validateSpawnInputs(command, args, { ...options, env });
 	const child = spawn(command, args, {
 		stdio: ["pipe", "pipe", "pipe"],
 		cwd: options?.cwd,
-		env: options?.env,
+		env,
 		...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
 	});
 

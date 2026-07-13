@@ -1,0 +1,22 @@
+name: Community & Dependabot Notifications
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  notify:
+    uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1
+    with:
+      repo-name: c8ctl
+      mention-group: ${{ vars.SLACK_MENTION_GROUP }}
+      author-association: ${{ github.event.pull_request.author_association || github.event.issue.author_association }}
+    secrets:
+      slack-webhook-url: ${{ secrets.SLACK_SDK_ALERTS }}
+      vault-addr: ${{ secrets.VAULT_ADDR }}
+      vault-role-id: ${{ secrets.VAULT_ROLE_ID }}
+      vault-secret-id: ${{ secrets.VAULT_SECRET_ID }}

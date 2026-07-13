@@ -22,8 +22,16 @@ The following are upstream dependencies — when they misbehave, report it. Do n
 
 | Path | Ownership and intent |
 | --- | --- |
-| `src/` | Production TypeScript code, primary edit surface |
+| `src/` | Production TypeScript code, primary edit surface. Organised into an enforced layered architecture — see [Source layout & layering](#source-layout--layering) |
+| `src/core/` | Foundational leaf layer — `config`, `logger`, `runtime`, client wiring. Imports nothing from the layers above it |
+| `src/framework/` | Command machinery — `command-registry`, `command-framework`, `command-validation` |
+| `src/framework/plugins/` | Plugin system — `plugin-loader`, `plugin-registry`, `plugin-version` |
+| `src/framework/ui/` | User-facing rendering — `help`, `completion` |
+| `src/utils/` | Leaf-layer helpers (alongside `core`; never import `framework`/`commands`) |
+| `src/utils/shared/` | Genuine cross-cutting leaves — `date-filter`, `resource-extensions`, `ignore`, `validation` |
+| `src/utils/command-local/` | Pure helpers that are the guts of a single command, kept test-visible — `open-helpers`, `search-helpers`, `mcp-proxy-helpers`, `watch-constants` |
 | `src/commands/` | Command handler implementations |
+| `src/commands/helpers/` | Command-private helpers, test-invisible (guarded by `helpers-import-boundary.test.ts`) |
 | `src/templates/` | Plugin scaffold templates — do not edit directly |
 | `tests/unit/` | Unit tests |
 | `tests/integration/` | Integration tests (require live Camunda or Docker) |
@@ -45,14 +53,60 @@ COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
 
 Key components:
 
-- `src/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
-- `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions
-- `src/command-framework.ts` — provides `defineCommand()` and the `dryRun()` helper
-- `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers
-- `src/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
-- `src/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
+- `src/framework/command-registry.ts` — single source of truth: all commands are declared here with flags, resources, help text, validation, and shell completions
+- `src/command-dispatch.ts` — maps `"verb:resource"` keys to handler functions (composition root, top-level)
+- `src/framework/command-framework.ts` — provides `defineCommand()`, the `CommandContext` type, and the `createDryRun()` factory behind `ctx.dryRun()`
+- `src/index.ts` — CLI entry point; parses arguments, resolves profiles, routes to handlers (composition root, top-level)
+- `src/core/config.ts` — profile and session state: stores credentials, active profile, active tenant, output mode
+- `src/core/logger.ts` — text/JSON output rendering; `isRecord()` type guard lives here
+- `src/core/runtime.ts` — global runtime singleton (`c8ctl`) exposed to plugins; `getUserDataDir()` resolution
 - `src/commands/` — per-resource command handler files
 - `default-plugins/` — built-in embedded plugins (JavaScript or TypeScript; `.ts` files are typechecked and linted alongside `src/`)
+
+#### Source layout & layering
+
+`src/` follows a strict, acyclic, **enforced** layered architecture (introduced in #414, sub-grouped in #427/#428). A file may only import from layers at or below its own:
+
+```
+composition root (src/index.ts, src/command-dispatch.ts)  →  commands  →  framework  →  core
+                                                                          utils (leaf)
+```
+
+| Layer | May import from |
+| --- | --- |
+| `core/` | `core` |
+| `utils/` | `core`, `utils` (leaf: never `framework`/`commands`) |
+| `framework/` | `core`, `utils`, `framework` (never `commands`) |
+| `commands/` | `core`, `utils`, `framework`, `commands` |
+| composition root (`src/index.ts`, `src/command-dispatch.ts`) | anything |
+
+This is guarded by [`tests/unit/layering-import-boundary.test.ts`](tests/unit/layering-import-boundary.test.ts). The guard classifies a file by its **first** path segment, so sub-directories (`framework/plugins/`, `framework/ui/`, `utils/shared/`, `utils/command-local/`) inherit their parent layer — sub-grouping is free w.r.t. the guard. The composition root is pinned to an explicit allow-list (`src/index.ts`, `src/command-dispatch.ts`); any *new* top-level `src/*.ts` file fails the guard until it is deliberately classified.
+
+##### Per-layer barrels (module encapsulation, #424)
+
+The three barreled layers — `core`, `utils`, `framework` — each expose a single public entry point, `<layer>/index.ts` (`export *` over their internal files). The same guard enforces two further rules:
+
+- **Rule A — cross-layer imports go through the barrel.** A file importing *into* a barreled layer must target `../core/index.ts`, never a deep file like `../core/logger.ts`. This holds for `commands/**` and the composition root alike.
+- **Rule B — intra-layer imports stay direct.** A file *within* a barreled layer imports its siblings by direct path (`./logger.ts`), never via its own barrel — this keeps module-eval order obvious and avoids self-referential cycles. (The barrel file re-exporting siblings via `./file.ts` is itself an intra-layer direct import, so it is allowed.)
+
+`commands/` is deliberately **not** barreled: nothing imports it cross-layer except the composition root, which is allowed to reach deep command files (it eager-loads every handler in `command-dispatch.ts`). To widen a barreled layer's public surface, add the symbol's source file to that layer's `index.ts`.
+
+Two conventions worth internalising:
+
+- **`utils/shared/` vs `utils/command-local/`** — the split axis is "command-agnostic reusable leaf" vs "the guts of one command". `command-local` helpers stay test-visible (not moved into `commands/**`) deliberately: their logic is pure and cross-platform and is better covered by direct unit tests than by coarser `c8()` subprocess tests.
+- **`utils/command-local/` vs `commands/helpers/`** — both hold command-specific support code, but `command-local` is test-visible (tests import it directly) while `commands/helpers/` is command-private and test-invisible (driven only through the `c8()` subprocess helper, per #291).
+
+##### Per-invocation flags come from `ctx`, not the global runtime (#424)
+
+The `c8ctl` runtime singleton (`src/core/runtime.ts`) stays — it is the irreducible plugin SDK exposed on `globalThis.c8ctl` (every default plugin and the scaffold template read it via `globalThis.c8ctl`), and `src/core/**` legitimately owns and wraps it (the core error handler and SDK client read `c8ctl.verbose`/`c8ctl.dryRun` directly; the composition root writes them). What shrank is its *mutable surface as seen from the layers above core*.
+
+Per-invocation request state — whether `--dry-run` / `--verbose` were passed — is resolved once at the composition root (`src/index.ts`) and threaded into handlers through the typed `CommandContext`:
+
+- **`ctx.dryRun({ command, method, endpoint, profile, body? })`** — the bound dry-run helper. Returns a `DryRunResult` when dry-run is active (return it to short-circuit), else `null`. Built by `createDryRun(isDryRun)` at the composition root. This replaces the old free `dryRun()` helper that read the global.
+- **`ctx.isDryRun`** — the raw boolean, for the handful of handlers that emit a *custom* dry-run payload (`deploy`, `identity`) rather than the framework's standard `DryRunResult`.
+- **`ctx.verbose`** — whether `--verbose` was passed.
+
+`src/commands/**` and `src/framework/**` must obtain these from `ctx` (handlers) or an explicit parameter (non-handler framework entry points such as `installCompletion`/`refreshCompletionsIfStale`), and must **not** read `c8ctl.dryRun` or `c8ctl.verbose` back off the global. This is guarded by [`tests/unit/no-runtime-global-reads-in-handlers.test.ts`](tests/unit/no-runtime-global-reads-in-handlers.test.ts) (AST-based, so the field names are safe to mention in comments and strings). `c8ctl.outputMode` is *session display state*, not a per-invocation request flag — read it via `logger.mode` where a logger is in scope; the `session` command reads it directly because managing session state is its job.
 
 ### Commit message guidelines
 
@@ -151,8 +205,9 @@ Never skip the lint and type-check steps before pushing.
 
 - `npm run typecheck` — runs `tsc --noEmit -p tsconfig.check.json` over `src/` and `tests/`
 - `npx biome check --fix` — lints and formats `src/` and `tests/` per `biome.json` (includes the `no-unsafe-type-assertion` plugin)
+- `npm run check:layering` — runs the architectural layering guard (`tests/unit/layering-import-boundary.test.ts`) in isolation: layer-direction rules plus the per-layer barrel rules (#414/#424). Fast (~1s); use it to check import boundaries without running the whole unit suite.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
-- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). Skips biome or tsc individually if not installed locally.
+- `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). When any `src/` file is staged it also runs the layering guard (`check:layering`) against the working tree, so import-boundary regressions are caught at commit time instead of in CI. Skips biome, tsc, or the guard individually if the toolchain is not installed locally.
 
 #### Test process isolation — `--experimental-test-isolation=none` for integration tests
 
@@ -180,7 +235,7 @@ The flag is **not** applied to `test:unit` because the unit suite has 66 files a
 
 ### Help output: flag scoping rule
 
-`c8ctl --help` (top-level) lists **only** the flags in `GLOBAL_FLAGS` (`src/command-registry.ts`). Verb- and resource-specific flags appear under `c8ctl help <verb>` only.
+`c8ctl --help` (top-level) lists **only** the flags in `GLOBAL_FLAGS` (`src/framework/command-registry.ts`). Verb- and resource-specific flags appear under `c8ctl help <verb>` only.
 
 There is **no opt-in mechanism** for promoting a verb-specific flag into the top-level Flags section. The previous `FlagDef.showInTopLevelHelp` field and the `(use with 'verb resource')` parenthetical workaround were removed in [#321](https://github.com/camunda/c8ctl/issues/321) / [#322](https://github.com/camunda/c8ctl/pull/322) because they produced misleading output: a flag listed at the root looks like it applies to every command.
 
@@ -298,14 +353,16 @@ Every command handler in `src/commands/**` follows the same shape. Pattern-match
 #### Canonical shape
 
 ```ts
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand } from "../framework/index.ts";
 
 export const myCommand = defineCommand("myverb", "my-resource", async (ctx, flags, args) => {
   const { client, profile, logger } = ctx;
 
   // 1. Dry-run check — must come BEFORE any I/O. Returns a DryRunResult
-  //    if `--dry-run` was passed, or `null` to continue.
-  const dr = dryRun({
+  //    if `--dry-run` was passed, or `null` to continue. The helper is
+  //    bound to this invocation's flag and lives on `ctx`, so handlers
+  //    never read dry-run state off the global runtime.
+  const dr = ctx.dryRun({
     command: "myverb my-resource",
     method: "POST",
     endpoint: "/my-resources",
@@ -358,10 +415,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 ```
 
 ```ts
-// ✅ Canonical shape — body inline, dryRun() helper, throws on failure,
+// ✅ Canonical shape — body inline, ctx.dryRun() helper, throws on failure,
 //    returns a CommandResult.
 export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
-  const dr = dryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: ctx.profile });
+  const dr = ctx.dryRun({ command: "deploy", method: "POST", endpoint: "/deployments", profile: ctx.profile });
   if (dr) return dr;
 
   if (ctx.positionals.length === 0) {
@@ -392,7 +449,7 @@ Long-running handlers — currently `watch` and `mcp-proxy` — correctly return
 
 ### Adding a new command
 
-Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
+Commands are defined declaratively. The `COMMAND_REGISTRY` in `src/framework/command-registry.ts` is the single source of truth — help text, shell completions, `parseArgs` options, and validation are all derived from it. No metadata is duplicated anywhere.
 
 #### Architecture overview
 
@@ -406,7 +463,7 @@ COMMAND_DISPATCH   →  wiring (maps "verb:resource" to handler)
 
 ##### 1. Declare the command in `COMMAND_REGISTRY`
 
-Add or extend a verb entry in `src/command-registry.ts`:
+Add or extend a verb entry in `src/framework/command-registry.ts`:
 
 ```typescript
 // In COMMAND_REGISTRY:
@@ -483,7 +540,7 @@ Create a handler file in `src/commands/`:
 
 ```typescript
 // src/commands/my-resource.ts
-import { defineCommand, dryRun } from "../command-framework.ts";
+import { defineCommand } from "../framework/index.ts";
 
 export const myverbMyResourceCommand = defineCommand(
   "myverb",
@@ -496,7 +553,7 @@ export const myverbMyResourceCommand = defineCommand(
     // args.key     → MyBrandedKey (required positional, branded)
 
     // Dry-run support (required for all commands)
-    const dr = dryRun({
+    const dr = ctx.dryRun({
       command: "myverb my-resource",
       method: "POST",
       endpoint: "/my-resources",
@@ -524,7 +581,7 @@ export const myverbMyResourceCommand = defineCommand(
 | `success` | Mutation confirmation | `{ message }` |
 | `no-result` | Nothing to display | — |
 
-The `dryRun()` helper checks the `--dry-run` flag and returns a `DryRunResult` if set, or `undefined` to continue.
+The `ctx.dryRun()` helper checks the `--dry-run` flag (captured once at the composition root) and returns a `DryRunResult` if set, or `null` to continue. The raw boolean is also available as `ctx.isDryRun` for handlers that emit a custom dry-run payload (`deploy`, `identity`).
 
 ##### 5. Register in `COMMAND_DISPATCH`
 
@@ -557,7 +614,7 @@ By adding the registry entry and dispatch wiring, these features are automatical
 - `c8ctl completion bash/zsh/fish` includes the verb, resource, and all flags
 - `parseArgs` accepts the declared flags with correct types
 - Flag validation runs at the boundary (branded types enforced)
-- `--dry-run` support (via `dryRun()` helper)
+- `--dry-run` support (via the `ctx.dryRun()` helper)
 - Output rendering (JSON, table, fields filtering) handled by the framework
 - Resource alias resolution (`mr` → `my-resource`) works everywhere
 

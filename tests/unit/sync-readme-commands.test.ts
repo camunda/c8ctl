@@ -29,12 +29,12 @@ import {
 	VRL_END_MARKER,
 	VRL_START_MARKER,
 } from "../../scripts/sync-readme-commands.ts";
-import type { CommandDef } from "../../src/command-registry.ts";
+import type { CommandDef } from "../../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	SEARCH_FLAGS,
-} from "../../src/command-registry.ts";
+} from "../../src/framework/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

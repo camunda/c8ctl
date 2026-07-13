@@ -7,7 +7,7 @@ import { existsSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type {} from "../../../src/runtime.ts";
+import type {} from "../../../src/core/runtime.ts";
 import {
 	applySetOverrides,
 	findPropertiesByBindingName,

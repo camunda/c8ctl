@@ -9,7 +9,7 @@ import {
 	fetchAllPages,
 	type PagedResponse,
 	type SearchConsistencyOpts,
-} from "../../src/client.ts";
+} from "../../src/core/client.ts";
 
 /** Build a properly shaped PagedResponse, filling missing fields with defaults. */
 function makePage<T>(

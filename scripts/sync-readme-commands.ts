@@ -15,13 +15,13 @@ import type {
 	CommandDef,
 	FlagDef,
 	PositionalDef,
-} from "../src/command-registry.ts";
+} from "../src/framework/command-registry.ts";
 import {
 	COMMAND_REGISTRY,
 	GLOBAL_FLAGS,
 	RESOURCE_ALIASES,
 	SEARCH_FLAGS,
-} from "../src/command-registry.ts";
+} from "../src/framework/command-registry.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

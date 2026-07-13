@@ -8,7 +8,6 @@
  * lived in index.ts.
  */
 
-import type { AnyCommandHandler } from "./command-framework.ts";
 import { completionCommand } from "./commands/completion.ts";
 import { deployCommand } from "./commands/deploy.ts";
 import { getFormCommand } from "./commands/forms.ts";
@@ -64,6 +63,7 @@ import {
 	completeJobCommand,
 	failJobCommand,
 	listJobsCommand,
+	updateJobCommand,
 } from "./commands/jobs.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
@@ -106,6 +106,7 @@ import {
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
 	searchVariablesCommand,
+	searchWaitStatesCommand,
 } from "./commands/search.ts";
 import {
 	outputCommand,
@@ -120,6 +121,7 @@ import {
 } from "./commands/user-tasks.ts";
 import { setVariableCommand } from "./commands/variables.ts";
 import { watchCommand } from "./commands/watch.ts";
+import type { AnyCommandHandler } from "./framework/index.ts";
 
 /**
  * Dispatch map keyed by "verb:resource".
@@ -174,6 +176,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["activate:jobs", activateJobsCommand],
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
+	["update:job", updateJobCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],
@@ -196,6 +199,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["search:tenant", searchIdentityTenantsCommand],
 	["search:authorization", searchIdentityAuthorizationsCommand],
 	["search:mapping-rule", searchIdentityMappingRulesCommand],
+	["search:wait-state", searchWaitStatesCommand],
 
 	// ── Identity: list ─────────────────────────────────────────────────
 	["list:user", listUsersCommand],

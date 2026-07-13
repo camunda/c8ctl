@@ -6,12 +6,14 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve as resolvePath } from "node:path";
+import { dirname, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { styleText } from "node:util";
+import { pathStringify } from "@bpmn-io/moddle-utils";
 import type { BpmnModdleElement } from "bpmn-moddle";
 import type { LintReport, LintResults } from "bpmnlint";
-import type { Logger } from "../../src/logger.ts";
-import type {} from "../../src/runtime.ts";
+import type { Logger } from "../../src/core/logger.ts";
+import type {} from "../../src/core/runtime.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -19,6 +21,63 @@ const require = createRequire(import.meta.url);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+type StaticResolverLike = {
+	resolveRule(pkg: string, ruleName: string): unknown;
+	resolveConfig(pkg: string, configName: string): unknown;
+};
+
+type BpmnlintVendor = {
+	Linter: new (opts: {
+		config: unknown;
+		resolver: StaticResolverLike;
+	}) => { lint(rootElement: unknown): Promise<LintResults> };
+	makeResolver: () => StaticResolverLike;
+	camundaCompatConfigNames: string[];
+};
+
+function isBpmnlintVendor(value: unknown): value is BpmnlintVendor {
+	return (
+		isRecord(value) &&
+		typeof value.Linter === "function" &&
+		typeof value.makeResolver === "function" &&
+		Array.isArray(value.camundaCompatConfigNames)
+	);
+}
+
+let cachedVendor: BpmnlintVendor | null = null;
+
+/**
+ * Load the prebuilt bpmnlint static-resolver vendor bundle. bpmnlint's default
+ * NodeResolver resolves rules and configs via runtime `require()` against the
+ * CWD, which cannot work in the self-contained published CLI. The bundle
+ * (built by `scripts/build-bpmnlint-vendor.mjs`) inlines every rule and config
+ * and is loaded here in both dev and prod for a single code path:
+ *   - dev:        default-plugins/bpmn/lint.ts → ../../dist/vendor/bpmnlint.cjs
+ *   - production: dist/default-plugins/bpmn/c8ctl-plugin.js → ../../vendor/bpmnlint.cjs
+ */
+function loadBpmnlintVendor(): BpmnlintVendor {
+	if (cachedVendor) return cachedVendor;
+	const dir = dirname(fileURLToPath(import.meta.url));
+	const candidates = [
+		resolvePath(dir, "..", "..", "dist", "vendor", "bpmnlint.cjs"),
+		resolvePath(dir, "..", "..", "vendor", "bpmnlint.cjs"),
+	];
+	for (const path of candidates) {
+		if (existsSync(path)) {
+			const loaded: unknown = require(path);
+			if (!isBpmnlintVendor(loaded)) {
+				throw new Error(`Invalid bpmnlint vendor bundle at ${path}`);
+			}
+			cachedVendor = loaded;
+			return loaded;
+		}
+	}
+	throw new Error(
+		"bpmnlint vendor bundle not found. Run `npm run build:vendor` to build it.\n" +
+			`Searched: ${candidates.join(", ")}`,
+	);
 }
 
 type BpmnInput = { xml: string; source: string };
@@ -138,15 +197,14 @@ function compareVersionParts(a: number[], b: number[]): number {
 }
 
 function resolveCamundaCompatConfig(version: string): ConfigResolution | null {
-	const plugin = require("bpmnlint-plugin-camunda-compat");
-	const configs = plugin.configs;
+	const configNames = loadBpmnlintVendor().camundaCompatConfigNames;
 
 	const configName = `camunda-cloud-${version.replace(".", "-")}`;
-	if (configName in configs) {
+	if (configNames.includes(configName)) {
 		return { kind: "exact", config: `plugin:camunda-compat/${configName}` };
 	}
 
-	const cloudConfigs = Object.keys(configs)
+	const cloudConfigs = configNames
 		.filter((k) => k.startsWith("camunda-cloud-"))
 		.sort((a, b) =>
 			compareVersionParts(parseVersionParts(a), parseVersionParts(b)),
@@ -237,7 +295,6 @@ function collectLintResult(results: LintResults): LintResult {
 	let warningCount = 0;
 	const issues: LintIssue[] = [];
 	const rows: LintRow[] = [];
-	const { pathStringify } = require("@bpmn-io/moddle-utils");
 
 	for (const [ruleName, reports] of Object.entries(results)) {
 		for (const report of reports) {
@@ -439,16 +496,14 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	const { Linter } = require("bpmnlint");
-	const NodeResolver = require("bpmnlint/lib/resolver/node-resolver");
+	const { Linter, makeResolver } = loadBpmnlintVendor();
 
-	// Pass our plugin-scoped `require` to NodeResolver so bpmnlint resolves
-	// `bpmnlint-plugin-camunda-compat` from c8ctl's installation, not the
-	// user's CWD. Without this, `bpmn lint` only works when run from a
-	// directory that happens to have the plugin in its node_modules.
+	// The static-resolver vendor bundle inlines all bpmnlint and
+	// camunda-compat rules/configs, so `bpmn lint` resolves them without a
+	// runtime CWD lookup and works in the self-contained published CLI.
 	const linter = new Linter({
 		config,
-		resolver: new NodeResolver({ require }),
+		resolver: makeResolver(),
 	});
 	const results = await linter.lint(rootElement);
 

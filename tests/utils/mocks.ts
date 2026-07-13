@@ -10,8 +10,8 @@
  * code under test actually touches; everything else is stubbed to a no-op.
  */
 
-import type { createClient } from "../../src/client.ts";
-import type { Logger } from "../../src/logger.ts";
+import type { createClient } from "../../src/core/client.ts";
+import type { Logger } from "../../src/core/logger.ts";
 
 type CamundaClient = ReturnType<typeof createClient>;
 
