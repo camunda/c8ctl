@@ -91,7 +91,7 @@ c8 get role admin
 ### Create a role
 
 ```bash
-c8 create role --name=my-role
+c8 create role --roleId=my-role --name='My role'
 ```
 
 ### Delete a role
@@ -209,7 +209,7 @@ c8 search mr --name=my-rule
 ### Create a mapping rule
 
 ```bash
-c8 create mr --mappingRuleId=my-rule --name='My Rule'
+c8 create mr --mappingRuleId=my-rule --name='My Rule' --claimName=email --claimValue=user@example.com
 ```
 
 ### Delete a mapping rule

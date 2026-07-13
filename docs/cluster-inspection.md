@@ -550,7 +550,7 @@ c8 publish msg order-placed --correlationKey=order-12345 --timeToLive=3600000
 
 ### Correlate a message
 
-`correlate` is an alias for `publish`:
+Use `correlate` to correlate a message to waiting process instances. It is a separate command from `publish` and, like `publish`, accepts a `--correlationKey` and optional `--variables`:
 
 ```bash
 c8 correlate msg payment-received --correlationKey=order-12345 --variables='{"amount":250.00}'

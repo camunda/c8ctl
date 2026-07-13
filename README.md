@@ -150,7 +150,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
-- `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`. See [Per-invocation output override](#per-invocation-output-override).
+- `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`.
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
 - `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr.
 

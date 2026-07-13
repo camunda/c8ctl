@@ -515,7 +515,14 @@ function main(): void {
 		const before = readme.slice(0, startIdx + START_MARKER.length);
 		const after = readme.slice(endIdx);
 		readme = `${before}\n\n${generated}\n\n${after}`;
+	} else if (startIdx !== -1 && endIdx !== -1) {
+		// Both markers are present but out of order (start appears after end).
+		console.error(
+			`ERROR: ${START_MARKER} must appear before ${END_MARKER} in README.md.`,
+		);
+		process.exit(1);
 	} else if (startIdx !== -1 || endIdx !== -1) {
+		// Exactly one of the two markers is present.
 		console.error(
 			`ERROR: README.md has a mismatched command-reference marker (found only one of ${START_MARKER} / ${END_MARKER}).`,
 		);
