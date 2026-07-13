@@ -1,0 +1,77 @@
+name: Promote to stable
+
+# Self-service stable release.
+#
+# Cutting a stable release means fast-forwarding the `release` branch to a
+# commit on `main` and letting the Release workflow publish it under the npm
+# `latest` dist-tag. This workflow automates that fast-forward so maintainers
+# no longer have to run the git steps locally (see RELEASE.md).
+#
+# Note: a push made with the built-in GITHUB_TOKEN does NOT trigger other
+# workflows (GitHub's anti-recursion rule). We therefore push `release` and
+# then explicitly dispatch the Release workflow — a workflow_dispatch from
+# GITHUB_TOKEN is an allowed exception and will run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA or branch on main to promote to stable'
+        required: false
+        default: 'main'
+
+concurrency:
+  group: promote-stable
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Fast-forward release to ${{ inputs.ref }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward release branch
+        env:
+          TARGET: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin main release --tags --prune
+
+          # Resolve the requested target to a concrete SHA. Prefer the remote
+          # tracking ref (e.g. "main") but fall back to a raw SHA/tag.
+          if git rev-parse --verify --quiet "origin/${TARGET}" >/dev/null; then
+            TARGET_SHA=$(git rev-parse "origin/${TARGET}")
+          else
+            TARGET_SHA=$(git rev-parse --verify "${TARGET}^{commit}")
+          fi
+          echo "Promoting ${TARGET} -> ${TARGET_SHA}"
+
+          # The target must contain the current release tip, otherwise a
+          # fast-forward would drop commits already released as stable.
+          if git rev-parse --verify --quiet origin/release >/dev/null; then
+            RELEASE_SHA=$(git rev-parse origin/release)
+            if [ "${RELEASE_SHA}" = "${TARGET_SHA}" ]; then
+              echo "::warning::release is already at ${TARGET_SHA}; nothing to promote (Release may report 'no release')."
+            elif ! git merge-base --is-ancestor "${RELEASE_SHA}" "${TARGET_SHA}"; then
+              echo "::error::release (${RELEASE_SHA}) is not an ancestor of ${TARGET} (${TARGET_SHA}); fast-forward is not possible."
+              exit 1
+            fi
+          fi
+
+          # Fast-forward only: the target already contains release, so this
+          # can never rewrite history on the release branch.
+          git push origin "${TARGET_SHA}:refs/heads/release"
+
+      - name: Trigger Release workflow on release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run release.yml --ref release
