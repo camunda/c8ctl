@@ -372,6 +372,10 @@ describe("Help Module", () => {
 			output.includes("wait-state"),
 			"search help should include wait-state resource",
 		);
+		assert.ok(
+			output.includes("wait-state (ws)"),
+			"search help should include the ws alias for wait-state",
+		);
 	});
 
 	test("showCommandHelp shows deploy help", () => {
