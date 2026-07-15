@@ -811,7 +811,7 @@ export const COMMAND_REGISTRY = {
 			"tenants",
 			"auth",
 			"mapping-rules",
-			"wait-state",
+			"ws",
 		],
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
