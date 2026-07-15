@@ -369,10 +369,6 @@ describe("Help Module", () => {
 			"search help should include --dateField flag",
 		);
 		assert.ok(
-			output.includes("wait-state"),
-			"search help should include wait-state resource",
-		);
-		assert.ok(
 			output.includes("wait-state (ws)"),
 			"search help should include the ws alias for wait-state",
 		);
