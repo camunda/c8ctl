@@ -108,6 +108,14 @@ function getTaskDefinitionType(xml: string): string | null {
 	return match ? match[1] : null;
 }
 
+function getTaskHeaderValue(xml: string, key: string): string | null {
+	const re = new RegExp(
+		`<zeebe:header\\s+(?=[^>]*key="${key}")(?=[^>]*value="([^"]*)")`,
+	);
+	const match = xml.match(re);
+	return match ? match[1] : null;
+}
+
 // ---------------------------------------------------------------------------
 // element-template verb
 // ---------------------------------------------------------------------------
@@ -2227,6 +2235,64 @@ describe("CLI behavioural: element-template edit", () => {
 					marker,
 					"edit must not reset the Hidden zeebe:taskDefinition/type property " +
 						"to its template default",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("--set updates a zeebe:taskHeader value (and prepends FEEL) without touching other bindings", async () => {
+		// Coverage for the zeebe:taskHeader branch of resolveBindingTarget,
+		// which is asymmetric to zeebe:input (keyed by binding.key, writing
+		// the header's `value` property) and was otherwise exercised by no
+		// --set path — apply or edit. `resultExpression` is a Text/FEEL header
+		// the fixture materializes with a default on apply, so editing it also
+		// proves maybePrependFeel runs on the edit path (feel: "required" =>
+		// a bare value gets an "=" prefix).
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				assert.ok(
+					getTaskHeaderValue(
+						readFileSync(tempBpmn, "utf-8"),
+						"resultExpression",
+					)?.startsWith("="),
+					"apply should have materialized the resultExpression header with its FEEL default",
+				);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"resultExpression=response.body",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(
+					getTaskHeaderValue(edited.stdout, "resultExpression"),
+					"=response.body",
+					"edit must update the taskHeader's value and prepend '=' for a feel:required header",
+				);
+				assert.strictEqual(
+					getInputValue(edited.stdout, "method"),
+					"POST",
+					"editing the taskHeader must not disturb the unrelated zeebe:input value",
 				);
 			} finally {
 				rmSync(tempDir, { recursive: true, force: true });
