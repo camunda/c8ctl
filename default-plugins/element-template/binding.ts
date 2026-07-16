@@ -17,12 +17,9 @@
  */
 
 import type { TemplateBinding } from "./helpers.ts";
+import { getModdleList, type ModdleElement } from "./moddle.ts";
 
-export type ModdleElement = {
-	$type: string;
-	get(name: string): unknown;
-	[key: string]: unknown;
-};
+export type { ModdleElement };
 
 export type ExtensionContainers = {
 	ioMapping: ModdleElement | undefined;
@@ -42,9 +39,8 @@ export function findExtensionByType(
 	if (!extensionElements) {
 		return undefined;
 	}
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-	const values = extensionElements.get("values") as ModdleElement[] | undefined;
-	return values?.find((v) => v.$type === type);
+	const values = getModdleList(extensionElements, "values");
+	return values.find((v) => v.$type === type);
 }
 
 /** Locate the extension containers each binding type reads/writes to. */
@@ -75,30 +71,22 @@ export function resolveBindingTarget(
 ): { child: ModdleElement; property: string } | undefined {
 	switch (binding.type) {
 		case "zeebe:input": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const inputs = (containers.ioMapping?.get("inputParameters") ??
-				[]) as ModdleElement[];
+			const inputs = getModdleList(containers.ioMapping, "inputParameters");
 			const child = inputs.find((p) => p.target === binding.name);
 			return child ? { child, property: "source" } : undefined;
 		}
 		case "zeebe:output": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const outputs = (containers.ioMapping?.get("outputParameters") ??
-				[]) as ModdleElement[];
+			const outputs = getModdleList(containers.ioMapping, "outputParameters");
 			const child = outputs.find((p) => p.source === binding.source);
 			return child ? { child, property: "target" } : undefined;
 		}
 		case "zeebe:taskHeader": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const headers = (containers.taskHeaders?.get("values") ??
-				[]) as ModdleElement[];
+			const headers = getModdleList(containers.taskHeaders, "values");
 			const child = headers.find((h) => h.key === binding.key);
 			return child ? { child, property: "value" } : undefined;
 		}
 		case "zeebe:property": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const props = (containers.zeebeProperties?.get("properties") ??
-				[]) as ModdleElement[];
+			const props = getModdleList(containers.zeebeProperties, "properties");
 			const child = props.find((p) => p.name === binding.name);
 			return child ? { child, property: "value" } : undefined;
 		}

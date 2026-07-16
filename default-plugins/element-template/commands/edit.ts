@@ -42,6 +42,11 @@ import {
 	type Template,
 	validateDropdownValue,
 } from "../helpers.ts";
+import {
+	getModdleElement,
+	getModdleNumber,
+	getModdleString,
+} from "../moddle.ts";
 import { readBpmnInput, resolveOotbTemplate } from "../template-ref.ts";
 import {
 	type BpmnElement,
@@ -84,20 +89,17 @@ async function planEdit(
 		throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
 	}
 
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped values
-	const templateId = element.businessObject.get("modelerTemplate") as
-		| string
-		| undefined;
+	const templateId = getModdleString(element.businessObject, "modelerTemplate");
 	if (!templateId) {
 		throw new Error(
 			`Element "${elementId}" has no element template applied (no zeebe:modelerTemplate attribute). ` +
 				"Use 'apply' to apply one first.",
 		);
 	}
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped values
-	const templateVersion = element.businessObject.get(
+	const templateVersion = getModdleNumber(
+		element.businessObject,
 		"modelerTemplateVersion",
-	) as number | undefined;
+	);
 	if (templateVersion === undefined) {
 		throw new Error(
 			`Element "${elementId}" has zeebe:modelerTemplate="${templateId}" but no recorded ` +
@@ -112,10 +114,10 @@ async function planEdit(
 		version: templateVersion,
 	});
 
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped ModdleElement
-	const extensionElements = element.businessObject.get("extensionElements") as
-		| ModdleElement
-		| undefined;
+	const extensionElements = getModdleElement(
+		element.businessObject,
+		"extensionElements",
+	);
 	const containers = findExtensionContainers(extensionElements);
 
 	// Keyed by (child, property) so conditional duplicate properties (same

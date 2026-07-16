@@ -18,6 +18,7 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "../helpers.ts";
+import { getModdleElement } from "../moddle.ts";
 import {
 	elementExistsInBpmn,
 	getExecutionPlatformVersion,
@@ -28,7 +29,6 @@ import {
 } from "../template-ref.ts";
 import {
 	type BpmnElement,
-	type ModdleElement,
 	type ModelerInstance,
 	resolveVendorBundle,
 	type VendorBundle,
@@ -63,10 +63,10 @@ function forceSetValues(
 	setArgs: string[],
 ): void {
 	const modeling = modeler.get("modeling");
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped ModdleElement
-	const extensionElements = element.businessObject.get("extensionElements") as
-		| ModdleElement
-		| undefined;
+	const extensionElements = getModdleElement(
+		element.businessObject,
+		"extensionElements",
+	);
 	if (!extensionElements) {
 		return;
 	}
