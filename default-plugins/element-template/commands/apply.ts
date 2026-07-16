@@ -3,16 +3,14 @@
  * element via the prebuilt bpmn-js + bpmn-js-element-templates vendor bundle.
  */
 
-import { existsSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
 import type {} from "../../../src/core/runtime.ts";
+import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
 	applySetOverrides,
+	atomicOverwriteFile,
 	findPropertiesByBindingName,
 	installStdoutEpipeHandler,
-	isRecord,
 	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
@@ -20,6 +18,7 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "../helpers.ts";
+import { getModdleElement } from "../moddle.ts";
 import {
 	elementExistsInBpmn,
 	getExecutionPlatformVersion,
@@ -28,107 +27,16 @@ import {
 	readTemplateFromPathOrUrl,
 	resolveOotbTemplate,
 } from "../template-ref.ts";
+import {
+	type BpmnElement,
+	type ModelerInstance,
+	resolveVendorBundle,
+	type VendorBundle,
+} from "../vendor.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
-
-// Minimal vendor-bundle surface — the bundle is loaded via require() with
-// an absolute path, so we type the local destination instead of declaring
-// the module name. Everything beyond this surface stays as `unknown` and
-// gets narrowed at the use site.
-type ModdleElement = {
-	$type: string;
-	get(name: string): unknown;
-	[key: string]: unknown;
-};
-type BpmnElement = { businessObject: ModdleElement };
-type ElementRegistry = { get(id: string): BpmnElement | undefined };
-type ElementTemplatesService = {
-	set(templates: Template[]): void;
-	applyTemplate(element: BpmnElement, template: Template): void;
-};
-type Modeling = {
-	updateModdleProperties(
-		element: BpmnElement,
-		moddleElement: ModdleElement,
-		properties: Record<string, unknown>,
-	): void;
-};
-type ModelerInstance = {
-	importXML(xml: string): Promise<unknown>;
-	get(name: "elementRegistry"): ElementRegistry;
-	get(name: "elementTemplates"): ElementTemplatesService;
-	get(name: "modeling"): Modeling;
-	get(name: string): unknown;
-	saveXML(options: { format?: boolean }): Promise<{ xml: string }>;
-};
-type ModelerCtor = new (options: {
-	additionalModules: unknown[];
-	moddleExtensions: Record<string, unknown>;
-}) => ModelerInstance;
-type VendorBundle = {
-	Modeler: ModelerCtor;
-	CloudElementTemplatesCoreModule: unknown;
-	ZeebeModdleExtension: unknown;
-	HeadlessTextRendererModule: unknown;
-};
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/**
- * Locate the prebuilt vendor bundle. Plugins live in two places:
- *   - dev:        default-plugins/element-template/commands/apply.ts
- *                 vendor: ../../../dist/vendor/bpmn-element-templates.cjs
- *   - production: dist/default-plugins/element-template/commands/apply.js
- *                 vendor: ../../../vendor/bpmn-element-templates.cjs
- */
-function resolveVendorBundle(): string {
-	const candidates = [
-		resolvePath(
-			__dirname,
-			"..",
-			"..",
-			"..",
-			"dist",
-			"vendor",
-			"bpmn-element-templates.cjs",
-		),
-		resolvePath(
-			__dirname,
-			"..",
-			"..",
-			"..",
-			"vendor",
-			"bpmn-element-templates.cjs",
-		),
-	];
-	for (const path of candidates) {
-		if (existsSync(path)) {
-			return path;
-		}
-	}
-	throw new Error(
-		"Vendor bundle not found. Run `npm run build:vendor` to build it.\n" +
-			`Searched: ${candidates.join(", ")}`,
-	);
-}
-
-/**
- * Find the first child of `extensionElements` whose moddle `$type` matches.
- * Avoids importing bpmn-js's `is()` helper just for one shape check.
- */
-function findExtensionByType(
-	extensionElements: ModdleElement | undefined,
-	type: string,
-): ModdleElement | undefined {
-	if (!extensionElements) {
-		return undefined;
-	}
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-	const values = extensionElements.get("values") as ModdleElement[] | undefined;
-	return values?.find((v) => v.$type === type);
-}
 
 /**
  * Force the source/value of each `--set` into the corresponding moddle child.
@@ -155,27 +63,15 @@ function forceSetValues(
 	setArgs: string[],
 ): void {
 	const modeling = modeler.get("modeling");
-	// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped ModdleElement
-	const extensionElements = element.businessObject.get("extensionElements") as
-		| ModdleElement
-		| undefined;
+	const extensionElements = getModdleElement(
+		element.businessObject,
+		"extensionElements",
+	);
 	if (!extensionElements) {
 		return;
 	}
 
-	const ioMapping = findExtensionByType(extensionElements, "zeebe:IoMapping");
-	const taskHeaders = findExtensionByType(
-		extensionElements,
-		"zeebe:TaskHeaders",
-	);
-	const taskDefinition = findExtensionByType(
-		extensionElements,
-		"zeebe:TaskDefinition",
-	);
-	const zeebeProperties = findExtensionByType(
-		extensionElements,
-		"zeebe:Properties",
-	);
+	const containers = findExtensionContainers(extensionElements);
 
 	for (const arg of setArgs) {
 		const { bindingTypeFilter, name, value } = parseSetArg(arg);
@@ -185,82 +81,14 @@ function forceSetValues(
 			bindingTypeFilter,
 		);
 		for (const prop of matches) {
+			if (!prop.binding) continue;
 			const effectiveValue = maybePrependFeel(prop, value);
-			updateModdleForProperty(modeling, element, prop, effectiveValue, {
-				ioMapping,
-				taskHeaders,
-				taskDefinition,
-				zeebeProperties,
-			});
-		}
-	}
-}
-
-function updateModdleForProperty(
-	modeling: Modeling,
-	element: BpmnElement,
-	prop: TemplateProperty,
-	value: string,
-	containers: {
-		ioMapping: ModdleElement | undefined;
-		taskHeaders: ModdleElement | undefined;
-		taskDefinition: ModdleElement | undefined;
-		zeebeProperties: ModdleElement | undefined;
-	},
-): void {
-	const binding = prop.binding;
-	if (!binding) {
-		return;
-	}
-
-	switch (binding.type) {
-		case "zeebe:input": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const inputs = (containers.ioMapping?.get("inputParameters") ??
-				[]) as ModdleElement[];
-			const child = inputs.find((p) => p.target === binding.name);
-			if (child) {
-				modeling.updateModdleProperties(element, child, { source: value });
-			}
-			return;
-		}
-		case "zeebe:output": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const outputs = (containers.ioMapping?.get("outputParameters") ??
-				[]) as ModdleElement[];
-			const child = outputs.find((p) => p.source === binding.source);
-			if (child) {
-				modeling.updateModdleProperties(element, child, { target: value });
-			}
-			return;
-		}
-		case "zeebe:taskHeader": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const headers = (containers.taskHeaders?.get("values") ??
-				[]) as ModdleElement[];
-			const child = headers.find((h) => h.key === binding.key);
-			if (child) {
-				modeling.updateModdleProperties(element, child, { value });
-			}
-			return;
-		}
-		case "zeebe:property": {
-			// biome-ignore lint/plugin: moddle API contract boundary — get() returns untyped collections
-			const props = (containers.zeebeProperties?.get("properties") ??
-				[]) as ModdleElement[];
-			const child = props.find((p) => p.name === binding.name);
-			if (child) {
-				modeling.updateModdleProperties(element, child, { value });
-			}
-			return;
-		}
-		case "zeebe:taskDefinition": {
-			if (containers.taskDefinition && binding.property) {
-				modeling.updateModdleProperties(element, containers.taskDefinition, {
-					[binding.property]: value,
+			const target = resolveBindingTarget(prop.binding, containers);
+			if (target) {
+				modeling.updateModdleProperties(element, target.child, {
+					[target.property]: effectiveValue,
 				});
 			}
-			return;
 		}
 	}
 }
@@ -467,38 +295,4 @@ export async function applySubcommand(args: string[]): Promise<void> {
 	}
 
 	process.stdout.write(resultXml);
-}
-
-/**
- * Overwrite `targetPath` atomically: write to a sibling temp file in
- * the same directory, then `renameSync` over the target. POSIX
- * `rename` is atomic on the same filesystem, so a kill mid-write
- * never destroys the user's BPMN file.
- *
- * Falls back to a direct `writeFileSync` if the rename fails with
- * EXDEV (cross-device link) — vanishingly rare for a file's own
- * sibling, but covers exotic setups like FUSE mounts.
- */
-function atomicOverwriteFile(targetPath: string, contents: string): void {
-	const target = resolvePath(targetPath);
-	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-	try {
-		writeFileSync(tmp, contents, "utf-8");
-		renameSync(tmp, target);
-	} catch (error) {
-		try {
-			unlinkSync(tmp);
-		} catch {
-			// Best-effort cleanup — the original error is what matters.
-		}
-		const code =
-			isRecord(error) && typeof error.code === "string"
-				? error.code
-				: undefined;
-		if (code === "EXDEV") {
-			writeFileSync(target, contents, "utf-8");
-			return;
-		}
-		throw error;
-	}
 }
