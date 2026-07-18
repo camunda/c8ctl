@@ -1882,7 +1882,7 @@ export const COMMAND_REGISTRY = {
  * through a typed declaration — not an `as` cast — so runtime string indexing
  * needs no `biome-ignore lint/plugin` suppression.
  */
-export const COMMAND_REGISTRY_BY_VERB: Record<string, CommandDef> =
+export const COMMAND_REGISTRY_BY_VERB: Readonly<Record<string, CommandDef>> =
 	COMMAND_REGISTRY;
 
 /** Union of all known verb names, derived from COMMAND_REGISTRY keys. */
