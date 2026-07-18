@@ -1874,6 +1874,17 @@ export const COMMAND_REGISTRY = {
 	},
 } satisfies Record<string, CommandDef>;
 
+/**
+ * String-indexed view of {@link COMMAND_REGISTRY} for dynamic lookups by
+ * unvalidated verb strings. The registry itself is declared with `satisfies`
+ * so its literal key/value types drive compile-time inference (see {@link Verb}
+ * and `ResolvedFlags`); this view widens it to `Record<string, CommandDef>`
+ * through a typed declaration — not an `as` cast — so runtime string indexing
+ * needs no `biome-ignore lint/plugin` suppression.
+ */
+export const COMMAND_REGISTRY_BY_VERB: Record<string, CommandDef> =
+	COMMAND_REGISTRY;
+
 /** Union of all known verb names, derived from COMMAND_REGISTRY keys. */
 export type Verb = keyof typeof COMMAND_REGISTRY;
 
@@ -1886,11 +1897,7 @@ export type Verb = keyof typeof COMMAND_REGISTRY;
  */
 export const VERB_ALIASES: Record<string, string[]> = (() => {
 	const map: Record<string, string[]> = {};
-	// biome-ignore lint/plugin: widen to CommandDef to access optional aliases property
-	for (const [verb, def] of Object.entries(COMMAND_REGISTRY) as [
-		string,
-		CommandDef,
-	][]) {
+	for (const [verb, def] of Object.entries(COMMAND_REGISTRY_BY_VERB)) {
 		for (const alias of def.aliases ?? []) {
 			if (!map[alias]) {
 				map[alias] = [];
@@ -1916,14 +1923,10 @@ export function resolveAlias(resource: string): string {
  * returns the first match. Use VERB_ALIASES directly for multi-target aliases.
  */
 export function getCommandDef(verb: string): CommandDef | undefined {
-	// biome-ignore lint/plugin: trust boundary — verb is unvalidated CLI input, must index dynamically
-	const direct = (COMMAND_REGISTRY as Record<string, CommandDef>)[verb];
+	const direct = COMMAND_REGISTRY_BY_VERB[verb];
 	if (direct) return direct;
 	const targets = VERB_ALIASES[verb];
-	return targets
-		? // biome-ignore lint/plugin: trust boundary — alias target is a dynamic string
-			(COMMAND_REGISTRY as Record<string, CommandDef>)[targets[0]]
-		: undefined;
+	return targets ? COMMAND_REGISTRY_BY_VERB[targets[0]] : undefined;
 }
 
 /**
@@ -1956,8 +1959,7 @@ export function resolveVerbAlias(verb: string, resource?: string): string {
 	if (resource) {
 		const normalizedResource = resolveAlias(resource);
 		for (const candidate of targets) {
-			// biome-ignore lint/plugin: trust boundary — candidate is a dynamic alias target
-			const def = (COMMAND_REGISTRY as Record<string, CommandDef>)[candidate];
+			const def = COMMAND_REGISTRY_BY_VERB[candidate];
 			if (def?.resources?.includes(normalizedResource)) {
 				return candidate;
 			}

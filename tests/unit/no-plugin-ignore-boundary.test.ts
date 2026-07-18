@@ -15,14 +15,23 @@
  *      (no new suppressions) and no fewer (when you remove one, decrement the
  *      entry so the ratchet only ever tightens; drop the entry at zero).
  *
- * The moddle object graph was the largest offender (9 suppressions across
- * `binding.ts`/`apply.ts`/`edit.ts`, each an `as` on an untyped
+ * The moddle object graph was the original largest offender (9 suppressions
+ * across `binding.ts`/`apply.ts`/`edit.ts`, each an `as` on an untyped
  * `moddleElement.get()`). It is deliberately absent from the list: those reads
  * now funnel through the guard-based accessors in
  * `default-plugins/element-template/moddle.ts`, which narrow with runtime type
- * guards instead of `as`. The remaining allow-listed boundaries (framework
- * `InferFlags` structural assertions, logger widening, CLI trust-boundary
- * indexing) are tracked for the same treatment in camunda/c8ctl#472.
+ * guards instead of `as`. The #472 follow-up then retired the remaining
+ * tractable boundaries the same way — logger payload widening and error-code
+ * reads via `isRecord`, `COMMAND_REGISTRY` string indexing via the typed
+ * `COMMAND_REGISTRY_BY_VERB` view, `isAppName` via `Array.some`, and
+ * `template-ref` tree traversal via an `isTraversable` guard.
+ *
+ * The sole remaining entry is `command-framework.ts`: five framework-internal
+ * assertions where the compiler cannot verify a mapped type / brand at an
+ * imperative boundary (`InferFlags`/`InferPositionals` built key-by-key, and
+ * the non-enumerable `CommandHandler` brand stamped via `defineProperty`).
+ * These are genuine type-system boundaries a runtime guard cannot express, so
+ * they stay documented and frozen rather than removed.
  *
  * Matching is on the suppression *comment* form (`// biome-ignore lint/plugin`)
  * — exactly what Biome recognises — so JSDoc prose mentioning the directive
@@ -45,13 +54,7 @@ const SCAN_ROOTS = ["src", "default-plugins"];
  * `moddle.ts`) and decrementing here.
  */
 const ALLOWED: Record<string, number> = {
-	"src/core/logger.ts": 3,
 	"src/framework/command-framework.ts": 5,
-	"src/framework/command-registry.ts": 4,
-	"src/framework/ui/help.ts": 1,
-	"src/index.ts": 1,
-	"src/utils/command-local/open-helpers.ts": 1,
-	"default-plugins/element-template/template-ref.ts": 1,
 };
 
 /** Matches the Biome suppression comment, not JSDoc/string mentions. */

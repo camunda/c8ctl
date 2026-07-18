@@ -60,12 +60,9 @@ export function sanitizeForLogging(data: unknown): unknown {
 	if (data instanceof Date || data instanceof RegExp || data instanceof URL) {
 		return data;
 	}
-	if (data !== null && typeof data === "object") {
+	if (isRecord(data)) {
 		const result: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(
-			// biome-ignore lint/plugin: data is narrowed to object, safe widening for Object.entries
-			data as Record<string, unknown>,
-		)) {
+		for (const [key, value] of Object.entries(data)) {
 			result[key] = SENSITIVE_LOG_FIELDS.has(key)
 				? "[REDACTED]"
 				: sanitizeForLogging(value);
@@ -151,15 +148,17 @@ function isNetworkError(error: Error): boolean {
 	// Node.js native fetch surfaces this when the TCP connection is refused
 	if (message.toLowerCase().includes("fetch failed")) return true;
 
-	// Check for Node.js system error codes (e.g. ECONNREFUSED)
-	// biome-ignore lint/plugin: Error subclasses have .code/.cause not declared on base Error
-	const errRecord = error as unknown as Record<string, unknown>;
-	const code =
-		typeof errRecord.code === "string"
-			? errRecord.code
-			: isRecord(errRecord.cause) && typeof errRecord.cause.code === "string"
-				? errRecord.cause.code
-				: undefined;
+	// Check for Node.js system error codes (e.g. ECONNREFUSED). The `code` and
+	// `cause` properties are carried by Node's system errors but not declared on
+	// the base `Error` type, so read them through a guard rather than a cast.
+	const err: unknown = error;
+	const code = isRecord(err)
+		? typeof err.code === "string"
+			? err.code
+			: isRecord(err.cause) && typeof err.cause.code === "string"
+				? err.cause.code
+				: undefined
+		: undefined;
 	if (code) {
 		return [
 			"ECONNREFUSED",
@@ -319,12 +318,13 @@ export class Logger {
 						isRecord(obj) ? filterObjectFields(obj, fields) : obj,
 					)
 				: data;
-		// Redact credentials before rendering
-		// biome-ignore lint/plugin: sanitizeForLogging returns unknown, safe widening for table rendering
-		const filteredData = sanitizeForLogging(filtered) as Record<
-			string,
-			unknown
-		>[];
+		// Redact credentials before rendering. sanitizeForLogging returns
+		// `unknown`; narrow back to table rows with a guard instead of a cast —
+		// non-object rows (which have no columns) are dropped.
+		const sanitized = sanitizeForLogging(filtered);
+		const filteredData: Record<string, unknown>[] = Array.isArray(sanitized)
+			? sanitized.filter(isRecord)
+			: [];
 
 		if (this.mode === "text") {
 			if (filteredData.length === 0) {
