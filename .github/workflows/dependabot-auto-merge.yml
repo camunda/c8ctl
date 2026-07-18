@@ -1,0 +1,43 @@
+name: Dependabot auto-merge
+
+# Reclaims human attention from the dependency-CVE default case: routine
+# patch/minor Dependabot bumps are auto-merged once they are green, leaving a
+# human in the loop only for major updates (which can carry breaking changes).
+#
+# GitHub's native auto-merge (`gh pr merge --auto`) does not merge immediately —
+# it merges only after every *required* status check and required review passes.
+# So this workflow enabling auto-merge is equivalent to "merge when green",
+# provided the branch's required checks are configured (see #474 recommendation
+# #1: make the `Test` checks required on `main`).
+#
+# Prerequisite: the repository setting "Allow auto-merge" must be enabled.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto-merge patch & minor
+    runs-on: ubuntu-latest
+    # Only act on Dependabot's own PRs.
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
