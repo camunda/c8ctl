@@ -14,6 +14,7 @@ import {
 	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
+	readValuesFile,
 	type Template,
 	type TemplateProperty,
 	warnUnmetConditions,
@@ -192,6 +193,11 @@ export async function applySubcommand(args: string[]): Promise<void> {
 	if (parsed.inPlace && !bpmnFilePath) {
 		throw new Error("--in-place cannot be used with stdin input");
 	}
+	if (parsed.valuesFile === "-" && !bpmnFilePath) {
+		throw new Error(
+			"--values-file - (stdin) cannot be combined with stdin BPMN input; provide a BPMN file path",
+		);
+	}
 
 	const input = await readBpmnInput(bpmnFilePath);
 	if (!input) {
@@ -220,11 +226,19 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		template = await readTemplateFromPathOrUrl(ref.value);
 	}
 
-	// Validate --set overrides against the template before dry-run or real apply,
+	// Merge --values-file entries (if any) with --set args.
+	// --values-file comes first so explicit --set flags override it on conflict.
+	let allSetArgs = parsed.setArgs;
+	if (parsed.valuesFile !== null) {
+		const fileArgs = await readValuesFile(parsed.valuesFile);
+		allSetArgs = [...fileArgs, ...parsed.setArgs];
+	}
+
+	// Validate all overrides against the template before dry-run or real apply,
 	// so `--dry-run --set notAProperty=x` fails just as the real apply would.
 	let setProperties: TemplateProperty[] = [];
-	if (parsed.setArgs.length > 0) {
-		setProperties = applySetOverrides(template.properties, parsed.setArgs);
+	if (allSetArgs.length > 0) {
+		setProperties = applySetOverrides(template.properties, allSetArgs);
 	}
 
 	// Dry-run: describe what would happen without mutating anything
@@ -246,7 +260,7 @@ export async function applySubcommand(args: string[]): Promise<void> {
 			elementId,
 			source: input.source,
 			inPlace: parsed.inPlace && !!bpmnFilePath,
-			setOverrides: parsed.setArgs,
+			setOverrides: allSetArgs,
 		};
 		if (c8ctl.outputMode === "json") {
 			logger.json(info);
@@ -264,8 +278,8 @@ export async function applySubcommand(args: string[]): Promise<void> {
 			} else {
 				logger.output("  Mode:     stdout (would print transformed XML)");
 			}
-			if (parsed.setArgs.length > 0) {
-				logger.output(`  --set:    ${parsed.setArgs.join(", ")}`);
+			if (allSetArgs.length > 0) {
+				logger.output(`  --set:    ${allSetArgs.join(", ")}`);
 			}
 		}
 		return;
@@ -277,7 +291,7 @@ export async function applySubcommand(args: string[]): Promise<void> {
 			input.xml,
 			template,
 			elementId,
-			parsed.setArgs,
+			allSetArgs,
 		);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
