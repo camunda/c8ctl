@@ -148,11 +148,9 @@ export async function getExecutionPlatformVersion(
  * carries the given `id`. Used by the dry-run path to surface "element not
  * found" before reporting a successful preview.
  */
-/**
- * Structural guard: an object we can index for tree traversal. Mirrors the
- * previous `typeof node === "object" && node !== null` check (arrays included)
- * so `containsId` can read properties without an `as` cast.
- */
+// Structural guard: an object we can index for tree traversal. Mirrors the
+// previous `typeof node === "object" && node !== null` check (arrays included)
+// so `containsId` can read properties without an `as` cast.
 function isTraversable(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
 }
