@@ -24,8 +24,8 @@ jobs:
   auto-merge:
     name: Auto-merge patch & minor
     runs-on: ubuntu-latest
-    # Only act on Dependabot's own PRs.
-    if: github.actor == 'dependabot[bot]'
+    # Only act on Dependabot-authored PRs.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
