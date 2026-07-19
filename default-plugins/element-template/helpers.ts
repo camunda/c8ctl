@@ -718,11 +718,11 @@ export async function readValuesFile(filePath: string): Promise<string[]> {
 	let content: string;
 	if (filePath === "-") {
 		process.stdin.setEncoding("utf-8");
-		let data = "";
+		const chunks: string[] = [];
 		for await (const chunk of process.stdin) {
-			data += chunk;
+			chunks.push(chunk);
 		}
-		content = data;
+		content = chunks.join("");
 	} else {
 		const resolved = resolvePath(filePath);
 		if (!existsSync(resolved)) {
@@ -736,8 +736,10 @@ export async function readValuesFile(filePath: string): Promise<string[]> {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(content);
-	} catch {
-		throw new Error(`--values-file: invalid JSON in ${label}`);
+	} catch (err) {
+		throw new Error(
+			`--values-file: invalid JSON in ${label}: ${err instanceof Error ? err.message : String(err)}`,
+		);
 	}
 
 	if (!isRecord(parsed)) {

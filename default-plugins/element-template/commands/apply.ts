@@ -193,6 +193,10 @@ export async function applySubcommand(args: string[]): Promise<void> {
 	if (parsed.inPlace && !bpmnFilePath) {
 		throw new Error("--in-place cannot be used with stdin input");
 	}
+	// When --values-file - is used, stdin carries the JSON values. BPMN must
+	// therefore come from a file — both cannot share stdin simultaneously.
+	// This check must come before readBpmnInput (which also reads stdin) so
+	// we error out without consuming the stream.
 	if (parsed.valuesFile === "-" && !bpmnFilePath) {
 		throw new Error(
 			"--values-file - (stdin) cannot be combined with stdin BPMN input; provide a BPMN file path",

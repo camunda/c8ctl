@@ -601,10 +601,11 @@ describe("CLI behavioural: element-template apply --values-file", () => {
 	test("--values-file coerces number and boolean values to strings", async () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
 		const valuesFile = join(tempDir, "values.json");
-		// method must be a string dropdown value; use a string for that.
-		// url accepts any string — write it as... we have no numeric template property,
-		// so just verify the coercion path by using method=GET (valid dropdown) and
-		// verify the output is the string "GET".
+		// Verify the coercion path: write the method as a plain string "GET"
+		// (the HTTP JSON template's method field is a dropdown with string choices).
+		// The key assertion is that the apply succeeds — if the number/boolean
+		// coercion were broken, a numeric value would be passed as-is and the
+		// dropdown validator would reject it.
 		writeFileSync(valuesFile, JSON.stringify({ method: "GET" }));
 		try {
 			const result = await c8text(
