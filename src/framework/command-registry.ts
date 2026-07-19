@@ -1878,12 +1878,30 @@ export const COMMAND_REGISTRY = {
  * String-indexed view of {@link COMMAND_REGISTRY} for dynamic lookups by
  * unvalidated verb strings. The registry itself is declared with `satisfies`
  * so its literal key/value types drive compile-time inference (see {@link Verb}
- * and `ResolvedFlags`); this view widens it to `Record<string, CommandDef>`
- * through a typed declaration — not an `as` cast — so runtime string indexing
- * needs no `biome-ignore lint/plugin` suppression.
+ * and `ResolvedFlags`); this view widens it to
+ * `Record<string, CommandDef | undefined>` through a typed declaration — not an
+ * `as` cast — so runtime string indexing needs no `biome-ignore lint/plugin`
+ * suppression.
+ *
+ * The value type is intentionally `CommandDef | undefined`: indexing with an
+ * arbitrary CLI verb can miss, and this keeps callers honest about handling the
+ * absent case. For entry iteration, use {@link commandRegistryEntries} instead,
+ * whose values are always present.
  */
-export const COMMAND_REGISTRY_BY_VERB: Readonly<Record<string, CommandDef>> =
-	COMMAND_REGISTRY;
+export const COMMAND_REGISTRY_BY_VERB: Readonly<
+	Record<string, CommandDef | undefined>
+> = COMMAND_REGISTRY;
+
+/**
+ * Typed entries of {@link COMMAND_REGISTRY} for iteration. `COMMAND_REGISTRY` is
+ * declared with `satisfies`, so its inferred value type is a union of literal
+ * command shapes (some without optional fields like `aliases`). This helper
+ * views each value as the full {@link CommandDef} — the values are always
+ * present, so no `undefined` handling is needed — without an `as` cast.
+ */
+export function commandRegistryEntries(): [string, CommandDef][] {
+	return Object.entries(COMMAND_REGISTRY);
+}
 
 /** Union of all known verb names, derived from COMMAND_REGISTRY keys. */
 export type Verb = keyof typeof COMMAND_REGISTRY;
@@ -1897,7 +1915,7 @@ export type Verb = keyof typeof COMMAND_REGISTRY;
  */
 export const VERB_ALIASES: Record<string, string[]> = (() => {
 	const map: Record<string, string[]> = {};
-	for (const [verb, def] of Object.entries(COMMAND_REGISTRY_BY_VERB)) {
+	for (const [verb, def] of commandRegistryEntries()) {
 		for (const alias of def.aliases ?? []) {
 			if (!map[alias]) {
 				map[alias] = [];
