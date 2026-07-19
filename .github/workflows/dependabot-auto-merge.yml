@@ -13,7 +13,7 @@ name: Dependabot auto-merge
 # Prerequisite: the repository setting "Allow auto-merge" must be enabled.
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [main]
 
 permissions:
