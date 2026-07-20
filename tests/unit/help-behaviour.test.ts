@@ -113,13 +113,23 @@ describe("CLI behavioural: help (JSON mode)", () => {
 	});
 
 	test("Business ID is discoverable on every applicable command", async () => {
-		for (const verb of ["list", "search", "create", "await", "run"]) {
-			const result = await c8("help", verb);
-			assert.strictEqual(result.status, 0, `help ${verb}: ${result.stderr}`);
-			assert.ok(
-				result.stdout.includes("--businessId"),
-				`Expected help ${verb} to include --businessId`,
-			);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-help-test-"));
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({ outputMode: "text" }),
+		);
+
+		try {
+			for (const verb of ["list", "search", "create", "await", "run"]) {
+				const result = await c8text(dataDir, "help", verb);
+				assert.strictEqual(result.status, 0, `help ${verb}: ${result.stderr}`);
+				assert.ok(
+					result.stdout.includes("--businessId"),
+					`Expected help ${verb} to include --businessId`,
+				);
+			}
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
 });
