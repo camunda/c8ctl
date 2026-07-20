@@ -111,6 +111,17 @@ describe("CLI behavioural: help (JSON mode)", () => {
 		assert.strictEqual(list.mutating, false, "list should not be mutating");
 		assert.strictEqual(create.mutating, true, "create should be mutating");
 	});
+
+	test("Business ID is discoverable on every applicable command", async () => {
+		for (const verb of ["list", "search", "create", "await", "run"]) {
+			const result = await c8("help", verb);
+			assert.strictEqual(result.status, 0, `help ${verb}: ${result.stderr}`);
+			assert.ok(
+				result.stdout.includes("--businessId"),
+				`Expected help ${verb} to include --businessId`,
+			);
+		}
+	});
 });
 
 // ─── text mode help ──────────────────────────────────────────────────────────

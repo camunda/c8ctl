@@ -48,6 +48,22 @@ describe("CLI behavioural: create process-instance", () => {
 		assert.deepStrictEqual(body.variables, { foo: "bar" });
 	});
 
+	test("--dry-run includes businessId when provided", async () => {
+		const result = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--businessId",
+			"order-123",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.businessId, "order-123");
+	});
+
 	test("--dry-run includes version when provided", async () => {
 		const result = await c8(
 			"create",
@@ -122,6 +138,22 @@ describe("CLI behavioural: await process-instance", () => {
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.processDefinitionId, "my-process");
 		assert.strictEqual(body.awaitCompletion, true);
+	});
+
+	test("--dry-run includes businessId when provided", async () => {
+		const result = await c8(
+			"await",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--businessId",
+			"claim-456",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.businessId, "claim-456");
 	});
 });
 
