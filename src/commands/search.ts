@@ -247,6 +247,9 @@ export const searchProcessInstancesCommand = defineCommand(
 				formatCriterion("Process Definition ID", processDefinitionId),
 			);
 		}
+		if (flags.businessId) {
+			criteria.push(formatCriterion("Business ID", flags.businessId));
+		}
 		if (flags.processDefinitionKey) {
 			criteria.push(
 				formatCriterion("Process Definition Key", flags.processDefinitionKey),
@@ -285,6 +288,9 @@ export const searchProcessInstancesCommand = defineCommand(
 
 		if (processDefinitionId) {
 			filter.filter.processDefinitionId = toStringFilter(processDefinitionId);
+		}
+		if (flags.businessId) {
+			filter.filter.businessId = toStringFilter(flags.businessId);
 		}
 
 		if (flags.processDefinitionKey) {
@@ -351,6 +357,7 @@ export const searchProcessInstancesCommand = defineCommand(
 		if (result.items && result.items.length > 0) {
 			let tableData = result.items.map((pi) => ({
 				Key: pi.processInstanceKey || pi.key,
+				"Business ID": pi.businessId || "-",
 				"Process ID": pi.processDefinitionId,
 				State: pi.state,
 				Version: pi.processDefinitionVersion || pi.version,

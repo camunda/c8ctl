@@ -31,6 +31,9 @@ export const listProcessInstancesCommand = defineCommand(
 		if (processDefinitionId) {
 			filter.filter.processDefinitionId = processDefinitionId;
 		}
+		if (flags.businessId) {
+			filter.filter.businessId = flags.businessId;
+		}
 
 		// version comes from global --version flag, not resource flags
 		const versionIdx = process.argv.indexOf("--version");
@@ -86,6 +89,7 @@ export const listProcessInstancesCommand = defineCommand(
 			kind: "list",
 			items: allItems.map((pi) => ({
 				Key: `${pi.hasIncident ? "⚠ " : ""}${pi.processInstanceKey}`,
+				"Business ID": pi.businessId || "-",
 				"Process ID": pi.processDefinitionId,
 				State: pi.state,
 				Version: pi.processDefinitionVersion,
@@ -180,6 +184,7 @@ export const createProcessInstanceCommand = defineCommand(
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
 		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (flags.businessId) body.businessId = flags.businessId;
 		if (awaitCompletion) body.awaitCompletion = true;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
@@ -234,6 +239,9 @@ export const createProcessInstanceCommand = defineCommand(
 				processDefinitionVersion: version,
 			}),
 			...(variables !== undefined && { variables }),
+			...(flags.businessId !== undefined && {
+				businessId: flags.businessId,
+			}),
 			...(awaitCompletion && { awaitCompletion: true }),
 			...(requestTimeout !== undefined && {
 				requestTimeout,
@@ -284,6 +292,7 @@ export const awaitProcessInstanceCommand = defineCommand(
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
 		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (flags.businessId) body.businessId = flags.businessId;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
 		const dr = ctx.dryRun({
@@ -325,6 +334,9 @@ export const awaitProcessInstanceCommand = defineCommand(
 				processDefinitionVersion: version,
 			}),
 			...(variables !== undefined && { variables }),
+			...(flags.businessId !== undefined && {
+				businessId: flags.businessId,
+			}),
 			awaitCompletion: true,
 			...(requestTimeout !== undefined && {
 				requestTimeout,

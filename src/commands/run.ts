@@ -41,7 +41,11 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 		method: "POST",
 		endpoint: "/deployments + /process-instances",
 		profile: ctx.profile,
-		body: { path, variables: flags.variables },
+		body: {
+			path,
+			variables: flags.variables,
+			businessId: flags.businessId,
+		},
 	});
 	if (dr) return dr;
 
@@ -104,6 +108,9 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 		processDefinitionId: ProcessDefinitionId.assumeExists(processId),
 		tenantId: TenantId.assumeExists(tenantId),
 		...(variables !== undefined && { variables }),
+		...(flags.businessId !== undefined && {
+			businessId: flags.businessId,
+		}),
 	});
 	logger.success("Process instance created", createResult.processInstanceKey);
 
