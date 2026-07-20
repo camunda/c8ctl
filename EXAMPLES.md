@@ -47,6 +47,9 @@ c8 list pi --state=ACTIVE
 
 # Filter by process definition version
 c8 list pi --id=order-process --version=2
+
+# Filter by Business ID
+c8 list pi --businessId=order-123
 ```
 
 ### Get Process Instance by Key
@@ -71,6 +74,9 @@ c8 create pi --id=order-process --version=2
 # Create with variables
 c8 create pi --id=order-process --variables='{"orderId":"12345","amount":100}'
 
+# Create with a Business ID for business-level correlation
+c8 create pi --id=order-process --businessId=order-123
+
 # Create and wait for completion
 c8 create pi --id=order-process --awaitCompletion
 
@@ -94,6 +100,9 @@ c8 await process-instance --id=order-process
 
 # With variables
 c8 await pi --id=order-process --variables='{"orderId":"12345"}'
+
+# With a Business ID
+c8 await pi --id=order-process --businessId=claim-456
 
 # With custom timeout (60 seconds)
 c8 await pi --id=order-process --requestTimeout=60000
@@ -262,7 +271,7 @@ c8 search pd --id='process-v?'
 | Resource | Fields supporting wildcards |
 |---|---|
 | Process Definitions | `--name`, `--id` (bpmnProcessId) |
-| Process Instances | `--id` (processDefinitionId) |
+| Process Instances | `--id` (processDefinitionId), `--businessId` |
 | User Tasks | `--assignee` |
 | Incidents | `--errorMessage`, `--id` (processDefinitionId) |
 | Jobs | `--type` |
@@ -342,6 +351,9 @@ c8 search pi --state=COMPLETED
 # Search by process definition ID
 c8 search pi --id=order-process
 c8 search pi --bpmnProcessId=order-process
+
+# Search by Business ID
+c8 search pi --businessId=order-123
 
 # Search by process definition version
 c8 search pi --id=order-process --version=2
@@ -697,6 +709,9 @@ c8 run ./order-process.bpmn
 
 # With variables
 c8 run ./order-process.bpmn --variables='{"orderId":"12345","amount":100}'
+
+# With a Business ID
+c8 run ./order-process.bpmn --businessId=order-123
 ```
 
 ---

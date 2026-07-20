@@ -25,6 +25,7 @@ These flags are accepted by every command.
 | `--verbose` | boolean |  | Show verbose output |
 | `--fields` | string |  | Comma-separated list of fields to display |
 | `--json` | boolean |  | Force JSON output for this invocation (does not persist; overrides session state and C8CTL_OUTPUT_MODE) |
+| `--yes` / `-y` | boolean |  | Skip confirmation prompts |
 
 ## Resource Aliases
 
@@ -89,6 +90,7 @@ List resources
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
+| `--businessId` | string |  | Filter by Business ID |
 | `--bpmnProcessId` | string |  | Filter by BPMN process ID |
 | `--id` | string |  | Filter by BPMN process ID (alias) |
 | `--processDefinitionId` | string |  | Filter by process definition ID |
@@ -248,6 +250,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
+| `--businessId` | string |  | Filter by Business ID |
 | `--bpmnProcessId` | string |  | Filter by BPMN process ID |
 | `--id` | string |  | Filter by BPMN process ID (alias) |
 | `--processDefinitionId` | string |  | Filter by process definition ID |
@@ -479,13 +482,6 @@ Create a resource (process instance, identity)
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--processDefinitionId` | string |  | Process definition ID (BPMN process ID) |
-| `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
-| `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
-| `--variables` | string |  | JSON variables |
-| `--awaitCompletion` | boolean |  | Wait for process to complete |
-| `--fetchVariables` | boolean |  | Fetch result variables on completion |
-| `--requestTimeout` | string |  | Await timeout in milliseconds |
 | `--username` | string |  | Username |
 | `--name` | string |  | Display name |
 | `--email` | string |  | Email address |
@@ -498,6 +494,22 @@ Create a resource (process instance, identity)
 | `--claimValue` | string |  | Claim value |
 
 **Resource-specific flags:**
+
+<details>
+<summary><code>process-instance</code> (<code>pi</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--processDefinitionId` | string |  | Process definition ID (BPMN process ID) |
+| `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
+| `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
+| `--businessId` | string |  | Business ID for the process instance |
+| `--variables` | string |  | JSON variables |
+| `--awaitCompletion` | boolean |  | Wait for process to complete |
+| `--fetchVariables` | boolean |  | Fetch result variables on completion |
+| `--requestTimeout` | string |  | Await timeout in milliseconds |
+
+</details>
 
 <details>
 <summary><code>authorization</code> (<code>auth</code>)</summary>
@@ -515,7 +527,7 @@ Create a resource (process instance, identity)
 **Examples:**
 
 ```bash
-c8ctl create pi --id=myProcess                              # Create a process instance
+c8ctl create pi --id=myProcess --businessId=order-123       # Create a process instance with a Business ID
 c8ctl create pi --id=myProcess --awaitCompletion            # Create and await completion
 c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret  # Create a user
 ```
@@ -576,6 +588,7 @@ Create and await process instance completion (server-side waiting)
 | `--processDefinitionId` | string |  | Process definition ID (BPMN process ID) |
 | `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
 | `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
+| `--businessId` | string |  | Business ID for the process instance |
 | `--variables` | string |  | JSON variables |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
 | `--requestTimeout` | string |  | Await timeout in milliseconds |
@@ -583,7 +596,7 @@ Create and await process instance completion (server-side waiting)
 **Examples:**
 
 ```bash
-c8ctl await pi --id=myProcess                               # Create and wait for completion
+c8ctl await pi --id=myProcess --businessId=claim-456        # Create with a Business ID and wait for completion
 ```
 
 ---
@@ -761,13 +774,14 @@ Deploy and start a process instance from a BPMN file
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
+| `--businessId` | string |  | Business ID for the process instance |
 | `--variables` | string |  | JSON variables |
 | `--force` | boolean |  | Deploy any file type, ignoring the default extension allow-list |
 
 **Examples:**
 
 ```bash
-c8ctl run ./my-process.bpmn                                 # Deploy and start process
+c8ctl run ./my-process.bpmn --businessId=order-123          # Deploy and start a process with a Business ID
 ```
 
 ---
@@ -919,7 +933,7 @@ Remove a profile (alias: rm)
 
 **Positional arguments:**
 
-- **profile:** `<name>` (required)
+- **profile:** `<name>` (optional)
 
 **Flags:**
 
