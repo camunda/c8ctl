@@ -496,21 +496,6 @@ Create a resource (process instance, identity)
 
 **Resources:** pi (process-instance), user, role, group, tenant, auth (authorization), mapping-rule
 
-**Verb-level flags:**
-
-| Flag | Type | Required | Description |
-|------|------|----------|-------------|
-| `--username` | string |  | Username |
-| `--name` | string |  | Display name |
-| `--email` | string |  | Email address |
-| `--password` | string |  | Password |
-| `--roleId` | string |  | Role ID |
-| `--groupId` | string |  | Group ID |
-| `--tenantId` | string |  | Tenant ID |
-| `--mappingRuleId` | string |  | Mapping rule ID |
-| `--claimName` | string |  | Claim name |
-| `--claimValue` | string |  | Claim value |
-
 **Resource-specific flags:**
 
 <details>
@@ -526,6 +511,60 @@ Create a resource (process instance, identity)
 | `--awaitCompletion` | boolean |  | Wait for process to complete |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
 | `--requestTimeout` | string |  | Await timeout in milliseconds |
+
+</details>
+
+<details>
+<summary><code>user</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--username` | string |  | Username |
+| `--name` | string |  | Display name |
+| `--email` | string |  | Email address |
+| `--password` | string |  | Password |
+
+</details>
+
+<details>
+<summary><code>role</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--roleId` | string |  | Role ID |
+| `--name` | string |  | Display name |
+
+</details>
+
+<details>
+<summary><code>group</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--groupId` | string |  | Group ID |
+| `--name` | string |  | Display name |
+
+</details>
+
+<details>
+<summary><code>tenant</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--tenantId` | string |  | Tenant ID |
+| `--name` | string |  | Display name |
+
+</details>
+
+<details>
+<summary><code>mapping-rule</code> (<code>mr</code>)</summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--mappingRuleId` | string |  | Mapping rule ID |
+| `--name` | string |  | Display name |
+| `--claimName` | string |  | Claim name |
+| `--claimValue` | string |  | Claim value |
 
 </details>
 

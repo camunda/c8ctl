@@ -326,6 +326,43 @@ const CREATE_PI_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+const CREATE_USER_FLAGS = {
+	username: {
+		type: "string",
+		description: "Username",
+		validate: Username.assumeExists,
+	},
+	name: { type: "string", description: "Display name" },
+	email: { type: "string", description: "Email address" },
+	password: { type: "string", description: "Password" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_ROLE_FLAGS = {
+	roleId: { type: "string", description: "Role ID" },
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_GROUP_FLAGS = {
+	groupId: { type: "string", description: "Group ID" },
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_TENANT_FLAGS = {
+	tenantId: {
+		type: "string",
+		description: "Tenant ID",
+		validate: TenantId.assumeExists,
+	},
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_MAPPING_RULE_FLAGS = {
+	mappingRuleId: { type: "string", description: "Mapping rule ID" },
+	name: { type: "string", description: "Display name" },
+	claimName: { type: "string", description: "Claim name" },
+	claimValue: { type: "string", description: "Claim value" },
+} as const satisfies Record<string, FlagDef>;
+
 const PD_SEARCH_FLAGS = {
 	bpmnProcessId: {
 		type: "string",
@@ -990,38 +1027,16 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rule",
 		],
-		flags: {
-			// Identity user
-			username: {
-				type: "string",
-				description: "Username",
-				validate: Username.assumeExists,
-			},
-			name: { type: "string", description: "Display name" },
-			email: { type: "string", description: "Email address" },
-			password: { type: "string", description: "Password" },
-			// Identity role
-			roleId: { type: "string", description: "Role ID" },
-			// Identity group
-			groupId: { type: "string", description: "Group ID" },
-			// Identity tenant
-			tenantId: {
-				type: "string",
-				description: "Tenant ID",
-				validate: TenantId.assumeExists,
-			},
-			// Identity mapping rule
-			mappingRuleId: {
-				type: "string",
-				description: "Mapping rule ID",
-			},
-			claimName: { type: "string", description: "Claim name" },
-			claimValue: { type: "string", description: "Claim value" },
-		},
+		flags: {},
 		// Resource-scoped flags prevent options for one resource from being
 		// accepted or required by unrelated create handlers (#308).
 		resourceFlags: {
 			"process-instance": CREATE_PI_FLAGS,
+			user: CREATE_USER_FLAGS,
+			role: CREATE_ROLE_FLAGS,
+			group: CREATE_GROUP_FLAGS,
+			tenant: CREATE_TENANT_FLAGS,
+			"mapping-rule": CREATE_MAPPING_RULE_FLAGS,
 			authorization: {
 				ownerId: {
 					type: "string",

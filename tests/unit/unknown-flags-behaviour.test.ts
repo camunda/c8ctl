@@ -358,6 +358,32 @@ describe("CLI behavioural: unknown flags — create", () => {
 		assertWarning(userResult.stderr, "businessId");
 	});
 
+	test("--username is valid for users but unknown for process instances", async () => {
+		const userResult = await c8(
+			"create",
+			"user",
+			"--dry-run",
+			"--username",
+			"john",
+			"--password",
+			"secret",
+		);
+		assert.strictEqual(userResult.status, 0, `stderr: ${userResult.stderr}`);
+		assertNoWarning(userResult.stderr);
+
+		const piResult = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--username",
+			"john",
+		);
+		assert.strictEqual(piResult.status, 0, `stderr: ${piResult.stderr}`);
+		assertWarning(piResult.stderr, "username");
+	});
+
 	test("--sortBy is unknown for create (search-only flag)", async () => {
 		const result = await c8(
 			"create",
