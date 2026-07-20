@@ -5,6 +5,7 @@
  *
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
+ *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] --set key=value
  *   c8ctl element-template info <template> [--engine-version <x.y.z>]
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
  *   c8ctl element-template get <template>
@@ -22,6 +23,7 @@ import type {
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
 import { applySubcommand } from "./commands/apply.ts";
+import { editSubcommand } from "./commands/edit.ts";
 import { getSubcommand } from "./commands/get.ts";
 import { getPropertiesSubcommand } from "./commands/get-properties.ts";
 import { infoSubcommand } from "./commands/info.ts";
@@ -87,6 +89,7 @@ const subcommandHandlers: Record<
 	info: infoSubcommand,
 	"get-properties": getPropertiesSubcommand,
 	apply: applySubcommand,
+	edit: editSubcommand,
 	get: getSubcommand,
 	sync: syncSubcommand,
 };
@@ -144,6 +147,12 @@ export const metadata = {
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
 				"is bound across multiple types — e.g. --set input:correlationKey=order-42.\n\n" +
+				"edit --set name=value updates a property on an element that already has a template applied, " +
+				"without re-running template application — it never resets other template-owned content " +
+				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
+				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element). " +
+				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
+				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
 				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
 				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
 				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
@@ -174,6 +183,11 @@ export const metadata = {
 				{
 					name: "apply",
 					description: "Apply a Camunda element template to a BPMN element",
+				},
+				{
+					name: "edit",
+					description:
+						"Update a property on an element that already has a template applied, without re-applying it",
 				},
 				{
 					name: "get",
@@ -259,6 +273,12 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template edit Task_1 process.bpmn --set method=PUT",
+					description:
+						"Update a single property on an already-templated element in place, without touching anything else the template governs",
+				},
+				{
+					command:
 						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
 					description:
 						"Print the raw template JSON to stdout (redirect to save a copy)",
@@ -284,13 +304,13 @@ export const commands = {
 			"in-place": {
 				type: "boolean",
 				short: "i",
-				description: "Modify the BPMN file in place [apply]",
+				description: "Modify the BPMN file in place [apply|edit]",
 			},
 			set: {
 				type: "string",
 				multiple: true,
 				description:
-					"Set a property value: name=value (repeatable; binding name from get-properties; = auto-prepended for feel=required properties) [apply]",
+					"Set a property value: name=value (repeatable; binding name from get-properties; = auto-prepended for feel=required properties) [apply|edit]",
 			},
 			detailed: {
 				type: "boolean",

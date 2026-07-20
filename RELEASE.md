@@ -101,9 +101,22 @@ If npm OIDC requires the package to already exist, you can do a one-time manual 
 
 After this bootstrap, prefer the automated workflow for subsequent alpha releases.
 
-## Procedure: Release a stable version (from `release`)
+## Procedure: Release a stable version (self-service, recommended)
 
-Stable releases are cut by updating the `release` branch.
+Use the **Promote to stable** workflow to cut a stable release without running any git commands locally. It fast-forwards `release` to a commit on `main` and then dispatches the Release workflow (which publishes under the `latest` dist-tag).
+
+1. Go to **Actions → Promote to stable → Run workflow**.
+2. Leave `ref` as `main` to promote the current tip of `main`, or enter a specific commit SHA / branch on `main`.
+3. Run the workflow. It will:
+   - fast-forward the `release` branch to the requested commit (fails if that would not be a fast-forward), then
+   - trigger the **Release** workflow on `release`.
+4. Verify artifacts (see below): the new version appears on the npm **latest** dist-tag and a GitHub release + tag are created.
+
+> The fast-forward guard means you can only promote commits that already contain the current `release` tip — you can never drop or rewrite already-released stable commits.
+
+## Procedure: Release a stable version (from `release`, manual git)
+
+Stable releases can also be cut by updating the `release` branch directly.
 
 1. Decide what goes into the stable release.
    - Typical approach: fast-forward `release` to the desired commit from `main`.

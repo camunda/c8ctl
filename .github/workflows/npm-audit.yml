@@ -1,0 +1,41 @@
+name: npm audit
+
+# Asynchronous (non-merge-blocking) security signal. Runs off the PR-to-merge
+# path on a weekly schedule so dependency vulnerabilities surface via a reliable
+# feedback loop (failed runs show up in the Actions UI and can be wired to
+# notifications) without adding latency to day-to-day merges. Dependabot handles
+# the actual fixes; this job is the tripwire that a high/critical advisory exists.
+#
+# Scoped to production dependencies (`--omit=dev`): the shipped surface is what
+# matters to users, and excluding dev/tooling transitives (the bundled `npm`
+# tree, `@actions/http-client`, esbuild, etc.) keeps the signal high so a red
+# run is always worth acting on rather than noise to be ignored.
+
+on:
+  schedule:
+    # Mondays at 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit production dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high

@@ -108,6 +108,14 @@ function getTaskDefinitionType(xml: string): string | null {
 	return match ? match[1] : null;
 }
 
+function getTaskHeaderValue(xml: string, key: string): string | null {
+	const re = new RegExp(
+		`<zeebe:header\\s+(?=[^>]*key="${key}")(?=[^>]*value="([^"]*)")`,
+	);
+	const match = xml.match(re);
+	return match ? match[1] : null;
+}
+
 // ---------------------------------------------------------------------------
 // element-template verb
 // ---------------------------------------------------------------------------
@@ -2045,6 +2053,573 @@ describe("CLI behavioural: element-template apply --dry-run", () => {
 			output.includes("MissingElement_xyz") && output.includes("not found"),
 			`Should report the missing element id. Got: ${output.slice(0, 300)}`,
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// element-template edit
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a sequence of CLI invocations against a single persistent, pre-seeded
+ * OOTB cache directory. `edit` resolves its target template from the local
+ * cache by the id/version recorded on the element (zeebe:modelerTemplate/
+ * -Version), so tests that apply a template and then edit it need the same
+ * cache available across both invocations.
+ */
+async function withSeededElementTemplateCache(
+	templates: Array<Record<string, unknown>>,
+	fn: (
+		run: (...args: string[]) => ReturnType<typeof asyncSpawn>,
+	) => Promise<void>,
+): Promise<void> {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "text" }),
+	);
+	const cacheDir = join(dataDir, "element-templates");
+	mkdirSync(cacheDir, { recursive: true });
+	writeFileSync(
+		join(cacheDir, "templates.json"),
+		JSON.stringify(templates, null, 2),
+	);
+	writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	const run = (...args: string[]) =>
+		asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
+			env: {
+				...process.env,
+				CAMUNDA_BASE_URL: "http://test-cluster/v2",
+				HOME: "/tmp/c8ctl-test-nonexistent-home",
+				C8CTL_DATA_DIR: dataDir,
+			},
+		});
+	try {
+		await fn(run);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: element-template edit", () => {
+	test("--set updates an already-materialized value and preserves hand-authored content the template doesn't own", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				// Simulate a hand-authored customization layered into an
+				// existing templated field — the way a Modeler user extends
+				// beyond what the template itself declares (c8ctl#466).
+				const beforeEdit = readFileSync(tempBpmn, "utf-8");
+				assert.ok(
+					beforeEdit.includes('key="resultExpression"'),
+					"fixture should already carry a resultExpression header to customize",
+				);
+				const customized = beforeEdit.replace(
+					/(key="resultExpression" value="=\{)/,
+					"$1&#10;  customHandAuthoredField: 1,",
+				);
+				assert.notStrictEqual(
+					customized,
+					beforeEdit,
+					"the resultExpression replace should have matched",
+				);
+				writeFileSync(tempBpmn, customized);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+				assert.ok(
+					edited.stdout.includes("customHandAuthoredField"),
+					"hand-authored content outside the template's own schema should survive edit",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("--set never resets a Hidden-typed property, even one hand-modified after apply", async () => {
+		// This is the actual c8ctl#466 regression: bpmn-js-element-templates'
+		// applyTemplate() unconditionally force-overwrites Hidden-typed
+		// properties back to their template default on every call
+		// (ChangeElementTemplateHandler#shouldKeepValue). `edit` never calls
+		// applyTemplate, so a Hidden binding's value — however it got there —
+		// must survive untouched across an unrelated --set.
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		const hiddenTaskDefType = httpJsonTemplate.properties.find(
+			(p: { binding?: { type?: string; property?: string }; type?: string }) =>
+				p.type === "Hidden" &&
+				p.binding?.type === "zeebe:taskDefinition" &&
+				p.binding?.property === "type",
+		);
+		assert.ok(
+			hiddenTaskDefType,
+			"fixture template should declare a Hidden zeebe:taskDefinition/type property",
+		);
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				assert.strictEqual(
+					getTaskDefinitionType(readFileSync(tempBpmn, "utf-8")),
+					hiddenTaskDefType.value,
+					"apply should have set the Hidden property to the template default",
+				);
+
+				// Hand-modify the Hidden field itself to a value the template
+				// doesn't own/generate — apply --set would silently stomp this
+				// back to the template default on any re-apply; edit must not.
+				const marker = "custom-hand-authored-task-type:1";
+				const beforeEdit = readFileSync(tempBpmn, "utf-8");
+				const customized = beforeEdit.replace(
+					`type="${hiddenTaskDefType.value}"`,
+					`type="${marker}"`,
+				);
+				assert.notStrictEqual(
+					customized,
+					beforeEdit,
+					"the taskDefinition type replace should have matched",
+				);
+				writeFileSync(tempBpmn, customized);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(
+					getInputValue(edited.stdout, "method"),
+					"PUT",
+					"the requested property should still be updated",
+				);
+				assert.strictEqual(
+					getTaskDefinitionType(edited.stdout),
+					marker,
+					"edit must not reset the Hidden zeebe:taskDefinition/type property " +
+						"to its template default",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("--set updates a zeebe:taskHeader value (and prepends FEEL) without touching other bindings", async () => {
+		// Coverage for the zeebe:taskHeader branch of resolveBindingTarget,
+		// which is asymmetric to zeebe:input (keyed by binding.key, writing
+		// the header's `value` property) and was otherwise exercised by no
+		// --set path — apply or edit. `resultExpression` is a Text/FEEL header
+		// the fixture materializes with a default on apply, so editing it also
+		// proves maybePrependFeel runs on the edit path (feel: "required" =>
+		// a bare value gets an "=" prefix).
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				assert.ok(
+					getTaskHeaderValue(
+						readFileSync(tempBpmn, "utf-8"),
+						"resultExpression",
+					)?.startsWith("="),
+					"apply should have materialized the resultExpression header with its FEEL default",
+				);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"resultExpression=response.body",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(
+					getTaskHeaderValue(edited.stdout, "resultExpression"),
+					"=response.body",
+					"edit must update the taskHeader's value and prepend '=' for a feel:required header",
+				);
+				assert.strictEqual(
+					getInputValue(edited.stdout, "method"),
+					"POST",
+					"editing the taskHeader must not disturb the unrelated zeebe:input value",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("errors clearly when the element has no template applied", async () => {
+		await withSeededElementTemplateCache([], async (run) => {
+			const result = await run(
+				"element-template",
+				"edit",
+				"Activity_17s7axj",
+				BPMN_FILE,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("no element template applied"),
+				`Should report the missing template. Got: ${output.slice(0, 300)}`,
+			);
+		});
+	});
+
+	test("later --set wins when two --set args target the same property", async () => {
+		// Distinct from the conditional-duplicate dedup: two *different* --set
+		// args resolving to the same moddle target must behave like `apply`
+		// ("--set wins", last one specified), not silently keep the first.
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+					"--set",
+					"method=DELETE",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(
+					getInputValue(edited.stdout, "method"),
+					"DELETE",
+					"the later --set method=DELETE should win over the earlier --set method=PUT",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("errors clearly when the property's condition was never met (not materialized)", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				// Apply without setting `method`, so the `body` property's
+				// gating condition (method=POST) is never met and no
+				// zeebe:input target="body" entry is ever materialized.
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				const result = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					'body={"hello":"world"}',
+				);
+				assert.strictEqual(result.status, 1);
+				const output = result.stdout + result.stderr;
+				assert.ok(
+					output.includes("has no existing value on this element to edit"),
+					`Should report the unmaterialized property. Got: ${output.slice(0, 300)}`,
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("rejects unknown property name", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				const result = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"nonexistent=value",
+				);
+				assert.strictEqual(result.status, 1);
+				const output = result.stdout + result.stderr;
+				assert.ok(
+					output.includes('Unknown property "nonexistent"'),
+					"Should report unknown property",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("requires at least one --set", async () => {
+		await withSeededElementTemplateCache([], async (run) => {
+			const result = await run(
+				"element-template",
+				"edit",
+				"Activity_17s7axj",
+				BPMN_FILE,
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("at least one --set"),
+				`Should require --set. Got: ${output.slice(0, 300)}`,
+			);
+		});
+	});
+
+	test("requires an element-id argument", async () => {
+		await withSeededElementTemplateCache([], async (run) => {
+			const result = await run("element-template", "edit");
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Missing element-id argument"),
+				`Should require element-id. Got: ${output.slice(0, 300)}`,
+			);
+		});
+	});
+
+	test("rejects unexpected extra positional argument", async () => {
+		await withSeededElementTemplateCache([], async (run) => {
+			const result = await run(
+				"element-template",
+				"edit",
+				"Activity_17s7axj",
+				BPMN_FILE,
+				"extra-arg",
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("Unexpected argument") && output.includes("extra-arg"),
+				`Should report the unexpected argument. Got: ${output.slice(0, 300)}`,
+			);
+		});
+	});
+
+	test("--dry-run reports without mutating the file", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				const beforeDryRun = readFileSync(tempBpmn, "utf-8");
+
+				const result = await run(
+					"--dry-run",
+					"element-template",
+					"edit",
+					"--in-place",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.ok(
+					result.stdout.includes("Dry run"),
+					"stdout should contain 'Dry run' summary line",
+				);
+				assert.ok(
+					result.stdout.toLowerCase().includes("in-place"),
+					"stdout should describe in-place mode",
+				);
+				assert.strictEqual(
+					readFileSync(tempBpmn, "utf-8"),
+					beforeDryRun,
+					"--dry-run must not modify the BPMN file",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("--in-place writes atomically and leaves no .tmp file", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				const result = await run(
+					"element-template",
+					"edit",
+					"-i",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				const leftovers = readdirSync(tempDir).filter((name) =>
+					name.endsWith(".tmp"),
+				);
+				assert.deepStrictEqual(
+					leftovers,
+					[],
+					`No .tmp file should survive a clean edit. Found: ${leftovers.join(", ")}`,
+				);
+				const updated = readFileSync(tempBpmn, "utf-8");
+				assert.strictEqual(getInputValue(updated, "method"), "PUT");
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("cold cache: exits 1 with a 'run sync first' hint", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const tempBpmn = join(tempDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		try {
+			// Produce a templated fixture under a seeded cache...
+			await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+			});
+
+			// ...then edit it against a cold (empty) cache.
+			const result = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("element-template sync"),
+				`Should point at 'sync'. Got: ${output.slice(0, 300)}`,
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 });
 

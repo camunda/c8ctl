@@ -88,6 +88,7 @@ export interface Profile {
 	clientSecret?: string;
 	audience?: string;
 	oAuthUrl?: string;
+	scope?: string;
 	username?: string;
 	password?: string;
 	defaultTenantId?: string;
@@ -120,6 +121,7 @@ export interface ClusterConfig {
 	clientSecret?: string;
 	audience?: string;
 	oAuthUrl?: string;
+	scope?: string;
 	username?: string;
 	password?: string;
 }
@@ -486,6 +488,7 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
 	if (conn.targetType === TARGET_TYPES.CAMUNDA_CLOUD) {
 		const audience = conn.audience?.trim();
 		const oAuthUrl = conn.oauthURL?.trim();
+		const scope = conn.scope?.trim();
 
 		return {
 			baseUrl: conn.camundaCloudClusterUrl || "",
@@ -493,6 +496,7 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
 			clientSecret: conn.camundaCloudClientSecret,
 			audience: audience || undefined,
 			oAuthUrl: oAuthUrl || "https://login.cloud.camunda.io/oauth/token",
+			scope: scope || undefined,
 		};
 	}
 
@@ -509,6 +513,7 @@ export function connectionToClusterConfig(conn: Connection): ClusterConfig {
 		config.clientSecret = conn.clientSecret;
 		config.oAuthUrl = conn.oauthURL;
 		config.audience = conn.audience;
+		config.scope = conn.scope;
 	}
 
 	return config;
@@ -528,6 +533,7 @@ export function connectionToProfile(conn: Connection): Profile {
 		clientSecret: config.clientSecret,
 		audience: config.audience,
 		oAuthUrl: config.oAuthUrl,
+		scope: config.scope,
 		username: config.username,
 		password: config.password,
 		defaultTenantId: conn.tenantId,
@@ -544,6 +550,7 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		clientSecret: profile.clientSecret,
 		audience: profile.audience,
 		oAuthUrl: profile.oAuthUrl,
+		scope: profile.scope,
 		username: profile.username,
 		password: profile.password,
 	};
@@ -811,6 +818,7 @@ export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
 	CAMUNDA_CLIENT_SECRET: "clientSecret",
 	CAMUNDA_OAUTH_URL: "oAuthUrl",
 	CAMUNDA_TOKEN_AUDIENCE: "audience",
+	CAMUNDA_OAUTH_SCOPE: "scope",
 	CAMUNDA_USERNAME: "username",
 	CAMUNDA_PASSWORD: "password",
 	CAMUNDA_DEFAULT_TENANT_ID: "defaultTenantId",
@@ -917,6 +925,7 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
 	const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
 	const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
+	const scope = process.env.CAMUNDA_OAUTH_SCOPE;
 	const username = process.env.CAMUNDA_USERNAME;
 	const password = process.env.CAMUNDA_PASSWORD;
 
@@ -927,6 +936,7 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 			clientSecret,
 			audience,
 			oAuthUrl,
+			scope,
 			username,
 			password,
 		};

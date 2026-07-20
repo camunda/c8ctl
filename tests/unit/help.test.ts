@@ -231,6 +231,41 @@ describe("Help Module", () => {
 		assert.ok(output.includes("fish"));
 	});
 
+	test("showVerbResources shows argument placeholder for run (resources: [], requiresResource: true)", () => {
+		showVerbResources("run");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl run"), "should show usage line");
+		assert.ok(
+			output.includes("Argument:"),
+			"should show Argument section, not empty Available resources",
+		);
+		assert.ok(
+			output.includes("<path>"),
+			"should show <path> placeholder from helpResource",
+		);
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
+	test("showVerbResources shows argument placeholder for deploy (resources: [], requiresResource: false)", () => {
+		showVerbResources("deploy");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl deploy"), "should show usage line");
+		assert.ok(output.includes("Argument:"), "should show Argument section");
+		assert.ok(
+			output.includes("[path...]"),
+			"should show [path...] placeholder from helpResource",
+		);
+		assert.ok(
+			!output.includes("Available resources:"),
+			"should not show empty Available resources list",
+		);
+	});
+
 	test("showHelp includes completion command", () => {
 		showHelp();
 
@@ -332,6 +367,10 @@ describe("Help Module", () => {
 		assert.ok(
 			output.includes("--dateField"),
 			"search help should include --dateField flag",
+		);
+		assert.ok(
+			output.includes("wait-state (ws)"),
+			"search help should include the ws alias for wait-state",
 		);
 	});
 
@@ -445,6 +484,16 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--errorMessage"));
 	});
 
+	test("showCommandHelp shows update help", () => {
+		showCommandHelp("update");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl update"));
+		assert.ok(output.includes("job"));
+		assert.ok(output.includes("--retries"));
+		assert.ok(output.includes("--timeout"));
+	});
+
 	test("showCommandHelp shows activate help", () => {
 		showCommandHelp("activate");
 
@@ -454,6 +503,8 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--maxJobsToActivate"));
 		assert.ok(output.includes("--timeout"));
 		assert.ok(output.includes("--worker"));
+		assert.ok(output.includes("--customHeaders"));
+		assert.ok(output.includes("--fetchVariable"));
 	});
 
 	test("showCommandHelp shows publish help", () => {
@@ -496,6 +547,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("c8ctl help resolve"));
 		assert.ok(output.includes("c8ctl help fail"));
 		assert.ok(output.includes("c8ctl help activate"));
+		assert.ok(output.includes("c8ctl help update"));
 		assert.ok(output.includes("c8ctl help publish"));
 		assert.ok(output.includes("c8ctl help correlate"));
 		assert.ok(output.includes("c8ctl help profiles"));
@@ -522,6 +574,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("resolve"));
 		assert.ok(output.includes("fail"));
 		assert.ok(output.includes("activate"));
+		assert.ok(output.includes("update"));
 		assert.ok(output.includes("publish"));
 		assert.ok(output.includes("correlate"));
 		assert.ok(output.includes("profiles"));

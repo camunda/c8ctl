@@ -607,7 +607,7 @@ export function showVerbResources(verb: string): void {
 		return;
 	}
 
-	if (resources.length === 0 && !def.requiresResource) {
+	if (resources.length === 0) {
 		const placeholder = deriveResourcePlaceholder(resolvedVerb, def);
 		console.log(`\nUsage: c8ctl ${resolvedVerb} ${placeholder}\n`);
 		console.log(`Argument:\n  ${placeholder || "(none)"}`);

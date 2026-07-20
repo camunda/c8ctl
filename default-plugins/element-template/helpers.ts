@@ -3,7 +3,13 @@
  * shared element-template schema types.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import {
+	existsSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
@@ -46,6 +52,43 @@ export function installStdoutEpipeHandler(): void {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Overwrite `targetPath` atomically: write to a sibling temp file in
+ * the same directory, then `renameSync` over the target. POSIX
+ * `rename` is atomic on the same filesystem, so a kill mid-write
+ * never destroys the user's BPMN file.
+ *
+ * Falls back to a direct `writeFileSync` if the rename fails with
+ * EXDEV (cross-device link) — vanishingly rare for a file's own
+ * sibling, but covers exotic setups like FUSE mounts.
+ */
+export function atomicOverwriteFile(
+	targetPath: string,
+	contents: string,
+): void {
+	const target = resolvePath(targetPath);
+	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+	try {
+		writeFileSync(tmp, contents, "utf-8");
+		renameSync(tmp, target);
+	} catch (error) {
+		try {
+			unlinkSync(tmp);
+		} catch {
+			// Best-effort cleanup — the original error is what matters.
+		}
+		const code =
+			isRecord(error) && typeof error.code === "string"
+				? error.code
+				: undefined;
+		if (code === "EXDEV") {
+			writeFileSync(target, contents, "utf-8");
+			return;
+		}
+		throw error;
+	}
 }
 
 // ---------------------------------------------------------------------------

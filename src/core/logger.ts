@@ -76,6 +76,16 @@ export function sanitizeForLogging(data: unknown): unknown {
 }
 
 /**
+ * Render a single table cell value as a string.
+ * Objects and arrays are JSON-stringified; primitives use String().
+ */
+function renderCell(value: unknown): string {
+	if (value === null || value === undefined) return "";
+	if (typeof value === "object") return JSON.stringify(value);
+	return String(value);
+}
+
+/**
  * Filter a single object to only include the specified fields.
  * Field matching is case-insensitive.
  */
@@ -334,7 +344,7 @@ export class Logger {
 			keys.forEach((key) => {
 				widths[key] = Math.max(
 					key.length,
-					...filteredData.map((obj) => String(obj[key] ?? "").length),
+					...filteredData.map((obj) => renderCell(obj[key]).length),
 				);
 			});
 
@@ -346,7 +356,7 @@ export class Logger {
 			// Print rows
 			filteredData.forEach((obj) => {
 				const row = keys
-					.map((key) => String(obj[key] ?? "").padEnd(widths[key]))
+					.map((key) => renderCell(obj[key]).padEnd(widths[key]))
 					.join(" | ");
 				this._writeLog(row);
 			});

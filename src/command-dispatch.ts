@@ -63,6 +63,7 @@ import {
 	completeJobCommand,
 	failJobCommand,
 	listJobsCommand,
+	updateJobCommand,
 } from "./commands/jobs.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
@@ -105,6 +106,7 @@ import {
 	searchProcessInstancesCommand,
 	searchUserTasksCommand,
 	searchVariablesCommand,
+	searchWaitStatesCommand,
 } from "./commands/search.ts";
 import {
 	outputCommand,
@@ -174,6 +176,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["activate:jobs", activateJobsCommand],
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
+	["update:job", updateJobCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],
@@ -196,6 +199,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["search:tenant", searchIdentityTenantsCommand],
 	["search:authorization", searchIdentityAuthorizationsCommand],
 	["search:mapping-rule", searchIdentityMappingRulesCommand],
+	["search:wait-state", searchWaitStatesCommand],
 
 	// ── Identity: list ─────────────────────────────────────────────────
 	["list:user", listUsersCommand],

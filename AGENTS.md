@@ -225,7 +225,7 @@ The flag is **not** applied to `test:unit` because the unit suite has 66 files a
 
 - always make sure that CLI commands, resources and options are reflected in
   - the `help` tests
-  - [README.md](README.md), [EXAMPLES.md](EXAMPLES.md) and other documentation
+  - [README.md](README.md), the [`docs/`](docs/) pages, and other documentation
   - shell completion
 - for every implementation, make sure to add or update tests that cover the new functionality. This includes unit tests for individual functions and integration tests for end-to-end scenarios. Tests should be comprehensive and cover edge cases to ensure the robustness of the codebase.
 
@@ -255,7 +255,7 @@ If you find yourself wanting to promote a flag into the top-level Flags section:
 - always consult [`.github/SDK_GAPS.md`](.github/SDK_GAPS.md) for known SDK limitations before implementing features that interact with the Camunda SDK. When a newer SDK version is available, check whether gaps listed there have been resolved and update the file accordingly (mark resolved items, remove workarounds).
 
 - consult [CONTEXT.md](CONTEXT.md) for CLI structure, resource aliases, and agent flags
-- consult [EXAMPLES.md](EXAMPLES.md) for command usage patterns
+- consult the [`docs/`](docs/) pages for command usage patterns — these are the single source of truth for user docs and are synced to camunda-docs
 - consult [PLUGIN-HELP.md](PLUGIN-HELP.md) when working on the plugin system
 
 ### TypeScript conventions

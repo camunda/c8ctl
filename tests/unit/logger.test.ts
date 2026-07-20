@@ -593,6 +593,116 @@ describe("Logger Module", () => {
 	});
 });
 
+describe("renderCell via table() — text mode cell rendering", () => {
+	let logOutput: string[];
+	let logger: Logger;
+
+	beforeEach(() => {
+		logOutput = [];
+		const trackingWriter = {
+			log(...data: unknown[]): void {
+				logOutput.push(data.join(" "));
+			},
+			error(..._data: unknown[]): void {},
+		};
+		logger = new Logger(trackingWriter);
+		c8ctl.outputMode = "text";
+	});
+
+	test("plain object cell is JSON-stringified", () => {
+		logger.table([{ headers: { "x-foo": "bar", "x-count": 42 } }]);
+
+		const rows = logOutput.slice(2); // skip header + separator
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes('{"x-foo":"bar","x-count":42}'),
+			`Expected JSON-stringified object in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("array cell is JSON-stringified", () => {
+		logger.table([{ tags: ["a", "b", "c"] }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes('["a","b","c"]'),
+			`Expected JSON-stringified array in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("null cell renders as empty string", () => {
+		logger.table([{ value: null }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		// null → empty → padded with spaces, so the row should not contain "null"
+		assert.ok(
+			!rows[0].includes("null"),
+			`Expected empty cell, got: ${rows[0]}`,
+		);
+	});
+
+	test("undefined cell renders as empty string", () => {
+		logger.table([{ a: "x", b: undefined }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			!rows[0].includes("undefined"),
+			`Expected empty cell, got: ${rows[0]}`,
+		);
+	});
+
+	test("string cell is passed through unchanged", () => {
+		logger.table([{ name: "hello" }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes("hello"),
+			`Expected 'hello' in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("number cell is converted via String()", () => {
+		logger.table([{ count: 42 }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(rows[0].includes("42"), `Expected '42' in row, got: ${rows[0]}`);
+	});
+
+	test("boolean cell is converted via String()", () => {
+		logger.table([{ active: true }]);
+
+		const rows = logOutput.slice(2);
+		assert.strictEqual(rows.length, 1);
+		assert.ok(
+			rows[0].includes("true"),
+			`Expected 'true' in row, got: ${rows[0]}`,
+		);
+	});
+
+	test("column width accounts for JSON-stringified object length", () => {
+		// Header "headers" is 7 chars; value {"x-foo":"bar"} is 15 chars → column must be ≥15
+		logger.table([{ headers: { "x-foo": "bar" } }]);
+
+		const header = logOutput[0];
+		// The column header "headers" must be padded to at least the value width
+		assert.ok(
+			header.startsWith("headers"),
+			`Header line should start with 'headers', got: ${header}`,
+		);
+		// The data row should contain the JSON without truncation
+		const row = logOutput[2];
+		assert.ok(
+			row.includes('{"x-foo":"bar"}'),
+			`Row should contain full JSON, got: ${row}`,
+		);
+	});
+});
+
 describe("sortTableData", () => {
 	let warnMessages: string[];
 	let logger: Logger;
