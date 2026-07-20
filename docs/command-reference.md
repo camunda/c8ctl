@@ -92,7 +92,7 @@ List resources
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--businessId` | string |  | Filter by Business ID |
+| `--businessId` | string |  | Filter by Business ID (Camunda 8.9+) |
 | `--bpmnProcessId` | string |  | Filter by BPMN process ID |
 | `--id` | string |  | Filter by BPMN process ID (alias) |
 | `--processDefinitionId` | string |  | Filter by process definition ID |
@@ -252,7 +252,7 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--businessId` | string |  | Filter by Business ID |
+| `--businessId` | string |  | Filter by Business ID (Camunda 8.9+) |
 | `--bpmnProcessId` | string |  | Filter by BPMN process ID |
 | `--id` | string |  | Filter by BPMN process ID (alias) |
 | `--processDefinitionId` | string |  | Filter by process definition ID |
@@ -521,7 +521,7 @@ Create a resource (process instance, identity)
 | `--processDefinitionId` | string |  | Process definition ID (BPMN process ID) |
 | `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
 | `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
-| `--businessId` | string |  | Business ID for the process instance |
+| `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
 | `--variables` | string |  | JSON variables |
 | `--awaitCompletion` | boolean |  | Wait for process to complete |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
@@ -606,7 +606,7 @@ Create and await process instance completion (server-side waiting)
 | `--processDefinitionId` | string |  | Process definition ID (BPMN process ID) |
 | `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
 | `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
-| `--businessId` | string |  | Business ID for the process instance |
+| `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
 | `--variables` | string |  | JSON variables |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
 | `--requestTimeout` | string |  | Await timeout in milliseconds |
@@ -821,7 +821,7 @@ Deploy and start a process instance from a BPMN file
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--businessId` | string |  | Business ID for the process instance |
+| `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
 | `--variables` | string |  | JSON variables |
 | `--force` | boolean |  | Deploy any file type, ignoring the default extension allow-list |
 

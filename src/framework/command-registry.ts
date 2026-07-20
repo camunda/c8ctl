@@ -258,7 +258,7 @@ export const SEARCH_FLAGS = {
 const PI_SEARCH_FLAGS = {
 	businessId: {
 		type: "string",
-		description: "Filter by Business ID",
+		description: "Filter by Business ID (Camunda 8.9+)",
 		validate: BusinessId.assumeExists,
 	},
 	bpmnProcessId: {
@@ -308,7 +308,7 @@ const CREATE_PI_FLAGS = {
 	},
 	businessId: {
 		type: "string",
-		description: "Business ID for the process instance",
+		description: "Business ID for the process instance (Camunda 8.9+)",
 		validate: BusinessId.assumeExists,
 	},
 	variables: { type: "string", description: "JSON variables" },
@@ -1124,7 +1124,7 @@ export const COMMAND_REGISTRY = {
 			},
 			businessId: {
 				type: "string",
-				description: "Business ID for the process instance",
+				description: "Business ID for the process instance (Camunda 8.9+)",
 				validate: BusinessId.assumeExists,
 			},
 			variables: { type: "string", description: "JSON variables" },
@@ -1452,7 +1452,7 @@ export const COMMAND_REGISTRY = {
 		flags: {
 			businessId: {
 				type: "string",
-				description: "Business ID for the process instance",
+				description: "Business ID for the process instance (Camunda 8.9+)",
 				validate: BusinessId.assumeExists,
 			},
 			variables: { type: "string", description: "JSON variables" },

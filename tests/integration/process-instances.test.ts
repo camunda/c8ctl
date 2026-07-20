@@ -27,6 +27,11 @@ import { asyncSpawn } from "../utils/spawn.ts";
 // Polling configuration for Elasticsearch consistency
 const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
+const camundaVersion = process.env.CAMUNDA_VERSION;
+const businessIdSkip =
+	camundaVersion === "8.8"
+		? `Business ID requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
@@ -129,7 +134,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		);
 	});
 
-	test("Business ID is searchable and visible across process instance reads", async () => {
+	test("Business ID is searchable and visible across process instance reads", {
+		skip: businessIdSkip,
+	}, async () => {
 		const businessId = `order-${Date.now()}`;
 		await deploy(testDir, "tests/fixtures/simple.bpmn");
 

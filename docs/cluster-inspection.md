@@ -48,6 +48,8 @@ c8 get topology
 
 ## Process instances
 
+Business IDs require Camunda 8.9 or newer.
+
 ### List process instances
 
 ```bash
