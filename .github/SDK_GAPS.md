@@ -14,8 +14,6 @@ When a new SDK limitation is discovered during development, add it here followin
 
 ## Open Gaps
 
-_None._
-
 - [ ] **`searchElementInstanceWaitStates` method missing**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
   - **Affected endpoint:** `POST /v2/element-instances/wait-states/search`

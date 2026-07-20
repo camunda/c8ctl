@@ -35,7 +35,7 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 
 	// Dry-run preview comes first, mirroring the pre-#288 order pinned by
 	// `tests/unit/form-topology-run-behaviour.test.ts`. The body shape
-	// `{ path, variables }` is part of that contract.
+	// `{ path, variables, businessId }` is part of that contract.
 	const dr = ctx.dryRun({
 		command: "run",
 		method: "POST",

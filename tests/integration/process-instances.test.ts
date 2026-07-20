@@ -29,7 +29,7 @@ const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
 const camundaVersion = process.env.CAMUNDA_VERSION;
 const businessIdSkip =
-	camundaVersion === "8.8"
+	camundaVersion?.startsWith("8.8") === true
 		? `Business ID requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
 		: false;
 
