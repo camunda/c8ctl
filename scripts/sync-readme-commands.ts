@@ -338,10 +338,6 @@ export const DOCS_PREAMBLE = [
 	"<!-- Auto-generated from COMMAND_REGISTRY in the c8ctl repo. Do not edit manually or in camunda-docs.",
 	"     This page is the source of truth in c8ctl and is synced to camunda-docs automatically.",
 	"     Run: node --experimental-strip-types scripts/sync-readme-commands.ts --docs -->",
-	"",
-	":::warning Alpha feature",
-	"`c8ctl` is in alpha and is not intended for production use. Commands and flags may change without notice between releases. See [Getting started](getting-started.md) for details.",
-	":::",
 ].join("\n");
 
 /** Generate a standalone Docusaurus-compatible command reference page. */

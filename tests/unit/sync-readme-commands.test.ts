@@ -747,11 +747,6 @@ describe("generateDocs() output structure", () => {
 		assert.ok(output.includes(DOCS_PREAMBLE));
 	});
 
-	test("includes alpha warning admonition", () => {
-		assert.ok(output.includes(":::warning Alpha feature"));
-		assert.ok(output.includes(":::"));
-	});
-
 	test("uses ## for top-level sections (not ###)", () => {
 		assert.ok(output.includes("## Global Flags"));
 		assert.ok(output.includes("## Commands"));
@@ -786,9 +781,5 @@ describe("generateDocs() output structure", () => {
 	test("does not contain README markers", () => {
 		assert.ok(!output.includes(START_MARKER));
 		assert.ok(!output.includes(END_MARKER));
-	});
-
-	test("links to getting-started.md in alpha warning", () => {
-		assert.ok(output.includes("[Getting started](getting-started.md)"));
 	});
 });
