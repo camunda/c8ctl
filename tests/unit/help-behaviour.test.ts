@@ -112,6 +112,7 @@ describe("CLI behavioural: help (JSON mode)", () => {
 		assert.strictEqual(create.mutating, true, "create should be mutating");
 	});
 
+	// Note: this test intentionally forces *text* output because JSON help does not render per-verb flag surfaces.
 	test("Business ID is discoverable on every applicable command", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-help-test-"));
 		writeFileSync(
