@@ -181,13 +181,23 @@ export const createProcessInstanceCommand = defineCommand(
 				? parseInt(flags.requestTimeout, 10)
 				: undefined;
 
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			try {
+				variables = JSON.parse(flags.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+			}
+		}
+
 		// Dry-run: emit the would-be API request without executing
 		const body: Record<string, unknown> = {
 			processDefinitionId,
 			tenantId,
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
-		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (variables !== undefined) body.variables = variables;
 		if (flags.businessId) body.businessId = flags.businessId;
 		if (awaitCompletion) body.awaitCompletion = true;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
@@ -215,17 +225,6 @@ export const createProcessInstanceCommand = defineCommand(
 			logger.info(
 				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
 			);
-		}
-
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-				return;
-			}
 		}
 
 		if (awaitCompletion) {
@@ -288,6 +287,16 @@ export const awaitProcessInstanceCommand = defineCommand(
 				? parseInt(flags.requestTimeout, 10)
 				: undefined;
 
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			try {
+				variables = JSON.parse(flags.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+			}
+		}
+
 		// Dry-run: emit the would-be API request without executing
 		const body: Record<string, unknown> = {
 			processDefinitionId,
@@ -295,7 +304,7 @@ export const awaitProcessInstanceCommand = defineCommand(
 			awaitCompletion: true,
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
-		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (variables !== undefined) body.variables = variables;
 		if (flags.businessId) body.businessId = flags.businessId;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
@@ -313,17 +322,6 @@ export const awaitProcessInstanceCommand = defineCommand(
 			logger.info(
 				"Note: --fetchVariables is not yet supported by the API. All variables will be returned.",
 			);
-		}
-
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-				return;
-			}
 		}
 
 		logger.info("Waiting for process instance to complete...");

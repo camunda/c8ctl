@@ -122,6 +122,24 @@ describe("CLI behavioural: create process-instance", () => {
 			`stderr: ${result.stderr}`,
 		);
 	});
+
+	test("rejects invalid variables JSON during dry-run", async () => {
+		const result = await c8(
+			"create",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--variables",
+			"not-json",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Invalid JSON for variables"),
+			`stderr: ${result.stderr}`,
+		);
+	});
 });
 
 // ─── await process-instance (alias for create --awaitCompletion) ─────────────
@@ -138,6 +156,24 @@ describe("CLI behavioural: await process-instance", () => {
 		const body = asRecord(out.body, "dry-run body");
 		assert.strictEqual(body.processDefinitionId, "my-process");
 		assert.strictEqual(body.awaitCompletion, true);
+	});
+
+	test("rejects invalid variables JSON during dry-run", async () => {
+		const result = await c8(
+			"await",
+			"pi",
+			"--dry-run",
+			"--id",
+			"my-process",
+			"--variables",
+			"not-json",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Invalid JSON for variables"),
+			`stderr: ${result.stderr}`,
+		);
 	});
 
 	test("--dry-run includes businessId when provided", async () => {
