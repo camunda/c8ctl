@@ -27,12 +27,18 @@ import { asyncSpawn } from "../utils/spawn.ts";
 // Polling configuration for Elasticsearch consistency
 const POLL_TIMEOUT_MS = 30000;
 const POLL_INTERVAL_MS = 1000;
+const camundaVersion = process.env.CAMUNDA_VERSION;
+const businessIdSkip =
+	camundaVersion?.startsWith("8.8") === true
+		? `Business ID requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
 
 type ProcessInstanceRow = {
 	Key: string | number;
+	"Business ID"?: string;
 	"Process ID": string;
 	State: string;
 	Version: number;
@@ -126,6 +132,81 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 			0,
 			`CLI should succeed. stderr: ${result.stderr}`,
 		);
+	});
+
+	test("Business ID is searchable and visible across process instance reads", {
+		skip: businessIdSkip,
+	}, async () => {
+		const businessId = `order-${Date.now()}`;
+		await deploy(testDir, "tests/fixtures/simple.bpmn");
+
+		const createResult = await cli(
+			testDir,
+			"create",
+			"pi",
+			"--id",
+			"simple-process",
+			"--businessId",
+			businessId,
+		);
+		assert.strictEqual(
+			createResult.status,
+			0,
+			`create should succeed. stderr: ${createResult.stderr}`,
+		);
+
+		let searchItems: ProcessInstanceRow[] = [];
+		const indexed = await pollUntil(
+			async () => {
+				const result = await cli(
+					testDir,
+					"search",
+					"pi",
+					"--businessId",
+					businessId,
+					"--fields",
+					"Key,businessId",
+				);
+				if (result.status !== 0) return false;
+				searchItems = parseItems<ProcessInstanceRow>(result.stdout);
+				return searchItems.length === 1;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(indexed, "created instance should be searchable by Business ID");
+		assert.strictEqual(searchItems[0]?.["Business ID"], businessId);
+
+		const key = String(searchItems[0]?.Key);
+		const getResult = await cli(
+			testDir,
+			"get",
+			"pi",
+			key,
+			"--fields",
+			"businessId",
+		);
+		assert.strictEqual(getResult.status, 0, `get failed: ${getResult.stderr}`);
+		assert.deepStrictEqual(JSON.parse(getResult.stdout), { businessId });
+
+		const listResult = await cli(
+			testDir,
+			"list",
+			"pi",
+			"--all",
+			"--businessId",
+			businessId,
+			"--fields",
+			"businessId",
+		);
+		assert.strictEqual(
+			listResult.status,
+			0,
+			`list failed: ${listResult.stderr}`,
+		);
+		assert.deepStrictEqual(parseItems<ProcessInstanceRow>(listResult.stdout), [
+			{ "Business ID": businessId },
+		]);
 	});
 
 	test("list process instances respects --limit via CLI", async () => {

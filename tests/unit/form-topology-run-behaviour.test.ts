@@ -147,6 +147,19 @@ describe("CLI behavioural: run", () => {
 		assert.strictEqual(body.variables, '{"x":1}');
 	});
 
+	test("--dry-run includes businessId in body", async () => {
+		const result = await c8(
+			"run",
+			"test.bpmn",
+			"--dry-run",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.strictEqual(body.businessId, "order-123");
+	});
+
 	test("shows usage when path is missing", async () => {
 		const result = await c8("run");
 		assert.strictEqual(result.status, 1);

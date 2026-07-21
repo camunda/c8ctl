@@ -35,6 +35,9 @@ export const listProcessInstancesCommand = defineCommand(
 		if (processDefinitionId) {
 			filter.filter.processDefinitionId = processDefinitionId;
 		}
+		if (flags.businessId) {
+			filter.filter.businessId = flags.businessId;
+		}
 
 		// version comes from global --version flag, not resource flags
 		const versionIdx = process.argv.indexOf("--version");
@@ -90,6 +93,7 @@ export const listProcessInstancesCommand = defineCommand(
 			kind: "list",
 			items: allItems.map((pi) => ({
 				Key: `${pi.hasIncident ? "⚠ " : ""}${pi.processInstanceKey}`,
+				"Business ID": pi.businessId || "-",
 				"Process ID": pi.processDefinitionId,
 				State: pi.state,
 				Version: pi.processDefinitionVersion,
@@ -177,13 +181,24 @@ export const createProcessInstanceCommand = defineCommand(
 				? parseInt(flags.requestTimeout, 10)
 				: undefined;
 
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			try {
+				variables = JSON.parse(flags.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+			}
+		}
+
 		// Dry-run: emit the would-be API request without executing
 		const body: Record<string, unknown> = {
 			processDefinitionId,
 			tenantId,
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
-		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (variables !== undefined) body.variables = variables;
+		if (flags.businessId) body.businessId = flags.businessId;
 		if (awaitCompletion) body.awaitCompletion = true;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
@@ -212,17 +227,6 @@ export const createProcessInstanceCommand = defineCommand(
 			);
 		}
 
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-				return;
-			}
-		}
-
 		if (awaitCompletion) {
 			logger.info("Waiting for process instance to complete...");
 		}
@@ -238,6 +242,9 @@ export const createProcessInstanceCommand = defineCommand(
 				processDefinitionVersion: version,
 			}),
 			...(variables !== undefined && { variables }),
+			...(flags.businessId !== undefined && {
+				businessId: flags.businessId,
+			}),
 			...(awaitCompletion && { awaitCompletion: true }),
 			...(requestTimeout !== undefined && {
 				requestTimeout,
@@ -280,6 +287,16 @@ export const awaitProcessInstanceCommand = defineCommand(
 				? parseInt(flags.requestTimeout, 10)
 				: undefined;
 
+		// Parse variables early for clear error reporting
+		let variables: Record<string, unknown> | undefined;
+		if (flags.variables) {
+			try {
+				variables = JSON.parse(flags.variables);
+			} catch (error) {
+				handleCommandError(logger, "Invalid JSON for variables", error);
+			}
+		}
+
 		// Dry-run: emit the would-be API request without executing
 		const body: Record<string, unknown> = {
 			processDefinitionId,
@@ -287,7 +304,8 @@ export const awaitProcessInstanceCommand = defineCommand(
 			awaitCompletion: true,
 		};
 		if (version !== undefined) body.processDefinitionVersion = version;
-		if (flags.variables) body.variables = JSON.parse(flags.variables);
+		if (variables !== undefined) body.variables = variables;
+		if (flags.businessId) body.businessId = flags.businessId;
 		if (requestTimeout !== undefined) body.requestTimeout = requestTimeout;
 
 		const dr = ctx.dryRun({
@@ -306,17 +324,6 @@ export const awaitProcessInstanceCommand = defineCommand(
 			);
 		}
 
-		// Parse variables early for clear error reporting
-		let variables: Record<string, unknown> | undefined;
-		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-				return;
-			}
-		}
-
 		logger.info("Waiting for process instance to complete...");
 
 		const request = {
@@ -329,6 +336,9 @@ export const awaitProcessInstanceCommand = defineCommand(
 				processDefinitionVersion: version,
 			}),
 			...(variables !== undefined && { variables }),
+			...(flags.businessId !== undefined && {
+				businessId: flags.businessId,
+			}),
 			awaitCompletion: true,
 			...(requestTimeout !== undefined && {
 				requestTimeout,

@@ -14,16 +14,8 @@ When a new SDK limitation is discovered during development, add it here followin
 
 ## Open Gaps
 
-- [ ] **`JobFilter` missing date-range fields**
-  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **8.8.4**
-  - **Affected type:** `JobFilter`
-  - **Missing fields:** `creationTime` (`DateTimeFilterProperty`), `lastUpdateTime` (`DateTimeFilterProperty`)
-  - **Available in:** Camunda 8.9 REST API ([jobs.yaml](../assets/c8/rest-api/jobs.yaml))
-  - **Impact:** `--between` date-range filtering for `c8 list jobs` / `c8 search jobs` cannot use `creationTime` or `lastUpdateTime` — only `deadline` and `endTime` are available.
-  - **Remediation:** Upgrade SDK when 8.9-compatible release ships; alternatively use `as any` type assertion as a temporary workaround.
-
 - [ ] **`searchElementInstanceWaitStates` method missing**
-  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.2**
   - **Affected endpoint:** `POST /v2/element-instances/wait-states/search`
   - **Missing:** No SDK method for the wait-states search endpoint
   - **Available in:** Camunda 8.8+ REST API
@@ -41,4 +33,6 @@ When a new SDK limitation is discovered during development, add it here followin
 
 ## Resolved Gaps
 
-_None yet._
+- [x] **`JobFilter` missing date-range fields**
+  - **Resolved in:** `@camunda8/orchestration-cluster-api` **9.1.0**
+  - **Fields:** `creationTime` and `lastUpdateTime` are available as `DateTimeFilterProperty`.

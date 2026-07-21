@@ -689,8 +689,9 @@ describe("detectUnknownFlags — non-search verbs", () => {
 	});
 
 	test("create: valid flags are not flagged", () => {
-		const unknown = detectUnknownFlags("create", "pi", {
+		const unknown = detectUnknownFlags("create", "process-instance", {
 			processDefinitionId: "my-proc",
+			businessId: "order-123",
 			variables: "{}",
 		});
 		assert.deepStrictEqual(unknown, []);

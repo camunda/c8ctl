@@ -8,6 +8,7 @@
 
 import {
 	AuthorizationKey,
+	BusinessId,
 	ElementInstanceKey,
 	IncidentKey,
 	JobKey,
@@ -255,6 +256,11 @@ export const SEARCH_FLAGS = {
 // ─── Reusable flag sets ──────────────────────────────────────────────────────
 
 const PI_SEARCH_FLAGS = {
+	businessId: {
+		type: "string",
+		description: "Filter by Business ID (Camunda 8.9+)",
+		validate: BusinessId.assumeExists,
+	},
 	bpmnProcessId: {
 		type: "string",
 		description: "Filter by BPMN process ID",
@@ -284,6 +290,77 @@ const PI_SEARCH_FLAGS = {
 		type: "string",
 		description: "Case-insensitive filter by BPMN process ID",
 	},
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_PI_FLAGS = {
+	processDefinitionId: {
+		type: "string",
+		description: "Process definition ID (BPMN process ID)",
+		validate: ProcessDefinitionId.assumeExists,
+	},
+	id: {
+		type: "string",
+		description: "Process definition ID (alias for --processDefinitionId)",
+	},
+	bpmnProcessId: {
+		type: "string",
+		description: "BPMN process ID (alias for --processDefinitionId)",
+	},
+	businessId: {
+		type: "string",
+		description: "Business ID for the process instance (Camunda 8.9+)",
+		validate: BusinessId.assumeExists,
+	},
+	variables: { type: "string", description: "JSON variables" },
+	awaitCompletion: {
+		type: "boolean",
+		description: "Wait for process to complete",
+	},
+	fetchVariables: {
+		type: "boolean",
+		description: "Fetch result variables on completion",
+	},
+	requestTimeout: {
+		type: "string",
+		description: "Await timeout in milliseconds",
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_USER_FLAGS = {
+	username: {
+		type: "string",
+		description: "Username",
+		validate: Username.assumeExists,
+	},
+	name: { type: "string", description: "Display name" },
+	email: { type: "string", description: "Email address" },
+	password: { type: "string", description: "Password" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_ROLE_FLAGS = {
+	roleId: { type: "string", description: "Role ID" },
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_GROUP_FLAGS = {
+	groupId: { type: "string", description: "Group ID" },
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_TENANT_FLAGS = {
+	tenantId: {
+		type: "string",
+		description: "Tenant ID",
+		validate: TenantId.assumeExists,
+	},
+	name: { type: "string", description: "Display name" },
+} as const satisfies Record<string, FlagDef>;
+
+const CREATE_MAPPING_RULE_FLAGS = {
+	mappingRuleId: { type: "string", description: "Mapping rule ID" },
+	name: { type: "string", description: "Display name" },
+	claimName: { type: "string", description: "Claim name" },
+	claimValue: { type: "string", description: "Claim value" },
 } as const satisfies Record<string, FlagDef>;
 
 const PD_SEARCH_FLAGS = {
@@ -928,8 +1005,8 @@ export const COMMAND_REGISTRY = {
 		requiresResource: true,
 		helpExamples: [
 			{
-				command: "c8ctl create pi --id=myProcess",
-				description: "Create a process instance",
+				command: "c8ctl create pi --id=myProcess --businessId=order-123",
+				description: "Create a process instance with a Business ID",
 			},
 			{
 				command: "c8ctl create pi --id=myProcess --awaitCompletion",
@@ -950,66 +1027,16 @@ export const COMMAND_REGISTRY = {
 			"auth",
 			"mapping-rule",
 		],
-		flags: {
-			// Process instance creation
-			processDefinitionId: {
-				type: "string",
-				description: "Process definition ID (BPMN process ID)",
-				validate: ProcessDefinitionId.assumeExists,
-			},
-			id: {
-				type: "string",
-				description: "Process definition ID (alias for --processDefinitionId)",
-			},
-			bpmnProcessId: {
-				type: "string",
-				description: "BPMN process ID (alias for --processDefinitionId)",
-			},
-			variables: { type: "string", description: "JSON variables" },
-			awaitCompletion: {
-				type: "boolean",
-				description: "Wait for process to complete",
-			},
-			fetchVariables: {
-				type: "boolean",
-				description: "Fetch result variables on completion",
-			},
-			requestTimeout: {
-				type: "string",
-				description: "Await timeout in milliseconds",
-			},
-			// Identity user
-			username: {
-				type: "string",
-				description: "Username",
-				validate: Username.assumeExists,
-			},
-			name: { type: "string", description: "Display name" },
-			email: { type: "string", description: "Email address" },
-			password: { type: "string", description: "Password" },
-			// Identity role
-			roleId: { type: "string", description: "Role ID" },
-			// Identity group
-			groupId: { type: "string", description: "Group ID" },
-			// Identity tenant
-			tenantId: {
-				type: "string",
-				description: "Tenant ID",
-				validate: TenantId.assumeExists,
-			},
-			// Identity mapping rule
-			mappingRuleId: {
-				type: "string",
-				description: "Mapping rule ID",
-			},
-			claimName: { type: "string", description: "Claim name" },
-			claimValue: { type: "string", description: "Claim value" },
-		},
-		// Resource-scoped flags: the authorization-specific flags below are
-		// only required when creating an authorization. Declaring them at the
-		// verb level would force every `create <resource>` invocation to
-		// supply them (see #308 — required-flag enforcement).
+		flags: {},
+		// Resource-scoped flags prevent options for one resource from being
+		// accepted or required by unrelated create handlers (#308).
 		resourceFlags: {
+			"process-instance": CREATE_PI_FLAGS,
+			user: CREATE_USER_FLAGS,
+			role: CREATE_ROLE_FLAGS,
+			group: CREATE_GROUP_FLAGS,
+			tenant: CREATE_TENANT_FLAGS,
+			"mapping-rule": CREATE_MAPPING_RULE_FLAGS,
 			authorization: {
 				ownerId: {
 					type: "string",
@@ -1091,8 +1118,8 @@ export const COMMAND_REGISTRY = {
 		requiresResource: true,
 		helpExamples: [
 			{
-				command: "c8ctl await pi --id=myProcess",
-				description: "Create and wait for completion",
+				command: "c8ctl await pi --id=myProcess --businessId=claim-456",
+				description: "Create with a Business ID and wait for completion",
 			},
 		],
 		resources: ["pi"],
@@ -1109,6 +1136,11 @@ export const COMMAND_REGISTRY = {
 			bpmnProcessId: {
 				type: "string",
 				description: "BPMN process ID (alias for --processDefinitionId)",
+			},
+			businessId: {
+				type: "string",
+				description: "Business ID for the process instance (Camunda 8.9+)",
+				validate: BusinessId.assumeExists,
 			},
 			variables: { type: "string", description: "JSON variables" },
 			fetchVariables: {
@@ -1427,12 +1459,17 @@ export const COMMAND_REGISTRY = {
 		requiresResource: true,
 		helpExamples: [
 			{
-				command: "c8ctl run ./my-process.bpmn",
-				description: "Deploy and start process",
+				command: "c8ctl run ./my-process.bpmn --businessId=order-123",
+				description: "Deploy and start a process with a Business ID",
 			},
 		],
 		resources: [],
 		flags: {
+			businessId: {
+				type: "string",
+				description: "Business ID for the process instance (Camunda 8.9+)",
+				validate: BusinessId.assumeExists,
+			},
 			variables: { type: "string", description: "JSON variables" },
 			force: {
 				type: "boolean",

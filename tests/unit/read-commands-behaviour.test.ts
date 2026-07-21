@@ -48,6 +48,18 @@ describe("CLI behavioural: list process-instances", () => {
 			urlSuffix: "/process-instances/search",
 		});
 	});
+
+	test("--dry-run includes businessId filter", async () => {
+		const result = await c8(
+			"list",
+			"pi",
+			"--dry-run",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getFilter(parseJson(result)).businessId, "order-123");
+	});
 });
 
 describe("CLI behavioural: search process-instances", () => {
@@ -67,6 +79,18 @@ describe("CLI behavioural: search process-instances", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		const out = parseJson(result);
 		assert.strictEqual(getFilter(out).processDefinitionId, "my-process");
+	});
+
+	test("--dry-run includes businessId filter", async () => {
+		const result = await c8(
+			"search",
+			"pi",
+			"--dry-run",
+			"--businessId",
+			"order-123",
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(getFilter(parseJson(result)).businessId, "order-123");
 	});
 
 	test("--dry-run includes date range filter", async () => {

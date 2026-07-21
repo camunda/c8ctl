@@ -87,16 +87,19 @@ function renderCell(value: unknown): string {
 
 /**
  * Filter a single object to only include the specified fields.
- * Field matching is case-insensitive.
+ * Matching ignores case and non-alphanumeric separators so CLI field names
+ * such as `businessId` select human-readable headers such as `Business ID`.
  */
 function filterObjectFields(
 	obj: Record<string, unknown>,
 	fields: string[],
 ): Record<string, unknown> {
-	const lowerFields = fields.map((f) => f.toLowerCase());
+	const normalizeField = (field: string) =>
+		field.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
+	const normalizedFields = fields.map(normalizeField);
 	return Object.fromEntries(
 		Object.entries(obj).filter(([key]) =>
-			lowerFields.includes(key.toLowerCase()),
+			normalizedFields.includes(normalizeField(key)),
 		),
 	);
 }
