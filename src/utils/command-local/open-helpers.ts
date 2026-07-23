@@ -19,8 +19,7 @@ export const OPEN_APPS = [
 export type AppName = (typeof OPEN_APPS)[number];
 
 export function isAppName(value: string): value is AppName {
-	// biome-ignore lint/plugin: safe widening — readonly tuple to readonly string[] for .includes() compatibility
-	return (OPEN_APPS as readonly string[]).includes(value);
+	return OPEN_APPS.some((app) => app === value);
 }
 
 /** Pattern that matches a self-managed REST API version suffix, e.g. `/v2` */

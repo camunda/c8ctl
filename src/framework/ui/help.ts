@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { getLogger } from "../../core/index.ts";
 import {
 	COMMAND_REGISTRY,
+	COMMAND_REGISTRY_BY_VERB,
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
@@ -36,8 +37,7 @@ function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
 
 /** Look up a verb in COMMAND_REGISTRY, returning undefined for unknown verbs. */
 function lookupVerb(verb: string): CommandDef | undefined {
-	// biome-ignore lint/plugin: single isolation point — COMMAND_REGISTRY uses `satisfies` so Object index needs widening
-	return (COMMAND_REGISTRY as Record<string, CommandDef>)[verb];
+	return COMMAND_REGISTRY_BY_VERB[verb];
 }
 
 /**
