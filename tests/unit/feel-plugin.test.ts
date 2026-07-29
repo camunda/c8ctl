@@ -619,7 +619,7 @@ describe("CLI behavioural: feel evaluate --dry-run", () => {
 // ---------------------------------------------------------------------------
 
 describe("CLI behavioural: feel evaluate cluster errors", () => {
-	test("unreachable cluster surfaces 'connection refused' with local-engine hint", async () => {
+	test("unreachable cluster surfaces 'service unavailable' with local-engine hint", async () => {
 		// Use a mock HTTP server responding with 503 to simulate an unreachable
 		// cluster without relying on TCP RST behaviour (socket.destroy()), which
 		// differs across platforms.  A 503 is not among the specifically handled
