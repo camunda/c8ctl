@@ -23,7 +23,7 @@ import {
 	isPluginRegistered,
 	removePluginFromRegistry,
 } from "../framework/index.ts";
-import { runNpm, runNpmCapture } from "../utils/index.ts";
+import { npm } from "../utils/index.ts";
 
 export { getInstalledPluginVersion, getVersionFromSource };
 
@@ -109,7 +109,7 @@ export const loadPluginCommand = defineCommand(
 
 				// Install from URL (file://, https://, git://, etc.)
 				logger.info(`Loading plugin from: ${fromUrl}...`);
-				runNpm({
+				npm({
 					args: ["install", fromUrl, "--prefix", pluginsDir],
 					stdio: "inherit",
 				});
@@ -137,7 +137,7 @@ export const loadPluginCommand = defineCommand(
 					throw new Error("unreachable: packageName is required");
 
 				logger.info(`Loading plugin: ${packageName}...`);
-				runNpm({
+				npm({
 					args: ["install", packageName, "--prefix", pluginsDir],
 					stdio: "inherit",
 				});
@@ -248,7 +248,8 @@ function listTopLevelDependencies(pluginsDir: string): string[] {
 	};
 
 	try {
-		const output = runNpmCapture({ args: npmListArgs });
+		const output = npm({ args: npmListArgs, stdout: true }).stdout;
+		if (!output) return [];
 		return parseDependencyNames(output);
 	} catch (error: unknown) {
 		// npm list can return non-zero exit codes (e.g. unmet peer deps) and still print valid JSON to stdout
@@ -380,7 +381,7 @@ export const unloadPluginCommand = defineCommand(
 		logger.info(`${action} plugin: ${packageName}...`);
 
 		try {
-			runNpm({
+			npm({
 				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});
@@ -685,7 +686,7 @@ export const syncPluginsCommand = defineCommand(
 
 					// Try npm rebuild first
 					try {
-						runNpm({
+						npm({
 							args: ["rebuild", plugin.name, "--prefix", pluginsDir],
 							stdio: "pipe",
 						});
@@ -701,7 +702,7 @@ export const syncPluginsCommand = defineCommand(
 
 				// Fresh install
 				try {
-					runNpm({
+					npm({
 						args: ["install", plugin.source, "--prefix", pluginsDir],
 						stdio: "inherit",
 					});
@@ -807,13 +808,13 @@ export const upgradePluginCommand = defineCommand(
 			);
 
 			// Uninstall current version
-			runNpm({
+			npm({
 				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "pipe",
 			});
 
 			// Install new version while respecting source type
-			runNpm({
+			npm({
 				args: ["install", installTarget, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});
@@ -884,13 +885,13 @@ export const downgradePluginCommand = defineCommand(
 			);
 
 			// Uninstall current version
-			runNpm({
+			npm({
 				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "pipe",
 			});
 
 			// Install specific version while respecting source type
-			runNpm({
+			npm({
 				args: ["install", installTarget, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});

@@ -135,7 +135,7 @@ describe("no bare npm spawns remain in src/ (#484)", () => {
 		assert.deepStrictEqual(
 			offenders,
 			[],
-			`These files spawn npm directly instead of using runNpm()/runNpmCapture(): ${offenders.join(", ")}`,
+			`These files spawn npm directly instead of using npm(): ${offenders.join(", ")}`,
 		);
 	});
 });

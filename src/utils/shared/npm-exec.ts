@@ -34,6 +34,10 @@ export interface NpmInvocation {
 	shell: boolean;
 }
 
+export interface NpmResult {
+	stdout?: string;
+}
+
 /** Characters that cannot be represented inside a double-quoted cmd.exe argument: quotes, line breaks and NUL. */
 const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
 
@@ -88,30 +92,31 @@ export function buildNpmInvocation({
 }
 
 /**
- * Run npm, inheriting or piping stdio, and discard the output.
+ * Run npm through the platform-aware wrapper.
  */
-export function runNpm({
+export function npm({
 	args,
 	stdio,
+	stdout = false,
 }: {
 	args: readonly string[];
 	stdio?: ExecFileSyncOptions["stdio"];
-}): void {
+	stdout?: boolean;
+}): NpmResult {
 	const invocation = buildNpmInvocation({ args });
+
+	if (stdout) {
+		const output = execFileSync(invocation.command, invocation.args, {
+			stdio: ["ignore", "pipe", "pipe"],
+			encoding: "utf-8",
+			shell: invocation.shell,
+		});
+		return { stdout: output };
+	}
+
 	execFileSync(invocation.command, invocation.args, {
 		stdio,
 		shell: invocation.shell,
 	});
-}
-
-/**
- * Run npm and capture stdout as UTF-8 text.
- */
-export function runNpmCapture({ args }: { args: readonly string[] }): string {
-	const invocation = buildNpmInvocation({ args });
-	return execFileSync(invocation.command, invocation.args, {
-		stdio: ["ignore", "pipe", "pipe"],
-		encoding: "utf-8",
-		shell: invocation.shell,
-	});
+	return {};
 }

@@ -102,7 +102,7 @@ describe("getCompletionFilePath", () => {
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
-		process.env.C8CTL_DATA_DIR = "/tmp/c8ctl-test";
+		process.env.C8CTL_DATA_DIR = join(tmpdir(), "c8ctl-test");
 	});
 
 	afterEach(() => {
@@ -114,8 +114,11 @@ describe("getCompletionFilePath", () => {
 	});
 
 	test("returns path under data dir with correct extension", () => {
-		const path = getCompletionFilePath("zsh");
-		assert.strictEqual(path, "/tmp/c8ctl-test/completions/c8ctl.zsh");
+		const completionPath = getCompletionFilePath("zsh");
+		assert.strictEqual(
+			completionPath,
+			join(tmpdir(), "c8ctl-test", "completions", "c8ctl.zsh"),
+		);
 	});
 
 	test("works for all three shells", () => {
