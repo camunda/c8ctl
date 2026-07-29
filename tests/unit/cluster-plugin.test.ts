@@ -19,6 +19,9 @@ import { mockProcessExit } from "../utils/mocks.ts";
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 
+/** Platform-correct binary name: c8run.exe on Windows, c8run elsewhere. */
+const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
+
 // ---------------------------------------------------------------------------
 // metadata
 // ---------------------------------------------------------------------------
@@ -372,7 +375,7 @@ describe("Cluster Plugin – findC8RunBinaryPath", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		const result = plugin.findC8RunBinaryPath(config);
 		assert.ok(result !== null, "should find binary");
 		assert.ok(result?.includes("c8run"), "path should reference binary name");
@@ -399,7 +402,7 @@ describe("Cluster Plugin – isC8RunInstalled", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		assert.strictEqual(plugin.isC8RunInstalled(config), true);
 	});
 });
@@ -427,7 +430,7 @@ describe("Cluster Plugin – getC8RunBinaryPath", () => {
 		const config = { cacheDir: tempDir, version: "8.8" };
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		const result = plugin.getC8RunBinaryPath(config);
 		assert.ok(
 			typeof result === "string" && result.length > 0,
@@ -709,7 +712,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		};
 		const binaryDir = join(tempDir, "c8run-8.8.1", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
 	});
@@ -724,7 +727,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8.1");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await assert.doesNotReject(() => plugin.ensureC8RunInstalled(config));
 
@@ -745,7 +748,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-current"');
 
 		const originalFetch = globalThis.fetch;
@@ -786,7 +789,7 @@ describe("Cluster Plugin – ensureC8RunInstalled", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-old"');
 
 		assert.strictEqual(
@@ -984,7 +987,7 @@ describe("Cluster Plugin – resolveVersion", () => {
 		// Create a fake c8run installation so readLocalAliasMapping considers the alias valid
 		const installDir = join(cacheDir, `c8run-${version}`, `c8run-${version}`);
 		mkdirSync(installDir, { recursive: true });
-		writeFileSync(join(installDir, "c8run"), "fake");
+		writeFileSync(join(installDir, C8RUN_BINARY), "fake");
 	}
 
 	function mockFetchWithVersions(html: string) {
@@ -1084,7 +1087,7 @@ describe("Cluster Plugin – resolveVersion", () => {
 			// Simulate installed version 8.9.5 (full semver directory)
 			const installDir = join(cacheDir, "c8run-8.9.5", "c8run-8.9.5");
 			mkdirSync(installDir, { recursive: true });
-			writeFileSync(join(installDir, "c8run"), "fake");
+			writeFileSync(join(installDir, C8RUN_BINARY), "fake");
 
 			// Simulate the alias cache: stable → 8.9 (minor version pattern)
 			plugin.storeLocalAliasMapping(cacheDir, "stable", "8.9");
@@ -1625,7 +1628,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await plugin.deleteVersion(tempDir, "8.8");
 		assert.strictEqual(
@@ -1648,7 +1651,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 		const installDir = join(tempDir, "c8run-8.8");
 		const binaryDir = join(installDir, "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		writeFileSync(join(tempDir, "cluster.active"), "running");
 		writeFileSync(join(tempDir, "cluster.version"), "8.8");
 		// Live pidfile so isVersionRunning() returns true
@@ -1673,7 +1676,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 	test("prevents deleting when pidfiles indicate a running cluster but marker is missing", async () => {
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		// No marker files — only a live pidfile
 		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
 
@@ -1694,7 +1697,7 @@ describe("Cluster Plugin – deleteVersion", () => {
 	test("prevents deleting when cluster.active exists but cluster.version is missing and pidfiles present", async () => {
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		// Partial marker state: active exists but version file is absent
 		writeFileSync(join(tempDir, "cluster.active"), "");
 		writeFileSync(join(binaryDir, "camunda.process"), String(process.pid));
@@ -1733,7 +1736,7 @@ describe("Cluster Plugin – purgeClusterData", () => {
 	) {
 		const binaryDir = join(cacheDir, `c8run-${version}`, versionDir);
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		// camunda-data dir (history data + app state)
 		mkdirSync(join(binaryDir, "camunda-data"), { recursive: true });
 		writeFileSync(join(binaryDir, "camunda-data", "elasticsearch.db"), "data");
@@ -1836,7 +1839,7 @@ describe("Cluster Plugin – purgeClusterData", () => {
 	test("works when camunda-data does not exist (e.g. never started)", async () => {
 		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		// Should not throw even with no data dirs to delete
 		await plugin.purgeClusterData(tempDir, "8.9");
@@ -1995,7 +1998,7 @@ describe("Cluster Plugin – purgeClusterData", () => {
 	test("handles camunda-zeebe-* dir that has no data subdir (lib-only)", async () => {
 		const binaryDir = join(tempDir, "c8run-8.9", "c8run-8.9.9");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		const zeebeDir = join(binaryDir, "camunda-zeebe-8.9.9");
 		mkdirSync(join(zeebeDir, "lib"), { recursive: true });
 		writeFileSync(join(zeebeDir, "lib", "zeebe.jar"), "binary");
@@ -2157,7 +2160,7 @@ describe("Cluster Plugin – streamLogs", () => {
 		// Create an install dir with a binary but no log dir
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		await plugin.streamLogs(tempDir);
 		const output = captured.join("\n");
@@ -2446,7 +2449,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-old"');
 
 		let fetchCalled = false;
@@ -2487,7 +2490,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 		plugin.storeETag(config, '"etag-current"');
 
 		Object.defineProperty(globalThis, "fetch", {
@@ -2527,7 +2530,7 @@ describe("Cluster Plugin – ensureC8RunInstalled start vs install behavior", ()
 		};
 		const binaryDir = join(tempDir, "c8run-8.8", "c8run-8.8.1");
 		mkdirSync(binaryDir, { recursive: true });
-		writeFileSync(join(binaryDir, "c8run"), "");
+		writeFileSync(join(binaryDir, C8RUN_BINARY), "");
 
 		Object.defineProperty(globalThis, "fetch", {
 			value: async () => {

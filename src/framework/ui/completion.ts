@@ -788,7 +788,11 @@ export function detectShell(): string | undefined {
 
 /** Get the appropriate RC file path for a given shell. */
 export function getShellRcFile(shell: string): string | undefined {
-	const home = homedir();
+	// Prefer the HOME env var (if explicitly set) over os.homedir(), so that
+	// tests and tools can isolate the home directory on all platforms.
+	// On Windows, os.homedir() reads USERPROFILE rather than HOME, so setting
+	// HOME in the test environment would otherwise have no effect.
+	const home = process.env.HOME ?? homedir();
 	switch (shell) {
 		case "bash":
 			// macOS uses .bash_profile by default; Linux uses .bashrc
