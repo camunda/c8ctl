@@ -34,7 +34,7 @@ export interface NpmInvocation {
 	shell: boolean;
 }
 
-/** Characters that cannot be represented inside a double-quoted cmd.exe argument. */
+/** Characters that cannot be represented inside a double-quoted cmd.exe argument: quotes, line breaks and NUL. */
 const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
 
 /** A `%VAR%` reference, which cmd.exe expands even inside double quotes. */
