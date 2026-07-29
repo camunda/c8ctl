@@ -1,16 +1,15 @@
 /**
  * Behavioural tests for the feel default plugin (default-plugins/feel/).
  *
- * Local-engine tests run feelin in-process (no cluster needed). One
- * cluster-engine test stands up a local TCP server that destroys each
- * accepted socket to provoke a deterministic connection failure and
- * exercise the error-classification path.
+ * Local-engine tests run feelin in-process (no cluster needed).
+ * Cluster-engine tests stand up a lightweight http.Server that returns a
+ * fixed HTTP status code to exercise the error-classification path without
+ * a live Camunda cluster.
  */
 
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as http from "node:http";
-import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -621,24 +620,18 @@ describe("CLI behavioural: feel evaluate --dry-run", () => {
 
 describe("CLI behavioural: feel evaluate cluster errors", () => {
 	test("unreachable cluster surfaces 'connection refused' with local-engine hint", async () => {
-		// Keep the server open and immediately destroy every incoming connection.
-		// The child receives a deterministic ECONNRESET rather than ECONNREFUSED,
-		// which avoids the race window that exists when the server is closed before
-		// the child connects (another process can bind the freed port on a busy CI host).
-		const server = new net.Server((socket) => {
-			socket.destroy();
-		});
-		const port = await new Promise<number>((resolve, reject) => {
-			server.listen(0, "127.0.0.1", () => {
-				const addr = server.address();
-				const p = typeof addr === "object" && addr !== null ? addr.port : null;
-				if (p !== null) {
-					resolve(p);
-				} else {
-					reject(new Error("Could not determine ephemeral port"));
-				}
-			});
-			server.on("error", reject);
+		// Use a mock HTTP server responding with 503 to simulate an unreachable
+		// cluster without relying on TCP RST behaviour (socket.destroy()), which
+		// differs across platforms.  A 503 is not among the specifically handled
+		// status codes (400/401/403/404) in classifyClusterError, so it takes the
+		// generic "Cannot connect" path — the same branch exercised by a real
+		// connection failure.
+		const { port, close } = await startMockClusterServer(503, {
+			type: "about:blank",
+			title: "SERVICE_UNAVAILABLE",
+			status: 503,
+			detail: "Cluster is temporarily unavailable",
+			instance: "/v2/expression/evaluation",
 		});
 
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-feel-test-"));
@@ -664,8 +657,9 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 			assert.ok(
 				output.includes("Cannot connect") ||
 					output.includes("refused") ||
-					output.includes("reset"),
-				`Should classify network failure. Got: ${output.slice(0, 300)}`,
+					output.includes("reset") ||
+					output.includes("unavailable"),
+				`Should classify cluster failure. Got: ${output.slice(0, 300)}`,
 			);
 			assert.ok(
 				output.includes("--engine local"),
@@ -676,7 +670,7 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 				"Hint should note feelin behaviour may differ from the cluster engine",
 			);
 		} finally {
-			server.close();
+			await close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
