@@ -41,6 +41,7 @@
     "prepublishOnly": "npm run build",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "npm run build:vendor && node --experimental-strip-types --test tests/unit/*.test.ts",
+    "test:unit:windows": "node --experimental-strip-types --test tests/unit/npm-exec.test.ts tests/unit/plugins.test.ts tests/unit/plugins-version.test.ts",
     "test:integration": "npm run build:vendor && node --experimental-strip-types --experimental-test-isolation=none --test tests/integration/*.test.ts",
     "dev": "node src/index.ts",
     "cli": "node src/index.ts",

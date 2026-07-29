@@ -2,7 +2,6 @@
  * Plugin management commands
  */
 
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +23,7 @@ import {
 	isPluginRegistered,
 	removePluginFromRegistry,
 } from "../framework/index.ts";
+import { runNpm, runNpmCapture } from "../utils/index.ts";
 
 export { getInstalledPluginVersion, getVersionFromSource };
 
@@ -109,7 +109,8 @@ export const loadPluginCommand = defineCommand(
 
 				// Install from URL (file://, https://, git://, etc.)
 				logger.info(`Loading plugin from: ${fromUrl}...`);
-				execFileSync("npm", ["install", fromUrl, "--prefix", pluginsDir], {
+				runNpm({
+					args: ["install", fromUrl, "--prefix", pluginsDir],
 					stdio: "inherit",
 				});
 
@@ -136,7 +137,8 @@ export const loadPluginCommand = defineCommand(
 					throw new Error("unreachable: packageName is required");
 
 				logger.info(`Loading plugin: ${packageName}...`);
-				execFileSync("npm", ["install", packageName, "--prefix", pluginsDir], {
+				runNpm({
+					args: ["install", packageName, "--prefix", pluginsDir],
 					stdio: "inherit",
 				});
 
@@ -246,10 +248,7 @@ function listTopLevelDependencies(pluginsDir: string): string[] {
 	};
 
 	try {
-		const output = execFileSync("npm", npmListArgs, {
-			stdio: ["ignore", "pipe", "pipe"],
-			encoding: "utf-8",
-		});
+		const output = runNpmCapture({ args: npmListArgs });
 		return parseDependencyNames(output);
 	} catch (error: unknown) {
 		// npm list can return non-zero exit codes (e.g. unmet peer deps) and still print valid JSON to stdout
@@ -381,7 +380,8 @@ export const unloadPluginCommand = defineCommand(
 		logger.info(`${action} plugin: ${packageName}...`);
 
 		try {
-			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+			runNpm({
+				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});
 		} catch (uninstallError) {
@@ -685,13 +685,10 @@ export const syncPluginsCommand = defineCommand(
 
 					// Try npm rebuild first
 					try {
-						execFileSync(
-							"npm",
-							["rebuild", plugin.name, "--prefix", pluginsDir],
-							{
-								stdio: "pipe",
-							},
-						);
+						runNpm({
+							args: ["rebuild", plugin.name, "--prefix", pluginsDir],
+							stdio: "pipe",
+						});
 						logger.success(`  ✓ ${plugin.name} rebuilt successfully`);
 						syncedCount++;
 						continue;
@@ -704,13 +701,10 @@ export const syncPluginsCommand = defineCommand(
 
 				// Fresh install
 				try {
-					execFileSync(
-						"npm",
-						["install", plugin.source, "--prefix", pluginsDir],
-						{
-							stdio: "inherit",
-						},
-					);
+					runNpm({
+						args: ["install", plugin.source, "--prefix", pluginsDir],
+						stdio: "inherit",
+					});
 					logger.success(`  ✓ ${plugin.name} installed successfully`);
 					syncedCount++;
 				} catch (installError) {
@@ -813,12 +807,14 @@ export const upgradePluginCommand = defineCommand(
 			);
 
 			// Uninstall current version
-			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+			runNpm({
+				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "pipe",
 			});
 
 			// Install new version while respecting source type
-			execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
+			runNpm({
+				args: ["install", installTarget, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});
 
@@ -888,12 +884,14 @@ export const downgradePluginCommand = defineCommand(
 			);
 
 			// Uninstall current version
-			execFileSync("npm", ["uninstall", packageName, "--prefix", pluginsDir], {
+			runNpm({
+				args: ["uninstall", packageName, "--prefix", pluginsDir],
 				stdio: "pipe",
 			});
 
 			// Install specific version while respecting source type
-			execFileSync("npm", ["install", installTarget, "--prefix", pluginsDir], {
+			runNpm({
+				args: ["install", installTarget, "--prefix", pluginsDir],
 				stdio: "inherit",
 			});
 

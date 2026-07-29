@@ -77,6 +77,45 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+  windows-unit-test:
+    # Windows regression guard for the plugin/npm spawn class of bugs (#484):
+    # `npm` is a `.cmd` shim on Windows and cannot be spawned like a POSIX
+    # binary. Nothing in the ubuntu/macOS matrix can catch that.
+    #
+    # The full unit suite is not Windows-clean yet (several tests assert POSIX
+    # paths), so it runs as an advisory step while the portability subset is
+    # required. Move files into `test:unit:windows` as they are made portable,
+    # and fold this job into the `unit-test` matrix once the whole suite passes.
+    name: Windows Unit Test (Node ${{ matrix.node }})
+    needs: [lint, typecheck]
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Windows portability unit tests
+        run: npm run test:unit:windows
+
+      - name: Run full unit suite (advisory)
+        continue-on-error: true
+        run: npm run test:unit
+
   integration-test:
     name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
