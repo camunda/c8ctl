@@ -37,8 +37,8 @@ export interface NpmInvocation {
 /** Characters that cannot be represented inside a double-quoted cmd.exe argument: quotes, line breaks and NUL. */
 const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
 
-/** A `%VAR%` reference, which cmd.exe expands even inside double quotes. */
-const WINDOWS_CMD_VARIABLE = /%[A-Za-z_][A-Za-z0-9_]*%/;
+/** A cmd.exe `%...%` environment-variable reference, which cmd.exe expands even inside double quotes. */
+const WINDOWS_CMD_VARIABLE = /%[^%]+%/;
 
 /**
  * Quote a single argument for a verbatim Windows command line.

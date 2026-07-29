@@ -99,14 +99,13 @@ describe("buildNpmInvocation", () => {
 	});
 
 	test("rejects Windows arguments containing a cmd.exe variable reference", () => {
-		assert.throws(
-			() =>
-				buildNpmInvocation({
-					args: ["install", "%APPDATA%\\evil"],
-					platform: "win32",
-				}),
-			/environment variable reference/,
-		);
+		for (const hostile of ["%APPDATA%\\evil", "%ProgramFiles(x86)%\\evil"]) {
+			assert.throws(
+				() =>
+					buildNpmInvocation({ args: ["install", hostile], platform: "win32" }),
+				/environment variable reference/,
+			);
+		}
 	});
 
 	test("keeps percent-encoded URLs, which are not variable references", () => {
