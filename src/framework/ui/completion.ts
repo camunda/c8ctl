@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { homedir, platform, userInfo } from "node:os";
 import { join } from "node:path";
 import { c8ctl, getLogger, getUserDataDir } from "../../core/index.ts";
 import {
@@ -788,11 +788,11 @@ export function detectShell(): string | undefined {
 
 /** Get the appropriate RC file path for a given shell. */
 export function getShellRcFile(shell: string): string | undefined {
-	// Prefer the HOME env var (if explicitly set) over os.homedir(), so that
+	// Prefer the HOME env var (if non-empty) over the OS account home, so that
 	// tests and tools can isolate the home directory on all platforms.
-	// On Windows, os.homedir() reads USERPROFILE rather than HOME, so setting
+	// On Windows, the OS account home ignores HOME, so setting
 	// HOME in the test environment would otherwise have no effect.
-	const home = process.env.HOME ?? homedir();
+	const home = process.env.HOME || userInfo().homedir;
 	switch (shell) {
 		case "bash":
 			// macOS uses .bash_profile by default; Linux uses .bashrc

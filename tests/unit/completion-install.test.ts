@@ -12,7 +12,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8ctl } from "../../src/core/runtime.ts";
@@ -71,6 +71,24 @@ describe("detectShell", () => {
 // ─── getShellRcFile ──────────────────────────────────────────────────────────
 
 describe("getShellRcFile", () => {
+	test("falls back to the OS home directory when HOME is empty", () => {
+		const originalHome = process.env.HOME;
+		process.env.HOME = "";
+
+		try {
+			assert.strictEqual(
+				getShellRcFile("zsh"),
+				join(userInfo().homedir, ".zshrc"),
+			);
+		} finally {
+			if (originalHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = originalHome;
+			}
+		}
+	});
+
 	test("returns .zshrc for zsh", () => {
 		const rc = getShellRcFile("zsh");
 		assert.ok(rc);
