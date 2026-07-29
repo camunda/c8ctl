@@ -127,4 +127,5 @@ export function npm({
 		};
 	}
 	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell });
+	return undefined;
 }
