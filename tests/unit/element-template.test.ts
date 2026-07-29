@@ -3087,8 +3087,16 @@ describe("CLI behavioural: element-template apply --in-place atomicity", () => {
 	});
 });
 
+// EPIPE behaviour is POSIX-specific: `sh`, `head`, and `/dev/null` are not
+// available on Windows. The test is skipped there and remains a full guard
+// on POSIX CI.
 describe("CLI behavioural: element-template stdout EPIPE handling", () => {
-	test("apply: closing the downstream pipe early exits cleanly without an unhandled error stack", async () => {
+	test("apply: closing the downstream pipe early exits cleanly without an unhandled error stack", {
+		skip:
+			process.platform === "win32"
+				? "POSIX-only: requires sh, head, and /dev/null"
+				: false,
+	}, async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-epipe-"));
 		try {
 			// Use a template file (no cache lookup) so we test the EPIPE

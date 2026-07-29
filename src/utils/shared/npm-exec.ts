@@ -44,7 +44,6 @@ interface NpmArgs {
 
 interface NpmArgsWithOutput extends NpmArgs {
 	stdout: true;
-	stdio?: ExecFileSyncOptions["stdio"];
 }
 
 interface NpmArgsWithoutOutput extends NpmArgs {
@@ -115,23 +114,17 @@ export function npm(options: NpmArgsWithOutput): { stdout: string };
 export function npm(options: NpmArgsWithoutOutput): undefined;
 export function npm({
 	args,
-	stdio,
-	stdout = false,
+	...opts
 }: NpmArgsWithOutput | NpmArgsWithoutOutput): NpmResult | undefined {
-	const invocation = buildNpmInvocation({ args });
-
-	if (stdout) {
-		const output = execFileSync(invocation.command, invocation.args, {
-			stdio: ["ignore", "pipe", "pipe"],
-			encoding: "utf-8",
-			shell: invocation.shell,
-		});
-		return { stdout: output };
+	const { command, args: resolvedArgs, shell } = buildNpmInvocation({ args });
+	if (opts.stdout) {
+		return {
+			stdout: execFileSync(command, resolvedArgs, {
+				stdio: ["ignore", "pipe", "pipe"],
+				encoding: "utf-8",
+				shell,
+			}),
+		};
 	}
-
-	execFileSync(invocation.command, invocation.args, {
-		stdio,
-		shell: invocation.shell,
-	});
-	return undefined;
+	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell });
 }
