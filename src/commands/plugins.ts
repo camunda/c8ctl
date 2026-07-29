@@ -248,8 +248,7 @@ function listTopLevelDependencies(pluginsDir: string): string[] {
 	};
 
 	try {
-		const output = npm({ args: npmListArgs, stdout: true }).stdout;
-		if (!output) return [];
+		const { stdout: output } = npm({ args: npmListArgs, stdout: true });
 		return parseDependencyNames(output);
 	} catch (error: unknown) {
 		// npm list can return non-zero exit codes (e.g. unmet peer deps) and still print valid JSON to stdout

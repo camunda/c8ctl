@@ -38,6 +38,20 @@ export interface NpmResult {
 	stdout?: string;
 }
 
+interface NpmArgs {
+	args: readonly string[];
+}
+
+interface NpmArgsWithOutput extends NpmArgs {
+	stdout: true;
+	stdio?: ExecFileSyncOptions["stdio"];
+}
+
+interface NpmArgsWithoutOutput extends NpmArgs {
+	stdio?: ExecFileSyncOptions["stdio"];
+	stdout?: false;
+}
+
 /** Characters that cannot be represented inside a double-quoted cmd.exe argument: quotes, line breaks and NUL. */
 const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
 
@@ -94,15 +108,13 @@ export function buildNpmInvocation({
 /**
  * Run npm through the platform-aware wrapper.
  */
+export function npm(options: NpmArgsWithOutput): { stdout: string };
+export function npm(options: NpmArgsWithoutOutput): undefined;
 export function npm({
 	args,
 	stdio,
 	stdout = false,
-}: {
-	args: readonly string[];
-	stdio?: ExecFileSyncOptions["stdio"];
-	stdout?: boolean;
-}): NpmResult {
+}: NpmArgsWithOutput | NpmArgsWithoutOutput): NpmResult | undefined {
 	const invocation = buildNpmInvocation({ args });
 
 	if (stdout) {
@@ -118,5 +130,5 @@ export function npm({
 		stdio,
 		shell: invocation.shell,
 	});
-	return {};
+	return undefined;
 }
