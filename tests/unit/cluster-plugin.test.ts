@@ -1789,7 +1789,7 @@ describe("Cluster Plugin – purgeClusterData", () => {
 			"zeebe data dir should be removed",
 		);
 		assert.ok(
-			existsSync(join(binaryDir, "c8run")),
+			existsSync(join(binaryDir, C8RUN_BINARY)),
 			"binary should be preserved",
 		);
 		assert.ok(
