@@ -55,8 +55,11 @@ interface NpmArgsWithoutOutput extends NpmArgs {
 /** Characters that cannot be represented inside a double-quoted cmd.exe argument: quotes, line breaks and NUL. */
 const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
 
-/** A cmd.exe `%...%` environment-variable reference, which cmd.exe expands even inside double quotes. */
-const WINDOWS_CMD_VARIABLE = /%[^%]+%/;
+/** A cmd.exe `%VAR%` environment-variable reference, which cmd.exe expands even inside double quotes.
+ *  Requires the name to start with a letter or underscore so that percent-encoded URL sequences
+ *  (which start with hex digits like `%20`) are not mistakenly treated as variable references.
+ *  Parentheses are allowed to cover names like `%ProgramFiles(x86)%`. */
+const WINDOWS_CMD_VARIABLE = /%[A-Z_][^%]*%/i;
 
 /**
  * Quote a single argument for a verbatim Windows command line.

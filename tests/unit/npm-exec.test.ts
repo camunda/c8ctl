@@ -118,13 +118,26 @@ describe("buildNpmInvocation", () => {
 			'"https://example.com/a%20b/pkg.tgz"',
 		]);
 	});
+
+	test("keeps URLs with multiple percent-encoded sequences, which are not variable references", () => {
+		// A URL like a%20b%2Fc has two %-sequences; the old regex /%[^%]+%/ would
+		// match the span "%20b%" between them, treating it as a cmd.exe variable.
+		const invocation = buildNpmInvocation({
+			args: ["install", "https://example.com/a%20b%2Fc/pkg.tgz"],
+			platform: "win32",
+		});
+		assert.deepStrictEqual(invocation.args, [
+			'"install"',
+			'"https://example.com/a%20b%2Fc/pkg.tgz"',
+		]);
+	});
 });
 
 describe("no bare npm spawns remain in src/ (#484)", () => {
 	test("npm is only spawned through the npm-exec helper", async () => {
 		const offenders: string[] = [];
 		for await (const relative of glob("**/*.ts", { cwd: SRC_DIR })) {
-			if (relative.replaceAll("\\", "/") === "utils/shared/npm-exec.ts") {
+			if (relative === join("utils", "shared", "npm-exec.ts")) {
 				continue;
 			}
 			const source = readFileSync(join(SRC_DIR, relative), "utf-8");
