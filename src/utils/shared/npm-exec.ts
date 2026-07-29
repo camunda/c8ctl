@@ -59,7 +59,7 @@ const WINDOWS_UNQUOTABLE = /["\r\n\0]/;
  *  Requires the name to start with a letter or underscore so that percent-encoded URL sequences
  *  (which start with hex digits like `%20`) are not mistakenly treated as variable references.
  *  Parentheses are allowed to cover names like `%ProgramFiles(x86)%`. */
-const WINDOWS_CMD_VARIABLE = /%[A-Z_][^%]*%/i;
+const WINDOWS_CMD_VARIABLE = /%[A-Z_][^%]*?%/i;
 
 /**
  * Quote a single argument for a verbatim Windows command line.

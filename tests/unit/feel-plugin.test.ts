@@ -623,9 +623,10 @@ describe("CLI behavioural: feel evaluate cluster errors", () => {
 		// Use a mock HTTP server responding with 503 to simulate an unreachable
 		// cluster without relying on TCP RST behaviour (socket.destroy()), which
 		// differs across platforms.  A 503 is not among the specifically handled
-		// status codes (400/401/403/404) in classifyClusterError, so it takes the
-		// generic "Cannot connect" path — the same branch exercised by a real
-		// connection failure.
+		// status codes (400/401/403/404) in classifyClusterError, so it falls
+		// through to the generic "Cannot connect" path — the same branch as a
+		// real connection failure.  The Problem Details body is returned for
+		// completeness; only the status code drives the classification branch.
 		const { port, close } = await startMockClusterServer(503, {
 			type: "about:blank",
 			title: "SERVICE_UNAVAILABLE",
