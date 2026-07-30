@@ -1,4 +1,4 @@
-name: Community & Dependabot Notifications
+name: Community & Dependency Bot Notifications
 
 on:
   issues:
