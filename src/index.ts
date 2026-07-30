@@ -45,6 +45,7 @@ import {
 	showVersion,
 	validateFlags,
 } from "./framework/index.ts";
+import { npm } from "./utils/index.ts";
 
 /**
  * Type guard: extract a string value from parseArgs values, or undefined.
@@ -382,11 +383,15 @@ async function main() {
 	}
 
 	// Inject dependencies into the runtime (breaks circular imports)
+	// `npm` is the cross-platform runner from utils/. Assigning it here is also
+	// the compile-time check that it still satisfies the `NpmRunner` contract
+	// core/ declares structurally (core/ may not import utils/).
 	c8ctl.init({
 		createClient,
 		resolveTenantId,
 		getLogger,
 		getUserDataDir,
+		npm,
 	});
 
 	// Load installed plugins

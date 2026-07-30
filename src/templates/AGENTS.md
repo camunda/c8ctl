@@ -42,6 +42,8 @@ Methods:
 - `c8ctl.createClient(profileFlag?, sdkConfig?)`
 - `c8ctl.resolveTenantId(profileFlag?)`
 - `c8ctl.getLogger(mode?)`
+- `c8ctl.getUserDataDir()`
+- `c8ctl.npm({ args, stdout?, stdio? })`
 
 ## Development Loop
 
@@ -57,6 +59,7 @@ Methods:
 - Use `c8ctl.getLogger()` for output-mode-aware logs.
 - Use `c8ctl.createClient()` for Camunda API interactions.
 - Use `c8ctl.resolveTenantId()` instead of duplicating tenant fallback logic.
+- Use `c8ctl.npm()` instead of spawning npm yourself — a bare `npm` spawn breaks on Windows.
 - Prefer clear, actionable error messages.
 - Avoid command names that conflict with built-in c8ctl commands.
 - For any non-trivial implementation or behavior change, always cross-check against upstream `c8ctl` repository: <https://github.com/camunda/c8ctl> before finalizing
