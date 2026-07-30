@@ -183,8 +183,24 @@ At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8
 - SDK client factory: `createClient(profile?, sdkConfig?)`
 - Tenant resolver: `resolveTenantId(profile?)`
 - Logger accessor: `getLogger()`
+- User data directory: `getUserDataDir()`
+- Cross-platform npm runner: `npm({ args, stdout?, stdio? })`
 
 Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.
+
+### Running npm from a plugin
+
+Use `c8ctl.npm()` rather than spawning npm yourself. On Windows npm is a `npm.cmd` shim: a bare `npm` spawn fails with `ENOENT`, and `npm.cmd` alone fails with `EINVAL` under the CVE-2024-27980 hardening in Node 18.20.2 / 20.12.2 / 21.7.3+. The runtime helper routes the call through `cmd.exe` with every argument quoted (plugin paths routinely contain spaces) and rejects arguments that cannot be passed safely — an embedded `"`, a line break, or a `%VAR%` reference.
+
+```typescript
+// Capture stdout
+const { stdout } = c8ctl.npm({ args: ['view', 'c8ctl-plugin-foo', 'version'], stdout: true });
+
+// Stream to the terminal instead (stdio is forwarded to the child)
+c8ctl.npm({ args: ['install', 'c8ctl-plugin-foo'], stdio: 'inherit' });
+```
+
+`stdout: true` returns `{ stdout: string }`; omitting it returns `undefined`. A non-zero npm exit throws.
 
 For TypeScript autocomplete, use the exported runtime type:
 

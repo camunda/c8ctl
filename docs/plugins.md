@@ -155,6 +155,8 @@ At runtime, `c8ctl` injects a global object via `globalThis.c8ctl` that plugins 
 | `createClient(profile?, sdkConfig?)` | Create a Camunda SDK client. Optionally pass a profile name to use specific credentials. |
 | `resolveTenantId(profile?)`          | Resolve the active tenant ID using the same fallback logic as built-in commands.         |
 | `getLogger()`                        | Get the `c8ctl` logger instance (respects the current output mode).                      |
+| `getUserDataDir()`                   | Absolute path of the `c8ctl` user data directory (honours `C8CTL_DATA_DIR`).             |
+| `npm({ args, stdout?, stdio? })`     | Run npm the way `c8ctl` does, portably. See [Running npm from a plugin](#running-npm-from-a-plugin). |
 | `version`                            | `c8ctl` version string.                                                                  |
 | `nodeVersion`                        | Node.js version.                                                                         |
 | `platform`                           | Operating system (`linux`, `darwin`, `win32`).                                           |
@@ -163,6 +165,24 @@ At runtime, `c8ctl` injects a global object via `globalThis.c8ctl` that plugins 
 | `outputMode`                         | Current output mode (`text` or `json`).                                                  |
 | `activeProfile`                      | Name of the active profile.                                                              |
 | `activeTenant`                       | Active tenant ID.                                                                        |
+
+### Running npm from a plugin
+
+Spawning npm directly is not portable. On Windows npm is a `npm.cmd` shim: a bare `npm` spawn fails with `ENOENT`, and `npm.cmd` alone fails with `EINVAL` under the CVE-2024-27980 hardening in Node 18.20.2 / 20.12.2 / 21.7.3 and later. `c8ctl.npm()` is the same helper the CLI uses for its own plugin installs — it routes the call through `cmd.exe` with every argument quoted (plugin paths routinely contain spaces) and rejects arguments that cannot be passed safely: an embedded `"`, a line break, or a `%VAR%` reference.
+
+```typescript
+import type { C8ctlPluginRuntime } from "@camunda8/cli/runtime";
+
+const c8ctl: C8ctlPluginRuntime | undefined = globalThis.c8ctl;
+if (!c8ctl) throw new Error("c8ctl runtime is not available");
+// Capture stdout
+const { stdout } = c8ctl.npm({ args: ["view", "c8ctl-plugin-foo", "version"], stdout: true });
+
+// Stream to the terminal instead
+c8ctl.npm({ args: ["install", "c8ctl-plugin-foo"], stdio: "inherit" });
+```
+
+`stdout: true` returns `{ stdout: string }`; omitting it returns `undefined`. A non-zero npm exit throws.
 
 ### TypeScript autocomplete
 

@@ -2,6 +2,7 @@
  * c8ctl runtime object with environment information and session state
  */
 
+import type { ExecFileSyncOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,11 +24,39 @@ export interface C8ctlEnv {
 	rootDir: string;
 }
 
+/** Options for the npm runner when its stdout is captured. */
+export interface NpmRunOptionsWithOutput {
+	args: readonly string[];
+	stdout: true;
+}
+
+/** Options for the npm runner when its output is inherited or discarded. */
+export interface NpmRunOptionsWithoutOutput {
+	args: readonly string[];
+	stdio?: ExecFileSyncOptions["stdio"];
+	stdout?: false;
+}
+
+/**
+ * Cross-platform npm runner.
+ *
+ * Declared structurally here rather than imported from
+ * `utils/shared/npm-exec.ts` because `core/` may not import `utils/` — not
+ * even type-only (see tests/unit/layering-import-boundary.test.ts). The real
+ * implementation is checked against this contract where it is injected, at
+ * the composition root.
+ */
+export interface NpmRunner {
+	(options: NpmRunOptionsWithOutput): { stdout: string };
+	(options: NpmRunOptionsWithoutOutput): undefined;
+}
+
 /**
  * Functions injected into the runtime via init() to break circular imports.
  * client.ts, config.ts, and logger.ts all import c8ctl from this module,
  * so this module cannot import runtime values from them at the top level
- * (type-only imports are OK).
+ * (type-only imports are OK). `npm` is injected for a different reason: it
+ * lives in `utils/`, which `core/` may not import from at all.
  */
 export interface C8ctlDeps {
 	createClient(
@@ -37,6 +66,7 @@ export interface C8ctlDeps {
 	resolveTenantId(profileFlag?: string): string;
 	getLogger(mode?: OutputMode): Logger;
 	getUserDataDir(): string;
+	npm: NpmRunner;
 }
 
 export interface C8ctlPluginRuntime {
@@ -69,6 +99,22 @@ export interface C8ctlPluginRuntime {
 	 * Overridable via C8CTL_DATA_DIR.
 	 */
 	getUserDataDir(): string;
+	/**
+	 * Run npm the way c8ctl itself does, portably.
+	 *
+	 * Spawning npm directly is not portable: on Windows npm is a `npm.cmd`
+	 * shim, bare `"npm"` fails with ENOENT and `"npm.cmd"` fails with EINVAL
+	 * under the CVE-2024-27980 hardening, so the invocation has to go through
+	 * cmd.exe with every argument quoted. Use this instead of hand-rolling a
+	 * spawn.
+	 *
+	 *   const { stdout } = c8ctl.npm({ args: ["view", pkg, "version"], stdout: true });
+	 *   c8ctl.npm({ args: ["install", pkg], stdio: "inherit" });
+	 *
+	 * Throws if an argument cannot be passed safely to cmd.exe (embedded
+	 * quote, line break, or a `%VAR%` reference).
+	 */
+	npm: NpmRunner;
 }
 
 declare global {
@@ -154,6 +200,21 @@ class C8ctl implements C8ctlPluginRuntime {
 			throw new Error("c8ctl.init() must be called before getUserDataDir()");
 		}
 		return this._deps.getUserDataDir();
+	}
+
+	npm(options: NpmRunOptionsWithOutput): { stdout: string };
+	npm(options: NpmRunOptionsWithoutOutput): undefined;
+	npm(
+		options: NpmRunOptionsWithOutput | NpmRunOptionsWithoutOutput,
+	): { stdout: string } | undefined {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before npm()");
+		}
+		// Narrow on the discriminant so each branch resolves a single overload
+		// of the injected runner.
+		return options.stdout === true
+			? this._deps.npm(options)
+			: this._deps.npm(options);
 	}
 
 	// Expose env properties directly for plugin compatibility
