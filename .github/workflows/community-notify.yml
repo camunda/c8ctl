@@ -11,6 +11,10 @@ permissions: {}
 jobs:
   notify:
     permissions:
+      # The Slack message reference is recorded via the Issues Comments API,
+      # which is shared between issues and PRs. Both scopes are granted because
+      # GitHub does not document which one is checked for a PR target.
+      issues: write
       pull-requests: write
     uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1
     with:
