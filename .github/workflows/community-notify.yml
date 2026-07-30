@@ -4,19 +4,31 @@ on:
   issues:
     types: [opened]
   pull_request_target:
-    types: [opened]
+    types: [opened, closed]
 
 permissions: {}
 
 jobs:
   notify:
+    # `closed` fires on every close, not just merges. An unmerged close is a
+    # no-op inside the reusable workflow, so skip the call entirely rather
+    # than producing an empty run and materialising secrets for nothing.
+    if: github.event.action == 'opened' || github.event.pull_request.merged == true
+    permissions:
+      # The Slack message reference is recorded via the Issues Comments API,
+      # which is shared between issues and PRs. Both scopes are granted because
+      # GitHub does not document which one is checked for a PR target.
+      issues: write
+      pull-requests: write
     uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1
     with:
       repo-name: c8ctl
       mention-group: ${{ vars.SLACK_MENTION_GROUP }}
+      slack-channel-id: ${{ vars.SLACK_SDK_ALERTS_CHANNEL_ID }}
       author-association: ${{ github.event.pull_request.author_association || github.event.issue.author_association }}
     secrets:
       slack-webhook-url: ${{ secrets.SLACK_SDK_ALERTS }}
+      slack-bot-token: ${{ secrets.SLACK_SDK_BOT_TOKEN }}
       vault-addr: ${{ secrets.VAULT_ADDR }}
       vault-role-id: ${{ secrets.VAULT_ROLE_ID }}
       vault-secret-id: ${{ secrets.VAULT_SECRET_ID }}
