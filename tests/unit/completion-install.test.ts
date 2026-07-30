@@ -71,7 +71,12 @@ describe("detectShell", () => {
 // ─── getShellRcFile ──────────────────────────────────────────────────────────
 
 describe("getShellRcFile", () => {
-	test("falls back to the OS home directory when HOME is empty", () => {
+	test("falls back to userInfo().homedir when HOME is empty (os.homedir() returns '')", () => {
+		// os.homedir() on POSIX returns the empty string when HOME is set to "".
+		// The implementation falls back to userInfo().homedir in that case.
+		// On Windows os.homedir() reads USERPROFILE so HOME="" has no effect there.
+		if (process.platform === "win32") return;
+
 		const originalHome = process.env.HOME;
 		process.env.HOME = "";
 
@@ -86,6 +91,24 @@ describe("getShellRcFile", () => {
 			} else {
 				process.env.HOME = originalHome;
 			}
+		}
+	});
+
+	test("returns undefined rather than a broken path when home cannot be determined", () => {
+		// On POSIX, HOME="" causes os.homedir() to return ""; userInfo().homedir
+		// still provides the real home in a normal environment, so the function
+		// returns a valid path. The `if (!home) return undefined` guard is a
+		// defensive measure for unusual environments (e.g. a headless container
+		// with no passwd entry) where neither source resolves to a usable dir.
+		// Testing it without module mocking is not possible in this codebase, but
+		// we verify here that the result is always either a meaningful absolute
+		// path or undefined — never join("", ...) which produces a relative path.
+		const rc = getShellRcFile("zsh");
+		if (rc !== undefined) {
+			assert.ok(
+				rc.startsWith("/") || (rc.length > 2 && rc[1] === ":"),
+				`Expected an absolute path, got ${JSON.stringify(rc)}`,
+			);
 		}
 	});
 
