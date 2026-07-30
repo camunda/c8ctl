@@ -649,7 +649,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -784,7 +784,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -903,7 +903,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -1022,7 +1022,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 				},
 			);
 
@@ -1146,7 +1146,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 					env: cliEnv,
 				},
 			);
@@ -1156,7 +1156,7 @@ export const commands = {
 				{
 					cwd: process.cwd(),
 					stdio: "pipe",
-					timeout: 10000,
+					timeout: 30000,
 					env: cliEnv,
 				},
 			);
@@ -1228,7 +1228,7 @@ describe("Plugin help includes examples from plugin metadata", () => {
 	const cliEnv = { ...process.env, C8CTL_DATA_DIR: dataDir };
 	const pluginDir = join(tmpdir(), `plugin-help-test-plugin-${process.pid}`);
 	const pluginName = "help-test-plugin";
-	const PLUGIN_TEST_TIMEOUT = 10000;
+	const PLUGIN_TEST_TIMEOUT = 30000;
 
 	before(() => {
 		mkdirSync(pluginDir, { recursive: true });

@@ -15,7 +15,15 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, matchesGlob, relative, resolve, sep } from "node:path";
+import {
+	dirname,
+	isAbsolute,
+	join,
+	matchesGlob,
+	relative,
+	resolve,
+	sep,
+} from "node:path";
 
 const DEFAULT_PATTERNS = ["node_modules/", "target/", ".git/"];
 
@@ -176,8 +184,11 @@ export function isIgnored(
 	if (sep !== "/") {
 		rel = rel.split(sep).join("/");
 	}
-	// Paths outside baseDir can't be ignored
-	if (rel === "" || rel === ".." || rel.startsWith("../")) {
+	// Paths outside baseDir can't be ignored.
+	// On Windows, when filePath is on a different drive than baseDir,
+	// `relative()` returns the absolute path unchanged. `isAbsolute` catches
+	// that case alongside the regular "../" guard.
+	if (rel === "" || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
 		return false;
 	}
 	return ig.ignores(rel);

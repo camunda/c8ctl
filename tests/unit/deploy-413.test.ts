@@ -37,9 +37,15 @@ function start413Server(): Promise<{ server: Server; baseUrl: string }> {
 		const server = createServer((req, res) => {
 			// Drain the request body, then reject — mirroring an ingress that
 			// returns 413 with a plain-text (non Problem-Detail) body.
+			// Set Connection: close to ensure the TCP connection is released
+			// immediately after the response, preventing lingering keep-alive
+			// handles that can trigger a libuv assertion on Windows (Node 24).
 			req.resume();
 			req.on("end", () => {
-				res.writeHead(413, { "Content-Type": "text/plain" });
+				res.writeHead(413, {
+					"Content-Type": "text/plain",
+					Connection: "close",
+				});
 				res.end("Payload Too Large");
 			});
 		});

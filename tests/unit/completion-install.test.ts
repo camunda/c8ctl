@@ -12,7 +12,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8ctl } from "../../src/core/runtime.ts";
@@ -71,6 +71,47 @@ describe("detectShell", () => {
 // ─── getShellRcFile ──────────────────────────────────────────────────────────
 
 describe("getShellRcFile", () => {
+	test("falls back to userInfo().homedir when HOME is empty (os.homedir() returns '')", () => {
+		// os.homedir() on POSIX returns the empty string when HOME is set to "".
+		// The implementation falls back to userInfo().homedir in that case.
+		// On Windows os.homedir() reads USERPROFILE so HOME="" has no effect there.
+		if (process.platform === "win32") return;
+
+		const originalHome = process.env.HOME;
+		process.env.HOME = "";
+
+		try {
+			assert.strictEqual(
+				getShellRcFile("zsh"),
+				join(userInfo().homedir, ".zshrc"),
+			);
+		} finally {
+			if (originalHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = originalHome;
+			}
+		}
+	});
+
+	test("returns undefined rather than a broken path when home cannot be determined", () => {
+		// On POSIX, HOME="" causes os.homedir() to return ""; userInfo().homedir
+		// still provides the real home in a normal environment, so the function
+		// returns a valid path. The `if (!home) return undefined` guard is a
+		// defensive measure for unusual environments (e.g. a headless container
+		// with no passwd entry) where neither source resolves to a usable dir.
+		// Testing it without module mocking is not possible in this codebase, but
+		// we verify here that the result is always either a meaningful absolute
+		// path or undefined — never join("", ...) which produces a relative path.
+		const rc = getShellRcFile("zsh");
+		if (rc !== undefined) {
+			assert.ok(
+				rc.startsWith("/") || (rc.length > 2 && rc[1] === ":"),
+				`Expected an absolute path, got ${JSON.stringify(rc)}`,
+			);
+		}
+	});
+
 	test("returns .zshrc for zsh", () => {
 		const rc = getShellRcFile("zsh");
 		assert.ok(rc);
@@ -102,7 +143,7 @@ describe("getCompletionFilePath", () => {
 
 	beforeEach(() => {
 		origDataDir = process.env.C8CTL_DATA_DIR;
-		process.env.C8CTL_DATA_DIR = "/tmp/c8ctl-test";
+		process.env.C8CTL_DATA_DIR = join(tmpdir(), "c8ctl-test");
 	});
 
 	afterEach(() => {
@@ -114,8 +155,11 @@ describe("getCompletionFilePath", () => {
 	});
 
 	test("returns path under data dir with correct extension", () => {
-		const path = getCompletionFilePath("zsh");
-		assert.strictEqual(path, "/tmp/c8ctl-test/completions/c8ctl.zsh");
+		const completionPath = getCompletionFilePath("zsh");
+		assert.strictEqual(
+			completionPath,
+			join(tmpdir(), "c8ctl-test", "completions", "c8ctl.zsh"),
+		);
 	});
 
 	test("works for all three shells", () => {

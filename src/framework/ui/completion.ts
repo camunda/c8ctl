@@ -3,7 +3,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { homedir, platform, userInfo } from "node:os";
 import { join } from "node:path";
 import { c8ctl, getLogger, getUserDataDir } from "../../core/index.ts";
 import {
@@ -788,7 +788,18 @@ export function detectShell(): string | undefined {
 
 /** Get the appropriate RC file path for a given shell. */
 export function getShellRcFile(shell: string): string | undefined {
-	const home = homedir();
+	// os.homedir() checks HOME on POSIX and USERPROFILE on Windows, then
+	// falls back to the native home. userInfo().homedir provides an additional
+	// fallback for environments where os.homedir() returns an empty string
+	// (e.g. HOME="" used for test isolation on POSIX). Return undefined rather
+	// than a broken relative path when neither source can resolve a home dir.
+	let home: string | undefined;
+	try {
+		home = homedir() || userInfo().homedir || undefined;
+	} catch {
+		return undefined;
+	}
+	if (!home) return undefined;
 	switch (shell) {
 		case "bash":
 			// macOS uses .bash_profile by default; Linux uses .bashrc

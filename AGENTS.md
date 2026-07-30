@@ -291,7 +291,7 @@ function createUser({ name, email, age }: { name: string; email: string; age: nu
 - prefer functional programming over OOP where reasonable
 - prefer concise expressions over verbose control structures
 - when outputting errors, provide clear, concise and actionable hints to the user
-- pay attention to cross-platform compatibility (Linux, macOS, Windows). _BUT_ only cater to WSL on Windows, no native Windows support.
+- pay attention to cross-platform compatibility (Linux, macOS, Windows). Native Windows is a supported, CI-verified platform (see the `windows-latest` job in `.github/workflows/test.yml`) — do not special-case WSL-only behavior.
 
 ### BPMN and DMN validation
 
