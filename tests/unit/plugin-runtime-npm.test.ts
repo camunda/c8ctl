@@ -53,10 +53,17 @@ afterEach(() => {
 });
 
 async function c8Plugin(...args: string[]): Promise<SpawnResult> {
+	// HOME/USERPROFILE are redirected into the per-test temp dir rather than
+	// pointed at a nonexistent path (as sibling plugin tests do): npm resolves
+	// ~/.npmrc from the home directory, so this isolates the spawned npm from
+	// the developer's real npm config without handing it a broken HOME.
+	// USERPROFILE matters on Windows, where os.homedir() reads it (#488).
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		CAMUNDA_BASE_URL: "http://test-cluster/v2",
 		C8CTL_DATA_DIR: testDataDir,
+		HOME: testDataDir,
+		USERPROFILE: testDataDir,
 	};
 	delete env.DEBUG;
 	delete env.C8CTL_DEBUG;
