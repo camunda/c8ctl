@@ -10,6 +10,10 @@ permissions: {}
 
 jobs:
   notify:
+    # `closed` fires on every close, not just merges. An unmerged close is a
+    # no-op inside the reusable workflow, so skip the call entirely rather
+    # than producing an empty run and materialising secrets for nothing.
+    if: github.event.action == 'opened' || github.event.pull_request.merged == true
     permissions:
       # The Slack message reference is recorded via the Issues Comments API,
       # which is shared between issues and PRs. Both scopes are granted because
