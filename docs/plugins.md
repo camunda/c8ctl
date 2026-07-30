@@ -173,8 +173,8 @@ Spawning npm directly is not portable. On Windows npm is a `npm.cmd` shim: a bar
 ```typescript
 import type { C8ctlPluginRuntime } from "@camunda8/cli/runtime";
 
-const c8ctl = globalThis.c8ctl as C8ctlPluginRuntime;
-
+const c8ctl: C8ctlPluginRuntime | undefined = globalThis.c8ctl;
+if (!c8ctl) throw new Error("c8ctl runtime is not available");
 // Capture stdout
 const { stdout } = c8ctl.npm({ args: ["view", "c8ctl-plugin-foo", "version"], stdout: true });
 
