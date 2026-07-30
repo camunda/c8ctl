@@ -10,10 +10,15 @@
  *                          18.20.2 / 20.12.2 / 21.7.3+ refuses to spawn a
  *                          `.bat`/`.cmd` file without `shell: true`)
  *
- * So on Windows we run the shim through `cmd.exe` (`shell: true`). Node joins
- * the arguments verbatim into a single command line in that mode, so every
- * argument has to be quoted here — plugin directories on Windows routinely
- * contain spaces (`C:\Users\First Last\AppData\Roaming\c8ctl\plugins`).
+ * So on Windows the shim is run through `cmd.exe` via `execSync(commandString)`.
+ * Using `execFileSync(cmd, args, { shell: true })` would achieve the same effect
+ * but triggers Node's DEP0190 deprecation warning (passing an args array with
+ * `shell: true` is deprecated as of Node ≥ 22). `execSync` takes a pre-built
+ * command string instead of an args array and is not subject to DEP0190.
+ *
+ * Because `cmd.exe` receives the arguments as a single command line, every
+ * argument must be quoted — plugin directories on Windows routinely contain
+ * spaces (`C:\Users\First Last\AppData\Roaming\c8ctl\plugins`).
  *
  * Double quoting is sound on Windows because `"`, `<`, `>` and `|` are illegal
  * in filenames and `cmd.exe` does not interpret `&`, `^` or `|` inside double
@@ -23,7 +28,11 @@
  * escaped.
  */
 
-import { type ExecFileSyncOptions, execFileSync } from "node:child_process";
+import {
+	type ExecFileSyncOptions,
+	execFileSync,
+	execSync,
+} from "node:child_process";
 
 export interface NpmInvocation {
 	/** Executable to spawn. */
@@ -117,15 +126,33 @@ export function npm({
 	...opts
 }: NpmArgsWithOutput | NpmArgsWithoutOutput): NpmResult | undefined {
 	const { command, args: resolvedArgs, shell } = buildNpmInvocation({ args });
+	// On Windows, `shell` is true because npm is a .cmd shim that requires cmd.exe.
+	// execFileSync(command, args, { shell: true }) triggers DEP0190 in Node ≥ 22 when
+	// an args array is combined with shell: true. execSync(commandString) takes a
+	// pre-built string instead of an array, so it is not subject to DEP0190.
+	// On POSIX, shell is false and execFileSync is used directly (no change).
+	if (shell) {
+		const cmdLine = [command, ...resolvedArgs].join(" ");
+		if (opts.stdout) {
+			return {
+				stdout: execSync(cmdLine, {
+					stdio: ["ignore", "pipe", "pipe"],
+					encoding: "utf-8",
+				}),
+			};
+		}
+		execSync(cmdLine, { stdio: opts.stdio });
+		return undefined;
+	}
 	if (opts.stdout) {
 		return {
 			stdout: execFileSync(command, resolvedArgs, {
 				stdio: ["ignore", "pipe", "pipe"],
 				encoding: "utf-8",
-				shell,
+				shell: false,
 			}),
 		};
 	}
-	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell });
+	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell: false });
 	return undefined;
 }
