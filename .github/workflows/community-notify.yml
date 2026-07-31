@@ -20,7 +20,7 @@ jobs:
       # GitHub does not document which one is checked for a PR target.
       issues: write
       pull-requests: write
-    uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1
+    uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1.9.0
     with:
       repo-name: c8ctl
       mention-group: ${{ vars.SLACK_MENTION_GROUP }}
