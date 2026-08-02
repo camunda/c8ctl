@@ -3,7 +3,7 @@ name: npm audit
 # Asynchronous (non-merge-blocking) security signal. Runs off the PR-to-merge
 # path on a weekly schedule so dependency vulnerabilities surface via a reliable
 # feedback loop (failed runs show up in the Actions UI and can be wired to
-# notifications) without adding latency to day-to-day merges. Dependabot handles
+# notifications) without adding latency to day-to-day merges. Renovate handles
 # the actual fixes; this job is the tripwire that a high/critical advisory exists.
 #
 # Scoped to production dependencies (`--omit=dev`): the shipped surface is what

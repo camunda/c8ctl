@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
+  "semanticCommits": "enabled",
+  "rebaseWhen": "behind-base-branch",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+    "src/templates/**"
+  ],
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "description": "AGENTS.md pins the toolchain to Node 22 LTS and treats .nvmrc as authoritative; never bump the Node version.",
+      "matchDatasources": ["node-version"],
+      "enabled": false
+    },
+    {
+      "description": "Auto-merge minor and patch updates once CI is green.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ],
+  "vulnerabilityAlerts": { "enabled": true },
+  "osvVulnerabilityAlerts": true
+}
