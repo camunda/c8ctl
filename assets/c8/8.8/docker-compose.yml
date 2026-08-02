@@ -39,7 +39,7 @@ services:
       - ./els-snapshots:/usr/local/els-snapshots
 
   opensearch:
-    image: opensearchproject/opensearch:2.19.4
+    image: opensearchproject/opensearch:2.19.6
     container_name: opensearch
     profiles: ['opensearch']
     environment:
