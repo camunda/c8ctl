@@ -78,7 +78,7 @@ services:
     depends_on:
       - postgres
     container_name: keycloak
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7
     command: start-dev --http-relative-path=/auth
     ports:
       - '18080:8080'
