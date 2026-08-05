@@ -743,6 +743,13 @@ describe("enforcement against a published host version (built dist)", () => {
 				...process.env,
 				CAMUNDA_BASE_URL: "http://test-cluster/v2",
 				C8CTL_DATA_DIR: dataDir,
+				// The staged host reports a *real* semver version, which is exactly
+				// what makes `startUpdateCheck` fire: it self-suppresses only for the
+				// development sentinel. A registry round-trip would then print an
+				// update notice into the output these tests assert on, so the result
+				// would depend on the machine's network and notification cache.
+				// `CI` is the switch update-check already honours.
+				CI: "1",
 			},
 		});
 	}
