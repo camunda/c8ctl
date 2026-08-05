@@ -6,6 +6,6 @@
   "keywords": ["c8ctl", "c8ctl-plugin", "feel", "expression"],
   "main": "c8ctl-plugin.ts",
   "dependencies": {
-    "feelin": "^6.2.0"
+    "feelin": "^7.0.0"
   }
 }
