@@ -78,3 +78,10 @@ Before considering a change complete:
 - Make the smallest change required for each task.
 - Do not add unrelated commands or refactors.
 - Keep `metadata.commands` descriptions concise and user-facing.
+
+## Git / GitHub CLI output
+
+- `git` and `gh` commands can invoke a pager and hang waiting for keyboard input (e.g. `q` to quit), which looks like the terminal is stuck. Always disable paging before running commands whose output might exceed a screen:
+
+- Prefix `git` read commands with `--no-pager`, e.g. `git --no-pager log`, `git --no-pager diff`, `git --no-pager show`.
+- Pipe `gh` output through `cat`, e.g. `gh pr list | cat`, `gh pr view 123 | cat`, `gh issue list | cat`.
