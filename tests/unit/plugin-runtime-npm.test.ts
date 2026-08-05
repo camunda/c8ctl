@@ -14,9 +14,16 @@
  */
 
 import assert from "node:assert";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { isRecord } from "../../src/core/logger.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
@@ -28,6 +35,9 @@ const FIXTURE_DIR = join(
 	"plugins",
 	"plugin-with-npm",
 );
+// Absolute: these tests run the CLI from a temp project directory, so a
+// path relative to the repo root would not resolve.
+const CLI_ENTRY = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
 const PLUGIN_PKG_NAME = "c8ctl-plugin-npm-runtime";
 
 let testDataDir: string;
@@ -52,7 +62,10 @@ afterEach(() => {
 	rmSync(testDataDir, { recursive: true, force: true });
 });
 
-async function c8Plugin(...args: string[]): Promise<SpawnResult> {
+async function c8Plugin(
+	args: string[],
+	options: { cwd?: string } = {},
+): Promise<SpawnResult> {
 	// HOME/USERPROFILE are redirected into the per-test temp dir rather than
 	// pointed at a nonexistent path (as sibling plugin tests do): npm resolves
 	// ~/.npmrc from the home directory, so this isolates the spawned npm from
@@ -71,11 +84,11 @@ async function c8Plugin(...args: string[]): Promise<SpawnResult> {
 	delete env.NODE_OPTIONS;
 	return asyncSpawn(
 		"node",
-		["--experimental-strip-types", "src/index.ts", ...args],
+		["--experimental-strip-types", CLI_ENTRY, ...args],
 		// Generous: spawning npm on a loaded CI runner is slow. This is a
 		// safety net, not a correctness assertion — do not tighten it into
 		// a race.
-		{ env, timeout: 60_000 },
+		{ env, timeout: 120_000, ...(options.cwd ? { cwd: options.cwd } : {}) },
 	);
 }
 
@@ -100,7 +113,7 @@ function lastJsonRecord(stdout: string): Record<string, unknown> {
 
 describe("plugin runtime: c8ctl.npm()", () => {
 	test("is exposed on globalThis.c8ctl by the time plugin code runs", async () => {
-		const result = await c8Plugin("npm-shape");
+		const result = await c8Plugin(["npm-shape"]);
 		assert.strictEqual(
 			result.status,
 			0,
@@ -110,7 +123,7 @@ describe("plugin runtime: c8ctl.npm()", () => {
 	});
 
 	test("runs npm and captures its stdout", async () => {
-		const result = await c8Plugin("npm-version");
+		const result = await c8Plugin(["npm-version"]);
 		assert.strictEqual(
 			result.status,
 			0,
@@ -121,5 +134,95 @@ describe("plugin runtime: c8ctl.npm()", () => {
 			typeof version === "string" && /^\d+\.\d+\.\d+/.test(version),
 			`expected a semver from 'npm --version', got: ${JSON.stringify(version)}`,
 		);
+	});
+});
+
+/**
+ * Regression guard for #526.
+ *
+ * `npm install --prefix <dir>` has to install the dependencies declared in
+ * `<dir>`, whatever the process cwd is. On Windows npm's own `--prefix`
+ * handling collapses the local and global install targets onto the same
+ * directory, so npm reinterprets the command as a global install of the
+ * current directory and reads `package.json` from the cwd instead — the
+ * invocation silently operates on the wrong project.
+ *
+ * These tests drive the real runtime API from a plugin, run the CLI from a
+ * project directory that deliberately has *no* `package.json`, and assert on
+ * where npm actually wrote — `--package-lock-only` makes the effect observable
+ * without touching the network.
+ */
+describe("plugin runtime: c8ctl.npm() honours --prefix (#526)", () => {
+	/** Create `<testDataDir>/<projectName>/.camunda` with a dependency-free package. */
+	function createProject(
+		projectName: string,
+		options: { workspaceRoot?: boolean } = {},
+	): { projectDir: string; prefixDir: string } {
+		const projectDir = join(testDataDir, projectName);
+		const prefixDir = join(projectDir, ".camunda");
+		mkdirSync(prefixDir, { recursive: true });
+		writeFileSync(
+			join(prefixDir, "package.json"),
+			JSON.stringify({
+				name: "c8ctl-prefix-scope-fixture",
+				version: "1.0.0",
+				private: true,
+			}),
+		);
+		if (options.workspaceRoot) {
+			writeFileSync(
+				join(projectDir, "package.json"),
+				JSON.stringify({
+					name: "c8ctl-prefix-scope-workspace-root",
+					version: "1.0.0",
+					private: true,
+					workspaces: [".camunda"],
+				}),
+			);
+		}
+		return { projectDir, prefixDir };
+	}
+
+	async function assertInstalledUnderPrefix(
+		projectName: string,
+		options: { workspaceRoot?: boolean } = {},
+	) {
+		const { projectDir, prefixDir } = createProject(projectName, options);
+
+		const result = await c8Plugin(["npm-prefix-install", prefixDir], {
+			cwd: projectDir,
+		});
+
+		assert.strictEqual(
+			result.status,
+			0,
+			`expected exit 0, got ${result.status}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			existsSync(join(prefixDir, "package-lock.json")),
+			`npm did not operate under the prefix ${prefixDir}. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			!existsSync(join(projectDir, "package-lock.json")),
+			`npm operated on the process cwd ${projectDir} instead of the prefix`,
+		);
+	}
+
+	test("installs into the prefix directory, not the process cwd", async () => {
+		await assertInstalledUnderPrefix("project");
+	});
+
+	test("installs into a prefix directory whose path contains spaces", async () => {
+		await assertInstalledUnderPrefix("my project");
+	});
+
+	test("installs into the prefix even when an ancestor declares it as a workspace", async () => {
+		// `--prefix` pins npm's local prefix outright, but resolving it from a
+		// working directory does not: npm keeps walking up and promotes the
+		// local prefix to a workspace root that claims the directory. Without a
+		// guard the install would land at the project root instead.
+		await assertInstalledUnderPrefix("workspace-project", {
+			workspaceRoot: true,
+		});
 	});
 });

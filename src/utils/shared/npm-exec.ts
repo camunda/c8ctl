@@ -26,6 +26,13 @@
  * the two constructs that survive double quotes — an embedded `"` and a
  * `%VAR%` environment-variable reference — are rejected outright rather than
  * escaped.
+ *
+ * A second Windows-only hazard is npm's own `--prefix` handling: a CLI
+ * `--prefix` sets the *global* prefix as well as the local one, and Windows
+ * puts the global install root directly under the prefix, so for a plain
+ * `npm install --prefix <dir>` npm cannot tell a local install apart from a
+ * global one and silently installs the *process cwd* instead (#526). That case
+ * is re-expressed as a cwd — see `rescopeWindowsLocalInstall()`.
  */
 
 import {
@@ -33,6 +40,8 @@ import {
 	execFileSync,
 	execSync,
 } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface NpmInvocation {
 	/** Executable to spawn. */
@@ -41,6 +50,8 @@ export interface NpmInvocation {
 	args: string[];
 	/** Whether the invocation must go through a shell. */
 	shell: boolean;
+	/** Directory to run npm in; `undefined` inherits the process cwd. */
+	cwd?: string;
 }
 
 export interface NpmResult {
@@ -79,18 +90,162 @@ function quoteWindowsArg(arg: string): string {
 	return `"${arg.replace(/(\\+)$/, "$1$1")}"`;
 }
 
+/** npm's `install` verb and every alias npm maps onto it (`npm help install`, `lib/utils/cmd-list.js`). */
+const NPM_INSTALL_COMMANDS = new Set([
+	"install",
+	"add",
+	"i",
+	"in",
+	"ins",
+	"inst",
+	"insta",
+	"instal",
+	"isnt",
+	"isnta",
+	"isntal",
+	"isntall",
+]);
+
+/** `--prefix` and its documented short form `-C`. */
+function isPrefixFlag(arg: string): boolean {
+	return arg === "--prefix" || arg === "-C";
+}
+
+/** `-g`, any single-dash cluster containing `g` (`-gf`), `--global`, or `--location=global`. */
+function isGlobalFlag(arg: string): boolean {
+	if (arg === "--global" || arg === "--global=true") return true;
+	if (arg === "--location=global") return true;
+	return /^-[a-z]*g[a-z]*$/i.test(arg);
+}
+
+/** Any spelling of npm's workspace selectors — `-w`, `--workspace(s)`, `--no-workspaces`. */
+function isWorkspaceFlag(arg: string): boolean {
+	return arg === "-w" || /^--(no-)?workspaces?(=|$)/.test(arg);
+}
+
+interface RescopedInvocation {
+	args: string[];
+	cwd: string;
+}
+
+/** What a prefix directory's `package.json` says, or `null` if there is none. */
+export interface PrefixManifest {
+	/** Whether the manifest declares a `workspaces` field. */
+	declaresWorkspaces: boolean;
+}
+
+/**
+ * Re-express `npm install --prefix <dir>` (no package specs) as an npm run
+ * whose *working directory* is `<dir>`.
+ *
+ * npm applies a CLI `--prefix` to both the local and the global prefix. On
+ * Windows the global install root is `<prefix>\node_modules`, while on POSIX
+ * it is `<prefix>/lib/node_modules`, so on Windows `npm install --prefix <dir>`
+ * makes the local install target (`npm.prefix`) and the global install target
+ * (`dirname(npm.globalDir)`) the *same* directory. npm's install command reads
+ * that as a global install of the current directory:
+ *
+ *     // `npm i -g` => "install this package globally"
+ *     if (where === globalTop && !args.length) { args = ['.'] }
+ *
+ * `.` is then resolved against the *process* cwd, so npm stops installing the
+ * dependencies declared in `<dir>` and instead tries to read `package.json`
+ * from the cwd — the ENOENT reported in #526. POSIX never trips the collision.
+ *
+ * Setting npm's cwd expresses the same intent without the prefix collision:
+ * `npm.localPrefix` walks up from the cwd and settles on `<dir>`, which is
+ * where the `package.json` lives. The two are not *quite* interchangeable —
+ * having settled on `<dir>`, npm keeps walking up to see whether an ancestor
+ * declares `<dir>` as one of its workspaces and promotes the local prefix to
+ * that ancestor if so, something `--prefix` never does — so the rewrite also
+ * passes `--workspaces=false`, which makes npm stop at `<dir>` (see
+ * `@npmcli/config`'s `loadLocalPrefix()`). The rewrite is deliberately
+ * conservative:
+ *
+ *   - only the install verb with no package spec is affected — every other npm
+ *     command, and `npm install <pkg> --prefix <dir>`, resolves `--prefix`
+ *     correctly on Windows;
+ *   - a global install keeps `--prefix`, which is exactly what it means there;
+ *   - any other bare token (e.g. the value of `--loglevel warn`) is treated as
+ *     a possible package spec and suppresses the rewrite;
+ *   - `<dir>` must actually contain a `package.json`, so npm can never walk up
+ *     past `<dir>` and install some parent directory's dependencies instead;
+ *   - a `<dir>` that is itself a workspace root, or an invocation that already
+ *     carries a workspace selector, is left alone: `--workspaces=false` would
+ *     drop the workspaces from the install instead of merely bounding the
+ *     walk-up.
+ */
+function rescopeWindowsLocalInstall(
+	args: readonly string[],
+	readPrefixManifest: (dir: string) => PrefixManifest | null,
+): RescopedInvocation | null {
+	const kept: string[] = [];
+	const bareTokens: string[] = [];
+	let prefix: string | undefined;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === undefined) continue;
+		if (isGlobalFlag(arg) || isWorkspaceFlag(arg)) return null;
+		if (isPrefixFlag(arg)) {
+			const value = args[i + 1];
+			// A dangling `--prefix` is npm's problem to report, not ours.
+			if (value === undefined || value.startsWith("-")) return null;
+			prefix = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--prefix=")) {
+			prefix = arg.slice("--prefix=".length);
+			continue;
+		}
+		if (!arg.startsWith("-")) bareTokens.push(arg);
+		kept.push(arg);
+	}
+
+	if (prefix === undefined || prefix === "") return null;
+	const command = bareTokens[0];
+	if (bareTokens.length !== 1 || command === undefined) return null;
+	if (!NPM_INSTALL_COMMANDS.has(command)) return null;
+	const manifest = readPrefixManifest(prefix);
+	if (manifest === null || manifest.declaresWorkspaces) return null;
+
+	return { args: [...kept, "--workspaces=false"], cwd: prefix };
+}
+
+/** Read `<dir>/package.json`; `null` when it is absent or unreadable. */
+function readPackageJson(dir: string): PrefixManifest | null {
+	let parsed: unknown;
+	try {
+		const source = readFileSync(join(dir, "package.json"), "utf-8");
+		// npm reads manifests through json-parse-even-better-errors, which
+		// tolerates a leading BOM — Windows editors write them, and the whole
+		// point of this branch is Windows.
+		parsed = JSON.parse(source.replace(/^\uFEFF/, ""));
+	} catch {
+		// Absent or malformed: either way there is nothing to re-scope onto.
+		return null;
+	}
+	const declaresWorkspaces =
+		typeof parsed === "object" && parsed !== null && "workspaces" in parsed;
+	return { declaresWorkspaces };
+}
+
 /**
  * Resolve how npm has to be spawned on the given platform.
  *
  * Exported for unit testing: pass an explicit `platform` to exercise the
- * Windows branch from a POSIX host.
+ * Windows branch from a POSIX host, and `readPrefixManifest` to exercise the
+ * Windows `--prefix` rescope without touching the filesystem.
  */
 export function buildNpmInvocation({
 	args,
 	platform = process.platform,
+	readPrefixManifest = readPackageJson,
 }: {
 	args: readonly string[];
 	platform?: NodeJS.Platform;
+	readPrefixManifest?: (dir: string) => PrefixManifest | null;
 }): NpmInvocation {
 	if (platform !== "win32") {
 		return { command: "npm", args: [...args], shell: false };
@@ -109,10 +264,15 @@ export function buildNpmInvocation({
 		}
 	}
 
+	// Validation runs on the arguments as given, so rescoping never widens what
+	// is accepted: a hostile `--prefix` value is rejected before it can become a cwd.
+	const rescoped = rescopeWindowsLocalInstall(args, readPrefixManifest);
+
 	return {
 		command: "npm.cmd",
-		args: args.map(quoteWindowsArg),
+		args: (rescoped?.args ?? args).map(quoteWindowsArg),
 		shell: true,
+		...(rescoped ? { cwd: rescoped.cwd } : {}),
 	};
 }
 
@@ -125,7 +285,12 @@ export function npm({
 	args,
 	...opts
 }: NpmArgsWithOutput | NpmArgsWithoutOutput): NpmResult | undefined {
-	const { command, args: resolvedArgs, shell } = buildNpmInvocation({ args });
+	const {
+		command,
+		args: resolvedArgs,
+		shell,
+		cwd,
+	} = buildNpmInvocation({ args });
 	// On Windows, `shell` is true because npm is a .cmd shim that requires cmd.exe.
 	// execFileSync(command, args, { shell: true }) triggers DEP0190 in Node ≥ 22 when
 	// an args array is combined with shell: true. execSync(commandString) takes a
@@ -138,10 +303,11 @@ export function npm({
 				stdout: execSync(cmdLine, {
 					stdio: ["ignore", "pipe", "pipe"],
 					encoding: "utf-8",
+					cwd,
 				}),
 			};
 		}
-		execSync(cmdLine, { stdio: opts.stdio });
+		execSync(cmdLine, { stdio: opts.stdio, cwd });
 		return undefined;
 	}
 	if (opts.stdout) {
@@ -150,9 +316,10 @@ export function npm({
 				stdio: ["ignore", "pipe", "pipe"],
 				encoding: "utf-8",
 				shell: false,
+				cwd,
 			}),
 		};
 	}
-	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell: false });
+	execFileSync(command, resolvedArgs, { stdio: opts.stdio, shell: false, cwd });
 	return undefined;
 }
