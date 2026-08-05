@@ -113,7 +113,7 @@ c8 doctor plugin
 c8 doctor plugin --json
 ```
 
-Built-in commands always take precedence over plugin commands, and the first plugin to register a given command wins. `doctor plugin` shows which registrations were kept and which were shadowed, plus each plugin's declared `engines.c8ctl` requirement and whether this c8ctl satisfies it.
+Built-in commands always take precedence over plugin commands, and the first plugin to register a given command wins — with one exception: a plugin disabled by its declared `engines.c8ctl` (see below) yields the command name to a compatible plugin regardless of load order, because its own copy could only ever refuse to run. `doctor plugin` shows which registrations were kept and which were shadowed, plus each plugin's declared requirement and whether this c8ctl satisfies it.
 
 ## The c8ctl version a plugin needs
 
