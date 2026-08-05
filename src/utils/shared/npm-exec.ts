@@ -217,7 +217,11 @@ function rescopeWindowsLocalInstall(
 function readPackageJson(dir: string): PrefixManifest | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+		const source = readFileSync(join(dir, "package.json"), "utf-8");
+		// npm reads manifests through json-parse-even-better-errors, which
+		// tolerates a leading BOM — Windows editors write them, and the whole
+		// point of this branch is Windows.
+		parsed = JSON.parse(source.replace(/^\uFEFF/, ""));
 	} catch {
 		// Absent or malformed: either way there is nothing to re-scope onto.
 		return null;

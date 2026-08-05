@@ -6,8 +6,9 @@
  */
 
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { glob } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -292,6 +293,25 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 			});
 			assert.strictEqual(invocation.cwd, undefined, `for ${flag}`);
 			assert.ok(invocation.args.includes('"--prefix"'), `for ${flag}`);
+		}
+	});
+
+	test("reads the prefix manifest off disk, tolerating a UTF-8 BOM", () => {
+		// The default manifest reader is only exercised here: npm itself parses
+		// manifests with a BOM-tolerant reader, and BOMs are a Windows habit.
+		const dir = mkdtempSync(join(tmpdir(), "c8ctl-npm-exec-bom-"));
+		try {
+			writeFileSync(
+				join(dir, "package.json"),
+				`\uFEFF${JSON.stringify({ name: "bom", version: "1.0.0", private: true })}`,
+			);
+			const invocation = buildNpmInvocation({
+				args: ["install", "--prefix", dir],
+				platform: "win32",
+			});
+			assert.strictEqual(invocation.cwd, dir);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
