@@ -113,6 +113,11 @@ export interface C8ctlPluginRuntime {
 	 *
 	 * Throws if an argument cannot be passed safely to cmd.exe (embedded
 	 * quote, line break, or a `%VAR%` reference).
+	 *
+	 * On Windows a package-spec-less `install --prefix <dir>` is transparently
+	 * re-scoped to run npm with its cwd set to `<dir>`, because npm's own
+	 * `--prefix` handling would otherwise install against the process cwd
+	 * (see `utils/shared/npm-exec.ts` and #526).
 	 */
 	npm: NpmRunner;
 }
