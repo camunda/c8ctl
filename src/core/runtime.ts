@@ -124,15 +124,42 @@ declare global {
 }
 
 /**
+ * The version in the repo's `package.json` — semantic-release replaces it at
+ * publish time, so seeing it means c8ctl is running from an unpublished source
+ * checkout.
+ */
+export const UNVERSIONED_DEV_BUILD = "0.0.0-semantically-released";
+
+/**
+ * Whether `version` identifies an unpublished development build.
+ *
+ * Such a version carries no information about the API surface it exposes, so
+ * anything that reasons about "which c8ctl is this" has to opt out rather than
+ * draw a conclusion: the self-update check skips notifying, and the plugin host
+ * requirement (`engines.c8ctl`, #523) skips enforcing.
+ */
+export function isUnversionedDevBuild(version: string): boolean {
+	return version === UNVERSIONED_DEV_BUILD;
+}
+
+/**
  * Get c8ctl version from package.json
+ *
+ * An unreadable or version-less `package.json` falls back to
+ * {@link UNVERSIONED_DEV_BUILD} rather than `0.0.0`. `0.0.0` is a real,
+ * parseable version that happens to satisfy no requirement, so anything
+ * comparing against it would draw a confident *wrong* conclusion — a plugin
+ * declaring `engines.c8ctl: ">=3.0.0"` would be reported as unsupported. The
+ * sentinel says "unknown", which every consumer already treats as "do not
+ * conclude anything from this".
  */
 function getVersion(): string {
 	try {
 		const packageJsonPath = join(__dirname, "..", "..", "package.json");
 		const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
-		return packageJson.version || "0.0.0";
+		return packageJson.version || UNVERSIONED_DEV_BUILD;
 	} catch {
-		return "0.0.0";
+		return UNVERSIONED_DEV_BUILD;
 	}
 }
 
