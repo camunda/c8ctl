@@ -6,21 +6,27 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	c8ctl,
 	ensurePluginsDir,
 	getLogger,
 	handleCommandError,
+	type Logger,
+	SilentError,
 } from "../core/index.ts";
 import {
 	addPluginToRegistry,
+	checkHostCompat,
 	clearLoadedPlugins,
 	defineCommand,
 	getInstalledPluginVersion,
 	getLoadedPluginSummaries,
 	getPluginCollisions,
 	getPluginEntry,
+	getPluginIncompatibilities,
 	getRegisteredPlugins,
 	getVersionFromSource,
 	isPluginRegistered,
+	readHostRequirement,
 	removePluginFromRegistry,
 } from "../framework/index.ts";
 import { npm } from "../utils/index.ts";
@@ -56,6 +62,89 @@ function renderTemplate(
 		content = content.replaceAll(`{{${key}}}`, value);
 	}
 	return content;
+}
+
+/**
+ * Fail the command when a just-installed plugin declares an `engines.c8ctl`
+ * this c8ctl does not satisfy (#523).
+ *
+ * Install time is the one moment the user is already thinking about plugin
+ * versions, so this is where the mismatch has to be reported — the alternative
+ * is what #523 describes: a successful "Plugin loaded successfully", then a
+ * stack trace from a different command later on.
+ *
+ * The plugin is left installed and registered, because it *is* installed. What
+ * this changes is that the command stops claiming success, so a script with
+ * `set -e` stops here instead of building on a plugin that cannot run.
+ *
+ * Throws `SilentError` after rendering, which `handleCommandError` turns into a
+ * bare non-zero exit — the caller can therefore run this inside its own
+ * try/catch without the failure being relabelled as an npm/network problem.
+ */
+function assertHostCompatible({
+	logger,
+	pluginsDir,
+	pluginName,
+}: {
+	logger: Logger;
+	pluginsDir: string;
+	pluginName: string;
+}): void {
+	const nodeModules = join(pluginsDir, "node_modules");
+	// `c8 load plugin foo@1.2.3` passes the version spec through as the name, but
+	// npm installs to `node_modules/foo`. Fall back to the name without its
+	// version suffix so a versioned install is still checked. `@scope/pkg`
+	// resolves directly and must not be mangled — only a suffix *after* the
+	// first character counts as a version separator.
+	const candidates = [pluginName];
+	const specAt = pluginName.indexOf("@", 1);
+	if (specAt > 0) candidates.push(pluginName.slice(0, specAt));
+
+	const packageJsonPath = candidates
+		.map((name) => join(resolvePackagePath(nodeModules, name), "package.json"))
+		.find((path) => existsSync(path));
+	if (packageJsonPath === undefined) {
+		// Reachable whenever the name we were given does not lead to the install
+		// directory npm actually used. Say so rather than silently reporting
+		// success: the loader still catches it on the next invocation, so this is a
+		// deferred check, not an absent one.
+		logger.debug(
+			`Skipping the host-compatibility check for '${pluginName}': no installed ` +
+				`package.json under ${nodeModules}.`,
+		);
+		return;
+	}
+
+	let packageJson: unknown;
+	try {
+		packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+	} catch {
+		// An unreadable package.json is not this check's business to report —
+		// the loader will surface it on the next invocation.
+		return;
+	}
+
+	const verdict = checkHostCompat({
+		pluginName,
+		declaredRange: readHostRequirement(packageJson),
+		hostVersion: c8ctl.version,
+	});
+	if (
+		verdict.status === "unverifiable" &&
+		verdict.reason === "unreadable-range"
+	) {
+		logger.warn(verdict.message ?? "");
+		return;
+	}
+	if (verdict.status !== "incompatible") return;
+
+	const summary = `Plugin '${pluginName}' is not compatible with this c8ctl`;
+	logger.error(summary);
+	logger.info(verdict.message ?? "");
+	logger.info(
+		"The plugin is installed but none of its commands will run. Run 'c8ctl doctor plugin' to see this again.",
+	);
+	throw new SilentError(summary);
 }
 
 /**
@@ -102,6 +191,10 @@ export const loadPluginCommand = defineCommand(
 		try {
 			let pluginName: string;
 			let pluginSource: string;
+			// Deferred until the host-compatibility check has had its say: a tick
+			// on the line above an "incompatible" cross reads as two verdicts on
+			// the same action.
+			let successDetail: string;
 
 			if (fromUrl) {
 				// Snapshot existing plugins before installation so we can identify the new one
@@ -130,7 +223,7 @@ export const loadPluginCommand = defineCommand(
 					throw new Error("Failed to extract plugin name from URL");
 				}
 
-				logger.success("Plugin loaded successfully from URL", fromUrl);
+				successDetail = fromUrl;
 			} else {
 				// Install from npm registry by package name
 				if (!packageName)
@@ -145,13 +238,26 @@ export const loadPluginCommand = defineCommand(
 				pluginName = packageName;
 				pluginSource = packageName;
 
-				logger.success("Plugin loaded successfully", packageName);
+				successDetail = packageName;
 			}
 
 			// Add to plugin registry
 			addPluginToRegistry(pluginName, pluginSource);
 			logger.debug(`Added ${pluginName} to plugin registry`);
 
+			// Before reporting success: a plugin this c8ctl is too old for will
+			// never become available, and saying otherwise is how #523's failure
+			// reached a later command as somebody else's stack trace. The registry
+			// entry is written first on purpose — the package is on disk either
+			// way, and `list`/`doctor plugin` should agree about that.
+			assertHostCompatible({ logger, pluginsDir, pluginName });
+
+			logger.success(
+				fromUrl
+					? "Plugin loaded successfully from URL"
+					: "Plugin loaded successfully",
+				successDetail,
+			);
 			// Note: Plugin will be available on next CLI invocation
 			// We don't reload in the same process to avoid module cache issues
 			logger.info("Plugin will be available on next command execution");
@@ -826,6 +932,11 @@ export const upgradePluginCommand = defineCommand(
 			// Clear plugin cache
 			clearLoadedPlugins();
 
+			// An upgrade can land on a release that raised its host floor — the
+			// same check as in `load plugin`, reported before success for the same
+			// reason.
+			assertHostCompatible({ logger, pluginsDir, pluginName: packageName });
+
 			logger.success("Plugin upgraded successfully", packageName);
 			logger.info("Plugin will be available on next command execution");
 		} catch (error) {
@@ -900,6 +1011,11 @@ export const downgradePluginCommand = defineCommand(
 
 			// Clear plugin cache
 			clearLoadedPlugins();
+
+			// Deliberately pinning an older release is the likeliest way to land on
+			// one built for an older c8ctl, so this is the highest-yield place for
+			// the check — same contract as `load` and `upgrade`.
+			assertHostCompatible({ logger, pluginsDir, pluginName: packageName });
 
 			logger.success("Plugin downgraded successfully", packageName);
 			logger.info("Plugin will be available on next command execution");
@@ -1034,9 +1150,10 @@ export const doctorPluginCommand = defineCommand(
 
 		const loaded = getLoadedPluginSummaries();
 		const collisions = getPluginCollisions();
+		const incompatible = getPluginIncompatibilities();
 
 		if (logger.mode === "json") {
-			logger.json({ loaded, collisions });
+			logger.json({ loaded, collisions, incompatible });
 			return;
 		}
 
@@ -1048,7 +1165,31 @@ export const doctorPluginCommand = defineCommand(
 				loaded.map((p) => ({
 					Plugin: p.name,
 					Commands: p.commands.length === 0 ? "(none)" : p.commands.join(", "),
+					Requires: p.requires ?? "—",
 				})),
+			);
+		}
+
+		if (incompatible.length > 0) {
+			logger.info("");
+			logger.info(`Incompatible with this c8ctl (${incompatible.length}):`);
+			logger.table(
+				incompatible.map((i) => ({
+					Plugin: i.plugin,
+					Version: i.pluginVersion,
+					Requires: i.required,
+					Running: i.running,
+				})),
+			);
+			logger.info("");
+			logger.info(
+				"These plugins are installed and still listed in help, but their commands refuse to run: " +
+					"the c8ctl they declare (engines.c8ctl) is not the one you have. If one of their command " +
+					"names appears above under a different plugin, that plugin has taken it over and it works.",
+			);
+			logger.info(
+				"To resolve: upgrade c8ctl with 'npm install -g @camunda8/cli@latest', or install a plugin " +
+					"release that supports this version. See docs/plugins.md for the requirement contract.",
 			);
 		}
 

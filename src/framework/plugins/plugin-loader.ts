@@ -11,6 +11,7 @@ import {
 	getLogger,
 	type Logger,
 	type OutputMode,
+	SilentError,
 } from "../../core/index.ts";
 import type { FlagDef } from "../command-registry.ts";
 import type {
@@ -19,6 +20,7 @@ import type {
 	SelectConfig,
 	SelectResult,
 } from "../ui/prompt.ts";
+import { checkHostCompat, readHostRequirement } from "./plugin-compat.ts";
 
 /**
  * Typed, documented host context passed to plugin command handlers as
@@ -135,6 +137,15 @@ interface LoadedPlugin {
 	version: string;
 	commands: PluginCommands;
 	metadata?: PluginMetadata;
+	/** The plugin's declared `engines.c8ctl` range, when it declared one (#523). */
+	hostRequirement?: string;
+	/**
+	 * True once `enforceHostRequirement` has disabled this plugin's commands
+	 * because this c8ctl does not satisfy `hostRequirement` (#523). Read by
+	 * `rejectDuplicateCommandNames`, which lets a disabled plugin lose a
+	 * command-name collision to a working one.
+	 */
+	hostIncompatible?: boolean;
 }
 
 const loadedPlugins = new Map<string, LoadedPlugin>();
@@ -144,14 +155,20 @@ const loadedPlugins = new Map<string, LoadedPlugin>();
  * surfaced by `c8ctl doctor plugin` (#363). Two flavours:
  *
  * - `command-name`: two plugins exported a command under the same name.
- *   The earlier-loaded plugin's command stays in dispatch; the later
- *   plugin's was dropped. `winner`/`loser` reflect that ordering.
+ *   Normally the earlier-loaded plugin's command stays in dispatch and the
+ *   later plugin's was dropped, so `winner`/`loser` reflect load order. The
+ *   exception is a `hostIncompatible` incumbent (#523), which loses the name
+ *   to a working newcomer regardless of order.
  * - `plugin-name`: two plugins shared the same `package.json#name`.
  *   The entire later plugin was rejected (its module body was never
  *   imported); `command` is undefined for this kind.
  *
- * The doctor command is the only consumer; the loader appends to this
- * list as it discovers collisions and never reads from it. Cleared by
+ * `winner` always names the plugin that ends up owning the command. When a
+ * takeover supersedes an earlier decision, `rejectDuplicateCommandNames`
+ * re-points the affected records rather than dropping them — the losers are
+ * still losers, and erasing their records would hide a real collision.
+ *
+ * The doctor command is the only external consumer. Cleared by
  * `clearLoadedPlugins()` so test fixtures stay isolated.
  */
 export interface PluginCollision {
@@ -162,6 +179,33 @@ export interface PluginCollision {
 }
 
 const pluginCollisions: PluginCollision[] = [];
+
+/**
+ * Structured record of a plugin whose declared `engines.c8ctl` this c8ctl does
+ * not satisfy (#523), surfaced by `c8ctl doctor plugin`.
+ *
+ * The plugin stays loaded and keeps its place in help — what changed is that its
+ * commands now refuse to run and print `message` instead (bar any a working
+ * plugin has taken over). Removing it from help would trade one confusing
+ * failure ("unknown command os") for another; leaving it visible means the
+ * command that a user or an agent already knows about is the one that explains
+ * itself.
+ *
+ * The loader only appends and the doctor command only reads;
+ * `clearLoadedPlugins()` resets it so test fixtures stay isolated.
+ */
+export interface PluginIncompatibility {
+	plugin: string;
+	/** The plugin's own version, for "which release did this come from". */
+	pluginVersion: string;
+	/** The declared range, verbatim. */
+	required: string;
+	/** The c8ctl the requirement was evaluated against. */
+	running: string;
+	message: string;
+}
+
+const pluginIncompatibilities: PluginIncompatibility[] = [];
 
 /**
  * Validate the passthrough/flags mutual-exclusion rule (#366). Removes
@@ -259,6 +303,11 @@ function validatePassthroughCommands(plugin: LoadedPlugin): void {
  * different name. Default plugins always load first, so user-installed
  * plugins cannot override default commands by name.
  *
+ * **One exception (#523):** an incumbent whose declared `engines.c8ctl` this
+ * c8ctl does not satisfy loses the name to a working newcomer — its command
+ * could only ever throw. A default plugin can never be on the losing side of
+ * this, since `enforceHostRequirement` runs for installed plugins only.
+ *
  * This guarantees that the merged map returned by `getPluginCommands()`
  * has a single owning plugin per command name, which keeps dispatch and
  * `isPassthroughPluginCommand()` consistent: the help renderer and the
@@ -272,21 +321,61 @@ function rejectDuplicateCommandNames(plugin: LoadedPlugin): void {
 	const logger = getLogger();
 	for (const commandName of Object.keys(plugin.commands)) {
 		for (const existing of loadedPlugins.values()) {
-			if (Object.hasOwn(existing.commands, commandName)) {
-				logger.warn(
-					`Plugin '${plugin.name}' tried to register command '${commandName}' but it is ` +
-						`already provided by plugin '${existing.name}'. The first registration wins; ` +
-						`dropping the duplicate from '${plugin.name}'.`,
+			if (!Object.hasOwn(existing.commands, commandName)) continue;
+
+			// One exception to first-registration-wins: an incumbent that cannot
+			// run on this c8ctl (#523) yields to a newcomer that can. Otherwise
+			// load order — lexicographic by package path — would decide that a
+			// disabled `aaa-plugin` keeps the command name and a working
+			// `zzz-plugin` loses it, leaving the user with a command that only
+			// ever throws while a functioning implementation sits unreachable.
+			// The incumbent keeps its plugin entry in help, but loses this command.
+			if (existing.hostIncompatible && !plugin.hostIncompatible) {
+				logger.debug(
+					`Plugin '${plugin.name}' takes over command '${commandName}' from ` +
+						`'${existing.name}', which is disabled on this c8ctl.`,
 				);
+				// Re-point, don't delete. Earlier records for this name are still
+				// true about who *lost* it — a third plugin that lost to the
+				// incumbent has genuinely lost the command — but their `winner` is
+				// now stale. Dropping them would erase that plugin's collision from
+				// `doctor plugin` entirely; leaving them unedited would credit a win
+				// to a plugin that no longer owns the name.
+				for (const record of pluginCollisions) {
+					if (
+						record.kind === "command-name" &&
+						record.command === commandName &&
+						record.winner === existing.name
+					) {
+						record.winner = plugin.name;
+					}
+				}
 				pluginCollisions.push({
 					kind: "command-name",
-					winner: existing.name,
-					loser: plugin.name,
+					winner: plugin.name,
+					loser: existing.name,
 					command: commandName,
 				});
-				delete plugin.commands[commandName];
-				break;
+				// `continue`, not `break`: this function is what maintains "at most
+				// one loaded plugin owns a given command name", so there is nothing
+				// further to find for this name.
+				delete existing.commands[commandName];
+				continue;
 			}
+
+			logger.warn(
+				`Plugin '${plugin.name}' tried to register command '${commandName}' but it is ` +
+					`already provided by plugin '${existing.name}'. The first registration wins; ` +
+					`dropping the duplicate from '${plugin.name}'.`,
+			);
+			pluginCollisions.push({
+				kind: "command-name",
+				winner: existing.name,
+				loser: plugin.name,
+				command: commandName,
+			});
+			delete plugin.commands[commandName];
+			break;
 		}
 	}
 }
@@ -320,6 +409,78 @@ function isDuplicatePluginName(pluginName: string): boolean {
 		return true;
 	}
 	return false;
+}
+
+/**
+ * Enforce a plugin's declared `engines.c8ctl` (#523).
+ *
+ * On an unmet requirement, every command the plugin registered is replaced with
+ * a handler that throws the explanation. The plugin stays in `loadedPlugins` and
+ * therefore in help — see {@link PluginIncompatibility} for why disabling is
+ * done this way round.
+ *
+ * Runs *before* the collision passes, which read `hostIncompatible` to let a
+ * disabled incumbent lose a command name to a working newcomer. Takes the host
+ * version as an argument so the behaviour is testable against versions other
+ * than whatever this build happens to report.
+ *
+ * Mutates `plugin.commands` in place.
+ */
+function enforceHostRequirement(
+	plugin: LoadedPlugin,
+	hostVersion: string,
+): void {
+	const logger = getLogger();
+	const verdict = checkHostCompat({
+		pluginName: plugin.name,
+		declaredRange: plugin.hostRequirement ?? null,
+		hostVersion,
+	});
+
+	if (verdict.status === "unverifiable") {
+		// Only an unreadable *range* warns: that is an authoring mistake, and the
+		// plugin is silently not getting the guarantee it asked for. The other two
+		// reasons are properties of the host — a source checkout, or a version
+		// string this check cannot parse — and would name a blameless plugin on
+		// every single invocation.
+		const message = verdict.message ?? "";
+		if (verdict.reason === "unreadable-range") logger.warn(message);
+		else logger.debug(message);
+		return;
+	}
+
+	if (verdict.status !== "incompatible") return;
+
+	const message = verdict.message ?? "";
+	plugin.hostIncompatible = true;
+	// Debug, not warn: unlike a dropped colliding command — which has no other
+	// channel to announce itself — a disabled plugin explains itself the moment
+	// one of its commands is used, and `doctor plugin` lists it on demand.
+	// Warning on every unrelated invocation would be noise with no new signal.
+	logger.debug(message);
+	pluginIncompatibilities.push({
+		plugin: plugin.name,
+		pluginVersion: plugin.version,
+		required: verdict.range ?? "",
+		running: hostVersion,
+		message,
+	});
+
+	// SilentError: the message is the whole diagnosis and is rendered as one
+	// error line by the top-level handler. A plain Error would come back out as
+	// "Unexpected error" plus a stack trace — the shape of failure this check
+	// exists to replace.
+	const refuse: PluginCommandHandler = async () => {
+		throw new SilentError(message);
+	};
+	for (const commandName of Object.keys(plugin.commands)) {
+		const command = plugin.commands[commandName];
+		// Keep the `{ flags, handler }` shape intact: help rendering and flag
+		// parsing both branch on it, and a command that loses its flags would
+		// fail with a parse error instead of the explanation.
+		plugin.commands[commandName] =
+			typeof command === "function" ? refuse : { ...command, handler: refuse };
+	}
 }
 
 /**
@@ -455,8 +616,16 @@ async function loadDefaultPlugins(): Promise<void> {
 
 /**
  * Load all installed plugins from global plugins directory
+ *
+ * `hostVersion` defaults to the running c8ctl and exists so the `engines.c8ctl`
+ * enforcement (#523) can be exercised against other versions: a source checkout
+ * reports the unpublished development version, which by design skips the check.
  */
-export async function loadInstalledPlugins(): Promise<void> {
+export async function loadInstalledPlugins({
+	hostVersion = c8ctl.version,
+}: {
+	hostVersion?: string;
+} = {}): Promise<void> {
 	const logger = getLogger();
 
 	// Expose the runtime to plugins via globalThis.
@@ -597,13 +766,21 @@ export async function loadInstalledPlugins(): Promise<void> {
 				const plugin = await import(pluginUrl);
 
 				if (plugin.commands && typeof plugin.commands === "object") {
+					const hostRequirement = readHostRequirement(packageJson);
 					const loaded: LoadedPlugin = {
 						name: pluginName,
 						version: pluginVersion,
 						commands: { ...plugin.commands },
 						metadata: plugin.metadata || {},
+						...(hostRequirement === null ? {} : { hostRequirement }),
 					};
 					validatePassthroughCommands(loaded);
+					// Before the collision pass, which needs to know whether either
+					// side of a command-name clash is disabled. Installed plugins
+					// only: a default plugin ships inside the c8ctl package, so its
+					// host is itself and there is no version skew for
+					// `engines.c8ctl` (#523) to catch.
+					enforceHostRequirement(loaded, hostVersion);
 					rejectDuplicateCommandNames(loaded);
 					loadedPlugins.set(pluginName, loaded);
 					const commandNames = Object.keys(loaded.commands);
@@ -768,11 +945,29 @@ export function isPassthroughPluginCommand(commandName: string): boolean {
 }
 
 /**
+ * True if the named command belongs to a plugin disabled by its declared
+ * `engines.c8ctl` (#523).
+ *
+ * The dispatcher uses this to skip flag validation for such a command: its
+ * handler exists only to report which c8ctl the plugin needs, and rejecting the
+ * invocation for a missing required flag first would replace that explanation
+ * with an instruction the user cannot usefully follow.
+ */
+export function isHostIncompatiblePluginCommand(commandName: string): boolean {
+	for (const plugin of loadedPlugins.values()) {
+		if (!Object.hasOwn(plugin.commands, commandName)) continue;
+		if (plugin.hostIncompatible === true) return true;
+	}
+	return false;
+}
+
+/**
  * Clear all loaded plugins (useful for testing and after uninstall)
  */
 export function clearLoadedPlugins(): void {
 	loadedPlugins.clear();
 	pluginCollisions.length = 0;
+	pluginIncompatibilities.length = 0;
 }
 
 /**
@@ -787,6 +982,17 @@ export function getPluginCollisions(): readonly Readonly<PluginCollision>[] {
 }
 
 /**
+ * Snapshot of plugins whose declared `engines.c8ctl` this c8ctl does not
+ * satisfy (#523). Same defensive-copy contract as
+ * {@link getPluginCollisions}; order reflects load order.
+ */
+export function getPluginIncompatibilities(): readonly Readonly<PluginIncompatibility>[] {
+	return Object.freeze(
+		pluginIncompatibilities.map((i) => Object.freeze({ ...i })),
+	);
+}
+
+/**
  * Snapshot of currently loaded plugins (#363). Returns the canonical
  * `package.json#name` of each plugin together with the command names
  * it actually registered (after duplicate-name rejection). Used by
@@ -796,6 +1002,8 @@ export function getPluginCollisions(): readonly Readonly<PluginCollision>[] {
 export interface LoadedPluginSummary {
 	name: string;
 	commands: string[];
+	/** Declared `engines.c8ctl` range, when the plugin declared one (#523). */
+	requires?: string;
 }
 
 export function getLoadedPluginSummaries(): LoadedPluginSummary[] {
@@ -804,6 +1012,9 @@ export function getLoadedPluginSummaries(): LoadedPluginSummary[] {
 		summaries.push({
 			name: plugin.name,
 			commands: Object.keys(plugin.commands),
+			...(plugin.hostRequirement === undefined
+				? {}
+				: { requires: plugin.hostRequirement }),
 		});
 	}
 	return summaries;
