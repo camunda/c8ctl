@@ -40,7 +40,7 @@ import {
 	execFileSync,
 	execSync,
 } from "node:child_process";
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface NpmInvocation {
@@ -118,9 +118,20 @@ function isGlobalFlag(arg: string): boolean {
 	return /^-[a-z]*g[a-z]*$/i.test(arg);
 }
 
+/** Any spelling of npm's workspace selectors — `-w`, `--workspace(s)`, `--no-workspaces`. */
+function isWorkspaceFlag(arg: string): boolean {
+	return arg === "-w" || /^--(no-)?workspaces?(=|$)/.test(arg);
+}
+
 interface RescopedInvocation {
 	args: string[];
 	cwd: string;
+}
+
+/** What a prefix directory's `package.json` says, or `null` if there is none. */
+export interface PrefixManifest {
+	/** Whether the manifest declares a `workspaces` field. */
+	declaresWorkspaces: boolean;
 }
 
 /**
@@ -141,9 +152,15 @@ interface RescopedInvocation {
  * dependencies declared in `<dir>` and instead tries to read `package.json`
  * from the cwd — the ENOENT reported in #526. POSIX never trips the collision.
  *
- * Setting npm's cwd expresses the same intent (`npm.localPrefix` walks up from
- * the cwd and stops at `<dir>`, which is where the `package.json` lives) with
- * no prefix collision. The rewrite is deliberately conservative:
+ * Setting npm's cwd expresses the same intent without the prefix collision:
+ * `npm.localPrefix` walks up from the cwd and settles on `<dir>`, which is
+ * where the `package.json` lives. The two are not *quite* interchangeable —
+ * having settled on `<dir>`, npm keeps walking up to see whether an ancestor
+ * declares `<dir>` as one of its workspaces and promotes the local prefix to
+ * that ancestor if so, something `--prefix` never does — so the rewrite also
+ * passes `--workspaces=false`, which makes npm stop at `<dir>` (see
+ * `@npmcli/config`'s `loadLocalPrefix()`). The rewrite is deliberately
+ * conservative:
  *
  *   - only the install verb with no package spec is affected — every other npm
  *     command, and `npm install <pkg> --prefix <dir>`, resolves `--prefix`
@@ -152,11 +169,15 @@ interface RescopedInvocation {
  *   - any other bare token (e.g. the value of `--loglevel warn`) is treated as
  *     a possible package spec and suppresses the rewrite;
  *   - `<dir>` must actually contain a `package.json`, so npm can never walk up
- *     past `<dir>` and install some parent directory's dependencies instead.
+ *     past `<dir>` and install some parent directory's dependencies instead;
+ *   - a `<dir>` that is itself a workspace root, or an invocation that already
+ *     carries a workspace selector, is left alone: `--workspaces=false` would
+ *     drop the workspaces from the install instead of merely bounding the
+ *     walk-up.
  */
 function rescopeWindowsLocalInstall(
 	args: readonly string[],
-	hasPackageJson: (dir: string) => boolean,
+	readPrefixManifest: (dir: string) => PrefixManifest | null,
 ): RescopedInvocation | null {
 	const kept: string[] = [];
 	const bareTokens: string[] = [];
@@ -165,7 +186,7 @@ function rescopeWindowsLocalInstall(
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === undefined) continue;
-		if (isGlobalFlag(arg)) return null;
+		if (isGlobalFlag(arg) || isWorkspaceFlag(arg)) return null;
 		if (isPrefixFlag(arg)) {
 			const value = args[i + 1];
 			// A dangling `--prefix` is npm's problem to report, not ours.
@@ -186,30 +207,41 @@ function rescopeWindowsLocalInstall(
 	const command = bareTokens[0];
 	if (bareTokens.length !== 1 || command === undefined) return null;
 	if (!NPM_INSTALL_COMMANDS.has(command)) return null;
-	if (!hasPackageJson(prefix)) return null;
+	const manifest = readPrefixManifest(prefix);
+	if (manifest === null || manifest.declaresWorkspaces) return null;
 
-	return { args: kept, cwd: prefix };
+	return { args: [...kept, "--workspaces=false"], cwd: prefix };
 }
 
-function directoryHasPackageJson(dir: string): boolean {
-	return existsSync(join(dir, "package.json"));
+/** Read `<dir>/package.json`; `null` when it is absent or unreadable. */
+function readPackageJson(dir: string): PrefixManifest | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(join(dir, "package.json"), "utf-8"));
+	} catch {
+		// Absent or malformed: either way there is nothing to re-scope onto.
+		return null;
+	}
+	const declaresWorkspaces =
+		typeof parsed === "object" && parsed !== null && "workspaces" in parsed;
+	return { declaresWorkspaces };
 }
 
 /**
  * Resolve how npm has to be spawned on the given platform.
  *
  * Exported for unit testing: pass an explicit `platform` to exercise the
- * Windows branch from a POSIX host, and `hasPackageJson` to exercise the
+ * Windows branch from a POSIX host, and `readPrefixManifest` to exercise the
  * Windows `--prefix` rescope without touching the filesystem.
  */
 export function buildNpmInvocation({
 	args,
 	platform = process.platform,
-	hasPackageJson = directoryHasPackageJson,
+	readPrefixManifest = readPackageJson,
 }: {
 	args: readonly string[];
 	platform?: NodeJS.Platform;
-	hasPackageJson?: (dir: string) => boolean;
+	readPrefixManifest?: (dir: string) => PrefixManifest | null;
 }): NpmInvocation {
 	if (platform !== "win32") {
 		return { command: "npm", args: [...args], shell: false };
@@ -230,7 +262,7 @@ export function buildNpmInvocation({
 
 	// Validation runs on the arguments as given, so rescoping never widens what
 	// is accepted: a hostile `--prefix` value is rejected before it can become a cwd.
-	const rescoped = rescopeWindowsLocalInstall(args, hasPackageJson);
+	const rescoped = rescopeWindowsLocalInstall(args, readPrefixManifest);
 
 	return {
 		command: "npm.cmd",

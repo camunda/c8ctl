@@ -23,7 +23,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { isRecord } from "../../src/core/logger.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
@@ -37,7 +37,7 @@ const FIXTURE_DIR = join(
 );
 // Absolute: these tests run the CLI from a temp project directory, so a
 // path relative to the repo root would not resolve.
-const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
+const CLI_ENTRY = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
 const PLUGIN_PKG_NAME = "c8ctl-plugin-npm-runtime";
 
 let testDataDir: string;
@@ -154,10 +154,10 @@ describe("plugin runtime: c8ctl.npm()", () => {
  */
 describe("plugin runtime: c8ctl.npm() honours --prefix (#526)", () => {
 	/** Create `<testDataDir>/<projectName>/.camunda` with a dependency-free package. */
-	function createProject(projectName: string): {
-		projectDir: string;
-		prefixDir: string;
-	} {
+	function createProject(
+		projectName: string,
+		options: { workspaceRoot?: boolean } = {},
+	): { projectDir: string; prefixDir: string } {
 		const projectDir = join(testDataDir, projectName);
 		const prefixDir = join(projectDir, ".camunda");
 		mkdirSync(prefixDir, { recursive: true });
@@ -169,11 +169,25 @@ describe("plugin runtime: c8ctl.npm() honours --prefix (#526)", () => {
 				private: true,
 			}),
 		);
+		if (options.workspaceRoot) {
+			writeFileSync(
+				join(projectDir, "package.json"),
+				JSON.stringify({
+					name: "c8ctl-prefix-scope-workspace-root",
+					version: "1.0.0",
+					private: true,
+					workspaces: [".camunda"],
+				}),
+			);
+		}
 		return { projectDir, prefixDir };
 	}
 
-	async function assertInstalledUnderPrefix(projectName: string) {
-		const { projectDir, prefixDir } = createProject(projectName);
+	async function assertInstalledUnderPrefix(
+		projectName: string,
+		options: { workspaceRoot?: boolean } = {},
+	) {
+		const { projectDir, prefixDir } = createProject(projectName, options);
 
 		const result = await c8Plugin(["npm-prefix-install", prefixDir], {
 			cwd: projectDir,
@@ -200,5 +214,15 @@ describe("plugin runtime: c8ctl.npm() honours --prefix (#526)", () => {
 
 	test("installs into a prefix directory whose path contains spaces", async () => {
 		await assertInstalledUnderPrefix("my project");
+	});
+
+	test("installs into the prefix even when an ancestor declares it as a workspace", async () => {
+		// `--prefix` pins npm's local prefix outright, but resolving it from a
+		// working directory does not: npm keeps walking up and promotes the
+		// local prefix to a workspace root that claims the directory. Without a
+		// guard the install would land at the project root instead.
+		await assertInstalledUnderPrefix("workspace-project", {
+			workspaceRoot: true,
+		});
 	});
 });

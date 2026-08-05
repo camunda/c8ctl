@@ -142,7 +142,7 @@ describe("buildNpmInvocation", () => {
  * installs the *process cwd* instead — the ENOENT reported in #526.
  */
 describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
-	const hasPackageJson = () => true;
+	const readPrefixManifest = () => ({ declaresWorkspaces: false });
 
 	test("runs a bare install in the prefix directory instead of passing --prefix", () => {
 		const invocation = buildNpmInvocation({
@@ -154,13 +154,14 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 				"--ignore-scripts",
 			],
 			platform: "win32",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(invocation.cwd, "C:\\projects\\app\\.camunda");
 		assert.deepStrictEqual(invocation.args, [
 			'"install"',
 			'"--package-lock-only"',
 			'"--ignore-scripts"',
+			'"--workspaces=false"',
 		]);
 	});
 
@@ -168,10 +169,13 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 		const invocation = buildNpmInvocation({
 			args: ["install", "--prefix=C:\\projects\\app\\.camunda"],
 			platform: "win32",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(invocation.cwd, "C:\\projects\\app\\.camunda");
-		assert.deepStrictEqual(invocation.args, ['"install"']);
+		assert.deepStrictEqual(invocation.args, [
+			'"install"',
+			'"--workspaces=false"',
+		]);
 	});
 
 	test("rescopes install aliases and the -C short form", () => {
@@ -179,10 +183,13 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 			const invocation = buildNpmInvocation({
 				args: [alias, "-C", "C:\\projects\\app\\.camunda"],
 				platform: "win32",
-				hasPackageJson,
+				readPrefixManifest,
 			});
 			assert.strictEqual(invocation.cwd, "C:\\projects\\app\\.camunda");
-			assert.deepStrictEqual(invocation.args, [`"${alias}"`]);
+			assert.deepStrictEqual(invocation.args, [
+				`"${alias}"`,
+				'"--workspaces=false"',
+			]);
 		}
 	});
 
@@ -190,13 +197,16 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 		const invocation = buildNpmInvocation({
 			args: ["install", "--prefix", "C:\\Users\\First Last\\my app\\.camunda"],
 			platform: "win32",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(
 			invocation.cwd,
 			"C:\\Users\\First Last\\my app\\.camunda",
 		);
-		assert.deepStrictEqual(invocation.args, ['"install"']);
+		assert.deepStrictEqual(invocation.args, [
+			'"install"',
+			'"--workspaces=false"',
+		]);
 	});
 
 	test("leaves an install with a package spec alone — npm resolves --prefix correctly there", () => {
@@ -208,7 +218,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 				"C:\\Users\\user\\AppData\\Roaming\\c8ctl\\plugins",
 			],
 			platform: "win32",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(invocation.cwd, undefined);
 		assert.deepStrictEqual(invocation.args, [
@@ -224,7 +234,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 			const invocation = buildNpmInvocation({
 				args: ["install", globalFlag, "--prefix", "C:\\tools\\npm"],
 				platform: "win32",
-				hasPackageJson,
+				readPrefixManifest,
 			});
 			assert.strictEqual(invocation.cwd, undefined);
 			assert.ok(invocation.args.includes('"--prefix"'));
@@ -236,7 +246,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 			const invocation = buildNpmInvocation({
 				args: [command, "--prefix", "C:\\projects\\app\\.camunda"],
 				platform: "win32",
-				hasPackageJson,
+				readPrefixManifest,
 			});
 			assert.strictEqual(invocation.cwd, undefined);
 			assert.ok(invocation.args.includes('"--prefix"'));
@@ -249,10 +259,40 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 		const invocation = buildNpmInvocation({
 			args: ["install", "--prefix", "C:\\projects\\app\\.camunda"],
 			platform: "win32",
-			hasPackageJson: () => false,
+			readPrefixManifest: () => null,
 		});
 		assert.strictEqual(invocation.cwd, undefined);
 		assert.ok(invocation.args.includes('"--prefix"'));
+	});
+
+	test("leaves a prefix that is itself a workspace root alone", () => {
+		// `--workspaces=false` would bound npm's walk-up (which is all the
+		// rescope wants) but would also drop the prefix's own workspaces from
+		// the install, so the invocation is left untouched instead.
+		const invocation = buildNpmInvocation({
+			args: ["install", "--prefix", "C:\\projects\\monorepo"],
+			platform: "win32",
+			readPrefixManifest: () => ({ declaresWorkspaces: true }),
+		});
+		assert.strictEqual(invocation.cwd, undefined);
+		assert.ok(invocation.args.includes('"--prefix"'));
+	});
+
+	test("leaves an invocation that already carries a workspace selector alone", () => {
+		for (const flag of [
+			"--workspaces",
+			"--workspaces=true",
+			"--no-workspaces",
+			"--workspace=pkg-a",
+		]) {
+			const invocation = buildNpmInvocation({
+				args: ["install", flag, "--prefix", "C:\\projects\\app\\.camunda"],
+				platform: "win32",
+				readPrefixManifest,
+			});
+			assert.strictEqual(invocation.cwd, undefined, `for ${flag}`);
+			assert.ok(invocation.args.includes('"--prefix"'), `for ${flag}`);
+		}
 	});
 
 	test("leaves an ambiguous bare token alone rather than guessing", () => {
@@ -267,7 +307,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 				"C:\\projects\\app\\.camunda",
 			],
 			platform: "win32",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(invocation.cwd, undefined);
 		assert.ok(invocation.args.includes('"--prefix"'));
@@ -279,7 +319,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 				buildNpmInvocation({
 					args: ["install", "--prefix", "%APPDATA%\\evil"],
 					platform: "win32",
-					hasPackageJson,
+					readPrefixManifest,
 				}),
 			/environment variable reference/,
 		);
@@ -289,7 +329,7 @@ describe("buildNpmInvocation: Windows --prefix rescope (#526)", () => {
 		const invocation = buildNpmInvocation({
 			args: ["install", "--prefix", "/home/user/app/.camunda"],
 			platform: "linux",
-			hasPackageJson,
+			readPrefixManifest,
 		});
 		assert.strictEqual(invocation.cwd, undefined);
 		assert.deepStrictEqual(invocation.args, [
