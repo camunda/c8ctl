@@ -6,7 +6,7 @@
   "keywords": ["c8ctl", "c8ctl-plugin", "element-template", "camunda"],
   "main": "c8ctl-plugin.ts",
   "dependencies": {
-    "bpmn-moddle": "^9.0.1",
+    "bpmn-moddle": "^10.0.0",
     "semver": "^7.6.3"
   },
   "devDependencies": {
