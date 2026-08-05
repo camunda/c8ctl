@@ -7,6 +7,7 @@
 export * from "./command-framework.ts";
 export * from "./command-registry.ts";
 export * from "./command-validation.ts";
+export * from "./plugins/plugin-compat.ts";
 export * from "./plugins/plugin-loader.ts";
 export * from "./plugins/plugin-registry.ts";
 export * from "./plugins/plugin-version.ts";

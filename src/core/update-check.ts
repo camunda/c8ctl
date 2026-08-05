@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getUserDataDir } from "./config.ts";
 import { isRecord } from "./logger.ts";
-import { c8ctl } from "./runtime.ts";
+import { c8ctl, isUnversionedDevBuild } from "./runtime.ts";
 
 /** npm registry metadata endpoint (returns JSON with dist-tags). */
 const REGISTRY_URL = "https://registry.npmjs.org/@camunda8/cli";
@@ -189,7 +189,7 @@ export function startUpdateCheck(currentVersion: string): void {
 	if (process.env.CI) return;
 
 	// Suppress for the development placeholder version
-	if (currentVersion === "0.0.0-semantically-released") return;
+	if (isUnversionedDevBuild(currentVersion)) return;
 
 	const channel = detectChannel(currentVersion);
 
