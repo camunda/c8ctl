@@ -4,7 +4,11 @@
 
 import { fetchAllPages } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
-import { buildDateFilter, parseBetween } from "../utils/index.ts";
+import {
+	buildDateFilter,
+	parseBetween,
+	parseVariablesFlag,
+} from "../utils/index.ts";
 
 /**
  * List user tasks
@@ -89,7 +93,7 @@ export const completeUserTaskCommand = defineCommand(
 		const body: Record<string, unknown> = {};
 		let variables: Record<string, unknown> | undefined;
 		if (flags.variables) {
-			variables = JSON.parse(flags.variables);
+			variables = parseVariablesFlag({ raw: flags.variables });
 			body.variables = variables;
 		}
 

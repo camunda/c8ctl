@@ -503,7 +503,7 @@ Create a resource (process instance, identity)
 | `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
 | `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
 | `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 | `--awaitCompletion` | boolean |  | Wait for process to complete |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
 | `--requestTimeout` | string |  | Await timeout in milliseconds |
@@ -642,7 +642,7 @@ Create and await process instance completion (server-side waiting)
 | `--id` | string |  | Process definition ID (alias for --processDefinitionId) |
 | `--bpmnProcessId` | string |  | BPMN process ID (alias for --processDefinitionId) |
 | `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 | `--fetchVariables` | boolean |  | Fetch result variables on completion |
 | `--requestTimeout` | string |  | Await timeout in milliseconds |
 
@@ -671,7 +671,7 @@ Complete a user task or job
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 
 ---
 
@@ -770,7 +770,7 @@ Publish a message for message correlation
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--correlationKey` | string |  | Correlation key |
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 | `--timeToLive` | string |  | Time to live in milliseconds |
 
 ---
@@ -790,7 +790,7 @@ Correlate a message to a specific process instance
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--correlationKey` | string | Yes | Correlation key |
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 | `--timeToLive` | string |  | Time to live in milliseconds |
 
 ---
@@ -811,7 +811,7 @@ Set variables on an element instance (process instance or flow element scope). V
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
-| `--variables` | string | Yes | JSON object of variables to set (required) |
+| `--variables` | string | Yes | JSON object of variables to set, or @file.json / @- to read from file/stdin (required) |
 | `--local` | boolean |  | Set variables in local scope only (default: propagate to outermost scope) |
 
 **Examples:**
@@ -857,7 +857,7 @@ Deploy and start a process instance from a BPMN file
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
 | `--businessId` | string |  | Business ID for the process instance (Camunda 8.9+) |
-| `--variables` | string |  | JSON variables |
+| `--variables` | string |  | JSON variables (or @file.json / @- to read from file/stdin) |
 | `--force` | boolean |  | Deploy any file type, ignoring the default extension allow-list |
 
 **Examples:**

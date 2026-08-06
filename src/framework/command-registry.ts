@@ -311,7 +311,10 @@ const CREATE_PI_FLAGS = {
 		description: "Business ID for the process instance (Camunda 8.9+)",
 		validate: BusinessId.assumeExists,
 	},
-	variables: { type: "string", description: "JSON variables" },
+	variables: {
+		type: "string",
+		description: "JSON variables (or @file.json / @- to read from file/stdin)",
+	},
 	awaitCompletion: {
 		type: "boolean",
 		description: "Wait for process to complete",
@@ -1142,7 +1145,11 @@ export const COMMAND_REGISTRY = {
 				description: "Business ID for the process instance (Camunda 8.9+)",
 				validate: BusinessId.assumeExists,
 			},
-			variables: { type: "string", description: "JSON variables" },
+			variables: {
+				type: "string",
+				description:
+					"JSON variables (or @file.json / @- to read from file/stdin)",
+			},
 			fetchVariables: {
 				type: "boolean",
 				description: "Fetch result variables on completion",
@@ -1164,7 +1171,11 @@ export const COMMAND_REGISTRY = {
 		requiresResource: true,
 		resources: ["ut", "job"],
 		flags: {
-			variables: { type: "string", description: "JSON variables" },
+			variables: {
+				type: "string",
+				description:
+					"JSON variables (or @file.json / @- to read from file/stdin)",
+			},
 		},
 		resourcePositionals: {
 			"user-task": [
@@ -1321,7 +1332,11 @@ export const COMMAND_REGISTRY = {
 				type: "string",
 				description: "Correlation key",
 			},
-			variables: { type: "string", description: "JSON variables" },
+			variables: {
+				type: "string",
+				description:
+					"JSON variables (or @file.json / @- to read from file/stdin)",
+			},
 			timeToLive: {
 				type: "string",
 				description: "Time to live in milliseconds",
@@ -1348,7 +1363,11 @@ export const COMMAND_REGISTRY = {
 				description: "Correlation key",
 				required: true,
 			},
-			variables: { type: "string", description: "JSON variables" },
+			variables: {
+				type: "string",
+				description:
+					"JSON variables (or @file.json / @- to read from file/stdin)",
+			},
 			timeToLive: {
 				type: "string",
 				description: "Time to live in milliseconds",
@@ -1386,7 +1405,8 @@ export const COMMAND_REGISTRY = {
 		flags: {
 			variables: {
 				type: "string",
-				description: "JSON object of variables to set (required)",
+				description:
+					"JSON object of variables to set, or @file.json / @- to read from file/stdin (required)",
 				required: true,
 			},
 			local: {
@@ -1470,7 +1490,11 @@ export const COMMAND_REGISTRY = {
 				description: "Business ID for the process instance (Camunda 8.9+)",
 				validate: BusinessId.assumeExists,
 			},
-			variables: { type: "string", description: "JSON variables" },
+			variables: {
+				type: "string",
+				description:
+					"JSON variables (or @file.json / @- to read from file/stdin)",
+			},
 			force: {
 				type: "boolean",
 				description:
