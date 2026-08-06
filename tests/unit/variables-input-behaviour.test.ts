@@ -3,20 +3,33 @@
  *
  * Inline JSON is quoting-hostile: PowerShell strips or re-splits the quotes
  * of a native command argument, so `{"a":"b"}` reaches the CLI as `{a:b}`.
- * These tests pin the quoting-proof escape hatches (`@file`, `@-`) and the
- * actionable hint emitted when inline JSON arrives mangled.
+ * These tests pin three things: intact inline JSON parses (using the sample
+ * payload from the issue verbatim), quote-stripped inline JSON is restored,
+ * and payloads that cannot be restored fail with a hint pointing at the
+ * quoting-proof `@file` / `@-` forms.
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { after, describe, test } from "node:test";
 import { c8, parseJson } from "../utils/cli.ts";
 import { asRecord } from "../utils/guards.ts";
 import { asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
+
+/**
+ * The exact payload reported in #528 — long, deeply nested, and full of
+ * colons, commas, em dashes, backticks and curly quotes inside its strings.
+ */
+const ISSUE_PAYLOAD: unknown = JSON.parse(
+	readFileSync(
+		resolve(import.meta.dirname, "..", "fixtures", "issue-528-variables.json"),
+		"utf-8",
+	),
+);
 
 const TMP_DIR = mkdtempSync(join(tmpdir(), "c8ctl-variables-input-"));
 after(() => rmSync(TMP_DIR, { recursive: true, force: true }));
@@ -93,7 +106,22 @@ describe("CLI behavioural: --variables input", () => {
 		});
 	});
 
-	test("shell-mangled inline JSON fails with a quoting hint", async () => {
+	test("parses the #528 payload inline", async () => {
+		const result = await c8(
+			"complete",
+			"job",
+			"2251799813692033",
+			"--variables",
+			JSON.stringify(ISSUE_PAYLOAD),
+			"--dry-run",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.deepStrictEqual(body.variables, ISSUE_PAYLOAD);
+	});
+
+	test("restores quotes stripped from inline JSON by the shell", async () => {
 		// {a:b} is what PowerShell leaves behind after stripping the quotes
 		// of {"a":"b"}.
 		const result = await c8(
@@ -105,7 +133,54 @@ describe("CLI behavioural: --variables input", () => {
 			"--dry-run",
 		);
 
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.deepStrictEqual(body.variables, { a: "b" });
+		assert.ok(
+			result.stderr.includes("restored quotes stripped by the shell"),
+			`expected a repair warning; stderr: ${result.stderr}`,
+		);
+	});
+
+	test("restoring quotes preserves nesting, numbers and booleans", async () => {
+		const result = await c8(
+			"create",
+			"pi",
+			"--id",
+			"my-process",
+			"--variables",
+			"{orderId:12345,customer:Jane Doe,paid:true,items:[pen,2],meta:{tag:x}}",
+			"--dry-run",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const body = asRecord(parseJson(result).body, "dry-run body");
+		assert.deepStrictEqual(body.variables, {
+			orderId: 12345,
+			customer: "Jane Doe",
+			paid: true,
+			items: ["pen", 2],
+			meta: { tag: "x" },
+		});
+	});
+
+	test("unrestorable mangled JSON fails with a quoting hint", async () => {
+		// Stripping the quotes from the #528 payload is irreversible: its
+		// strings contain the ':' and ',' that would delimit the tokens.
+		const result = await c8(
+			"complete",
+			"job",
+			"2251799813692033",
+			"--variables",
+			JSON.stringify(ISSUE_PAYLOAD).replaceAll('"', ""),
+			"--dry-run",
+		);
+
 		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("lost its quotes"),
+			`expected a quote-stripping diagnosis; stderr: ${result.stderr}`,
+		);
 		assert.ok(
 			result.stderr.includes("--variables @vars.json"),
 			`expected quoting hint; stderr: ${result.stderr}`,

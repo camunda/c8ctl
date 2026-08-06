@@ -463,6 +463,8 @@ c8 complete job 2251799813685252 --variables=@vars.json
 Get-Content vars.json | c8 complete job 2251799813685252 --variables=@-
 ```
 
+When inline JSON arrives with all of its quotes stripped (`{a:b}` instead of `{"a":"b"}`), c8ctl restores them and prints a warning showing the payload it recovered. Restoration is best-effort: it cannot tell `{"a":1}` from `{"a":"1"}`, and it fails outright when a stripped string contained a `:` or `,` of its own. Use `@file.json` or `@-` for anything non-trivial.
+
 The element instance key is the key of the process instance or the specific flow element scope you want to update. You can retrieve these keys from `c8 get pi` or `c8 search pi`.
 
 ## Identity management
