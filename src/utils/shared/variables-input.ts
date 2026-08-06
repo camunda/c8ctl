@@ -136,8 +136,8 @@ export function parseVariablesFlag({
 	} catch (error) {
 		// Inline input only: an `@file` / `@-` payload never went through
 		// shell quoting, so a repair there would be guesswork.
-		const repaired = origin ? null : tryRequote(text);
-		if (repaired === null) {
+		const repair = origin ? null : tryRequote(text);
+		if (!repair) {
 			const msg = error instanceof Error ? error.message : String(error);
 			if (origin) {
 				throw new Error(`Invalid JSON for ${label}${from}: ${msg}`);
@@ -152,7 +152,14 @@ export function parseVariablesFlag({
 				`Invalid JSON for ${label}: ${msg}.${stripped} ${QUOTING_HINT}`,
 			);
 		}
-		parsed = repaired;
+		// Announce the repair: re-quoting cannot recover the original
+		// string/number distinction (`{a:1}` could have been `{"a":1}` or
+		// `{"a":"1"}`), so the user gets to see what was sent.
+		getLogger().warn(
+			`--variables: restored quotes stripped by the shell -> ${repair.json}. ` +
+				"Use --variables @file.json or @- to pass JSON verbatim.",
+		);
+		parsed = repair.value;
 	}
 
 	if (!isRecord(parsed)) {
@@ -168,25 +175,18 @@ export function parseVariablesFlag({
 /**
  * Attempt the quote-stripping repair and parse the result.
  *
- * Returns the parsed value, or `null` when the input is not repairable.
- * A successful repair is announced on stderr: re-quoting cannot recover
- * the original string/number distinction (`{a:1}` could have been
- * `{"a":1}` or `{"a":"1"}`), so the user gets to see what was sent.
+ * Pure: returns both the repaired JSON text (for the caller's warning) and
+ * the value it parsed to, or `null` when the input is not repairable. The
+ * wrapper object keeps the "not repairable" sentinel distinct from a
+ * payload that legitimately parsed to `null`.
  */
-function tryRequote(text: string): unknown {
-	const repaired = requoteStrippedJson(text);
-	if (repaired === null) return null;
+function tryRequote(text: string): { json: string; value: unknown } | null {
+	const json = requoteStrippedJson(text);
+	if (json === null) return null;
 
-	let parsed: unknown;
 	try {
-		parsed = JSON.parse(repaired);
+		return { json, value: JSON.parse(json) };
 	} catch {
 		return null;
 	}
-
-	getLogger().warn(
-		`--variables: restored quotes stripped by the shell -> ${repaired}. ` +
-			"Use --variables @file.json or @- to pass JSON verbatim.",
-	);
-	return parsed;
 }
