@@ -22,9 +22,9 @@ const QUOTING_HINT =
  * Resolve the raw flag value to JSON text, following an `@file` / `@-`
  * reference when present.
  */
-function readVariablesSource(raw: string): string {
+function readVariablesSource(raw: string): { text: string; origin?: string } {
 	const value = raw.trim();
-	if (!value.startsWith("@")) return value;
+	if (!value.startsWith("@")) return { text: value };
 
 	const ref = value.slice(1);
 	if (ref === "-") {
@@ -33,13 +33,17 @@ function readVariablesSource(raw: string): string {
 				"--variables @- expects JSON on stdin, but stdin is a terminal",
 			);
 		}
-		return readFileSync(0, "utf-8");
+		// Blocking read of fd 0 until EOF, the same contract as `cat -`:
+		// the producer of the pipe is expected to close it. Reading stdin
+		// synchronously here is safe because `--variables` is parsed once
+		// per invocation, before any other stdin consumer runs.
+		return { text: readFileSync(0, "utf-8"), origin: "stdin" };
 	}
 	if (!ref) {
 		throw new Error("--variables @ requires a file path (e.g. @vars.json)");
 	}
 	try {
-		return readFileSync(ref, "utf-8");
+		return { text: readFileSync(ref, "utf-8"), origin: `'${ref}'` };
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		throw new Error(`Cannot read variables file '${ref}': ${msg}`);
@@ -59,21 +63,28 @@ export function parseVariablesFlag({
 	raw: string;
 	label?: string;
 }): Record<string, unknown> {
-	const source = readVariablesSource(raw);
+	const { text, origin } = readVariablesSource(raw);
+	// Name the input source so a bad file or piped payload is not mistaken
+	// for a bad inline argument.
+	const from = origin ? ` (read from ${origin})` : "";
 
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(source);
+		parsed = JSON.parse(text);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		throw new Error(`Invalid JSON for ${label}: ${msg}. ${QUOTING_HINT}`);
+		throw new Error(
+			origin
+				? `Invalid JSON for ${label}${from}: ${msg}`
+				: `Invalid JSON for ${label}: ${msg}. ${QUOTING_HINT}`,
+		);
 	}
 
 	if (!isRecord(parsed)) {
 		throw new Error(
 			Array.isArray(parsed)
-				? "--variables must be a JSON object (not an array)"
-				: "--variables must be a JSON object",
+				? `--variables must be a JSON object (not an array)${from}`
+				: `--variables must be a JSON object${from}`,
 		);
 	}
 	return parsed;

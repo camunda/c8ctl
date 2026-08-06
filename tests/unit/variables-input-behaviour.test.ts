@@ -149,5 +149,9 @@ describe("CLI behavioural: --variables input", () => {
 			result.stderr.includes("--variables must be a JSON object"),
 			`stderr: ${result.stderr}`,
 		);
+		assert.ok(
+			result.stderr.includes(path),
+			`expected the file to be named as the source; stderr: ${result.stderr}`,
+		);
 	});
 });
