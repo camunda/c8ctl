@@ -15,3 +15,4 @@ export * from "./shared/ignore.ts";
 export * from "./shared/npm-exec.ts";
 export * from "./shared/resource-extensions.ts";
 export * from "./shared/validation.ts";
+export * from "./shared/variables-input.ts";

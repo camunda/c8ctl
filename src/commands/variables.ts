@@ -2,8 +2,8 @@
  * Variable commands
  */
 
-import { isRecord } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
+import { parseVariablesFlag } from "../utils/index.ts";
 
 /**
  * Set variables on an element instance (process instance or flow element).
@@ -21,22 +21,10 @@ export const setVariableCommand = defineCommand(
 		// by validateFlags (#308), so rawVariables is guaranteed non-empty here.
 		const rawVariables = flags.variables;
 
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(rawVariables);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			throw new Error(`Invalid JSON for --variables: ${msg}`);
-		}
-
-		if (!isRecord(parsed)) {
-			throw new Error(
-				Array.isArray(parsed)
-					? "--variables must be a JSON object (not an array)"
-					: "--variables must be a JSON object",
-			);
-		}
-		const variables: Record<string, unknown> = parsed;
+		const variables = parseVariablesFlag({
+			raw: rawVariables,
+			label: "--variables",
+		});
 
 		const local = flags.local === true;
 
