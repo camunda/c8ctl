@@ -57,8 +57,6 @@ present in the index (including prereleases), and its
 `id` + `version` appear in the marketplace index. The archive is a recovery
 source, not a second catalogue: archive-only templates are ignored and a
 non-403 error alone does not trigger it.
-`C8CTL_CONNECTOR_RELEASES_URL` and `C8CTL_CONNECTOR_TEMPLATES_ARCHIVE_URL`
-override the GitHub API and archive URL for tests or restricted environments.
 
 The release also offers a `.tar.gz` asset, but Node supports gzip
 decompression without a TAR reader. ZIP plus the plugin-local `fflate`

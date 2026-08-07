@@ -26,6 +26,12 @@ import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 const FIXTURES_DIR = resolve(import.meta.dirname, "..", "fixtures");
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = "src/index.ts";
+const CONNECTOR_RELEASES_FETCH_MOCK = join(
+	REPO_ROOT,
+	"tests",
+	"fixtures",
+	"mock-connector-releases.mjs",
+);
 const BPMN_FILE = join(FIXTURES_DIR, "simple.bpmn");
 const TEMPLATE_FILE = join(FIXTURES_DIR, "http-json-connector.json");
 
@@ -2822,7 +2828,6 @@ async function startMarketplaceStub(
 
 type ArchiveFallbackStub = {
 	marketplaceUrl: string;
-	releasesUrl: string;
 	releaseRequests: () => number;
 	archiveRequests: () => number;
 	rawRequests: () => number;
@@ -2959,7 +2964,6 @@ async function startArchiveFallbackStub({
 	const port = getServerPort(server);
 	return {
 		marketplaceUrl: `http://127.0.0.1:${port}/ootb-connectors`,
-		releasesUrl: `http://127.0.0.1:${port}/releases`,
 		releaseRequests: () => releaseRequestCount,
 		archiveRequests: () => archiveRequestCount,
 		rawRequests: () => rawRequestCount,
@@ -2992,6 +2996,8 @@ describe("CLI behavioural: element-template sync 403 archive fallback", () => {
 			const result = await asyncSpawn(
 				"node",
 				[
+					"--import",
+					CONNECTOR_RELEASES_FETCH_MOCK,
 					"--experimental-strip-types",
 					CLI,
 					"--json",
@@ -3004,7 +3010,6 @@ describe("CLI behavioural: element-template sync 403 archive fallback", () => {
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
 						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
-						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
 					},
 				},
 			);
@@ -3067,6 +3072,8 @@ describe("CLI behavioural: element-template sync 403 archive fallback", () => {
 			const result = await asyncSpawn(
 				"node",
 				[
+					"--import",
+					CONNECTOR_RELEASES_FETCH_MOCK,
 					"--experimental-strip-types",
 					CLI,
 					"--json",
@@ -3079,7 +3086,6 @@ describe("CLI behavioural: element-template sync 403 archive fallback", () => {
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
 						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
-						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
 					},
 				},
 			);
@@ -3129,7 +3135,6 @@ describe("CLI behavioural: element-template sync 403 archive fallback", () => {
 						HOME: "/tmp/c8ctl-test-nonexistent-home",
 						C8CTL_DATA_DIR: dataDir,
 						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
-						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
 					},
 				},
 			);

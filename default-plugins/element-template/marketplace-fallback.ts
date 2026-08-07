@@ -161,12 +161,7 @@ function parseConnectorRelease(value: unknown): ConnectorRelease | null {
 async function getConnectorArchiveUrl(
 	entries: MarketplaceTemplateEntry[],
 ): Promise<string> {
-	const override = process.env.C8CTL_CONNECTOR_TEMPLATES_ARCHIVE_URL;
-	if (override) return override;
-
-	const releasesUrl =
-		process.env.C8CTL_CONNECTOR_RELEASES_URL || DEFAULT_CONNECTOR_RELEASES_URL;
-	const raw = await fetchJson(releasesUrl, {
+	const raw = await fetchJson(DEFAULT_CONNECTOR_RELEASES_URL, {
 		Accept: "application/vnd.github+json",
 	});
 	if (!Array.isArray(raw)) {

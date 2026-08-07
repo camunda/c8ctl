@@ -317,10 +317,7 @@ warning at the end (the property won't be applied).
    Camunda engine line in the index (including prereleases), and downloads one
    template ZIP. It keeps only indexed `id` + `version` entries and uses the
    archive for every template that did not already download successfully.
-   Non-403 ref errors do not start ZIP recovery. Set
-   `C8CTL_CONNECTOR_RELEASES_URL` or
-   `C8CTL_CONNECTOR_TEMPLATES_ARCHIVE_URL` to override the release lookup
-   during testing or in restricted environments.
+   Non-403 ref errors do not start ZIP recovery.
 3. **Local file or URL** template args (paths containing `/` or `\`,
    starting with `.`, ending in `.json`, or starting with `http(s)://`)
    skip the index entirely.
