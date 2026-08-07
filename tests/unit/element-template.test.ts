@@ -18,6 +18,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { zipSync } from "fflate";
 import { isRecord } from "../../src/core/logger.ts";
 import { c8 } from "../utils/cli.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
@@ -2818,6 +2819,330 @@ async function startMarketplaceStub(
 			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
 	};
 }
+
+type ArchiveFallbackStub = {
+	marketplaceUrl: string;
+	releasesUrl: string;
+	releaseRequests: () => number;
+	archiveRequests: () => number;
+	rawRequests: () => number;
+	close: () => Promise<void>;
+};
+
+async function startArchiveFallbackStub({
+	indexTemplates,
+	archiveTemplates,
+	rawStatus = 403,
+	rawStatusesByIndex = {},
+	rawTemplatesByIndex = {},
+}: {
+	indexTemplates: Array<Record<string, unknown>>;
+	archiveTemplates: Array<Record<string, unknown>>;
+	rawStatus?: number;
+	rawStatusesByIndex?: Record<number, number>;
+	rawTemplatesByIndex?: Record<number, Record<string, unknown>>;
+}): Promise<ArchiveFallbackStub> {
+	const index: Record<
+		string,
+		Array<{ version: number; ref: string; engine: { camunda: string } }>
+	> = {};
+	const archiveFiles: Record<string, Uint8Array> = {};
+	for (const [indexPosition, template] of indexTemplates.entries()) {
+		if (
+			typeof template.id !== "string" ||
+			typeof template.version !== "number"
+		) {
+			throw new Error("Archive fallback test templates need id and version");
+		}
+		index[template.id] ||= [];
+		index[template.id].push({
+			version: template.version,
+			ref: `__BASE__/raw/${indexPosition}.json`,
+			engine: { camunda: "^8.10" },
+		});
+	}
+	for (const [archivePosition, template] of archiveTemplates.entries()) {
+		archiveFiles[`template-${archivePosition}.json`] = new TextEncoder().encode(
+			JSON.stringify(template),
+		);
+	}
+	const archive = zipSync(archiveFiles);
+	const stableArchive = zipSync({});
+	let releaseRequestCount = 0;
+	let archiveRequestCount = 0;
+	let rawRequestCount = 0;
+
+	const server: Server = createServer((req, res) => {
+		if (!req.url) {
+			res.statusCode = 400;
+			res.end();
+			return;
+		}
+		const baseUrl = `http://127.0.0.1:${getServerPort(server)}`;
+		if (req.url === "/ootb-connectors") {
+			const rewritten = Object.fromEntries(
+				Object.entries(index).map(([id, entries]) => [
+					id,
+					entries.map((entry) => ({
+						...entry,
+						ref: entry.ref.replace("__BASE__", baseUrl),
+					})),
+				]),
+			);
+			res.setHeader("content-type", "application/json");
+			res.end(JSON.stringify(rewritten));
+			return;
+		}
+		if (req.url.startsWith("/raw/")) {
+			rawRequestCount += 1;
+			const indexPosition = Number(
+				req.url.slice("/raw/".length, -".json".length),
+			);
+			const rawTemplate = rawTemplatesByIndex[indexPosition];
+			if (rawTemplate) {
+				res.setHeader("content-type", "application/json");
+				res.end(JSON.stringify(rawTemplate));
+				return;
+			}
+			res.statusCode = rawStatusesByIndex[indexPosition] ?? rawStatus;
+			res.end();
+			return;
+		}
+		if (req.url === "/releases") {
+			releaseRequestCount += 1;
+			res.setHeader("content-type", "application/json");
+			res.end(
+				JSON.stringify([
+					{
+						draft: false,
+						tag_name: "8.9.7",
+						assets: [
+							{
+								name: "connectors-bundle-templates-8.9.7.zip",
+								browser_download_url: `${baseUrl}/stable.zip`,
+							},
+						],
+					},
+					{
+						draft: false,
+						tag_name: "8.10.0-alpha4",
+						assets: [
+							{
+								name: "connectors-bundle-templates-8.10.0-alpha4.zip",
+								browser_download_url: `${baseUrl}/archive.zip`,
+							},
+						],
+					},
+				]),
+			);
+			return;
+		}
+		if (req.url === "/archive.zip") {
+			archiveRequestCount += 1;
+			res.setHeader("content-type", "application/zip");
+			res.end(archive);
+			return;
+		}
+		if (req.url === "/stable.zip") {
+			res.setHeader("content-type", "application/zip");
+			res.end(stableArchive);
+			return;
+		}
+		res.statusCode = 404;
+		res.end();
+	});
+
+	await new Promise<void>((resolveListen, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => resolveListen());
+	});
+	const port = getServerPort(server);
+	return {
+		marketplaceUrl: `http://127.0.0.1:${port}/ootb-connectors`,
+		releasesUrl: `http://127.0.0.1:${port}/releases`,
+		releaseRequests: () => releaseRequestCount,
+		archiveRequests: () => archiveRequestCount,
+		rawRequests: () => rawRequestCount,
+		close: () =>
+			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+	};
+}
+
+describe("CLI behavioural: element-template sync 403 archive fallback", () => {
+	test("switches to one compatible archive and keeps only indexed templates", async () => {
+		const requested = Array.from({ length: 24 }, (_, index) => ({
+			id: `io.example.requested-${index}`,
+			name: `Requested ${index}`,
+			version: 1,
+			properties: [],
+		}));
+		const archiveOnly = {
+			id: "io.example.archive-only",
+			name: "Archive only",
+			version: 1,
+			properties: [],
+		};
+		const stub = await startArchiveFallbackStub({
+			indexTemplates: requested,
+			archiveTemplates: [...requested.slice(1), archiveOnly],
+			rawTemplatesByIndex: { 0: requested[0] },
+		});
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-archive-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+				],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
+						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(stub.releaseRequests(), 1);
+			assert.strictEqual(stub.archiveRequests(), 1);
+			assert.ok(
+				stub.rawRequests() < requested.length,
+				"Raw downloads should stop when archive recovery begins.",
+			);
+			const cache = JSON.parse(
+				readFileSync(
+					join(dataDir, "element-templates", "templates.json"),
+					"utf8",
+				),
+			);
+			assert.strictEqual(cache.length, requested.length);
+			assert.deepStrictEqual(
+				cache
+					.map((template: { id: string }) => template.id)
+					.sort((a: string, b: string) => a.localeCompare(b)),
+				requested
+					.map((template) => template.id)
+					.sort((a, b) => a.localeCompare(b)),
+			);
+			for (const template of cache) {
+				assert.strictEqual(
+					template.metadata.upstreamRef.includes("/raw/"),
+					true,
+				);
+			}
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("recovers every unfinished template after another ref returns 403", async () => {
+		const requested = [
+			{
+				id: "io.example.forbidden",
+				name: "Forbidden",
+				version: 1,
+				properties: [],
+			},
+			{
+				id: "io.example.not-found",
+				name: "Not found",
+				version: 1,
+				properties: [],
+			},
+		];
+		const stub = await startArchiveFallbackStub({
+			indexTemplates: requested,
+			archiveTemplates: requested,
+			rawStatusesByIndex: { 0: 403, 1: 404 },
+		});
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-archive-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+				],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
+						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(stub.releaseRequests(), 1);
+			assert.strictEqual(stub.archiveRequests(), 1);
+			const cache = JSON.parse(
+				readFileSync(
+					join(dataDir, "element-templates", "templates.json"),
+					"utf8",
+				),
+			);
+			assert.strictEqual(cache.length, requested.length);
+			assert.doesNotMatch(result.stderr, /HTTP 404/);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not use the archive fallback for non-403 template errors", async () => {
+		const requested = {
+			id: "io.example.not-found",
+			name: "Not found",
+			version: 1,
+			properties: [],
+		};
+		const stub = await startArchiveFallbackStub({
+			indexTemplates: [requested],
+			archiveTemplates: [requested],
+			rawStatus: 404,
+		});
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-archive-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+				],
+				{
+					env: {
+						...process.env,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_OOTB_ELEMENT_TEMPLATES_URL: stub.marketplaceUrl,
+						C8CTL_CONNECTOR_RELEASES_URL: stub.releasesUrl,
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(stub.releaseRequests(), 0);
+			assert.strictEqual(stub.archiveRequests(), 0);
+			assert.match(result.stderr, /HTTP 404/);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("CLI behavioural: element-template sync lockfile", () => {
 	test("second concurrent sync exits non-zero pointing at the lockfile", async () => {
