@@ -202,6 +202,15 @@ c8ctl.npm({ args: ['install', 'c8ctl-plugin-foo'], stdio: 'inherit' });
 
 `stdout: true` returns `{ stdout: string }`; omitting it returns `undefined`. A non-zero npm exit throws.
 
+#### Installing into a directory with `--prefix`
+
+`npm install --prefix <dir>` with no package spec misbehaves on Windows: npm applies the CLI `--prefix` to the global prefix too, and because the Windows global install root is `<prefix>\node_modules` (rather than `<prefix>/lib/node_modules` as on POSIX) npm decides the install is global, rewrites the empty argument list to `.`, and resolves that against the process cwd — so it reads the wrong `package.json` ([#526](https://github.com/camunda/c8ctl/issues/526)). `c8ctl.npm()` detects this exact shape on Windows and instead runs npm with its cwd set to the prefix directory, which is equivalent and correct. Plugins do not need to change their cwd or use an npm-specific option form, and POSIX invocations are untouched. The re-scope is bounded (`--workspaces=false`) so npm resolves exactly that directory rather than promoting the install to a workspace root above it, and a prefix that is itself a workspace root is left untouched.
+
+```typescript
+// Works the same on Linux, macOS and Windows
+c8ctl.npm({ args: ['install', '--prefix', projectDir], stdout: true });
+```
+
 For TypeScript autocomplete, use the exported runtime type:
 
 ```typescript
