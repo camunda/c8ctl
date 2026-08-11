@@ -104,11 +104,14 @@ function readVariablesSource(raw: string): { text: string; origin?: string } {
 	if (!ref) {
 		throw new Error("--variables @ requires a file path (e.g. @vars.json)");
 	}
+	// Normalise to forward slashes so Windows backslashes survive JSON
+	// serialisation in error messages without being doubled.
+	const normalised = ref.replaceAll("\\", "/");
 	try {
-		return { text: readFileSync(ref, "utf-8"), origin: `'${ref}'` };
+		return { text: readFileSync(ref, "utf-8"), origin: `'${normalised}'` };
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		throw new Error(`Cannot read variables file '${ref}': ${msg}`);
+		throw new Error(`Cannot read variables file '${normalised}': ${msg}`);
 	}
 }
 
