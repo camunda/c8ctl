@@ -77,7 +77,8 @@
   ],
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^9.1.0",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "semver": "^7.6.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.11",

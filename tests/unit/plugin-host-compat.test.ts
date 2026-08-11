@@ -257,7 +257,7 @@ describe("satisfiesRange", () => {
 	test("returns null for a range c8ctl cannot parse", () => {
 		// `null` is "cannot evaluate", which callers fail open on — distinct
 		// from `false`, which disables the plugin's commands.
-		for (const range of ["latest", ">=four", "1.x || 2.x", ">=", "~>3.3"]) {
+		for (const range of ["latest", ">=four", ">=", "not-a-range", "1.2.3.4"]) {
 			assert.equal(satisfiesRange({ version: "4.0.0", range }), null, range);
 		}
 	});
@@ -266,22 +266,39 @@ describe("satisfiesRange", () => {
 		assert.equal(satisfiesRange({ version: "wat", range: ">=3.3.0" }), null);
 	});
 
-	test("an unsupported range never resolves to `false`, whatever the comparator order", () => {
-		// The failure this guards: evaluating comparators left to right and
-		// returning on the first unsatisfied one. `^3.0.0` is unsatisfied by
-		// 4.1.0, so a short-circuiting AND answers `false` — reporting a plugin
-		// that npm considers compatible as incompatible, and disabling it. Every
-		// comparator has to be parsed before any verdict is reached.
-		const unsupported = [
-			"^3.0.0 || ^4.0.0",
-			">=5.0.0 || >=1.0.0",
-			">=4.0.0 || garbage",
-			"3.3.0 - 4.0.0",
-			"5.0.0 - 6.0.0",
-		];
-		for (const range of unsupported) {
-			assert.equal(satisfiesRange({ version: "4.1.0", range }), null, range);
-		}
+	test("set unions and hyphen ranges are evaluated, not treated as unsupported", () => {
+		// Delegating to `semver` gets the full npm range grammar for free — these
+		// forms are valid npm syntax that a hand-rolled comparator parser would
+		// have to special-case.
+		assert.equal(
+			satisfiesRange({ version: "4.1.0", range: "^3.0.0 || ^4.0.0" }),
+			true,
+		);
+		assert.equal(
+			satisfiesRange({ version: "2.9.0", range: "^3.0.0 || ^4.0.0" }),
+			false,
+		);
+		assert.equal(
+			satisfiesRange({ version: "1.5.0", range: ">=5.0.0 || >=1.0.0" }),
+			true,
+		);
+		assert.equal(
+			satisfiesRange({ version: "3.5.0", range: "3.3.0 - 4.0.0" }),
+			true,
+		);
+		assert.equal(
+			satisfiesRange({ version: "4.0.1", range: "3.3.0 - 4.0.0" }),
+			false,
+		);
+	});
+
+	test("a union with one unparseable branch still fails open", () => {
+		// `semver` rejects the whole range rather than evaluating the readable
+		// half — this stays `null` ("cannot evaluate"), not a partial verdict.
+		assert.equal(
+			satisfiesRange({ version: "4.1.0", range: ">=4.0.0 || garbage" }),
+			null,
+		);
 	});
 
 	test("prerelease tags order by identifier, not just by trailing number", () => {
@@ -423,25 +440,25 @@ describe("checkHostCompat", () => {
 		const verdict = checkHostCompat({
 			pluginName,
 			declaredRange: "*",
-			hostVersion: "v4.0.0-nightly",
+			hostVersion: "nightly-build",
 		});
 		assert.equal(verdict.status, "unverifiable");
 		assert.equal(verdict.reason, "unreadable-host-version");
 		assert.match(verdict.message ?? "", /this c8ctl reports its version/);
-		assert.match(verdict.message ?? "", /v4\.0\.0-nightly/);
+		assert.match(verdict.message ?? "", /nightly-build/);
 		assert.doesNotMatch(verdict.message ?? "", /not a version range/);
 	});
 
-	test("a range c8ctl cannot read fails open and names the supported forms", () => {
+	test("a range c8ctl cannot read fails open and points at npm's range syntax", () => {
 		const verdict = checkHostCompat({
 			pluginName,
-			declaredRange: "1.x || 2.x",
+			declaredRange: "latest",
 			hostVersion: "4.0.0",
 		});
 		assert.equal(verdict.status, "unverifiable");
-		assert.equal(verdict.range, "1.x || 2.x");
-		assert.match(verdict.message ?? "", /1\.x \|\| 2\.x/);
-		assert.match(verdict.message ?? "", /\^/);
+		assert.equal(verdict.range, "latest");
+		assert.match(verdict.message ?? "", /latest/);
+		assert.match(verdict.message ?? "", /node-semver/);
 	});
 });
 
@@ -547,7 +564,7 @@ describe("loader enforcement of engines.c8ctl", () => {
 
 	test("a range c8ctl cannot read never disables a plugin", async () => {
 		const { commands, incompatibilities } = await loadFixture(
-			"1.x || 2.x",
+			"latest",
 			"3.3.0",
 		);
 		assert.deepEqual(incompatibilities, []);
@@ -893,7 +910,7 @@ describe("enforcement against a published host version (built dist)", () => {
 		const cli = stageHost("3.3.0");
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-host-compat-warn-"));
 		stagedDirs.push(dataDir);
-		const fixture = stageFixtureCopy("1.x || 2.x");
+		const fixture = stageFixtureCopy("latest");
 		const { status, stdout, stderr } = await runHost(
 			cli,
 			["load", "plugin", "--from", pathToFileURL(fixture).href],

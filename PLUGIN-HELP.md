@@ -202,9 +202,9 @@ This surface grows: `npm({ ... })` is newer than the rest of it, and a plugin ca
 
 c8ctl then refuses `load plugin` / `upgrade plugin` / `downgrade plugin` on a host that is too old, and disables the plugin's commands with a message naming the required and running versions, rather than letting them fail deeper in. `doctor plugin` reports the requirement and any incompatibility in text and `--json`.
 
-Supported comparators are `>=`, `>`, `<=`, `<`, `^`, `~`, an exact version, and `*`; space- or comma-separated comparators are ANDed, and every operand must be a full `major.minor.patch` version. Prereleases order as semver specifies (`>=4.0.0` excludes `4.0.0-alpha.1`, and `^4.1.0` excludes `5.0.0-alpha.1`).
+Range evaluation delegates to `semver` (npm's own library for `engines` fields), with `includePrerelease` on, so the full npm range grammar is supported — comparators (`>=`, `>`, `<=`, `<`, `^`, `~`, an exact version, `*`), set unions (`"^3 || ^4"`), hyphen ranges (`"3.3.0 - 4.0.0"`), and partial or wildcard versions (`"^4"`, `"4.x"`). Prereleases order as semver specifies (`>=4.0.0` excludes `4.0.0-alpha.1`, and `^4.1.0` excludes `5.0.0-alpha.1`).
 
-Set unions (`"^3 || ^4"`), hyphen ranges, and partial versions (`"^4"`, `"4.x"`) are valid npm syntax that c8ctl does **not** evaluate — they land on the same fail-open path as an unparseable range, alongside c8ctl running as an unpublished development build: the plugin stays fully enabled, because the check never disables a plugin over a question it could not answer. See [docs/plugins.md](docs/plugins.md#the-c8ctl-version-a-plugin-needs) for the user-facing view.
+A range `semver` cannot parse (`"latest"`, `">=four"`) lands on the same fail-open path as c8ctl running as an unpublished development build: the plugin stays fully enabled, because the check never disables a plugin over a question it could not answer. See [docs/plugins.md](docs/plugins.md#the-c8ctl-version-a-plugin-needs) for the user-facing view.
 
 ### Running npm from a plugin
 
