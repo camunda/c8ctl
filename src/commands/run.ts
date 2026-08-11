@@ -15,6 +15,7 @@ import {
 } from "@camunda8/orchestration-cluster-api";
 import { resolveTenantId } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
+import { parseVariablesFlag } from "../utils/index.ts";
 
 /**
  * Extract process ID from BPMN file content.
@@ -67,13 +68,7 @@ export const runCommand = defineCommand("run", "", async (ctx, flags) => {
 	// belongs.
 	let variables: Record<string, unknown> | undefined;
 	if (flags.variables !== undefined) {
-		try {
-			variables = JSON.parse(flags.variables);
-		} catch (error) {
-			throw new Error(
-				`Invalid JSON for variables: ${error instanceof Error ? error.message : String(error)}`,
-			);
-		}
+		variables = parseVariablesFlag({ raw: flags.variables });
 	}
 
 	// Read BPMN file and extract process ID.

@@ -7,11 +7,12 @@ import {
 	ProcessDefinitionId,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
-import { fetchAllPages, handleCommandError } from "../core/index.ts";
+import { fetchAllPages } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
 	buildDateFilter,
 	parseBetween,
+	parseVariablesFlag,
 	processInstancesEmptyMessage,
 } from "../utils/index.ts";
 
@@ -184,11 +185,7 @@ export const createProcessInstanceCommand = defineCommand(
 		// Parse variables early for clear error reporting
 		let variables: Record<string, unknown> | undefined;
 		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-			}
+			variables = parseVariablesFlag({ raw: flags.variables });
 		}
 
 		// Dry-run: emit the would-be API request without executing
@@ -290,11 +287,7 @@ export const awaitProcessInstanceCommand = defineCommand(
 		// Parse variables early for clear error reporting
 		let variables: Record<string, unknown> | undefined;
 		if (flags.variables) {
-			try {
-				variables = JSON.parse(flags.variables);
-			} catch (error) {
-				handleCommandError(logger, "Invalid JSON for variables", error);
-			}
+			variables = parseVariablesFlag({ raw: flags.variables });
 		}
 
 		// Dry-run: emit the would-be API request without executing

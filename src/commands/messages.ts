@@ -5,6 +5,7 @@
 import { TenantId } from "@camunda8/orchestration-cluster-api";
 import { resolveTenantId } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
+import { parseVariablesFlag } from "../utils/index.ts";
 
 /**
  * Publish message
@@ -24,7 +25,7 @@ export const publishMessageCommand = defineCommand(
 		};
 		let variables: Record<string, unknown> | undefined;
 		if (flags.variables) {
-			variables = JSON.parse(flags.variables);
+			variables = parseVariablesFlag({ raw: flags.variables });
 			body.variables = variables;
 		}
 		const timeToLive = flags.timeToLive
@@ -79,7 +80,7 @@ export const correlateMessageCommand = defineCommand(
 		};
 		let variables: Record<string, unknown> | undefined;
 		if (flags.variables) {
-			variables = JSON.parse(flags.variables);
+			variables = parseVariablesFlag({ raw: flags.variables });
 			body.variables = variables;
 		}
 		const timeToLive = flags.timeToLive
