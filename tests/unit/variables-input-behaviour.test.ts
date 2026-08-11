@@ -224,8 +224,10 @@ describe("CLI behavioural: --variables input", () => {
 			result.stderr.includes("--variables must be a JSON object"),
 			`stderr: ${result.stderr}`,
 		);
+		// On Windows the logger emits JSON where backslashes are doubled; check both forms.
+		const jsonEscapedPath = path.replaceAll("\\", "\\\\");
 		assert.ok(
-			result.stderr.includes(path),
+			result.stderr.includes(path) || result.stderr.includes(jsonEscapedPath),
 			`expected the file to be named as the source; stderr: ${result.stderr}`,
 		);
 	});
