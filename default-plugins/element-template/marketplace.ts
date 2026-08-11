@@ -8,7 +8,8 @@
  * We download every ref once, inline the templates into a single
  * `templates.json` cache file, and inject `metadata.upstreamRef = <ref>` so
  * subsequent syncs can skip already-cached entries (matches Modeler's
- * approach in `app/lib/template-updater/util.js`).
+ * approach in `app/lib/template-updater/util.js`). A 403 from a ref is
+ * recovered from a compatible connector release archive.
  */
 
 import {
@@ -25,6 +26,14 @@ import {
 import { join } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template, USER_AGENT } from "./helpers.ts";
+import {
+	fetchReleaseArchive,
+	getArchivedTemplate,
+	HttpResponseError,
+	isForbiddenResponse,
+	type MarketplaceReleaseArchive,
+	type MarketplaceTemplateEntry,
+} from "./marketplace-fallback.ts";
 
 const DEFAULT_OOTB_URL =
 	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";
@@ -48,12 +57,7 @@ type IndexVersionEntry = {
 	engine?: IndexEngine;
 };
 
-type FlatIndexEntry = {
-	id: string;
-	version: number;
-	ref: string;
-	engine: IndexEngine | undefined;
-};
+type FlatIndexEntry = MarketplaceTemplateEntry;
 
 export type SyncSummary = {
 	total: number;
@@ -360,17 +364,25 @@ export function nudgeIfStale(logger: Logger): void {
 // HTTP
 // ---------------------------------------------------------------------------
 
-async function fetchJson(url: string): Promise<unknown> {
+async function fetchResponse(
+	url: string,
+	headers: Record<string, string> = {},
+): Promise<Response> {
 	const response = await fetch(url, {
-		headers: { "User-Agent": USER_AGENT },
+		headers: { "User-Agent": USER_AGENT, ...headers },
 		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
 	});
 	if (!response.ok) {
-		throw new Error(
-			`HTTP ${response.status} ${response.statusText} for ${url}`,
-		);
+		throw new HttpResponseError(response.status, response.statusText, url);
 	}
-	return response.json();
+	return response;
+}
+
+async function fetchJson(
+	url: string,
+	headers: Record<string, string> = {},
+): Promise<unknown> {
+	return (await fetchResponse(url, headers)).json();
 }
 
 async function fetchIndex(): Promise<Record<string, IndexVersionEntry[]>> {
@@ -419,27 +431,43 @@ async function fetchTemplate(url: string): Promise<Template> {
 // Sync
 // ---------------------------------------------------------------------------
 
+type DirectFetchResults = {
+	templates: Map<FlatIndexEntry, Template>;
+	errors: Map<FlatIndexEntry, unknown>;
+	fallbackRequired: boolean;
+};
+
 /**
- * Run `fn` over `items` with at most `concurrency` in flight.
- * Each fn() must handle its own errors — exceptions abort the pool.
+ * Fetch raw refs concurrently until a forbidden response makes archive
+ * recovery necessary. Workers already awaiting a response drain, but no worker
+ * dequeues another ref once archive mode has started.
  */
-async function pool<T>(
-	items: T[],
-	concurrency: number,
-	fn: (item: T) => Promise<void>,
-): Promise<void> {
-	const queue = items.slice();
+async function fetchDirectTemplates(
+	entries: FlatIndexEntry[],
+): Promise<DirectFetchResults> {
+	const queue = entries.slice();
+	const templates = new Map<FlatIndexEntry, Template>();
+	const errors = new Map<FlatIndexEntry, unknown>();
+	let fallbackRequired = false;
 	const workers = Array.from(
-		{ length: Math.min(concurrency, queue.length) },
+		{ length: Math.min(FETCH_CONCURRENCY, queue.length) },
 		async () => {
-			while (queue.length > 0) {
-				const item = queue.shift();
-				if (item === undefined) break;
-				await fn(item);
+			while (!fallbackRequired) {
+				const entry = queue.shift();
+				if (entry === undefined) break;
+				try {
+					templates.set(entry, await fetchTemplate(entry.ref));
+				} catch (error) {
+					errors.set(entry, error);
+					if (isForbiddenResponse(error)) {
+						fallbackRequired = true;
+					}
+				}
 			}
 		},
 	);
 	await Promise.all(workers);
+	return { templates, errors, fallbackRequired };
 }
 
 /**
@@ -528,26 +556,49 @@ async function syncTemplatesLocked({
 
 	let fetched = 0;
 	let errors = 0;
-	let progress = 0;
 	const fetchedTemplates: Template[] = [];
+	const direct = await fetchDirectTemplates(toFetch);
+	let archiveError: unknown;
+	let releaseArchive: MarketplaceReleaseArchive | null = null;
+	if (direct.fallbackRequired) {
+		try {
+			releaseArchive = await fetchReleaseArchive({ entries, logger });
+		} catch (error) {
+			archiveError = error;
+		}
+	}
 
-	await pool(toFetch, FETCH_CONCURRENCY, async (entry) => {
-		progress += 1;
-		const myProgress = progress;
+	for (const [index, entry] of toFetch.entries()) {
+		const progress = index + 1;
 		const label = `${entry.id}@${entry.version}`;
 		try {
-			const template = await fetchTemplate(entry.ref);
+			let template = direct.templates.get(entry);
+			if (template === undefined) {
+				if (releaseArchive !== null) {
+					template = getArchivedTemplate(entry, releaseArchive);
+				} else if (direct.fallbackRequired) {
+					throw (
+						archiveError ??
+						new Error("Connector template release archive could not be loaded")
+					);
+				} else {
+					throw (
+						direct.errors.get(entry) ??
+						new Error(`Template fetch did not complete for ${entry.ref}`)
+					);
+				}
+			}
 			template.metadata = template.metadata || {};
 			template.metadata.upstreamRef = entry.ref;
 			fetchedTemplates.push(template);
 			fetched += 1;
-			logger.info(`  [${myProgress}/${toFetch.length}] ${label}`);
+			logger.info(`  [${progress}/${toFetch.length}] ${label}`);
 		} catch (error) {
 			errors += 1;
 			const message = error instanceof Error ? error.message : String(error);
-			logger.warn(`  [${myProgress}/${toFetch.length}] ${label} — ${message}`);
+			logger.warn(`  [${progress}/${toFetch.length}] ${label} — ${message}`);
 		}
-	});
+	}
 
 	// Build the new cache: keep cached entries that are still in the index,
 	// plus everything we just fetched. Sort fetched entries by id+version so

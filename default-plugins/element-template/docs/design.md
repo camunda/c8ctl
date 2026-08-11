@@ -48,6 +48,21 @@ We chose the **marketplace endpoint** for parity with Desktop Modeler:
 The endpoint is overridable via `C8CTL_OOTB_ELEMENT_TEMPLATES_URL`
 (useful for testing).
 
+When an indexed template ref returns HTTP 403, `sync` stops scheduling new
+raw-ref downloads. It lets requests already in flight finish, retains the
+successful direct results, and resolves every unfinished template from one
+release archive. The release is the newest in the highest Camunda engine line
+present in the index (including prereleases), and its
+`connectors-bundle-templates-<tag>.zip` asset is filtered to templates whose
+`id` + `version` appear in the marketplace index. The archive is a recovery
+source, not a second catalogue: archive-only templates are ignored and a
+non-403 error alone does not trigger it.
+
+The release also offers a `.tar.gz` asset, but Node supports gzip
+decompression without a TAR reader. ZIP plus the plugin-local `fflate`
+dependency provides complete archive handling without invoking platform
+utilities, so it remains portable across macOS, Linux, and native Windows.
+
 ## Cache strategy
 
 We mirror Desktop Modeler's approach
@@ -61,6 +76,9 @@ We mirror Desktop Modeler's approach
   Since each `ref` is a commit-pinned `raw.githubusercontent.com` URL,
   "upstreamRef unchanged" ⇒ "content unchanged" ⇒ no re-fetch needed.
   Subsequent syncs only fetch refs that aren't already in the cache.
+- A 403 fallback stores the original indexed `upstreamRef`, so templates
+  recovered from a release archive participate in the same incremental cache
+  reuse as directly fetched templates.
 - Per-template fetch failures are logged + counted, never abort the run.
 
 ### Lifecycle
