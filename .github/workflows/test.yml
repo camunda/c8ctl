@@ -74,6 +74,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # AGENTS.md documents `npm run build` before `npm test` locally, because
+      # some tests exercise the *published* dist layout and skip themselves when
+      # it is absent (tests/unit/plugin-host-compat.test.ts needs a dist/ whose
+      # package.json carries a real version). Without a build step CI silently ran
+      # the weaker subset — a skipped test looks identical to a passing one in the
+      # summary.
+      #
+      # One leg only. Those tests assert OS-agnostic logic, and `npm run build`
+      # re-runs `npm run lint` (already its own job) and rewrites the synced
+      # README/docs blocks, so paying for it six times buys nothing. The other
+      # legs keep skipping them, which is what the skip reason is for.
+      - name: Build (for tests that exercise the published dist layout)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run build
+
       - name: Run unit tests
         run: npm run test:unit
 

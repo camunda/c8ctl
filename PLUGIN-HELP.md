@@ -188,6 +188,24 @@ At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8
 
 Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.
 
+### Declaring the c8ctl version you need
+
+This surface grows: `npm({ ... })` is newer than the rest of it, and a plugin calling it on an older c8ctl gets `TypeError: c8ctl.npm is not a function` from inside its own handler. Declare the floor instead, in the plugin's `package.json` (#523):
+
+```json
+{
+  "engines": {
+    "c8ctl": ">=4.0.0-alpha.1"
+  }
+}
+```
+
+c8ctl then refuses `load plugin` / `upgrade plugin` / `downgrade plugin` on a host that is too old, and disables the plugin's commands with a message naming the required and running versions, rather than letting them fail deeper in. `doctor plugin` reports the requirement and any incompatibility in text and `--json`.
+
+Range evaluation delegates to `semver` (npm's own library for `engines` fields), with `includePrerelease` on, so the full npm range grammar is supported — comparators (`>=`, `>`, `<=`, `<`, `^`, `~`, an exact version, `*`), set unions (`"^3 || ^4"`), hyphen ranges (`"3.3.0 - 4.0.0"`), and partial or wildcard versions (`"^4"`, `"4.x"`). Prereleases order as semver specifies (`>=4.0.0` excludes `4.0.0-alpha.1`, and `^4.1.0` excludes `5.0.0-alpha.1`).
+
+A range `semver` cannot parse (`"latest"`, `">=four"`) lands on the same fail-open path as c8ctl running as an unpublished development build: the plugin stays fully enabled, because the check never disables a plugin over a question it could not answer. See [docs/plugins.md](docs/plugins.md#the-c8ctl-version-a-plugin-needs) for the user-facing view.
+
 ### Running npm from a plugin
 
 Use `c8ctl.npm()` rather than spawning npm yourself. On Windows npm is a `npm.cmd` shim: a bare `npm` spawn fails with `ENOENT`, and `npm.cmd` alone fails with `EINVAL` under the CVE-2024-27980 hardening in Node 18.20.2 / 20.12.2 / 21.7.3+. The runtime helper routes the call through `cmd.exe` with every argument quoted (plugin paths routinely contain spaces) and rejects arguments that cannot be passed safely — an embedded `"`, a line break, or a `%VAR%` reference.

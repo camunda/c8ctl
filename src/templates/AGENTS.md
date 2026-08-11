@@ -14,6 +14,11 @@ Build and maintain a plugin that exposes useful commands through `export const c
 - Required export: `commands` object mapping command name -> async handler
 - Optional export: `metadata` object for help descriptions
 - Package keywords must include `c8ctl` or `c8ctl-plugin`
+- `engines.c8ctl` declares the c8ctl version this plugin needs. It ships as `"*"`
+  (any version). Tighten it — e.g. `">=4.0.0-alpha.1"` — as soon as a handler
+  starts using a runtime API that older c8ctl versions do not expose: c8ctl then
+  refuses the install and disables the commands with an explanation, instead of
+  letting them fail somewhere inside this plugin
 
 ## Runtime API (available as global `c8ctl`)
 

@@ -147,5 +147,10 @@ vite.config.ts.timestamp-*
 c8ctl-test-*
 test-plugin-temp
 
+# Repo-local temp trees for tests that need dist/ under a patched package.json
+# (tests/unit/plugin-host-compat.test.ts). They sit inside the repo on purpose,
+# so Node still resolves the real node_modules from them.
+tests/.tmp-*
+
 # Temp tsconfig created by .githooks/pre-commit
 .tsconfig.pre-commit.*.json

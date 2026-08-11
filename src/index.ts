@@ -16,6 +16,7 @@ import {
 	loadSessionState,
 	printUpdateNotification,
 	resolveTenantId,
+	SilentError,
 	type SortOrder,
 	startUpdateCheck,
 } from "./core/index.ts";
@@ -31,6 +32,7 @@ import {
 	getCommandDef,
 	getPluginCommands,
 	getPluginVersionForCommand,
+	isHostIncompatiblePluginCommand,
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type PluginCtx,
@@ -638,7 +640,15 @@ async function main() {
 				if (value !== undefined) {
 					extractedFlags[flagName] = value;
 				}
-				if (def.required === true && value === undefined) {
+				// A disabled plugin (#523) is exempt: its handler exists only to
+				// explain which c8ctl it needs, and "--label is required" would
+				// send the user off to satisfy a flag for a command that cannot
+				// run whatever they pass.
+				if (
+					def.required === true &&
+					value === undefined &&
+					!isHostIncompatiblePluginCommand(verb)
+				) {
 					logger.error(`--${flagName} is required`);
 					process.exit(1);
 				}
@@ -767,6 +777,13 @@ try {
 			.catch((error) => {
 				if (c8ctl.verbose) {
 					throw error;
+				}
+				// A SilentError carries a message that is already the complete,
+				// user-facing diagnosis (see core/errors.ts). Render it as one
+				// error line — "Unexpected error" plus a stack would bury it.
+				if (error instanceof SilentError) {
+					getLogger(c8ctl.outputMode).error(error.message);
+					process.exit(1);
 				}
 				console.error("Unexpected error:", error);
 				process.exit(1);
