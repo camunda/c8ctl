@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "type": "module",
   "description": "c8ctl plugin to apply and inspect Camunda element templates",
-  "keywords": ["c8ctl", "c8ctl-plugin", "element-template", "camunda"],
+  "keywords": [
+    "c8ctl",
+    "c8ctl-plugin",
+    "element-template",
+    "camunda"
+  ],
   "main": "c8ctl-plugin.ts",
   "dependencies": {
     "bpmn-moddle": "^9.0.1"
   },
   "devDependencies": {
-    "bpmn-js-element-templates": "^2.23.1",
+    "bpmn-js-element-templates": "^2.30.0",
     "bpmn-js-headless": "^0.2.0",
     "zeebe-bpmn-moddle": "^1.11.0"
   }
