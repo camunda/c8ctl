@@ -14,6 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, describe, test } from "node:test";
+import { toDisplayPath } from "../../src/utils/shared/variables-input.ts";
 import { c8, parseJson } from "../utils/cli.ts";
 import { asRecord } from "../utils/guards.ts";
 import { asyncSpawnWithStdin } from "../utils/spawn.ts";
@@ -224,9 +225,7 @@ describe("CLI behavioural: --variables input", () => {
 			result.stderr.includes("--variables must be a JSON object"),
 			`stderr: ${result.stderr}`,
 		);
-		// The implementation normalises backslashes to forward slashes in error
-		// messages so they survive JSON serialisation on Windows unchanged.
-		const normalisedPath = path.replaceAll("\\", "/");
+		const normalisedPath = toDisplayPath(path);
 		assert.ok(
 			result.stderr.includes(normalisedPath),
 			`expected the file to be named as the source; stderr: ${result.stderr}`,

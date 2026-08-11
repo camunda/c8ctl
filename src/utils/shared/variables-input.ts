@@ -32,6 +32,14 @@ const JSON_LITERAL =
 const STRUCTURAL = new Set(["{", "}", "[", "]", ":", ","]);
 
 /**
+ * Normalise a filesystem path to forward slashes so Windows backslashes
+ * survive JSON serialisation in error messages without being doubled.
+ */
+export function toDisplayPath(path: string): string {
+	return path.replaceAll("\\", "/");
+}
+
+/**
  * Does this look like a JSON object whose double quotes the shell removed?
  * Requires the object braces to have survived — anything else is a typo or
  * a payload the shell also split on spaces, neither of which is repairable.
@@ -104,9 +112,7 @@ function readVariablesSource(raw: string): { text: string; origin?: string } {
 	if (!ref) {
 		throw new Error("--variables @ requires a file path (e.g. @vars.json)");
 	}
-	// Normalise to forward slashes so Windows backslashes survive JSON
-	// serialisation in error messages without being doubled.
-	const normalised = ref.replaceAll("\\", "/");
+	const normalised = toDisplayPath(ref);
 	try {
 		return { text: readFileSync(ref, "utf-8"), origin: `'${normalised}'` };
 	} catch (error) {
