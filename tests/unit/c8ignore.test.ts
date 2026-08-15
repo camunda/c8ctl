@@ -29,12 +29,16 @@ function dryRunDeploy(
 			env: {
 				...process.env,
 				// Hermetic isolation: point c8ctl's data dir and the (read-only)
-				// Camunda Modeler settings dir at empty temp dirs so the run does not
-				// inherit the developer's real profiles/Modeler connections. Without
-				// this, a machine with >1 discoverable profile makes `deploy` prompt
-				// for a target and the dry-run never emits its JSON.
-				C8CTL_DATA_DIR: join(tmpdir(), `c8ctl-ignore-data-${Date.now()}`),
-				C8CTL_MODELER_DIR: join(tmpdir(), `c8ctl-ignore-modeler-${Date.now()}`),
+				// Camunda Modeler settings dir at empty dirs under the per-test cwd
+				// so the run does not inherit the developer's real profiles/Modeler
+				// connections. Without this, a machine with >1 discoverable profile
+				// makes `deploy` prompt for a target and the dry-run never emits its
+				// JSON. Keeping them under cwd means the existing rmSync(testDir)
+				// cleanup removes them too — nothing accumulates under the OS temp
+				// dir. Only .bpmn/.dmn/.form files are deployable, so these config
+				// dirs are never picked up as resources.
+				C8CTL_DATA_DIR: join(cwd, ".c8ctl-data"),
+				C8CTL_MODELER_DIR: join(cwd, ".c8ctl-modeler"),
 			},
 			timeout: 15000,
 		},
