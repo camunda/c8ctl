@@ -20,6 +20,14 @@ describe("Deployment Validation", () => {
 		mkdirSync(testDir, { recursive: true });
 		originalEnv = { ...process.env };
 		process.env.XDG_DATA_HOME = testDir;
+		// Point c8ctl's data dir and the read-only Modeler settings dir at the
+		// isolated test dir so the run does not inherit the developer's real
+		// profiles/Modeler connections (which would make deploy prompt for a
+		// target instead of reaching validation). XDG_DATA_HOME alone is not
+		// enough: macOS ignores it for the data dir, and Modeler discovery reads
+		// a separate location.
+		process.env.C8CTL_DATA_DIR = testDir;
+		process.env.C8CTL_MODELER_DIR = join(testDir, "modeler");
 		// Clear all Camunda env vars to ensure test isolation
 		delete process.env.CAMUNDA_BASE_URL;
 		delete process.env.CAMUNDA_CLIENT_ID;
