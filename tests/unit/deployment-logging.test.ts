@@ -22,7 +22,15 @@ describe("Deployment Logging", () => {
 		testDir = join(tmpdir(), `c8ctl-deploy-log-test-${Date.now()}`);
 		mkdirSync(testDir, { recursive: true });
 		originalEnv = { ...process.env };
-		process.env.XDG_DATA_HOME = testDir;
+		// Hermetic isolation: point c8ctl's data dir and the (read-only) Camunda
+		// Modeler settings dir at the isolated test dir so the run does not inherit
+		// the developer's real profiles/Modeler connections (which would make deploy
+		// prompt for a target instead of reaching validation). C8CTL_DATA_DIR is the
+		// reliable override: c8ctl's data dir does not read XDG_DATA_HOME — macOS
+		// uses Application Support and Linux falls back to XDG_CONFIG_HOME
+		// (see src/core/config.ts:getUserDataDir).
+		process.env.C8CTL_DATA_DIR = testDir;
+		process.env.C8CTL_MODELER_DIR = join(testDir, "modeler");
 		// Clear all Camunda env vars to ensure test isolation
 		delete process.env.CAMUNDA_BASE_URL;
 		delete process.env.CAMUNDA_CLIENT_ID;
