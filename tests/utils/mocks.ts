@@ -10,8 +10,29 @@
  * code under test actually touches; everything else is stubbed to a no-op.
  */
 
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { createClient } from "../../src/core/client.ts";
 import type { Logger } from "../../src/core/logger.ts";
+
+/**
+ * A stable, empty directory used as the default `C8CTL_MODELER_DIR` for tests.
+ *
+ * `getAllProfiles()` merges c8ctl profiles with Camunda Desktop Modeler
+ * connections read from the machine-global Modeler data dir. Without an
+ * override, a developer machine that has Desktop Modeler installed leaks its
+ * real connections (e.g. `modeler:c8run`) into every hermetic test data dir —
+ * silently adding a second profile that breaks profile-sensitive commands like
+ * `deploy` locally while passing in CI (which has no Modeler installed).
+ *
+ * Pointing `C8CTL_MODELER_DIR` at a freshly created empty dir (no
+ * `settings.json`) makes `loadModelerConnections()` return `[]`, so tests see
+ * only the profiles they themselves configure. Created once per test process.
+ */
+const ISOLATED_MODELER_DIR = mkdtempSync(
+	join(tmpdir(), "c8ctl-test-no-modeler-"),
+);
 
 type CamundaClient = ReturnType<typeof createClient>;
 
@@ -50,11 +71,21 @@ export function makeMockLogger(partial: Partial<Logger> = {}): Logger {
 /**
  * Build a NodeJS.ProcessEnv from `process.env` plus overrides, without
  * needing an `as NodeJS.ProcessEnv` cast at call sites.
+ *
+ * Defaults `C8CTL_MODELER_DIR` to an isolated empty dir so ambient Camunda
+ * Desktop Modeler connections cannot leak into hermetic tests (see
+ * {@link ISOLATED_MODELER_DIR}). A caller that needs a specific Modeler dir can
+ * still override it via `overrides` or by pre-setting `process.env`.
  */
 export function makeTestEnv(
 	overrides: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
-	return { ...process.env, ...overrides };
+	const env: NodeJS.ProcessEnv = {
+		C8CTL_MODELER_DIR: ISOLATED_MODELER_DIR,
+		...process.env,
+		...overrides,
+	};
+	return env;
 }
 
 /**
