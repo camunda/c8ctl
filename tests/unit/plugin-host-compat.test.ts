@@ -958,13 +958,17 @@ describe("enforcement against a published host version (built dist)", () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-host-compat-enc-"));
 		stagedDirs.push(dataDir);
 
-		// A parent dir whose name contains `~` → pathToFileURL emits `%7E`.
+		// A parent dir whose name contains a literal `~`.
 		const encodedParent = join(dataDir, "RUNNER~1");
 		mkdirSync(encodedParent, { recursive: true });
 		const fixture = join(encodedParent, "plugin-src");
 		cpSync(FIXTURE_DIR, fixture, { recursive: true });
 
-		const fromUrl = pathToFileURL(fixture).href;
+		// `~` is an unreserved character in RFC 3986, so whether pathToFileURL
+		// percent-encodes it is platform/Node-version dependent. Force the
+		// encoding so this guard deterministically exercises the fileURLToPath()
+		// decode path regardless of how pathToFileURL serialized the `~`.
+		const fromUrl = pathToFileURL(fixture).href.replace(/~/g, "%7E");
 		assert.match(
 			fromUrl,
 			/%7E/,

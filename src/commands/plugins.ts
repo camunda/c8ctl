@@ -308,13 +308,16 @@ function getPackageName(pkgPath: string): string | null {
 }
 
 /**
- * Resolve a `--from` spec into the argument npm should receive.
+ * Resolve an npm-install source spec into the argument npm should receive.
  *
- * A `file:` URL must be converted to a native filesystem path before it is
- * handed to `npm install`. On Windows the temp dir often sits under an 8.3
- * short path (e.g. `C:\Users\RUNNER~1\...`); `pathToFileURL` percent-encodes
- * the `~` to `%7E`, and npm passes that raw, still-encoded `file://` URL
- * straight to `fs.open`, which then ENOENTs on `…RUNNER%7E1…\package.json`.
+ * Applies to every `npm install` source that may originate from a `file:` URL
+ * — `load plugin --from`, plus the registry-sourced `sync`/`upgrade`/`downgrade`
+ * paths, all of which can carry a stored `file://` source. A `file:` URL must
+ * be converted to a native filesystem path before it is handed to
+ * `npm install`. On Windows the temp dir often sits under an 8.3 short path
+ * (e.g. `C:\Users\RUNNER~1\...`); `pathToFileURL` percent-encodes the `~` to
+ * `%7E`, and npm passes that raw, still-encoded `file://` URL straight to
+ * `fs.open`, which then ENOENTs on `…RUNNER%7E1…\package.json`.
  * `fileURLToPath` decodes the URL back into the real path npm can open, and
  * mirrors the decoding already done in `getPackageNameFromSourceUrl`. Non-file
  * specs (https:, git:, bare package names) are passed through unchanged.
@@ -831,7 +834,12 @@ export const syncPluginsCommand = defineCommand(
 				// Fresh install
 				try {
 					npm({
-						args: ["install", plugin.source, "--prefix", pluginsDir],
+						args: [
+							"install",
+							toNpmInstallSpec(plugin.source),
+							"--prefix",
+							pluginsDir,
+						],
 						stdio: "inherit",
 					});
 					logger.success(`  ✓ ${plugin.name} installed successfully`);
@@ -943,7 +951,12 @@ export const upgradePluginCommand = defineCommand(
 
 			// Install new version while respecting source type
 			npm({
-				args: ["install", installTarget, "--prefix", pluginsDir],
+				args: [
+					"install",
+					toNpmInstallSpec(installTarget),
+					"--prefix",
+					pluginsDir,
+				],
 				stdio: "inherit",
 			});
 
@@ -1025,7 +1038,12 @@ export const downgradePluginCommand = defineCommand(
 
 			// Install specific version while respecting source type
 			npm({
-				args: ["install", installTarget, "--prefix", pluginsDir],
+				args: [
+					"install",
+					toNpmInstallSpec(installTarget),
+					"--prefix",
+					pluginsDir,
+				],
 				stdio: "inherit",
 			});
 
