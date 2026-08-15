@@ -946,8 +946,8 @@ describe("enforcement against a published host version (built dist)", () => {
 	});
 
 	// Regression guard for the Windows-only failure where the temp dir sits under
-	// an 8.3 short path (`…\RUNNER~1\…`): `pathToFileURL` percent-encodes the `~`
-	// to `%7E`, and a raw `file://` URL handed to `npm install` ENOENTs on the
+	// an 8.3 short path (`…\RUNNER~1\…`): `pathToFileURL` may percent-encode the
+	// `~` to `%7E`, and a raw `file://` URL handed to `npm install` ENOENTs on the
 	// still-encoded path. Staging the fixture under a directory whose name
 	// literally contains `~` reproduces the `%7E` encoding on every platform, so
 	// this locks in the `fileURLToPath()` decode in `load plugin --from`.
@@ -984,6 +984,47 @@ describe("enforcement against a published host version (built dist)", () => {
 			install.status,
 			0,
 			`expected a clean install from an encoded file URL: ${install.stdout}${install.stderr}`,
+		);
+		assert.match(install.stdout, /Plugin loaded successfully/);
+	});
+
+	// Guard the case-insensitive `file:` scheme match in `toNpmInstallSpec`:
+	// `isAcceptedUrl` accepts schemes case-insensitively, so an upper-cased
+	// `FILE://` --from source must still be decoded via `fileURLToPath()` rather
+	// than passed to `npm install` raw — otherwise the `%7E` encoding survives
+	// and reintroduces the Windows ENOENT this helper exists to prevent.
+	test("an upper-cased FILE:// --from with an encoded path installs cleanly", {
+		skip,
+	}, async () => {
+		const cli = stageHost("4.0.0");
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-host-compat-enc-uc-"));
+		stagedDirs.push(dataDir);
+
+		const encodedParent = join(dataDir, "RUNNER~1");
+		mkdirSync(encodedParent, { recursive: true });
+		const fixture = join(encodedParent, "plugin-src");
+		cpSync(FIXTURE_DIR, fixture, { recursive: true });
+
+		// Force both the `%7E` encoding and an upper-cased scheme so this guard
+		// deterministically exercises the case-insensitive decode path.
+		const fromUrl = pathToFileURL(fixture)
+			.href.replace(/~/g, "%7E")
+			.replace(/^file:/, "FILE:");
+		assert.match(
+			fromUrl,
+			/^FILE:.*%7E/,
+			`expected an upper-cased encoded file URL, got ${fromUrl}`,
+		);
+
+		const install = await runHost(
+			cli,
+			["load", "plugin", "--from", fromUrl],
+			dataDir,
+		);
+		assert.equal(
+			install.status,
+			0,
+			`expected a clean install from an upper-cased encoded file URL: ${install.stdout}${install.stderr}`,
 		);
 		assert.match(install.stdout, /Plugin loaded successfully/);
 	});

@@ -315,15 +315,17 @@ function getPackageName(pkgPath: string): string | null {
  * paths, all of which can carry a stored `file://` source. A `file:` URL must
  * be converted to a native filesystem path before it is handed to
  * `npm install`. On Windows the temp dir often sits under an 8.3 short path
- * (e.g. `C:\Users\RUNNER~1\...`); `pathToFileURL` percent-encodes the `~` to
+ * (e.g. `C:\Users\RUNNER~1\...`); `pathToFileURL` may percent-encode the `~` to
  * `%7E`, and npm passes that raw, still-encoded `file://` URL straight to
  * `fs.open`, which then ENOENTs on `…RUNNER%7E1…\package.json`.
  * `fileURLToPath` decodes the URL back into the real path npm can open, and
- * mirrors the decoding already done in `getPackageNameFromSourceUrl`. Non-file
- * specs (https:, git:, bare package names) are passed through unchanged.
+ * mirrors the decoding already done in `getPackageNameFromSourceUrl`. The scheme
+ * is matched case-insensitively to mirror `isAcceptedUrl`, so an upper-cased
+ * `FILE://` source is decoded rather than passed through raw. Non-file specs
+ * (https:, git:, bare package names) are passed through unchanged.
  */
 function toNpmInstallSpec(fromUrl: string): string {
-	if (fromUrl.startsWith("file:")) {
+	if (/^file:/i.test(fromUrl)) {
 		try {
 			return fileURLToPath(fromUrl);
 		} catch {
@@ -340,7 +342,7 @@ function getPackageNameFromSourceUrl(url: string): string | null {
 	const URL_SCHEME_PATTERN = /^[a-zA-Z]+:/;
 	let sourcePath: string | null = null;
 	try {
-		if (url.startsWith("file:")) {
+		if (/^file:/i.test(url)) {
 			sourcePath = fileURLToPath(url);
 		} else if (!URL_SCHEME_PATTERN.test(url)) {
 			sourcePath = url;
@@ -926,7 +928,7 @@ export const upgradePluginCommand = defineCommand(
 
 		// Versioned upgrade needs to respect source type
 		// File-based plugins do not have a version selector in npm install syntax
-		if (version && source.startsWith("file:")) {
+		if (version && /^file:/i.test(source)) {
 			logger.info(`Plugin source is: ${source}`);
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
@@ -1013,7 +1015,7 @@ export const downgradePluginCommand = defineCommand(
 
 		// Downgrade needs to respect the plugin source
 		// File-based plugins do not have a version selector in npm install syntax
-		if (source.startsWith("file:")) {
+		if (/^file:/i.test(source)) {
 			logger.info(`Plugin source is: ${source}`);
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
