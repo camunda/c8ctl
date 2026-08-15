@@ -148,12 +148,18 @@ export async function getExecutionPlatformVersion(
  * carries the given `id`. Used by the dry-run path to surface "element not
  * found" before reporting a successful preview.
  */
+// Structural guard: an object we can index for tree traversal. Mirrors the
+// previous `typeof node === "object" && node !== null` check (arrays included)
+// so `containsId` can read properties without an `as` cast.
+function isTraversable(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
 function containsId(node: unknown, id: string, seen: Set<object>): boolean {
-	if (node === null || typeof node !== "object") return false;
+	if (!isTraversable(node)) return false;
 	if (seen.has(node)) return false;
 	seen.add(node);
-	// biome-ignore lint/plugin: narrowing unknown to a plain object record for tree traversal
-	const record = node as Record<string, unknown>;
+	const record = node;
 	if (record.id === id) return true;
 	for (const key of Object.keys(record)) {
 		if (key.startsWith("$")) continue;

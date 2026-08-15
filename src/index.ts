@@ -21,9 +21,8 @@ import {
 	startUpdateCheck,
 } from "./core/index.ts";
 import {
-	COMMAND_REGISTRY,
 	type CommandContext,
-	type CommandDef,
+	commandRegistryEntries,
 	createDryRun,
 	deriveParseArgsOptions,
 	detectUnknownFlags,
@@ -315,8 +314,7 @@ function warnUnknownFlags(
 
 /** Verbs that require a resource argument — derived from COMMAND_REGISTRY (includes aliases). */
 const VERB_REQUIRES_RESOURCE = new Set(
-	// biome-ignore lint/plugin: widen to CommandDef to access optional aliases property
-	(Object.entries(COMMAND_REGISTRY) as [string, CommandDef][])
+	commandRegistryEntries()
 		.filter(([, def]) => def.requiresResource)
 		.flatMap(([verb, def]) => [verb, ...(def.aliases ?? [])]),
 );
