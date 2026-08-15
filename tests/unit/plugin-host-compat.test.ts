@@ -944,4 +944,43 @@ describe("enforcement against a published host version (built dist)", () => {
 		assert.equal(run.status, 0, run.stdout + run.stderr);
 		assert.match(run.stdout, /"ran":"host-bare"/);
 	});
+
+	// Regression guard for the Windows-only failure where the temp dir sits under
+	// an 8.3 short path (`…\RUNNER~1\…`): `pathToFileURL` percent-encodes the `~`
+	// to `%7E`, and a raw `file://` URL handed to `npm install` ENOENTs on the
+	// still-encoded path. Staging the fixture under a directory whose name
+	// literally contains `~` reproduces the `%7E` encoding on every platform, so
+	// this locks in the `fileURLToPath()` decode in `load plugin --from`.
+	test("a file:// --from with a percent-encoded path installs cleanly", {
+		skip,
+	}, async () => {
+		const cli = stageHost("4.0.0");
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-host-compat-enc-"));
+		stagedDirs.push(dataDir);
+
+		// A parent dir whose name contains `~` → pathToFileURL emits `%7E`.
+		const encodedParent = join(dataDir, "RUNNER~1");
+		mkdirSync(encodedParent, { recursive: true });
+		const fixture = join(encodedParent, "plugin-src");
+		cpSync(FIXTURE_DIR, fixture, { recursive: true });
+
+		const fromUrl = pathToFileURL(fixture).href;
+		assert.match(
+			fromUrl,
+			/%7E/,
+			`expected an encoded ~ in the file URL, got ${fromUrl}`,
+		);
+
+		const install = await runHost(
+			cli,
+			["load", "plugin", "--from", fromUrl],
+			dataDir,
+		);
+		assert.equal(
+			install.status,
+			0,
+			`expected a clean install from an encoded file URL: ${install.stdout}${install.stderr}`,
+		);
+		assert.match(install.stdout, /Plugin loaded successfully/);
+	});
 });

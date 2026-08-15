@@ -203,7 +203,7 @@ export const loadPluginCommand = defineCommand(
 				// Install from URL (file://, https://, git://, etc.)
 				logger.info(`Loading plugin from: ${fromUrl}...`);
 				npm({
-					args: ["install", fromUrl, "--prefix", pluginsDir],
+					args: ["install", toNpmInstallSpec(fromUrl), "--prefix", pluginsDir],
 					stdio: "inherit",
 				});
 
@@ -305,6 +305,29 @@ function getPackageName(pkgPath: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Resolve a `--from` spec into the argument npm should receive.
+ *
+ * A `file:` URL must be converted to a native filesystem path before it is
+ * handed to `npm install`. On Windows the temp dir often sits under an 8.3
+ * short path (e.g. `C:\Users\RUNNER~1\...`); `pathToFileURL` percent-encodes
+ * the `~` to `%7E`, and npm passes that raw, still-encoded `file://` URL
+ * straight to `fs.open`, which then ENOENTs on `…RUNNER%7E1…\package.json`.
+ * `fileURLToPath` decodes the URL back into the real path npm can open, and
+ * mirrors the decoding already done in `getPackageNameFromSourceUrl`. Non-file
+ * specs (https:, git:, bare package names) are passed through unchanged.
+ */
+function toNpmInstallSpec(fromUrl: string): string {
+	if (fromUrl.startsWith("file:")) {
+		try {
+			return fileURLToPath(fromUrl);
+		} catch {
+			return fromUrl;
+		}
+	}
+	return fromUrl;
 }
 
 /**
