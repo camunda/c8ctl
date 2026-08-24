@@ -136,7 +136,7 @@ jobs:
     needs: [test, release]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     permissions: {}
-    uses: camunda/sdk-infra/.github/workflows/sdk-slack-notify.yml@v1.10.0
+    uses: camunda/sdk-infra/.github/workflows/sdk-slack-notify.yml@v1.11.0
     with:
       repo-name: c8ctl
       workflow-name: Release
