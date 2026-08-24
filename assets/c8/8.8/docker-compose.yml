@@ -100,7 +100,7 @@ services:
 
   camunda:
     container_name: camunda
-    image: camunda/camunda:8.10-SNAPSHOT
+    image: camunda/camunda:${CAMUNDA_VERSION}
     environment:
       - 'JAVA_TOOL_OPTIONS=-Xms512m -Xmx1g'
       - ZEEBE_BROKER_NETWORK_HOST=camunda
