@@ -25,6 +25,11 @@
       "description": "Auto-merge minor and patch updates once CI is green.",
       "matchUpdateTypes": ["minor", "patch"],
       "automerge": true
+    },
+    {
+      "description": "assets/c8/8.8 and 8.9 pin the camunda/camunda image to a specific test-matrix version (in docker-compose.yml via CAMUNDA_VERSION, and in .env). Renovate has already auto-bumped this pin twice (PR #500, PR #543), breaking the release; do not let it touch these paths again.",
+      "matchFileNames": ["assets/c8/8.8/**", "assets/c8/8.9/**"],
+      "enabled": false
     }
   ],
   "vulnerabilityAlerts": { "enabled": true },
