@@ -186,6 +186,7 @@ export type ParsedSetArg = {
 export type ParsedPluginArgs = {
 	inPlace: boolean;
 	setArgs: string[];
+	valuesFile: string | null;
 	positionals: string[];
 	error: string | null;
 };
@@ -623,12 +624,14 @@ export function warnUnmetConditions(
 }
 
 // ---------------------------------------------------------------------------
-// Plugin arg parser — extracts --set, --in-place/-i, and positionals
+// Plugin arg parser — extracts --set, --values-file, --in-place/-i, positionals
 // ---------------------------------------------------------------------------
 
 /**
  * Parse plugin args, separating flags from positionals.
  * - `--set foo=bar` (or `--set=foo=bar`) is repeatable, collected into setArgs[]
+ * - `--values-file <path>` (or `--values-file=-`) loads a JSON object of name→value
+ *   pairs; use `-` to read from stdin. Last occurrence wins.
  * - `--in-place` / `-i` is a boolean
  * - everything else is a positional
  *
@@ -639,6 +642,7 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 	const result: ParsedPluginArgs = {
 		inPlace: false,
 		setArgs: [],
+		valuesFile: null,
 		positionals: [],
 		error: null,
 	};
@@ -672,6 +676,23 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 			continue;
 		}
 
+		if (arg === "--values-file") {
+			const next = args[i + 1];
+			if (next === undefined) {
+				result.error =
+					"--values-file requires a path (e.g. --values-file config.json or --values-file -)";
+				return result;
+			}
+			result.valuesFile = next;
+			i++;
+			continue;
+		}
+
+		if (arg.startsWith("--values-file=")) {
+			result.valuesFile = arg.slice("--values-file=".length);
+			continue;
+		}
+
 		if (arg.startsWith("-")) {
 			result.error = `Unknown flag: ${arg}`;
 			return result;
@@ -681,6 +702,66 @@ export function parseArgs(args: string[]): ParsedPluginArgs {
 	}
 
 	return result;
+}
+
+/**
+ * Read a `--values-file` argument: parse the JSON object and return
+ * an array of `name=value` strings compatible with `--set` processing.
+ * Pass `"-"` to read from stdin.
+ *
+ * Throws on missing file, invalid JSON, non-object root, or unsupported
+ * value types (null, object, array). Numbers and booleans are coerced to
+ * their string representation so authors can write `"maxTokens": 4096`
+ * without quoting.
+ */
+export async function readValuesFile(filePath: string): Promise<string[]> {
+	let content: string;
+	if (filePath === "-") {
+		process.stdin.setEncoding("utf-8");
+		const chunks: string[] = [];
+		for await (const chunk of process.stdin) {
+			chunks.push(chunk);
+		}
+		content = chunks.join("");
+	} else {
+		const resolved = resolvePath(filePath);
+		if (!existsSync(resolved)) {
+			throw new Error(`Values file not found: ${filePath}`);
+		}
+		content = readFileSync(resolved, "utf-8");
+	}
+
+	const label = filePath === "-" ? "stdin" : filePath;
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(content);
+	} catch (err) {
+		throw new Error(
+			`--values-file: invalid JSON in ${label}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
+
+	if (!isRecord(parsed)) {
+		throw new Error(
+			`--values-file: expected a JSON object mapping names to values in ${label}`,
+		);
+	}
+
+	const setArgs: string[] = [];
+	for (const [key, value] of Object.entries(parsed)) {
+		if (typeof value === "string") {
+			setArgs.push(`${key}=${value}`);
+		} else if (typeof value === "number" || typeof value === "boolean") {
+			setArgs.push(`${key}=${String(value)}`);
+		} else {
+			throw new Error(
+				`--values-file: property "${key}" has unsupported value type ${value === null ? "null" : typeof value}; expected string, number, or boolean`,
+			);
+		}
+	}
+
+	return setArgs;
 }
 
 /**
