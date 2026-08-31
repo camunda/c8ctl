@@ -180,21 +180,42 @@ export function validateFlags(
 	// explicitly-invalid value (e.g. bad enum) surfaces its specific error
 	// before the generic "is required" message.
 	//
-	// "Present" means: a non-empty string, OR a non-empty array whose last
-	// element is a non-empty string. node:util `parseArgs({ strict: false })`
-	// returns an array when the same flag is supplied more than once
-	// (`--foo a --foo b` → `["a","b"]`), so a strict `typeof === "string"`
-	// check would incorrectly report a supplied flag as missing.
+	// For a non-`multiple` flag, "present" means: a non-empty string, OR a
+	// non-empty array whose *last* element is a non-empty string.
+	// node:util `parseArgs({ strict: false })` returns an array when the
+	// same flag is supplied more than once (`--foo a --foo b` →
+	// `["a","b"]`), so a strict `typeof === "string"` check would
+	// incorrectly report a supplied flag as missing — and checking the
+	// last element matches that flag's own last-write-wins semantics.
+	//
+	// A `multiple: true` flag has no last-write-wins semantics — every
+	// element is independently meaningful — so it's "present" if *any*
+	// element is a non-empty string, not only the last one (a repeated
+	// flag whose last occurrence happens to be empty, e.g.
+	// `--header "X: 1" --header ""`, must not be reported as missing).
 	for (const [flagName, def] of Object.entries(flagDefs)) {
 		if (def.required !== true) continue;
 		const raw = values[flagName];
-		if (!isPresentString(raw)) {
+		const present = def.multiple ? isPresentAny(raw) : isPresentString(raw);
+		if (!present) {
 			logger.error(`--${flagName} is required`);
 			process.exit(1);
 		}
 	}
 
 	return validated;
+}
+
+/**
+ * True iff a `multiple: true` flag's raw value contains at least one
+ * non-empty string anywhere — not just the last element. See the
+ * required-flag enforcement comment in `validateFlags` for why.
+ */
+function isPresentAny(
+	raw: string | boolean | (string | boolean)[] | undefined,
+): boolean {
+	const items = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+	return items.some((v) => typeof v === "string" && v !== "");
 }
 
 /**

@@ -728,6 +728,61 @@ describe("validateFlags handles multiple:true + validate", () => {
 	});
 });
 
+// ─── validateFlags — multiple:true + required:true ───────────────────────────
+
+/**
+ * A `multiple: true` flag has no last-write-wins semantics — every element
+ * is independently meaningful — so the required-flag presence check must
+ * not look only at the last element the way it does for a non-repeatable
+ * flag.
+ */
+describe("validateFlags handles multiple:true + required:true", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const requiredMultipleFlag: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		header: {
+			type: "string",
+			multiple: true,
+			required: true,
+			description: "A required, repeatable header",
+		},
+	};
+
+	test("is not rejected as missing when a non-empty value precedes an empty one", () => {
+		// The LAST occurrence is empty; an earlier one is not. A last-only
+		// presence check would incorrectly report this as missing.
+		assert.doesNotThrow(() =>
+			validateFlags({ header: ["X: 1", ""] }, requiredMultipleFlag),
+		);
+	});
+
+	test("is rejected as missing when every occurrence is empty", () => {
+		assert.throws(
+			() => validateFlags({ header: ["", ""] }, requiredMultipleFlag),
+			/process\.exit\(1\)/,
+		);
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("--header is required"), combined);
+	});
+
+	test("is rejected as missing when never supplied", () => {
+		assert.throws(
+			() => validateFlags({}, requiredMultipleFlag),
+			/process\.exit\(1\)/,
+		);
+	});
+
+	test("is accepted when supplied once as a plain string", () => {
+		assert.doesNotThrow(() =>
+			validateFlags({ header: "X: 1" }, requiredMultipleFlag),
+		);
+	});
+});
+
 // ─── detectUnknownFlags ─────────────────────────────────────────────────────
 
 describe("detectUnknownFlags — non-search verbs", () => {
