@@ -101,6 +101,11 @@ export function requireCsvEnum<T extends string>(
  *
  * Enforcement order:
  *   1. Every flag with a `validate` function has it applied (invalid → exit 1).
+ *      For a `multiple: true` flag, every element is validated — not just
+ *      the last — since `deserializeFlags` validates every element too;
+ *      this is the single chokepoint that must catch a bad value before
+ *      dispatch, with a clean `Invalid --<flag>` message rather than an
+ *      uncaught validator throw surfacing later as "Unexpected error".
  *   2. Every flag with `required: true` must be present as a non-empty string
  *      (missing → exit 1 with `--<flag> is required`).
  *
@@ -122,12 +127,38 @@ export function validateFlags(
 
 	for (const [flagName, def] of Object.entries(flagDefs)) {
 		if (!def.validate) continue;
-
-		// Pick the value to validate. As with required-flag enforcement
-		// below, accept the last string from a repeated-flag array so that
-		// `--foo a --foo b` (which `parseArgs({ strict: false })` returns as
-		// `["a","b"]`) is validated rather than silently skipped.
 		const raw = values[flagName];
+
+		if (def.multiple) {
+			// Every element of a repeatable flag is a distinct value —
+			// unlike a non-repeatable flag received twice, none of them is
+			// "overridden" by a later one — so each must be validated.
+			const items = Array.isArray(raw)
+				? raw
+				: typeof raw === "string"
+					? [raw]
+					: [];
+			const strings = items.filter(
+				(v): v is string => typeof v === "string" && v !== "",
+			);
+			if (strings.length === 0) continue;
+			try {
+				validated.set(
+					flagName,
+					strings.map((s) => def.validate?.(s)),
+				);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				logger.error(`Invalid --${flagName}: ${message}`);
+				process.exit(1);
+			}
+			continue;
+		}
+
+		// Pick the value to validate. Accept the last string from a
+		// repeated-flag array so that `--foo a --foo b` (which
+		// `parseArgs({ strict: false })` returns as `["a","b"]`) is
+		// validated rather than silently skipped.
 		const value =
 			typeof raw === "string"
 				? raw

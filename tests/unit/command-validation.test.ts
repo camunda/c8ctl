@@ -670,6 +670,64 @@ describe("validateFlags handles repeated-flag arrays", () => {
 	});
 });
 
+// ─── validateFlags — multiple:true + validate ────────────────────────────────
+
+/**
+ * `deserializeFlags` validates every element of a `multiple: true` flag
+ * (not just the last), so `validateFlags` — the pre-dispatch chokepoint —
+ * must do the same. Otherwise an earlier invalid element would pass this
+ * check (which only looked at the last element) and then throw uncaught
+ * inside `deserializeFlags` during dispatch, surfacing as an "Unexpected
+ * error" instead of a clean `Invalid --<flag>` message.
+ */
+describe("validateFlags handles multiple:true + validate", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const multipleValidatedFlag: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		num: {
+			type: "string",
+			multiple: true,
+			description: "Repeatable number",
+			validate: (v: string) => {
+				if (!/^[0-9]+$/.test(v)) throw new Error("must be numeric");
+				return v;
+			},
+		},
+	};
+
+	test("validates every element, not just the last", () => {
+		// The FIRST value is invalid here — a last-only check would miss it.
+		assert.throws(
+			() => validateFlags({ num: ["abc", "123"] }, multipleValidatedFlag),
+			/process\.exit\(1\)/,
+		);
+		const combined = errorSpy.join("\n");
+		assert.ok(combined.includes("Invalid --num"), combined);
+	});
+
+	test("accepts every element when all are valid", () => {
+		const result = validateFlags(
+			{ num: ["123", "456"] },
+			multipleValidatedFlag,
+		);
+		assert.deepStrictEqual(result.get("num"), ["123", "456"]);
+	});
+
+	test("validates a single occurrence supplied as a plain string", () => {
+		const result = validateFlags({ num: "123" }, multipleValidatedFlag);
+		assert.deepStrictEqual(result.get("num"), ["123"]);
+	});
+
+	test("skips a multiple:true + validate flag that was never supplied", () => {
+		const result = validateFlags({}, multipleValidatedFlag);
+		assert.strictEqual(result.size, 0);
+	});
+});
+
 // ─── detectUnknownFlags ─────────────────────────────────────────────────────
 
 describe("detectUnknownFlags — non-search verbs", () => {
