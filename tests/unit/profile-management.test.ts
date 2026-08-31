@@ -604,6 +604,29 @@ describe("Profile management", () => {
 		});
 	});
 
+	/**
+	 * Read a persisted profile from a specific data dir. Restores whatever
+	 * C8CTL_DATA_DIR held before (via `finally`) even if getProfile() throws,
+	 * so a failed assertion can't leak the override into later tests running
+	 * in this same process.
+	 */
+	function getProfileFromDataDir(
+		dataDir: string,
+		name: string,
+	): ReturnType<typeof getProfile> {
+		const original = process.env.C8CTL_DATA_DIR;
+		process.env.C8CTL_DATA_DIR = dataDir;
+		try {
+			return getProfile(name);
+		} finally {
+			if (original === undefined) {
+				delete process.env.C8CTL_DATA_DIR;
+			} else {
+				process.env.C8CTL_DATA_DIR = original;
+			}
+		}
+	}
+
 	describe("CLI: c8 add profile --header / --exactBaseUrl (#547)", () => {
 		let testDataDir: string;
 
@@ -650,9 +673,7 @@ describe("Profile management", () => {
 				`Expected header name in output, got: ${result.stdout}`,
 			);
 
-			process.env.C8CTL_DATA_DIR = testDataDir;
-			const profile = getProfile("gateway");
-			delete process.env.C8CTL_DATA_DIR;
+			const profile = getProfileFromDataDir(testDataDir, "gateway");
 
 			assert.ok(profile);
 			assert.deepStrictEqual(profile.headers, { "X-Api-Key": "secret" });
@@ -686,9 +707,7 @@ describe("Profile management", () => {
 				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
 			);
 
-			process.env.C8CTL_DATA_DIR = testDataDir;
-			const profile = getProfile("gateway-multi");
-			delete process.env.C8CTL_DATA_DIR;
+			const profile = getProfileFromDataDir(testDataDir, "gateway-multi");
 
 			assert.ok(profile);
 			assert.deepStrictEqual(profile.headers, {
@@ -726,9 +745,7 @@ describe("Profile management", () => {
 				`Expected exact-base-url note in output, got: ${result.stdout}`,
 			);
 
-			process.env.C8CTL_DATA_DIR = testDataDir;
-			const profile = getProfile("gateway-exact");
-			delete process.env.C8CTL_DATA_DIR;
+			const profile = getProfileFromDataDir(testDataDir, "gateway-exact");
 
 			assert.ok(profile);
 			assert.strictEqual(profile.exactBaseUrl, true);
@@ -765,9 +782,7 @@ describe("Profile management", () => {
 				`Expected invalid header error, got: ${output}`,
 			);
 
-			process.env.C8CTL_DATA_DIR = testDataDir;
-			const profile = getProfile("gateway-bad-header");
-			delete process.env.C8CTL_DATA_DIR;
+			const profile = getProfileFromDataDir(testDataDir, "gateway-bad-header");
 			assert.strictEqual(
 				profile,
 				undefined,
@@ -798,9 +813,7 @@ describe("Profile management", () => {
 			assert.ok(!output.includes("Headers:"));
 			assert.ok(!output.includes("used exactly as given"));
 
-			process.env.C8CTL_DATA_DIR = testDataDir;
-			const profile = getProfile("plain");
-			delete process.env.C8CTL_DATA_DIR;
+			const profile = getProfileFromDataDir(testDataDir, "plain");
 
 			assert.ok(profile);
 			assert.strictEqual(profile.headers, undefined);

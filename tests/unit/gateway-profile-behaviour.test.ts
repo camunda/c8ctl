@@ -27,6 +27,23 @@ interface CapturedRequest {
 	headers: Record<string, string | string[] | undefined>;
 }
 
+/**
+ * Find the one job-activation request among everything the mock server
+ * received. Asserting via this helper — rather than checking
+ * `requests.length === 1` and indexing `requests[0]` — keeps these tests
+ * robust if the SDK ever issues an additional harmless request (e.g. a
+ * topology check) alongside the activation request under test.
+ */
+function findActivationRequest(requests: CapturedRequest[]): CapturedRequest {
+	const matches = requests.filter((r) => r.url?.endsWith("/jobs/activation"));
+	assert.strictEqual(
+		matches.length,
+		1,
+		`expected exactly one /jobs/activation request, got ${matches.length}: ${JSON.stringify(requests)}`,
+	);
+	return matches[0];
+}
+
 function getServerPort(server: Server): number {
 	const addr = server.address();
 	if (isRecord(addr) && typeof addr.port === "number") {
@@ -146,8 +163,8 @@ describe("CLI behavioural: gateway profile headers + exactBaseUrl (#547)", () =>
 		});
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		assert.strictEqual(server.requests.length, 1);
-		assert.strictEqual(server.requests[0].headers["x-api-key"], "secret");
+		const activation = findActivationRequest(server.requests);
+		assert.strictEqual(activation.headers["x-api-key"], "secret");
 	});
 
 	test("--exactBaseUrl targets the profile's base URL without appending /v2", async () => {
@@ -161,8 +178,8 @@ describe("CLI behavioural: gateway profile headers + exactBaseUrl (#547)", () =>
 		});
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		assert.strictEqual(server.requests.length, 1);
-		assert.strictEqual(server.requests[0].url, "/jobs/activation");
+		const activation = findActivationRequest(server.requests);
+		assert.strictEqual(activation.url, "/jobs/activation");
 	});
 
 	test("combines --header and --exactBaseUrl on the same request", async () => {
@@ -177,13 +194,10 @@ describe("CLI behavioural: gateway profile headers + exactBaseUrl (#547)", () =>
 		});
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		assert.strictEqual(server.requests.length, 1);
-		assert.strictEqual(server.requests[0].url, "/jobs/activation");
-		assert.strictEqual(server.requests[0].headers["x-api-key"], "secret");
-		assert.strictEqual(
-			server.requests[0].headers["x-correlation-id"],
-			"abc-123",
-		);
+		const activation = findActivationRequest(server.requests);
+		assert.strictEqual(activation.url, "/jobs/activation");
+		assert.strictEqual(activation.headers["x-api-key"], "secret");
+		assert.strictEqual(activation.headers["x-correlation-id"], "abc-123");
 	});
 
 	test("a profile using neither flag behaves exactly as before", async () => {
@@ -196,10 +210,10 @@ describe("CLI behavioural: gateway profile headers + exactBaseUrl (#547)", () =>
 		});
 
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		assert.strictEqual(server.requests.length, 1);
 		// baseUrl already carries /v2, as every profile is expected to today
 		// — the request path is unaffected by this change.
-		assert.strictEqual(server.requests[0].url, "/v2/jobs/activation");
-		assert.strictEqual(server.requests[0].headers["x-api-key"], undefined);
+		const activation = findActivationRequest(server.requests);
+		assert.strictEqual(activation.url, "/v2/jobs/activation");
+		assert.strictEqual(activation.headers["x-api-key"], undefined);
 	});
 });
