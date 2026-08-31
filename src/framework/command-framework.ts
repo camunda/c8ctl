@@ -90,8 +90,9 @@ export type ResolvedPositionals<
  * A flag is non-optional in the handler's view iff it is declared
  * `required: true` in the FlagDef. `required: true` is enforced at the
  * framework boundary by validateFlags (#308) — including for `multiple`
- * flags: `validateFlags`'s presence check already treats a repeated flag's
- * array as present when its last element is a non-empty string, so the
+ * flags: `validateFlags` treats a repeated flag's array as present when
+ * *any* element is a non-empty string (not just the last, since every
+ * element of a `multiple` flag is independently meaningful), so the
  * handler is guaranteed to see a value there too.
  *
  * The type parameter is unconstrained so conditional types like
