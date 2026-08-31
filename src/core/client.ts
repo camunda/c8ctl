@@ -15,6 +15,27 @@ import { c8ctl } from "./runtime.ts";
 type FetchFn = NonNullable<CamundaOptions["fetch"]>;
 
 /**
+ * Normalize a base URL the same way constructing a `Request` from it would:
+ * the WHATWG URL parser lowercases the host and applies its own formatting
+ * (default ports, etc). `Request.url` in the fetch wrapper below always
+ * reflects that normalized form — even when the SDK's own internal
+ * `CAMUNDA_REST_ADDRESS` string keeps the caller's original casing — so
+ * comparing against a base derived from the raw, un-parsed `baseUrl` string
+ * can silently fail to match a profile whose `--baseUrl` has an
+ * uppercase/mixed-case host. Falls back to a plain trim when `baseUrl`
+ * isn't a parseable absolute URL; requests built from it would already be
+ * failing elsewhere in that case.
+ */
+function normalizeBaseUrl(baseUrl: string): string {
+	const trimmed = baseUrl.trim();
+	try {
+		return new URL(trimmed).toString().replace(/\/+$/, "");
+	} catch {
+		return trimmed.replace(/\/+$/, "");
+	}
+}
+
+/**
  * Wrap a fetch implementation so every request made under a gateway-fronted
  * profile carries its custom headers and, when `exactBaseUrl` is set,
  * targets the profile's base URL exactly instead of the SDK's auto-suffixed
@@ -46,7 +67,7 @@ export function buildGatewayFetch(opts: {
 		opts.delegate ?? ((input, init) => fetch(input, init));
 	const headerEntries = Object.entries(opts.headers ?? {});
 
-	const strippedBase = opts.baseUrl.trim().replace(/\/+$/, "");
+	const strippedBase = normalizeBaseUrl(opts.baseUrl);
 	const sdkComputedBase = /\/v2$/i.test(strippedBase)
 		? strippedBase
 		: `${strippedBase}/v2`;
@@ -63,7 +84,10 @@ export function buildGatewayFetch(opts: {
 		const boundary = request.url.charAt(sdkComputedBase.length);
 		const matchesComputedBase =
 			request.url.startsWith(sdkComputedBase) &&
-			(boundary === "" || boundary === "/" || boundary === "?");
+			(boundary === "" ||
+				boundary === "/" ||
+				boundary === "?" ||
+				boundary === "#");
 
 		if (opts.exactBaseUrl && matchesComputedBase) {
 			const exactUrl = strippedBase + request.url.slice(sdkComputedBase.length);

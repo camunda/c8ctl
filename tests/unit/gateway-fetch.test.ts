@@ -192,6 +192,30 @@ describe("buildGatewayFetch", () => {
 			);
 		});
 
+		test("matches the SDK-computed base even when --baseUrl has an uppercase host", async () => {
+			const { delegate, requests } = recordingDelegate();
+			const gatewayFetch = buildGatewayFetch({
+				baseUrl: "https://GATEWAY.example.com/camunda-api",
+				exactBaseUrl: true,
+				delegate,
+			});
+
+			// The WHATWG URL parser (used by `new Request()`) lowercases the
+			// host, so this is what a real SDK-issued request's URL looks
+			// like even though --baseUrl itself has an uppercase host.
+			await gatewayFetch(
+				new Request(
+					"https://GATEWAY.example.com/camunda-api/v2/process-instances/search",
+					{ method: "GET" },
+				),
+			);
+
+			assert.strictEqual(
+				requests[0].url,
+				"https://gateway.example.com/camunda-api/process-instances/search",
+			);
+		});
+
 		test("does not rewrite the URL when exactBaseUrl is not set", async () => {
 			const { delegate, requests } = recordingDelegate();
 			const gatewayFetch = buildGatewayFetch({
