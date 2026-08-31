@@ -8,7 +8,7 @@
  */
 
 import assert from "node:assert";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -25,8 +25,7 @@ describe("resolveAuthHeaders — custom profile headers (#547)", () => {
 	let originalEnv: NodeJS.ProcessEnv;
 
 	beforeEach(() => {
-		testDataDir = join(tmpdir(), `c8ctl-auth-headers-${Date.now()}`);
-		mkdirSync(testDataDir, { recursive: true });
+		testDataDir = mkdtempSync(join(tmpdir(), "c8ctl-auth-headers-"));
 		originalEnv = { ...process.env };
 		process.env.C8CTL_DATA_DIR = testDataDir;
 	});
@@ -111,8 +110,7 @@ describe("rawPostWithHeaders — exactBaseUrl (#547)", () => {
 	let capturedUrl: string | undefined;
 
 	beforeEach(() => {
-		testDataDir = join(tmpdir(), `c8ctl-raw-post-${Date.now()}`);
-		mkdirSync(testDataDir, { recursive: true });
+		testDataDir = mkdtempSync(join(tmpdir(), "c8ctl-raw-post-"));
 		originalEnv = { ...process.env };
 		process.env.C8CTL_DATA_DIR = testDataDir;
 

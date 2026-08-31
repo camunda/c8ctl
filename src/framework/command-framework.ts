@@ -77,20 +77,22 @@ export type ResolvedPositionals<
 /**
  * Map a flag schema to typed handler parameters.
  *
- * - `multiple: true` flags → `R[] | undefined` when combined with
- *   `validate` (each element validated), else `string[] | undefined`.
- *   Checked before `validate`/`type` so a flag combining `multiple` with
- *   `validate` infers an array — matching `deserializeFlags`, which always
- *   returns an array for a `multiple` flag regardless of `validate`.
+ * - `multiple: true` flags → `R[]` when combined with `validate` (each
+ *   element validated), else `string[]` — `| undefined` unless
+ *   `required: true`. Checked before `validate`/`type` so a flag combining
+ *   `multiple` with `validate` infers an array — matching
+ *   `deserializeFlags`, which always returns an array for a `multiple`
+ *   flag regardless of `validate`.
  * - Flags with `validate` (non-`multiple`) → the validator's return type
  * - Boolean flags → boolean
  * - Everything else → string
  *
  * A flag is non-optional in the handler's view iff it is declared
  * `required: true` in the FlagDef. `required: true` is enforced at the
- * framework boundary by validateFlags (#308), so the handler is guaranteed
- * to see a value. `multiple` flags are always optional — there is no
- * required-array enforcement in validateFlags.
+ * framework boundary by validateFlags (#308) — including for `multiple`
+ * flags: `validateFlags`'s presence check already treats a repeated flag's
+ * array as present when its last element is a non-empty string, so the
+ * handler is guaranteed to see a value there too.
  *
  * The type parameter is unconstrained so conditional types like
  * `ResolvedFlags<V, R>` can be passed through without constraint errors.
@@ -99,8 +101,12 @@ export type ResolvedPositionals<
 export type InferFlags<F extends Record<string, any>> = {
 	[K in keyof F]: F[K] extends { multiple: true }
 		? F[K] extends { validate: (v: string) => infer R }
-			? R[] | undefined
-			: string[] | undefined
+			? F[K] extends { required: true }
+				? R[]
+				: R[] | undefined
+			: F[K] extends { required: true }
+				? string[]
+				: string[] | undefined
 		: F[K] extends { validate: (v: string) => infer R }
 			? F[K] extends { required: true }
 				? R

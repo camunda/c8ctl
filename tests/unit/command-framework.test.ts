@@ -77,6 +77,15 @@ const MULTIPLE_VALIDATED_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+const REQUIRED_MULTIPLE_FLAGS = {
+	header: {
+		type: "string",
+		multiple: true,
+		required: true,
+		description: "A required, repeatable header",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  deserializeFlags — runtime behaviour
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -305,6 +314,14 @@ describe("InferFlags — type inference (compile-time)", () => {
 		const pdKey = ProcessDefinitionKey.assumeExists("111");
 		const _withValues: Result = { pdKeys: [pdKey] };
 		const _withoutValues: Result = { pdKeys: undefined };
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true + required:true infers to a non-optional array", () => {
+		type Result = InferFlags<typeof REQUIRED_MULTIPLE_FLAGS>;
+		// No `| undefined` variant — validateFlags's presence check already
+		// covers a repeated flag's array, so this must compile without it.
+		const _check: Result = { header: ["X-A: 1"] };
 		assert.ok(true, "compiles");
 	});
 });
