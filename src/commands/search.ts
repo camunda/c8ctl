@@ -1024,6 +1024,7 @@ export const searchWaitStatesCommand = defineCommand(
 					"/element-instances/wait-states/search",
 					f,
 					authHeaders,
+					profile,
 				);
 				if (!isRecord(result)) {
 					throw new Error("Unexpected response shape from wait states search");

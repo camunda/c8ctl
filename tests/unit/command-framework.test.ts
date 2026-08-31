@@ -64,6 +64,10 @@ const MIXED_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+const MULTIPLE_FLAGS = {
+	header: { type: "string", multiple: true, description: "A header" },
+} as const satisfies Record<string, FlagDef>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  deserializeFlags — runtime behaviour
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -173,6 +177,41 @@ describe("deserializeFlags", () => {
 		const keys = Object.keys(result);
 		assert.deepStrictEqual(keys.sort(), ["email", "name"]);
 	});
+
+	// ─── multiple:true flags ─────────────────────────────────────────────────
+
+	test("collects repeated multiple:true flags into an array", () => {
+		const result = deserializeFlags(
+			{ header: ["X-A: 1", "X-B: 2"] },
+			MULTIPLE_FLAGS,
+		);
+		assert.deepStrictEqual(result.header, ["X-A: 1", "X-B: 2"]);
+	});
+
+	test("wraps a single multiple:true value in a one-element array", () => {
+		// node:util parseArgs returns a plain string, not an array, when a
+		// multiple:true flag is supplied exactly once.
+		const result = deserializeFlags({ header: "X-A: 1" }, MULTIPLE_FLAGS);
+		assert.deepStrictEqual(result.header, ["X-A: 1"]);
+	});
+
+	test("undefined for missing multiple:true flags", () => {
+		const result = deserializeFlags({}, MULTIPLE_FLAGS);
+		assert.strictEqual(result.header, undefined);
+	});
+
+	test("filters out empty-string entries from multiple:true flags", () => {
+		const result = deserializeFlags(
+			{ header: ["X-A: 1", "", "X-B: 2"] },
+			MULTIPLE_FLAGS,
+		);
+		assert.deepStrictEqual(result.header, ["X-A: 1", "X-B: 2"]);
+	});
+
+	test("undefined when every multiple:true entry is empty", () => {
+		const result = deserializeFlags({ header: [""] }, MULTIPLE_FLAGS);
+		assert.strictEqual(result.header, undefined);
+	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -214,6 +253,13 @@ describe("InferFlags — type inference (compile-time)", () => {
 			verbose: true,
 			processDefinitionKey: pdKey,
 		};
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true flags infer to string[] | undefined", () => {
+		type Result = InferFlags<typeof MULTIPLE_FLAGS>;
+		const _withValues: Result = { header: ["X-A: 1", "X-B: 2"] };
+		const _withoutValues: Result = { header: undefined };
 		assert.ok(true, "compiles");
 	});
 });

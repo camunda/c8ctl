@@ -1001,6 +1001,8 @@ Add a profile
 | `--password` | string |  | Basic auth password |
 | `--from-file` | string |  | Import from .env file |
 | `--from-env` | boolean |  | Import from environment variables |
+| `--header` | string |  | Custom HTTP header attached to every request made under this profile (format: "Name: value", repeatable) |
+| `--exactBaseUrl` | boolean |  | Use --baseUrl exactly as given for every request, without appending /v2 |
 
 ---
 

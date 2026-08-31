@@ -16,6 +16,7 @@ import {
 	MODELER_PREFIX,
 	type Profile,
 	parseEnvFile,
+	parseHeaderFlags,
 	removeProfile as removeProfileConfig,
 } from "../core/index.ts";
 import { confirm, defineCommand, select } from "../framework/index.ts";
@@ -84,6 +85,8 @@ interface AddProfileOptions {
 	tenantId?: string;
 	envFile?: string;
 	fromEnv?: boolean;
+	headers?: string[];
+	exactBaseUrl?: boolean;
 }
 
 /**
@@ -120,6 +123,13 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		);
 	}
 
+	// --header/--exactBaseUrl apply regardless of how the rest of the
+	// profile is populated (manual flags, --from-file, or --from-env).
+	const headers = options.headers?.length
+		? parseHeaderFlags(options.headers)
+		: undefined;
+	const exactBaseUrl = options.exactBaseUrl || undefined;
+
 	if (options.envFile) {
 		// --from-file: read a .env file and map CAMUNDA_* vars to profile fields
 		if (!existsSync(options.envFile)) {
@@ -127,7 +137,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		}
 		const content = readFileSync(options.envFile, "utf-8");
 		const vars = parseEnvFile(content);
-		profile = envVarsToProfile(name, vars);
+		profile = { ...envVarsToProfile(name, vars), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
 			logger.info("The .env file must contain at least CAMUNDA_BASE_URL.");
 			throw new Error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
@@ -138,7 +148,7 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		logger.info(`  Auth: ${describeAuth(profile)}`);
 	} else if (options.fromEnv) {
 		// --from-env: read from current process environment
-		profile = envVarsToProfile(name, process.env);
+		profile = { ...envVarsToProfile(name, process.env), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
 			logger.info("Set CAMUNDA_BASE_URL before using --from-env.");
 			throw new Error("CAMUNDA_BASE_URL not set in environment");
@@ -152,6 +162,8 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		profile = {
 			name,
 			baseUrl: options.url || "http://localhost:8080/v2",
+			headers,
+			exactBaseUrl,
 			clientId: options.clientId,
 			clientSecret: options.clientSecret,
 			audience: options.audience,
@@ -163,6 +175,13 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		};
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added`);
+	}
+
+	if (profile.headers && Object.keys(profile.headers).length > 0) {
+		logger.info(`  Headers: ${Object.keys(profile.headers).join(", ")}`);
+	}
+	if (profile.exactBaseUrl) {
+		logger.info("  Base URL used exactly as given (no /v2 suffix appended)");
 	}
 }
 
@@ -288,6 +307,8 @@ export const addProfileCommand = defineCommand(
 			password: flags.password,
 			envFile: flags["from-file"],
 			fromEnv: flags["from-env"],
+			headers: flags.header,
+			exactBaseUrl: flags.exactBaseUrl,
 		});
 		return { kind: "none" };
 	},

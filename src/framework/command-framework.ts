@@ -79,12 +79,15 @@ export type ResolvedPositionals<
  *
  * - Flags with `validate` → the validator's return type
  * - Boolean flags → boolean
+ * - `multiple: true` string flags → `string[] | undefined` (repeatable;
+ *   collects every occurrence, `undefined` when never supplied)
  * - Everything else → string
  *
  * A flag is non-optional in the handler's view iff it is declared
  * `required: true` in the FlagDef. `required: true` is enforced at the
  * framework boundary by validateFlags (#308), so the handler is guaranteed
- * to see a value.
+ * to see a value. `multiple` flags are always optional — there is no
+ * required-array enforcement in validateFlags.
  *
  * The type parameter is unconstrained so conditional types like
  * `ResolvedFlags<V, R>` can be passed through without constraint errors.
@@ -99,9 +102,11 @@ export type InferFlags<F extends Record<string, any>> = {
 			? F[K] extends { required: true }
 				? boolean
 				: boolean | undefined
-			: F[K] extends { required: true }
-				? string
-				: string | undefined;
+			: F[K] extends { multiple: true }
+				? string[] | undefined
+				: F[K] extends { required: true }
+					? string
+					: string | undefined;
 };
 
 // ─── InferPositionals ────────────────────────────────────────────────────────
@@ -413,6 +418,8 @@ export function defineCommand<V extends keyof Registry, R extends string>(
  * - If the flag has a `validate` function and the raw value is a non-empty
  *   string, call the validator (which returns a branded type).
  * - If the flag is boolean, extract the boolean value.
+ * - If the flag is `multiple: true`, collect every supplied value into a
+ *   string array (`undefined` when never supplied).
  * - Otherwise, extract the string value.
  *
  * Validators that throw are intentionally NOT caught here — validation
@@ -434,6 +441,14 @@ export function deserializeFlags<F extends Record<string, FlagDef>>(
 
 		if (def.type === "boolean") {
 			result[key] = typeof raw === "boolean" ? raw : undefined;
+		} else if (def.multiple) {
+			// node:util parseArgs collects repeated `multiple: true` flags into
+			// an array. A single occurrence still arrives as a plain string.
+			const items = Array.isArray(raw) ? raw : [raw];
+			const strings = items.filter(
+				(v): v is string => typeof v === "string" && v !== "",
+			);
+			result[key] = strings.length > 0 ? strings : undefined;
 		} else if (typeof raw === "string" && raw !== "") {
 			result[key] = def.validate ? def.validate(raw) : raw;
 		} else {

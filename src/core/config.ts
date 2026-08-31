@@ -92,6 +92,18 @@ export interface Profile {
 	username?: string;
 	password?: string;
 	defaultTenantId?: string;
+	/**
+	 * Custom HTTP headers attached to every REST request made under this
+	 * profile (e.g. a gateway API key or correlation ID). Keyed by header
+	 * name.
+	 */
+	headers?: Record<string, string>;
+	/**
+	 * When true, `baseUrl` is used exactly as given for every request —
+	 * c8ctl does not append `/v2`. For gateway-fronted clusters whose base
+	 * path does not match c8ctl's assumed suffixing.
+	 */
+	exactBaseUrl?: boolean;
 }
 
 export interface SessionState {
@@ -124,6 +136,10 @@ export interface ClusterConfig {
 	scope?: string;
 	username?: string;
 	password?: string;
+	/** See `Profile.headers`. */
+	headers?: Record<string, string>;
+	/** See `Profile.exactBaseUrl`. */
+	exactBaseUrl?: boolean;
 }
 
 // ============================================================================
@@ -553,6 +569,8 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		scope: profile.scope,
 		username: profile.username,
 		password: profile.password,
+		headers: profile.headers,
+		exactBaseUrl: profile.exactBaseUrl,
 	};
 }
 
@@ -810,9 +828,19 @@ export function hasCamundaEnvVars(): boolean {
 }
 
 /**
+ * Profile fields whose value is a plain string — the only fields
+ * `ENV_VAR_PROFILE_MAP` may target, since every CAMUNDA_* env var maps to a
+ * single string value. `headers` (a map) and `exactBaseUrl` (a boolean)
+ * have no env-var equivalent and are deliberately excluded.
+ */
+type StringProfileField = {
+	[K in keyof Profile]-?: Profile[K] extends string | undefined ? K : never;
+}[keyof Profile];
+
+/**
  * The env var → profile field mapping used by --from-file and --from-env.
  */
-export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
+export const ENV_VAR_PROFILE_MAP: Record<string, StringProfileField> = {
 	CAMUNDA_BASE_URL: "baseUrl",
 	CAMUNDA_CLIENT_ID: "clientId",
 	CAMUNDA_CLIENT_SECRET: "clientSecret",
@@ -849,6 +877,33 @@ export function parseEnvFile(content: string): Record<string, string> {
 		result[key] = value;
 	}
 	return result;
+}
+
+/**
+ * Parse repeatable `--header "Name: value"` flags into a header map.
+ * Splits each entry on the first colon; the name and value are trimmed.
+ * Throws with a message naming the offending entry when a header is
+ * missing its colon separator or has an empty name.
+ */
+export function parseHeaderFlags(entries: string[]): Record<string, string> {
+	const headers: Record<string, string> = {};
+	for (const entry of entries) {
+		const colonIndex = entry.indexOf(":");
+		if (colonIndex === -1) {
+			throw new Error(
+				`Invalid --header "${entry}" — expected format "Name: value"`,
+			);
+		}
+		const name = entry.slice(0, colonIndex).trim();
+		const value = entry.slice(colonIndex + 1).trim();
+		if (!name) {
+			throw new Error(
+				`Invalid --header "${entry}" — header name must not be empty`,
+			);
+		}
+		headers[name] = value;
+	}
+	return headers;
 }
 
 /**

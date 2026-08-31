@@ -649,6 +649,26 @@ const PROFILE_CONNECTION_FLAGS = {
 		type: "boolean",
 		description: "Import from environment variables",
 	},
+	header: {
+		type: "string",
+		multiple: true,
+		description:
+			'Custom HTTP header attached to every request made under this profile (format: "Name: value", repeatable)',
+		agentDescription:
+			'Repeatable. Format: "Name: value". Attached to every REST request made ' +
+			"under this profile (e.g. a gateway API key or correlation ID header).",
+		agentAppliesTo: "add profile",
+	},
+	exactBaseUrl: {
+		type: "boolean",
+		description:
+			"Use --baseUrl exactly as given for every request, without appending /v2",
+		agentDescription:
+			"When set, requests under this profile target --baseUrl exactly as " +
+			"given — c8ctl does not append /v2. For gateway/proxy-fronted " +
+			"clusters whose base path does not match c8ctl's assumed suffixing.",
+		agentAppliesTo: "add profile",
+	},
 } as const satisfies Record<string, FlagDef>;
 
 // ─── Per-resource get flags ──────────────────────────────────────────────────
