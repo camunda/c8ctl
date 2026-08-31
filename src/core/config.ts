@@ -901,10 +901,21 @@ export function setHeaderCaseInsensitive(
 }
 
 /**
+ * RFC 7230 `token` grammar — the only characters a valid HTTP header name
+ * may contain. Rejects e.g. a space in the name early, rather than letting
+ * it reach `Headers.set()` at request time.
+ */
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
  * Parse repeatable `--header "Name: value"` flags into a header map.
  * Splits each entry on the first colon; the name and value are trimmed.
  * Throws with a message naming the offending entry when a header is
- * missing its colon separator or has an empty name.
+ * missing its colon separator, has an empty or malformed name, or has a
+ * value containing CR/LF — validating this at parse time surfaces a clean
+ * `Invalid --header` error immediately, rather than persisting the
+ * profile successfully and only failing later, at request time, when
+ * `Headers.set()` itself rejects the same input.
  *
  * Repeating the same header name — even differing only in case, since HTTP
  * header names are case-insensitive — replaces the earlier value (last
@@ -924,6 +935,16 @@ export function parseHeaderFlags(entries: string[]): Record<string, string> {
 		if (!name) {
 			throw new Error(
 				`Invalid --header "${entry}" — header name must not be empty`,
+			);
+		}
+		if (!HTTP_HEADER_NAME_RE.test(name)) {
+			throw new Error(
+				`Invalid --header "${entry}" — header name "${name}" is not a valid HTTP token (letters, digits, and !#$%&'*+-.^_\`|~ only)`,
+			);
+		}
+		if (/[\r\n]/.test(value)) {
+			throw new Error(
+				`Invalid --header "${entry}" — header value must not contain a line break`,
 			);
 		}
 		setHeaderCaseInsensitive(headers, name, value);

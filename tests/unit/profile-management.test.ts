@@ -602,6 +602,44 @@ describe("Profile management", () => {
 			]);
 			assert.deepStrictEqual(headers, { authorization: "Bearer new" });
 		});
+
+		test("accepts every character allowed in an HTTP header token", () => {
+			const headers = parseHeaderFlags(["X-Api!#$%&'*+-.^_`|~Key: secret"]);
+			assert.deepStrictEqual(headers, {
+				"X-Api!#$%&'*+-.^_`|~Key": "secret",
+			});
+		});
+
+		test("throws when the header name contains a space", () => {
+			assert.throws(
+				() => parseHeaderFlags(["Bad Name: value"]),
+				/Invalid --header "Bad Name: value" — header name "Bad Name" is not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header name contains a colon-illegal character", () => {
+			assert.throws(
+				() => parseHeaderFlags(['X-"Quoted": value']),
+				/is not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header value contains a line break", () => {
+			// The offending entry itself contains \r\n, so the thrown
+			// message spans multiple lines — match with [\s\S] instead of
+			// "." (which doesn't cross a newline by default).
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\r\nEvil: 1"]),
+				/Invalid --header [\s\S]* — header value must not contain a line break/,
+			);
+		});
+
+		test("throws when the header value contains only a newline", () => {
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\nEvil: 1"]),
+				/header value must not contain a line break/,
+			);
+		});
 	});
 
 	/**
