@@ -41,7 +41,7 @@ function recordingDelegate(): {
 
 describe("buildGatewayFetch", () => {
 	describe("headers", () => {
-		test("attaches a custom header to a GET request", async () => {
+		test("attaches a custom header to a POST request", async () => {
 			const { delegate, requests } = recordingDelegate();
 			const gatewayFetch = buildGatewayFetch({
 				baseUrl: "http://localhost:8080/v2",

@@ -880,10 +880,35 @@ export function parseEnvFile(content: string): Record<string, string> {
 }
 
 /**
+ * Set one header on `target`, replacing any existing key that differs only
+ * in case rather than adding a second, differently-cased entry. HTTP
+ * header names are case-insensitive; a plain `Record<string, string>` is
+ * not, so this normalizes that for any code merging header maps built from
+ * user input (e.g. `parseHeaderFlags`, `resolveAuthHeaders`).
+ */
+export function setHeaderCaseInsensitive(
+	target: Record<string, string>,
+	name: string,
+	value: string,
+): void {
+	const existingKey = Object.keys(target).find(
+		(k) => k.toLowerCase() === name.toLowerCase(),
+	);
+	if (existingKey !== undefined && existingKey !== name) {
+		delete target[existingKey];
+	}
+	target[name] = value;
+}
+
+/**
  * Parse repeatable `--header "Name: value"` flags into a header map.
  * Splits each entry on the first colon; the name and value are trimmed.
  * Throws with a message naming the offending entry when a header is
  * missing its colon separator or has an empty name.
+ *
+ * Repeating the same header name — even differing only in case, since HTTP
+ * header names are case-insensitive — replaces the earlier value (last
+ * `--header` wins) rather than persisting both under separate keys.
  */
 export function parseHeaderFlags(entries: string[]): Record<string, string> {
 	const headers: Record<string, string> = {};
@@ -901,7 +926,7 @@ export function parseHeaderFlags(entries: string[]): Record<string, string> {
 				`Invalid --header "${entry}" — header name must not be empty`,
 			);
 		}
-		headers[name] = value;
+		setHeaderCaseInsensitive(headers, name, value);
 	}
 	return headers;
 }

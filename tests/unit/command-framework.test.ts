@@ -68,6 +68,15 @@ const MULTIPLE_FLAGS = {
 	header: { type: "string", multiple: true, description: "A header" },
 } as const satisfies Record<string, FlagDef>;
 
+const MULTIPLE_VALIDATED_FLAGS = {
+	pdKeys: {
+		type: "string",
+		multiple: true,
+		description: "Repeatable, validated PD keys",
+		validate: ProcessDefinitionKey.assumeExists,
+	},
+} as const satisfies Record<string, FlagDef>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  deserializeFlags — runtime behaviour
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -212,6 +221,34 @@ describe("deserializeFlags", () => {
 		const result = deserializeFlags({ header: [""] }, MULTIPLE_FLAGS);
 		assert.strictEqual(result.header, undefined);
 	});
+
+	// ─── multiple:true combined with validate ───────────────────────────────
+
+	test("applies validate to every element of a multiple:true flag", () => {
+		const result = deserializeFlags(
+			{ pdKeys: ["111", "222"] },
+			MULTIPLE_VALIDATED_FLAGS,
+		);
+		assert.deepStrictEqual(result.pdKeys, [
+			ProcessDefinitionKey.assumeExists("111"),
+			ProcessDefinitionKey.assumeExists("222"),
+		]);
+	});
+
+	test("applies validate to a single multiple:true value wrapped into an array", () => {
+		const result = deserializeFlags(
+			{ pdKeys: "111" },
+			MULTIPLE_VALIDATED_FLAGS,
+		);
+		assert.deepStrictEqual(result.pdKeys, [
+			ProcessDefinitionKey.assumeExists("111"),
+		]);
+	});
+
+	test("undefined for a missing multiple:true + validate flag", () => {
+		const result = deserializeFlags({}, MULTIPLE_VALIDATED_FLAGS);
+		assert.strictEqual(result.pdKeys, undefined);
+	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -260,6 +297,14 @@ describe("InferFlags — type inference (compile-time)", () => {
 		type Result = InferFlags<typeof MULTIPLE_FLAGS>;
 		const _withValues: Result = { header: ["X-A: 1", "X-B: 2"] };
 		const _withoutValues: Result = { header: undefined };
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true + validate infers to the validator's branded array type", () => {
+		type Result = InferFlags<typeof MULTIPLE_VALIDATED_FLAGS>;
+		const pdKey = ProcessDefinitionKey.assumeExists("111");
+		const _withValues: Result = { pdKeys: [pdKey] };
+		const _withoutValues: Result = { pdKeys: undefined };
 		assert.ok(true, "compiles");
 	});
 });

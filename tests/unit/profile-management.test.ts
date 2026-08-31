@@ -9,7 +9,13 @@
 
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -585,14 +591,27 @@ describe("Profile management", () => {
 			const headers = parseHeaderFlags(["X-Empty:"]);
 			assert.deepStrictEqual(headers, { "X-Empty": "" });
 		});
+
+		test("a later --header replaces an earlier one differing only in case", () => {
+			// HTTP header names are case-insensitive — persisting both
+			// "Authorization" and "authorization" would be confusing and
+			// redundant, and the last one supplied should win.
+			const headers = parseHeaderFlags([
+				"Authorization: Bearer old",
+				"authorization: Bearer new",
+			]);
+			assert.deepStrictEqual(headers, { authorization: "Bearer new" });
+		});
 	});
 
 	describe("CLI: c8 add profile --header / --exactBaseUrl (#547)", () => {
 		let testDataDir: string;
 
 		beforeEach(() => {
-			testDataDir = join(tmpdir(), `c8ctl-gateway-${Date.now()}`);
-			mkdirSync(testDataDir, { recursive: true });
+			// mkdtempSync (not a Date.now()-suffixed name) avoids a directory
+			// collision if another test file's worker process happens to
+			// create its own temp dir in the same millisecond.
+			testDataDir = mkdtempSync(join(tmpdir(), "c8ctl-gateway-"));
 		});
 
 		afterEach(() => {

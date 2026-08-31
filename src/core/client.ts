@@ -7,7 +7,7 @@ import {
 	type CamundaOptions,
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
-import { resolveClusterConfig } from "./config.ts";
+import { resolveClusterConfig, setHeaderCaseInsensitive } from "./config.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
 
@@ -376,20 +376,16 @@ export async function resolveAuthHeaders(
  * that differs only in case rather than adding a second, differently-cased
  * entry. `target` is a plain `Record<string, string>` (not a `Headers`
  * instance), since that's the contract `resolveAuthHeaders`/`rawPost*` use
- * for the one manual REST call that bypasses the SDK client.
+ * for the one manual REST call that bypasses the SDK client. Delegates to
+ * `setHeaderCaseInsensitive` (shared with `parseHeaderFlags`) for the
+ * per-entry logic.
  */
 function mergeHeadersCaseInsensitive(
 	target: Record<string, string>,
 	overrides: Record<string, string>,
 ): void {
 	for (const [name, value] of Object.entries(overrides)) {
-		const existingKey = Object.keys(target).find(
-			(k) => k.toLowerCase() === name.toLowerCase(),
-		);
-		if (existingKey !== undefined && existingKey !== name) {
-			delete target[existingKey];
-		}
-		target[name] = value;
+		setHeaderCaseInsensitive(target, name, value);
 	}
 }
 
