@@ -910,12 +910,18 @@ const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 /**
  * Parse repeatable `--header "Name: value"` flags into a header map.
  * Splits each entry on the first colon; the name and value are trimmed.
- * Throws with a message naming the offending entry when a header is
- * missing its colon separator, has an empty or malformed name, or has a
- * value containing CR/LF — validating this at parse time surfaces a clean
+ * Throws with a message describing the problem when a header is missing
+ * its colon separator, has an empty or malformed name, or has a value
+ * containing CR/LF — validating this at parse time surfaces a clean
  * `Invalid --header` error immediately, rather than persisting the
  * profile successfully and only failing later, at request time, when
  * `Headers.set()` itself rejects the same input.
+ *
+ * Error messages never include the raw entry or its value: a header value
+ * is typically a secret (an API key, a bearer token), and echoing it back
+ * would leak it into logs or CI output on a typo. Only the header *name*
+ * is ever quoted, since it identifies which `--header` was malformed
+ * without exposing what it was carrying.
  *
  * Repeating the same header name — even differing only in case, since HTTP
  * header names are case-insensitive — replaces the earlier value (last
@@ -926,25 +932,21 @@ export function parseHeaderFlags(entries: string[]): Record<string, string> {
 	for (const entry of entries) {
 		const colonIndex = entry.indexOf(":");
 		if (colonIndex === -1) {
-			throw new Error(
-				`Invalid --header "${entry}" — expected format "Name: value"`,
-			);
+			throw new Error('Invalid --header — expected format "Name: value"');
 		}
 		const name = entry.slice(0, colonIndex).trim();
 		const value = entry.slice(colonIndex + 1).trim();
 		if (!name) {
-			throw new Error(
-				`Invalid --header "${entry}" — header name must not be empty`,
-			);
+			throw new Error("Invalid --header — header name must not be empty");
 		}
 		if (!HTTP_HEADER_NAME_RE.test(name)) {
 			throw new Error(
-				`Invalid --header "${entry}" — header name "${name}" is not a valid HTTP token (letters, digits, and !#$%&'*+-.^_\`|~ only)`,
+				`Invalid --header "${name}" — not a valid HTTP token (letters, digits, and !#$%&'*+-.^_\`|~ only)`,
 			);
 		}
 		if (/[\r\n]/.test(value)) {
 			throw new Error(
-				`Invalid --header "${entry}" — header value must not contain a line break`,
+				`Invalid --header "${name}" — value must not contain a line break`,
 			);
 		}
 		setHeaderCaseInsensitive(headers, name, value);

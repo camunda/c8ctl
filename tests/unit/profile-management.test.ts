@@ -576,8 +576,20 @@ describe("Profile management", () => {
 		test("throws when a header is missing its colon separator", () => {
 			assert.throws(
 				() => parseHeaderFlags(["NoColonHere"]),
-				/Invalid --header "NoColonHere"/,
+				/Invalid --header — expected format/,
 			);
+		});
+
+		test("does not echo the raw entry when the colon separator is missing", () => {
+			// The whole malformed string could itself be a secret the user
+			// forgot to prefix with "Name: " — never echo it back.
+			try {
+				parseHeaderFlags(["super-secret-token-abc123"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-token-abc123"), message);
+			}
 		});
 
 		test("throws when the header name is empty", () => {
@@ -613,31 +625,38 @@ describe("Profile management", () => {
 		test("throws when the header name contains a space", () => {
 			assert.throws(
 				() => parseHeaderFlags(["Bad Name: value"]),
-				/Invalid --header "Bad Name: value" — header name "Bad Name" is not a valid HTTP token/,
+				/Invalid --header "Bad Name" — not a valid HTTP token/,
 			);
 		});
 
 		test("throws when the header name contains a colon-illegal character", () => {
 			assert.throws(
 				() => parseHeaderFlags(['X-"Quoted": value']),
-				/is not a valid HTTP token/,
+				/not a valid HTTP token/,
 			);
 		});
 
 		test("throws when the header value contains a line break", () => {
-			// The offending entry itself contains \r\n, so the thrown
-			// message spans multiple lines — match with [\s\S] instead of
-			// "." (which doesn't cross a newline by default).
 			assert.throws(
 				() => parseHeaderFlags(["X-Foo: bar\r\nEvil: 1"]),
-				/Invalid --header [\s\S]* — header value must not contain a line break/,
+				/Invalid --header "X-Foo" — value must not contain a line break/,
 			);
+		});
+
+		test("does not echo the header value when it contains a line break", () => {
+			try {
+				parseHeaderFlags(["X-Foo: super-secret-value\r\nEvil: 1"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-value"), message);
+			}
 		});
 
 		test("throws when the header value contains only a newline", () => {
 			assert.throws(
 				() => parseHeaderFlags(["X-Foo: bar\nEvil: 1"]),
-				/header value must not contain a line break/,
+				/value must not contain a line break/,
 			);
 		});
 	});
