@@ -28,6 +28,13 @@ type FetchFn = NonNullable<CamundaOptions["fetch"]>;
  * `baseUrl` — is the only interception point available without forking the
  * SDK. `sdkComputedBase` mirrors the SDK's own suffixing rule exactly, so
  * it always matches the prefix the SDK actually built.
+ *
+ * `sdkComputedBase` is derived from `strippedBase` (never a trailing
+ * slash), not the raw trimmed `baseUrl`: the SDK's own internal config
+ * merge strips exactly one trailing slash before building request URLs, so
+ * a `baseUrl` ending in `/v2/` would otherwise leave `sdkComputedBase` one
+ * character longer than the real prefix, eating the endpoint path's
+ * leading `/` on rewrite (`.../v2process-instances/search`).
  */
 export function buildGatewayFetch(opts: {
 	baseUrl: string;
@@ -39,10 +46,9 @@ export function buildGatewayFetch(opts: {
 		opts.delegate ?? ((input, init) => fetch(input, init));
 	const headerEntries = Object.entries(opts.headers ?? {});
 
-	const trimmedBase = opts.baseUrl.trim();
-	const strippedBase = trimmedBase.replace(/\/+$/, "");
-	const sdkComputedBase = /\/v2\/?$/i.test(trimmedBase)
-		? trimmedBase
+	const strippedBase = opts.baseUrl.trim().replace(/\/+$/, "");
+	const sdkComputedBase = /\/v2$/i.test(strippedBase)
+		? strippedBase
 		: `${strippedBase}/v2`;
 
 	return async (input, init) => {
@@ -51,7 +57,15 @@ export function buildGatewayFetch(opts: {
 				? input
 				: new Request(input, init);
 
-		if (opts.exactBaseUrl && request.url.startsWith(sdkComputedBase)) {
+		// Require a path boundary (not just a string prefix) so a base that
+		// happens to be a textual prefix of an unrelated longer path can
+		// never match.
+		const boundary = request.url.charAt(sdkComputedBase.length);
+		const matchesComputedBase =
+			request.url.startsWith(sdkComputedBase) &&
+			(boundary === "" || boundary === "/" || boundary === "?");
+
+		if (opts.exactBaseUrl && matchesComputedBase) {
 			const exactUrl = strippedBase + request.url.slice(sdkComputedBase.length);
 			// GET/HEAD requests cannot carry a body — the fetch spec throws if
 			// one is passed, even a nullish stream reference.
@@ -358,14 +372,19 @@ function mergeHeadersCaseInsensitive(
 /**
  * Mirror the SDK's own `/v2` auto-append rule (see `buildGatewayFetch` for
  * why there is no config flag to control this) for a manually-built REST
- * request. Returns `config.baseUrl` untouched when `exactBaseUrl` is set.
+ * request. Returns `config.baseUrl` (trailing slashes stripped) untouched
+ * when `exactBaseUrl` is set.
+ *
+ * Always returns a value with no trailing slash — including when
+ * `config.baseUrl` already ends in `/v2/` — so the caller's
+ * `${baseUrl}${endpoint}` concatenation never produces a double slash
+ * (`endpoint` always starts with `/`).
  */
 function restBaseUrlForProfile(profile?: string): string {
 	const config = resolveClusterConfig(profile);
-	const trimmed = config.baseUrl.trim();
-	const stripped = trimmed.replace(/\/+$/, "");
+	const stripped = config.baseUrl.trim().replace(/\/+$/, "");
 	if (config.exactBaseUrl) return stripped;
-	return /\/v2\/?$/i.test(trimmed) ? trimmed : `${stripped}/v2`;
+	return /\/v2$/i.test(stripped) ? stripped : `${stripped}/v2`;
 }
 
 /**

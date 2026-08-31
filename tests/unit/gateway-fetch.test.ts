@@ -166,6 +166,32 @@ describe("buildGatewayFetch", () => {
 			);
 		});
 
+		test("does not drop the path's leading slash when baseUrl ends with /v2/ (trailing slash)", async () => {
+			const { delegate, requests } = recordingDelegate();
+			const gatewayFetch = buildGatewayFetch({
+				baseUrl: "https://gateway.example.com/camunda-api/v2/",
+				exactBaseUrl: true,
+				delegate,
+			});
+
+			await gatewayFetch(
+				new Request(
+					"https://gateway.example.com/camunda-api/v2/process-instances/search",
+					{ method: "GET" },
+				),
+			);
+
+			// A trailing slash on baseUrl must not change behavior from the
+			// no-trailing-slash case above: baseUrl already targets the
+			// SDK-computed prefix exactly, so the URL is left unchanged — not
+			// mangled into ".../v2process-instances/search" by miscounting
+			// where the SDK-computed prefix ends.
+			assert.strictEqual(
+				requests[0].url,
+				"https://gateway.example.com/camunda-api/v2/process-instances/search",
+			);
+		});
+
 		test("does not rewrite the URL when exactBaseUrl is not set", async () => {
 			const { delegate, requests } = recordingDelegate();
 			const gatewayFetch = buildGatewayFetch({

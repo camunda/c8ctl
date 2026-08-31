@@ -108,7 +108,7 @@ async function activateJobsUnderProfile(
 		],
 		{
 			env: {
-				PATH: process.env.PATH,
+				...process.env,
 				HOME: "/tmp/c8ctl-test-nonexistent-home",
 				C8CTL_DATA_DIR: dataDir,
 			},

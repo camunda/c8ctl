@@ -173,6 +173,26 @@ describe("rawPostWithHeaders — exactBaseUrl (#547)", () => {
 		);
 	});
 
+	test("does not double-slash the URL when baseUrl already ends with /v2/ (trailing slash)", async () => {
+		addProfile({
+			name: "gateway-trailing-slash",
+			baseUrl: "https://gateway.example.com/camunda-api/v2/",
+		});
+
+		const client = makeMockClient();
+		await rawPost(
+			client,
+			"/element-instances/wait-states/search",
+			{},
+			"gateway-trailing-slash",
+		);
+
+		assert.strictEqual(
+			capturedUrl,
+			"https://gateway.example.com/camunda-api/v2/element-instances/wait-states/search",
+		);
+	});
+
 	test("falls back to the client's own resolved address when no profile is given", async () => {
 		const client = makeMockClient({
 			getConfig: () => ({
