@@ -67,6 +67,26 @@ describe("resolveAuthHeaders — custom profile headers (#547)", () => {
 		assert.strictEqual(headers.Authorization, "Bearer gateway-token");
 	});
 
+	test("a differently-cased custom header still overrides, not duplicates", async () => {
+		addProfile({
+			name: "gateway-case",
+			baseUrl: "https://gateway.example.com/camunda-api",
+			username: "demo",
+			password: "demo",
+			// Lowercase "authorization" must replace the computed
+			// "Authorization" rather than sit alongside it — HTTP header
+			// names are case-insensitive, and the SDK-fetch path
+			// (buildGatewayFetch, via Headers.set) already behaves this way.
+			headers: { authorization: "Bearer gateway-token" },
+		});
+
+		const headers = await resolveAuthHeaders("gateway-case");
+
+		assert.strictEqual(headers.authorization, "Bearer gateway-token");
+		assert.strictEqual(headers.Authorization, undefined);
+		assert.strictEqual(Object.keys(headers).length, 2); // Content-Type + authorization
+	});
+
 	test("no headers field means no extra headers beyond Content-Type/Authorization", async () => {
 		addProfile({
 			name: "plain",

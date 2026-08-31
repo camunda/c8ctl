@@ -323,12 +323,36 @@ export async function resolveAuthHeaders(
 
 	// Custom headers are applied last so a gateway-fronted profile can
 	// override any header above (e.g. replacing Authorization with its own
-	// gateway API key).
+	// gateway API key). Merged case-insensitively — HTTP header names are
+	// case-insensitive, and `buildGatewayFetch`'s SDK-side equivalent uses
+	// `Headers.set`, which already normalizes this way.
 	if (config.headers) {
-		Object.assign(headers, config.headers);
+		mergeHeadersCaseInsensitive(headers, config.headers);
 	}
 
 	return headers;
+}
+
+/**
+ * Set every entry from `overrides` on `target`, replacing any existing key
+ * that differs only in case rather than adding a second, differently-cased
+ * entry. `target` is a plain `Record<string, string>` (not a `Headers`
+ * instance), since that's the contract `resolveAuthHeaders`/`rawPost*` use
+ * for the one manual REST call that bypasses the SDK client.
+ */
+function mergeHeadersCaseInsensitive(
+	target: Record<string, string>,
+	overrides: Record<string, string>,
+): void {
+	for (const [name, value] of Object.entries(overrides)) {
+		const existingKey = Object.keys(target).find(
+			(k) => k.toLowerCase() === name.toLowerCase(),
+		);
+		if (existingKey !== undefined && existingKey !== name) {
+			delete target[existingKey];
+		}
+		target[name] = value;
+	}
 }
 
 /**
