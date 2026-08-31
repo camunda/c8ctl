@@ -166,6 +166,26 @@ describe("buildGatewayFetch", () => {
 			);
 		});
 
+		test("forwards the original Request unchanged (no body buffering) when baseUrl already ends with /v2", async () => {
+			const { delegate, requests } = recordingDelegate();
+			const gatewayFetch = buildGatewayFetch({
+				baseUrl: "https://gateway.example.com/camunda-api/v2",
+				exactBaseUrl: true,
+				delegate,
+			});
+
+			const original = new Request(
+				"https://gateway.example.com/camunda-api/v2/process-instances/search",
+				{ method: "POST", body: JSON.stringify({ foo: "bar" }) },
+			);
+			await gatewayFetch(original);
+
+			// Same Request instance forwarded — proof the URL-rewrite branch
+			// (and its body-buffering via arrayBuffer()) was skipped
+			// entirely, not just a no-op rewrite to an identical URL.
+			assert.strictEqual(requests[0], original);
+		});
+
 		test("does not drop the path's leading slash when baseUrl ends with /v2/ (trailing slash)", async () => {
 			const { delegate, requests } = recordingDelegate();
 			const gatewayFetch = buildGatewayFetch({

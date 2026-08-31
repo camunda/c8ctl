@@ -72,38 +72,50 @@ export function buildGatewayFetch(opts: {
 		? strippedBase
 		: `${strippedBase}/v2`;
 
+	// When baseUrl already ends in /v2, the SDK never appends anything, so
+	// rewriting would always produce the same URL the request already has.
+	// Skip the whole URL-rewrite branch for such a profile — computed once
+	// here rather than per request — so exactBaseUrl on a baseUrl that
+	// already ends in /v2 costs nothing beyond the header injection below
+	// (no body buffering, no Request reconstruction, on every request).
+	const needsUrlRewrite = opts.exactBaseUrl && strippedBase !== sdkComputedBase;
+
 	return async (input, init) => {
 		let request =
 			input instanceof Request && init === undefined
 				? input
 				: new Request(input, init);
 
-		// Require a path boundary (not just a string prefix) so a base that
-		// happens to be a textual prefix of an unrelated longer path can
-		// never match.
-		const boundary = request.url.charAt(sdkComputedBase.length);
-		const matchesComputedBase =
-			request.url.startsWith(sdkComputedBase) &&
-			(boundary === "" ||
-				boundary === "/" ||
-				boundary === "?" ||
-				boundary === "#");
+		if (needsUrlRewrite) {
+			// Require a path boundary (not just a string prefix) so a base
+			// that happens to be a textual prefix of an unrelated longer
+			// path can never match.
+			const boundary = request.url.charAt(sdkComputedBase.length);
+			const matchesComputedBase =
+				request.url.startsWith(sdkComputedBase) &&
+				(boundary === "" ||
+					boundary === "/" ||
+					boundary === "?" ||
+					boundary === "#");
 
-		if (opts.exactBaseUrl && matchesComputedBase) {
-			const exactUrl = strippedBase + request.url.slice(sdkComputedBase.length);
-			// GET/HEAD requests cannot carry a body — the fetch spec throws if
-			// one is passed, even a nullish stream reference.
-			const hasBody = request.method !== "GET" && request.method !== "HEAD";
-			// Buffer the body (rather than passing the live stream through)
-			// so the new Request doesn't need Node's `duplex: "half"` option.
-			const body = hasBody ? await request.arrayBuffer() : undefined;
-			request = new Request(exactUrl, {
-				method: request.method,
-				headers: request.headers,
-				body,
-				redirect: request.redirect,
-				signal: request.signal,
-			});
+			if (matchesComputedBase) {
+				const exactUrl =
+					strippedBase + request.url.slice(sdkComputedBase.length);
+				// GET/HEAD requests cannot carry a body — the fetch spec
+				// throws if one is passed, even a nullish stream reference.
+				const hasBody = request.method !== "GET" && request.method !== "HEAD";
+				// Buffer the body (rather than passing the live stream
+				// through) so the new Request doesn't need Node's
+				// `duplex: "half"` option.
+				const body = hasBody ? await request.arrayBuffer() : undefined;
+				request = new Request(exactUrl, {
+					method: request.method,
+					headers: request.headers,
+					body,
+					redirect: request.redirect,
+					signal: request.signal,
+				});
+			}
 		}
 
 		for (const [name, value] of headerEntries) {
