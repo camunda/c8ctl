@@ -1,7 +1,7 @@
 # AGENTS.md — `element-template` plugin
 
 Read [docs/design.md](./docs/design.md) before changing this plugin. It
-covers the **why**: vendor bundle, marketplace endpoint choice, cache
+covers the **why**: vendor bundle, release-bundle source choice, cache
 strategy (`upstreamRef`-keyed dedup), lazy bootstrap, and semver-based
 version resolution.
 
@@ -12,7 +12,8 @@ version resolution.
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
 | `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
-| `marketplace.ts` | Cache I/O, `/ootb-connectors` fetch, sync, search, version resolution |
+| `cache.ts` | Cache I/O, sync, search, version resolution |
+| `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
 | `binding.ts` | Binding-target resolution shared by `apply`/`edit` — which moddle child + property a `zeebe:input`/etc. binding writes to. Hand-rolled stand-in for bpmn-js-element-templates' internal `setPropertyValue`; see the note at the top of the file about replacing it once bpmn-io/bpmn-js-element-templates#236 ships. |
 | `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
@@ -29,13 +30,13 @@ version resolution.
   without reason — `metadata.upstreamRef` is the dedup key for
   incremental sync.
 - **No subcommand auto-bootstraps the cache.** OOTB-id resolution
-  is guarded by `requireCachePresent()` in `marketplace.ts`, which
+  is guarded by `requireCachePresent()` in `cache.ts`, which
   throws the shared `CACHE_NOT_FOUND_MESSAGE` when the cache is
   absent. The reason auto-bootstrap is forbidden: bootstrap progress
   goes through `logger.info`, which writes to stdout in text mode —
   it would corrupt `apply | bpmn lint` and `get <id> > template.json`
-  pipelines, and racing cold-cache invocations would both fetch the
-  same ~14 MB index. Don't re-add a bootstrap call to any subcommand
+  pipelines, and racing cold-cache invocations would both download the
+  same bundles. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
 - **Path/URL apply paths must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
@@ -45,7 +46,7 @@ version resolution.
   overwrites a user-owned file (cache or BPMN) must follow the same
   pattern — a kill mid-write must not leave a truncated file.
 - **`syncTemplates` is serialised by an advisory lockfile.** The
-  helper `withSyncLock` in `marketplace.ts` holds
+  helper `withSyncLock` in `cache.ts` holds
   `<cacheDir>/.sync.lock` while the body runs, with stale-lock
   recovery (dead PID or > 60 min old) and signal handlers
   (SIGINT/SIGTERM/SIGHUP) that release before re-raising. Don't
@@ -79,9 +80,13 @@ version resolution.
   WeakMap-based `sourceByDetail` side table in `loadTemplate` preserves
   this identity so `get-properties` doesn't collapse them and `--set`
   writes to all matching duplicates.
-- **Marketplace endpoint URL is overridable via
-  `C8CTL_OOTB_ELEMENT_TEMPLATES_URL`** — useful for tests against a
-  local fixture server.
+- **Templates come from the `camunda/connectors` GitHub releases, not
+  `raw.githubusercontent.com`** (blocked in many enterprise networks —
+  c8ctl#530). `sync` keeps the newest release per minor line, skipping
+  drafts, release candidates and releases whose bundle asset isn't
+  published yet. The release listing endpoint is overridable via
+  `C8CTL_CONNECTORS_RELEASES_URL` — useful for tests against a local
+  fixture server.
 
 ## Testing
 
@@ -89,7 +94,8 @@ version resolution.
 npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
 ```
 
-Smoke-test against the live marketplace (writes to a throwaway dir):
+Smoke-test against the live connectors releases (writes to a throwaway
+dir):
 
 ```bash
 C8CTL_DATA_DIR=/tmp/c8ctl-smoke node --experimental-strip-types src/index.ts \
