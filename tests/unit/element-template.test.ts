@@ -2929,8 +2929,9 @@ describe("CLI behavioural: element-template sync source (#530)", () => {
 			);
 			for (const template of cache) {
 				const ref = upstreamRefOf(template);
-				assert.ok(
-					!ref.includes("raw.githubusercontent.com"),
+				assert.notStrictEqual(
+					new URL(ref).hostname,
+					"raw.githubusercontent.com",
 					`upstreamRef must not point at raw.githubusercontent.com: ${ref}`,
 				);
 				assert.ok(
