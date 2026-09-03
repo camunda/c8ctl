@@ -302,14 +302,25 @@ function atomicWriteFileSync(target: string, contents: string): void {
 	}
 }
 
-function saveCache(templates: Template[]): void {
+/**
+ * Persist the cache. `stampFetchedAt: false` leaves the previous
+ * timestamp alone — used when a sync only partially succeeded, so the
+ * staleness nudge keeps pointing at the next `sync` instead of
+ * pretending the cache is fresh and complete.
+ */
+function saveCache(
+	templates: Template[],
+	{ stampFetchedAt = true }: { stampFetchedAt?: boolean } = {},
+): void {
 	const dir = getCacheDir();
 	mkdirSync(dir, { recursive: true });
 	atomicWriteFileSync(
 		getCachePath(),
 		`${JSON.stringify(templates, null, 2)}\n`,
 	);
-	atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
+	if (stampFetchedAt) {
+		atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
+	}
 }
 
 export function isCacheStale(): boolean {
@@ -568,17 +579,41 @@ async function syncTemplatesLocked({
 		}
 	}
 
-	// Without --prune, keep templates that no longer belong to a selected
+	// A bundle URL changes with every patch release, so the previous
+	// patch's cached templates always land in `staleCached`. Dropping
+	// them while its replacement failed to download would delete a whole
+	// minor line's templates over one transient HTTP error, so pruning
+	// only happens on a fully successful sync.
+	const pruning = prune && errors === 0;
+	if (prune && errors > 0) {
+		logger.warn(
+			`Skipping prune: ${errors} bundle(s) failed to download — cached templates were kept.`,
+		);
+	}
+
+	// Without pruning, keep templates that no longer belong to a selected
 	// release (e.g. the user wants to retain a line that dropped out of
 	// support). With --prune they are dropped and reported.
-	if (!prune) {
+	if (!pruning) {
 		for (const tpl of sortTemplates(staleCached)) {
 			add(tpl);
 		}
 	}
-	const pruned = prune ? staleCached.length : 0;
+	const pruned = pruning ? staleCached.length : 0;
 
-	saveCache(next);
+	if (next.length === 0) {
+		// Nothing downloaded, nothing reusable — writing an empty cache
+		// here would make `requireCachePresent()` pass over a cache that
+		// can never resolve a template.
+		throw new Error(
+			`No element templates could be downloaded (${errors} bundle(s) failed). ` +
+				"Check the warnings above and retry 'c8ctl element-template sync'.",
+		);
+	}
+
+	// A partial sync leaves the previous `fetched-at` in place so the
+	// staleness nudge keeps asking for a full refresh.
+	saveCache(next, { stampFetchedAt: errors === 0 });
 
 	const summary: SyncSummary = {
 		total: next.length,

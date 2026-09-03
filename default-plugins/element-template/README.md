@@ -98,7 +98,7 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
-c8ctl element-template sync --prune    # also drop entries no longer in the index
+c8ctl element-template sync --prune    # also drop entries no longer in a selected release
 ```
 
 ## Inspecting a template
@@ -303,8 +303,9 @@ warning at the end (the property won't be applied).
 ## How OOTB templates are resolved
 
 1. **Source**: the `camunda/connectors` GitHub releases. `sync` lists
-   the releases, keeps the newest release of every minor line (8.8.x,
-   8.9.x, ... — alphas count, release candidates don't), and downloads
+   the releases, keeps the newest release of each of the 4 newest minor
+   lines (8.8.x, 8.9.x, ... — alphas count, release candidates don't),
+   and downloads
    each one's `connectors-bundle-templates-<tag>.tar.gz` asset from
    `github.com`. `raw.githubusercontent.com` is deliberately not used:
    it is blocked in many enterprise networks. Override the release

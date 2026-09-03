@@ -68,6 +68,12 @@ minor line** — 8.8.x, 8.9.x, 8.10.x, ...:
 - Draft releases and releases without a bundle asset (a release that is
   still being built) are skipped, so an in-flight release falls back to
   the previous one on that line.
+- Only the **4 newest minor lines** are kept (`MAX_MINOR_LINES` in
+  `releases.ts`), roughly Camunda's supported-version window. This keeps
+  the selection deterministic: the newest release of each selected line
+  is always within the first page of the listing, whereas an EOL line's
+  newest release drifts down the listing until it falls off the page and
+  would silently vanish from the selection.
 
 Bundles contain a superset of the marketplace index: the `-hybrid`
 variants and a few templates the marketplace does not list are cached
@@ -88,7 +94,11 @@ We mirror Desktop Modeler's approach
   assets are tag-pinned and therefore immutable, so "asset URL already
   in the cache" ⇒ "bundle already ingested" ⇒ no re-download.
 - `id@version` is deduplicated across bundles, newest release wins.
-- Per-release fetch failures are logged + counted, never abort the run.
+- Per-release fetch failures are logged + counted, and never abort the
+  run — unless *every* bundle failed and nothing was reusable from the
+  cache, in which case `sync` errors out rather than writing an empty
+  cache. A partial sync also leaves `fetched-at` untouched, so the
+  staleness nudge keeps asking for a full refresh.
 
 ### Lifecycle
 
@@ -111,7 +121,11 @@ We mirror Desktop Modeler's approach
 - **`sync`** always re-fetches the release listing but only downloads
   bundles that aren't cached yet. **`sync --prune`** drops cached
   entries that no longer belong to a selected release (opt-in: a user
-  may keep a legacy line intentionally).
+  may keep a legacy line intentionally). Pruning is skipped when any
+  bundle failed to download: a bundle URL changes with every patch, so
+  the previous patch's cached templates are always "stale", and dropping
+  them while their replacement failed would delete a whole minor line
+  over one transient HTTP error.
 - **Atomicity**: `sync` writes `templates.json` and `fetched-at`
   via a sibling temp file + `renameSync`, so a kill mid-sync leaves
   the previous cache intact. `apply --in-place` uses the same recipe

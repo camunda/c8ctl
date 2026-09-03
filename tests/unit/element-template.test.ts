@@ -2716,6 +2716,8 @@ type ReleaseSpec = {
 	draft?: boolean;
 	/** Omit to model a release published without a template bundle. */
 	templates?: Array<Record<string, unknown>>;
+	/** Serve this status instead of the bundle (simulates a flaky asset host). */
+	downloadStatus?: number;
 };
 
 type StubServer = {
@@ -2775,9 +2777,13 @@ function bundleAssetName(tag: string): string {
 async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
 	const downloads: string[] = [];
 	const bundles = new Map<string, Buffer>();
+	const failures = new Map<string, number>();
 	for (const release of releases) {
 		if (release.templates) {
 			bundles.set(release.tag, buildTemplateBundle(release.templates));
+		}
+		if (release.downloadStatus !== undefined) {
+			failures.set(release.tag, release.downloadStatus);
 		}
 	}
 
@@ -2809,6 +2815,13 @@ async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
 			return;
 		}
 		const download = /^\/download\/([^/]+)\/(.+)$/.exec(req.url);
+		const failure = download ? failures.get(download[1]) : undefined;
+		if (download && failure !== undefined) {
+			downloads.push(download[1]);
+			res.statusCode = failure;
+			res.end();
+			return;
+		}
 		const bundle = download ? bundles.get(download[1]) : undefined;
 		if (download && bundle) {
 			downloads.push(download[1]);
@@ -3029,6 +3042,139 @@ describe("CLI behavioural: element-template sync source (#530)", () => {
 			const summary = JSON.parse(summaryLine ?? "{}");
 			assert.strictEqual(summary.fetched, 0, `Got summary: ${summaryLine}`);
 			assert.strictEqual(summary.cached, 1, `Got summary: ${summaryLine}`);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("only the newest minor lines are synced (bounded selection)", async () => {
+		const stub = await startReleasesStub([
+			{ tag: "8.10.0-alpha1", templates: [ootbTemplate("io.example.L10", 1)] },
+			{ tag: "8.9.9", templates: [ootbTemplate("io.example.L9", 1)] },
+			{ tag: "8.8.18", templates: [ootbTemplate("io.example.L8", 1)] },
+			{ tag: "8.7.24", templates: [ootbTemplate("io.example.L7", 1)] },
+			{ tag: "8.6.27", templates: [ootbTemplate("io.example.L6", 1)] },
+			{ tag: "8.5.30", templates: [ootbTemplate("io.example.L5", 1)] },
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-lines-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, stub.url) },
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(
+				stub.downloads().sort(),
+				["8.10.0-alpha1", "8.7.24", "8.8.18", "8.9.9"],
+				"only the four newest minor lines should be downloaded",
+			);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("a failed bundle download does not prune that line's cached templates", async () => {
+		// 8.9.2 supersedes the cached 8.9.1 bundle but its download fails.
+		// Without the guard, --prune would drop every cached 8.9 template
+		// and leave the cache silently short of a whole minor line.
+		const stub = await startReleasesStub([
+			{ tag: "8.9.2", templates: [], downloadStatus: 503 },
+			{
+				tag: "8.8.18",
+				templates: [ootbTemplate("io.example.OnEightEight", 1)],
+			},
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-failed-"));
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		const base = stub.url.replace("/releases", "");
+		writeFileSync(
+			join(cacheDir, "templates.json"),
+			JSON.stringify([
+				{
+					id: "io.example.OnEightNine",
+					name: "On 8.9",
+					version: 3,
+					properties: [],
+					metadata: {
+						upstreamRef: `${base}/download/8.9.1/${bundleAssetName("8.9.1")}#template-0.json`,
+					},
+				},
+			]),
+		);
+		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+					"--prune",
+				],
+				{
+					env: {
+						...syncEnv(dataDir, stub.url),
+						C8CTL_OUTPUT_MODE: "json",
+					},
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed despite one failed bundle. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(
+				readCache(dataDir)
+					.map((t) => t.id)
+					.sort(),
+				["io.example.OnEightEight", "io.example.OnEightNine"],
+				"templates of the line whose download failed must survive --prune",
+			);
+			const summaryLine = result.stdout
+				.trim()
+				.split("\n")
+				.reverse()
+				.find((line) => line.startsWith("{") && line.includes("pruned"));
+			const summary = JSON.parse(summaryLine ?? "{}");
+			assert.strictEqual(summary.pruned, 0, `Got summary: ${summaryLine}`);
+			assert.strictEqual(summary.errors, 1, `Got summary: ${summaryLine}`);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("a cold sync where every bundle fails errors out instead of writing an empty cache", async () => {
+		const stub = await startReleasesStub([
+			{ tag: "8.8.18", templates: [], downloadStatus: 500 },
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-allfail-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, stub.url) },
+			);
+			assert.strictEqual(result.status, 1, "sync should fail");
+			const combined = result.stdout + result.stderr;
+			assert.ok(
+				combined.includes("No element templates could be downloaded"),
+				`Expected a download-failure error. Got: ${combined.slice(0, 300)}`,
+			);
+			assert.ok(
+				!existsSync(join(dataDir, "element-templates", "templates.json")),
+				"an empty cache must not be written",
+			);
 		} finally {
 			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });

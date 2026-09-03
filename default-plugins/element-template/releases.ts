@@ -34,6 +34,14 @@ const ASSET_FETCH_TIMEOUT_MS = 120_000; // 120 s per bundle download
  */
 const MAX_BUNDLE_BYTES = 128 * 1024 * 1024;
 
+/**
+ * How many minor lines to cache, newest first (8.10.x, 8.9.x, 8.8.x,
+ * 8.7.x at the time of writing). Roughly Camunda's supported-version
+ * window, and small enough that the newest release of every selected
+ * line is always present in a single page of the release listing.
+ */
+const MAX_MINOR_LINES = 4;
+
 export type ConnectorRelease = {
 	/** Release tag, e.g. `8.8.18` or `8.10.0-alpha3`. */
 	tag: string;
@@ -115,13 +123,19 @@ export function parseReleases(raw: unknown): ConnectorRelease[] {
 }
 
 /**
- * Keep only the newest release of each minor line, newest line first.
+ * Keep the newest release of each of the `MAX_MINOR_LINES` newest minor
+ * lines, newest line first.
  *
  * Older patches of a minor add nothing: every bundle is cumulative, so
  * `8.8.18` already contains every template version `8.8.17` shipped.
  * Across minors the bundles do differ (a template version added in
  * 8.9 is absent from the 8.8 line), which is why we keep one release
  * per minor rather than just the newest release overall.
+ *
+ * The line cap keeps the selection deterministic: the newest release of
+ * each of the newest lines is always within one page of the listing,
+ * whereas an EOL line's newest release drifts down the listing until it
+ * falls off the page and would silently disappear from the selection.
  */
 export function selectLatestPerMinor(
 	releases: ConnectorRelease[],
@@ -134,9 +148,9 @@ export function selectLatestPerMinor(
 			latest.set(key, release);
 		}
 	}
-	return [...latest.values()].sort((a, b) =>
-		semver.rcompare(a.version, b.version),
-	);
+	return [...latest.values()]
+		.sort((a, b) => semver.rcompare(a.version, b.version))
+		.slice(0, MAX_MINOR_LINES);
 }
 
 // ---------------------------------------------------------------------------
@@ -157,8 +171,16 @@ export async function fetchConnectorReleases(): Promise<ConnectorRelease[]> {
 		signal: AbortSignal.timeout(RELEASES_FETCH_TIMEOUT_MS),
 	});
 	if (!response.ok) {
+		// 403/429 from api.github.com is almost always the unauthenticated
+		// rate limit (60 requests/hour/IP), which a user can wait out or
+		// route around with a mirror.
+		const hint =
+			response.status === 403 || response.status === 429
+				? "\nThe GitHub API rate limit may be exhausted — retry later, or point " +
+					"C8CTL_CONNECTORS_RELEASES_URL at a mirror of the release listing."
+				: "";
 		throw new Error(
-			`HTTP ${response.status} ${response.statusText} for ${url}`,
+			`HTTP ${response.status} ${response.statusText} for ${url}${hint}`,
 		);
 	}
 	return selectLatestPerMinor(parseReleases(await response.json()));

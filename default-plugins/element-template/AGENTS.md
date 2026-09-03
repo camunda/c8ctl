@@ -82,9 +82,12 @@ version resolution.
   writes to all matching duplicates.
 - **Templates come from the `camunda/connectors` GitHub releases, not
   `raw.githubusercontent.com`** (blocked in many enterprise networks —
-  c8ctl#530). `sync` keeps the newest release per minor line, skipping
-  drafts, release candidates and releases whose bundle asset isn't
-  published yet. The release listing endpoint is overridable via
+  c8ctl#530). `sync` keeps the newest release of each of the 4 newest
+  minor lines (`MAX_MINOR_LINES`), skipping drafts, release candidates
+  and releases whose bundle asset isn't published yet. A bundle URL
+  changes with every patch, so `--prune` is skipped whenever a download
+  failed — otherwise one transient error would drop a whole minor line.
+  The release listing endpoint is overridable via
   `C8CTL_CONNECTORS_RELEASES_URL` — useful for tests against a local
   fixture server.
 
