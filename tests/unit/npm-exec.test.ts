@@ -12,7 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildNpmInvocation } from "../../src/utils/shared/npm-exec.ts";
+import {
+	buildNpmInvocation,
+	hardenInstallArgs,
+} from "../../src/utils/shared/npm-exec.ts";
 
 const SRC_DIR = fileURLToPath(new URL("../../src", import.meta.url));
 
@@ -377,5 +380,60 @@ describe("no bare npm spawns remain in src/ (#484)", () => {
 			[],
 			`These files spawn npm directly instead of using npm(): ${offenders.join(", ")}`,
 		);
+	});
+});
+
+describe("hardenInstallArgs (#551 — audit hang on file: deps)", () => {
+	test("appends --no-audit --no-fund to install commands", () => {
+		assert.deepStrictEqual(
+			hardenInstallArgs([
+				"install",
+				"file:/tmp/plugin",
+				"--prefix",
+				"/plugins",
+			]),
+			[
+				"install",
+				"file:/tmp/plugin",
+				"--prefix",
+				"/plugins",
+				"--no-audit",
+				"--no-fund",
+			],
+		);
+	});
+
+	test("hardens every alias npm maps onto install", () => {
+		for (const alias of ["i", "add", "in", "isntall"]) {
+			const out = hardenInstallArgs([alias, "some-pkg"]);
+			assert.ok(out.includes("--no-audit"), `${alias} should get --no-audit`);
+			assert.ok(out.includes("--no-fund"), `${alias} should get --no-fund`);
+		}
+	});
+
+	test("leaves non-install commands untouched", () => {
+		const args = ["ls", "--prefix", "/plugins", "--json"];
+		assert.deepStrictEqual(hardenInstallArgs(args), args);
+	});
+
+	test("hardens uninstall (and aliases) too — audit runs on tree removal", () => {
+		for (const alias of ["uninstall", "remove", "rm", "unlink"]) {
+			const out = hardenInstallArgs([alias, "some-pkg", "--prefix", "/p"]);
+			assert.ok(out.includes("--no-audit"), `${alias} should get --no-audit`);
+			assert.ok(out.includes("--no-fund"), `${alias} should get --no-fund`);
+		}
+	});
+
+	test("is idempotent and never doubles a caller-supplied opt-out", () => {
+		assert.deepStrictEqual(
+			hardenInstallArgs(["install", "pkg", "--no-audit", "--no-fund"]),
+			["install", "pkg", "--no-audit", "--no-fund"],
+		);
+	});
+
+	test("respects an explicit --audit=true / --fund without overriding it", () => {
+		const out = hardenInstallArgs(["install", "pkg", "--audit=true", "--fund"]);
+		assert.ok(!out.includes("--no-audit"), "must not override --audit=true");
+		assert.ok(!out.includes("--no-fund"), "must not override --fund");
 	});
 });

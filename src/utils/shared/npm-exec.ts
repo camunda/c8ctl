@@ -106,6 +106,61 @@ const NPM_INSTALL_COMMANDS = new Set([
 	"isntall",
 ]);
 
+/** True when `flag` is already set in any spelling npm accepts (`--no-x`, `--x`, `--x=…`). */
+function hasBooleanFlag(args: readonly string[], name: string): boolean {
+	return args.some(
+		(arg) =>
+			arg === `--no-${name}` ||
+			arg === `--${name}` ||
+			arg.startsWith(`--${name}=`),
+	);
+}
+
+/**
+ * npm's `uninstall` verb and every alias npm maps onto it
+ * (`npm help uninstall`, `lib/utils/cmd-list.js`).
+ */
+const NPM_UNINSTALL_COMMANDS = new Set([
+	"uninstall",
+	"unlink",
+	"remove",
+	"rm",
+	"r",
+	"un",
+]);
+
+/**
+ * npm commands that trigger the registry `audit`/`fund` round-trip: everything
+ * that mutates the dependency tree (install and uninstall families).
+ */
+function triggersAudit(command: string): boolean {
+	return (
+		NPM_INSTALL_COMMANDS.has(command) || NPM_UNINSTALL_COMMANDS.has(command)
+	);
+}
+
+/**
+ * Harden tree-mutating npm invocations by disabling `audit` and `fund`.
+ *
+ * Both trigger a blocking network round-trip to the registry on every
+ * install/uninstall. `audit` in particular stalls for minutes when the prefix's
+ * dependency tree contains a `file:`/`link` dependency (as every plugin prefix
+ * does), which is what makes `c8 load`/`c8 unload plugin` — and the
+ * plugin-lifecycle integration tests — hang until their `spawnSync` timeout
+ * fires. Neither is relevant to (un)loading a plugin, so we always opt out.
+ * Idempotent: never doubles a flag the caller set.
+ */
+export function hardenInstallArgs(args: readonly string[]): string[] {
+	const command = args.find((arg) => !arg.startsWith("-"));
+	if (command === undefined || !triggersAudit(command)) {
+		return [...args];
+	}
+	const hardened = [...args];
+	if (!hasBooleanFlag(args, "audit")) hardened.push("--no-audit");
+	if (!hasBooleanFlag(args, "fund")) hardened.push("--no-fund");
+	return hardened;
+}
+
 /** `--prefix` and its documented short form `-C`. */
 function isPrefixFlag(arg: string): boolean {
 	return arg === "--prefix" || arg === "-C";
@@ -290,7 +345,7 @@ export function npm({
 		args: resolvedArgs,
 		shell,
 		cwd,
-	} = buildNpmInvocation({ args });
+	} = buildNpmInvocation({ args: hardenInstallArgs(args) });
 	// On Windows, `shell` is true because npm is a .cmd shim that requires cmd.exe.
 	// execFileSync(command, args, { shell: true }) triggers DEP0190 in Node ≥ 22 when
 	// an args array is combined with shell: true. execSync(commandString) takes a
