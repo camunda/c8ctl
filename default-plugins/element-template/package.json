@@ -11,7 +11,7 @@
   ],
   "main": "c8ctl-plugin.ts",
   "dependencies": {
-    "bpmn-moddle": "^9.0.1"
+    "bpmn-moddle": "^10.0.0"
   },
   "devDependencies": {
     "bpmn-js-element-templates": "^2.30.0",
