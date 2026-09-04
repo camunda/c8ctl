@@ -1,10 +1,10 @@
 /**
  * `c8ctl element-template sync` — refresh the local OOTB element template
- * cache from the marketplace.
+ * cache from the camunda/connectors GitHub releases.
  */
 
 import type {} from "../../../src/core/runtime.ts";
-import { syncTemplates } from "../marketplace.ts";
+import { syncTemplates } from "../cache.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;

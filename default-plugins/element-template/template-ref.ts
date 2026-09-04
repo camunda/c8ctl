@@ -13,6 +13,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import type {} from "../../src/core/runtime.ts";
 import {
+	findById,
+	nudgeIfStale,
+	pickVersion,
+	requireCachePresent,
+} from "./cache.ts";
+import {
 	getPropertyDetail,
 	getSettableProperties,
 	type PropertyDetail,
@@ -21,12 +27,6 @@ import {
 	type Template,
 	type TemplateProperty,
 } from "./helpers.ts";
-import {
-	findById,
-	nudgeIfStale,
-	pickVersion,
-	requireCachePresent,
-} from "./marketplace.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;

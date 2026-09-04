@@ -1,14 +1,13 @@
 /**
- * Marketplace OOTB element-template index.
+ * OOTB element-template cache.
  *
- * Source: GET https://marketplace.cloud.camunda.io/api/v1/ootb-connectors
- *   → { [id]: [{ version, ref, engine: { camunda: "^8.x" } }, ...] }
- *
- * Each `ref` is a commit-pinned raw.githubusercontent.com URL → immutable.
- * We download every ref once, inline the templates into a single
- * `templates.json` cache file, and inject `metadata.upstreamRef = <ref>` so
- * subsequent syncs can skip already-cached entries (matches Modeler's
- * approach in `app/lib/template-updater/util.js`).
+ * Source: the `camunda/connectors` GitHub releases (see `releases.ts`).
+ * For every supported minor line we download that line's newest
+ * `connectors-bundle-templates-<tag>.tar.gz` asset, inline its templates
+ * into a single `templates.json` cache file, and inject
+ * `metadata.upstreamRef = <assetUrl>#<file>` so subsequent syncs can skip
+ * bundles that are already cached (same dedup idea as Modeler's
+ * `app/lib/template-updater/util.js`).
  */
 
 import {
@@ -24,36 +23,21 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import semver from "semver";
-import { isRecord, type Logger, type Template, USER_AGENT } from "./helpers.ts";
+import { isRecord, type Logger, type Template } from "./helpers.ts";
+import {
+	type ConnectorRelease,
+	extractJsonEntries,
+	fetchConnectorReleases,
+	fetchReleaseAsset,
+	getReleasesUrl,
+} from "./releases.ts";
 
-const DEFAULT_OOTB_URL =
-	"https://marketplace.cloud.camunda.io/api/v1/ootb-connectors";
-const FETCH_CONCURRENCY = 12;
+const FETCH_CONCURRENCY = 4;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const FETCH_TIMEOUT_MS = 30_000; // 30 s per HTTP request
 // Backstop for ghost locks left by PID-recycled crashed syncs. Kept
 // well above realistic sync runtimes so a live but slow sync's lock
 // is never reclaimed.
 const SYNC_LOCK_STALE_AFTER_MS = 60 * 60 * 1000; // 60 minutes
-
-// ---------------------------------------------------------------------------
-// Index entry types
-// ---------------------------------------------------------------------------
-
-type IndexEngine = { camunda?: string };
-
-type IndexVersionEntry = {
-	version?: number;
-	ref?: string;
-	engine?: IndexEngine;
-};
-
-type FlatIndexEntry = {
-	id: string;
-	version: number;
-	ref: string;
-	engine: IndexEngine | undefined;
-};
 
 export type SyncSummary = {
 	total: number;
@@ -66,10 +50,6 @@ export type SyncSummary = {
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-
-export function getMarketplaceUrl(): string {
-	return process.env.C8CTL_OOTB_ELEMENT_TEMPLATES_URL || DEFAULT_OOTB_URL;
-}
 
 export function getCacheDir(): string {
 	if (!globalThis.c8ctl?.getUserDataDir) {
@@ -322,14 +302,25 @@ function atomicWriteFileSync(target: string, contents: string): void {
 	}
 }
 
-function saveCache(templates: Template[]): void {
+/**
+ * Persist the cache. `stampFetchedAt: false` leaves the previous
+ * timestamp alone — used when a sync only partially succeeded, so the
+ * staleness nudge keeps pointing at the next `sync` instead of
+ * pretending the cache is fresh and complete.
+ */
+function saveCache(
+	templates: Template[],
+	{ stampFetchedAt = true }: { stampFetchedAt?: boolean } = {},
+): void {
 	const dir = getCacheDir();
 	mkdirSync(dir, { recursive: true });
 	atomicWriteFileSync(
 		getCachePath(),
 		`${JSON.stringify(templates, null, 2)}\n`,
 	);
-	atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
+	if (stampFetchedAt) {
+		atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
+	}
 }
 
 export function isCacheStale(): boolean {
@@ -357,62 +348,62 @@ export function nudgeIfStale(logger: Logger): void {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP
+// Bundle ingestion
 // ---------------------------------------------------------------------------
-
-async function fetchJson(url: string): Promise<unknown> {
-	const response = await fetch(url, {
-		headers: { "User-Agent": USER_AGENT },
-		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-	});
-	if (!response.ok) {
-		throw new Error(
-			`HTTP ${response.status} ${response.statusText} for ${url}`,
-		);
-	}
-	return response.json();
-}
-
-async function fetchIndex(): Promise<Record<string, IndexVersionEntry[]>> {
-	const raw = await fetchJson(getMarketplaceUrl());
-	if (!isRecord(raw)) {
-		throw new Error("Marketplace index is not a JSON object");
-	}
-	// Trust the upstream shape — schema-validated at the marketplace.
-	const result: Record<string, IndexVersionEntry[]> = {};
-	for (const [id, value] of Object.entries(raw)) {
-		if (!Array.isArray(value)) continue;
-		const entries: IndexVersionEntry[] = [];
-		for (const entry of value) {
-			if (!isRecord(entry)) continue;
-			entries.push({
-				version: typeof entry.version === "number" ? entry.version : undefined,
-				ref: typeof entry.ref === "string" ? entry.ref : undefined,
-				engine: isRecord(entry.engine)
-					? {
-							camunda:
-								typeof entry.engine.camunda === "string"
-									? entry.engine.camunda
-									: undefined,
-						}
-					: undefined,
-			});
-		}
-		result[id] = entries;
-	}
-	return result;
-}
 
 function isTemplateLike(value: unknown): value is Template {
 	return isRecord(value) && Array.isArray(value.properties);
 }
 
-async function fetchTemplate(url: string): Promise<Template> {
-	const raw = await fetchJson(url);
-	if (!isTemplateLike(raw)) {
-		throw new Error(`Fetched template at ${url} did not match expected shape`);
+/**
+ * `metadata.upstreamRef` for a template that came out of a release
+ * bundle: the asset URL plus the archive entry it was read from.
+ * Both halves are immutable (release assets are tag-pinned), so a
+ * cached ref means "this bundle is already ingested".
+ */
+function buildUpstreamRef(assetUrl: string, entryName: string): string {
+	return `${assetUrl}#${entryName}`;
+}
+
+/** The asset URL half of an `upstreamRef` (everything before the `#`). */
+function assetUrlOfRef(ref: string): string {
+	const hash = ref.indexOf("#");
+	return hash === -1 ? ref : ref.slice(0, hash);
+}
+
+/**
+ * Download and unpack one release bundle into templates carrying an
+ * `upstreamRef`. Templates without a numeric `version` are skipped:
+ * they are pre-versioned legacy templates that version resolution
+ * cannot rank.
+ */
+async function fetchReleaseTemplates(
+	release: ConnectorRelease,
+): Promise<Template[]> {
+	const bundle = await fetchReleaseAsset(release.assetUrl);
+	const templates: Template[] = [];
+	for (const entry of extractJsonEntries(bundle)) {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(entry.content);
+		} catch {
+			continue;
+		}
+		if (!isTemplateLike(parsed) || typeof parsed.version !== "number") {
+			continue;
+		}
+		parsed.metadata = {
+			...parsed.metadata,
+			upstreamRef: buildUpstreamRef(release.assetUrl, entry.name),
+		};
+		templates.push(parsed);
 	}
-	return raw;
+	if (templates.length === 0) {
+		throw new Error(
+			`Bundle for release ${release.tag} contained no element templates`,
+		);
+	}
+	return templates;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,38 +433,29 @@ async function pool<T>(
 	await Promise.all(workers);
 }
 
-/**
- * Flatten the marketplace index `{ id: [{version, ref, engine}] }` into a flat
- * list of `{ id, version, ref, engine }` entries, dropping legacy entries with
- * no `version`.
- */
-function flattenIndex(
-	index: Record<string, IndexVersionEntry[]>,
-): FlatIndexEntry[] {
-	const entries: FlatIndexEntry[] = [];
-	for (const [id, versions] of Object.entries(index)) {
-		for (const entry of versions) {
-			if (entry.version === undefined || entry.ref === undefined) continue;
-			entries.push({
-				id,
-				version: entry.version,
-				ref: entry.ref,
-				engine: entry.engine,
-			});
-		}
-	}
-	return entries;
+/** Order templates by id, then version — a stable cache ordering. */
+function sortTemplates(templates: Template[]): Template[] {
+	return [...templates].sort((a, b) => {
+		const idCmp = (a.id ?? "").localeCompare(b.id ?? "");
+		if (idCmp !== 0) return idCmp;
+		return (a.version ?? 0) - (b.version ?? 0);
+	});
 }
 
 /**
- * Sync the cache with the marketplace.
+ * Sync the cache with the connectors GitHub releases.
  *
- * - Always re-fetches the index.
- * - Fetches refs that aren't already cached (matches by `metadata.upstreamRef`).
- * - With `prune: true`, drops cached entries whose `upstreamRef` is no longer
- *   in the fresh index.
+ * - Always re-fetches the release listing and reduces it to the newest
+ *   release per minor line.
+ * - Downloads the template bundle of every selected release that isn't
+ *   already cached (matched by the asset URL half of
+ *   `metadata.upstreamRef`).
+ * - Deduplicates `id@version` across bundles, preferring the newest
+ *   release's copy.
+ * - With `prune: true`, drops cached entries that no longer belong to a
+ *   selected release.
  *
- * Per-template fetch failures are logged + counted but do not abort the run.
+ * Per-release fetch failures are logged + counted but do not abort the run.
  *
  * Returns a summary `{ total, fetched, cached, errors, pruned }`.
  */
@@ -494,11 +476,16 @@ async function syncTemplatesLocked({
 	logger: Logger;
 	prune: boolean;
 }): Promise<SyncSummary> {
-	logger.info(`Fetching index from ${getMarketplaceUrl()} ...`);
-	const index = await fetchIndex();
-	const entries = flattenIndex(index);
+	const releasesUrl = getReleasesUrl();
+	logger.info(`Fetching connector releases from ${releasesUrl} ...`);
+	const releases = await fetchConnectorReleases();
+	if (releases.length === 0) {
+		throw new Error(
+			`No connector release with an element-template bundle found at ${releasesUrl}.`,
+		);
+	}
 	logger.info(
-		`Index has ${entries.length} template versions across ${Object.keys(index).length} connectors.`,
+		`Latest release per minor: ${releases.map((r) => r.tag).join(", ")}.`,
 	);
 
 	let existing: Template[];
@@ -509,93 +496,129 @@ async function syncTemplatesLocked({
 		logger.warn(`Corrupt cache — starting fresh: ${message}`);
 		existing = [];
 	}
-	const byUpstreamRef = new Map<string, Template>();
+
+	// Group the cache by the bundle each template came from. Anything
+	// that doesn't belong to a selected release (no `upstreamRef`, or a
+	// bundle that dropped out of the selection) is a prune candidate.
+	const selectedAssets = new Set(releases.map((r) => r.assetUrl));
+	const cachedByAsset = new Map<string, Template[]>();
+	const staleCached: Template[] = [];
 	for (const tpl of existing) {
 		const ref = tpl.metadata?.upstreamRef;
-		if (ref) byUpstreamRef.set(ref, tpl);
+		const asset = ref ? assetUrlOfRef(ref) : undefined;
+		if (asset && selectedAssets.has(asset)) {
+			const bucket = cachedByAsset.get(asset);
+			if (bucket) bucket.push(tpl);
+			else cachedByAsset.set(asset, [tpl]);
+		} else {
+			staleCached.push(tpl);
+		}
 	}
 
-	const freshRefs = new Set(entries.map((e) => e.ref));
-	const toFetch = entries.filter((e) => !byUpstreamRef.has(e.ref));
+	// Release assets are tag-pinned and therefore immutable: a bundle
+	// already represented in the cache never has to be downloaded again.
+	const toFetch = releases.filter((r) => !cachedByAsset.has(r.assetUrl));
+	const reusedCount = [...cachedByAsset.values()].reduce(
+		(sum, bucket) => sum + bucket.length,
+		0,
+	);
 
 	logger.info(
 		`${
-			byUpstreamRef.size > 0
-				? `Reusing ${entries.length - toFetch.length} cached, `
+			reusedCount > 0
+				? `Reusing ${reusedCount} cached templates from ${cachedByAsset.size} bundle(s), `
 				: ""
-		}fetching ${toFetch.length} new...`,
+		}downloading ${toFetch.length} bundle(s)...`,
 	);
 
-	let fetched = 0;
 	let errors = 0;
 	let progress = 0;
-	const fetchedTemplates: Template[] = [];
+	const fetchedByAsset = new Map<string, Template[]>();
 
-	await pool(toFetch, FETCH_CONCURRENCY, async (entry) => {
+	await pool(toFetch, FETCH_CONCURRENCY, async (release) => {
 		progress += 1;
 		const myProgress = progress;
-		const label = `${entry.id}@${entry.version}`;
 		try {
-			const template = await fetchTemplate(entry.ref);
-			template.metadata = template.metadata || {};
-			template.metadata.upstreamRef = entry.ref;
-			fetchedTemplates.push(template);
-			fetched += 1;
-			logger.info(`  [${myProgress}/${toFetch.length}] ${label}`);
+			const templates = await fetchReleaseTemplates(release);
+			fetchedByAsset.set(release.assetUrl, templates);
+			logger.info(
+				`  [${myProgress}/${toFetch.length}] ${release.tag} — ${templates.length} templates`,
+			);
 		} catch (error) {
 			errors += 1;
 			const message = error instanceof Error ? error.message : String(error);
-			logger.warn(`  [${myProgress}/${toFetch.length}] ${label} — ${message}`);
+			logger.warn(
+				`  [${myProgress}/${toFetch.length}] ${release.tag} — ${message}`,
+			);
 		}
 	});
 
-	// Build the new cache: keep cached entries that are still in the index,
-	// plus everything we just fetched. Sort fetched entries by id+version so
-	// cache order (and therefore search result order) is deterministic
-	// regardless of network timing.
-	fetchedTemplates.sort((a, b) => {
-		const idCmp = (a.id ?? "").localeCompare(b.id ?? "");
-		if (idCmp !== 0) return idCmp;
-		return (a.version ?? 0) - (b.version ?? 0);
-	});
+	// Build the new cache newest release first, so an `id@version` shipped
+	// by several minor lines is taken from the newest one. Each bundle's
+	// templates are sorted by id+version so cache order (and therefore
+	// search result order) is deterministic regardless of network timing.
 	const next: Template[] = [];
-	for (const tpl of existing) {
-		const ref = tpl.metadata?.upstreamRef;
-		if (ref && freshRefs.has(ref)) {
-			next.push(tpl);
-		}
-	}
-	next.push(...fetchedTemplates);
+	const seen = new Set<string>();
+	let fetched = 0;
+	let cached = 0;
+	const add = (tpl: Template): boolean => {
+		const key = `${tpl.id}@${tpl.version}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		next.push(tpl);
+		return true;
+	};
 
-	// `pruned` = cached entries whose upstreamRef no longer appears in the
-	// fresh index (or that never had one). The "without --prune" branch
-	// below preserves these entries; with --prune we drop them, and the
-	// summary line reports that count to the user.
-	let pruned = 0;
-	if (prune) {
-		pruned = existing.filter((t) => {
-			const ref = t.metadata?.upstreamRef;
-			return ref === undefined || !freshRefs.has(ref);
-		}).length;
-	}
-
-	// Without --prune, keep templates whose upstreamRef vanished from the index
-	// (e.g. user wants to retain an older version that was removed upstream).
-	if (!prune) {
-		for (const tpl of existing) {
-			const ref = tpl.metadata?.upstreamRef;
-			if (ref && !freshRefs.has(ref) && !next.includes(tpl)) {
-				next.push(tpl);
-			}
+	for (const release of releases) {
+		const fresh = fetchedByAsset.get(release.assetUrl);
+		const templates = fresh ?? cachedByAsset.get(release.assetUrl) ?? [];
+		for (const tpl of sortTemplates(templates)) {
+			if (!add(tpl)) continue;
+			if (fresh) fetched += 1;
+			else cached += 1;
 		}
 	}
 
-	saveCache(next);
+	// A bundle URL changes with every patch release, so the previous
+	// patch's cached templates always land in `staleCached`. Dropping
+	// them while its replacement failed to download would delete a whole
+	// minor line's templates over one transient HTTP error, so pruning
+	// only happens on a fully successful sync.
+	const pruning = prune && errors === 0;
+	if (prune && errors > 0) {
+		logger.warn(
+			`Skipping prune: ${errors} bundle(s) failed to download — cached templates were kept.`,
+		);
+	}
+
+	// Without pruning, keep templates that no longer belong to a selected
+	// release (e.g. the user wants to retain a line that dropped out of
+	// support). With --prune they are dropped and reported.
+	if (!pruning) {
+		for (const tpl of sortTemplates(staleCached)) {
+			add(tpl);
+		}
+	}
+	const pruned = pruning ? staleCached.length : 0;
+
+	if (next.length === 0) {
+		// Nothing downloaded, nothing reusable — writing an empty cache
+		// here would make `requireCachePresent()` pass over a cache that
+		// can never resolve a template.
+		throw new Error(
+			`No element templates could be downloaded (${errors} bundle(s) failed). ` +
+				"Check the warnings above and retry 'c8ctl element-template sync'.",
+		);
+	}
+
+	// A partial sync leaves the previous `fetched-at` in place so the
+	// staleness nudge keeps asking for a full refresh.
+	saveCache(next, { stampFetchedAt: errors === 0 });
 
 	const summary: SyncSummary = {
 		total: next.length,
 		fetched,
-		cached: entries.length - toFetch.length,
+		cached,
 		errors,
 		pruned,
 	};
