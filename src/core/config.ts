@@ -92,6 +92,18 @@ export interface Profile {
 	username?: string;
 	password?: string;
 	defaultTenantId?: string;
+	/**
+	 * Custom HTTP headers attached to every REST request made under this
+	 * profile (e.g. a gateway API key or correlation ID). Keyed by header
+	 * name.
+	 */
+	headers?: Record<string, string>;
+	/**
+	 * When true, `baseUrl` is used exactly as given for every request —
+	 * c8ctl does not append `/v2`. For gateway-fronted clusters whose base
+	 * path does not match c8ctl's assumed suffixing.
+	 */
+	exactBaseUrl?: boolean;
 }
 
 export interface SessionState {
@@ -124,6 +136,10 @@ export interface ClusterConfig {
 	scope?: string;
 	username?: string;
 	password?: string;
+	/** See `Profile.headers`. */
+	headers?: Record<string, string>;
+	/** See `Profile.exactBaseUrl`. */
+	exactBaseUrl?: boolean;
 }
 
 // ============================================================================
@@ -553,6 +569,8 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		scope: profile.scope,
 		username: profile.username,
 		password: profile.password,
+		headers: profile.headers,
+		exactBaseUrl: profile.exactBaseUrl,
 	};
 }
 
@@ -810,9 +828,19 @@ export function hasCamundaEnvVars(): boolean {
 }
 
 /**
+ * Profile fields whose value is a plain string — the only fields
+ * `ENV_VAR_PROFILE_MAP` may target, since every CAMUNDA_* env var maps to a
+ * single string value. `headers` (a map) and `exactBaseUrl` (a boolean)
+ * have no env-var equivalent and are deliberately excluded.
+ */
+type StringProfileField = {
+	[K in keyof Profile]-?: Profile[K] extends string | undefined ? K : never;
+}[keyof Profile];
+
+/**
  * The env var → profile field mapping used by --from-file and --from-env.
  */
-export const ENV_VAR_PROFILE_MAP: Record<string, keyof Profile> = {
+export const ENV_VAR_PROFILE_MAP: Record<string, StringProfileField> = {
 	CAMUNDA_BASE_URL: "baseUrl",
 	CAMUNDA_CLIENT_ID: "clientId",
 	CAMUNDA_CLIENT_SECRET: "clientSecret",
@@ -849,6 +877,81 @@ export function parseEnvFile(content: string): Record<string, string> {
 		result[key] = value;
 	}
 	return result;
+}
+
+/**
+ * Set one header on `target`, replacing any existing key that differs only
+ * in case rather than adding a second, differently-cased entry. HTTP
+ * header names are case-insensitive; a plain `Record<string, string>` is
+ * not, so this normalizes that for any code merging header maps built from
+ * user input (e.g. `parseHeaderFlags`, `resolveAuthHeaders`).
+ */
+export function setHeaderCaseInsensitive(
+	target: Record<string, string>,
+	name: string,
+	value: string,
+): void {
+	const existingKey = Object.keys(target).find(
+		(k) => k.toLowerCase() === name.toLowerCase(),
+	);
+	if (existingKey !== undefined && existingKey !== name) {
+		delete target[existingKey];
+	}
+	target[name] = value;
+}
+
+/**
+ * RFC 7230 `token` grammar — the only characters a valid HTTP header name
+ * may contain. Rejects e.g. a space in the name early, rather than letting
+ * it reach `Headers.set()` at request time.
+ */
+const HTTP_HEADER_NAME_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Parse repeatable `--header "Name: value"` flags into a header map.
+ * Splits each entry on the first colon; the name and value are trimmed.
+ * Throws with a message describing the problem when a header is missing
+ * its colon separator, has an empty or malformed name, or has a value
+ * containing CR/LF — validating this at parse time surfaces a clean
+ * `Invalid --header` error immediately, rather than persisting the
+ * profile successfully and only failing later, at request time, when
+ * `Headers.set()` itself rejects the same input.
+ *
+ * Error messages never include the raw entry or its value: a header value
+ * is typically a secret (an API key, a bearer token), and echoing it back
+ * would leak it into logs or CI output on a typo. Only the header *name*
+ * is ever quoted, since it identifies which `--header` was malformed
+ * without exposing what it was carrying.
+ *
+ * Repeating the same header name — even differing only in case, since HTTP
+ * header names are case-insensitive — replaces the earlier value (last
+ * `--header` wins) rather than persisting both under separate keys.
+ */
+export function parseHeaderFlags(entries: string[]): Record<string, string> {
+	const headers: Record<string, string> = {};
+	for (const entry of entries) {
+		const colonIndex = entry.indexOf(":");
+		if (colonIndex === -1) {
+			throw new Error('Invalid --header — expected format "Name: value"');
+		}
+		const name = entry.slice(0, colonIndex).trim();
+		const value = entry.slice(colonIndex + 1).trim();
+		if (!name) {
+			throw new Error("Invalid --header — header name must not be empty");
+		}
+		if (!HTTP_HEADER_NAME_RE.test(name)) {
+			throw new Error(
+				`Invalid --header "${name}" — not a valid HTTP token (letters, digits, and !#$%&'*+-.^_\`|~ only)`,
+			);
+		}
+		if (/[\r\n]/.test(value)) {
+			throw new Error(
+				`Invalid --header "${name}" — value must not contain a line break`,
+			);
+		}
+		setHeaderCaseInsensitive(headers, name, value);
+	}
+	return headers;
 }
 
 /**

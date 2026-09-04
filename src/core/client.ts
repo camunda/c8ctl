@@ -7,9 +7,124 @@ import {
 	type CamundaOptions,
 	createCamundaClient,
 } from "@camunda8/orchestration-cluster-api";
-import { resolveClusterConfig } from "./config.ts";
+import { resolveClusterConfig, setHeaderCaseInsensitive } from "./config.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
+
+/** The fetch-compatible function type the SDK accepts via `CamundaOptions.fetch`. */
+type FetchFn = NonNullable<CamundaOptions["fetch"]>;
+
+/**
+ * Normalize a base URL the same way constructing a `Request` from it would:
+ * the WHATWG URL parser lowercases the host and applies its own formatting
+ * (default ports, etc). `Request.url` in the fetch wrapper below always
+ * reflects that normalized form — even when the SDK's own internal
+ * `CAMUNDA_REST_ADDRESS` string keeps the caller's original casing — so
+ * comparing against a base derived from the raw, un-parsed `baseUrl` string
+ * can silently fail to match a profile whose `--baseUrl` has an
+ * uppercase/mixed-case host. Falls back to a plain trim when `baseUrl`
+ * isn't a parseable absolute URL; requests built from it would already be
+ * failing elsewhere in that case.
+ */
+function normalizeBaseUrl(baseUrl: string): string {
+	const trimmed = baseUrl.trim();
+	try {
+		return new URL(trimmed).toString().replace(/\/+$/, "");
+	} catch {
+		return trimmed.replace(/\/+$/, "");
+	}
+}
+
+/**
+ * Wrap a fetch implementation so every request made under a gateway-fronted
+ * profile carries its custom headers and, when `exactBaseUrl` is set,
+ * targets the profile's base URL exactly instead of the SDK's auto-suffixed
+ * one.
+ *
+ * The SDK (`@camunda8/orchestration-cluster-api`) appends `/v2` to
+ * `CAMUNDA_REST_ADDRESS` whenever it does not already end with `/v2` or
+ * `/v2/`, with no config flag to disable it. The `fetch` hook receives the
+ * already-built `Request` (after auth headers have been applied), so
+ * rewriting its URL there — replacing the SDK-computed base with the raw
+ * `baseUrl` — is the only interception point available without forking the
+ * SDK. `sdkComputedBase` mirrors the SDK's own suffixing rule exactly, so
+ * it always matches the prefix the SDK actually built.
+ *
+ * `sdkComputedBase` is derived from `strippedBase` (never a trailing
+ * slash), not the raw trimmed `baseUrl`: the SDK's own internal config
+ * merge strips exactly one trailing slash before building request URLs, so
+ * a `baseUrl` ending in `/v2/` would otherwise leave `sdkComputedBase` one
+ * character longer than the real prefix, eating the endpoint path's
+ * leading `/` on rewrite (`.../v2process-instances/search`).
+ */
+export function buildGatewayFetch(opts: {
+	baseUrl: string;
+	headers?: Record<string, string>;
+	exactBaseUrl?: boolean;
+	delegate?: FetchFn;
+}): FetchFn {
+	const delegate: FetchFn =
+		opts.delegate ?? ((input, init) => fetch(input, init));
+	const headerEntries = Object.entries(opts.headers ?? {});
+
+	const strippedBase = normalizeBaseUrl(opts.baseUrl);
+	const sdkComputedBase = /\/v2$/i.test(strippedBase)
+		? strippedBase
+		: `${strippedBase}/v2`;
+
+	// When baseUrl already ends in /v2, the SDK never appends anything, so
+	// rewriting would always produce the same URL the request already has.
+	// Skip the whole URL-rewrite branch for such a profile — computed once
+	// here rather than per request — so exactBaseUrl on a baseUrl that
+	// already ends in /v2 costs nothing beyond the header injection below
+	// (no body buffering, no Request reconstruction, on every request).
+	const needsUrlRewrite = opts.exactBaseUrl && strippedBase !== sdkComputedBase;
+
+	return async (input, init) => {
+		let request =
+			input instanceof Request && init === undefined
+				? input
+				: new Request(input, init);
+
+		if (needsUrlRewrite) {
+			// Require a path boundary (not just a string prefix) so a base
+			// that happens to be a textual prefix of an unrelated longer
+			// path can never match.
+			const boundary = request.url.charAt(sdkComputedBase.length);
+			const matchesComputedBase =
+				request.url.startsWith(sdkComputedBase) &&
+				(boundary === "" ||
+					boundary === "/" ||
+					boundary === "?" ||
+					boundary === "#");
+
+			if (matchesComputedBase) {
+				const exactUrl =
+					strippedBase + request.url.slice(sdkComputedBase.length);
+				// GET/HEAD requests cannot carry a body — the fetch spec
+				// throws if one is passed, even a nullish stream reference.
+				const hasBody = request.method !== "GET" && request.method !== "HEAD";
+				// Buffer the body (rather than passing the live stream
+				// through) so the new Request doesn't need Node's
+				// `duplex: "half"` option.
+				const body = hasBody ? await request.arrayBuffer() : undefined;
+				request = new Request(exactUrl, {
+					method: request.method,
+					headers: request.headers,
+					body,
+					redirect: request.redirect,
+					signal: request.signal,
+				});
+			}
+		}
+
+		for (const [name, value] of headerEntries) {
+			request.headers.set(name, value);
+		}
+
+		return delegate(request);
+	};
+}
 
 /**
  * Create a Camunda 8 cluster client with resolved configuration
@@ -56,7 +171,26 @@ export function createClient(
 		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "trace";
 	}
 
-	return createCamundaClient({ config: sdkConfig, ...additionalSdkConfig });
+	const options: Partial<CamundaOptions> = {
+		config: sdkConfig,
+		...additionalSdkConfig,
+	};
+
+	// Only wrap fetch when the profile actually needs it — profiles that
+	// don't set headers or exactBaseUrl must behave exactly as before.
+	const hasHeaders = !!(
+		config.headers && Object.keys(config.headers).length > 0
+	);
+	if (hasHeaders || config.exactBaseUrl) {
+		options.fetch = buildGatewayFetch({
+			baseUrl: config.baseUrl,
+			headers: config.headers,
+			exactBaseUrl: config.exactBaseUrl,
+			delegate: additionalSdkConfig.fetch,
+		});
+	}
+
+	return createCamundaClient(options);
 }
 
 /**
@@ -237,7 +371,52 @@ export async function resolveAuthHeaders(
 		headers.Authorization = `Basic ${encoded}`;
 	}
 
+	// Custom headers are applied last so a gateway-fronted profile can
+	// override any header above (e.g. replacing Authorization with its own
+	// gateway API key). Merged case-insensitively — HTTP header names are
+	// case-insensitive, and `buildGatewayFetch`'s SDK-side equivalent uses
+	// `Headers.set`, which already normalizes this way.
+	if (config.headers) {
+		mergeHeadersCaseInsensitive(headers, config.headers);
+	}
+
 	return headers;
+}
+
+/**
+ * Set every entry from `overrides` on `target`, replacing any existing key
+ * that differs only in case rather than adding a second, differently-cased
+ * entry. `target` is a plain `Record<string, string>` (not a `Headers`
+ * instance), since that's the contract `resolveAuthHeaders`/`rawPost*` use
+ * for the one manual REST call that bypasses the SDK client. Delegates to
+ * `setHeaderCaseInsensitive` (shared with `parseHeaderFlags`) for the
+ * per-entry logic.
+ */
+function mergeHeadersCaseInsensitive(
+	target: Record<string, string>,
+	overrides: Record<string, string>,
+): void {
+	for (const [name, value] of Object.entries(overrides)) {
+		setHeaderCaseInsensitive(target, name, value);
+	}
+}
+
+/**
+ * Mirror the SDK's own `/v2` auto-append rule (see `buildGatewayFetch` for
+ * why there is no config flag to control this) for a manually-built REST
+ * request. Returns `config.baseUrl` (trailing slashes stripped) untouched
+ * when `exactBaseUrl` is set.
+ *
+ * Always returns a value with no trailing slash — including when
+ * `config.baseUrl` already ends in `/v2/` — so the caller's
+ * `${baseUrl}${endpoint}` concatenation never produces a double slash
+ * (`endpoint` always starts with `/`).
+ */
+function restBaseUrlForProfile(profile?: string): string {
+	const config = resolveClusterConfig(profile);
+	const stripped = config.baseUrl.trim().replace(/\/+$/, "");
+	if (config.exactBaseUrl) return stripped;
+	return /\/v2$/i.test(stripped) ? stripped : `${stripped}/v2`;
 }
 
 /**
@@ -254,20 +433,28 @@ export async function rawPost(
 	profile?: string,
 ): Promise<unknown> {
 	const headers = await resolveAuthHeaders(profile);
-	return rawPostWithHeaders(client, endpoint, body, headers);
+	return rawPostWithHeaders(client, endpoint, body, headers, profile);
 }
 
 /**
  * Make a POST request using pre-resolved auth headers. Use this inside
  * pagination loops after calling `resolveAuthHeaders()` once.
+ *
+ * `profile` is optional for backward compatibility: when omitted, the base
+ * URL falls back to `client.getConfig().restAddress` (the SDK's own
+ * resolved address), which does not honor a profile's `exactBaseUrl`.
  */
 export async function rawPostWithHeaders(
 	client: CamundaClient,
 	endpoint: string,
 	body: unknown,
 	headers: Record<string, string>,
+	profile?: string,
 ): Promise<unknown> {
-	const baseUrl = client.getConfig().restAddress;
+	const baseUrl =
+		profile === undefined
+			? client.getConfig().restAddress
+			: restBaseUrlForProfile(profile);
 
 	const res = await fetch(`${baseUrl}${endpoint}`, {
 		method: "POST",

@@ -22,6 +22,13 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Impact:** `c8ctl search wait-state` cannot use the SDK client directly; uses `resolveAuthHeaders()` + `rawPostWithHeaders()` to make authenticated HTTP requests.
   - **Remediation:** Upgrade SDK when a release ships with `searchElementInstanceWaitStates`; replace `rawPostWithHeaders()` call with the SDK method.
 
+- [ ] **No config flag to disable the automatic `/v2` suffix on `CAMUNDA_REST_ADDRESS`**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.4**
+  - **Behavior:** `hydrateConfig()` always appends `/v2` to `CAMUNDA_REST_ADDRESS` unless the value already ends with `/v2` or `/v2/`; there is no override.
+  - **Affected:** gateway/proxy-fronted profiles whose base path doesn't match this convention (`c8ctl add profile --exactBaseUrl`, #547).
+  - **Impact:** `createClient()` (`src/core/client.ts`) works around this by passing a custom `fetch` (`buildGatewayFetch`) that rewrites the outgoing `Request`'s URL, replacing the SDK-computed `.../v2` prefix with the profile's literal `baseUrl`. `rawPostWithHeaders()`/`resolveClusterConfig()` mirror the same suffixing rule for the one manually-issued REST call (`search wait-state`) that bypasses the SDK client.
+  - **Remediation:** If the SDK adds a config flag (e.g. `CAMUNDA_REST_ADDRESS_EXACT`) to opt out of the suffix, use it directly and remove `buildGatewayFetch`'s URL-rewriting branch and the mirrored logic in `restBaseUrlForProfile()`.
+
 - [ ] **`WaitStateType` enum not exported from SDK**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **9.1.0**
   - **Affected type:** `WaitStateType` (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)

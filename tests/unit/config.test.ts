@@ -211,6 +211,52 @@ describe("Config Module", () => {
 				"Active profile should be unchanged",
 			);
 		});
+
+		// ─── headers / exactBaseUrl (#547) ───────────────────────────────────
+
+		test("addProfile and loadProfiles round-trip headers and exactBaseUrl", () => {
+			addProfile({
+				name: "gateway",
+				baseUrl: "https://gateway.example.com/camunda-api",
+				headers: { "X-Api-Key": "secret" },
+				exactBaseUrl: true,
+			});
+
+			const loaded = getProfile("gateway");
+			assert.ok(loaded);
+			assert.deepStrictEqual(loaded.headers, { "X-Api-Key": "secret" });
+			assert.strictEqual(loaded.exactBaseUrl, true);
+		});
+
+		test("a profile without headers/exactBaseUrl round-trips them as undefined", () => {
+			addProfile({ name: "plain", baseUrl: "http://plain.com/v2" });
+
+			const loaded = getProfile("plain");
+			assert.ok(loaded);
+			assert.strictEqual(loaded.headers, undefined);
+			assert.strictEqual(loaded.exactBaseUrl, undefined);
+		});
+
+		test("resolveClusterConfig carries a profile's headers and exactBaseUrl through", () => {
+			addProfile({
+				name: "gateway",
+				baseUrl: "https://gateway.example.com/camunda-api",
+				headers: { "X-Api-Key": "secret" },
+				exactBaseUrl: true,
+			});
+
+			const config = resolveClusterConfig("gateway");
+			assert.deepStrictEqual(config.headers, { "X-Api-Key": "secret" });
+			assert.strictEqual(config.exactBaseUrl, true);
+		});
+
+		test("resolveClusterConfig leaves headers/exactBaseUrl undefined for a plain profile", () => {
+			addProfile({ name: "plain", baseUrl: "http://plain.com/v2" });
+
+			const config = resolveClusterConfig("plain");
+			assert.strictEqual(config.headers, undefined);
+			assert.strictEqual(config.exactBaseUrl, undefined);
+		});
 	});
 
 	// Simplified tests for now - we'll expand later if needed

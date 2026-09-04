@@ -4,11 +4,18 @@
  * - --from-file for add profile
  * - --from-env for add profile
  * - use profile --none
+ * - --header / --exactBaseUrl for gateway-fronted profiles (#547)
  */
 
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -16,9 +23,11 @@ import {
 	addProfile,
 	clearActiveProfile,
 	envVarsToProfile,
+	getProfile,
 	hasCamundaEnvVars,
 	loadSessionState,
 	parseEnvFile,
+	parseHeaderFlags,
 	resolveClusterConfig,
 } from "../../src/core/config.ts";
 import { c8ctl } from "../../src/core/runtime.ts";
@@ -534,6 +543,338 @@ describe("Profile management", () => {
 			);
 
 			rmSync(testDataDir, { recursive: true, force: true });
+		});
+	});
+
+	describe("parseHeaderFlags", () => {
+		test("parses a single 'Name: value' entry", () => {
+			const headers = parseHeaderFlags(["X-Api-Key: secret"]);
+			assert.deepStrictEqual(headers, { "X-Api-Key": "secret" });
+		});
+
+		test("parses multiple entries", () => {
+			const headers = parseHeaderFlags([
+				"X-Api-Key: secret",
+				"X-Correlation-Id: abc-123",
+			]);
+			assert.deepStrictEqual(headers, {
+				"X-Api-Key": "secret",
+				"X-Correlation-Id": "abc-123",
+			});
+		});
+
+		test("trims whitespace around name and value", () => {
+			const headers = parseHeaderFlags(["  X-Api-Key  :  secret  "]);
+			assert.deepStrictEqual(headers, { "X-Api-Key": "secret" });
+		});
+
+		test("splits on the first colon only, preserving colons in the value", () => {
+			const headers = parseHeaderFlags(["Authorization: Bearer abc:def"]);
+			assert.deepStrictEqual(headers, { Authorization: "Bearer abc:def" });
+		});
+
+		test("throws when a header is missing its colon separator", () => {
+			assert.throws(
+				() => parseHeaderFlags(["NoColonHere"]),
+				/Invalid --header — expected format/,
+			);
+		});
+
+		test("does not echo the raw entry when the colon separator is missing", () => {
+			// The whole malformed string could itself be a secret the user
+			// forgot to prefix with "Name: " — never echo it back.
+			try {
+				parseHeaderFlags(["super-secret-token-abc123"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-token-abc123"), message);
+			}
+		});
+
+		test("throws when the header name is empty", () => {
+			assert.throws(
+				() => parseHeaderFlags([": value"]),
+				/header name must not be empty/,
+			);
+		});
+
+		test("allows an empty value", () => {
+			const headers = parseHeaderFlags(["X-Empty:"]);
+			assert.deepStrictEqual(headers, { "X-Empty": "" });
+		});
+
+		test("a later --header replaces an earlier one differing only in case", () => {
+			// HTTP header names are case-insensitive — persisting both
+			// "Authorization" and "authorization" would be confusing and
+			// redundant, and the last one supplied should win.
+			const headers = parseHeaderFlags([
+				"Authorization: Bearer old",
+				"authorization: Bearer new",
+			]);
+			assert.deepStrictEqual(headers, { authorization: "Bearer new" });
+		});
+
+		test("accepts every character allowed in an HTTP header token", () => {
+			const headers = parseHeaderFlags(["X-Api!#$%&'*+-.^_`|~Key: secret"]);
+			assert.deepStrictEqual(headers, {
+				"X-Api!#$%&'*+-.^_`|~Key": "secret",
+			});
+		});
+
+		test("throws when the header name contains a space", () => {
+			assert.throws(
+				() => parseHeaderFlags(["Bad Name: value"]),
+				/Invalid --header "Bad Name" — not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header name contains a colon-illegal character", () => {
+			assert.throws(
+				() => parseHeaderFlags(['X-"Quoted": value']),
+				/not a valid HTTP token/,
+			);
+		});
+
+		test("throws when the header value contains a line break", () => {
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\r\nEvil: 1"]),
+				/Invalid --header "X-Foo" — value must not contain a line break/,
+			);
+		});
+
+		test("does not echo the header value when it contains a line break", () => {
+			try {
+				parseHeaderFlags(["X-Foo: super-secret-value\r\nEvil: 1"]);
+				assert.fail("expected parseHeaderFlags to throw");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				assert.ok(!message.includes("super-secret-value"), message);
+			}
+		});
+
+		test("throws when the header value contains only a newline", () => {
+			assert.throws(
+				() => parseHeaderFlags(["X-Foo: bar\nEvil: 1"]),
+				/value must not contain a line break/,
+			);
+		});
+	});
+
+	/**
+	 * Read a persisted profile from a specific data dir. Restores whatever
+	 * C8CTL_DATA_DIR held before (via `finally`) even if getProfile() throws,
+	 * so a failed assertion can't leak the override into later tests running
+	 * in this same process.
+	 */
+	function getProfileFromDataDir(
+		dataDir: string,
+		name: string,
+	): ReturnType<typeof getProfile> {
+		const original = process.env.C8CTL_DATA_DIR;
+		process.env.C8CTL_DATA_DIR = dataDir;
+		try {
+			return getProfile(name);
+		} finally {
+			if (original === undefined) {
+				delete process.env.C8CTL_DATA_DIR;
+			} else {
+				process.env.C8CTL_DATA_DIR = original;
+			}
+		}
+	}
+
+	describe("CLI: c8 add profile --header / --exactBaseUrl (#547)", () => {
+		let testDataDir: string;
+
+		beforeEach(() => {
+			// mkdtempSync (not a Date.now()-suffixed name) avoids a directory
+			// collision if another test file's worker process happens to
+			// create its own temp dir in the same millisecond.
+			testDataDir = mkdtempSync(join(tmpdir(), "c8ctl-gateway-"));
+		});
+
+		afterEach(() => {
+			if (existsSync(testDataDir)) {
+				rmSync(testDataDir, { recursive: true, force: true });
+			}
+		});
+
+		test("stores a single --header on the profile", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"X-Api-Key: secret",
+				],
+				{
+					encoding: "utf-8",
+					timeout: 5000,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+			assert.ok(
+				(result.stdout ?? "").includes("Headers: X-Api-Key"),
+				`Expected header name in output, got: ${result.stdout}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway");
+
+			assert.ok(profile);
+			assert.deepStrictEqual(profile.headers, { "X-Api-Key": "secret" });
+		});
+
+		test("repeating --header collects every value", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-multi",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"X-Api-Key: secret",
+					"--header",
+					"X-Correlation-Id: abc-123",
+				],
+				{
+					encoding: "utf-8",
+					timeout: 5000,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-multi");
+
+			assert.ok(profile);
+			assert.deepStrictEqual(profile.headers, {
+				"X-Api-Key": "secret",
+				"X-Correlation-Id": "abc-123",
+			});
+		});
+
+		test("--exactBaseUrl is stored on the profile", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-exact",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--exactBaseUrl",
+				],
+				{
+					encoding: "utf-8",
+					timeout: 5000,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(
+				result.status,
+				0,
+				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
+			);
+			assert.ok(
+				(result.stdout ?? "").includes("used exactly as given"),
+				`Expected exact-base-url note in output, got: ${result.stdout}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-exact");
+
+			assert.ok(profile);
+			assert.strictEqual(profile.exactBaseUrl, true);
+			assert.strictEqual(
+				profile.baseUrl,
+				"https://gateway.example.com/camunda-api",
+			);
+		});
+
+		test("errors on a malformed --header value", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"gateway-bad-header",
+					"--baseUrl=https://gateway.example.com/camunda-api",
+					"--header",
+					"NoColonHere",
+				],
+				{
+					encoding: "utf-8",
+					timeout: 5000,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.notStrictEqual(result.status, 0);
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+			assert.ok(
+				output.includes("Invalid --header"),
+				`Expected invalid header error, got: ${output}`,
+			);
+
+			const profile = getProfileFromDataDir(testDataDir, "gateway-bad-header");
+			assert.strictEqual(
+				profile,
+				undefined,
+				"Profile must not be persisted when --header is invalid",
+			);
+		});
+
+		test("profiles without --header or --exactBaseUrl behave exactly as before", () => {
+			const result = spawnSync(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI_ENTRY,
+					"add",
+					"profile",
+					"plain",
+					"--baseUrl=https://plain.example.com/v2",
+				],
+				{
+					encoding: "utf-8",
+					timeout: 5000,
+					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
+				},
+			);
+
+			assert.strictEqual(result.status, 0);
+			const output = (result.stdout ?? "") + (result.stderr ?? "");
+			assert.ok(!output.includes("Headers:"));
+			assert.ok(!output.includes("used exactly as given"));
+
+			const profile = getProfileFromDataDir(testDataDir, "plain");
+
+			assert.ok(profile);
+			assert.strictEqual(profile.headers, undefined);
+			assert.strictEqual(profile.exactBaseUrl, undefined);
 		});
 	});
 });

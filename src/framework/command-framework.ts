@@ -77,31 +77,48 @@ export type ResolvedPositionals<
 /**
  * Map a flag schema to typed handler parameters.
  *
- * - Flags with `validate` → the validator's return type
+ * - `multiple: true` flags → `R[]` when combined with `validate` (each
+ *   element validated), else `string[]` — `| undefined` unless
+ *   `required: true`. Checked before `validate`/`type` so a flag combining
+ *   `multiple` with `validate` infers an array — matching
+ *   `deserializeFlags`, which always returns an array for a `multiple`
+ *   flag regardless of `validate`.
+ * - Flags with `validate` (non-`multiple`) → the validator's return type
  * - Boolean flags → boolean
  * - Everything else → string
  *
  * A flag is non-optional in the handler's view iff it is declared
  * `required: true` in the FlagDef. `required: true` is enforced at the
- * framework boundary by validateFlags (#308), so the handler is guaranteed
- * to see a value.
+ * framework boundary by validateFlags (#308) — including for `multiple`
+ * flags: `validateFlags` treats a repeated flag's array as present when
+ * *any* element is a non-empty string (not just the last, since every
+ * element of a `multiple` flag is independently meaningful), so the
+ * handler is guaranteed to see a value there too.
  *
  * The type parameter is unconstrained so conditional types like
  * `ResolvedFlags<V, R>` can be passed through without constraint errors.
  */
 // biome-ignore lint/suspicious/noExplicitAny: unconstrained to accept conditional types
 export type InferFlags<F extends Record<string, any>> = {
-	[K in keyof F]: F[K] extends { validate: (v: string) => infer R }
-		? F[K] extends { required: true }
-			? R
-			: R | undefined
-		: F[K] extends { type: "boolean" }
+	[K in keyof F]: F[K] extends { multiple: true }
+		? F[K] extends { validate: (v: string) => infer R }
 			? F[K] extends { required: true }
-				? boolean
-				: boolean | undefined
+				? R[]
+				: R[] | undefined
 			: F[K] extends { required: true }
-				? string
-				: string | undefined;
+				? string[]
+				: string[] | undefined
+		: F[K] extends { validate: (v: string) => infer R }
+			? F[K] extends { required: true }
+				? R
+				: R | undefined
+			: F[K] extends { type: "boolean" }
+				? F[K] extends { required: true }
+					? boolean
+					: boolean | undefined
+				: F[K] extends { required: true }
+					? string
+					: string | undefined;
 };
 
 // ─── InferPositionals ────────────────────────────────────────────────────────
@@ -410,9 +427,12 @@ export function defineCommand<V extends keyof Registry, R extends string>(
  * Deserialize raw parseArgs values into typed flags.
  *
  * For each flag in the schema:
+ * - If the flag is boolean, extract the boolean value.
+ * - If the flag is `multiple: true`, collect every supplied value into an
+ *   array (`undefined` when never supplied), applying `validate` to each
+ *   element when present.
  * - If the flag has a `validate` function and the raw value is a non-empty
  *   string, call the validator (which returns a branded type).
- * - If the flag is boolean, extract the boolean value.
  * - Otherwise, extract the string value.
  *
  * Validators that throw are intentionally NOT caught here — validation
@@ -434,6 +454,19 @@ export function deserializeFlags<F extends Record<string, FlagDef>>(
 
 		if (def.type === "boolean") {
 			result[key] = typeof raw === "boolean" ? raw : undefined;
+		} else if (def.multiple) {
+			// node:util parseArgs collects repeated `multiple: true` flags into
+			// an array. A single occurrence still arrives as a plain string.
+			const items = Array.isArray(raw) ? raw : [raw];
+			const strings = items.filter(
+				(v): v is string => typeof v === "string" && v !== "",
+			);
+			result[key] =
+				strings.length > 0
+					? def.validate
+						? strings.map((s) => def.validate?.(s))
+						: strings
+					: undefined;
 		} else if (typeof raw === "string" && raw !== "") {
 			result[key] = def.validate ? def.validate(raw) : raw;
 		} else {

@@ -64,6 +64,28 @@ const MIXED_FLAGS = {
 	},
 } as const satisfies Record<string, FlagDef>;
 
+const MULTIPLE_FLAGS = {
+	header: { type: "string", multiple: true, description: "A header" },
+} as const satisfies Record<string, FlagDef>;
+
+const MULTIPLE_VALIDATED_FLAGS = {
+	pdKeys: {
+		type: "string",
+		multiple: true,
+		description: "Repeatable, validated PD keys",
+		validate: ProcessDefinitionKey.assumeExists,
+	},
+} as const satisfies Record<string, FlagDef>;
+
+const REQUIRED_MULTIPLE_FLAGS = {
+	header: {
+		type: "string",
+		multiple: true,
+		required: true,
+		description: "A required, repeatable header",
+	},
+} as const satisfies Record<string, FlagDef>;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  deserializeFlags — runtime behaviour
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -173,6 +195,69 @@ describe("deserializeFlags", () => {
 		const keys = Object.keys(result);
 		assert.deepStrictEqual(keys.sort(), ["email", "name"]);
 	});
+
+	// ─── multiple:true flags ─────────────────────────────────────────────────
+
+	test("collects repeated multiple:true flags into an array", () => {
+		const result = deserializeFlags(
+			{ header: ["X-A: 1", "X-B: 2"] },
+			MULTIPLE_FLAGS,
+		);
+		assert.deepStrictEqual(result.header, ["X-A: 1", "X-B: 2"]);
+	});
+
+	test("wraps a single multiple:true value in a one-element array", () => {
+		// node:util parseArgs returns a plain string, not an array, when a
+		// multiple:true flag is supplied exactly once.
+		const result = deserializeFlags({ header: "X-A: 1" }, MULTIPLE_FLAGS);
+		assert.deepStrictEqual(result.header, ["X-A: 1"]);
+	});
+
+	test("undefined for missing multiple:true flags", () => {
+		const result = deserializeFlags({}, MULTIPLE_FLAGS);
+		assert.strictEqual(result.header, undefined);
+	});
+
+	test("filters out empty-string entries from multiple:true flags", () => {
+		const result = deserializeFlags(
+			{ header: ["X-A: 1", "", "X-B: 2"] },
+			MULTIPLE_FLAGS,
+		);
+		assert.deepStrictEqual(result.header, ["X-A: 1", "X-B: 2"]);
+	});
+
+	test("undefined when every multiple:true entry is empty", () => {
+		const result = deserializeFlags({ header: [""] }, MULTIPLE_FLAGS);
+		assert.strictEqual(result.header, undefined);
+	});
+
+	// ─── multiple:true combined with validate ───────────────────────────────
+
+	test("applies validate to every element of a multiple:true flag", () => {
+		const result = deserializeFlags(
+			{ pdKeys: ["111", "222"] },
+			MULTIPLE_VALIDATED_FLAGS,
+		);
+		assert.deepStrictEqual(result.pdKeys, [
+			ProcessDefinitionKey.assumeExists("111"),
+			ProcessDefinitionKey.assumeExists("222"),
+		]);
+	});
+
+	test("applies validate to a single multiple:true value wrapped into an array", () => {
+		const result = deserializeFlags(
+			{ pdKeys: "111" },
+			MULTIPLE_VALIDATED_FLAGS,
+		);
+		assert.deepStrictEqual(result.pdKeys, [
+			ProcessDefinitionKey.assumeExists("111"),
+		]);
+	});
+
+	test("undefined for a missing multiple:true + validate flag", () => {
+		const result = deserializeFlags({}, MULTIPLE_VALIDATED_FLAGS);
+		assert.strictEqual(result.pdKeys, undefined);
+	});
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -214,6 +299,29 @@ describe("InferFlags — type inference (compile-time)", () => {
 			verbose: true,
 			processDefinitionKey: pdKey,
 		};
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true flags infer to string[] | undefined", () => {
+		type Result = InferFlags<typeof MULTIPLE_FLAGS>;
+		const _withValues: Result = { header: ["X-A: 1", "X-B: 2"] };
+		const _withoutValues: Result = { header: undefined };
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true + validate infers to the validator's branded array type", () => {
+		type Result = InferFlags<typeof MULTIPLE_VALIDATED_FLAGS>;
+		const pdKey = ProcessDefinitionKey.assumeExists("111");
+		const _withValues: Result = { pdKeys: [pdKey] };
+		const _withoutValues: Result = { pdKeys: undefined };
+		assert.ok(true, "compiles");
+	});
+
+	test("multiple:true + required:true infers to a non-optional array", () => {
+		type Result = InferFlags<typeof REQUIRED_MULTIPLE_FLAGS>;
+		// No `| undefined` variant — validateFlags's presence check already
+		// covers a repeated flag's array, so this must compile without it.
+		const _check: Result = { header: ["X-A: 1"] };
 		assert.ok(true, "compiles");
 	});
 });
