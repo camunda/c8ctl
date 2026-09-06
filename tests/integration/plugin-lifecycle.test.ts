@@ -626,22 +626,23 @@ export const commands = {
 			writeFileSync(join(scaffoldDir, "src", "c8ctl-plugin.ts"), pluginSource);
 
 			// Step 3: Build the plugin.
-			// `--no-audit --no-fund` avoids npm's blocking registry round-trip on
-			// install. Audit in particular stalls for minutes when a `file:`/link
-			// dependency is in scope (here: the enclosing c8ctl checkout the
-			// scaffold is created inside), which would blow the timeout below. See
-			// the plugin loader's matching hardening in src/utils/shared/npm-exec.ts (#551).
-			execSync("npm install --no-audit --no-fund", {
-				cwd: scaffoldDir,
-				stdio: "pipe",
-				timeout: 30000,
-			});
-
-			execSync("npm run build", {
-				cwd: scaffoldDir,
-				stdio: "pipe",
-				timeout: 10000,
-			});
+			// No `npm install` is needed: the scaffold is created inside the
+			// c8ctl checkout, so `typescript` and `@types/node` resolve from the
+			// repo's own node_modules. Skipping the install also avoids npm's
+			// blocking audit/fund round-trip on the enclosing file: tree (which
+			// stalls for minutes, #551) and the pointless published-@camunda8/cli
+			// install — the plugin source above imports nothing from it.
+			// We invoke the repo's tsc directly rather than the scaffold's
+			// `npm run build` script, which would need a scaffold-local tsc binary.
+			execFileSync(
+				process.execPath,
+				[join(process.cwd(), "node_modules", "typescript", "bin", "tsc")],
+				{
+					cwd: scaffoldDir,
+					stdio: "pipe",
+					timeout: 30000,
+				},
+			);
 
 			// Verify the build output exists
 			const builtPluginFile = join(scaffoldDir, "dist", "c8ctl-plugin.js");
