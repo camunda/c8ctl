@@ -98,7 +98,7 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
-c8ctl element-template sync --prune    # also drop entries no longer in the index
+c8ctl element-template sync --prune    # also drop entries no longer in a selected release
 ```
 
 ## Inspecting a template
@@ -302,10 +302,14 @@ warning at the end (the property won't be applied).
 
 ## How OOTB templates are resolved
 
-1. **Index**: fetched from the Camunda marketplace
-   (`https://marketplace.cloud.camunda.io/api/v1/ootb-connectors`) — the
-   same source Desktop Modeler uses. Override via
-   `C8CTL_OOTB_ELEMENT_TEMPLATES_URL` for testing.
+1. **Source**: the `camunda/connectors` GitHub releases. `sync` lists
+   the releases, keeps the newest release of each of the 4 newest minor
+   lines (8.8.x, 8.9.x, ... — alphas count, release candidates don't),
+   and downloads
+   each one's `connectors-bundle-templates-<tag>.tar.gz` asset from
+   `github.com`. `raw.githubusercontent.com` is deliberately not used:
+   it is blocked in many enterprise networks. Override the release
+   listing endpoint via `C8CTL_CONNECTORS_RELEASES_URL` for testing.
 2. **Populate the cache once** via `c8ctl element-template sync`.
    Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
    `apply`, `get`) exit non-zero with a hint to run `sync` when the
@@ -314,14 +318,14 @@ warning at the end (the property won't be applied).
    `apply | bpmn lint` or `get <id> > template.json`.
 3. **Local file or URL** template args (paths containing `/` or `\`,
    starting with `.`, ending in `.json`, or starting with `http(s)://`)
-   skip the index entirely.
+   skip the cache entirely.
 4. **Version selection** uses `semver.satisfies` against the BPMN's
    `modeler:executionPlatformVersion` and each template's
    `engines.camunda` constraint. Without `@<version>`, the highest
    compatible version wins.
 5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
-   refresh — `sync` only fetches refs not already cached (commit-pinned
-   URLs make incremental sync free).
+   refresh — `sync` only downloads bundles not already cached (release
+   assets are tag-pinned, so incremental sync is free).
 6. **Concurrent syncs** are serialised by an advisory lock at
    `<cache-dir>/.sync.lock`. A second `sync` started while one is
    already running exits non-zero rather than racing.
@@ -339,5 +343,5 @@ Set `C8CTL_DATA_DIR` to override.
 ## Design
 
 See [`docs/design.md`](./docs/design.md) for the full reasoning behind
-the marketplace endpoint choice, the vendor bundle, the cache strategy
+the release-bundle source choice, the vendor bundle, the cache strategy
 (mirrored from Desktop Modeler), and version resolution.

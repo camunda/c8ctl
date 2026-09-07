@@ -19,7 +19,8 @@ const c8ctl = globalThis.c8ctl;
 
 /**
  * User-Agent header sent on every outbound HTTP call this plugin makes
- * (marketplace index/template fetches and ad-hoc template URL loads),
+ * (connector release listing/bundle downloads and ad-hoc template URL
+ * loads),
  * so traffic from c8ctl is attributable in upstream logs.
  */
 export const USER_AGENT = `c8ctl-plugin-element-template/${c8ctl.version}`;
@@ -762,8 +763,8 @@ export function parseTemplateJson(content: string): Template {
 	if (!isTemplate(parsed)) {
 		throw new Error("Element template did not match the expected shape");
 	}
-	// We trust the rest of the shape because the source is either the
-	// marketplace (commit-pinned, schema-validated upstream) or a
+	// We trust the rest of the shape because the source is either a
+	// connectors release bundle (schema-validated upstream) or a
 	// file/URL the user owns. Read-time strict validation would block
 	// 90% of the workflow without catching meaningful bugs.
 	return parsed;

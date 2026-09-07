@@ -326,7 +326,8 @@ export const commands = {
 			},
 			prune: {
 				type: "boolean",
-				description: "Drop cached entries no longer in the index [sync]",
+				description:
+					"Drop cached entries no longer in a selected release [sync]",
 			},
 			"no-icon": {
 				type: "boolean",

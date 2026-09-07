@@ -24,29 +24,61 @@ shipped layout but during development we run directly from
 
 ## OOTB template integration
 
-Three sources publish the OOTB connector templates:
+Four sources publish the OOTB connector templates:
 
 | | Source-of-truth | Inlines templates? | Has all versions? | Used by |
 |---|---|---|---|---|
+| `github.com/camunda/connectors` releases (bundle asset) | yes | yes (~1 MB gzip per line) | per minor line | c8ctl |
 | `marketplace.cloud.camunda.io/api/v1/ootb-connectors` | mirrors GH | no, URL refs | yes | Desktop Modeler |
 | `github.com/camunda/connectors/connector-templates.json` | yes | no, URL refs | yes | (the marketplace) |
 | `@camunda/connectors-element-templates` (npm) | derived | yes (~9MB) | yes, may lag | (Web Modeler skill) |
 
-We chose the **marketplace endpoint** for parity with Desktop Modeler:
+We use the **release bundle assets** — every connectors release ships a
+`connectors-bundle-templates-<tag>.tar.gz` with one JSON file per
+template:
 
-- Desktop Modeler is released and deployed widely; the endpoint contract
-  is effectively stable.
-- The endpoint already proxies the GH source-of-truth; using it means
-  we benefit from any future server-side filtering/versioning the
-  marketplace adds.
+- The marketplace endpoint (Desktop Modeler's source, and c8ctl's
+  original choice) only publishes *refs* into
+  `raw.githubusercontent.com`, a host routinely blocked in enterprise
+  networks — the reason for the switch, see c8ctl#530. Release
+  downloads are served from `github.com`, which those environments
+  generally do reach.
+- One request per minor line replaces ~650 per-template requests, so a
+  cold sync is a few MB and a few seconds instead of ~14 MB and ~30 s.
 - npm package was rejected: confirmed lag against the GH source and
   some entries are missing `version`/`engines` (pre-versioned legacy
   templates).
-- GH directly was rejected because the marketplace gives us the same
-  content with one less reason to drift from Modeler's behavior.
 
-The endpoint is overridable via `C8CTL_OOTB_ELEMENT_TEMPLATES_URL`
-(useful for testing).
+### Which releases
+
+`sync` lists the releases (`api.github.com/repos/camunda/connectors/
+releases?per_page=100`, overridable via
+`C8CTL_CONNECTORS_RELEASES_URL`) and keeps **the newest release of each
+minor line** — 8.8.x, 8.9.x, 8.10.x, ...:
+
+- Bundles are cumulative within a line, so the newest patch of 8.8
+  already contains everything 8.8.17 shipped. Across lines they differ,
+  which is why one release per line is kept rather than just the newest
+  release overall.
+- Alphas count (`8.10.0-alpha3` is the only source for a line that has
+  no stable release yet); release candidates do not — they are
+  superseded within days. Note that semver ranks `8.10.0-alpha5-rc3`
+  *above* `8.10.0-alpha5`, so RCs are filtered explicitly rather than
+  by ordering.
+- Draft releases and releases without a bundle asset (a release that is
+  still being built) are skipped, so an in-flight release falls back to
+  the previous one on that line.
+- Only the **4 newest minor lines** are kept (`MAX_MINOR_LINES` in
+  `releases.ts`), roughly Camunda's supported-version window. This keeps
+  the selection deterministic: the newest release of each selected line
+  is always within the first page of the listing, whereas an EOL line's
+  newest release drifts down the listing until it falls off the page and
+  would silently vanish from the selection.
+
+Bundles contain a superset of the marketplace index: the `-hybrid`
+variants and a few templates the marketplace does not list are cached
+too, and templates without a numeric `version` (pre-versioned legacy
+entries that version resolution cannot rank) are skipped.
 
 ## Cache strategy
 
@@ -56,12 +88,17 @@ We mirror Desktop Modeler's approach
 - Cache lives in `<userDataDir>/element-templates/`:
   - `templates.json` — flat array of all template objects (matches
     Modeler's `.camunda-connector-templates.json` shape).
-  - `fetched-at` — epoch ms of last index sync.
-- Each cached template gets `metadata.upstreamRef = <ref-url>` injected.
-  Since each `ref` is a commit-pinned `raw.githubusercontent.com` URL,
-  "upstreamRef unchanged" ⇒ "content unchanged" ⇒ no re-fetch needed.
-  Subsequent syncs only fetch refs that aren't already in the cache.
-- Per-template fetch failures are logged + counted, never abort the run.
+  - `fetched-at` — epoch ms of last sync.
+- Each cached template gets
+  `metadata.upstreamRef = <assetUrl>#<file-in-bundle>` injected. Release
+  assets are tag-pinned and therefore immutable, so "asset URL already
+  in the cache" ⇒ "bundle already ingested" ⇒ no re-download.
+- `id@version` is deduplicated across bundles, newest release wins.
+- Per-release fetch failures are logged + counted, and never abort the
+  run — unless *every* bundle failed and nothing was reusable from the
+  cache, in which case `sync` errors out rather than writing an empty
+  cache. A partial sync also leaves `fetched-at` untouched, so the
+  staleness nudge keeps asking for a full refresh.
 
 ### Lifecycle
 
@@ -79,11 +116,16 @@ We mirror Desktop Modeler's approach
   arg in `parseTemplateRef` before any cache call.
 - **Stale cache** (>7 days since `fetched-at`): warn-only, suggesting
   `c8ctl element-template sync`. We don't auto-refresh — surprise
-  network activity inside `apply` is undesirable and the index is
-  small enough that manual sync is cheap.
-- **`sync`** always re-fetches the index but skips already-cached
-  refs. **`sync --prune`** drops cached entries no longer in the
-  fresh index (opt-in: a user may keep a legacy version intentionally).
+  network activity inside `apply` is undesirable and a manual sync is
+  cheap.
+- **`sync`** always re-fetches the release listing but only downloads
+  bundles that aren't cached yet. **`sync --prune`** drops cached
+  entries that no longer belong to a selected release (opt-in: a user
+  may keep a legacy line intentionally). Pruning is skipped when any
+  bundle failed to download: a bundle URL changes with every patch, so
+  the previous patch's cached templates are always "stale", and dropping
+  them while their replacement failed would delete a whole minor line
+  over one transient HTTP error.
 - **Atomicity**: `sync` writes `templates.json` and `fetched-at`
   via a sibling temp file + `renameSync`, so a kill mid-sync leaves
   the previous cache intact. `apply --in-place` uses the same recipe
@@ -100,9 +142,9 @@ We mirror Desktop Modeler's approach
 
 Earlier draft considered fetching only the requested `(id, version)`
 on demand. Rejected because **search needs the template names**, which
-live inside the template files (the index has only `id`/`version`/`ref`).
-Eager bulk fetch makes search instant; the ~14 MB / ~30 s first-run
-cost is acceptable, and incremental syncs are cheap.
+means every template has to be read anyway. Bundles make this moot: the
+whole line arrives in one request, so eager bulk fetch is both simpler
+and faster than any lazy scheme.
 
 ## Version resolution
 

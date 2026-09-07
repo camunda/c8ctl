@@ -91,8 +91,8 @@ export async function getSubcommand(args: string[]): Promise<void> {
 	const template = await resolveOotbTemplate(ref);
 
 	// The cache injects `metadata.upstreamRef` (our internal pointer for
-	// incremental sync); strip it so the output matches what you'd get
-	// from the marketplace, not c8ctl's cache shape.
+	// incremental sync); strip it so the output matches the template as
+	// published upstream, not c8ctl's cache shape.
 	let cleaned = stripInternalMetadata(template);
 	if (noIcon) {
 		cleaned = stripIcon(cleaned);

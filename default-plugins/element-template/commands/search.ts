@@ -6,12 +6,12 @@
 
 import { styleText } from "node:util";
 import type {} from "../../../src/core/runtime.ts";
-import { parseEngineVersionFlag } from "../helpers.ts";
 import {
 	nudgeIfStale,
 	requireCachePresent,
 	searchTemplates,
-} from "../marketplace.ts";
+} from "../cache.ts";
+import { parseEngineVersionFlag } from "../helpers.ts";
 import { buildTemplateSummary, formatTemplateHeaderLines } from "./info.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
