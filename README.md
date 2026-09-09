@@ -203,7 +203,7 @@ For the complete reference of every command, flag, resource, and alias, see:
 
 ## License
 
-Apache 2.0 - see LICENSE.md
+MIT - see [LICENSE](LICENSE)
 
 ## Contributing
 
