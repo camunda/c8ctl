@@ -558,10 +558,12 @@ async function extractArchive(archivePath, targetDir) {
 
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { stdio: 'inherit' });
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       if (code === 0) {
         logger.info('Extraction complete.');
         resolve();
+      } else if (signal) {
+        reject(new Error(`Extraction terminated by signal ${signal}`));
       } else {
         reject(new Error(`Extraction failed with code ${code}`));
       }
