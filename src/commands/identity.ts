@@ -2,7 +2,13 @@
  * Identity shared helpers and assignment dispatcher
  */
 
-import { TenantId, Username } from "@camunda8/orchestration-cluster-api";
+import {
+	GroupId,
+	MappingRuleId,
+	RoleId,
+	TenantId,
+	Username,
+} from "@camunda8/orchestration-cluster-api";
 import {
 	createClient,
 	getLogger,
@@ -171,14 +177,14 @@ async function handleAssign(
 		case "role": {
 			if (values["to-user"]) {
 				await client.assignRoleToUser({
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 					username: Username.assumeExists(String(values["to-user"])),
 				});
 				logger.success(`Role '${id}' assigned to user '${values["to-user"]}'`);
 			} else if (values["to-group"]) {
 				await client.assignRoleToGroup({
-					roleId: id,
-					groupId: String(values["to-group"]),
+					roleId: RoleId.assumeExists(id),
+					groupId: GroupId.assumeExists(String(values["to-group"])),
 				});
 				logger.success(
 					`Role '${id}' assigned to group '${values["to-group"]}'`,
@@ -186,15 +192,17 @@ async function handleAssign(
 			} else if (values["to-tenant"]) {
 				await client.assignRoleToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 				});
 				logger.success(
 					`Role '${id}' assigned to tenant '${values["to-tenant"]}'`,
 				);
 			} else if (values["to-mapping-rule"]) {
 				await client.assignRoleToMappingRule({
-					roleId: id,
-					mappingRuleId: String(values["to-mapping-rule"]),
+					roleId: RoleId.assumeExists(id),
+					mappingRuleId: MappingRuleId.assumeExists(
+						String(values["to-mapping-rule"]),
+					),
 				});
 				logger.success(
 					`Role '${id}' assigned to mapping rule '${values["to-mapping-rule"]}'`,
@@ -209,7 +217,7 @@ async function handleAssign(
 		case "user": {
 			if (values["to-group"]) {
 				await client.assignUserToGroup({
-					groupId: String(values["to-group"]),
+					groupId: GroupId.assumeExists(String(values["to-group"])),
 					username: Username.assumeExists(id),
 				});
 				logger.success(
@@ -232,7 +240,7 @@ async function handleAssign(
 			if (values["to-tenant"]) {
 				await client.assignGroupToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					groupId: id,
+					groupId: GroupId.assumeExists(id),
 				});
 				logger.success(
 					`Group '${id}' assigned to tenant '${values["to-tenant"]}'`,
@@ -245,8 +253,8 @@ async function handleAssign(
 		case "mapping-rule": {
 			if (values["to-group"]) {
 				await client.assignMappingRuleToGroup({
-					groupId: String(values["to-group"]),
-					mappingRuleId: id,
+					groupId: GroupId.assumeExists(String(values["to-group"])),
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' assigned to group '${values["to-group"]}'`,
@@ -254,7 +262,7 @@ async function handleAssign(
 			} else if (values["to-tenant"]) {
 				await client.assignMappingRuleToTenant({
 					tenantId: TenantId.assumeExists(String(values["to-tenant"])),
-					mappingRuleId: id,
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' assigned to tenant '${values["to-tenant"]}'`,
@@ -329,7 +337,7 @@ async function handleUnassign(
 		case "role": {
 			if (values["from-user"]) {
 				await client.unassignRoleFromUser({
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 					username: Username.assumeExists(String(values["from-user"])),
 				});
 				logger.success(
@@ -337,8 +345,8 @@ async function handleUnassign(
 				);
 			} else if (values["from-group"]) {
 				await client.unassignRoleFromGroup({
-					roleId: id,
-					groupId: String(values["from-group"]),
+					roleId: RoleId.assumeExists(id),
+					groupId: GroupId.assumeExists(String(values["from-group"])),
 				});
 				logger.success(
 					`Role '${id}' unassigned from group '${values["from-group"]}'`,
@@ -346,15 +354,17 @@ async function handleUnassign(
 			} else if (values["from-tenant"]) {
 				await client.unassignRoleFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					roleId: id,
+					roleId: RoleId.assumeExists(id),
 				});
 				logger.success(
 					`Role '${id}' unassigned from tenant '${values["from-tenant"]}'`,
 				);
 			} else if (values["from-mapping-rule"]) {
 				await client.unassignRoleFromMappingRule({
-					roleId: id,
-					mappingRuleId: String(values["from-mapping-rule"]),
+					roleId: RoleId.assumeExists(id),
+					mappingRuleId: MappingRuleId.assumeExists(
+						String(values["from-mapping-rule"]),
+					),
 				});
 				logger.success(
 					`Role '${id}' unassigned from mapping rule '${values["from-mapping-rule"]}'`,
@@ -369,7 +379,7 @@ async function handleUnassign(
 		case "user": {
 			if (values["from-group"]) {
 				await client.unassignUserFromGroup({
-					groupId: String(values["from-group"]),
+					groupId: GroupId.assumeExists(String(values["from-group"])),
 					username: Username.assumeExists(id),
 				});
 				logger.success(
@@ -392,7 +402,7 @@ async function handleUnassign(
 			if (values["from-tenant"]) {
 				await client.unassignGroupFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					groupId: id,
+					groupId: GroupId.assumeExists(id),
 				});
 				logger.success(
 					`Group '${id}' unassigned from tenant '${values["from-tenant"]}'`,
@@ -405,8 +415,8 @@ async function handleUnassign(
 		case "mapping-rule": {
 			if (values["from-group"]) {
 				await client.unassignMappingRuleFromGroup({
-					groupId: String(values["from-group"]),
-					mappingRuleId: id,
+					groupId: GroupId.assumeExists(String(values["from-group"])),
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' unassigned from group '${values["from-group"]}'`,
@@ -414,7 +424,7 @@ async function handleUnassign(
 			} else if (values["from-tenant"]) {
 				await client.unassignMappingRuleFromTenant({
 					tenantId: TenantId.assumeExists(String(values["from-tenant"])),
-					mappingRuleId: id,
+					mappingRuleId: MappingRuleId.assumeExists(id),
 				});
 				logger.success(
 					`Mapping rule '${id}' unassigned from tenant '${values["from-tenant"]}'`,

@@ -10,14 +10,18 @@ import {
 	AuthorizationKey,
 	BusinessId,
 	ElementInstanceKey,
+	GroupId,
 	IncidentKey,
 	JobKey,
+	MappingRuleId,
 	ProcessDefinitionId,
 	ProcessDefinitionKey,
 	ProcessInstanceKey,
+	RoleId,
 	TenantId,
 	Username,
 	UserTaskKey,
+	WaitStateTypeEnum,
 } from "@camunda8/orchestration-cluster-api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -341,12 +345,20 @@ const CREATE_USER_FLAGS = {
 } as const satisfies Record<string, FlagDef>;
 
 const CREATE_ROLE_FLAGS = {
-	roleId: { type: "string", description: "Role ID" },
+	roleId: {
+		type: "string",
+		description: "Role ID",
+		validate: RoleId.assumeExists,
+	},
 	name: { type: "string", description: "Display name" },
 } as const satisfies Record<string, FlagDef>;
 
 const CREATE_GROUP_FLAGS = {
-	groupId: { type: "string", description: "Group ID" },
+	groupId: {
+		type: "string",
+		description: "Group ID",
+		validate: GroupId.assumeExists,
+	},
 	name: { type: "string", description: "Display name" },
 } as const satisfies Record<string, FlagDef>;
 
@@ -360,7 +372,11 @@ const CREATE_TENANT_FLAGS = {
 } as const satisfies Record<string, FlagDef>;
 
 const CREATE_MAPPING_RULE_FLAGS = {
-	mappingRuleId: { type: "string", description: "Mapping rule ID" },
+	mappingRuleId: {
+		type: "string",
+		description: "Mapping rule ID",
+		validate: MappingRuleId.assumeExists,
+	},
 	name: { type: "string", description: "Display name" },
 	claimName: { type: "string", description: "Claim name" },
 	claimValue: { type: "string", description: "Claim value" },
@@ -565,18 +581,6 @@ const WAIT_STATE_ELEMENT_TYPE_ENUM = {
 	UNSPECIFIED: "UNSPECIFIED",
 	USER_TASK: "USER_TASK",
 } as const;
-
-// The SDK does not export a WaitStateType enum — all six values are declared
-// inline here. Tracked in .github/SDK_GAPS.md.
-const WAIT_STATE_TYPE_ENUM = {
-	JOB: "JOB",
-	MESSAGE: "MESSAGE",
-	TIMER: "TIMER",
-	CONDITION: "CONDITION",
-	USER_TASK: "USER_TASK",
-	SIGNAL: "SIGNAL",
-} as const;
-
 const WAIT_STATE_SEARCH_FLAGS = {
 	processInstanceKey: {
 		type: "string",
@@ -610,7 +614,7 @@ const WAIT_STATE_SEARCH_FLAGS = {
 		type: "string",
 		description:
 			"Filter by wait state type (JOB, MESSAGE, TIMER, CONDITION, USER_TASK, SIGNAL)",
-		enum: WAIT_STATE_TYPE_ENUM,
+		enum: WaitStateTypeEnum,
 	},
 } as const satisfies Record<string, FlagDef>;
 
@@ -741,11 +745,11 @@ const GET_USER_POSITIONALS = [
 ] as const satisfies readonly PositionalDef[];
 
 const GET_ROLE_POSITIONALS = [
-	{ name: "roleId", required: true },
+	{ name: "roleId", required: true, validate: RoleId.assumeExists },
 ] as const satisfies readonly PositionalDef[];
 
 const GET_GROUP_POSITIONALS = [
-	{ name: "groupId", required: true },
+	{ name: "groupId", required: true, validate: GroupId.assumeExists },
 ] as const satisfies readonly PositionalDef[];
 
 const GET_TENANT_POSITIONALS = [
@@ -765,7 +769,11 @@ const GET_AUTHORIZATION_POSITIONALS = [
 ] as const satisfies readonly PositionalDef[];
 
 const GET_MAPPING_RULE_POSITIONALS = [
-	{ name: "mappingRuleId", required: true },
+	{
+		name: "mappingRuleId",
+		required: true,
+		validate: MappingRuleId.assumeExists,
+	},
 ] as const satisfies readonly PositionalDef[];
 
 const GET_FORM_POSITIONALS = [

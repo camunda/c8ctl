@@ -7,8 +7,6 @@ import {
 	fetchAllPages,
 	isRecord,
 	type Logger,
-	rawPostWithHeaders,
-	resolveAuthHeaders,
 	sortTableData,
 } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
@@ -942,8 +940,8 @@ export const searchVariablesCommand = defineCommand(
  * Search wait states (element instances currently waiting for an external event).
  * API: POST /v2/element-instances/wait-states/search
  *
- * The SDK (v9.1.0) does not yet expose this endpoint — tracked in .github/SDK_GAPS.md.
- * We use rawPostWithHeaders() to make authenticated requests via resolveAuthHeaders().
+ * Uses the SDK client method `searchElementInstanceWaitStates`, exposed since
+ * `@camunda8/orchestration-cluster-api` v10.
  */
 export const searchWaitStatesCommand = defineCommand(
 	"search",
@@ -1014,42 +1012,8 @@ export const searchWaitStatesCommand = defineCommand(
 
 		logSearchCriteria(logger, "Wait States", criteria);
 
-		// Resolve auth once before pagination to avoid repeated token fetches
-		const authHeaders = await resolveAuthHeaders(profile);
-
 		const allItems = await fetchAllPages<Record<string, unknown>>(
-			async (f, _opts) => {
-				const result = await rawPostWithHeaders(
-					client,
-					"/element-instances/wait-states/search",
-					f,
-					authHeaders,
-					profile,
-				);
-				if (!isRecord(result)) {
-					throw new Error("Unexpected response shape from wait states search");
-				}
-				const items: Record<string, unknown>[] = Array.isArray(result.items)
-					? result.items.filter(isRecord)
-					: [];
-				const page = isRecord(result.page) ? result.page : {};
-				return {
-					items,
-					page: {
-						totalItems:
-							typeof page.totalItems === "number"
-								? page.totalItems
-								: Number.isFinite(Number(page.totalItems))
-									? Number(page.totalItems)
-									: Number.POSITIVE_INFINITY,
-						endCursor:
-							typeof page.endCursor === "string" ? page.endCursor : null,
-						startCursor:
-							typeof page.startCursor === "string" ? page.startCursor : null,
-						hasMoreTotalItems: page.hasMoreTotalItems === true,
-					},
-				};
-			},
+			(f, opts) => client.searchElementInstanceWaitStates(f, opts),
 			filter,
 			DEFAULT_PAGE_SIZE,
 			ctx.limit,
