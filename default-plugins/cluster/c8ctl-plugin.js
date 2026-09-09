@@ -550,45 +550,56 @@ async function extractArchive(archivePath, targetDir) {
 
   mkdirSync(targetDir, { recursive: true });
 
+  const { command, args } = resolveExtractCommand({
+    archivePath,
+    targetDir,
+    platform: osPlatform(),
+  });
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, { stdio: 'inherit' });
+    proc.on('exit', (code) => {
+      if (code === 0) {
+        logger.info('Extraction complete.');
+        resolve();
+      } else {
+        reject(new Error(`Extraction failed with code ${code}`));
+      }
+    });
+    proc.on('error', (err) => {
+      reject(
+        new Error(
+          `Failed to extract archive with "${command}": ${err.message}. ` +
+            `Make sure "${command}" is available on your PATH.`,
+        ),
+      );
+    });
+  });
+}
+
+/**
+ * Decide which extractor to spawn for a given archive and platform.
+ *
+ * Windows has no POSIX `unzip`, but ships bsdtar/libarchive as
+ * C:\Windows\System32\tar.exe (Windows 10 1803 / Server 2019+), and libarchive
+ * reads ZIP — so on win32 we extract a `.zip` with `tar -xf`. macOS has `unzip`
+ * preinstalled, and Linux only ever receives a `tar.gz`, so `unzip` is only
+ * ever selected on a platform that has it.
+ *
+ * @param {{ archivePath: string, targetDir: string, platform: string }} opts
+ * @returns {{ command: string, args: string[] }}
+ */
+export function resolveExtractCommand({ archivePath, targetDir, platform }) {
   if (archivePath.endsWith('.zip')) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('unzip', ['-q', archivePath, '-d', targetDir], {
-        stdio: 'inherit',
-      });
-      proc.on('exit', (code) => {
-        if (code === 0) {
-          logger.info('Extraction complete.');
-          resolve();
-        } else {
-          reject(new Error(`Extraction failed with code ${code}`));
-        }
-      });
-      proc.on('error', (err) => {
-        reject(
-          new Error(
-            `Failed to run unzip command: ${err.message}. Make sure unzip is installed.`,
-          ),
-        );
-      });
-    });
-  } else if (archivePath.endsWith('.tar.gz')) {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('tar', ['-xzf', archivePath, '-C', targetDir], {
-        stdio: 'inherit',
-      });
-      proc.on('exit', (code) => {
-        if (code === 0) {
-          logger.info('Extraction complete.');
-          resolve();
-        } else {
-          reject(new Error(`Extraction failed with code ${code}`));
-        }
-      });
-      proc.on('error', reject);
-    });
-  } else {
-    throw new Error(`Unsupported archive format: ${archivePath}`);
+    if (platform === 'win32') {
+      return { command: 'tar', args: ['-xf', archivePath, '-C', targetDir] };
+    }
+    return { command: 'unzip', args: ['-q', archivePath, '-d', targetDir] };
   }
+  if (archivePath.endsWith('.tar.gz')) {
+    return { command: 'tar', args: ['-xzf', archivePath, '-C', targetDir] };
+  }
+  throw new Error(`Unsupported archive format: ${archivePath}`);
 }
 
 export function findC8RunBinaryPath(config) {

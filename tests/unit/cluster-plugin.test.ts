@@ -272,6 +272,63 @@ describe("Cluster Plugin – version validation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// resolveExtractCommand (issue #540 — native Windows extraction)
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – resolveExtractCommand", () => {
+	const archivePath = "/cache/c8run-8.9.13-windows-x86_64.zip";
+	const targetDir = "/cache/c8run-8.9.13";
+
+	test("uses `tar -xf` for a .zip on Windows (no POSIX unzip)", () => {
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath,
+			targetDir,
+			platform: "win32",
+		});
+		assert.strictEqual(command, "tar");
+		assert.deepStrictEqual(args, ["-xf", archivePath, "-C", targetDir]);
+	});
+
+	test("uses `unzip -q` for a .zip on macOS", () => {
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath: "/cache/c8run-8.9.13-macos-aarch64.zip",
+			targetDir,
+			platform: "darwin",
+		});
+		assert.strictEqual(command, "unzip");
+		assert.deepStrictEqual(args, [
+			"-q",
+			"/cache/c8run-8.9.13-macos-aarch64.zip",
+			"-d",
+			targetDir,
+		]);
+	});
+
+	test("uses `tar -xzf` for a .tar.gz on Linux", () => {
+		const tgz = "/cache/c8run-8.9.13-linux-x86_64.tar.gz";
+		const { command, args } = plugin.resolveExtractCommand({
+			archivePath: tgz,
+			targetDir,
+			platform: "linux",
+		});
+		assert.strictEqual(command, "tar");
+		assert.deepStrictEqual(args, ["-xzf", tgz, "-C", targetDir]);
+	});
+
+	test("throws on an unsupported archive format", () => {
+		assert.throws(
+			() =>
+				plugin.resolveExtractCommand({
+					archivePath: "/cache/c8run.rar",
+					targetDir,
+					platform: "win32",
+				}),
+			/Unsupported archive format/,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // parsePluginArgs
 // ---------------------------------------------------------------------------
 
