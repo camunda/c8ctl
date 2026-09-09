@@ -586,7 +586,7 @@ async function extractArchive(archivePath, targetDir) {
  * platform extracts a `.zip` with `unzip -q`: macOS ships `unzip`
  * preinstalled, and in practice Linux callers only ever pass a `.tar.gz`
  * (handled below), never a `.zip`. If a Linux `.zip` were ever passed here it
- * would resolve to `unzip`, and extract() surfaces a clear "make sure unzip is
+ * would resolve to `unzip`, and extractArchive() surfaces a clear "make sure unzip is
  * on your PATH" error if the binary is missing.
  *
  * @param {{ archivePath: string, targetDir: string, platform: string }} opts
