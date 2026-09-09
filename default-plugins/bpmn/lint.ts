@@ -170,7 +170,7 @@ function detectCamundaCloudVersion(
 	rootElement: BpmnModdleElement,
 ): string | null {
 	const info = extractPlatformInfo(rootElement);
-	if (!info || info.executionPlatform !== "Camunda Cloud" || !info.version) {
+	if (info?.executionPlatform !== "Camunda Cloud" || !info.version) {
 		return null;
 	}
 	const match = info.version.match(/^(\d+\.\d+)/);
