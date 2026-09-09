@@ -99,10 +99,15 @@ jobs:
       contents: read
     strategy:
       fail-fast: false
+      # Halved integration matrix (2 of the 4 legs) for PRs and manual dispatch.
+      # This is a diagonal: every Node version and every Camunda version is still
+      # exercised exactly once, at roughly half the wall-clock/runner cost. The
+      # full 4-leg cartesian matrix runs only for GA (stable) releases, on the
+      # `release` branch — see release.yml.
       matrix:
-        node: [22, 24]
-        camunda: ['8.8', '8.9']
-        os: [ubuntu-latest]
+        include:
+          - { node: 22, camunda: '8.9', os: ubuntu-latest }
+          - { node: 24, camunda: '8.8', os: ubuntu-latest }
 
     steps:
       - name: Checkout code

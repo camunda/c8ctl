@@ -10,16 +10,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  set-matrix:
+    name: Compute integration test matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: Select matrix (full for GA release, halved otherwise)
+        id: set
+        shell: bash
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/release" ]; then
+            # GA (stable / `latest`) release — run the full 4-leg matrix.
+            echo 'matrix={"include":[{"node":22,"camunda":"8.8"},{"node":22,"camunda":"8.9"},{"node":24,"camunda":"8.8"},{"node":24,"camunda":"8.9"}]}' >> "$GITHUB_OUTPUT"
+          else
+            # Alpha prereleases (`main`) and manual dispatch — halved diagonal
+            # matrix: every Node and Camunda version exercised once.
+            echo 'matrix={"include":[{"node":22,"camunda":"8.9"},{"node":24,"camunda":"8.8"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Test (Node ${{ matrix.node }} - Camunda ${{ matrix.camunda }})
+    needs: set-matrix
     runs-on: ubuntu-latest
     permissions:
       contents: read
     strategy:
       fail-fast: true
-      matrix:
-        node: [22, 24]
-        camunda: ['8.8', '8.9']
+      matrix: ${{ fromJSON(needs.set-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout code
