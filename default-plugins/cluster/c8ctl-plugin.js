@@ -582,9 +582,12 @@ async function extractArchive(archivePath, targetDir) {
  *
  * Windows has no POSIX `unzip`, but ships bsdtar/libarchive as
  * C:\Windows\System32\tar.exe (Windows 10 1803 / Server 2019+), and libarchive
- * reads ZIP — so on win32 we extract a `.zip` with `tar -xf`. macOS has `unzip`
- * preinstalled, and Linux only ever receives a `tar.gz`, so `unzip` is only
- * ever selected on a platform that has it.
+ * reads ZIP — so on win32 we extract a `.zip` with `tar -xf`. Any other
+ * platform extracts a `.zip` with `unzip -q`: macOS ships `unzip`
+ * preinstalled, and in practice Linux callers only ever pass a `.tar.gz`
+ * (handled below), never a `.zip`. If a Linux `.zip` were ever passed here it
+ * would resolve to `unzip`, and extract() surfaces a clear "make sure unzip is
+ * on your PATH" error if the binary is missing.
  *
  * @param {{ archivePath: string, targetDir: string, platform: string }} opts
  * @returns {{ command: string, args: string[] }}
