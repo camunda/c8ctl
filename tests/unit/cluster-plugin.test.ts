@@ -2822,6 +2822,16 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 // ---------------------------------------------------------------------------
 
 describe("Cluster Plugin – sliceSecretsArgv", () => {
+	function permutations<T>(items: readonly T[]): T[][] {
+		if (items.length <= 1) return [Array.from(items)];
+
+		return items.flatMap((item, index) =>
+			permutations([...items.slice(0, index), ...items.slice(index + 1)]).map(
+				(rest) => [item, ...rest],
+			),
+		);
+	}
+
 	test("returns the raw tail after cluster secrets, flags intact", () => {
 		const argv = ["cluster", "secrets", "set", "API_KEY", "--stdin"];
 		const result = plugin.sliceSecretsArgv(argv, [
@@ -2837,6 +2847,25 @@ describe("Cluster Plugin – sliceSecretsArgv", () => {
 		const argv = ["--profile", "myprofile", "cluster", "secrets", "list"];
 		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
 		assert.deepStrictEqual(result, ["list"]);
+	});
+
+	test("preserves every permutation of forwarded secrets flags after the cluster secrets boundary", () => {
+		const forwardedFlags = ["--stdin", "--all", "--yes"] as const;
+
+		for (const flags of permutations(forwardedFlags)) {
+			const result = plugin.parseSecretsArgs(
+				plugin.sliceSecretsArgv(
+					["cluster", "secrets", "opaque-verb", ...flags],
+					["secrets", "opaque-verb"],
+				),
+			);
+
+			assert.deepStrictEqual(
+				result,
+				{ version: null, passthrough: ["opaque-verb", ...flags] },
+				flags.join(" "),
+			);
+		}
 	});
 
 	test("is not fooled by a global flag value that reads 'cluster'", () => {
