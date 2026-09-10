@@ -77,7 +77,7 @@
     "default-plugins/element-template"
   ],
   "dependencies": {
-    "@camunda8/orchestration-cluster-api": "^10.0.0-alpha.43",
+    "@camunda8/orchestration-cluster-api": "^10.0.0-alpha.44",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "semver": "^7.6.3"
   },
