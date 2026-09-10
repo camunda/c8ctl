@@ -16,6 +16,6 @@
   "devDependencies": {
     "bpmn-js-element-templates": "^2.30.0",
     "bpmn-js-headless": "^0.2.0",
-    "zeebe-bpmn-moddle": "^1.11.0"
+    "zeebe-bpmn-moddle": "^2.0.0"
   }
 }
