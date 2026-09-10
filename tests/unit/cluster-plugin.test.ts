@@ -2868,6 +2868,33 @@ describe("Cluster Plugin – sliceSecretsArgv", () => {
 		}
 	});
 
+	test("preserves valid secrets switches and args unchanged after the cluster secrets boundary", () => {
+		const validSecretsTails = [
+			["set", "OPENAI_API_KEY"],
+			["set", "OPENAI_API_KEY", "--stdin"],
+			["list"],
+			["list", "--all"],
+			["path"],
+			["delete", "OPENAI_API_KEY", "--yes"],
+			["import", ".env.secrets"],
+		] as const;
+
+		for (const tail of validSecretsTails) {
+			const result = plugin.parseSecretsArgs(
+				plugin.sliceSecretsArgv(
+					["--profile", "prod", "cluster", "--verbose", "secrets", ...tail],
+					["secrets", ...tail.filter((token) => !token.startsWith("--"))],
+				),
+			);
+
+			assert.deepStrictEqual(
+				result,
+				{ version: null, passthrough: Array.from(tail) },
+				tail.join(" "),
+			);
+		}
+	});
+
 	test("is not fooled by a global flag value that reads 'cluster'", () => {
 		const argv = ["--profile", "cluster", "cluster", "secrets", "list"];
 		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
