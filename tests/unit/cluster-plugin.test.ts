@@ -2856,6 +2856,60 @@ describe("Cluster Plugin – sliceSecretsArgv", () => {
 		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
 		assert.deepStrictEqual(result, ["list"]);
 	});
+
+	// The host's own top-level parser recognizes --profile/--verbose (real
+	// global flags) wherever they sit and strips them from positionals, but
+	// it also strips an unrecognized plugin-only flag like --stdin because it
+	// treats any unknown "--foo" as a boolean (#364) — so hostArgs here is
+	// what the host actually delivers: --stdin already gone. If
+	// sliceSecretsArgv fell back to hostArgs instead of correctly walking
+	// raw argv, --stdin would be lost for good.
+
+	test("skips a global string flag placed between cluster and secrets", () => {
+		const argv = [
+			"cluster",
+			"--profile",
+			"prod",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global string flag in --flag=value form between cluster and secrets", () => {
+		const argv = [
+			"cluster",
+			"--profile=prod",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global boolean flag placed between cluster and secrets", () => {
+		const argv = ["cluster", "--verbose", "secrets", "set", "KEY", "--stdin"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global string flag in --flag=value form before cluster", () => {
+		const argv = [
+			"--profile=prod",
+			"cluster",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
 });
 
 describe("Cluster Plugin – parseSecretsArgs", () => {
@@ -2870,6 +2924,18 @@ describe("Cluster Plugin – parseSecretsArgs", () => {
 	test("strips a leading --c8-version and its value", () => {
 		const result = plugin.parseSecretsArgs(["--c8-version", "8.10", "list"]);
 		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("strips a leading --c8-version=<value> form", () => {
+		const result = plugin.parseSecretsArgs(["--c8-version=8.10", "list"]);
+		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("throws when --c8-version=<value> has an empty value", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version=", "list"]),
+			/Missing value for --c8-version/,
+		);
 	});
 
 	test("leaves a non-leading --c8-version untouched", () => {
