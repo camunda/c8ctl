@@ -80,6 +80,19 @@ c8ctl element-template apply \
 c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
   ServiceTask_1 process.bpmn
 
+# Set properties via --set (one per flag; last wins on conflict)
+c8ctl element-template apply io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
+  --set method=POST --set url=https://api.example.com
+
+# Set many properties from a JSON file (batch alternative to --set)
+c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
+  --values-file config.json
+
+# Read the values JSON from stdin (BPMN must be a file when using --values-file -)
+jq -n '{"method":"POST","url":"https://api.example.com"}' \
+  | c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 ServiceTask_1 process.bpmn \
+    --values-file -
+
 # Stream BPMN through stdin, get the modified BPMN on stdout. Works
 # with slow upstream producers (lint, apply chained together, etc.) —
 # stdin is consumed asynchronously and waits for the writer to finish.
@@ -244,6 +257,46 @@ c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
   --set body='={ "orderId": orderId, "amount": 42 }' \
   --set resultExpression='={ "status": response.statusCode }'
 ```
+
+### Batch property input with `--values-file`
+
+For templates with many properties, pass a JSON file mapping binding names
+to values instead of repeating `--set`:
+
+```bash
+c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
+  ServiceTask_1 process.bpmn \
+  --values-file config.json
+```
+
+Where `config.json` is:
+
+```json
+{
+  "authentication.type": "noAuth",
+  "method": "POST",
+  "url": "https://api.example.com/v1/orders",
+  "body": "={ \"orderId\": orderId }",
+  "resultExpression": "={ \"status\": response.statusCode }"
+}
+```
+
+Use `--values-file -` to read the JSON from stdin — useful for piping
+from `jq` or other generators. When using `--values-file -`, the BPMN
+must come from a file (both values and BPMN cannot be piped from stdin):
+
+```bash
+# Generate values dynamically and pipe them in
+jq -n --arg url "$API_URL" '{"method":"POST","url":$url}' \
+  | c8ctl element-template apply -i io.camunda.connectors.HttpJson.v2 \
+    ServiceTask_1 process.bpmn --values-file -
+```
+
+`--set` and `--values-file` can be combined. When both target the same
+property, `--set` wins (it is processed after the file).
+
+Values in the JSON file may be strings, numbers, or booleans. Numbers and
+booleans are coerced to their string representation automatically.
 
 ### How `--set` resolves a name
 
