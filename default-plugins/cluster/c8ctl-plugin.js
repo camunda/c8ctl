@@ -1226,9 +1226,34 @@ export async function stopC8Run(config, debug = false) {
 // it only locates the right c8run binary and forwards the call to it.
 // ---------------------------------------------------------------------------
 
-// Global c8ctl flags that take a value, so their value token is skipped
-// rather than mistaken for the "cluster" verb token below.
-const GLOBAL_STRING_FLAGS_TAKING_VALUE = new Set(['--profile', '--fields', '--version', '-v']);
+// Global c8ctl flags, mirrored from src/framework/command-registry.ts's
+// GLOBAL_FLAGS (a plugin cannot import src/ — see the layering rules in
+// AGENTS.md). Needed to correctly identify the "cluster secrets" token pair
+// in raw argv: c8ctl accepts these flags anywhere on the command line, not
+// just before the verb, so one can legitimately sit between "cluster" and
+// "secrets" (e.g. `c8ctl cluster --profile prod secrets set KEY --stdin`).
+const GLOBAL_BOOLEAN_FLAGS = new Set(['--help', '-h', '--dry-run', '--verbose', '--json', '--yes', '-y']);
+const GLOBAL_STRING_FLAGS = new Set(['--profile', '--fields', '--version', '-v']);
+
+/** True for a recognized global boolean flag token (never consumes a following token). */
+function isGlobalBooleanFlagToken(token) {
+  return GLOBAL_BOOLEAN_FLAGS.has(token);
+}
+
+/**
+ * True for a recognized global string flag token, in either "--flag value"
+ * or "--flag=value" form. The caller still needs to know which form it was
+ * to decide whether to also skip the next token — see `stringFlagTokenWidth`.
+ */
+function isGlobalStringFlagToken(token) {
+  const name = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
+  return GLOBAL_STRING_FLAGS.has(name);
+}
+
+/** How many argv slots a global string flag token occupies: 1 for "--flag=value", 2 for "--flag value". */
+function stringFlagTokenWidth(token) {
+  return token.includes('=') ? 1 : 2;
+}
 
 /**
  * Recover the raw argv tail that follows "cluster secrets", reading
@@ -1239,26 +1264,45 @@ const GLOBAL_STRING_FLAGS_TAKING_VALUE = new Set(['--profile', '--fields', '--ve
  * silently drop flags like --stdin, --all, and --yes before they ever
  * reached this plugin.
  *
- * Walks argv from the start, skipping known global flags (and the value of
- * ones that take one) until it finds "cluster" immediately followed by
- * "secrets", then returns everything after that pair. Falls back to
- * `hostArgs.slice(1)` — the args array a plugin host actually delivers —
- * when no such pair is found, e.g. a direct/programmatic call.
+ * Walks argv from the start, skipping recognized global flags (in both
+ * "--flag value" and "--flag=value" form) wherever they appear — including
+ * between "cluster" and "secrets" — until it finds that pair, then returns
+ * everything after it. Falls back to `hostArgs.slice(1)` — the args array a
+ * plugin host actually delivers — only when no such pair is found at all,
+ * e.g. a direct/programmatic call, or "cluster" is followed by some other
+ * verb.
  */
 export function sliceSecretsArgv(argv, hostArgs) {
   let i = 0;
+  let foundCluster = false;
+
   while (i < argv.length) {
     const token = argv[i];
-    if (token === 'cluster') {
-      if (argv[i + 1] === 'secrets') {
-        return argv.slice(i + 2);
-      }
-      break;
-    }
-    if (GLOBAL_STRING_FLAGS_TAKING_VALUE.has(token)) {
-      i += 2;
+
+    if (!foundCluster && token === 'cluster') {
+      foundCluster = true;
+      i += 1;
       continue;
     }
+
+    if (foundCluster && token === 'secrets') {
+      return argv.slice(i + 1);
+    }
+
+    if (isGlobalBooleanFlagToken(token)) {
+      i += 1;
+      continue;
+    }
+    if (isGlobalStringFlagToken(token)) {
+      i += stringFlagTokenWidth(token);
+      continue;
+    }
+
+    // After "cluster", anything that isn't a recognized global flag and
+    // isn't "secrets" means this isn't the invocation we're looking for
+    // (e.g. "cluster start") — give up and fall back.
+    if (foundCluster) break;
+
     i += 1;
   }
 
@@ -1269,25 +1313,33 @@ export function sliceSecretsArgv(argv, hostArgs) {
  * Split a `cluster secrets` argv tail into an optional pinned c8run version
  * and the passthrough arguments that go to `c8run secrets` unchanged.
  *
- * Only strips --c8-version when it is the very first token, so any later
- * occurrence reaches c8run untouched. There is deliberately no verb
- * allowlist here — c8ctl does not validate or enumerate c8run's own verbs,
- * so an older, newer, or unreleased c8run's verb set (including one c8ctl
- * has never heard of) is still forwarded and its own error surfaces as-is.
+ * Only strips --c8-version (in either "--c8-version value" or
+ * "--c8-version=value" form, matching how the rest of c8ctl accepts string
+ * flags) when it is the very first token, so any later occurrence reaches
+ * c8run untouched. There is deliberately no verb allowlist here — c8ctl
+ * does not validate or enumerate c8run's own verbs, so an older, newer, or
+ * unreleased c8run's verb set (including one c8ctl has never heard of) is
+ * still forwarded and its own error surfaces as-is.
  */
 export function parseSecretsArgs(tail) {
   let version = null;
   let passthrough = tail;
 
-  if (passthrough[0] === '--c8-version') {
-    const value = passthrough[1];
-    if (!value || value.startsWith('-')) {
+  const first = passthrough[0];
+  const isC8VersionFlag = first === '--c8-version' || (typeof first === 'string' && first.startsWith('--c8-version='));
+  if (isC8VersionFlag) {
+    if (first.startsWith('--c8-version=')) {
+      version = first.slice('--c8-version='.length);
+      passthrough = passthrough.slice(1);
+    } else {
+      version = passthrough[1];
+      passthrough = passthrough.slice(2);
+    }
+    if (!version || version.startsWith('-')) {
       throw new Error(
         'Missing value for --c8-version. Example: c8ctl cluster secrets --c8-version 8.10 list',
       );
     }
-    version = value;
-    passthrough = passthrough.slice(2);
   }
 
   if (passthrough.length === 0) {
