@@ -19,7 +19,7 @@ jobs:
       fail-fast: true
       matrix:
         node: [22, 24]
-        camunda: ['8.8', '8.9']
+        camunda: ['8.8', '8.9', '8.10']
 
     steps:
       - name: Checkout code
