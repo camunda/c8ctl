@@ -20,7 +20,7 @@ import {
 } from 'node:fs';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -321,6 +321,7 @@ export const metadata = {
         { name: 'log', description: 'Stream cluster logs' },
         { name: 'logs', description: 'Stream cluster logs' },
         { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
+        { name: 'secrets', description: 'Manage local development secrets (passed through to c8run)' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -335,6 +336,10 @@ export const metadata = {
         { command: 'c8ctl cluster delete 8.8', description: 'Remove a locally cached version' },
         { command: 'c8ctl cluster purge 8.8', description: 'Delete runtime data for a version (binary stays intact)' },
         { command: 'c8ctl cluster stop --purge', description: 'Stop the running cluster and delete its runtime data' },
+        { command: 'c8ctl cluster secrets set OPENAI_API_KEY', description: 'Store a secret (prompts, no-echo)' },
+        { command: 'c8ctl cluster secrets list', description: 'List secret names (values are never shown)' },
+        { command: 'c8ctl cluster secrets import .env.secrets', description: 'Import secrets from a dotenv file' },
+        { command: 'c8ctl cluster secrets delete OPENAI_API_KEY --yes', description: 'Delete a secret without prompting' },
       ],
     },
   },
@@ -1214,6 +1219,299 @@ export async function stopC8Run(config, debug = false) {
 }
 
 // ---------------------------------------------------------------------------
+// Secrets passthrough (#314)
+//
+// c8run itself owns secret storage, validation, and locking (`c8run secrets
+// set|list|path|delete|import`). c8ctl adds no store and sees no values —
+// it only locates the right c8run binary and forwards the call to it.
+// ---------------------------------------------------------------------------
+
+// Global c8ctl flags, mirrored from src/framework/command-registry.ts's
+// GLOBAL_FLAGS (a plugin cannot import src/ — see the layering rules in
+// AGENTS.md). Needed to correctly identify the "cluster secrets" token pair
+// in raw argv: c8ctl accepts these flags anywhere on the command line, not
+// just before the verb, so one can legitimately sit between "cluster" and
+// "secrets" (e.g. `c8ctl cluster --profile prod secrets set KEY --stdin`).
+const GLOBAL_BOOLEAN_FLAGS = new Set(['--help', '-h', '--dry-run', '--verbose', '--json', '--yes', '-y']);
+const GLOBAL_STRING_FLAGS = new Set(['--profile', '--fields', '--version', '-v']);
+
+/** True for a recognized global boolean flag token (never consumes a following token). */
+function isGlobalBooleanFlagToken(token) {
+  return GLOBAL_BOOLEAN_FLAGS.has(token);
+}
+
+/**
+ * True for a recognized global string flag token, in either "--flag value"
+ * or "--flag=value" form. The caller still needs to know which form it was
+ * to decide whether to also skip the next token — see `stringFlagTokenWidth`.
+ */
+function isGlobalStringFlagToken(token) {
+  const name = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
+  return GLOBAL_STRING_FLAGS.has(name);
+}
+
+/** How many argv slots a global string flag token occupies: 1 for "--flag=value", 2 for "--flag value". */
+function stringFlagTokenWidth(token) {
+  return token.includes('=') ? 1 : 2;
+}
+
+/**
+ * Recover the raw argv tail that follows "cluster secrets", reading
+ * `argv` (normally `process.argv.slice(2)`) directly instead of the array
+ * the c8ctl host passes to a plugin command. The host's top-level parser
+ * treats an unrecognized flag as a boolean and strips it from the
+ * positionals a plugin receives (see #364 in src/index.ts), which would
+ * silently drop flags like --stdin, --all, and --yes before they ever
+ * reached this plugin.
+ *
+ * Walks argv from the start, skipping recognized global flags (in both
+ * "--flag value" and "--flag=value" form) wherever they appear — including
+ * between "cluster" and "secrets" — until it finds that pair, then returns
+ * everything after it. Falls back to `hostArgs.slice(1)` — the args array a
+ * plugin host actually delivers — only when no such pair is found at all,
+ * e.g. a direct/programmatic call, or "cluster" is followed by some other
+ * verb.
+ */
+export function sliceSecretsArgv(argv, hostArgs) {
+  let i = 0;
+  let foundCluster = false;
+
+  while (i < argv.length) {
+    const token = argv[i];
+
+    if (!foundCluster && token === 'cluster') {
+      foundCluster = true;
+      i += 1;
+      continue;
+    }
+
+    if (foundCluster && token === 'secrets') {
+      return argv.slice(i + 1);
+    }
+
+    if (isGlobalBooleanFlagToken(token)) {
+      i += 1;
+      continue;
+    }
+    if (isGlobalStringFlagToken(token)) {
+      i += stringFlagTokenWidth(token);
+      continue;
+    }
+
+    // After "cluster", anything that isn't a recognized global flag and
+    // isn't "secrets" means this isn't the invocation we're looking for
+    // (e.g. "cluster start") — give up and fall back.
+    if (foundCluster) break;
+
+    i += 1;
+  }
+
+  return hostArgs.slice(1);
+}
+
+/**
+ * Split a `cluster secrets` argv tail into an optional pinned c8run version
+ * and the passthrough arguments that go to `c8run secrets` unchanged.
+ *
+ * Only strips --c8-version (in either "--c8-version value" or
+ * "--c8-version=value" form, matching how the rest of c8ctl accepts string
+ * flags) when it is the very first token, so any later occurrence reaches
+ * c8run untouched. There is deliberately no verb allowlist here — c8ctl
+ * does not validate or enumerate c8run's own verbs, so an older, newer, or
+ * unreleased c8run's verb set (including one c8ctl has never heard of) is
+ * still forwarded and its own error surfaces as-is.
+ */
+export function parseSecretsArgs(tail) {
+  let version = null;
+  let passthrough = tail;
+
+  const first = passthrough[0];
+  const isC8VersionFlag = first === '--c8-version' || (typeof first === 'string' && first.startsWith('--c8-version='));
+  if (isC8VersionFlag) {
+    if (first.startsWith('--c8-version=')) {
+      version = first.slice('--c8-version='.length);
+      passthrough = passthrough.slice(1);
+    } else {
+      version = passthrough[1];
+      passthrough = passthrough.slice(2);
+    }
+    if (!version || version.startsWith('-')) {
+      throw new Error(
+        'Missing value for --c8-version. Example: c8ctl cluster secrets --c8-version 8.10 list',
+      );
+    }
+  }
+
+  if (passthrough.length === 0) {
+    throw new Error(
+      'usage: c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>',
+    );
+  }
+
+  return { version, passthrough };
+}
+
+/**
+ * Resolve paths in a secrets passthrough call against the caller's cwd, not
+ * c8run's. c8run always runs with its cwd set to its own binary directory
+ * (see startC8Run below), so a relative `import <file>` or
+ * C8RUN_SECRETS_DIR would otherwise resolve against the wrong directory and
+ * silently miss the file the user meant.
+ *
+ * Only touches an `import` positional and C8RUN_SECRETS_DIR; every other
+ * verb and flag passes through untouched. "-" (stdin) and already-absolute
+ * paths are left alone. Never mutates the passthrough array or env object
+ * it receives.
+ */
+export function resolveSecretsPaths(passthrough, { cwd = process.cwd(), env = process.env } = {}) {
+  let resolvedPassthrough = passthrough;
+  if (
+    passthrough[0] === 'import' &&
+    passthrough[1] &&
+    passthrough[1] !== '-' &&
+    !isAbsolute(passthrough[1])
+  ) {
+    resolvedPassthrough = [...passthrough];
+    resolvedPassthrough[1] = resolve(cwd, passthrough[1]);
+  }
+
+  let resolvedEnv = env;
+  const secretsDir = env.C8RUN_SECRETS_DIR;
+  if (secretsDir && !isAbsolute(secretsDir)) {
+    resolvedEnv = { ...env, C8RUN_SECRETS_DIR: resolve(cwd, secretsDir) };
+  }
+
+  return { passthrough: resolvedPassthrough, env: resolvedEnv };
+}
+
+/**
+ * True when a cluster is currently running, returning its version. Requires
+ * both marker files plus a live pidfile — a stale marker with no live
+ * process must not misdirect a secrets call at a version that is not
+ * actually running.
+ */
+function runningMarkerVersion(cacheDir) {
+  const markerFile = join(cacheDir, ACTIVE_MARKER_FILE);
+  const versionFile = join(cacheDir, VERSION_MARKER_FILE);
+  if (!existsSync(markerFile) || !existsSync(versionFile)) return null;
+  if (!hasRunningClusterPidfiles(cacheDir)) return null;
+  const version = readFileSync(versionFile, 'utf-8').trim();
+  return version || null;
+}
+
+/**
+ * Pick which installed c8run binary should handle a `secrets` passthrough
+ * call. Order: an explicit --c8-version always wins; otherwise prefer the
+ * version currently running (its store is the one actually in effect),
+ * otherwise fall back to the highest locally installed version.
+ *
+ * Never triggers a download — fetching a multi-hundred-MB c8run archive to
+ * run `secrets list` would be a surprising side effect. Returns null when
+ * nothing is installed so the caller can point the user at `cluster install`.
+ */
+export async function selectSecretsVersion(cacheDir, { explicit } = {}) {
+  if (explicit) {
+    validateVersionSpec(explicit);
+    return resolveVersion(explicit, { preferLocal: true, cacheDir });
+  }
+
+  const running = runningMarkerVersion(cacheDir);
+  if (running) return running;
+
+  const installed = getInstalledVersionsList(cacheDir)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return installed.length > 0 ? installed[installed.length - 1] : null;
+}
+
+/**
+ * Translate c8run's "unsupported operation" failure into an actionable hint
+ * naming the resolved version, instead of leaving the user to guess why a
+ * documented subcommand didn't work. Any other failure — a validation
+ * error, a permission error, and so on — is c8run's own message, already
+ * streamed to stderr as it was produced; this returns null so the caller
+ * does not print anything extra.
+ */
+export function mapSecretsFailure(exitCode, stderrTail, version) {
+  if (exitCode === 0) return null;
+  if (!/unsupported operation:\s*secrets/i.test(stderrTail)) return null;
+
+  return (
+    `c8run ${version} does not support "secrets" yet.\n` +
+    `Install a c8run build that includes it, e.g.: c8ctl cluster install ${version}\n` +
+    'Until then, pass secrets as environment variables when starting instead:\n' +
+    '  SECRET_MY_KEY=value c8ctl cluster start\n'
+  );
+}
+
+/**
+ * Forward a `cluster secrets` call to the resolved c8run binary's own
+ * `secrets` subcommand, unchanged. stdin/stdout/stderr are inherited so the
+ * no-echo prompt, --stdin, and `import -` all behave exactly as they would
+ * calling c8run directly — c8ctl adds no validation and never sees a value.
+ *
+ * `spawnFn`, `cwd`, and `env` are injectable for testing; production calls
+ * rely on their defaults (the real `spawn`, the current process's cwd and
+ * environment).
+ */
+export async function runClusterSecrets(
+  cacheDir,
+  tail,
+  { explicitVersion, spawnFn = spawn, cwd = process.cwd(), env = process.env } = {},
+) {
+  const logger = getLogger();
+
+  const version = await selectSecretsVersion(cacheDir, { explicit: explicitVersion });
+  if (!version) {
+    logger.error(
+      'No c8run installed locally. Install one first: c8ctl cluster install alpha',
+    );
+    process.exit(1);
+    return;
+  }
+
+  let binaryPath;
+  try {
+    binaryPath = getC8RunBinaryPath({ cacheDir, version });
+  } catch (error) {
+    logger.error(`Failed to run secrets command: ${error.message}`);
+    process.exit(1);
+    return;
+  }
+
+  const { passthrough, env: resolvedEnv } = resolveSecretsPaths(tail, { cwd, env });
+
+  const exitCode = await new Promise((resolvePromise, reject) => {
+    const proc = spawnFn(binaryPath, ['secrets', ...passthrough], {
+      stdio: ['inherit', 'inherit', 'pipe'],
+      cwd: dirname(binaryPath),
+      env: resolvedEnv,
+    });
+
+    let stderrTail = '';
+    proc.stderr?.on('data', (chunk) => {
+      const text = typeof chunk === 'string' ? chunk : chunk.toString('utf-8');
+      process.stderr.write(text);
+      stderrTail = (stderrTail + text).slice(-4096);
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to spawn c8run: ${err.message}`));
+    });
+    proc.on('close', (code) => {
+      const hint = mapSecretsFailure(code ?? 1, stderrTail, version);
+      if (hint) {
+        logger.error(hint);
+      }
+      resolvePromise(code ?? 1);
+    });
+  });
+
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
 
@@ -1686,6 +1984,25 @@ const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'in
 export const commands = {
   'cluster': async (args) => {
     const logger = getLogger();
+
+    // Secrets passthrough (#314) is intercepted before parsePluginArgs:
+    // its arguments (verbs, flags, positionals) belong to c8run, not to
+    // c8ctl's own version/--debug/--purge parsing.
+    if (args[0] === 'secrets') {
+      let parsedSecrets;
+      try {
+        parsedSecrets = parseSecretsArgs(sliceSecretsArgv(process.argv.slice(2), args));
+      } catch (error) {
+        logger.error(error.message);
+        process.exit(1);
+        return;
+      }
+      await runClusterSecrets(getCacheDir(), parsedSecrets.passthrough, {
+        explicitVersion: parsedSecrets.version,
+      });
+      return;
+    }
+
     const parsed = parsePluginArgs(args);
 
     if (!parsed.subcommand || !VALID_SUBCOMMANDS.includes(parsed.subcommand)) {
@@ -1699,6 +2016,7 @@ export const commands = {
       console.log('  c8ctl cluster install <version>');
       console.log('  c8ctl cluster delete <version>');
       console.log('  c8ctl cluster purge <version>');
+      console.log('  c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>');
       console.log('');
       console.log('Subcommands:');
       console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
@@ -1710,6 +2028,7 @@ export const commands = {
       console.log('  install      Download a version without starting it');
       console.log('  delete       Remove a locally cached version to reclaim disk space');
       console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
+      console.log('  secrets      Manage local development secrets (forwarded verbatim to c8run)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
@@ -1744,6 +2063,14 @@ export const commands = {
       console.log('  c8ctl cluster delete 8.8');
       console.log('  c8ctl cluster purge 8.8          # Delete runtime data, keep binary');
       console.log('  c8ctl cluster stop --purge        # Stop cluster and delete its runtime data');
+      console.log('  c8ctl cluster secrets set OPENAI_API_KEY  # Prompts, no-echo; use --stdin for automation');
+      console.log('  c8ctl cluster secrets list');
+      console.log('  c8ctl cluster secrets import .env.secrets');
+      console.log('  c8ctl cluster secrets delete OPENAI_API_KEY --yes');
+      console.log('');
+      console.log('secrets forwards everything after it to c8run\'s own "secrets" command —');
+      console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
+      console.log('for c8run\'s own secrets help (--help here belongs to c8ctl).');
       return;
     }
 

@@ -3,6 +3,7 @@
  */
 
 import assert from "node:assert";
+import { EventEmitter } from "node:events";
 import {
 	existsSync,
 	mkdirSync,
@@ -12,7 +13,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { mockProcessExit } from "../utils/mocks.ts";
 
@@ -51,6 +52,14 @@ describe("Cluster Plugin – metadata", () => {
 		assert.ok(
 			typeof cmd.description === "string" && cmd.description.length > 0,
 			"cluster command should have a non-empty description",
+		);
+	});
+
+	test("cluster command declares a secrets subcommand", () => {
+		const subcommands = plugin.metadata.commands.cluster.subcommands;
+		assert.ok(
+			subcommands.some((s: { name: string }) => s.name === "secrets"),
+			'subcommands should include "secrets"',
 		);
 	});
 
@@ -192,6 +201,16 @@ describe("Cluster Plugin – command usage output", () => {
 
 		const output = captured.join("\n");
 		assert.ok(output.includes("--debug"), "Should document --debug flag");
+	});
+
+	test("usage mentions secrets subcommand", async () => {
+		await plugin.commands.cluster([]);
+
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("secrets"),
+			'Should document "secrets" subcommand',
+		);
 	});
 
 	test("usage contains examples", async () => {
@@ -2399,6 +2418,40 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 			"--purge on start should error",
 		);
 	});
+
+	test("secrets subcommand with no verb exits with a usage error", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["secrets"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("usage: c8ctl cluster secrets"),
+			"should print a secrets-specific usage error",
+		);
+	});
+
+	test("secrets subcommand exits with an install hint when nothing is installed", async () => {
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin.commands.cluster(["secrets", "list"]).catch(() => {});
+		} finally {
+			restoreExit();
+		}
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("No c8run installed locally"),
+			"should point the user at cluster install",
+		);
+		assert.ok(
+			output.includes("c8ctl cluster install"),
+			"should suggest the install command",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2761,5 +2814,542 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 		writeFileSync(join(versionDir, "camunda.log"), String(process.pid));
 		const result = plugin.hasRunningClusterPidfiles(tempDir);
 		assert.strictEqual(result, false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// secrets passthrough (#314)
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – sliceSecretsArgv", () => {
+	function permutations<T>(items: readonly T[]): T[][] {
+		if (items.length <= 1) return [Array.from(items)];
+
+		return items.flatMap((item, index) =>
+			permutations([...items.slice(0, index), ...items.slice(index + 1)]).map(
+				(rest) => [item, ...rest],
+			),
+		);
+	}
+
+	test("returns the raw tail after cluster secrets, flags intact", () => {
+		const argv = ["cluster", "secrets", "set", "API_KEY", "--stdin"];
+		const result = plugin.sliceSecretsArgv(argv, [
+			"secrets",
+			"set",
+			"API_KEY",
+			"--stdin",
+		]);
+		assert.deepStrictEqual(result, ["set", "API_KEY", "--stdin"]);
+	});
+
+	test("skips a leading global string flag and its value", () => {
+		const argv = ["--profile", "myprofile", "cluster", "secrets", "list"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
+		assert.deepStrictEqual(result, ["list"]);
+	});
+
+	test("preserves every permutation of forwarded secrets flags after the cluster secrets boundary", () => {
+		const forwardedFlags = ["--stdin", "--all", "--yes"] as const;
+
+		for (const flags of permutations(forwardedFlags)) {
+			const result = plugin.parseSecretsArgs(
+				plugin.sliceSecretsArgv(
+					["cluster", "secrets", "opaque-verb", ...flags],
+					["secrets", "opaque-verb"],
+				),
+			);
+
+			assert.deepStrictEqual(
+				result,
+				{ version: null, passthrough: ["opaque-verb", ...flags] },
+				flags.join(" "),
+			);
+		}
+	});
+
+	test("preserves valid secrets switches and args unchanged after the cluster secrets boundary", () => {
+		const validSecretsTails = [
+			["set", "OPENAI_API_KEY"],
+			["set", "OPENAI_API_KEY", "--stdin"],
+			["list"],
+			["list", "--all"],
+			["path"],
+			["delete", "OPENAI_API_KEY", "--yes"],
+			["import", ".env.secrets"],
+		] as const;
+
+		for (const tail of validSecretsTails) {
+			const result = plugin.parseSecretsArgs(
+				plugin.sliceSecretsArgv(
+					["--profile", "prod", "cluster", "--verbose", "secrets", ...tail],
+					["secrets", ...tail.filter((token) => !token.startsWith("--"))],
+				),
+			);
+
+			assert.deepStrictEqual(
+				result,
+				{ version: null, passthrough: Array.from(tail) },
+				tail.join(" "),
+			);
+		}
+	});
+
+	test("is not fooled by a global flag value that reads 'cluster'", () => {
+		const argv = ["--profile", "cluster", "cluster", "secrets", "list"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
+		assert.deepStrictEqual(result, ["list"]);
+	});
+
+	test("falls back to hostArgs when argv has no cluster secrets pair", () => {
+		const argv = ["node", "test-runner.js", "--test"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "API_KEY"]);
+		assert.deepStrictEqual(result, ["set", "API_KEY"]);
+	});
+
+	test("falls back to hostArgs when cluster is not followed by secrets", () => {
+		const argv = ["cluster", "start"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
+		assert.deepStrictEqual(result, ["list"]);
+	});
+
+	// The host's own top-level parser recognizes --profile/--verbose (real
+	// global flags) wherever they sit and strips them from positionals, but
+	// it also strips an unrecognized plugin-only flag like --stdin because it
+	// treats any unknown "--foo" as a boolean (#364) — so hostArgs here is
+	// what the host actually delivers: --stdin already gone. If
+	// sliceSecretsArgv fell back to hostArgs instead of correctly walking
+	// raw argv, --stdin would be lost for good.
+
+	test("skips a global string flag placed between cluster and secrets", () => {
+		const argv = [
+			"cluster",
+			"--profile",
+			"prod",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global string flag in --flag=value form between cluster and secrets", () => {
+		const argv = [
+			"cluster",
+			"--profile=prod",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global boolean flag placed between cluster and secrets", () => {
+		const argv = ["cluster", "--verbose", "secrets", "set", "KEY", "--stdin"];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+
+	test("skips a global string flag in --flag=value form before cluster", () => {
+		const argv = [
+			"--profile=prod",
+			"cluster",
+			"secrets",
+			"set",
+			"KEY",
+			"--stdin",
+		];
+		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
+		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	});
+});
+
+describe("Cluster Plugin – parseSecretsArgs", () => {
+	test("returns the tail unchanged when there is no --c8-version", () => {
+		const result = plugin.parseSecretsArgs(["set", "API_KEY"]);
+		assert.deepStrictEqual(result, {
+			version: null,
+			passthrough: ["set", "API_KEY"],
+		});
+	});
+
+	test("strips a leading --c8-version and its value", () => {
+		const result = plugin.parseSecretsArgs(["--c8-version", "8.10", "list"]);
+		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("strips a leading --c8-version=<value> form", () => {
+		const result = plugin.parseSecretsArgs(["--c8-version=8.10", "list"]);
+		assert.deepStrictEqual(result, { version: "8.10", passthrough: ["list"] });
+	});
+
+	test("throws when --c8-version=<value> has an empty value", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version=", "list"]),
+			/Missing value for --c8-version/,
+		);
+	});
+
+	test("leaves a non-leading --c8-version untouched", () => {
+		const result = plugin.parseSecretsArgs(["list", "--c8-version", "8.10"]);
+		assert.deepStrictEqual(result, {
+			version: null,
+			passthrough: ["list", "--c8-version", "8.10"],
+		});
+	});
+
+	test("forwards an unknown verb unchanged (no c8ctl-side allowlist)", () => {
+		const result = plugin.parseSecretsArgs(["doctor"]);
+		assert.deepStrictEqual(result, { version: null, passthrough: ["doctor"] });
+	});
+
+	test("throws on an empty tail", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs([]),
+			/usage: c8ctl cluster secrets/,
+		);
+	});
+
+	test("throws when --c8-version has no value", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version"]),
+			/Missing value for --c8-version/,
+		);
+	});
+
+	test("throws when --c8-version's value looks like a flag", () => {
+		assert.throws(
+			() => plugin.parseSecretsArgs(["--c8-version", "--stdin"]),
+			/Missing value for --c8-version/,
+		);
+	});
+});
+
+describe("Cluster Plugin – resolveSecretsPaths", () => {
+	test("absolutizes a relative import file against cwd", () => {
+		const result = plugin.resolveSecretsPaths(["import", "./secrets.env"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, [
+			"import",
+			resolve("/home/user/project", "./secrets.env"),
+		]);
+	});
+
+	test("leaves '-' (stdin) untouched for import", () => {
+		const result = plugin.resolveSecretsPaths(["import", "-"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["import", "-"]);
+	});
+
+	test("leaves an already-absolute import path untouched", () => {
+		const result = plugin.resolveSecretsPaths(["import", "/already/abs.env"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["import", "/already/abs.env"]);
+	});
+
+	test("leaves non-import verbs untouched", () => {
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user/project",
+			env: {},
+		});
+		assert.deepStrictEqual(result.passthrough, ["list"]);
+	});
+
+	test("absolutizes a relative C8RUN_SECRETS_DIR without mutating the input env", () => {
+		const env = { C8RUN_SECRETS_DIR: ".secrets" };
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(
+			result.env.C8RUN_SECRETS_DIR,
+			resolve("/home/user", ".secrets"),
+		);
+		assert.strictEqual(
+			env.C8RUN_SECRETS_DIR,
+			".secrets",
+			"input env must not be mutated",
+		);
+	});
+
+	test("leaves an already-absolute C8RUN_SECRETS_DIR untouched", () => {
+		const env = { C8RUN_SECRETS_DIR: "/abs/secrets" };
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(result.env.C8RUN_SECRETS_DIR, "/abs/secrets");
+	});
+
+	test("returns the same env reference when there is nothing to resolve", () => {
+		const env = {};
+		const result = plugin.resolveSecretsPaths(["list"], {
+			cwd: "/home/user",
+			env,
+		});
+		assert.strictEqual(result.env, env);
+	});
+});
+
+describe("Cluster Plugin – selectSecretsVersion", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("an explicit version always wins", async () => {
+		const result = await plugin.selectSecretsVersion(tempDir, {
+			explicit: "8.9.0-alpha5",
+		});
+		assert.strictEqual(result, "8.9.0-alpha5");
+	});
+
+	test("rejects an invalid explicit version", async () => {
+		await assert.rejects(
+			() => plugin.selectSecretsVersion(tempDir, { explicit: "../evil" }),
+			/Invalid version string/,
+		);
+	});
+
+	test("prefers the currently running cluster's version over installed ones", async () => {
+		writeFileSync(join(tempDir, "cluster.active"), "running");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9.0-alpha5");
+		mkdirSync(join(tempDir, "c8run-8.10"), { recursive: true });
+		const runningDir = join(
+			tempDir,
+			"c8run-8.9.0-alpha5",
+			"c8run-8.9.0-alpha5.1",
+		);
+		mkdirSync(runningDir, { recursive: true });
+		writeFileSync(join(runningDir, "camunda.process"), String(process.pid));
+
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, "8.9.0-alpha5");
+	});
+
+	test("falls back to the highest installed version when nothing is running", async () => {
+		mkdirSync(join(tempDir, "c8run-8.8"), { recursive: true });
+		mkdirSync(join(tempDir, "c8run-8.10"), { recursive: true });
+
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, "8.10");
+	});
+
+	test("returns null when nothing is running or installed", async () => {
+		const result = await plugin.selectSecretsVersion(tempDir, {});
+		assert.strictEqual(result, null);
+	});
+});
+
+describe("Cluster Plugin – mapSecretsFailure", () => {
+	test("returns null on a successful exit", () => {
+		const result = plugin.mapSecretsFailure(
+			0,
+			"unsupported operation: secrets",
+			"8.9",
+		);
+		assert.strictEqual(result, null);
+	});
+
+	test("maps c8run's unsupported-operation error to an upgrade hint", () => {
+		const result = plugin.mapSecretsFailure(
+			1,
+			"unsupported operation: secrets\n",
+			"8.9",
+		);
+		assert.ok(result?.includes("8.9"), "hint should name the resolved version");
+		assert.ok(
+			result?.includes("c8ctl cluster install 8.9"),
+			"hint should suggest refreshing the install",
+		);
+	});
+
+	test("leaves any other c8run failure untouched", () => {
+		const result = plugin.mapSecretsFailure(
+			1,
+			'invalid secret name "1BAD"',
+			"8.9",
+		);
+		assert.strictEqual(result, null);
+	});
+});
+
+describe("Cluster Plugin – runClusterSecrets", () => {
+	let tempDir: string;
+	let captured: string[];
+	let originalError: typeof console.error;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+		captured = [];
+		originalError = console.error;
+		console.error = (...args: unknown[]) => {
+			captured.push(args.map(String).join(" "));
+		};
+	});
+
+	afterEach(() => {
+		console.error = originalError;
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	function installFakeBinary(version: string) {
+		const binaryDir = join(tempDir, `c8run-${version}`, `c8run-${version}.1`);
+		mkdirSync(binaryDir, { recursive: true });
+		const binaryPath = join(binaryDir, C8RUN_BINARY);
+		writeFileSync(binaryPath, "");
+		return binaryPath;
+	}
+
+	/** Minimal stand-in for the ChildProcess spawn() returns: an EventEmitter with a stderr stream. */
+	class FakeC8RunProcess extends EventEmitter {
+		readonly stderr = new EventEmitter();
+	}
+
+	function makeFakeSpawn({
+		exitCode = 0,
+		stderrChunks = [],
+	}: {
+		exitCode?: number;
+		stderrChunks?: string[];
+	} = {}) {
+		const calls: {
+			command: string;
+			args: string[];
+			options: Record<string, unknown>;
+		}[] = [];
+		const spawnFn = (
+			command: string,
+			args: string[],
+			options: Record<string, unknown>,
+		) => {
+			const proc = new FakeC8RunProcess();
+			calls.push({ command, args, options });
+			queueMicrotask(() => {
+				for (const chunk of stderrChunks) {
+					proc.stderr.emit("data", Buffer.from(chunk));
+				}
+				proc.emit("close", exitCode);
+			});
+			return proc;
+		};
+		return { spawnFn, calls };
+	}
+
+	test("spawns c8run secrets with the forwarded args, inherited stdio, and the binary's own cwd", async () => {
+		const binaryPath = installFakeBinary("8.9");
+		const { spawnFn, calls } = makeFakeSpawn();
+
+		await plugin.runClusterSecrets(tempDir, ["set", "API_KEY", "--stdin"], {
+			explicitVersion: "8.9",
+			spawnFn,
+			cwd: tempDir,
+			env: {},
+		});
+
+		assert.strictEqual(calls.length, 1);
+		assert.strictEqual(calls[0].command, binaryPath);
+		assert.deepStrictEqual(calls[0].args, [
+			"secrets",
+			"set",
+			"API_KEY",
+			"--stdin",
+		]);
+		assert.strictEqual(calls[0].options.cwd, dirname(binaryPath));
+		assert.deepStrictEqual(calls[0].options.stdio, [
+			"inherit",
+			"inherit",
+			"pipe",
+		]);
+	});
+
+	test("propagates a non-zero exit code from c8run", async () => {
+		installFakeBinary("8.9");
+		const { spawnFn } = makeFakeSpawn({ exitCode: 3 });
+		let exitCode: number | string | null | undefined;
+		const restoreExit = mockProcessExit((code) => {
+			exitCode = code;
+		});
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					explicitVersion: "8.9",
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		assert.strictEqual(exitCode, 3);
+	});
+
+	test("maps c8run's unsupported-operation stderr to an upgrade hint", async () => {
+		installFakeBinary("8.9");
+		const { spawnFn } = makeFakeSpawn({
+			exitCode: 1,
+			stderrChunks: ["unsupported operation: secrets\n"],
+		});
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					explicitVersion: "8.9",
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		const output = captured.join("\n");
+		assert.ok(output.includes('does not support "secrets"'));
+		assert.ok(output.includes("c8ctl cluster install 8.9"));
+	});
+
+	test("exits 1 with an install hint when nothing is installed", async () => {
+		const { spawnFn, calls } = makeFakeSpawn();
+		const restoreExit = mockProcessExit();
+
+		try {
+			await plugin
+				.runClusterSecrets(tempDir, ["list"], {
+					spawnFn,
+					cwd: tempDir,
+					env: {},
+				})
+				.catch(() => {});
+		} finally {
+			restoreExit();
+		}
+
+		assert.strictEqual(
+			calls.length,
+			0,
+			"should never spawn without a resolved version",
+		);
+		const output = captured.join("\n");
+		assert.ok(output.includes("No c8run installed locally"));
 	});
 });
