@@ -67,6 +67,9 @@ npm install @camunda8/cli -g
 # Start a local Camunda 8 cluster (no Docker required)
 c8ctl cluster start
 
+# Store a secret for local development (values are never shown or stored by c8ctl)
+c8ctl cluster secrets set OPENAI_API_KEY
+
 # Deploy a process and start an instance
 c8ctl deploy ./my-process.bpmn
 c8ctl run my-process
