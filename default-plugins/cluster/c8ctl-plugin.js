@@ -1086,9 +1086,14 @@ export function processStartSignature(pid) {
       return starttime ? `linux:${starttime}` : null;
     }
     if (platform === 'darwin' || platform.endsWith('bsd')) {
-      // `ps -o lstart=` prints the process start timestamp; paired with the PID
-      // it is a reliable identity a reused PID will not reproduce.
-      const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      // `ps -o lstart=` prints the process start timestamp, but only at
+      // ONE-SECOND resolution — a PID reused within that same second would
+      // reproduce it, and macOS `ps` exposes no higher-resolution creation
+      // time. Pair it with the executable path (`comm=`), which is fixed for
+      // the life of the process and an unrelated process that reused the PID
+      // will not share. The combined fingerprint means `recordedPidIsLive()`
+      // rejects such a replacement instead of signalling an unrelated process.
+      const out = execFileSync('ps', ['-o', 'lstart=,comm=', '-p', String(pid)], {
         encoding: 'utf-8',
         timeout: 3000,
       }).trim();
@@ -1243,7 +1248,12 @@ export function readRunningClusterRecord(cacheDir) {
           ),
         )
       : {};
-  if (!version && pids.length === 0) {
+  // Reject any record that lacks a non-empty version attribution. A record
+  // with no version but stray PIDs (e.g. a malformed/hand-edited cluster.pids)
+  // would otherwise let liveRecordedPids()/reapClusterProcesses() treat those
+  // PIDs as cluster-owned and signal them with no version to attribute them to
+  // — a path to killing an unrelated live process during `cluster stop` (#560).
+  if (!version) {
     return null;
   }
   return { version, pids, signatures };
@@ -1297,6 +1307,21 @@ export function clearRunningClusterRecord(cacheDir) {
   }
 }
 
+/**
+ * Retire the durable record when it no longer tracks any LIVE process. A stale
+ * record left by a crash, a forced kill, or an already-stopped cluster keeps
+ * dead PIDs in `cluster.pids`; on a platform where signature capture is
+ * unavailable the liveness-only fallback would later mistake a reused PID for
+ * this cluster — blocking a start and risking an unrelated process during stop
+ * (#560). Safe to call from any cleanup / no-running path: a no-op when the
+ * record is absent or still has at least one live recorded PID.
+ */
+export function clearStaleRunningClusterRecord(cacheDir) {
+  if (readRunningClusterRecord(cacheDir) && liveRecordedPids(cacheDir).length === 0) {
+    clearRunningClusterRecord(cacheDir);
+  }
+}
+
 /** The still-live PIDs from the durable running-cluster record. */
 export function liveRecordedPids(cacheDir) {
   const record = readRunningClusterRecord(cacheDir);
@@ -1313,7 +1338,7 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-function recordRunningClusterPids(config) {
+export function recordRunningClusterPids(config) {
   const pids = collectPidfilePids(config.cacheDir, { version: config.version }).filter((pid) =>
     isPidAlive(pid),
   );
@@ -1427,6 +1452,9 @@ export async function stopC8Run(config, debug = false) {
   const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
 
   if (!markerExists && !clusterAppearsRunning) {
+    // Nothing live to stop. Retire any stale record left by a crash/kill so its
+    // dead PIDs cannot later be mistaken for this cluster (#560).
+    clearStaleRunningClusterRecord(config.cacheDir);
     logger.warn(
       'No cluster is currently running.',
     );
@@ -1969,13 +1997,17 @@ export async function clusterStatus(cacheDir) {
   // orphan left after its install dir was replaced/removed (#560).
   const untracked = !markerExists && processesRunning;
 
+  // `untracked` takes precedence over a healthy probe: an orphaned process can
+  // still serve the health endpoint while holding its ports, and the operator
+  // must be told it is no longer tracked (and how to recover) rather than shown
+  // a plain "running". Healthy connection URLs are still surfaced below.
   let status;
-  if (isHealthy) {
+  if (untracked) {
+    status = 'running (untracked)';
+  } else if (isHealthy) {
     status = 'running';
   } else if (markerExists) {
     status = 'starting or unresponsive';
-  } else if (untracked) {
-    status = 'running (untracked)';
   } else {
     status = 'stopped';
   }
@@ -2006,12 +2038,15 @@ export async function clusterStatus(cacheDir) {
     console.log('  - Health:     ' + CLUSTER_URLS.health);
     console.log('');
     console.log('  Default credentials: demo / demo');
-  } else if (untracked) {
+  }
+
+  if (untracked) {
+    // Shown even when the orphan is healthy: it is still not tracked by c8ctl.
     console.log('');
     console.log('  A cluster process is still running but is no longer tracked by c8ctl');
     console.log('  (its install directory was likely replaced or removed while running).');
     console.log('  Stop it with: c8ctl cluster stop');
-  } else {
+  } else if (!isHealthy) {
     console.log('');
     console.log('  The cluster appears to have been started but is not yet responding.');
     console.log('  Run "c8ctl cluster status" again in a moment, or check the logs.');
@@ -2192,6 +2227,9 @@ export async function deleteVersion(cacheDir, versionSpec) {
   }
 
   purgeInstalledVersion(config, { reason: 'as requested' });
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
   logger.info(`Version ${versionSpec} has been deleted.`);
 }
 
@@ -2265,6 +2303,9 @@ export async function purgeClusterData(cacheDir, versionSpec) {
   } else {
     logger.info(`No runtime data found for ${resolvedVersion} — nothing to delete.`);
   }
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
   logger.info(`Binary and installed files preserved. Start fresh with: c8ctl cluster start ${resolvedVersion}`);
 }
 

@@ -1484,6 +1484,34 @@ describe("Cluster Plugin – clusterStatus", () => {
 			"Should display the version resolved from the durable record",
 		);
 	});
+
+	// #560 — an orphaned process can still serve the health endpoint while
+	// holding its ports. Status must still flag it as untracked (with the stop
+	// hint) even when healthy, while retaining the connection URLs.
+	test('reports "running (untracked)" with URLs AND a stop hint when an orphan is healthy', async () => {
+		Object.defineProperty(globalThis, "fetch", {
+			value: async () => ({ ok: true, json: async () => ({ status: "UP" }) }),
+			writable: true,
+			configurable: true,
+		});
+		// Live recorded PID (our own), no marker → untracked, and health is UP.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+
+		await plugin.clusterStatus(tempDir);
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("running (untracked)"),
+			"untracked must take precedence over a healthy probe",
+		);
+		assert.ok(output.includes("Operate"), "healthy URLs are still surfaced");
+		assert.ok(
+			output.includes("c8ctl cluster stop"),
+			"the recovery hint is shown even for a healthy orphan",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -3108,6 +3136,89 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				}
 			}
 		}
+	});
+
+	// #560 — the start call site itself must persist the durable record. Drive
+	// the snapshot function used at that call site with a live child's pidfile
+	// and assert the cache-root record captures the live PID and its signature,
+	// so a regression that drops this snapshot cannot pass unnoticed.
+	test("recordRunningClusterPids snapshots the live PID and its signature from the install dir", () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		return new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		})
+			.then(() => {
+				if (child.pid == null) {
+					throw new Error("spawned child has no PID");
+				}
+				const pid = child.pid;
+				const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+				mkdirSync(versionDir, { recursive: true });
+				writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+				plugin.recordRunningClusterPids({ cacheDir: tempDir, version: "8.9" });
+
+				const record = plugin.readRunningClusterRecord(tempDir);
+				assert.strictEqual(record.version, "8.9");
+				assert.ok(
+					record.pids.includes(pid),
+					"the record must contain the live PID from the install dir",
+				);
+				const sig = plugin.processStartSignature(pid);
+				if (sig) {
+					assert.strictEqual(
+						record.signatures?.[pid],
+						sig,
+						"the record must capture the live PID's start signature",
+					);
+				}
+			})
+			.finally(() => {
+				if (child.pid && plugin.isPidAlive(child.pid)) {
+					try {
+						process.kill(child.pid, "SIGKILL");
+					} catch {
+						// already gone
+					}
+				}
+			});
+	});
+
+	// #560 — a record with no version attribution must never expose its PIDs;
+	// otherwise a malformed cluster.pids could aim `cluster stop` at an
+	// unrelated live process.
+	test("readRunningClusterRecord rejects a record with no version even when it has PIDs", () => {
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: null, pids: [process.pid] }),
+		);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+	});
+
+	// #560 — cleanup / no-running paths must retire a stale record (no live
+	// PIDs) but keep one that still tracks a live process.
+	test("clearStaleRunningClusterRecord drops a dead-PID record but keeps a live one", () => {
+		// Dead PID → the record is stale and must be retired.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [999999999],
+		});
+		plugin.clearStaleRunningClusterRecord(tempDir);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+
+		// Live PID → the record must survive.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+		plugin.clearStaleRunningClusterRecord(tempDir);
+		assert.notStrictEqual(plugin.readRunningClusterRecord(tempDir), null);
 	});
 });
 
