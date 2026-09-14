@@ -3020,6 +3020,95 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 			});
 		}
 	});
+
+	// #560 — the PID-reuse guard: a recorded PID is only honoured when its
+	// captured start signature still matches, so a reused numeric PID is not
+	// mistaken for the original cluster process.
+	test("recordedPidIsLive honours a matching signature and rejects a mismatch", () => {
+		const sig = plugin.processStartSignature(process.pid);
+		if (sig) {
+			// Platform can fingerprint: the real signature matches (live), a
+			// deliberately wrong one does not (treated as a reused PID → not live).
+			assert.strictEqual(plugin.recordedPidIsLive(process.pid, sig), true);
+			assert.strictEqual(
+				plugin.recordedPidIsLive(process.pid, `${sig}-tampered-mismatch`),
+				false,
+			);
+		} else {
+			// Platform cannot fingerprint (e.g. unsupported OS): degrade to a
+			// liveness-only check so a real orphan is never stranded.
+			assert.strictEqual(
+				plugin.recordedPidIsLive(process.pid, "unverifiable"),
+				true,
+			);
+		}
+		// A dead PID is never live, regardless of any recorded signature.
+		assert.strictEqual(plugin.recordedPidIsLive(999999999, "whatever"), false);
+	});
+
+	test("liveRecordedPids drops a recorded PID whose start signature no longer matches", () => {
+		const sig = plugin.processStartSignature(process.pid);
+		if (!sig) {
+			// Signature-based discrimination is not available on this platform;
+			// the guard degrades to liveness-only, which other tests already cover.
+			return;
+		}
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+			signatures: { [process.pid]: `${sig}-reused-pid` },
+		});
+		// The PID is alive but its signature mismatches → it is NOT ours.
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), false);
+	});
+
+	test("stopC8Run does not terminate a live PID whose recorded signature no longer matches", async () => {
+		// A real, long-lived child stands in for an unrelated process that reused
+		// the recorded numeric PID after the original cluster process exited.
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			const sig = plugin.processStartSignature(child.pid);
+			if (!sig || child.pid == null) {
+				// Cannot fingerprint on this platform — skip; the liveness-only
+				// fallback is intentional and covered elsewhere.
+				return;
+			}
+			const pid = child.pid;
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+			// Recorded with a signature that will NOT match the live child.
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [pid],
+				signatures: { [pid]: `${sig}-stale-reused` },
+			});
+
+			await plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" });
+
+			// The unrelated process must be left untouched…
+			assert.strictEqual(plugin.isPidAlive(child.pid), true);
+			// …and the now-unmatched record is cleared (no live recorded PIDs).
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------

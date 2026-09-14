@@ -14,6 +14,7 @@ import {
   existsSync,
   mkdirSync,
   writeFileSync,
+  renameSync,
   rmSync,
   readdirSync,
   readFileSync,
@@ -1014,7 +1015,23 @@ async function startC8Run(config, debug = false) {
     // (status/stop still see the live process via the record), whereas a
     // marker-without-record would let the stale-marker cleanup path drop the
     // markers and leave the process orphaned with no handle to reap it (#560).
-    recordRunningClusterPids(config);
+    //
+    // The record write is nevertheless best-effort: if it throws (e.g. the
+    // cache root is unwritable / disk full), we must NOT abort here and leave a
+    // just-started, healthy cluster with NEITHER a record NOR markers — that
+    // strands it for both `status` and `stop`. The install dir still exists at
+    // this point, so the markers + c8run's own `.process` pidfiles keep the
+    // cluster fully trackable and stoppable; only the extra orphan-recovery
+    // handle (needed later, if the dir is removed) is missing, which we warn on.
+    try {
+      recordRunningClusterPids(config);
+    } catch (error) {
+      logger.warn(
+        `Could not persist the durable cluster PID record (${
+          error instanceof Error ? error.message : String(error)
+        }); the cluster is still tracked via its markers and pidfiles.`,
+      );
+    }
     writeFileSync(markerFile, 'running');
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
@@ -1076,6 +1093,25 @@ export function processStartSignature(pid) {
         timeout: 3000,
       }).trim();
       return out ? `ps:${out}` : null;
+    }
+    if (platform === 'win32') {
+      // Windows is a supported platform (#560): fingerprint with the process
+      // creation time from CIM/WMI. Paired with the PID it distinguishes the
+      // original process from an unrelated one that reused the numeric PID.
+      // Guard the null case so a missing PID yields empty output (→ null) rather
+      // than a property access on $null throwing.
+      const out = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            `if ($p) { $p.CreationDate.ToString('o') }`,
+        ],
+        { encoding: 'utf-8', timeout: 5000 },
+      ).trim();
+      return out ? `win:${out}` : null;
     }
   } catch {
     // No signature available — the caller falls back to a liveness-only check.
@@ -1228,10 +1264,29 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures 
       }
     }
   }
-  writeFileSync(
-    getPidRecordPath(cacheDir),
-    JSON.stringify({ version: version ?? null, pids: cleanPids, signatures: cleanSignatures }),
-  );
+  // `cluster.pids` is the ONLY recovery handle once an install dir disappears,
+  // so the write must be crash-safe: serialise to a sibling temp file and
+  // atomically rename it into place. An interruption then leaves either the
+  // previous valid record or the new one — never a truncated/unparseable file
+  // that would make status/stop lose the orphan PID (#560).
+  const finalPath = getPidRecordPath(cacheDir);
+  const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify({
+    version: version ?? null,
+    pids: cleanPids,
+    signatures: cleanSignatures,
+  });
+  try {
+    writeFileSync(tmpPath, payload);
+    renameSync(tmpPath, finalPath);
+  } catch (error) {
+    try {
+      if (existsSync(tmpPath)) rmSync(tmpPath);
+    } catch {
+      // best effort — nothing more we can do about a leftover temp file
+    }
+    throw error;
+  }
 }
 
 /** Remove the durable running-cluster PID record if present. */
@@ -1319,16 +1374,17 @@ async function terminatePid(pid, { graceMs = 5000, pollMs = 200 } = {}) {
 
 /**
  * Terminate any cluster processes still alive under `cacheDir` — those named
- * by the durable PID record plus any still-live c8run `.process` pidfiles.
- * This is the stop backstop for the orphan case (#560), where `c8run stop`
- * cannot reach a process whose install dir / pidfiles were removed. Never
+ * by the durable PID record, each of which is validated against its recorded
+ * start signature before we signal it. This is the stop backstop for the
+ * orphan case (#560), where `c8run stop` cannot reach a process whose install
+ * dir / pidfiles were removed. We deliberately do NOT scan raw `.process`
+ * pidfiles here: they carry no start-signature, span every cached version, and
+ * a stale pidfile whose numeric PID was reused would make us SIGTERM/SIGKILL an
+ * unrelated process. Raw pidfiles remain c8run's own responsibility. Never
  * targets this process (or its parent). Returns the count actually terminated.
  */
 export async function reapClusterProcesses(cacheDir) {
-  const targets = new Set([
-    ...liveRecordedPids(cacheDir),
-    ...collectPidfilePids(cacheDir).filter((pid) => isPidAlive(pid)),
-  ]);
+  const targets = new Set(liveRecordedPids(cacheDir));
   // Guard against ever signalling the c8ctl process itself (or its parent) —
   // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
   targets.delete(process.pid);
