@@ -1512,6 +1512,54 @@ describe("Cluster Plugin – clusterStatus", () => {
 			"the recovery hint is shown even for a healthy orphan",
 		);
 	});
+
+	// #560 — `--json` consumers must get the SAME orphan recovery guidance the
+	// text renderer prints, otherwise a machine-readable status reports
+	// "running (untracked)" with no actionable instruction.
+	test('emits a "recovery" field in JSON mode for an untracked orphan (and none when tracked)', async () => {
+		const originalC8ctl = globalThis.c8ctl;
+		const payloads: Record<string, unknown>[] = [];
+		globalThis.c8ctl = {
+			// @ts-expect-error — partial Logger mock for testing
+			getLogger: () => ({
+				mode: "json",
+				json: (obj: Record<string, unknown>) => payloads.push(obj),
+				info: () => {},
+				warn: () => {},
+				error: () => {},
+				debug: () => {},
+			}),
+		};
+		try {
+			// Orphan: live recorded PID, no marker, health unreachable.
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [process.pid],
+			});
+			await plugin.clusterStatus(tempDir);
+			assert.strictEqual(payloads.length, 1, "JSON status emitted once");
+			assert.strictEqual(payloads[0].status, "running (untracked)");
+			const recovery = payloads[0].recovery;
+			assert.ok(
+				typeof recovery === "string" && recovery.includes("c8ctl cluster stop"),
+				"JSON orphan status must carry the stop recovery instruction",
+			);
+
+			// Tracked/stopped: no record, no marker → no recovery field.
+			payloads.length = 0;
+			plugin.clearRunningClusterRecord(tempDir);
+			await plugin.clusterStatus(tempDir);
+			assert.strictEqual(payloads.length, 1, "JSON status emitted once");
+			assert.strictEqual(payloads[0].status, "stopped");
+			assert.strictEqual(
+				payloads[0].recovery,
+				undefined,
+				"a non-orphan JSON status must not carry a recovery field",
+			);
+		} finally {
+			globalThis.c8ctl = originalC8ctl;
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -3367,6 +3415,66 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 	// omits un-fingerprintable PIDs rather than degrading to liveness-only.
 	test("platformSupportsProcessSignature is true on supported platforms", () => {
 		assert.strictEqual(plugin.platformSupportsProcessSignature(), true);
+	});
+
+	// #560 — deterministic coverage for the null-signature branch: a PID that is
+	// live at record time but whose fingerprint cannot be captured (the process
+	// exited in the capture window, or `ps` failed) must be OMITTED on a
+	// fingerprinting platform, never persisted without a signature. The signature
+	// source is injected so the branch is exercised without racing a real exit.
+	test("recordRunningClusterPids omits a live PID whose signature cannot be captured", async () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return; // liveness-only fallback platform: no signature branch to exercise
+		}
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			// Signature capture forced to fail for a genuinely live PID.
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{ signatureOf: () => null },
+			);
+			const omitted = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				!omitted.pids.includes(pid),
+				"a live PID with no capturable signature must be omitted",
+			);
+
+			// With a signature the same live PID is recorded and carries it.
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{ signatureOf: () => "stub-signature" },
+			);
+			const kept = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				kept.pids.includes(pid),
+				"a fingerprintable live PID must be recorded",
+			);
+			assert.strictEqual(kept.signatures?.[pid], "stub-signature");
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
 	});
 });
 

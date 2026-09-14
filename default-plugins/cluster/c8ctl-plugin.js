@@ -1371,27 +1371,31 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-export function recordRunningClusterPids(config) {
-  const livePids = collectPidfilePids(config.cacheDir, { version: config.version }).filter((pid) =>
-    isPidAlive(pid),
-  );
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature } = {}) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
-  for (const pid of livePids) {
-    const sig = processStartSignature(pid);
-    if (sig) {
-      signatures[pid] = sig;
-      pids.push(pid);
-    } else if (!canFingerprint) {
+  for (const pid of collectPidfilePids(config.cacheDir, { version: config.version })) {
+    if (canFingerprint) {
+      // Capture identity with a SINGLE combined liveness+fingerprint operation.
+      // processStartSignature runs one `ps`/PowerShell query that already
+      // returns null for a dead PID, so — unlike a separate isPidAlive()
+      // pre-check followed by a later signature capture — there is no window in
+      // which the liveness probe and the fingerprint could observe two
+      // different processes and record a reused PID's identity as c8run's
+      // (#560). A null result means the PID is not a live, fingerprintable
+      // process, so it is omitted: persisting it without a signature would let
+      // a later reuse of the number fall back to numeric liveness and let the
+      // reap path signal an unrelated process.
+      const sig = signatureOf(pid);
+      if (sig) {
+        signatures[pid] = sig;
+        pids.push(pid);
+      }
+    } else if (isPidAlive(pid)) {
       // This platform can't fingerprint any process, so no recorded PID can
-      // carry a signature; keep it so the cluster stays trackable (the reuse
-      // guard degrades to a liveness-only check everywhere). On a platform that
-      // CAN fingerprint, a null signature for a PID that was alive at the check
-      // above means the process exited in that window — omit it, because
-      // persisting it without a signature would let a later reuse of the number
-      // fall back to numeric liveness and let the reap path signal an unrelated
-      // process (#560).
+      // carry a signature; keep the live PID so the cluster stays trackable
+      // (the reuse guard degrades to a liveness-only check everywhere).
       pids.push(pid);
     }
   }
@@ -1434,7 +1438,15 @@ async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {
     // Already exited or not permitted — fall through to the liveness check.
   }
   const deadline = Date.now() + graceMs;
-  while (recordedPidIsLive(pid, signature) && Date.now() < deadline) {
+  // Poll for exit with a CHEAP liveness probe (signal 0 — no subprocess). A
+  // process' start signature is immutable while it lives, so re-running the
+  // external `ps`/PowerShell signature query on every 200 ms poll would spawn
+  // dozens of subprocesses (each with a multi-second timeout) and make stop
+  // block far beyond graceMs on a slow host. We still revalidate the recorded
+  // IDENTITY (signature) immediately before the SIGKILL escalation below, so a
+  // PID reused during the grace window can never be signalled as if it were the
+  // tracked process (#560).
+  while (isPidAlive(pid) && Date.now() < deadline) {
     await sleep(pollMs);
   }
   if (recordedPidIsLive(pid, signature)) {
@@ -1699,12 +1711,16 @@ export async function stopC8Run(config, debug = false) {
   }
 
   if (attempted === 0 && !hadSuccessfulStop) {
-    throw new Error(
-      'Could not find an installed c8run binary to execute stop.',
-    );
-  }
-
-  if (!hadSuccessfulStop && lastError) {
+    // ...but only when there is nothing left to reap. If a recorded process is
+    // still alive (e.g. reaping hit EPERM), the incomplete-stop diagnostic
+    // below carries the actionable PID/retry guidance and must win over this
+    // generic "no binary" message even though the install dir is gone (#560).
+    if (remainingPids.length === 0) {
+      throw new Error(
+        'Could not find an installed c8run binary to execute stop.',
+      );
+    }
+  } else if (!hadSuccessfulStop && lastError && remainingPids.length === 0) {
     throw lastError;
   }
 
@@ -2085,7 +2101,17 @@ export async function clusterStatus(cacheDir) {
   }
 
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
-    logger.json({ status, version, urls: isHealthy ? CLUSTER_URLS : undefined });
+    // Machine-readable status must carry the SAME recovery guidance the text
+    // renderer prints below for an orphan, otherwise a `--json` consumer sees
+    // `running (untracked)` with no actionable instruction (#560).
+    logger.json({
+      status,
+      version,
+      urls: isHealthy ? CLUSTER_URLS : undefined,
+      recovery: untracked
+        ? 'A cluster process is still running but is no longer tracked by c8ctl (its install directory was likely replaced or removed while running). Stop it with: c8ctl cluster stop'
+        : undefined,
+    });
     return;
   }
 
