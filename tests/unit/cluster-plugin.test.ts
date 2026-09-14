@@ -3220,6 +3220,77 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		plugin.clearStaleRunningClusterRecord(tempDir);
 		assert.notStrictEqual(plugin.readRunningClusterRecord(tempDir), null);
 	});
+
+	// #560 — a record whose version fails the path-traversal guard must be
+	// treated as unusable, so `cluster stop` never interpolates a traversal
+	// version into a binary path.
+	test("readRunningClusterRecord rejects a record whose version fails validateVersionSpec", () => {
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: "foo/../../tmp", pids: [process.pid] }),
+		);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		assert.deepStrictEqual(plugin.liveRecordedPids(tempDir), []);
+
+		// A well-formed version is still accepted.
+		writeFileSync(
+			join(tempDir, "cluster.pids"),
+			JSON.stringify({ version: "8.9.5", pids: [process.pid] }),
+		);
+		assert.strictEqual(
+			plugin.readRunningClusterRecord(tempDir)?.version,
+			"8.9.5",
+		);
+	});
+
+	// #560 — termination is gated on the recorded start signature, not bare
+	// numeric liveness: a live PID whose signature no longer matches (PID reuse)
+	// must NOT be signalled, and reaping must report it as not-terminated.
+	test("reapClusterProcesses never signals a live PID whose recorded signature no longer matches", async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			// Record the live PID but with a signature that cannot match it,
+			// standing in for a PID that was reused by an unrelated process.
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [pid],
+				signatures: { [pid]: "linux:0-stale-reused" },
+			});
+
+			const reaped = await plugin.reapClusterProcesses(tempDir);
+
+			assert.strictEqual(
+				reaped,
+				0,
+				"a signature-mismatched PID must not be reaped",
+			);
+			assert.strictEqual(
+				plugin.isPidAlive(pid),
+				true,
+				"the unrelated live process must be left untouched",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------

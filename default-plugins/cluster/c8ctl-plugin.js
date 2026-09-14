@@ -1256,6 +1256,17 @@ export function readRunningClusterRecord(cacheDir) {
   if (!version) {
     return null;
   }
+  // Reject a record whose version fails the same path-traversal guard applied
+  // to CLI-supplied versions. `version` is later interpolated into join() paths
+  // by getC8RunBinaryPath during `cluster stop`, so a malformed record such as
+  // `foo/../../tmp` could otherwise bypass validateVersionSpec and make stop
+  // inspect/execute a binary outside the cache root (#560). Treat an invalid
+  // record as unusable rather than trusting on-disk state.
+  try {
+    validateVersionSpec(version);
+  } catch {
+    return null;
+  }
   return { version, pids, signatures };
 }
 
@@ -1373,8 +1384,13 @@ export function isVersionInstanceRunning(cacheDir, version) {
  * Send SIGTERM to a PID, wait up to `graceMs` for it to exit, then SIGKILL.
  * Returns true once the process is confirmed gone.
  */
-async function terminatePid(pid, { graceMs = 5000, pollMs = 200 } = {}) {
-  if (!isPidAlive(pid)) {
+async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {}) {
+  // Revalidate the recorded identity before EVERY signal, not just numeric
+  // liveness. If the original process exits and its PID is reused (e.g. during
+  // the SIGTERM grace window), the captured start signature no longer matches
+  // and we must NOT escalate to an unrelated process (#560). recordedPidIsLive
+  // degrades to a liveness-only check when no signature was captured.
+  if (!recordedPidIsLive(pid, signature)) {
     return false;
   }
   try {
@@ -1383,10 +1399,10 @@ async function terminatePid(pid, { graceMs = 5000, pollMs = 200 } = {}) {
     // Already exited or not permitted — fall through to the liveness check.
   }
   const deadline = Date.now() + graceMs;
-  while (isPidAlive(pid) && Date.now() < deadline) {
+  while (recordedPidIsLive(pid, signature) && Date.now() < deadline) {
     await sleep(pollMs);
   }
-  if (isPidAlive(pid)) {
+  if (recordedPidIsLive(pid, signature)) {
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
@@ -1394,7 +1410,9 @@ async function terminatePid(pid, { graceMs = 5000, pollMs = 200 } = {}) {
     }
     await sleep(pollMs);
   }
-  return !isPidAlive(pid);
+  // Confirmed gone once the ORIGINAL recorded process is no longer live — a
+  // signature mismatch (PID reuse) counts as gone: the process we tracked ended.
+  return !recordedPidIsLive(pid, signature);
 }
 
 /**
@@ -1409,6 +1427,8 @@ async function terminatePid(pid, { graceMs = 5000, pollMs = 200 } = {}) {
  * targets this process (or its parent). Returns the count actually terminated.
  */
 export async function reapClusterProcesses(cacheDir) {
+  const record = readRunningClusterRecord(cacheDir);
+  const signatures = record?.signatures ?? {};
   const targets = new Set(liveRecordedPids(cacheDir));
   // Guard against ever signalling the c8ctl process itself (or its parent) —
   // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
@@ -1419,7 +1439,9 @@ export async function reapClusterProcesses(cacheDir) {
 
   let reaped = 0;
   for (const pid of targets) {
-    if (await terminatePid(pid)) {
+    // Carry the recorded start signature into termination so each signal is
+    // gated on the ORIGINAL identity, not bare numeric liveness (#560).
+    if (await terminatePid(pid, { signature: signatures[pid] })) {
       reaped += 1;
     }
   }
@@ -1631,7 +1653,8 @@ export async function stopC8Run(config, debug = false) {
   if (existsSync(versionFile)) {
     rmSync(versionFile);
   }
-  if (liveRecordedPids(config.cacheDir).length === 0) {
+  const remainingPids = liveRecordedPids(config.cacheDir);
+  if (remainingPids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
   } else {
     logger.warn(
@@ -1648,6 +1671,20 @@ export async function stopC8Run(config, debug = false) {
 
   if (!hadSuccessfulStop && lastError) {
     throw lastError;
+  }
+
+  // A partial stop is still a FAILED stop: if any recorded PID is confirmed
+  // alive after reaping, the cluster may still hold its ports, so a fresh start
+  // would collide. Surface it as an error (the record was retained above) so
+  // the CLI exits non-zero and the user retries, rather than reporting success
+  // while an orphan lingers (#560).
+  if (remainingPids.length > 0) {
+    throw new Error(
+      `Stop incomplete: ${remainingPids.length} recorded cluster process${
+        remainingPids.length === 1 ? '' : 'es'
+      } could not be confirmed stopped (PID${remainingPids.length === 1 ? '' : 's'}: ${remainingPids.join(', ')}). ` +
+        'The durable PID record was kept — retry with "c8ctl cluster stop".',
+    );
   }
 
   logger.info('Cluster stopped.');
