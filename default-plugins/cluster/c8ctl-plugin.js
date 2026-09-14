@@ -809,6 +809,22 @@ export async function ensureC8RunInstalled(config) {
     }
   }
 
+  // Reached the download/extract fallback. Either nothing is installed, or the
+  // install dir exists but its binary is missing/corrupt (isC8RunInstalled is
+  // false, so the guarded rolling-update branch above was skipped entirely).
+  // extractArchive writes into c8run-${version}; if an instance started from
+  // this version is still live — a partial/corrupt install whose processes are
+  // running — extracting would overwrite files under the live cluster and could
+  // corrupt it. Refuse here too, mirroring the rolling-update guard above, so a
+  // (re)install can never mutate a running install (#560).
+  if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+    throw new Error(
+      `Refusing to (re)install c8run ${config.version}: an instance started from it is still running, ` +
+        'and extracting now would overwrite files under the live cluster. ' +
+        'Stop it first with "c8ctl cluster stop", then re-run the install.',
+    );
+  }
+
   logger.info('No local installation found. Setting up...');
 
   const { archivePath, etag } = await downloadC8Run(config);
@@ -1149,17 +1165,28 @@ export function processStartSignature(pid) {
 /**
  * True when `pid` is alive AND, where we captured a start signature for it, that
  * signature still matches — i.e. it is the ORIGINAL recorded process, not an
- * unrelated one that reused the PID after the original exited. When no signature
- * was recorded, or the platform cannot produce one now, this degrades to a
- * liveness-only check (never inventing a false negative that would strand a real
- * orphan).
+ * unrelated one that reused the PID after the original exited. A recorded entry
+ * with NO signature is trusted (liveness only) ONLY on platforms that cannot
+ * fingerprint at all; on a fingerprinting platform our writer never persists a
+ * signature-less PID (#568), so a signature-less entry there can only be a
+ * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
+ * signalling a reused, unrelated process. When a signature WAS recorded but the
+ * platform cannot reproduce one now (transient `ps` failure), the guard still
+ * degrades to liveness only, never inventing a false negative that would strand
+ * a real orphan.
  */
 export function recordedPidIsLive(pid, signature) {
   if (!isPidAlive(pid)) {
     return false;
   }
   if (!signature) {
-    return true;
+    // No signature recorded. On a fingerprinting platform this can only be a
+    // stale/legacy/hand-edited record (our writer always signs live PIDs there
+    // now), whose bare numeric liveness could match a reused unrelated process
+    // — refuse it. Only non-fingerprinting platforms keep the liveness-only
+    // degrade, since there no recorded PID can ever carry a signature and
+    // rejecting would strand every real orphan (#560/#568).
+    return !platformSupportsProcessSignature();
   }
   const current = processStartSignature(pid);
   return current === null || current === signature;

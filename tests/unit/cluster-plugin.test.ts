@@ -25,6 +25,23 @@ const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 /** Platform-correct binary name: c8run.exe on Windows, c8run elsewhere. */
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
+/**
+ * Build a durable running-cluster record for a live PID that `recordedPidIsLive`
+ * accepts on BOTH fingerprinting and non-fingerprinting platforms. Since #568 a
+ * record entry on a fingerprinting platform MUST carry a start signature to be
+ * trusted (a signature-less entry there is treated as a stale/legacy pidfile and
+ * rejected), so this captures the real signature where the platform can produce
+ * one and degrades to a signature-less record only where it cannot.
+ */
+function liveSelfRecord(version = "8.9", pid: number = process.pid) {
+	const sig = plugin.processStartSignature(pid);
+	return {
+		version,
+		pids: [pid],
+		signatures: sig ? { [pid]: sig } : {},
+	};
+}
+
 // ---------------------------------------------------------------------------
 // metadata
 // ---------------------------------------------------------------------------
@@ -1464,10 +1481,7 @@ describe("Cluster Plugin – clusterStatus", () => {
 	test('reports "running (untracked)" with a stop hint for an orphaned process (live record, no marker)', async () => {
 		// Live recorded PID (our own), no marker; beforeEach's fetch stub keeps
 		// the health endpoint unreachable.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 
 		await plugin.clusterStatus(tempDir);
 		const output = captured.join("\n");
@@ -1495,10 +1509,7 @@ describe("Cluster Plugin – clusterStatus", () => {
 			configurable: true,
 		});
 		// Live recorded PID (our own), no marker → untracked, and health is UP.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 
 		await plugin.clusterStatus(tempDir);
 		const output = captured.join("\n");
@@ -1532,10 +1543,7 @@ describe("Cluster Plugin – clusterStatus", () => {
 		};
 		try {
 			// Orphan: live recorded PID, no marker, health unreachable.
-			plugin.writeRunningClusterRecord(tempDir, {
-				version: "8.9",
-				pids: [process.pid],
-			});
+			plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 			await plugin.clusterStatus(tempDir);
 			assert.strictEqual(payloads.length, 1, "JSON status emitted once");
 			assert.strictEqual(payloads[0].status, "running (untracked)");
@@ -2952,10 +2960,7 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 	test("returns true from the durable PID record when the install dir is gone", () => {
 		// No c8run-* dirs at all — only the cache-root record, referencing a
 		// live PID (our own). This is the orphaned-process scenario.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
 	});
 
@@ -3008,10 +3013,7 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 
 	test("isVersionInstanceRunning is true from the record after the install dir is removed", () => {
 		// No install dir; only the durable record attributes a live PID to 8.9.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), true);
 		// A different version is not implicated by that record.
 		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.8"), false);
@@ -3047,10 +3049,10 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 			// exactly as when a running version's cache dir is replaced/removed.
 			writeFileSync(join(tempDir, "cluster.active"), "running");
 			writeFileSync(join(tempDir, "cluster.version"), "8.9");
-			plugin.writeRunningClusterRecord(tempDir, {
-				version: "8.9",
-				pids: [child.pid],
-			});
+			plugin.writeRunningClusterRecord(
+				tempDir,
+				liveSelfRecord("8.9", child.pid),
+			);
 
 			assert.strictEqual(plugin.isPidAlive(child.pid), true);
 
@@ -3092,10 +3094,7 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		plugin.storeETag(config, "old-etag");
 		// The durable record is the ONLY witness that the version is still running
 		// (no .process pidfile), exactly the orphan-prevention path under test.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 
 		const originalFetch = globalThis.fetch;
 		Object.defineProperty(globalThis, "fetch", {
@@ -3122,6 +3121,27 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		}
 	});
 
+	// #560/#568 — the download/extract fallback must also refuse to run over a
+	// live instance. When the install dir exists but its binary is missing,
+	// isC8RunInstalled() is false, so the rolling-update guard is skipped and
+	// control falls through to download/extract, which would extract into the
+	// live version dir and overwrite files under the running cluster.
+	test("ensureC8RunInstalled refuses to (re)install over a running instance whose binary is missing", async () => {
+		const installDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(installDir, { recursive: true });
+		// Deliberately NO c8run binary → isC8RunInstalled() is false.
+		// A live instance is still attributed to 8.9 via the durable record.
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
+		const config = { cacheDir: tempDir, version: "8.9" };
+
+		await assert.rejects(
+			() => plugin.ensureC8RunInstalled(config),
+			/still running/i,
+		);
+		// The refusal fires before any download/extract, so the dir is untouched.
+		assert.strictEqual(existsSync(installDir), true);
+	});
+
 	// #560 — the PID-reuse guard: a recorded PID is only honoured when its
 	// captured start signature still matches, so a reused numeric PID is not
 	// mistaken for the original cluster process.
@@ -3145,6 +3165,43 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		}
 		// A dead PID is never live, regardless of any recorded signature.
 		assert.strictEqual(plugin.recordedPidIsLive(999999999, "whatever"), false);
+	});
+
+	// #568 — a recorded entry with NO signature is trusted (liveness only) ONLY
+	// where the platform cannot fingerprint. On a fingerprinting platform our
+	// writer always signs live PIDs, so a signature-less entry can only be a
+	// stale/legacy/hand-edited cluster.pids and must be rejected rather than risk
+	// signalling a reused, unrelated process.
+	test("recordedPidIsLive rejects a signature-less live PID on fingerprinting platforms", () => {
+		const canFingerprint = plugin.platformSupportsProcessSignature();
+		const live = plugin.recordedPidIsLive(process.pid, undefined);
+		if (canFingerprint) {
+			assert.strictEqual(
+				live,
+				false,
+				"a signature-less record entry must not be trusted where fingerprinting is available",
+			);
+		} else {
+			assert.strictEqual(
+				live,
+				true,
+				"where no PID can carry a signature, degrade to liveness-only so a real orphan is never stranded",
+			);
+		}
+	});
+
+	// #568 — the same enforcement observed end-to-end: a signature-less durable
+	// record must not keep a version "running" on a fingerprinting platform.
+	test("isVersionInstanceRunning ignores a signature-less record on fingerprinting platforms", () => {
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+		const expected = !plugin.platformSupportsProcessSignature();
+		assert.strictEqual(
+			plugin.isVersionInstanceRunning(tempDir, "8.9"),
+			expected,
+		);
 	});
 
 	test("liveRecordedPids drops a recorded PID whose start signature no longer matches", () => {
@@ -3286,10 +3343,7 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
 
 		// Live PID → the record must survive.
-		plugin.writeRunningClusterRecord(tempDir, {
-			version: "8.9",
-			pids: [process.pid],
-		});
+		plugin.writeRunningClusterRecord(tempDir, liveSelfRecord());
 		plugin.clearStaleRunningClusterRecord(tempDir);
 		assert.notStrictEqual(plugin.readRunningClusterRecord(tempDir), null);
 	});
