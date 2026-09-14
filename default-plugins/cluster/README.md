@@ -67,6 +67,20 @@ patch releases.
 If the download server is unreachable, the aliases fall back to the values
 shipped in the plugin's `package.json`.
 
+### Resilient running-state tracking
+
+A running cluster is tracked both by c8run's own `.process` pidfiles (which live
+inside the version's install directory) **and** by a durable PID record kept at
+the cache root (`cluster.pids`). Because that record survives the version's
+install directory being replaced, upgraded, or removed while the cluster is
+still running, `cluster status` and `cluster stop` continue to see the live
+process — where they previously reported the cluster as *stopped* and left the
+process orphaned on its ports. To prevent orphaning in the first place, `delete`,
+`install` (rolling upgrade), and `purge` refuse to remove the install directory
+of a version whose instance is still running; stop the cluster first. If a
+process does end up orphaned (e.g. the directory was removed outside c8ctl),
+`cluster stop` terminates it directly using the recorded PID.
+
 ## How it works
 
 1. **Download**: Automatically downloads the correct c8run binary for your platform from the Camunda Download Center

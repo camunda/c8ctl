@@ -3,6 +3,7 @@
  */
 
 import assert from "node:assert";
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
 	existsSync,
@@ -2814,6 +2815,147 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 		writeFileSync(join(versionDir, "camunda.log"), String(process.pid));
 		const result = plugin.hasRunningClusterPidfiles(tempDir);
 		assert.strictEqual(result, false);
+	});
+
+	// #560 — the durable PID record must keep a running instance visible even
+	// after its install dir (and its .process pidfiles) is replaced/removed.
+	test("returns true from the durable PID record when the install dir is gone", () => {
+		// No c8run-* dirs at all — only the cache-root record, referencing a
+		// live PID (our own). This is the orphaned-process scenario.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), true);
+	});
+
+	test("returns false from the durable PID record when its PIDs are dead", () => {
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [999999999],
+		});
+		assert.strictEqual(plugin.hasRunningClusterPidfiles(tempDir), false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #560 — durable running-cluster PID record & orphan reaping
+// ---------------------------------------------------------------------------
+
+describe("Cluster Plugin – running-cluster PID record (#560)", () => {
+	let tempDir: string;
+
+	const waitFor = async (
+		predicate: () => boolean,
+		{ timeoutMs = 5000, pollMs = 50 } = {},
+	): Promise<void> => {
+		const deadline = Date.now() + timeoutMs;
+		while (!predicate() && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, pollMs));
+		}
+	};
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
+	});
+
+	afterEach(() => {
+		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	test("write/read/clear round-trips the record", () => {
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [111, 222, 111],
+		});
+		const record = plugin.readRunningClusterRecord(tempDir);
+		assert.strictEqual(record.version, "8.9");
+		// De-duplicated, positive integers only.
+		assert.deepStrictEqual([...record.pids].sort(), [111, 222]);
+
+		plugin.clearRunningClusterRecord(tempDir);
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
+
+	test("isVersionInstanceRunning is true from a live .process pidfile", () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(join(versionDir, "camunda.process"), String(process.pid));
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), true);
+	});
+
+	test("isVersionInstanceRunning is true from the record after the install dir is removed", () => {
+		// No install dir; only the durable record attributes a live PID to 8.9.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.9"), true);
+		// A different version is not implicated by that record.
+		assert.strictEqual(plugin.isVersionInstanceRunning(tempDir, "8.8"), false);
+	});
+
+	test("purgeInstalledVersion refuses to remove a running version's install dir", () => {
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		writeFileSync(join(versionDir, "camunda.process"), String(process.pid));
+
+		assert.throws(
+			() => plugin.purgeInstalledVersion({ cacheDir: tempDir, version: "8.9" }),
+			/still running/i,
+		);
+		// The install dir must survive the refused purge.
+		assert.strictEqual(existsSync(versionDir), true);
+	});
+
+	test("stopC8Run reaps an orphaned process the record still tracks after its install dir is gone", async () => {
+		// A real, long-lived child stands in for the orphaned Java process.
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			// Markers + record survive; the install dir (and its binary) does NOT,
+			// exactly as when a running version's cache dir is replaced/removed.
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+			plugin.writeRunningClusterRecord(tempDir, {
+				version: "8.9",
+				pids: [child.pid],
+			});
+
+			assert.strictEqual(plugin.isPidAlive(child.pid), true);
+
+			const stopped = await plugin.stopC8Run({
+				cacheDir: tempDir,
+				version: "8.9",
+			});
+
+			// The orphan is terminated…
+			await waitFor(() => !plugin.isPidAlive(child.pid));
+			assert.strictEqual(plugin.isPidAlive(child.pid), false);
+			// …markers and the record are cleaned up…
+			assert.strictEqual(existsSync(join(tempDir, "cluster.active")), false);
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+			// …and stop reports the version it stopped.
+			assert.strictEqual(stopped, "8.9");
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
 	});
 });
 
