@@ -1065,6 +1065,22 @@ export function isPidAlive(pid) {
  * platform/environment gives us nothing to fingerprint with (in which case
  * callers fall back to a liveness-only check). Never throws.
  */
+/**
+ * True on platforms where `processStartSignature()` can produce a real
+ * fingerprint (Linux, macOS/BSD, Windows). On any other platform no PID can be
+ * fingerprinted, so callers must degrade to a liveness-only reuse guard rather
+ * than dropping otherwise-trackable PIDs (#560).
+ */
+export function platformSupportsProcessSignature() {
+  const platform = osPlatform();
+  return (
+    platform === 'linux' ||
+    platform === 'darwin' ||
+    platform.endsWith('bsd') ||
+    platform === 'win32'
+  );
+}
+
 export function processStartSignature(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
     return null;
@@ -1096,6 +1112,12 @@ export function processStartSignature(pid) {
       const out = execFileSync('ps', ['-o', 'lstart=,comm=', '-p', String(pid)], {
         encoding: 'utf-8',
         timeout: 3000,
+        // `lstart` is rendered in the process locale, so a start under one
+        // LC_TIME and a stop under another would produce different strings for
+        // the SAME live process — `recordedPidIsLive()` would then reject the
+        // orphan as gone and never reap it. Pin a fixed C/POSIX locale so the
+        // signature is locale-independent and stable across invocations (#560).
+        env: { ...process.env, LC_ALL: 'C', LC_TIME: 'C', LANG: 'C' },
       }).trim();
       return out ? `ps:${out}` : null;
     }
@@ -1350,14 +1372,27 @@ export function liveRecordedPids(cacheDir) {
  * apart from an unrelated one that reused its PID.
  */
 export function recordRunningClusterPids(config) {
-  const pids = collectPidfilePids(config.cacheDir, { version: config.version }).filter((pid) =>
+  const livePids = collectPidfilePids(config.cacheDir, { version: config.version }).filter((pid) =>
     isPidAlive(pid),
   );
+  const canFingerprint = platformSupportsProcessSignature();
+  const pids = [];
   const signatures = {};
-  for (const pid of pids) {
+  for (const pid of livePids) {
     const sig = processStartSignature(pid);
     if (sig) {
       signatures[pid] = sig;
+      pids.push(pid);
+    } else if (!canFingerprint) {
+      // This platform can't fingerprint any process, so no recorded PID can
+      // carry a signature; keep it so the cluster stays trackable (the reuse
+      // guard degrades to a liveness-only check everywhere). On a platform that
+      // CAN fingerprint, a null signature for a PID that was alive at the check
+      // above means the process exited in that window — omit it, because
+      // persisting it without a signature would let a later reuse of the number
+      // fall back to numeric liveness and let the reap path signal an unrelated
+      // process (#560).
+      pids.push(pid);
     }
   }
   writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
@@ -2303,31 +2338,45 @@ export async function purgeClusterData(cacheDir, versionSpec) {
   }
 
   const config = { cacheDir, version: resolvedVersion };
-  if (!isC8RunInstalled(config)) {
+  const installDir = join(cacheDir, `c8run-${resolvedVersion}`);
+  if (!existsSync(installDir)) {
     logger.error(`Version ${resolvedVersion} is not installed locally.`);
     process.exit(1);
   }
 
-  const binaryPath = getC8RunBinaryPath(config);
-  const binaryDir = dirname(binaryPath);
+  // Runtime data normally sits next to the c8run binary. If the binary itself
+  // is missing but the install dir survives — a partial/corrupt install, or the
+  // orphan case where the binary was removed out from under a running cluster
+  // (#560) — fall back to scanning the install dir and its immediate subdirs so
+  // leftover data is still purged instead of being silently left behind.
+  const binaryPath = findC8RunBinaryPath(config);
+  const dataRoots = binaryPath
+    ? [dirname(binaryPath)]
+    : [
+        installDir,
+        ...readdirSync(installDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(installDir, entry.name)),
+      ];
 
   const deleted = [];
+  for (const dataRoot of dataRoots) {
+    // Delete camunda-data (history data + application state)
+    const camundaDataDir = join(dataRoot, 'camunda-data');
+    if (existsSync(camundaDataDir)) {
+      rmSync(camundaDataDir, { recursive: true });
+      deleted.push('camunda-data');
+    }
 
-  // Delete camunda-data (history data + application state)
-  const camundaDataDir = join(binaryDir, 'camunda-data');
-  if (existsSync(camundaDataDir)) {
-    rmSync(camundaDataDir, { recursive: true });
-    deleted.push('camunda-data');
-  }
-
-  // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
-  if (existsSync(binaryDir)) {
-    for (const entry of readdirSync(binaryDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
-      const dataDir = join(binaryDir, entry.name, 'data');
-      if (existsSync(dataDir)) {
-        rmSync(dataDir, { recursive: true });
-        deleted.push(join(entry.name, 'data'));
+    // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
+    if (existsSync(dataRoot)) {
+      for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
+        const dataDir = join(dataRoot, entry.name, 'data');
+        if (existsSync(dataDir)) {
+          rmSync(dataDir, { recursive: true });
+          deleted.push(join(entry.name, 'data'));
+        }
       }
     }
   }
@@ -2706,11 +2755,14 @@ export const commands = {
           if (!stoppedVersion) {
             logger.warn('Cannot determine which version to purge (version marker is missing). ' +
                 'To purge manually, run: c8ctl cluster purge <version>');
-          } else if (!isC8RunInstalled({ cacheDir: theCacheDir, version: stoppedVersion })) {
-            // The install dir is already gone — e.g. the orphan case where it was
-            // removed out from under a running cluster (#560). There is no runtime
-            // data left to purge, so treat it as already purged rather than letting
-            // purgeClusterData exit "not installed" and fail the combined command.
+          } else if (!existsSync(join(theCacheDir, `c8run-${stoppedVersion}`))) {
+            // The install dir itself is already gone — e.g. the orphan case
+            // where it was removed out from under a running cluster (#560).
+            // There is genuinely no runtime data left to purge, so treat it as
+            // already purged rather than letting purgeClusterData exit "not
+            // installed" and fail the combined command. If the install dir
+            // still exists (even with its binary missing), fall through to
+            // purgeClusterData so any leftover data is not silently retained.
             logger.info(
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );

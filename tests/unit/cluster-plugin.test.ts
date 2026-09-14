@@ -1953,6 +1953,31 @@ describe("Cluster Plugin – purgeClusterData", () => {
 		);
 	});
 
+	test("purges leftover data when the install dir survives but the binary is gone", async () => {
+		const binaryDir = makeFakeInstall(tempDir, "8.9", "c8run-8.9.9");
+		// Simulate a partial/corrupt install: the binary is gone but the install
+		// dir and its runtime data remain (e.g. the orphan case in #560).
+		rmSync(join(binaryDir, C8RUN_BINARY));
+		assert.strictEqual(
+			plugin.isC8RunInstalled({ cacheDir: tempDir, version: "8.9" }),
+			false,
+			"precondition: the binary must be absent",
+		);
+
+		await plugin.purgeClusterData(tempDir, "8.9");
+
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-data")),
+			false,
+			"camunda-data must be purged even with the binary missing",
+		);
+		assert.strictEqual(
+			existsSync(join(binaryDir, "camunda-zeebe-c8run-8.9.9", "data")),
+			false,
+			"zeebe data must be purged even with the binary missing",
+		);
+	});
+
 	test("errors and exits when version is not installed", async () => {
 		const restoreExit = mockProcessExit(() => {});
 		try {
@@ -3291,11 +3316,59 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 			}
 		}
 	});
-});
 
-// ---------------------------------------------------------------------------
-// secrets passthrough (#314)
-// ---------------------------------------------------------------------------
+	// #560 — on a platform that can fingerprint processes, a recorded PID must
+	// never be persisted without a signature: otherwise a number reused after
+	// the process exits would fall back to numeric-only liveness and the reap
+	// path could signal an unrelated process.
+	test("recordRunningClusterPids records no PID without a signature on a fingerprinting platform", async () => {
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			plugin.recordRunningClusterPids({ cacheDir: tempDir, version: "8.9" });
+
+			const record = plugin.readRunningClusterRecord(tempDir);
+			if (plugin.platformSupportsProcessSignature()) {
+				for (const recordedPid of record.pids) {
+					assert.ok(
+						record.signatures?.[recordedPid],
+						`recorded PID ${recordedPid} must carry a signature on a fingerprinting platform`,
+					);
+				}
+			}
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// #560 — the fingerprinting-capability check must be true on every
+	// CI-supported platform (Linux, macOS, Windows), so the record-building path
+	// omits un-fingerprintable PIDs rather than degrading to liveness-only.
+	test("platformSupportsProcessSignature is true on supported platforms", () => {
+		assert.strictEqual(plugin.platformSupportsProcessSignature(), true);
+	});
+});
 
 describe("Cluster Plugin – sliceSecretsArgv", () => {
 	function permutations<T>(items: readonly T[]): T[][] {
