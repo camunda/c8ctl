@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { mockProcessExit } from "../utils/mocks.ts";
+import { pollUntil } from "../utils/polling.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
@@ -1455,6 +1456,34 @@ describe("Cluster Plugin – clusterStatus", () => {
 			"Should report starting/unresponsive status",
 		);
 	});
+
+	// #560 — a live PID record with no active marker and an unreachable health
+	// endpoint is the orphaned-process case (install dir replaced/removed while
+	// running). Status must surface it as "running (untracked)" with recovery
+	// guidance rather than reporting the live cluster as stopped.
+	test('reports "running (untracked)" with a stop hint for an orphaned process (live record, no marker)', async () => {
+		// Live recorded PID (our own), no marker; beforeEach's fetch stub keeps
+		// the health endpoint unreachable.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+
+		await plugin.clusterStatus(tempDir);
+		const output = captured.join("\n");
+		assert.ok(
+			output.includes("running (untracked)"),
+			'Should report "running (untracked)" status for an orphaned process',
+		);
+		assert.ok(
+			output.includes("c8ctl cluster stop"),
+			"Should surface the cluster stop recovery hint",
+		);
+		assert.ok(
+			output.includes("8.9"),
+			"Should display the version resolved from the durable record",
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2845,16 +2874,6 @@ describe("Cluster Plugin – hasRunningClusterPidfiles", () => {
 describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 	let tempDir: string;
 
-	const waitFor = async (
-		predicate: () => boolean,
-		{ timeoutMs = 5000, pollMs = 50 } = {},
-	): Promise<void> => {
-		const deadline = Date.now() + timeoutMs;
-		while (!predicate() && Date.now() < deadline) {
-			await new Promise((r) => setTimeout(r, pollMs));
-		}
-	};
-
 	beforeEach(() => {
 		tempDir = mkdtempSync(join(tmpdir(), "c8ctl-test-"));
 	});
@@ -2940,7 +2959,7 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 			});
 
 			// The orphan is terminated…
-			await waitFor(() => !plugin.isPidAlive(child.pid));
+			await pollUntil(async () => !plugin.isPidAlive(child.pid), 5000, 50);
 			assert.strictEqual(plugin.isPidAlive(child.pid), false);
 			// …markers and the record are cleaned up…
 			assert.strictEqual(existsSync(join(tempDir, "cluster.active")), false);
@@ -2955,6 +2974,50 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 					// already gone
 				}
 			}
+		}
+	});
+
+	// #560 — a rolling `install` must refuse to replace a version's install dir
+	// while an instance started from it is still running (only the durable PID
+	// record, not a pidfile, may witness it). Otherwise the in-place upgrade
+	// orphans the process and frees none of its ports.
+	test("ensureC8RunInstalled rejects a rolling update while a live PID record exists, leaving the install intact", async () => {
+		const installDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(installDir, { recursive: true });
+		// A c8run binary so isC8RunInstalled() is true and findC8RunBinaryPath resolves.
+		writeFileSync(join(installDir, C8RUN_BINARY), "#!/bin/sh\n");
+		const config = { cacheDir: tempDir, version: "8.9", checkForUpdates: true };
+		// Stored ETag differs from the (stubbed) remote ETag → an update is available.
+		plugin.storeETag(config, "old-etag");
+		// The durable record is the ONLY witness that the version is still running
+		// (no .process pidfile), exactly the orphan-prevention path under test.
+		plugin.writeRunningClusterRecord(tempDir, {
+			version: "8.9",
+			pids: [process.pid],
+		});
+
+		const originalFetch = globalThis.fetch;
+		Object.defineProperty(globalThis, "fetch", {
+			value: async () => ({
+				ok: true,
+				headers: { get: (h: string) => (h === "etag" ? "new-etag" : null) },
+			}),
+			writable: true,
+			configurable: true,
+		});
+		try {
+			await assert.rejects(
+				() => plugin.ensureC8RunInstalled(config),
+				/still running/i,
+			);
+			// The install dir must survive the refused rolling update.
+			assert.strictEqual(existsSync(join(installDir, C8RUN_BINARY)), true);
+		} finally {
+			Object.defineProperty(globalThis, "fetch", {
+				value: originalFetch,
+				writable: true,
+				configurable: true,
+			});
 		}
 	});
 });

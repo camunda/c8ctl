@@ -75,11 +75,13 @@ the cache root (`cluster.pids`). Because that record survives the version's
 install directory being replaced, upgraded, or removed while the cluster is
 still running, `cluster status` and `cluster stop` continue to see the live
 process — where they previously reported the cluster as *stopped* and left the
-process orphaned on its ports. To prevent orphaning in the first place, `delete`,
-`install` (rolling upgrade), and `purge` refuse to remove the install directory
-of a version whose instance is still running; stop the cluster first. If a
-process does end up orphaned (e.g. the directory was removed outside c8ctl),
-`cluster stop` terminates it directly using the recorded PID.
+process orphaned on its ports. To prevent orphaning in the first place, `delete`
+and a rolling `install` refuse to **remove the install directory** of a version
+whose instance is still running, and `purge` refuses to **delete the runtime
+data** of a running version — note that `purge` only clears runtime/history data
+and always leaves the install directory itself in place. Stop the cluster first.
+If a process does end up orphaned (e.g. the directory was removed outside
+c8ctl), `cluster stop` terminates it directly using the recorded PID.
 
 ## How it works
 
