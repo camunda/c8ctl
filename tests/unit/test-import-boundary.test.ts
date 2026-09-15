@@ -68,6 +68,10 @@ function listTestFiles(): string[] {
 		for (const entry of entries) {
 			const abs = join(dir, entry.name);
 			if (entry.isDirectory()) {
+				// Other test files stage short-lived artifacts under hidden
+				// directories in tests/. They are not test sources and may
+				// disappear while this parallel suite is walking the tree.
+				if (entry.name.startsWith(".")) continue;
 				walk(abs);
 			} else if (entry.isFile() && entry.name.endsWith(".test.ts")) {
 				out.push(abs);

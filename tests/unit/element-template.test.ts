@@ -1781,6 +1781,65 @@ describe("CLI behavioural: element-template apply headless import", () => {
 			"stderr should not contain bpmn-js importer warnings",
 		);
 	});
+
+	test("emits the AI Agent Task agent definition binding", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-agent-definition-"));
+		const templatePath = join(tempDir, "ai-agent-task.json");
+		const bpmnPath = join(tempDir, "governed-instructions.bpmn");
+		writeFileSync(
+			templatePath,
+			JSON.stringify({
+				name: "AI Agent Task",
+				id: "io.camunda.connectors.agenticai.ai-agent-task.v2",
+				version: 2,
+				appliesTo: ["bpmn:Task"],
+				elementType: { value: "bpmn:ServiceTask" },
+				properties: [
+					{
+						value: "io.camunda.agenticai:aiagent:task:2",
+						binding: {
+							type: "zeebe:taskDefinition",
+							property: "type",
+						},
+						type: "Hidden",
+					},
+					{
+						value: "aiAgentTask",
+						binding: {
+							type: "zeebe:agentDefinition",
+							property: "agentType",
+						},
+						type: "Hidden",
+					},
+				],
+			}),
+		);
+		writeFileSync(
+			bpmnPath,
+			readFileSync(BPMN_FILE, "utf8").replaceAll(
+				"Activity_17s7axj",
+				"GovernedInstructionsTask",
+			),
+		);
+
+		try {
+			const result = await c8text(
+				"element-template",
+				"apply",
+				templatePath,
+				"GovernedInstructionsTask",
+				bpmnPath,
+			);
+
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.match(
+				result.stdout,
+				/<zeebe:agentDefinition agentType="aiAgentTask" \/>/,
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
