@@ -67,13 +67,29 @@ patch releases.
 If the download server is unreachable, the aliases fall back to the values
 shipped in the plugin's `package.json`.
 
+### Resilient running-state tracking
+
+A running cluster is tracked both by c8run's own `.process` pidfiles (which live
+inside the version's install directory) **and** by a durable PID record kept at
+the cache root (`cluster.pids`). Because that record survives the version's
+install directory being replaced, upgraded, or removed while the cluster is
+still running, `cluster status` and `cluster stop` continue to see the live
+process — where they previously reported the cluster as *stopped* and left the
+process orphaned on its ports. To prevent orphaning in the first place, `delete`
+and a rolling `install` refuse to **remove the install directory** of a version
+whose instance is still running, and `purge` refuses to **delete the runtime
+data** of a running version — note that `purge` only clears runtime/history data
+and always leaves the install directory itself in place. Stop the cluster first.
+If a process does end up orphaned (e.g. the directory was removed outside
+c8ctl), `cluster stop` terminates it directly using the recorded PID.
+
 ## How it works
 
 1. **Download**: Automatically downloads the correct c8run binary for your platform from the Camunda Download Center
 2. **Cache**: Stores downloaded binaries in a platform-specific cache directory
 3. **Start**: Launches c8run in the background and waits for the cluster to become healthy
 4. **Stop**: Gracefully shuts down the running cluster
-5. **Status**: Reports whether a cluster is running by checking the active marker file and the live health endpoint
+5. **Status**: Reports whether a cluster is running by checking the active marker file, the durable PID record (`cluster.pids`), and the live health endpoint — so it still detects a cluster whose install directory was replaced or removed while running
 6. **Logs**: Streams log output (camunda.log, connectors.log) from the running cluster using `tail -f`
 7. **List**: Shows all locally cached versions and the current resolved values of available version aliases
 8. **List-remote**: Queries the Camunda Download Center and displays all available versions

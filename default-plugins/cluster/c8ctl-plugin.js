@@ -8,12 +8,13 @@
  *   c8ctl cluster stop  [<version>]
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
   mkdirSync,
   writeFileSync,
+  renameSync,
   rmSync,
   readdirSync,
   readFileSync,
@@ -299,6 +300,8 @@ function fireAndForget(promise) {
   return promise.catch(() => {});
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // ---------------------------------------------------------------------------
 // Plugin metadata
 // ---------------------------------------------------------------------------
@@ -368,6 +371,12 @@ function getLogger() {
 
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
+// Durable running-cluster PID record, written at start time. Unlike c8run's
+// own `.process` pidfiles — which live INSIDE a version's install dir and
+// vanish when that dir is replaced or removed — this record lives at the
+// cache root, so a running instance stays trackable (status/stop) even after
+// its install directory is deleted or upgraded out from under it (#560).
+const PID_RECORD_FILE = 'cluster.pids';
 const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
 const HEALTH_CHECK_TIMEOUT_MS = 3_000;
 const ALIAS_COLUMN_WIDTH = 22;
@@ -663,6 +672,20 @@ export function getC8RunBinaryPath(config) {
 
 export function purgeInstalledVersion(config, { reason } = {}) {
   const logger = getLogger();
+
+  // Never remove a version's install dir while an instance started from it is
+  // still running — doing so orphans the process (it keeps holding its ports)
+  // and destroys the .process pidfiles c8ctl relied on to find it, so
+  // status/stop go blind (#560). This backstops every caller: the delete/purge
+  // subcommands guard earlier with a friendlier message, and the rolling-update
+  // path relies on this to refuse an in-place upgrade of a running version.
+  if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+    throw new Error(
+      `Refusing to remove c8run ${config.version}: an instance started from this version is still running. ` +
+        'Stop it first with "c8ctl cluster stop".',
+    );
+  }
+
   const installDir = join(config.cacheDir, `c8run-${config.version}`);
   const platformInfo = getPlatformIdentifier();
   const archiveFile = join(
@@ -752,6 +775,16 @@ export async function ensureC8RunInstalled(config) {
         logger.info(`c8run ${config.version} is already installed and up to date.`);
         return;
       }
+      // Refuse to replace a running version's install dir out from under it.
+      // purgeInstalledVersion throws if an instance is still running; surface
+      // an update-specific hint so the user knows to stop the cluster first.
+      if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+        throw new Error(
+          `A newer c8run ${config.version} is available, but an instance started from the current ` +
+            'install is still running. Updating now would orphan it and free none of its ports. ' +
+            'Stop it first with "c8ctl cluster stop", then re-run the install.',
+        );
+      }
       purgeInstalledVersion(config);
     } else {
       // Use local installation as-is (start subcommand, or pinned version)
@@ -774,6 +807,22 @@ export async function ensureC8RunInstalled(config) {
 
       return;
     }
+  }
+
+  // Reached the download/extract fallback. Either nothing is installed, or the
+  // install dir exists but its binary is missing/corrupt (isC8RunInstalled is
+  // false, so the guarded rolling-update branch above was skipped entirely).
+  // extractArchive writes into c8run-${version}; if an instance started from
+  // this version is still live — a partial/corrupt install whose processes are
+  // running — extracting would overwrite files under the live cluster and could
+  // corrupt it. Refuse here too, mirroring the rolling-update guard above, so a
+  // (re)install can never mutate a running install (#560).
+  if (isVersionInstanceRunning(config.cacheDir, config.version)) {
+    throw new Error(
+      `Refusing to (re)install c8run ${config.version}: an instance started from it is still running, ` +
+        'and extracting now would overwrite files under the live cluster. ' +
+        'Stop it first with "c8ctl cluster stop", then re-run the install.',
+    );
   }
 
   logger.info('No local installation found. Setting up...');
@@ -896,6 +945,23 @@ async function startC8Run(config, debug = false) {
     logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
     if (existsSync(markerFile)) rmSync(markerFile);
     if (existsSync(versionFile)) rmSync(versionFile);
+  } else if (hasRunningClusterPidfiles(config.cacheDir)) {
+    // No active marker, but a live process is still tracked — typically an
+    // orphan recorded only in the durable cache-root PID record after its
+    // install dir was replaced/removed (#560). Refuse rather than launch a
+    // second instance: a successful start would overwrite the record with a
+    // fresh snapshot (losing the orphan's PID), and on the default ports it
+    // would collide with the still-running process. Preserve the record so
+    // "c8ctl cluster stop" can still find and reap the orphan.
+    logger.warn(
+      'A cluster process appears to be running already (no active marker, but a live tracked process was found).',
+    );
+    const record = readRunningClusterRecord(config.cacheDir);
+    if (record?.version) {
+      logger.info(`Detected running version from the durable PID record: ${record.version}`);
+    }
+    logger.info('Stop it first with "c8ctl cluster stop".');
+    return;
   }
 
   logger.info('Starting Camunda 8 local cluster...');
@@ -960,6 +1026,28 @@ async function startC8Run(config, debug = false) {
   const isReady = await waitForClusterReady();
 
   if (isReady) {
+    // Publish the durable PID record BEFORE the active marker. If c8ctl is
+    // interrupted between these writes, a record-without-marker is recoverable
+    // (status/stop still see the live process via the record), whereas a
+    // marker-without-record would let the stale-marker cleanup path drop the
+    // markers and leave the process orphaned with no handle to reap it (#560).
+    //
+    // The record write is nevertheless best-effort: if it throws (e.g. the
+    // cache root is unwritable / disk full), we must NOT abort here and leave a
+    // just-started, healthy cluster with NEITHER a record NOR markers — that
+    // strands it for both `status` and `stop`. The install dir still exists at
+    // this point, so the markers + c8run's own `.process` pidfiles keep the
+    // cluster fully trackable and stoppable; only the extra orphan-recovery
+    // handle (needed later, if the dir is removed) is missing, which we warn on.
+    try {
+      recordRunningClusterPids(config);
+    } catch (error) {
+      logger.warn(
+        `Could not persist the durable cluster PID record (${
+          error instanceof Error ? error.message : String(error)
+        }); the cluster is still tracked via its markers and pidfiles.`,
+      );
+    }
     writeFileSync(markerFile, 'running');
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
@@ -973,21 +1061,161 @@ async function startC8Run(config, debug = false) {
   }
 }
 
-export function hasRunningClusterPidfiles(cacheDir) {
-  if (!existsSync(cacheDir)) {
+/** True when a PID refers to a live process. EPERM (owned by another user) counts as alive. */
+export function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return Boolean(error && error.code === 'EPERM');
+  }
+}
 
-  const versionDirs = readdirSync(cacheDir, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isDirectory() && entry.name.startsWith('c8run-'),
-    )
-    .map((entry) => join(cacheDir, entry.name));
+/**
+ * A best-effort, platform-native "start signature" for a PID — enough to tell
+ * the ORIGINAL process apart from an unrelated one that reused the same numeric
+ * PID after the original exited. Returns a stable string, or null when the
+ * platform/environment gives us nothing to fingerprint with (in which case
+ * callers fall back to a liveness-only check). Never throws.
+ */
+/**
+ * True on platforms where `processStartSignature()` can produce a real
+ * fingerprint (Linux, macOS/BSD, Windows). On any other platform no PID can be
+ * fingerprinted, so callers must degrade to a liveness-only reuse guard rather
+ * than dropping otherwise-trackable PIDs (#560).
+ */
+export function platformSupportsProcessSignature() {
+  const platform = osPlatform();
+  return (
+    platform === 'linux' ||
+    platform === 'darwin' ||
+    platform.endsWith('bsd') ||
+    platform === 'win32'
+  );
+}
 
-  // Scan each version dir and its immediate subdirectories (max depth 1)
-  // rather than a full recursive DFS — c8run installs can contain large
-  // extracted trees, logs, and data that would make a deep walk slow.
+export function processStartSignature(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  const platform = osPlatform();
+  try {
+    if (platform === 'linux') {
+      // /proc/<pid>/stat field 22 is the process start time (clock ticks since
+      // boot) — fixed for the life of the process and re-assigned with the PID,
+      // so it distinguishes a reused PID. `comm` (field 2) can contain spaces
+      // and parentheses, so parse the numeric fields from the LAST ')'.
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+      const rparen = stat.lastIndexOf(')');
+      if (rparen === -1) return null;
+      const fields = stat.slice(rparen + 1).trim().split(/\s+/);
+      // After ')' the fields are state(3), ppid(4), …; starttime is field 22,
+      // i.e. index 19 of this remainder (22 - 3).
+      const starttime = fields[19];
+      return starttime ? `linux:${starttime}` : null;
+    }
+    if (platform === 'darwin' || platform.endsWith('bsd')) {
+      // `ps -o lstart=` prints the process start timestamp, but only at
+      // ONE-SECOND resolution — a PID reused within that same second would
+      // reproduce it, and macOS `ps` exposes no higher-resolution creation
+      // time. Pair it with the executable path (`comm=`), which is fixed for
+      // the life of the process and an unrelated process that reused the PID
+      // will not share. The combined fingerprint means `recordedPidIsLive()`
+      // rejects such a replacement instead of signalling an unrelated process.
+      const out = execFileSync('ps', ['-o', 'lstart=,comm=', '-p', String(pid)], {
+        encoding: 'utf-8',
+        timeout: 3000,
+        // `lstart` is rendered in the process locale, so a start under one
+        // LC_TIME and a stop under another would produce different strings for
+        // the SAME live process — `recordedPidIsLive()` would then reject the
+        // orphan as gone and never reap it. Pin a fixed C/POSIX locale so the
+        // signature is locale-independent and stable across invocations (#560).
+        env: { ...process.env, LC_ALL: 'C', LC_TIME: 'C', LANG: 'C' },
+      }).trim();
+      return out ? `ps:${out}` : null;
+    }
+    if (platform === 'win32') {
+      // Windows is a supported platform (#560): fingerprint with the process
+      // creation time from CIM/WMI. Paired with the PID it distinguishes the
+      // original process from an unrelated one that reused the numeric PID.
+      // Guard the null case so a missing PID yields empty output (→ null) rather
+      // than a property access on $null throwing.
+      const out = execFileSync(
+        'powershell',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+            `if ($p) { $p.CreationDate.ToString('o') }`,
+        ],
+        { encoding: 'utf-8', timeout: 5000 },
+      ).trim();
+      return out ? `win:${out}` : null;
+    }
+  } catch {
+    // No signature available — the caller falls back to a liveness-only check.
+  }
+  return null;
+}
+
+/**
+ * True when `pid` is alive AND, where we captured a start signature for it, that
+ * signature still matches — i.e. it is the ORIGINAL recorded process, not an
+ * unrelated one that reused the PID after the original exited. A recorded entry
+ * with NO signature is trusted (liveness only) ONLY on platforms that cannot
+ * fingerprint at all; on a fingerprinting platform our writer never persists a
+ * signature-less PID (#568), so a signature-less entry there can only be a
+ * stale/legacy/hand-edited `cluster.pids` and is rejected rather than risk
+ * signalling a reused, unrelated process. When a signature WAS recorded but the
+ * platform cannot reproduce one now (transient `ps` failure), the guard still
+ * degrades to liveness only, never inventing a false negative that would strand
+ * a real orphan.
+ */
+export function recordedPidIsLive(pid, signature) {
+  if (!isPidAlive(pid)) {
+    return false;
+  }
+  if (!signature) {
+    // No signature recorded. On a fingerprinting platform this can only be a
+    // stale/legacy/hand-edited record (our writer always signs live PIDs there
+    // now), whose bare numeric liveness could match a reused unrelated process
+    // — refuse it. Only non-fingerprinting platforms keep the liveness-only
+    // degrade, since there no recorded PID can ever carry a signature and
+    // rejecting would strand every real orphan (#560/#568).
+    return !platformSupportsProcessSignature();
+  }
+  const current = processStartSignature(pid);
+  return current === null || current === signature;
+}
+
+/**
+ * Collect the PIDs recorded in c8run `.process` pidfiles under `cacheDir`.
+ * When `version` is given only that version's install dir is scanned;
+ * otherwise every `c8run-*` install dir is scanned. Each install dir and its
+ * immediate subdirectories are scanned (max depth 1) rather than a full
+ * recursive DFS — c8run installs can contain large extracted trees, logs, and
+ * data that would make a deep walk slow. Returns parsed positive integers
+ * (alive or not); the caller decides liveness.
+ */
+export function collectPidfilePids(cacheDir, { version } = {}) {
+  const pids = [];
+  if (!existsSync(cacheDir)) {
+    return pids;
+  }
+
+  let versionDirs;
+  if (version) {
+    versionDirs = [join(cacheDir, `c8run-${version}`)];
+  } else {
+    versionDirs = readdirSync(cacheDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('c8run-'))
+      .map((entry) => join(cacheDir, entry.name));
+  }
+
   for (const versionDir of versionDirs) {
     let entries;
     try {
@@ -1016,34 +1244,299 @@ export function hasRunningClusterPidfiles(cacheDir) {
         if (!entry.isFile() || !entry.name.endsWith('.process')) {
           continue;
         }
-
-        const entryPath = join(dir, entry.name);
-
         let pid;
         try {
-          pid = Number.parseInt(readFileSync(entryPath, 'utf-8').trim(), 10);
+          pid = Number.parseInt(readFileSync(join(dir, entry.name), 'utf-8').trim(), 10);
         } catch {
           // Pidfile may have been removed between listing and reading.
           continue;
         }
-
-        if (!Number.isInteger(pid) || pid <= 0) {
-          continue;
-        }
-
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (error) {
-          if (error && error.code === 'EPERM') {
-            return true;
-          }
+        if (Number.isInteger(pid) && pid > 0) {
+          pids.push(pid);
         }
       }
     }
   }
 
-  return false;
+  return pids;
+}
+
+function getPidRecordPath(cacheDir) {
+  return join(cacheDir, PID_RECORD_FILE);
+}
+
+/**
+ * Read the durable running-cluster PID record (see PID_RECORD_FILE). Returns
+ * `{ version, pids }` or null when absent/unparseable. This record lives at
+ * the cache root, so it survives a running version's install dir being
+ * replaced or deleted — the case that otherwise orphans the process (#560).
+ */
+export function readRunningClusterRecord(cacheDir) {
+  const filePath = getPidRecordPath(cacheDir);
+  if (!existsSync(filePath)) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const version = typeof parsed.version === 'string' && parsed.version ? parsed.version : null;
+  const pids = Array.isArray(parsed.pids)
+    ? parsed.pids.filter((pid) => Number.isInteger(pid) && pid > 0)
+    : [];
+  const signatures =
+    parsed.signatures && typeof parsed.signatures === 'object' && !Array.isArray(parsed.signatures)
+      ? Object.fromEntries(
+          Object.entries(parsed.signatures).filter(
+            ([pid, sig]) => Number.isInteger(Number(pid)) && typeof sig === 'string' && sig,
+          ),
+        )
+      : {};
+  // Reject any record that lacks a non-empty version attribution. A record
+  // with no version but stray PIDs (e.g. a malformed/hand-edited cluster.pids)
+  // would otherwise let liveRecordedPids()/reapClusterProcesses() treat those
+  // PIDs as cluster-owned and signal them with no version to attribute them to
+  // — a path to killing an unrelated live process during `cluster stop` (#560).
+  if (!version) {
+    return null;
+  }
+  // Reject a record whose version fails the same path-traversal guard applied
+  // to CLI-supplied versions. `version` is later interpolated into join() paths
+  // by getC8RunBinaryPath during `cluster stop`, so a malformed record such as
+  // `foo/../../tmp` could otherwise bypass validateVersionSpec and make stop
+  // inspect/execute a binary outside the cache root (#560). Treat an invalid
+  // record as unusable rather than trusting on-disk state.
+  try {
+    validateVersionSpec(version);
+  } catch {
+    return null;
+  }
+  return { version, pids, signatures };
+}
+
+/** Persist the durable running-cluster PID record. */
+export function writeRunningClusterRecord(cacheDir, { version, pids, signatures }) {
+  mkdirSync(cacheDir, { recursive: true });
+  const cleanPids = Array.isArray(pids)
+    ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
+    : [];
+  const cleanSignatures = {};
+  if (signatures && typeof signatures === 'object' && !Array.isArray(signatures)) {
+    for (const pid of cleanPids) {
+      const sig = signatures[pid];
+      if (typeof sig === 'string' && sig) {
+        cleanSignatures[pid] = sig;
+      }
+    }
+  }
+  // `cluster.pids` is the ONLY recovery handle once an install dir disappears,
+  // so the write must be crash-safe: serialise to a sibling temp file and
+  // atomically rename it into place. An interruption then leaves either the
+  // previous valid record or the new one — never a truncated/unparseable file
+  // that would make status/stop lose the orphan PID (#560).
+  const finalPath = getPidRecordPath(cacheDir);
+  const tmpPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify({
+    version: version ?? null,
+    pids: cleanPids,
+    signatures: cleanSignatures,
+  });
+  try {
+    writeFileSync(tmpPath, payload);
+    renameSync(tmpPath, finalPath);
+  } catch (error) {
+    try {
+      if (existsSync(tmpPath)) rmSync(tmpPath);
+    } catch {
+      // best effort — nothing more we can do about a leftover temp file
+    }
+    throw error;
+  }
+}
+
+/** Remove the durable running-cluster PID record if present. */
+export function clearRunningClusterRecord(cacheDir) {
+  const filePath = getPidRecordPath(cacheDir);
+  if (existsSync(filePath)) {
+    rmSync(filePath);
+  }
+}
+
+/**
+ * Retire the durable record when it no longer tracks any LIVE process. A stale
+ * record left by a crash, a forced kill, or an already-stopped cluster keeps
+ * dead PIDs in `cluster.pids`; on a platform where signature capture is
+ * unavailable the liveness-only fallback would later mistake a reused PID for
+ * this cluster — blocking a start and risking an unrelated process during stop
+ * (#560). Safe to call from any cleanup / no-running path: a no-op when the
+ * record is absent or still has at least one live recorded PID.
+ */
+export function clearStaleRunningClusterRecord(cacheDir) {
+  if (readRunningClusterRecord(cacheDir) && liveRecordedPids(cacheDir).length === 0) {
+    clearRunningClusterRecord(cacheDir);
+  }
+}
+
+/** The still-live PIDs from the durable running-cluster record. */
+export function liveRecordedPids(cacheDir) {
+  const record = readRunningClusterRecord(cacheDir);
+  if (!record) {
+    return [];
+  }
+  return record.pids.filter((pid) => recordedPidIsLive(pid, record.signatures?.[pid]));
+}
+
+/**
+ * Snapshot the live c8run PIDs for the just-started version into the durable
+ * cache-root record, so the cluster stays trackable (status/stop) even if its
+ * install dir is later replaced or removed (#560). Each PID is fingerprinted
+ * with a start signature so a later stop/status can tell the recorded process
+ * apart from an unrelated one that reused its PID.
+ */
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature } = {}) {
+  const canFingerprint = platformSupportsProcessSignature();
+  const pids = [];
+  const signatures = {};
+  for (const pid of collectPidfilePids(config.cacheDir, { version: config.version })) {
+    if (canFingerprint) {
+      // Capture identity with a SINGLE combined liveness+fingerprint operation.
+      // processStartSignature runs one `ps`/PowerShell query that already
+      // returns null for a dead PID, so — unlike a separate isPidAlive()
+      // pre-check followed by a later signature capture — there is no window in
+      // which the liveness probe and the fingerprint could observe two
+      // different processes and record a reused PID's identity as c8run's
+      // (#560). A null result means the PID is not a live, fingerprintable
+      // process, so it is omitted: persisting it without a signature would let
+      // a later reuse of the number fall back to numeric liveness and let the
+      // reap path signal an unrelated process.
+      const sig = signatureOf(pid);
+      if (sig) {
+        signatures[pid] = sig;
+        pids.push(pid);
+      }
+    } else if (isPidAlive(pid)) {
+      // This platform can't fingerprint any process, so no recorded PID can
+      // carry a signature; keep the live PID so the cluster stays trackable
+      // (the reuse guard degrades to a liveness-only check everywhere).
+      pids.push(pid);
+    }
+  }
+  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
+}
+
+/**
+ * True when an instance started from the given version is still running,
+ * either via a live `.process` pidfile in its install dir or via the durable
+ * PID record attributing a live process to that version.
+ */
+export function isVersionInstanceRunning(cacheDir, version) {
+  if (collectPidfilePids(cacheDir, { version }).some((pid) => isPidAlive(pid))) {
+    return true;
+  }
+  const record = readRunningClusterRecord(cacheDir);
+  return Boolean(
+    record &&
+      record.version === version &&
+      record.pids.some((pid) => recordedPidIsLive(pid, record.signatures?.[pid])),
+  );
+}
+
+/**
+ * Send SIGTERM to a PID, wait up to `graceMs` for it to exit, then SIGKILL.
+ * Returns true once the process is confirmed gone.
+ */
+async function terminatePid(pid, { signature, graceMs = 5000, pollMs = 200 } = {}) {
+  // Revalidate the recorded identity before EVERY signal, not just numeric
+  // liveness. If the original process exits and its PID is reused (e.g. during
+  // the SIGTERM grace window), the captured start signature no longer matches
+  // and we must NOT escalate to an unrelated process (#560). recordedPidIsLive
+  // degrades to a liveness-only check when no signature was captured.
+  if (!recordedPidIsLive(pid, signature)) {
+    return false;
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // Already exited or not permitted — fall through to the liveness check.
+  }
+  const deadline = Date.now() + graceMs;
+  // Poll for exit with a CHEAP liveness probe (signal 0 — no subprocess). A
+  // process' start signature is immutable while it lives, so re-running the
+  // external `ps`/PowerShell signature query on every 200 ms poll would spawn
+  // dozens of subprocesses (each with a multi-second timeout) and make stop
+  // block far beyond graceMs on a slow host. We still revalidate the recorded
+  // IDENTITY (signature) immediately before the SIGKILL escalation below, so a
+  // PID reused during the grace window can never be signalled as if it were the
+  // tracked process (#560).
+  while (isPidAlive(pid) && Date.now() < deadline) {
+    await sleep(pollMs);
+  }
+  if (recordedPidIsLive(pid, signature)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Best effort — nothing more we can do.
+    }
+    await sleep(pollMs);
+  }
+  // Confirmed gone once the ORIGINAL recorded process is no longer live — a
+  // signature mismatch (PID reuse) counts as gone: the process we tracked ended.
+  return !recordedPidIsLive(pid, signature);
+}
+
+/**
+ * Terminate any cluster processes still alive under `cacheDir` — those named
+ * by the durable PID record, each of which is validated against its recorded
+ * start signature before we signal it. This is the stop backstop for the
+ * orphan case (#560), where `c8run stop` cannot reach a process whose install
+ * dir / pidfiles were removed. We deliberately do NOT scan raw `.process`
+ * pidfiles here: they carry no start-signature, span every cached version, and
+ * a stale pidfile whose numeric PID was reused would make us SIGTERM/SIGKILL an
+ * unrelated process. Raw pidfiles remain c8run's own responsibility. Never
+ * targets this process (or its parent). Returns the count actually terminated.
+ */
+export async function reapClusterProcesses(cacheDir) {
+  const record = readRunningClusterRecord(cacheDir);
+  const signatures = record?.signatures ?? {};
+  const targets = new Set(liveRecordedPids(cacheDir));
+  // Guard against ever signalling the c8ctl process itself (or its parent) —
+  // a cluster's Java process is never c8ctl, and tests stand in with own PIDs.
+  targets.delete(process.pid);
+  if (typeof process.ppid === 'number') {
+    targets.delete(process.ppid);
+  }
+
+  let reaped = 0;
+  for (const pid of targets) {
+    // Carry the recorded start signature into termination so each signal is
+    // gated on the ORIGINAL identity, not bare numeric liveness (#560).
+    if (await terminatePid(pid, { signature: signatures[pid] })) {
+      reaped += 1;
+    }
+  }
+  return reaped;
+}
+
+export function hasRunningClusterPidfiles(cacheDir) {
+  if (!existsSync(cacheDir)) {
+    return false;
+  }
+
+  // Primary signal: c8run's own .process pidfiles inside the install dirs.
+  if (collectPidfilePids(cacheDir).some((pid) => isPidAlive(pid))) {
+    return true;
+  }
+
+  // Fallback: the durable cache-root PID record. This still resolves after a
+  // running version's install dir (and with it the .process pidfiles) has been
+  // replaced or deleted, which would otherwise make c8ctl report the live
+  // cluster as stopped and leave its process orphaned (#560).
+  return liveRecordedPids(cacheDir).length > 0;
 }
 
 export async function stopC8Run(config, debug = false) {
@@ -1055,6 +1548,9 @@ export async function stopC8Run(config, debug = false) {
   const clusterAppearsRunning = hasRunningClusterPidfiles(config.cacheDir);
 
   if (!markerExists && !clusterAppearsRunning) {
+    // Nothing live to stop. Retire any stale record left by a crash/kill so its
+    // dead PIDs cannot later be mistaken for this cluster (#560).
+    clearStaleRunningClusterRecord(config.cacheDir);
     logger.warn(
       'No cluster is currently running.',
     );
@@ -1076,6 +1572,7 @@ export async function stopC8Run(config, debug = false) {
     if (existsSync(markerFile)) {
       rmSync(markerFile);
     }
+    clearRunningClusterRecord(config.cacheDir);
     return staleVersion;
   }
 
@@ -1103,6 +1600,16 @@ export async function stopC8Run(config, debug = false) {
     if (markerVersion) {
       stoppedVersion = markerVersion;
       versionsToTry.push(markerVersion);
+    }
+  }
+
+  // Fall back to the durable PID record's version when the marker is gone —
+  // this is the version whose install dir may have been removed (#560).
+  if (versionsToTry.length === 0) {
+    const record = readRunningClusterRecord(config.cacheDir);
+    if (record?.version) {
+      stoppedVersion = record.version;
+      versionsToTry.push(record.version);
     }
   }
 
@@ -1195,23 +1702,67 @@ export async function stopC8Run(config, debug = false) {
     }
   }
 
-  // Always clean up markers, even if stop failed — a stale marker
-  // would permanently block future starts.
+  // Reap any cluster processes still alive after the c8run stop attempt(s).
+  // In the orphan case (#560) the version's install dir — and with it the
+  // .process pidfiles c8run's own stop relies on — was replaced or removed
+  // while the process kept running, so `c8run stop` cannot see it. The durable
+  // cache-root PID record lets us find and terminate the process directly.
+  const reaped = await reapClusterProcesses(config.cacheDir);
+  if (reaped > 0) {
+    hadSuccessfulStop = true;
+    logger.warn(
+      `Terminated ${reaped} orphaned cluster process${reaped === 1 ? '' : 'es'} that c8run no longer tracked.`,
+    );
+  }
+
+  // Markers are always cleared (a stale marker or version file would block
+  // future starts), but the durable PID record is the ONLY handle to an orphan.
+  // If reaping could not confirm every recorded process dead — e.g. signalling
+  // returned EPERM, or the kill did not land — keep the record so a later
+  // "c8ctl cluster stop" can retry. Only clear it once every recorded PID is
+  // confirmed gone (#560).
   if (existsSync(markerFile)) {
     rmSync(markerFile);
   }
   if (existsSync(versionFile)) {
     rmSync(versionFile);
   }
-
-  if (attempted === 0) {
-    throw new Error(
-      'Could not find an installed c8run binary to execute stop.',
+  const remainingPids = liveRecordedPids(config.cacheDir);
+  if (remainingPids.length === 0) {
+    clearRunningClusterRecord(config.cacheDir);
+  } else {
+    logger.warn(
+      'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
+        'PID record so "c8ctl cluster stop" can retry.',
     );
   }
 
-  if (!hadSuccessfulStop && lastError) {
+  if (attempted === 0 && !hadSuccessfulStop) {
+    // ...but only when there is nothing left to reap. If a recorded process is
+    // still alive (e.g. reaping hit EPERM), the incomplete-stop diagnostic
+    // below carries the actionable PID/retry guidance and must win over this
+    // generic "no binary" message even though the install dir is gone (#560).
+    if (remainingPids.length === 0) {
+      throw new Error(
+        'Could not find an installed c8run binary to execute stop.',
+      );
+    }
+  } else if (!hadSuccessfulStop && lastError && remainingPids.length === 0) {
     throw lastError;
+  }
+
+  // A partial stop is still a FAILED stop: if any recorded PID is confirmed
+  // alive after reaping, the cluster may still hold its ports, so a fresh start
+  // would collide. Surface it as an error (the record was retained above) so
+  // the CLI exits non-zero and the user retries, rather than reporting success
+  // while an orphan lingers (#560).
+  if (remainingPids.length > 0) {
+    throw new Error(
+      `Stop incomplete: ${remainingPids.length} recorded cluster process${
+        remainingPids.length === 1 ? '' : 'es'
+      } could not be confirmed stopped (PID${remainingPids.length === 1 ? '' : 's'}: ${remainingPids.join(', ')}). ` +
+        'The durable PID record was kept — retry with "c8ctl cluster stop".',
+    );
   }
 
   logger.info('Cluster stopped.');
@@ -1529,9 +2080,15 @@ export async function clusterStatus(cacheDir) {
   const versionFile = join(cacheDir, VERSION_MARKER_FILE);
 
   const markerExists = existsSync(markerFile);
-  const version = markerExists && existsSync(versionFile)
+  const record = readRunningClusterRecord(cacheDir);
+  // A live process may exist without (or despite) a marker — e.g. after its
+  // install dir was replaced/removed, orphaning it (#560). Detect it so status
+  // never reports "stopped" while a tracked cluster process is still alive.
+  const processesRunning = hasRunningClusterPidfiles(cacheDir);
+  const markerVersion = markerExists && existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim() || null
     : null;
+  const version = markerVersion ?? record?.version ?? null;
 
   // Check live health endpoint regardless of marker
   let isHealthy = false;
@@ -1551,8 +2108,18 @@ export async function clusterStatus(cacheDir) {
     // Health endpoint not reachable
   }
 
+  // A cluster process is alive but not tracked by a marker — typically an
+  // orphan left after its install dir was replaced/removed (#560).
+  const untracked = !markerExists && processesRunning;
+
+  // `untracked` takes precedence over a healthy probe: an orphaned process can
+  // still serve the health endpoint while holding its ports, and the operator
+  // must be told it is no longer tracked (and how to recover) rather than shown
+  // a plain "running". Healthy connection URLs are still surfaced below.
   let status;
-  if (isHealthy) {
+  if (untracked) {
+    status = 'running (untracked)';
+  } else if (isHealthy) {
     status = 'running';
   } else if (markerExists) {
     status = 'starting or unresponsive';
@@ -1561,11 +2128,21 @@ export async function clusterStatus(cacheDir) {
   }
 
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
-    logger.json({ status, version, urls: isHealthy ? CLUSTER_URLS : undefined });
+    // Machine-readable status must carry the SAME recovery guidance the text
+    // renderer prints below for an orphan, otherwise a `--json` consumer sees
+    // `running (untracked)` with no actionable instruction (#560).
+    logger.json({
+      status,
+      version,
+      urls: isHealthy ? CLUSTER_URLS : undefined,
+      recovery: untracked
+        ? 'A cluster process is still running but is no longer tracked by c8ctl (its install directory was likely replaced or removed while running). Stop it with: c8ctl cluster stop'
+        : undefined,
+    });
     return;
   }
 
-  if (!markerExists && !isHealthy) {
+  if (!markerExists && !isHealthy && !processesRunning) {
     console.log('Cluster status: stopped');
     console.log('');
     console.log('  Start with: c8ctl cluster start');
@@ -1586,7 +2163,15 @@ export async function clusterStatus(cacheDir) {
     console.log('  - Health:     ' + CLUSTER_URLS.health);
     console.log('');
     console.log('  Default credentials: demo / demo');
-  } else {
+  }
+
+  if (untracked) {
+    // Shown even when the orphan is healthy: it is still not tracked by c8ctl.
+    console.log('');
+    console.log('  A cluster process is still running but is no longer tracked by c8ctl');
+    console.log('  (its install directory was likely replaced or removed while running).');
+    console.log('  Stop it with: c8ctl cluster stop');
+  } else if (!isHealthy) {
     console.log('');
     console.log('  The cluster appears to have been started but is not yet responding.');
     console.log('  Run "c8ctl cluster status" again in a moment, or check the logs.');
@@ -1767,6 +2352,9 @@ export async function deleteVersion(cacheDir, versionSpec) {
   }
 
   purgeInstalledVersion(config, { reason: 'as requested' });
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
   logger.info(`Version ${versionSpec} has been deleted.`);
 }
 
@@ -1803,31 +2391,45 @@ export async function purgeClusterData(cacheDir, versionSpec) {
   }
 
   const config = { cacheDir, version: resolvedVersion };
-  if (!isC8RunInstalled(config)) {
+  const installDir = join(cacheDir, `c8run-${resolvedVersion}`);
+  if (!existsSync(installDir)) {
     logger.error(`Version ${resolvedVersion} is not installed locally.`);
     process.exit(1);
   }
 
-  const binaryPath = getC8RunBinaryPath(config);
-  const binaryDir = dirname(binaryPath);
+  // Runtime data normally sits next to the c8run binary. If the binary itself
+  // is missing but the install dir survives — a partial/corrupt install, or the
+  // orphan case where the binary was removed out from under a running cluster
+  // (#560) — fall back to scanning the install dir and its immediate subdirs so
+  // leftover data is still purged instead of being silently left behind.
+  const binaryPath = findC8RunBinaryPath(config);
+  const dataRoots = binaryPath
+    ? [dirname(binaryPath)]
+    : [
+        installDir,
+        ...readdirSync(installDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => join(installDir, entry.name)),
+      ];
 
   const deleted = [];
+  for (const dataRoot of dataRoots) {
+    // Delete camunda-data (history data + application state)
+    const camundaDataDir = join(dataRoot, 'camunda-data');
+    if (existsSync(camundaDataDir)) {
+      rmSync(camundaDataDir, { recursive: true });
+      deleted.push('camunda-data');
+    }
 
-  // Delete camunda-data (history data + application state)
-  const camundaDataDir = join(binaryDir, 'camunda-data');
-  if (existsSync(camundaDataDir)) {
-    rmSync(camundaDataDir, { recursive: true });
-    deleted.push('camunda-data');
-  }
-
-  // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
-  if (existsSync(binaryDir)) {
-    for (const entry of readdirSync(binaryDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
-      const dataDir = join(binaryDir, entry.name, 'data');
-      if (existsSync(dataDir)) {
-        rmSync(dataDir, { recursive: true });
-        deleted.push(join(entry.name, 'data'));
+    // Delete Zeebe journal data inside camunda-zeebe-* subdirectory
+    if (existsSync(dataRoot)) {
+      for (const entry of readdirSync(dataRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !entry.name.startsWith('camunda-zeebe-')) continue;
+        const dataDir = join(dataRoot, entry.name, 'data');
+        if (existsSync(dataDir)) {
+          rmSync(dataDir, { recursive: true });
+          deleted.push(join(entry.name, 'data'));
+        }
       }
     }
   }
@@ -1840,6 +2442,9 @@ export async function purgeClusterData(cacheDir, versionSpec) {
   } else {
     logger.info(`No runtime data found for ${resolvedVersion} — nothing to delete.`);
   }
+  // Retire a stale durable record with no live PIDs so its dead (possibly
+  // reused) PIDs are not later mistaken for this cluster (#560).
+  clearStaleRunningClusterRecord(cacheDir);
   logger.info(`Binary and installed files preserved. Start fresh with: c8ctl cluster start ${resolvedVersion}`);
 }
 
@@ -2203,6 +2808,17 @@ export const commands = {
           if (!stoppedVersion) {
             logger.warn('Cannot determine which version to purge (version marker is missing). ' +
                 'To purge manually, run: c8ctl cluster purge <version>');
+          } else if (!existsSync(join(theCacheDir, `c8run-${stoppedVersion}`))) {
+            // The install dir itself is already gone — e.g. the orphan case
+            // where it was removed out from under a running cluster (#560).
+            // There is genuinely no runtime data left to purge, so treat it as
+            // already purged rather than letting purgeClusterData exit "not
+            // installed" and fail the combined command. If the install dir
+            // still exists (even with its binary missing), fall through to
+            // purgeClusterData so any leftover data is not silently retained.
+            logger.info(
+              `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
+            );
           } else {
             await purgeClusterData(theCacheDir, stoppedVersion);
           }
