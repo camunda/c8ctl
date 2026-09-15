@@ -76,6 +76,22 @@ Explicitly named files are always deployed regardless of extension — the exten
 c8 deploy ./custom-resource.unsupported
 ```
 
+### Prototype: governed Markdown identity
+
+For the governed-instructions prototype, a Markdown resource can declare a stable deployment identity in YAML frontmatter:
+
+```markdown
+---
+camunda:
+  resourceId: claims-review-instructions.md
+---
+# Claims review instructions
+```
+
+`c8ctl` uploads this resource under the `camunda.resourceId` value and removes the frontmatter from the uploaded content. If the key is absent, the Markdown filename remains the resource ID. Malformed frontmatter, duplicate identity keys, and multiple Markdown files with the same resolved resource ID in one deployment are rejected before upload. This preprocessing applies only to `.md` files; BPMN, DMN, forms, and other generic resources are unchanged.
+
+This is a narrow client-side prototype for recording and validation. A server-owned identity field in the deployment API remains the preferred permanent contract because it avoids encoding resource identity in the multipart filename.
+
 Use `--force` to disable extension filtering during directory discovery, deploying every file found regardless of extension:
 
 ```bash

@@ -34,6 +34,7 @@ import {
 	meetsMinExtensionVersion,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
+import { prepareMarkdownResources } from "./markdown-resource.ts";
 
 const PROCESS_APPLICATION_FILE = ".process-application";
 
@@ -123,6 +124,7 @@ function extractDefinitionId(
 interface ResourceFile {
 	path: string;
 	name: string;
+	deploymentName: string;
 	content: Buffer;
 	isBuildingBlock: boolean;
 	isProcessApplication: boolean;
@@ -264,6 +266,7 @@ function collectResourceFiles(
 		collected.push({
 			path: dirPath,
 			name: basename(dirPath),
+			deploymentName: basename(dirPath),
 			content: readFileSync(dirPath),
 			isBuildingBlock: groupInfo.type === "bb",
 			isProcessApplication: groupInfo.type === "pa",
@@ -347,6 +350,7 @@ function collectResourceFiles(
 			collected.push({
 				path: file,
 				name: basename(file),
+				deploymentName: basename(file),
 				content: readFileSync(file),
 				isBuildingBlock: groupInfo.type === "bb",
 				isProcessApplication: groupInfo.type === "pa",
@@ -557,6 +561,8 @@ export function collectResourcesForPaths(
 		);
 	}
 
+	prepareMarkdownResources(deduped);
+
 	return {
 		resources: deduped,
 		skippedExtensions,
@@ -711,11 +717,11 @@ export async function deployResources(
 	const resourcesByName = new Map<string, ResourceFile[]>();
 
 	resources.forEach((r) => {
-		const existing = resourcesByName.get(r.name);
+		const existing = resourcesByName.get(r.deploymentName);
 		if (existing) {
 			existing.push(r);
 		} else {
-			resourcesByName.set(r.name, [r]);
+			resourcesByName.set(r.deploymentName, [r]);
 		}
 
 		const ext = extname(r.path);
@@ -757,7 +763,7 @@ export async function deployResources(
 		tenantId: TenantId.assumeExists(tenantId),
 		resources: resources.map((r) => {
 			// Determine MIME type based on extension
-			const ext = r.name.split(".").pop()?.toLowerCase();
+			const ext = r.deploymentName.split(".").pop()?.toLowerCase();
 			const mimeType =
 				ext === "bpmn"
 					? "application/xml"
@@ -767,7 +773,7 @@ export async function deployResources(
 							? "application/json"
 							: "application/octet-stream";
 			// Convert Buffer to Uint8Array for File constructor
-			return new File([new Uint8Array(r.content)], r.name, {
+			return new File([new Uint8Array(r.content)], r.deploymentName, {
 				type: mimeType,
 			});
 		}),

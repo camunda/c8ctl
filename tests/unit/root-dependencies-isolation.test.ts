@@ -25,6 +25,8 @@ const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CORE_DEPENDENCIES = [
 	"@camunda8/orchestration-cluster-api",
 	"@modelcontextprotocol/sdk",
+	// Strict YAML frontmatter parsing for governed Markdown resources.
+	"js-yaml",
 	// Range evaluation for a plugin's declared `engines.c8ctl` (#523) —
 	// src/framework/plugins/plugin-compat.ts imports it directly.
 	"semver",

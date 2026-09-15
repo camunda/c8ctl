@@ -366,7 +366,9 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			profile: deployProfile,
 			body: {
 				tenantId: ctx.tenantId,
-				resources: previewResources.map((r) => ({ name: r.name })),
+				resources: previewResources.map((r) => ({
+					name: r.deploymentName,
+				})),
 			},
 		});
 		if (dr) return dr;
