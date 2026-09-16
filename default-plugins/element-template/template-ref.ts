@@ -132,7 +132,7 @@ export function parseTemplateRef(arg: string | undefined): TemplateRef | null {
 export async function getExecutionPlatformVersion(
 	xml: string,
 ): Promise<string | null> {
-	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const { BpmnModdle } = await import("bpmn-moddle");
 	const moddle = new BpmnModdle();
 	try {
 		const { rootElement } = await moddle.fromXML(xml);
@@ -179,7 +179,7 @@ export async function elementExistsInBpmn(
 	xml: string,
 	elementId: string,
 ): Promise<boolean> {
-	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const { BpmnModdle } = await import("bpmn-moddle");
 	const moddle = new BpmnModdle();
 	const { rootElement } = await moddle.fromXML(xml);
 	return containsId(rootElement, elementId, new Set<object>());
