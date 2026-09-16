@@ -11,11 +11,11 @@
   ],
   "main": "c8ctl-plugin.ts",
   "dependencies": {
-    "bpmn-moddle": "^9.0.1"
+    "bpmn-moddle": "^10.2.0"
   },
   "devDependencies": {
-    "bpmn-js-element-templates": "^2.30.0",
+    "bpmn-js-element-templates": "^2.36.3",
     "bpmn-js-headless": "^0.2.0",
-    "zeebe-bpmn-moddle": "^1.11.0"
+    "zeebe-bpmn-moddle": "^2.0.0"
   }
 }
