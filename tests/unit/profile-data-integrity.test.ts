@@ -286,7 +286,15 @@ describe("profile data integrity", () => {
 		// regular file → ENOTDIR" trick surfaced as ENOENT on Windows, wrongly
 		// looking absent).
 		mkdirSync(profilesPath());
-		assert.throws(() => loadProfiles(), /Refusing to treat an unreadable/i);
+		// The wording differs by platform: on POSIX the O_RDONLY|O_NONBLOCK open
+		// of a directory succeeds and the new non-regular-entry gate rejects it
+		// ("not a regular file"); on Windows the open itself fails EISDIR and
+		// routes to the generic unreadable-file throw. Both refuse to treat it as
+		// empty — that shared contract is what this test pins.
+		assert.throws(
+			() => loadProfiles(),
+			/Refusing to treat (it|an unreadable)/i,
+		);
 		// Seeding loads first; on the unreadable path it must warn and leave the
 		// path untouched, never reseed a default over it.
 		ensureDefaultProfile();
@@ -492,6 +500,33 @@ describe("profile data integrity", () => {
 			assert.ok(
 				readFileSync(join(dataDir, realBackups[0])).equals(rawBytes),
 				"the independent backup must hold the exact corrupt bytes",
+			);
+		});
+
+		test("a FIFO squatting profiles.json itself is rejected without hanging", (t) => {
+			// The PRIMARY read path opens profiles.json directly. A plain
+			// `readFileSync` on a FIFO blocks O_RDONLY until a writer appears — so
+			// a profiles.json pre-created as a FIFO would hang EVERY startup
+			// forever. `loadProfiles` opens O_RDONLY|O_NONBLOCK and rejects the
+			// non-regular entry via `fstat` before any read, so the open returns
+			// at once and startup fails cleanly instead of hanging. It must also
+			// NOT be treated as "no profiles" (the wipe regression).
+			try {
+				execFileSync("mkfifo", [profilesPath()]);
+			} catch {
+				t.skip("mkfifo unavailable on this host");
+				return;
+			}
+
+			// Must throw (non-regular entry) rather than HANG on the FIFO open.
+			assert.throws(() => loadProfiles(), /not a regular file/i);
+
+			// Seeding must NOT clobber the FIFO (the wipe regression), and the
+			// FIFO must be left untouched.
+			ensureDefaultProfile();
+			assert.ok(
+				lstatSync(profilesPath()).isFIFO(),
+				"the FIFO squatting profiles.json must be left untouched, never reseeded over",
 			);
 		});
 

@@ -696,8 +696,32 @@ export function loadProfiles(): Profile[] {
 	const profilesPath = getProfilesPath();
 
 	let data: Buffer;
+	let fd: number | undefined;
 	try {
-		data = readFileSync(profilesPath);
+		// Open the PRIMARY profiles path NON-BLOCKING before reading: a
+		// profiles.json pre-created as a FIFO (or other blocking special file)
+		// would make a plain `readFileSync` hang startup FOREVER waiting for a
+		// writer. With O_NONBLOCK the open returns at once and the `fstatSync`
+		// gate below rejects a non-regular entry before any read — mirroring the
+		// canonical-backup reuse path. O_NONBLOCK is a no-op for regular files
+		// (reads are unaffected). We deliberately DO follow symlinks here (no
+		// O_NOFOLLOW): reading THROUGH a valid symlink to a regular file is the
+		// documented behaviour, and a DANGLING symlink still surfaces as ENOENT
+		// and is handled below.
+		fd = openSync(profilesPath, constants.O_RDONLY | constants.O_NONBLOCK);
+		const st = fstatSync(fd);
+		if (!st.isFile()) {
+			// A non-regular entry (FIFO, device, socket, directory) squats the
+			// profiles path. This is NOT "no profiles yet" — refuse to proceed so
+			// a later save cannot replace it and silently lose the user's intent.
+			throw new Error(
+				`profiles file at ${profilesPath} is not a regular file (e.g. a ` +
+					`FIFO, device, or directory). Refusing to treat it as empty (that ` +
+					`would overwrite your saved profiles) — fix or remove it, then ` +
+					`re-run.`,
+			);
+		}
+		data = readFileSync(fd);
 	} catch (err) {
 		// A MISSING file (ENOENT) legitimately means "no profiles yet" → [].
 		// Any OTHER read error (permissions, a transiently inaccessible parent,
@@ -707,7 +731,7 @@ export function loadProfiles(): Profile[] {
 		// seeding can never proceed from a false "empty" state and clobber the
 		// user's saved profiles.
 		if (isRecord(err) && err.code === "ENOENT") {
-			// `readFileSync` also returns ENOENT for a DANGLING symlink (the link
+			// `openSync` also returns ENOENT for a DANGLING symlink (the link
 			// exists, its target does not). That is NOT "no profiles yet": a
 			// later `saveProfiles` rename would replace the link and the user's
 			// intended target is lost. `lstatSync` inspects the path entry
@@ -725,11 +749,19 @@ export function loadProfiles(): Profile[] {
 			}
 			return [];
 		}
+		// A well-formed error we threw ourselves (the non-regular-entry gate
+		// above) carries no fs `code` — surface it verbatim rather than
+		// re-wrapping it as a raw read failure.
+		if (!(isRecord(err) && typeof err.code === "string")) {
+			throw err;
+		}
 		throw new Error(
 			`Failed to read profiles at ${profilesPath}: ${err instanceof Error ? err.message : String(err)}. ` +
 				`Refusing to treat an unreadable profiles file as empty (that would ` +
 				`overwrite your saved profiles).`,
 		);
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
 	}
 
 	try {
