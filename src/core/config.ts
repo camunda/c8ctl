@@ -7,7 +7,6 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import {
-	chmodSync,
 	closeSync,
 	constants,
 	existsSync,
@@ -483,17 +482,32 @@ function backupCorruptProfiles(
 	// squatting the canonical path can neither redirect the reused read nor a
 	// chmod outside the profile store.
 	const tmp = `${profilesPath}.corrupt-tmp-${randomUUID()}`;
+	let stagedFd: number | undefined;
 	try {
-		// `wx` = create-exclusive with a restrictive mode up front (never the
-		// 0666 umask default), so a credential temp is never briefly
-		// world-readable; chmod pins any bits umask stripped.
-		writeFileSync(tmp, data, { mode, flag: "wx" });
-		chmodSync(tmp, mode);
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default), so a credential temp is
+		// never briefly world-readable and a symlink can neither be followed nor
+		// pre-created at the temp path. Then write and re-tighten the exact mode
+		// (create mode is umask-masked) THROUGH THE FD via `fchmodSync` — never a
+		// pathname `chmodSync`, which a symlink swapped in after the file closed
+		// could redirect to a target outside the profile store.
+		stagedFd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode,
+		);
+		writeFileSync(stagedFd, data);
+		fchmodSync(stagedFd, mode);
 	} catch {
 		// Could not even stage the temp copy — best-effort, give up cleanly.
+		if (stagedFd !== undefined) closeQuietly(stagedFd);
 		removeQuietly(tmp);
 		return { backup, backedUp: false };
 	}
+	closeQuietly(stagedFd);
 
 	try {
 		// Publish under a BOUNDED, DETERMINISTIC set of content-addressed names:
@@ -569,8 +583,15 @@ function pathEntryExists(path: string): boolean {
 	try {
 		lstatSync(path);
 		return true;
-	} catch {
-		return false;
+	} catch (err) {
+		// Only an ENOENT from `lstatSync` PROVES the entry is genuinely absent.
+		// Any OTHER failure (ENOTDIR, EACCES, EIO…) means the path is present but
+		// unstattable — e.g. on Windows a data-directory path that is a regular
+		// file can yield ENOENT from `readFileSync` yet ENOTDIR from `lstatSync`.
+		// Treat those as "exists/unreadable" so `loadProfiles` routes them to the
+		// protected throw path instead of seeding over an unreadable store.
+		if (isRecord(err) && err.code === "ENOENT") return false;
+		return true;
 	}
 }
 
@@ -592,6 +613,16 @@ function reuseCanonicalBackup(
 		fd = openSync(backup, constants.O_RDONLY | constants.O_NOFOLLOW);
 		const st = fstatSync(fd);
 		if (!st.isFile()) return false; // reject symlink target / non-regular
+		// Reject a HARD-LINK squat: O_NOFOLLOW blocks symlinks but not a
+		// pre-existing hard link to a same-byte file OUTSIDE this directory —
+		// reusing it would report a foreign inode as our backup and let the
+		// `fchmodSync` below change that outside inode's permissions. A backup we
+		// published (link → unlink temp) settles at nlink === 1, so anything with
+		// extra links is not an independently owned copy. (A racer reusing the
+		// canonical name in the microscopic window before the publisher unlinks
+		// its temp may see nlink === 2 and fall through to the bounded `.dup`
+		// name — a spurious second file at worst, never an unbounded fan-out.)
+		if (st.nlink !== 1) return false;
 		if (!readFileSync(fd).equals(data)) return false;
 		if ((st.mode & 0o777) !== mode) {
 			try {
@@ -751,34 +782,47 @@ export function loadProfiles(): Profile[] {
 export function saveProfiles(profiles: Profile[]): void {
 	const profilesPath = getProfilesPath();
 	const profilesFile: ProfilesFile = { profiles };
-	// Randomise the temp name and open it EXCLUSIVELY (`wx`) below. The old
-	// `<pid>.<ms>.tmp` name was predictable, so in a writable/shared data
-	// directory an attacker could pre-create a symlink at that path; a default
-	// truncating open would then FOLLOW it and redirect the serialized
-	// credentials outside the profile store. A random name is unguessable and
-	// `wx` refuses to open an existing entry (symlink included), so the temp
-	// file can neither be redirected nor clobbered by another entry.
+	// Randomise the temp name and open it EXCLUSIVE + no-follow (O_EXCL |
+	// O_NOFOLLOW) below. The old `<pid>.<ms>.tmp` name was predictable, so in a
+	// writable/shared data directory an attacker could pre-create a symlink at
+	// that path; a default truncating open would then FOLLOW it and redirect the
+	// serialized credentials outside the profile store. A random name is
+	// unguessable and O_EXCL|O_NOFOLLOW refuses to open an existing entry
+	// (symlink included), so the temp file can neither be redirected nor
+	// clobbered by another entry.
 	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
 	// Preserve the existing file's permission bits (e.g. 0600) so an atomic
 	// replace never silently widens a user-protected profiles.json — it holds
 	// client secrets and passwords — to the umask default.
 	const mode = fileMode(profilesPath);
+	let fd: number | undefined;
 	try {
-		// Create the temp file with a restrictive mode up front (never the 0666
-		// umask default): a crash between write and rename otherwise leaves a
-		// `.tmp` holding credentials with broader permissions. `wx` =
-		// create-exclusive: never truncate or follow a pre-existing entry. chmod
-		// still runs afterwards to pin the exact source mode (create mode is
-		// umask-masked).
-		writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), {
-			mode: mode ?? 0o600,
-			flag: "wx",
-		});
-		if (mode !== undefined) chmodSync(tmp, mode);
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default): a crash between write and
+		// rename otherwise leaves a `.tmp` holding credentials with broader
+		// permissions, and O_EXCL never truncates/follows a pre-existing entry
+		// (symlink included). Write and re-tighten the exact source mode THROUGH
+		// THE FD via `fchmodSync` (create mode is umask-masked) — never a pathname
+		// `chmodSync`, which a symlink swapped in after the file closed could
+		// redirect outside the profile store. Close before the rename so Windows
+		// (which refuses to rename an open file) can swap it atomically.
+		fd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode ?? 0o600,
+		);
+		writeFileSync(fd, JSON.stringify(profilesFile, null, 2));
+		if (mode !== undefined) fchmodSync(fd, mode);
+		closeSync(fd);
+		fd = undefined;
 		renameSync(tmp, profilesPath);
 	} catch (err) {
 		// Any failure — including the initial write (e.g. a full disk) — must not
-		// leave the temp file behind.
+		// leave the temp file (or its fd) behind.
+		if (fd !== undefined) closeQuietly(fd);
 		try {
 			rmSync(tmp, { force: true });
 		} catch {

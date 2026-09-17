@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
+	linkSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
@@ -394,6 +395,54 @@ describe("profile data integrity", () => {
 				(f) =>
 					f.startsWith("profiles.json.corrupt-") &&
 					lstatSync(join(dataDir, f)).isFile(),
+			);
+			assert.equal(realBackups.length, 1);
+			assert.ok(
+				readFileSync(join(dataDir, realBackups[0])).equals(rawBytes),
+				"the independent backup must hold the exact corrupt bytes",
+			);
+		});
+
+		test("a HARD-LINK squatting the canonical backup name is not reused (no chmod leak)", () => {
+			// O_NOFOLLOW blocks a symlink but NOT a pre-existing hard link. If an
+			// attacker hard-links the canonical `profiles.json.corrupt-<sha256>`
+			// name to a same-byte file OUTSIDE the store, fstat().isFile() and the
+			// byte comparison both pass — a naive reuse would report a foreign
+			// inode as our backup AND fchmod that outside inode. The reuse path
+			// rejects any candidate with nlink !== 1 (a hard link to an
+			// independently referenced inode), so the bytes are promoted to a
+			// fresh, real backup instead.
+			const rawBytes = Buffer.from([0x7b, 0x20, 0xff, 0xfe]);
+			const canonical = join(
+				dataDir,
+				`profiles.json.corrupt-${createHash("sha256").update(rawBytes).digest("hex")}`,
+			);
+			// A same-byte file OUTSIDE the store, world-readable, hard-linked in as
+			// the canonical name. Its extra link (outside + canonical) makes
+			// nlink === 2, and we prove its mode is never touched by the reuse.
+			const outside = join(dataDir, "outside-target");
+			writeFileSync(outside, rawBytes);
+			chmodSync(outside, 0o644);
+			linkSync(outside, canonical);
+
+			writeFileSync(profilesPath(), rawBytes);
+			chmodSync(profilesPath(), 0o600);
+			assert.throws(() => loadProfiles(), /corrupt/i);
+
+			// The outside inode's mode is untouched — no fchmod leaked through the
+			// hard link.
+			assert.equal(
+				statSync(outside).mode & 0o777,
+				0o644,
+				"a hard-linked reuse candidate must never be chmod'd",
+			);
+			// A real, independent (nlink === 1) backup was created instead — under
+			// the bounded `.dup` fallback name, since the canonical name was
+			// squatted.
+			const realBackups = readdirSync(dataDir).filter(
+				(f) =>
+					f.startsWith("profiles.json.corrupt-") &&
+					lstatSync(join(dataDir, f)).nlink === 1,
 			);
 			assert.equal(realBackups.length, 1);
 			assert.ok(
