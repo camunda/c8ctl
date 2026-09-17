@@ -16,6 +16,7 @@
  */
 
 import assert from "node:assert";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	chmodSync,
@@ -443,6 +444,49 @@ describe("profile data integrity", () => {
 				(f) =>
 					f.startsWith("profiles.json.corrupt-") &&
 					lstatSync(join(dataDir, f)).nlink === 1,
+			);
+			assert.equal(realBackups.length, 1);
+			assert.ok(
+				readFileSync(join(dataDir, realBackups[0])).equals(rawBytes),
+				"the independent backup must hold the exact corrupt bytes",
+			);
+		});
+
+		test("a FIFO squatting the canonical backup name is rejected without hanging", (t) => {
+			// The reuse read opens an EXISTING canonical name. Opening a FIFO
+			// O_RDONLY blocks until a writer appears — so if an attacker
+			// pre-creates the canonical `profiles.json.corrupt-<sha256>` name as a
+			// FIFO, a blocking open would hang every startup recovering this
+			// corruption forever. The reuse path adds O_NONBLOCK, so the open
+			// returns at once, `fstat` sees a non-regular entry, and the FIFO is
+			// rejected — recovery then falls to the bounded `.dup` name.
+			const rawBytes = Buffer.from([0x7b, 0x20, 0xff, 0xfd]);
+			const canonical = join(
+				dataDir,
+				`profiles.json.corrupt-${createHash("sha256").update(rawBytes).digest("hex")}`,
+			);
+			try {
+				execFileSync("mkfifo", [canonical]);
+			} catch {
+				t.skip("mkfifo unavailable on this host");
+				return;
+			}
+
+			writeFileSync(profilesPath(), rawBytes);
+			chmodSync(profilesPath(), 0o600);
+			// Must return (throw "corrupt") rather than HANG on the FIFO open.
+			assert.throws(() => loadProfiles(), /corrupt/i);
+
+			// The canonical name is still the untouched FIFO (never reused/read),
+			// and a real regular-file backup was published under the `.dup` name.
+			assert.ok(
+				lstatSync(canonical).isFIFO(),
+				"the FIFO squatting the canonical name must be left untouched",
+			);
+			const realBackups = readdirSync(dataDir).filter(
+				(f) =>
+					f.startsWith("profiles.json.corrupt-") &&
+					lstatSync(join(dataDir, f)).isFile(),
 			);
 			assert.equal(realBackups.length, 1);
 			assert.ok(

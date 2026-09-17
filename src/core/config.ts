@@ -610,9 +610,18 @@ function reuseCanonicalBackup(
 ): boolean {
 	let fd: number | undefined;
 	try {
-		fd = openSync(backup, constants.O_RDONLY | constants.O_NOFOLLOW);
+		// O_NONBLOCK so a canonical name pre-created as a FIFO (or other blocking
+		// special file) can NEVER hang this open indefinitely waiting for a peer
+		// — with O_NONBLOCK the open returns at once, `fstatSync` sees a
+		// non-regular entry, and we reject it below. For a regular file
+		// O_NONBLOCK is a no-op (reads are unaffected), and we never `readFileSync`
+		// a candidate that failed the `isFile()` gate, so a FIFO is never read.
+		fd = openSync(
+			backup,
+			constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+		);
 		const st = fstatSync(fd);
-		if (!st.isFile()) return false; // reject symlink target / non-regular
+		if (!st.isFile()) return false; // reject symlink target / non-regular / FIFO
 		// Reject a HARD-LINK squat: O_NOFOLLOW blocks symlinks but not a
 		// pre-existing hard link to a same-byte file OUTSIDE this directory —
 		// reusing it would report a foreign inode as our backup and let the
