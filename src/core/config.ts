@@ -5,7 +5,23 @@
  * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import {
+	closeSync,
+	constants,
+	existsSync,
+	fchmodSync,
+	fstatSync,
+	linkSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { OutputMode } from "./logger.ts";
@@ -331,31 +347,546 @@ interface ProfilesFile {
 }
 
 /**
- * Load c8ctl profiles from profiles.json
+ * The permission bits (0oNNN) of an existing file, or `undefined` if it cannot
+ * be stat'd. Used to carry a user-protected `profiles.json` mode (e.g. 0600 —
+ * it holds client secrets and passwords) onto its backups and atomic-replace
+ * temp files, so persistence never silently widens the file to the umask
+ * default and exposes credentials to other local users.
  */
-export function loadProfiles(): Profile[] {
-	const profilesPath = getProfilesPath();
-
-	if (!existsSync(profilesPath)) {
-		return [];
+function fileMode(path: string): number | undefined {
+	try {
+		return statSync(path).mode & 0o777;
+	} catch {
+		return undefined;
 	}
+}
+
+/** True on native Windows, where POSIX permission bits do not apply. */
+const isWindows = platform() === "win32";
+
+/**
+ * Re-tighten an open fd to `mode` THROUGH THE FD — but only where the platform
+ * implements it. `fchmodSync` throws `ERR_METHOD_NOT_IMPLEMENTED` on Windows
+ * (access there is governed by ACLs, not POSIX mode bits), so an unconditional
+ * call would throw on every profile save and corrupt-file recovery on the
+ * Windows CI leg — the catch would then delete the staged temp and report that
+ * no backup was written. The create-time `mode` already covers the only bit
+ * Windows honours (read-only), so skipping the fd chmod there loses nothing.
+ */
+function pinFdMode(fd: number, mode: number): void {
+	if (!isWindows) fchmodSync(fd, mode);
+}
+
+/** The optional, string-typed fields of a `Profile`. */
+const OPTIONAL_STRING_PROFILE_FIELDS = [
+	"clientId",
+	"clientSecret",
+	"audience",
+	"oAuthUrl",
+	"scope",
+	"username",
+	"password",
+	"defaultTenantId",
+] as const;
+
+/** A `Record<string, string>` — every value is a string. */
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return (
+		isRecord(value) && Object.values(value).every((v) => typeof v === "string")
+	);
+}
+
+/**
+ * A well-formed `Profile`. Validates the required `name`/`baseUrl` AND every
+ * optional field's runtime type: a syntactically valid file whose optional
+ * fields have the wrong type (a non-string credential, a non-map `headers`, a
+ * non-boolean `exactBaseUrl`) is schema corruption, not a healthy profile —
+ * accepting it would let `profileToClusterConfig`/the request layer later
+ * mishandle authentication, headers, or URL suffixing instead of the file
+ * being rejected up front.
+ */
+function isValidProfile(value: unknown): value is Profile {
+	if (
+		!isRecord(value) ||
+		typeof value.name !== "string" ||
+		typeof value.baseUrl !== "string"
+	) {
+		return false;
+	}
+	for (const field of OPTIONAL_STRING_PROFILE_FIELDS) {
+		if (value[field] !== undefined && typeof value[field] !== "string") {
+			return false;
+		}
+	}
+	if (
+		value.exactBaseUrl !== undefined &&
+		typeof value.exactBaseUrl !== "boolean"
+	) {
+		return false;
+	}
+	if (value.headers !== undefined && !isStringRecord(value.headers)) {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Runtime schema validation for a parsed profiles.json. A compile-time
+ * `ProfilesFile` annotation is erased at runtime, so a syntactically valid but
+ * schema-corrupt file (`{}`, `{"profiles": null}`, `[]`, or entries missing a
+ * name/baseUrl) would otherwise slip through `profilesFile.profiles || []` as
+ * an "empty" store and reopen the silent-wipe path. Returns the validated
+ * profiles array, or `null` when the value is not a valid profiles file.
+ */
+function extractValidProfiles(parsed: unknown): Profile[] | null {
+	if (!isRecord(parsed)) return null;
+	const rawProfiles = parsed.profiles;
+	if (!Array.isArray(rawProfiles)) return null;
+	if (!rawProfiles.every(isValidProfile)) return null;
+	return rawProfiles;
+}
+
+/**
+ * Preserve the original bytes of a corrupt profiles.json in a content-addressed,
+ * mode-preserving backup (best-effort). Returns the backup path and whether it
+ * actually exists on disk afterwards.
+ *
+ * - Deduplicates: `loadProfiles` runs on virtually every CLI startup (via
+ *   `loadSessionState`), so leaving the corrupt file in place would otherwise
+ *   spew a fresh full copy on every command and eventually fill the disk. The
+ *   backup name is the SHA-256 of the corrupt bytes, so a
+ *   `profiles.json.corrupt-<sha256>` backup already holding the exact same
+ *   bytes is reused instead of writing another.
+ * - Restrictive mode: the backup carries credentials, so it inherits the source
+ *   file's permission bits (e.g. 0600) rather than the umask default — and is
+ *   CREATED with that mode (or a 0600 fallback), never briefly world-readable.
+ * - Byte-exact: takes the raw `Buffer` read off disk (never a UTF-8-decoded
+ *   string), so a torn write ending mid-multibyte-sequence is backed up and
+ *   deduplicated by its true bytes, not lossily re-encoded replacement chars.
+ */
+function backupCorruptProfiles(
+	profilesPath: string,
+	data: Buffer,
+): { backup: string; backedUp: boolean } {
+	// The mode a credential backup must carry: the source file's bits (e.g.
+	// 0600) or a restrictive 0600 fallback. Computed up front so a REUSED
+	// backup can be re-tightened too, not just a freshly created one.
+	const mode = fileMode(profilesPath) ?? 0o600;
+
+	// CONTENT-ADDRESSED canonical name: the backup filename is a pure function
+	// of the corrupt BYTES (their SHA-256), so identical corruption always maps
+	// to exactly ONE file. This is what bounds the credential copies across
+	// processes: N c8ctl children racing on the same corrupt profiles.json all
+	// derive the same name, and an EXCLUSIVE (`wx`) create lets exactly one win
+	// — every other loses with EEXIST and REUSES that single canonical backup,
+	// instead of each writing its own random-suffixed copy. A cross-process
+	// readdir/dedup scan could NOT prevent that fan-out (every child can finish
+	// scanning empty before any has written); a content-addressed name closes
+	// the race deterministically with no lock, and subsumes the old dedup scan
+	// for free (same bytes → same name).
+	const hash = createHash("sha256").update(data).digest("hex");
+	const backup = `${profilesPath}.corrupt-${hash}`;
+
+	// Stage the bytes in a private temp file FIRST, fully written and mode-pinned,
+	// then publish the canonical name with an atomic `link()`. This is what makes
+	// the canonical backup safe to reuse under concurrency: `link()` only ever
+	// exposes `backup` once it points at fully written content, so a losing racer
+	// that observes EEXIST reads COMPLETE bytes (never a half-finished write that
+	// would fail the equality check and fan out into a second copy). `link()`
+	// also refuses to follow or overwrite a pre-existing symlink at the canonical
+	// name, and the reuse read below opens with O_NOFOLLOW — so a symlink
+	// squatting the canonical path can neither redirect the reused read nor a
+	// chmod outside the profile store.
+	const tmp = `${profilesPath}.corrupt-tmp-${randomUUID()}`;
+	let stagedFd: number | undefined;
+	try {
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default), so a credential temp is
+		// never briefly world-readable and a symlink can neither be followed nor
+		// pre-created at the temp path. Then write and re-tighten the exact mode
+		// (create mode is umask-masked) THROUGH THE FD via `fchmodSync` — never a
+		// pathname `chmodSync`, which a symlink swapped in after the file closed
+		// could redirect to a target outside the profile store.
+		stagedFd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode,
+		);
+		writeFileSync(stagedFd, data);
+		pinFdMode(stagedFd, mode);
+	} catch {
+		// Could not even stage the temp copy — best-effort, give up cleanly.
+		if (stagedFd !== undefined) closeQuietly(stagedFd);
+		removeQuietly(tmp);
+		return { backup, backedUp: false };
+	}
+	closeQuietly(stagedFd);
 
 	try {
-		const data = readFileSync(profilesPath, "utf-8");
-		const profilesFile: ProfilesFile = JSON.parse(data);
-		return profilesFile.profiles || [];
-	} catch {
-		return [];
+		// Publish under a BOUNDED, DETERMINISTIC set of content-addressed names:
+		// the canonical name first, then a single `.dup` fallback for the
+		// (astronomically unlikely) case where the canonical name is squatted by
+		// a non-matching or symlinked file. Both names are pure functions of the
+		// corrupt bytes, so repeated recoveries of the same corruption always map
+		// to the SAME (at most two) files and REUSE them — never a fresh
+		// random-suffixed copy per run. If BOTH names are unusable (e.g. an
+		// attacker squatting both with symlinks), we stop after preserving the
+		// original on disk rather than accumulate unbounded credential copies.
+		for (const name of [backup, `${backup}.dup`]) {
+			if (publishBackup(tmp, name, data, mode)) {
+				return { backup: name, backedUp: true };
+			}
+		}
+		return { backup, backedUp: false };
+	} finally {
+		// Drop the temp NAME. Whether we linked (content also at a published
+		// name) or gave up, unlinking the temp name never removes the
+		// hard-linked content it published elsewhere.
+		removeQuietly(tmp);
 	}
 }
 
 /**
- * Save c8ctl profiles to profiles.json
+ * Publish the mode-pinned `tmp` under content-addressed `name` via an atomic
+ * `link()`, or REUSE `name` if it already holds these exact bytes. Returns
+ * `true` when `name` ends up as a usable regular-file backup of `data`, `false`
+ * when `name` is unusable (squatted by a symlink / non-matching file, or a
+ * non-EEXIST link error) so the caller can try the next name.
+ *
+ * `link()` never follows or overwrites a pre-existing symlink at `name`, and the
+ * hard link inherits `tmp`'s already-pinned mode — so no post-publish
+ * pathname-based chmod (which a symlink swap could redirect outside the store)
+ * is needed.
+ */
+function publishBackup(
+	tmp: string,
+	name: string,
+	data: Buffer,
+	mode: number,
+): boolean {
+	try {
+		linkSync(tmp, name);
+		return true;
+	} catch (err) {
+		// EEXIST: the name already exists. Reuse it iff it is a regular file with
+		// these exact bytes (and a repairable mode); otherwise it is unusable.
+		if (isRecord(err) && err.code === "EEXIST") {
+			return reuseCanonicalBackup(name, data, mode);
+		}
+		return false;
+	}
+}
+
+/** Best-effort unlink that swallows ENOENT and any other error. */
+function removeQuietly(path: string): void {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		/* best-effort cleanup */
+	}
+}
+
+/**
+ * Does the path ENTRY itself exist, without following a final symlink? Uses
+ * `lstatSync`, so a DANGLING symlink (link present, target absent) counts as
+ * "exists" — distinguishing a broken/unreadable profiles path from a genuinely
+ * absent one when a `readFileSync` returns ENOENT.
+ */
+function pathEntryExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch (err) {
+		// Only an ENOENT from `lstatSync` PROVES the entry is genuinely absent.
+		// Any OTHER failure (ENOTDIR, EACCES, EIO…) means the path is present but
+		// unstattable — e.g. on Windows a data-directory path that is a regular
+		// file can yield ENOENT from `readFileSync` yet ENOTDIR from `lstatSync`.
+		// Treat those as "exists/unreadable" so `loadProfiles` routes them to the
+		// protected throw path instead of seeding over an unreadable store.
+		if (isRecord(err) && err.code === "ENOENT") return false;
+		return true;
+	}
+}
+
+/**
+ * Reuse an existing content-addressed canonical backup iff it is a REGULAR file
+ * whose bytes match `data`. Opens with O_NOFOLLOW and operates on the resulting
+ * fd (fstat/read/fchmod), so a symlink squatting the canonical name is rejected
+ * (ELOOP) and can never redirect the read or a chmod to a target outside the
+ * profile store. Re-tightens a stale/world-readable mode on the same fd (an
+ * older run may have created it 0644 before profiles.json was locked to 0600).
+ */
+function reuseCanonicalBackup(
+	backup: string,
+	data: Buffer,
+	mode: number,
+): boolean {
+	let fd: number | undefined;
+	try {
+		// O_NONBLOCK so a canonical name pre-created as a FIFO (or other blocking
+		// special file) can NEVER hang this open indefinitely waiting for a peer
+		// — with O_NONBLOCK the open returns at once, `fstatSync` sees a
+		// non-regular entry, and we reject it below. For a regular file
+		// O_NONBLOCK is a no-op (reads are unaffected), and we never `readFileSync`
+		// a candidate that failed the `isFile()` gate, so a FIFO is never read.
+		fd = openSync(
+			backup,
+			constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+		);
+		const st = fstatSync(fd);
+		if (!st.isFile()) return false; // reject symlink target / non-regular / FIFO
+		// Reject a HARD-LINK squat: O_NOFOLLOW blocks symlinks but not a
+		// pre-existing hard link to a same-byte file OUTSIDE this directory —
+		// reusing it would report a foreign inode as our backup and let the
+		// `fchmodSync` below change that outside inode's permissions. A backup we
+		// published (link → unlink temp) settles at nlink === 1, so anything with
+		// extra links is not an independently owned copy. (A racer reusing the
+		// canonical name in the microscopic window before the publisher unlinks
+		// its temp may see nlink === 2 and fall through to the bounded `.dup`
+		// name — a spurious second file at worst, never an unbounded fan-out.)
+		if (st.nlink !== 1) return false;
+		if (!readFileSync(fd).equals(data)) return false;
+		if ((st.mode & 0o777) !== mode) {
+			try {
+				pinFdMode(fd, mode);
+			} catch {
+				// Could not re-tighten a stale/world-readable candidate. Do NOT
+				// claim it as a safe backup — reporting it as reused would leave
+				// credentials at a wider mode than promised. Return false so the
+				// caller publishes a freshly mode-pinned copy under the next name.
+				return false;
+			}
+		}
+		return true;
+	} catch {
+		// ELOOP (symlink, blocked by O_NOFOLLOW), ENOENT, unreadable, etc.
+		return false;
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
+	}
+}
+
+/** Best-effort fd close that swallows any error. */
+function closeQuietly(fd: number): void {
+	try {
+		closeSync(fd);
+	} catch {
+		/* best-effort close */
+	}
+}
+
+/** Back up the corrupt file (best-effort) and throw a recoverable error. */
+function throwCorruptProfiles(
+	profilesPath: string,
+	data: Buffer,
+	detail: string,
+): never {
+	const { backup, backedUp } = backupCorruptProfiles(profilesPath, data);
+	const backupNote = backedUp
+		? `Its contents were backed up to ${backup}. `
+		: `A backup could not be written, but the original file is still on disk untouched. `;
+	throw new Error(
+		`profiles.json at ${profilesPath} is corrupt (${detail}). ${backupNote}` +
+			`Refusing to overwrite it to avoid destroying your saved profiles — ` +
+			`fix or remove the file, then re-run.`,
+	);
+}
+
+/**
+ * Load c8ctl profiles from profiles.json.
+ *
+ * A MISSING file legitimately means "no profiles yet" → `[]`. But a file that
+ * exists and cannot be read/parsed is NOT empty — it is corrupt or transiently
+ * unreadable (e.g. a torn write from a crash or two c8ctl processes racing).
+ * Returning `[]` in that case is catastrophic: the very next `saveProfiles`
+ * (via `addProfile`/`ensureDefaultProfile`/`removeProfile`) would overwrite the
+ * file with a truncated set, silently DESTROYING every saved profile. So we
+ * distinguish the two: absent → `[]`; present-but-unreadable → THROW (after
+ * preserving the original bytes in a content-addressed backup), so no caller can
+ * mistake corruption for emptiness and clobber the user's profiles.
+ */
+export function loadProfiles(): Profile[] {
+	const profilesPath = getProfilesPath();
+
+	let data: Buffer;
+	let fd: number | undefined;
+	try {
+		// Open the PRIMARY profiles path NON-BLOCKING before reading: a
+		// profiles.json pre-created as a FIFO (or other blocking special file)
+		// would make a plain `readFileSync` hang startup FOREVER waiting for a
+		// writer. With O_NONBLOCK the open returns at once and the `fstatSync`
+		// gate below rejects a non-regular entry before any read — mirroring the
+		// canonical-backup reuse path. O_NONBLOCK is a no-op for regular files
+		// (reads are unaffected). We deliberately DO follow symlinks here (no
+		// O_NOFOLLOW): reading THROUGH a valid symlink to a regular file is the
+		// documented behaviour, and a DANGLING symlink still surfaces as ENOENT
+		// and is handled below.
+		fd = openSync(profilesPath, constants.O_RDONLY | constants.O_NONBLOCK);
+		const st = fstatSync(fd);
+		if (!st.isFile()) {
+			// A non-regular entry (FIFO, device, socket, directory) squats the
+			// profiles path. This is NOT "no profiles yet" — refuse to proceed so
+			// a later save cannot replace it and silently lose the user's intent.
+			throw new Error(
+				`profiles file at ${profilesPath} is not a regular file (e.g. a ` +
+					`FIFO, device, or directory). Refusing to treat it as empty (that ` +
+					`would overwrite your saved profiles) — fix or remove it, then ` +
+					`re-run.`,
+			);
+		}
+		data = readFileSync(fd);
+	} catch (err) {
+		// A MISSING file (ENOENT) legitimately means "no profiles yet" → [].
+		// Any OTHER read error (permissions, a transiently inaccessible parent,
+		// an I/O fault) is NOT emptiness: `existsSync` can't tell these apart —
+		// it returns false for an unstattable path too — so we key strictly on
+		// ENOENT and route every other failure to the protected throw path, so
+		// seeding can never proceed from a false "empty" state and clobber the
+		// user's saved profiles.
+		if (isRecord(err) && err.code === "ENOENT") {
+			// `openSync` also returns ENOENT for a DANGLING symlink (the link
+			// exists, its target does not). That is NOT "no profiles yet": a
+			// later `saveProfiles` rename would replace the link and the user's
+			// intended target is lost. `lstatSync` inspects the path entry
+			// ITSELF without following it — if it succeeds, something is present
+			// (a broken symlink or other non-regular entry) and we must NOT treat
+			// it as empty. Only a genuinely absent entry (lstat also ENOENT)
+			// means "no profiles yet".
+			if (pathEntryExists(profilesPath)) {
+				throw new Error(
+					`profiles file at ${profilesPath} exists but its contents could not ` +
+						`be read (e.g. a dangling symlink). Refusing to treat it as empty ` +
+						`(that would overwrite your saved profiles) — fix or remove it, ` +
+						`then re-run.`,
+				);
+			}
+			return [];
+		}
+		// A well-formed error we threw ourselves (the non-regular-entry gate
+		// above) carries no fs `code` — surface it verbatim rather than
+		// re-wrapping it as a raw read failure.
+		if (!(isRecord(err) && typeof err.code === "string")) {
+			throw err;
+		}
+		throw new Error(
+			`Failed to read profiles at ${profilesPath}: ${err instanceof Error ? err.message : String(err)}. ` +
+				`Refusing to treat an unreadable profiles file as empty (that would ` +
+				`overwrite your saved profiles).`,
+		);
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
+	}
+
+	try {
+		// Decode with FATAL UTF-8: a lenient `Buffer.toString("utf-8")` silently
+		// replaces malformed bytes with U+FFFD, so invalid bytes inside a quoted
+		// JSON value would still `JSON.parse` and validate as a healthy profile —
+		// letting a later save rewrite the file and lose the original bytes with
+		// no `.corrupt-*` backup. Route a decode failure through the same backup
+		// + throw path as a parse failure.
+		let text: string;
+		try {
+			text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+		} catch {
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				"contains invalid UTF-8 byte sequences",
+			);
+		}
+		const parsed: unknown = JSON.parse(text);
+		const profiles = extractValidProfiles(parsed);
+		if (profiles === null) {
+			// Syntactically valid JSON, but not a valid profiles file. Treating
+			// this as "no profiles" would let a subsequent save clobber it, so
+			// back it up and throw exactly as for an unparseable file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				'does not contain a valid "profiles" array',
+			);
+		}
+		return profiles;
+	} catch (err) {
+		if (err instanceof SyntaxError) {
+			// The file exists but is corrupt/torn. Preserve the original bytes in
+			// a backup (best-effort) so nothing is lost, then throw — never treat
+			// corruption as "no profiles", which would let a subsequent save
+			// clobber the file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				`could not be parsed: ${err.message}`,
+			);
+		}
+		throw err;
+	}
+}
+
+/**
+ * Save c8ctl profiles to profiles.json ATOMICALLY.
+ *
+ * A bare `writeFileSync` truncates the target and then streams the new bytes, so
+ * a crash, a full disk, or a second c8ctl process reading mid-write can observe
+ * a TORN file — which `loadProfiles` then can't parse, and (pre-fix) treated as
+ * "no profiles", cascading into a total wipe. Writing to a same-directory temp
+ * file and `rename`-ing over the target makes the swap atomic: a reader sees
+ * either the whole old file or the whole new one, never a partial one.
  */
 export function saveProfiles(profiles: Profile[]): void {
 	const profilesPath = getProfilesPath();
 	const profilesFile: ProfilesFile = { profiles };
-	writeFileSync(profilesPath, JSON.stringify(profilesFile, null, 2), "utf-8");
+	// Randomise the temp name and open it EXCLUSIVE + no-follow (O_EXCL |
+	// O_NOFOLLOW) below. The old `<pid>.<ms>.tmp` name was predictable, so in a
+	// writable/shared data directory an attacker could pre-create a symlink at
+	// that path; a default truncating open would then FOLLOW it and redirect the
+	// serialized credentials outside the profile store. A random name is
+	// unguessable and O_EXCL|O_NOFOLLOW refuses to open an existing entry
+	// (symlink included), so the temp file can neither be redirected nor
+	// clobbered by another entry.
+	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+	// Preserve the existing file's permission bits (e.g. 0600) so an atomic
+	// replace never silently widens a user-protected profiles.json — it holds
+	// client secrets and passwords — to the umask default.
+	const mode = fileMode(profilesPath);
+	let fd: number | undefined;
+	try {
+		// Create-exclusive (O_EXCL) + no-follow (O_NOFOLLOW) with a restrictive
+		// mode up front (never the 0666 umask default): a crash between write and
+		// rename otherwise leaves a `.tmp` holding credentials with broader
+		// permissions, and O_EXCL never truncates/follows a pre-existing entry
+		// (symlink included). Write and re-tighten the exact source mode THROUGH
+		// THE FD via `fchmodSync` (create mode is umask-masked) — never a pathname
+		// `chmodSync`, which a symlink swapped in after the file closed could
+		// redirect outside the profile store. Close before the rename so Windows
+		// (which refuses to rename an open file) can swap it atomically.
+		fd = openSync(
+			tmp,
+			constants.O_WRONLY |
+				constants.O_CREAT |
+				constants.O_EXCL |
+				constants.O_NOFOLLOW,
+			mode ?? 0o600,
+		);
+		writeFileSync(fd, JSON.stringify(profilesFile, null, 2));
+		if (mode !== undefined) pinFdMode(fd, mode);
+		closeSync(fd);
+		fd = undefined;
+		renameSync(tmp, profilesPath);
+	} catch (err) {
+		// Any failure — including the initial write (e.g. a full disk) — must not
+		// leave the temp file (or its fd) behind.
+		if (fd !== undefined) closeQuietly(fd);
+		try {
+			rmSync(tmp, { force: true });
+		} catch {
+			/* best effort */
+		}
+		throw err;
+	}
 }
 
 /**
@@ -636,9 +1167,24 @@ export const DEFAULT_PROFILE_CONFIG: Profile = {
 /**
  * Ensure the default 'local' profile exists in profiles.json.
  * If no 'local' profile is configured, creates one with the localhost defaults.
+ *
+ * Runs on virtually every command (via `loadSessionState`). It MUST NOT be the
+ * thing that destroys a user's profiles: if `getProfile` throws because
+ * profiles.json is present but unreadable/corrupt, seeding here would reload the
+ * (still-unreadable) file, see zero profiles, and overwrite it — wiping every
+ * saved profile. So on a read failure we warn and leave the file untouched
+ * rather than reseed. `loadProfiles` already preserved the original bytes.
  */
 export function ensureDefaultProfile(): void {
-	const existing = getProfile(DEFAULT_PROFILE);
+	let existing: Profile | undefined;
+	try {
+		existing = getProfile(DEFAULT_PROFILE);
+	} catch (err) {
+		getLogger().warn(
+			`Skipping default-profile seeding: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
 	if (!existing) {
 		addProfile({ ...DEFAULT_PROFILE_CONFIG });
 	}
