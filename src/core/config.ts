@@ -355,13 +355,57 @@ function fileMode(path: string): number | undefined {
 	}
 }
 
-/** A minimally well-formed profile entry: at least a name and a baseUrl. */
-function isValidProfile(value: unknown): value is Profile {
+/** The optional, string-typed fields of a `Profile`. */
+const OPTIONAL_STRING_PROFILE_FIELDS = [
+	"clientId",
+	"clientSecret",
+	"audience",
+	"oAuthUrl",
+	"scope",
+	"username",
+	"password",
+	"defaultTenantId",
+] as const;
+
+/** A `Record<string, string>` — every value is a string. */
+function isStringRecord(value: unknown): value is Record<string, string> {
 	return (
-		isRecord(value) &&
-		typeof value.name === "string" &&
-		typeof value.baseUrl === "string"
+		isRecord(value) && Object.values(value).every((v) => typeof v === "string")
 	);
+}
+
+/**
+ * A well-formed `Profile`. Validates the required `name`/`baseUrl` AND every
+ * optional field's runtime type: a syntactically valid file whose optional
+ * fields have the wrong type (a non-string credential, a non-map `headers`, a
+ * non-boolean `exactBaseUrl`) is schema corruption, not a healthy profile —
+ * accepting it would let `profileToClusterConfig`/the request layer later
+ * mishandle authentication, headers, or URL suffixing instead of the file
+ * being rejected up front.
+ */
+function isValidProfile(value: unknown): value is Profile {
+	if (
+		!isRecord(value) ||
+		typeof value.name !== "string" ||
+		typeof value.baseUrl !== "string"
+	) {
+		return false;
+	}
+	for (const field of OPTIONAL_STRING_PROFILE_FIELDS) {
+		if (value[field] !== undefined && typeof value[field] !== "string") {
+			return false;
+		}
+	}
+	if (
+		value.exactBaseUrl !== undefined &&
+		typeof value.exactBaseUrl !== "boolean"
+	) {
+		return false;
+	}
+	if (value.headers !== undefined && !isStringRecord(value.headers)) {
+		return false;
+	}
+	return true;
 }
 
 /**
@@ -391,11 +435,15 @@ function extractValidProfiles(parsed: unknown): Profile[] | null {
  *   prior `profiles.json.corrupt-*` backup already holds the exact same bytes,
  *   reuse it instead of writing another.
  * - Restrictive mode: the backup carries credentials, so it inherits the source
- *   file's permission bits (e.g. 0600) rather than the umask default.
+ *   file's permission bits (e.g. 0600) rather than the umask default — and is
+ *   CREATED with that mode (or a 0600 fallback), never briefly world-readable.
+ * - Byte-exact: takes the raw `Buffer` read off disk (never a UTF-8-decoded
+ *   string), so a torn write ending mid-multibyte-sequence is backed up and
+ *   deduplicated by its true bytes, not lossily re-encoded replacement chars.
  */
 function backupCorruptProfiles(
 	profilesPath: string,
-	data: string,
+	data: Buffer,
 ): { backup: string; backedUp: boolean } {
 	const prefix = `${basename(profilesPath)}.corrupt-`;
 	const dir = dirname(profilesPath);
@@ -404,7 +452,7 @@ function backupCorruptProfiles(
 			if (!name.startsWith(prefix)) continue;
 			const candidate = join(dir, name);
 			try {
-				if (readFileSync(candidate, "utf-8") === data) {
+				if (readFileSync(candidate).equals(data)) {
 					return { backup: candidate, backedUp: true };
 				}
 			} catch {
@@ -418,7 +466,11 @@ function backupCorruptProfiles(
 	const backup = `${profilesPath}.corrupt-${Date.now()}`;
 	const mode = fileMode(profilesPath);
 	try {
-		writeFileSync(backup, data, "utf-8");
+		// Create with a restrictive mode up front (never the 0666 umask default)
+		// so a credential backup is never briefly world-readable, then chmod to
+		// the exact source mode for an existing-name collision (where the create
+		// mode is ignored) or to unmask bits umask may have stripped.
+		writeFileSync(backup, data, { mode: mode ?? 0o600 });
 		if (mode !== undefined) chmodSync(backup, mode);
 		return { backup, backedUp: true };
 	} catch {
@@ -429,7 +481,7 @@ function backupCorruptProfiles(
 /** Back up the corrupt file (best-effort) and throw a recoverable error. */
 function throwCorruptProfiles(
 	profilesPath: string,
-	data: string,
+	data: Buffer,
 	detail: string,
 ): never {
 	const { backup, backedUp } = backupCorruptProfiles(profilesPath, data);
@@ -459,14 +511,20 @@ function throwCorruptProfiles(
 export function loadProfiles(): Profile[] {
 	const profilesPath = getProfilesPath();
 
-	if (!existsSync(profilesPath)) {
-		return [];
-	}
-
-	let data: string;
+	let data: Buffer;
 	try {
-		data = readFileSync(profilesPath, "utf-8");
+		data = readFileSync(profilesPath);
 	} catch (err) {
+		// A MISSING file (ENOENT) legitimately means "no profiles yet" → [].
+		// Any OTHER read error (permissions, a transiently inaccessible parent,
+		// an I/O fault) is NOT emptiness: `existsSync` can't tell these apart —
+		// it returns false for an unstattable path too — so we key strictly on
+		// ENOENT and route every other failure to the protected throw path, so
+		// seeding can never proceed from a false "empty" state and clobber the
+		// user's saved profiles.
+		if (isRecord(err) && err.code === "ENOENT") {
+			return [];
+		}
 		throw new Error(
 			`Failed to read profiles at ${profilesPath}: ${err instanceof Error ? err.message : String(err)}. ` +
 				`Refusing to treat an unreadable profiles file as empty (that would ` +
@@ -475,7 +533,7 @@ export function loadProfiles(): Profile[] {
 	}
 
 	try {
-		const parsed: unknown = JSON.parse(data);
+		const parsed: unknown = JSON.parse(data.toString("utf-8"));
 		const profiles = extractValidProfiles(parsed);
 		if (profiles === null) {
 			// Syntactically valid JSON, but not a valid profiles file. Treating
@@ -523,7 +581,13 @@ export function saveProfiles(profiles: Profile[]): void {
 	// client secrets and passwords — to the umask default.
 	const mode = fileMode(profilesPath);
 	try {
-		writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), "utf-8");
+		// Create the temp file with a restrictive mode up front (never the 0666
+		// umask default): a crash between write and rename otherwise leaves a
+		// `.tmp` holding credentials with broader permissions. chmod still runs
+		// afterwards to pin the exact source mode (create mode is umask-masked).
+		writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), {
+			mode: mode ?? 0o600,
+		});
 		if (mode !== undefined) chmodSync(tmp, mode);
 		renameSync(tmp, profilesPath);
 	} catch (err) {

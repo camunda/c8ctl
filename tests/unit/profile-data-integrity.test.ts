@@ -69,12 +69,7 @@ describe("profile data integrity", () => {
 	test("a corrupt read preserves the original bytes in a backup", () => {
 		const original = '{ "profiles": [ TORN';
 		writeFileSync(profilesPath(), original, "utf-8");
-		try {
-			loadProfiles();
-			assert.fail("expected loadProfiles to throw on a corrupt file");
-		} catch {
-			/* expected */
-		}
+		assert.throws(() => loadProfiles(), /corrupt/i);
 		const backups = readdirSync(dataDir).filter((f) =>
 			f.startsWith("profiles.json.corrupt-"),
 		);
@@ -134,6 +129,12 @@ describe("profile data integrity", () => {
 		'{"profiles": [ { "baseUrl": "http://x" } ]}', // entry missing `name`
 		'{"profiles": [ { "name": "merlin" } ]}', // entry missing `baseUrl`
 		'{"profiles": "merlin"}',
+		// Optional fields with the wrong runtime type are schema corruption too:
+		// accepting them would feed bad auth/headers/URL data to the request layer.
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "clientId": 123 } ]}',
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "exactBaseUrl": "yes" } ]}',
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "headers": "nope" } ]}',
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "headers": { "k": 1 } } ]}',
 	]) {
 		test(`schema-corrupt profiles.json is rejected, not treated as empty: ${malformed}`, () => {
 			writeFileSync(profilesPath(), malformed, "utf-8");
@@ -147,6 +148,50 @@ describe("profile data integrity", () => {
 	test("an empty-but-valid profiles.json is zero profiles (not corrupt)", () => {
 		writeFileSync(profilesPath(), '{ "profiles": [] }', "utf-8");
 		assert.deepEqual(loadProfiles(), []);
+	});
+
+	test("a valid profile with well-typed optional fields loads (not over-rejected)", () => {
+		writeFileSync(
+			profilesPath(),
+			JSON.stringify({
+				profiles: [
+					{
+						name: "gw",
+						baseUrl: "http://gw",
+						clientId: "id",
+						exactBaseUrl: true,
+						headers: { "x-api-key": "secret" },
+					},
+				],
+			}),
+			"utf-8",
+		);
+		assert.deepEqual(loadProfiles(), [
+			{
+				name: "gw",
+				baseUrl: "http://gw",
+				clientId: "id",
+				exactBaseUrl: true,
+				headers: { "x-api-key": "secret" },
+			},
+		]);
+	});
+
+	test("a torn write with invalid UTF-8 bytes is backed up byte-for-byte", () => {
+		// A crash mid-multibyte-sequence leaves bytes that are not valid UTF-8.
+		// The backup must preserve the exact bytes on disk, not a lossily
+		// re-encoded copy full of U+FFFD replacement characters.
+		const rawBytes = Buffer.from([0x7b, 0x20, 0xff, 0xfe, 0x00, 0x80]);
+		writeFileSync(profilesPath(), rawBytes);
+		assert.throws(() => loadProfiles(), /corrupt/i);
+		const backups = readdirSync(dataDir).filter((f) =>
+			f.startsWith("profiles.json.corrupt-"),
+		);
+		assert.equal(backups.length, 1);
+		assert.ok(
+			readFileSync(join(dataDir, backups[0])).equals(rawBytes),
+			"backup must be byte-identical to the torn file",
+		);
 	});
 
 	test("repeated corrupt reads deduplicate backups (no unbounded copies)", () => {
