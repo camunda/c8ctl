@@ -20,11 +20,13 @@ import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
@@ -352,6 +354,54 @@ describe("profile data integrity", () => {
 				statSync(backupPath).mode & 0o777,
 				0o600,
 				"the reused backup must be re-tightened, not left world-readable",
+			);
+		});
+
+		test("a symlink squatting the canonical backup name is not followed on reuse", () => {
+			// The content-addressed reuse path must NOT follow a symlink. If an
+			// attacker pre-creates the canonical `profiles.json.corrupt-<sha256>`
+			// name as a symlink pointing at a same-byte file elsewhere, a naive
+			// readFileSync/chmod would report a "backup" without an independent
+			// copy AND could chmod a target outside the profile store. The reuse
+			// path opens with O_NOFOLLOW, so the symlink is rejected and the
+			// recovered bytes are promoted to a fresh, real backup instead.
+			const rawBytes = Buffer.from([0x7b, 0x20, 0xff, 0xfe]);
+			const canonical = join(
+				dataDir,
+				`profiles.json.corrupt-${createHash("sha256").update(rawBytes).digest("hex")}`,
+			);
+			// A same-byte decoy OUTSIDE the profile store, left world-readable so
+			// we can prove it is never chmod'd by the reuse path.
+			const decoy = join(dataDir, "decoy-target");
+			writeFileSync(decoy, rawBytes);
+			chmodSync(decoy, 0o644);
+			symlinkSync(decoy, canonical);
+
+			writeFileSync(profilesPath(), rawBytes);
+			chmodSync(profilesPath(), 0o600);
+			assert.throws(() => loadProfiles(), /corrupt/i);
+
+			// The canonical name is still the untouched symlink (never overwritten).
+			assert.ok(
+				lstatSync(canonical).isSymbolicLink(),
+				"the pre-existing symlink must not be clobbered",
+			);
+			// The decoy target's mode is untouched — no chmod leaked through the link.
+			assert.equal(
+				statSync(decoy).mode & 0o777,
+				0o644,
+				"a symlinked reuse candidate must never be chmod'd",
+			);
+			// A real, independent regular-file backup was created instead.
+			const realBackups = readdirSync(dataDir).filter(
+				(f) =>
+					f.startsWith("profiles.json.corrupt-") &&
+					lstatSync(join(dataDir, f)).isFile(),
+			);
+			assert.equal(realBackups.length, 1);
+			assert.ok(
+				readFileSync(join(dataDir, realBackups[0])).equals(rawBytes),
+				"the independent backup must hold the exact corrupt bytes",
 			);
 		});
 

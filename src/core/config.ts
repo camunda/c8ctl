@@ -8,8 +8,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
 	chmodSync,
+	closeSync,
+	constants,
 	existsSync,
+	fchmodSync,
+	fstatSync,
+	linkSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	renameSync,
 	rmSync,
@@ -425,15 +431,16 @@ function extractValidProfiles(parsed: unknown): Profile[] | null {
 }
 
 /**
- * Preserve the original bytes of a corrupt profiles.json in a timestamped,
+ * Preserve the original bytes of a corrupt profiles.json in a content-addressed,
  * mode-preserving backup (best-effort). Returns the backup path and whether it
  * actually exists on disk afterwards.
  *
  * - Deduplicates: `loadProfiles` runs on virtually every CLI startup (via
  *   `loadSessionState`), so leaving the corrupt file in place would otherwise
- *   spew a fresh full copy on every command and eventually fill the disk. If a
- *   prior `profiles.json.corrupt-*` backup already holds the exact same bytes,
- *   reuse it instead of writing another.
+ *   spew a fresh full copy on every command and eventually fill the disk. The
+ *   backup name is the SHA-256 of the corrupt bytes, so a
+ *   `profiles.json.corrupt-<sha256>` backup already holding the exact same
+ *   bytes is reused instead of writing another.
  * - Restrictive mode: the backup carries credentials, so it inherits the source
  *   file's permission bits (e.g. 0600) rather than the umask default — and is
  *   CREATED with that mode (or a 0600 fallback), never briefly world-readable.
@@ -464,65 +471,128 @@ function backupCorruptProfiles(
 	const hash = createHash("sha256").update(data).digest("hex");
 	const backup = `${profilesPath}.corrupt-${hash}`;
 
-	// Re-tighten a possibly stale/world-readable backup to the required mode: an
-	// older run may have created it 0644 before profiles.json was locked down to
-	// 0600, and reusing it as-is would keep a world-readable credential copy.
-	const retighten = (path: string): void => {
-		try {
-			if ((statSync(path).mode & 0o777) !== mode) chmodSync(path, mode);
-		} catch {
-			/* best-effort mode repair — reuse the backup regardless */
-		}
-	};
+	// Stage the bytes in a private temp file FIRST, fully written and mode-pinned,
+	// then publish the canonical name with an atomic `link()`. This is what makes
+	// the canonical backup safe to reuse under concurrency: `link()` only ever
+	// exposes `backup` once it points at fully written content, so a losing racer
+	// that observes EEXIST reads COMPLETE bytes (never a half-finished write that
+	// would fail the equality check and fan out into a second copy). `link()`
+	// also refuses to follow or overwrite a pre-existing symlink at the canonical
+	// name, and the reuse read below opens with O_NOFOLLOW — so a symlink
+	// squatting the canonical path can neither redirect the reused read nor a
+	// chmod outside the profile store.
+	const tmp = `${profilesPath}.corrupt-tmp-${randomUUID()}`;
+	try {
+		// `wx` = create-exclusive with a restrictive mode up front (never the
+		// 0666 umask default), so a credential temp is never briefly
+		// world-readable; chmod pins any bits umask stripped.
+		writeFileSync(tmp, data, { mode, flag: "wx" });
+		chmodSync(tmp, mode);
+	} catch {
+		// Could not even stage the temp copy — best-effort, give up cleanly.
+		removeQuietly(tmp);
+		return { backup, backedUp: false };
+	}
 
 	try {
-		// Create with a restrictive mode up front (never the 0666 umask default)
-		// so a credential backup is never briefly world-readable, then chmod to
-		// pin any bits umask may have stripped. `wx` = create-exclusive: never
-		// truncate a colliding backup and never follow a pre-existing symlink.
-		writeFileSync(backup, data, { mode, flag: "wx" });
-		chmodSync(backup, mode);
+		linkSync(tmp, backup);
+		// We published the canonical backup (its content lives at both `tmp` and
+		// `backup` now; the `finally` drops the stale temp name).
 		return { backup, backedUp: true };
 	} catch (err) {
-		if (isRecord(err) && err.code === "EEXIST") {
-			// A backup for these exact bytes already exists — written by an
-			// earlier run or a concurrent process that won the race. Reuse it
-			// (re-tightening a stale mode) so identical bytes never spawn a
-			// second credential copy. Guard the astronomically unlikely case
-			// where the existing file's bytes differ (a SHA-256 collision, or an
-			// unrelated file squatting the name): fall back to a unique
-			// random-suffixed backup rather than claim a mismatched file.
-			try {
-				if (readFileSync(backup).equals(data)) {
-					retighten(backup);
-					return { backup, backedUp: true };
-				}
-			} catch {
-				/* unreadable canonical backup — fall through to a unique copy */
-			}
-			return backupUniqueCorruptCopy(profilesPath, data, mode);
+		if (
+			isRecord(err) &&
+			err.code === "EEXIST" &&
+			reuseCanonicalBackup(backup, data, mode)
+		) {
+			// The canonical name already holds these exact bytes (an earlier run
+			// or a concurrent winner). Reuse it so identical bytes never spawn a
+			// second credential copy.
+			return { backup, backedUp: true };
 		}
-		return { backup, backedUp: false };
+		// Canonical name is unusable — bytes differ (SHA-256 collision or an
+		// unrelated/symlinked file squatting the name), unreadable, or a
+		// non-EEXIST link error. Promote our already-staged temp to a unique
+		// random-suffixed backup rather than claim a mismatched file or discard
+		// the recovered bytes.
+		return promoteTempToUniqueCopy(tmp, profilesPath, mode);
+	} finally {
+		// Drop the temp NAME. Whether we linked (content also at `backup`) or
+		// promoted (content moved to a unique name), unlinking the temp name
+		// never removes the hard-linked content it published elsewhere.
+		removeQuietly(tmp);
+	}
+}
+
+/** Best-effort unlink that swallows ENOENT and any other error. */
+function removeQuietly(path: string): void {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		/* best-effort cleanup */
 	}
 }
 
 /**
- * Fallback backup path for the (astronomically unlikely) case where the
- * content-addressed canonical name is already taken by a NON-matching file.
- * Writes to a fresh random-suffixed name with an EXCLUSIVE (`wx`) open, so a
- * same-millisecond `Date.now()` collision fails with EEXIST and is retried
- * instead of clobbering another process's bytes.
+ * Reuse an existing content-addressed canonical backup iff it is a REGULAR file
+ * whose bytes match `data`. Opens with O_NOFOLLOW and operates on the resulting
+ * fd (fstat/read/fchmod), so a symlink squatting the canonical name is rejected
+ * (ELOOP) and can never redirect the read or a chmod to a target outside the
+ * profile store. Re-tightens a stale/world-readable mode on the same fd (an
+ * older run may have created it 0644 before profiles.json was locked to 0600).
  */
-function backupUniqueCorruptCopy(
-	profilesPath: string,
+function reuseCanonicalBackup(
+	backup: string,
 	data: Buffer,
 	mode: number,
+): boolean {
+	let fd: number | undefined;
+	try {
+		fd = openSync(backup, constants.O_RDONLY | constants.O_NOFOLLOW);
+		const st = fstatSync(fd);
+		if (!st.isFile()) return false; // reject symlink target / non-regular
+		if (!readFileSync(fd).equals(data)) return false;
+		if ((st.mode & 0o777) !== mode) {
+			try {
+				fchmodSync(fd, mode);
+			} catch {
+				/* best-effort mode repair — reuse the backup regardless */
+			}
+		}
+		return true;
+	} catch {
+		// ELOOP (symlink, blocked by O_NOFOLLOW), ENOENT, unreadable, etc.
+		return false;
+	} finally {
+		if (fd !== undefined) closeQuietly(fd);
+	}
+}
+
+/** Best-effort fd close that swallows any error. */
+function closeQuietly(fd: number): void {
+	try {
+		closeSync(fd);
+	} catch {
+		/* best-effort close */
+	}
+}
+
+/**
+ * Promote the already-staged temp file to a fresh random-suffixed backup for the
+ * (astronomically unlikely) case where the content-addressed canonical name is
+ * taken by a NON-matching or symlinked file. Publishes via an atomic `link()`,
+ * so a same-name collision fails with EEXIST and is retried rather than
+ * clobbering another process's bytes; the caller's `finally` drops the temp name.
+ */
+function promoteTempToUniqueCopy(
+	tmp: string,
+	profilesPath: string,
+	mode: number,
 ): { backup: string; backedUp: boolean } {
-	let backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
 	for (let attempt = 0; attempt < 5; attempt++) {
-		backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
+		const backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
 		try {
-			writeFileSync(backup, data, { mode, flag: "wx" });
+			linkSync(tmp, backup);
 			chmodSync(backup, mode);
 			return { backup, backedUp: true };
 		} catch (err) {
@@ -531,7 +601,7 @@ function backupUniqueCorruptCopy(
 			return { backup, backedUp: false };
 		}
 	}
-	return { backup, backedUp: false };
+	return { backup: tmp, backedUp: false };
 }
 
 /** Back up the corrupt file (best-effort) and throw a recoverable error. */
