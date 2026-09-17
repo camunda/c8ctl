@@ -140,7 +140,7 @@ export async function readBpmnInput(
 }
 
 export async function createBpmnModdle() {
-	const BpmnModdle = (await import("bpmn-moddle")).default;
+	const { BpmnModdle } = await import("bpmn-moddle");
 	const zeebeSchema = (
 		await import("zeebe-bpmn-moddle/resources/zeebe.json", {
 			with: { type: "json" },

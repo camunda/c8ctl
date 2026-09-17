@@ -28,6 +28,10 @@ const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = "src/index.ts";
 const BPMN_FILE = join(FIXTURES_DIR, "simple.bpmn");
 const TEMPLATE_FILE = join(FIXTURES_DIR, "http-json-connector.json");
+const AGENT_DEFINITION_TEMPLATE_FILE = join(
+	FIXTURES_DIR,
+	"agent-definition-template.json",
+);
 
 async function c8text(...args: string[]) {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
@@ -106,6 +110,11 @@ function makeVersionedFooTemplates() {
 
 function getTaskDefinitionType(xml: string): string | null {
 	const match = xml.match(/<zeebe:taskDefinition[^>]+type="([^"]*)"/);
+	return match ? match[1] : null;
+}
+
+function getAgentDefinitionAgentType(xml: string): string | null {
+	const match = xml.match(/<zeebe:agentDefinition[^>]+agentType="([^"]*)"/);
 	return match ? match[1] : null;
 }
 
@@ -212,6 +221,26 @@ describe("CLI behavioural: element-template apply", () => {
 		assert.ok(
 			output.includes("not found") || output.includes("Error"),
 			"Should report element not found",
+		);
+	});
+
+	test("applies a Hidden property bound to zeebe:agentDefinition (bpmn-moddle/zeebe-bpmn-moddle schema regression)", async () => {
+		// zeebe-bpmn-moddle@1.11.0's schema doesn't know about the
+		// `zeebe:agentDefinition` extension element (added for the AI Agent
+		// connector templates): bpmn-moddle silently drops any property bound
+		// to it during serialization instead of erroring, so `apply` exits 0
+		// but the output is missing the extension entirely.
+		const result = await c8text(
+			"element-template",
+			"apply",
+			AGENT_DEFINITION_TEMPLATE_FILE,
+			"Activity_17s7axj",
+			BPMN_FILE,
+		);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.strictEqual(
+			getAgentDefinitionAgentType(result.stdout),
+			"aiAgentTask",
 		);
 	});
 });
