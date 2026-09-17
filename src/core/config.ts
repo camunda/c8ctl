@@ -14,6 +14,7 @@ import {
 	fchmodSync,
 	fstatSync,
 	linkSync,
+	lstatSync,
 	mkdirSync,
 	openSync,
 	readFileSync,
@@ -495,32 +496,57 @@ function backupCorruptProfiles(
 	}
 
 	try {
-		linkSync(tmp, backup);
-		// We published the canonical backup (its content lives at both `tmp` and
-		// `backup` now; the `finally` drops the stale temp name).
-		return { backup, backedUp: true };
-	} catch (err) {
-		if (
-			isRecord(err) &&
-			err.code === "EEXIST" &&
-			reuseCanonicalBackup(backup, data, mode)
-		) {
-			// The canonical name already holds these exact bytes (an earlier run
-			// or a concurrent winner). Reuse it so identical bytes never spawn a
-			// second credential copy.
-			return { backup, backedUp: true };
+		// Publish under a BOUNDED, DETERMINISTIC set of content-addressed names:
+		// the canonical name first, then a single `.dup` fallback for the
+		// (astronomically unlikely) case where the canonical name is squatted by
+		// a non-matching or symlinked file. Both names are pure functions of the
+		// corrupt bytes, so repeated recoveries of the same corruption always map
+		// to the SAME (at most two) files and REUSE them — never a fresh
+		// random-suffixed copy per run. If BOTH names are unusable (e.g. an
+		// attacker squatting both with symlinks), we stop after preserving the
+		// original on disk rather than accumulate unbounded credential copies.
+		for (const name of [backup, `${backup}.dup`]) {
+			if (publishBackup(tmp, name, data, mode)) {
+				return { backup: name, backedUp: true };
+			}
 		}
-		// Canonical name is unusable — bytes differ (SHA-256 collision or an
-		// unrelated/symlinked file squatting the name), unreadable, or a
-		// non-EEXIST link error. Promote our already-staged temp to a unique
-		// random-suffixed backup rather than claim a mismatched file or discard
-		// the recovered bytes.
-		return promoteTempToUniqueCopy(tmp, profilesPath, mode);
+		return { backup, backedUp: false };
 	} finally {
-		// Drop the temp NAME. Whether we linked (content also at `backup`) or
-		// promoted (content moved to a unique name), unlinking the temp name
-		// never removes the hard-linked content it published elsewhere.
+		// Drop the temp NAME. Whether we linked (content also at a published
+		// name) or gave up, unlinking the temp name never removes the
+		// hard-linked content it published elsewhere.
 		removeQuietly(tmp);
+	}
+}
+
+/**
+ * Publish the mode-pinned `tmp` under content-addressed `name` via an atomic
+ * `link()`, or REUSE `name` if it already holds these exact bytes. Returns
+ * `true` when `name` ends up as a usable regular-file backup of `data`, `false`
+ * when `name` is unusable (squatted by a symlink / non-matching file, or a
+ * non-EEXIST link error) so the caller can try the next name.
+ *
+ * `link()` never follows or overwrites a pre-existing symlink at `name`, and the
+ * hard link inherits `tmp`'s already-pinned mode — so no post-publish
+ * pathname-based chmod (which a symlink swap could redirect outside the store)
+ * is needed.
+ */
+function publishBackup(
+	tmp: string,
+	name: string,
+	data: Buffer,
+	mode: number,
+): boolean {
+	try {
+		linkSync(tmp, name);
+		return true;
+	} catch (err) {
+		// EEXIST: the name already exists. Reuse it iff it is a regular file with
+		// these exact bytes (and a repairable mode); otherwise it is unusable.
+		if (isRecord(err) && err.code === "EEXIST") {
+			return reuseCanonicalBackup(name, data, mode);
+		}
+		return false;
 	}
 }
 
@@ -530,6 +556,21 @@ function removeQuietly(path: string): void {
 		rmSync(path, { force: true });
 	} catch {
 		/* best-effort cleanup */
+	}
+}
+
+/**
+ * Does the path ENTRY itself exist, without following a final symlink? Uses
+ * `lstatSync`, so a DANGLING symlink (link present, target absent) counts as
+ * "exists" — distinguishing a broken/unreadable profiles path from a genuinely
+ * absent one when a `readFileSync` returns ENOENT.
+ */
+function pathEntryExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch {
+		return false;
 	}
 }
 
@@ -556,7 +597,11 @@ function reuseCanonicalBackup(
 			try {
 				fchmodSync(fd, mode);
 			} catch {
-				/* best-effort mode repair — reuse the backup regardless */
+				// Could not re-tighten a stale/world-readable candidate. Do NOT
+				// claim it as a safe backup — reporting it as reused would leave
+				// credentials at a wider mode than promised. Return false so the
+				// caller publishes a freshly mode-pinned copy under the next name.
+				return false;
 			}
 		}
 		return true;
@@ -575,33 +620,6 @@ function closeQuietly(fd: number): void {
 	} catch {
 		/* best-effort close */
 	}
-}
-
-/**
- * Promote the already-staged temp file to a fresh random-suffixed backup for the
- * (astronomically unlikely) case where the content-addressed canonical name is
- * taken by a NON-matching or symlinked file. Publishes via an atomic `link()`,
- * so a same-name collision fails with EEXIST and is retried rather than
- * clobbering another process's bytes; the caller's `finally` drops the temp name.
- */
-function promoteTempToUniqueCopy(
-	tmp: string,
-	profilesPath: string,
-	mode: number,
-): { backup: string; backedUp: boolean } {
-	for (let attempt = 0; attempt < 5; attempt++) {
-		const backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
-		try {
-			linkSync(tmp, backup);
-			chmodSync(backup, mode);
-			return { backup, backedUp: true };
-		} catch (err) {
-			// Only a name collision is retryable; any other IO error is fatal.
-			if (isRecord(err) && err.code === "EEXIST") continue;
-			return { backup, backedUp: false };
-		}
-	}
-	return { backup: tmp, backedUp: false };
 }
 
 /** Back up the corrupt file (best-effort) and throw a recoverable error. */
@@ -631,7 +649,7 @@ function throwCorruptProfiles(
  * (via `addProfile`/`ensureDefaultProfile`/`removeProfile`) would overwrite the
  * file with a truncated set, silently DESTROYING every saved profile. So we
  * distinguish the two: absent → `[]`; present-but-unreadable → THROW (after
- * preserving the original bytes in a timestamped backup), so no caller can
+ * preserving the original bytes in a content-addressed backup), so no caller can
  * mistake corruption for emptiness and clobber the user's profiles.
  */
 export function loadProfiles(): Profile[] {
@@ -649,6 +667,22 @@ export function loadProfiles(): Profile[] {
 		// seeding can never proceed from a false "empty" state and clobber the
 		// user's saved profiles.
 		if (isRecord(err) && err.code === "ENOENT") {
+			// `readFileSync` also returns ENOENT for a DANGLING symlink (the link
+			// exists, its target does not). That is NOT "no profiles yet": a
+			// later `saveProfiles` rename would replace the link and the user's
+			// intended target is lost. `lstatSync` inspects the path entry
+			// ITSELF without following it — if it succeeds, something is present
+			// (a broken symlink or other non-regular entry) and we must NOT treat
+			// it as empty. Only a genuinely absent entry (lstat also ENOENT)
+			// means "no profiles yet".
+			if (pathEntryExists(profilesPath)) {
+				throw new Error(
+					`profiles file at ${profilesPath} exists but its contents could not ` +
+						`be read (e.g. a dangling symlink). Refusing to treat it as empty ` +
+						`(that would overwrite your saved profiles) — fix or remove it, ` +
+						`then re-run.`,
+				);
+			}
 			return [];
 		}
 		throw new Error(

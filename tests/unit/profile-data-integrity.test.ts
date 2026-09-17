@@ -21,6 +21,7 @@ import {
 	chmodSync,
 	existsSync,
 	lstatSync,
+	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -277,24 +278,20 @@ describe("profile data integrity", () => {
 	test("an UNREADABLE (non-ENOENT) profiles.json throws and cannot be reseeded", () => {
 		// `existsSync` cannot tell an absent file from an unstattable one, so
 		// loadProfiles keys strictly on ENOENT: any OTHER read error must throw,
-		// never return `[]`. Force a deterministic ENOTDIR by pointing the data
-		// dir at a regular FILE, so `<file>/profiles.json` is unreadable.
-		const fileAsDir = join(
-			tmpdir(),
-			`c8ctl-notdir-${process.pid}-${Date.now()}`,
+		// never return `[]`. Force a deterministic, CROSS-PLATFORM non-ENOENT
+		// read error by making `profiles.json` a DIRECTORY — `readFileSync` then
+		// fails with EISDIR on POSIX and Windows alike (the older "data dir is a
+		// regular file → ENOTDIR" trick surfaced as ENOENT on Windows, wrongly
+		// looking absent).
+		mkdirSync(profilesPath());
+		assert.throws(() => loadProfiles(), /Refusing to treat an unreadable/i);
+		// Seeding loads first; on the unreadable path it must warn and leave the
+		// path untouched, never reseed a default over it.
+		ensureDefaultProfile();
+		assert.ok(
+			lstatSync(profilesPath()).isDirectory(),
+			"the unreadable path must be left untouched, never reseeded over",
 		);
-		writeFileSync(fileAsDir, "not a directory");
-		process.env.C8CTL_DATA_DIR = fileAsDir;
-		try {
-			assert.throws(() => loadProfiles(), /Refusing to treat an unreadable/i);
-			// Seeding loads first; on the unreadable path it must warn and leave
-			// the path untouched, never reseed a default over it.
-			ensureDefaultProfile();
-			assert.equal(readFileSync(fileAsDir, "utf-8"), "not a directory");
-		} finally {
-			process.env.C8CTL_DATA_DIR = dataDir;
-			rmSync(fileAsDir, { force: true });
-		}
 	});
 
 	// POSIX-only: permission bits are not meaningfully enforced on Windows.
@@ -402,6 +399,23 @@ describe("profile data integrity", () => {
 			assert.ok(
 				readFileSync(join(dataDir, realBackups[0])).equals(rawBytes),
 				"the independent backup must hold the exact corrupt bytes",
+			);
+		});
+
+		test("a DANGLING profiles.json symlink is not mistaken for an absent file", () => {
+			// `readFileSync` on a broken symlink returns ENOENT — identical to a
+			// genuinely missing file. Treating it as "no profiles" would let the
+			// next save rename over the link and lose the user's intended target.
+			// `loadProfiles` uses `lstatSync` to see the link ENTRY itself, so a
+			// dangling link is routed to the protected throw path, not `[]`.
+			const missingTarget = join(dataDir, "does-not-exist.json");
+			symlinkSync(missingTarget, profilesPath());
+			assert.throws(() => loadProfiles(), /exists but its contents/i);
+			// Seeding must NOT clobber the dangling link (the wipe regression).
+			ensureDefaultProfile();
+			assert.ok(
+				lstatSync(profilesPath()).isSymbolicLink(),
+				"the dangling symlink must be left untouched, never reseeded over",
 			);
 		});
 
