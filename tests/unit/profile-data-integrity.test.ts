@@ -16,6 +16,7 @@
  */
 
 import assert from "node:assert";
+import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -208,6 +209,41 @@ describe("profile data integrity", () => {
 			1,
 			"identical corrupt bytes must not spawn multiple backups",
 		);
+	});
+
+	test("the backup name is CONTENT-ADDRESSED (concurrent recoveries converge on one file)", () => {
+		// The dedup key is the corrupt filename itself: it is a pure function of
+		// the corrupt BYTES (their SHA-256). This is what bounds credential
+		// copies across PROCESSES — N c8ctl children racing on the same corrupt
+		// profiles.json all derive the same canonical name and the exclusive
+		// (`wx`) create lets exactly one win, so they converge on a single
+		// backup instead of each writing its own (a cross-process readdir scan
+		// could not prevent that, since every child can scan-empty before any
+		// writes). Pin the name so a future refactor can't silently drop the
+		// content-addressing and reopen the race.
+		const rawBytes = Buffer.from([0x7b, 0x20, 0xff, 0xfe, 0x00, 0x80]);
+		writeFileSync(profilesPath(), rawBytes);
+		assert.throws(() => loadProfiles(), /corrupt/i);
+		const backups = readdirSync(dataDir).filter((f) =>
+			f.startsWith("profiles.json.corrupt-"),
+		);
+		assert.equal(backups.length, 1);
+		const expected = `profiles.json.corrupt-${createHash("sha256").update(rawBytes).digest("hex")}`;
+		assert.equal(
+			backups[0],
+			expected,
+			"backup name must be the SHA-256 of the corrupt bytes",
+		);
+		// Distinct corruption yields its OWN single canonical backup, never a
+		// merge and never an unbounded fan-out.
+		const otherBytes = Buffer.from([0x7b, 0x21]);
+		writeFileSync(profilesPath(), otherBytes);
+		assert.throws(() => loadProfiles(), /corrupt/i);
+		const after = readdirSync(dataDir)
+			.filter((f) => f.startsWith("profiles.json.corrupt-"))
+			.sort();
+		const expectedOther = `profiles.json.corrupt-${createHash("sha256").update(otherBytes).digest("hex")}`;
+		assert.deepEqual([expected, expectedOther].sort(), after);
 	});
 
 	test("invalid UTF-8 INSIDE a quoted value is corruption, not a healthy profile", () => {

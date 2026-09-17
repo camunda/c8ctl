@@ -5,12 +5,11 @@
  * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
-	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
@@ -18,7 +17,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir, platform } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
@@ -446,53 +445,83 @@ function backupCorruptProfiles(
 	profilesPath: string,
 	data: Buffer,
 ): { backup: string; backedUp: boolean } {
-	const prefix = `${basename(profilesPath)}.corrupt-`;
-	const dir = dirname(profilesPath);
 	// The mode a credential backup must carry: the source file's bits (e.g.
 	// 0600) or a restrictive 0600 fallback. Computed up front so a REUSED
 	// backup can be re-tightened too, not just a freshly created one.
 	const mode = fileMode(profilesPath) ?? 0o600;
+
+	// CONTENT-ADDRESSED canonical name: the backup filename is a pure function
+	// of the corrupt BYTES (their SHA-256), so identical corruption always maps
+	// to exactly ONE file. This is what bounds the credential copies across
+	// processes: N c8ctl children racing on the same corrupt profiles.json all
+	// derive the same name, and an EXCLUSIVE (`wx`) create lets exactly one win
+	// — every other loses with EEXIST and REUSES that single canonical backup,
+	// instead of each writing its own random-suffixed copy. A cross-process
+	// readdir/dedup scan could NOT prevent that fan-out (every child can finish
+	// scanning empty before any has written); a content-addressed name closes
+	// the race deterministically with no lock, and subsumes the old dedup scan
+	// for free (same bytes → same name).
+	const hash = createHash("sha256").update(data).digest("hex");
+	const backup = `${profilesPath}.corrupt-${hash}`;
+
+	// Re-tighten a possibly stale/world-readable backup to the required mode: an
+	// older run may have created it 0644 before profiles.json was locked down to
+	// 0600, and reusing it as-is would keep a world-readable credential copy.
+	const retighten = (path: string): void => {
+		try {
+			if ((statSync(path).mode & 0o777) !== mode) chmodSync(path, mode);
+		} catch {
+			/* best-effort mode repair — reuse the backup regardless */
+		}
+	};
+
 	try {
-		for (const name of readdirSync(dir)) {
-			if (!name.startsWith(prefix)) continue;
-			const candidate = join(dir, name);
+		// Create with a restrictive mode up front (never the 0666 umask default)
+		// so a credential backup is never briefly world-readable, then chmod to
+		// pin any bits umask may have stripped. `wx` = create-exclusive: never
+		// truncate a colliding backup and never follow a pre-existing symlink.
+		writeFileSync(backup, data, { mode, flag: "wx" });
+		chmodSync(backup, mode);
+		return { backup, backedUp: true };
+	} catch (err) {
+		if (isRecord(err) && err.code === "EEXIST") {
+			// A backup for these exact bytes already exists — written by an
+			// earlier run or a concurrent process that won the race. Reuse it
+			// (re-tightening a stale mode) so identical bytes never spawn a
+			// second credential copy. Guard the astronomically unlikely case
+			// where the existing file's bytes differ (a SHA-256 collision, or an
+			// unrelated file squatting the name): fall back to a unique
+			// random-suffixed backup rather than claim a mismatched file.
 			try {
-				if (readFileSync(candidate).equals(data)) {
-					// Repair a stale backup that predates a source-mode tightening:
-					// an older run may have created it 0644 (world-readable) before
-					// profiles.json was locked down to 0600. Reusing it as-is would
-					// keep a world-readable credential copy, so re-apply the mode.
-					try {
-						if ((statSync(candidate).mode & 0o777) !== mode) {
-							chmodSync(candidate, mode);
-						}
-					} catch {
-						/* best-effort mode repair — reuse the backup regardless */
-					}
-					return { backup: candidate, backedUp: true };
+				if (readFileSync(backup).equals(data)) {
+					retighten(backup);
+					return { backup, backedUp: true };
 				}
 			} catch {
-				/* unreadable candidate — ignore and keep scanning */
+				/* unreadable canonical backup — fall through to a unique copy */
 			}
+			return backupUniqueCorruptCopy(profilesPath, data, mode);
 		}
-	} catch {
-		/* directory unreadable — fall through to a best-effort fresh backup */
+		return { backup, backedUp: false };
 	}
+}
 
-	// Create the backup with an EXCLUSIVE (`wx`) open so two concurrent
-	// processes recovering the same corrupt file never clobber each other's
-	// copy: a same-millisecond `Date.now()` name collision fails with EEXIST
-	// instead of overwriting the bytes the other process just captured, and we
-	// retry under a fresh unique name. The random suffix makes a collision all
-	// but impossible; `wx` guarantees correctness even if one occurs.
+/**
+ * Fallback backup path for the (astronomically unlikely) case where the
+ * content-addressed canonical name is already taken by a NON-matching file.
+ * Writes to a fresh random-suffixed name with an EXCLUSIVE (`wx`) open, so a
+ * same-millisecond `Date.now()` collision fails with EEXIST and is retried
+ * instead of clobbering another process's bytes.
+ */
+function backupUniqueCorruptCopy(
+	profilesPath: string,
+	data: Buffer,
+	mode: number,
+): { backup: string; backedUp: boolean } {
 	let backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
 	for (let attempt = 0; attempt < 5; attempt++) {
 		backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
 		try {
-			// Create with a restrictive mode up front (never the 0666 umask
-			// default) so a credential backup is never briefly world-readable,
-			// then chmod to unmask any bits umask may have stripped. `wx` =
-			// create-exclusive: never truncate a colliding backup.
 			writeFileSync(backup, data, { mode, flag: "wx" });
 			chmodSync(backup, mode);
 			return { backup, backedUp: true };
@@ -618,7 +647,14 @@ export function loadProfiles(): Profile[] {
 export function saveProfiles(profiles: Profile[]): void {
 	const profilesPath = getProfilesPath();
 	const profilesFile: ProfilesFile = { profiles };
-	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.tmp`;
+	// Randomise the temp name and open it EXCLUSIVELY (`wx`) below. The old
+	// `<pid>.<ms>.tmp` name was predictable, so in a writable/shared data
+	// directory an attacker could pre-create a symlink at that path; a default
+	// truncating open would then FOLLOW it and redirect the serialized
+	// credentials outside the profile store. A random name is unguessable and
+	// `wx` refuses to open an existing entry (symlink included), so the temp
+	// file can neither be redirected nor clobbered by another entry.
+	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
 	// Preserve the existing file's permission bits (e.g. 0600) so an atomic
 	// replace never silently widens a user-protected profiles.json — it holds
 	// client secrets and passwords — to the umask default.
@@ -626,10 +662,13 @@ export function saveProfiles(profiles: Profile[]): void {
 	try {
 		// Create the temp file with a restrictive mode up front (never the 0666
 		// umask default): a crash between write and rename otherwise leaves a
-		// `.tmp` holding credentials with broader permissions. chmod still runs
-		// afterwards to pin the exact source mode (create mode is umask-masked).
+		// `.tmp` holding credentials with broader permissions. `wx` =
+		// create-exclusive: never truncate or follow a pre-existing entry. chmod
+		// still runs afterwards to pin the exact source mode (create mode is
+		// umask-masked).
 		writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), {
 			mode: mode ?? 0o600,
+			flag: "wx",
 		});
 		if (mode !== undefined) chmodSync(tmp, mode);
 		renameSync(tmp, profilesPath);
