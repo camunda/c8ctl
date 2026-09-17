@@ -361,6 +361,22 @@ function fileMode(path: string): number | undefined {
 	}
 }
 
+/** True on native Windows, where POSIX permission bits do not apply. */
+const isWindows = platform() === "win32";
+
+/**
+ * Re-tighten an open fd to `mode` THROUGH THE FD — but only where the platform
+ * implements it. `fchmodSync` throws `ERR_METHOD_NOT_IMPLEMENTED` on Windows
+ * (access there is governed by ACLs, not POSIX mode bits), so an unconditional
+ * call would throw on every profile save and corrupt-file recovery on the
+ * Windows CI leg — the catch would then delete the staged temp and report that
+ * no backup was written. The create-time `mode` already covers the only bit
+ * Windows honours (read-only), so skipping the fd chmod there loses nothing.
+ */
+function pinFdMode(fd: number, mode: number): void {
+	if (!isWindows) fchmodSync(fd, mode);
+}
+
 /** The optional, string-typed fields of a `Profile`. */
 const OPTIONAL_STRING_PROFILE_FIELDS = [
 	"clientId",
@@ -500,7 +516,7 @@ function backupCorruptProfiles(
 			mode,
 		);
 		writeFileSync(stagedFd, data);
-		fchmodSync(stagedFd, mode);
+		pinFdMode(stagedFd, mode);
 	} catch {
 		// Could not even stage the temp copy — best-effort, give up cleanly.
 		if (stagedFd !== undefined) closeQuietly(stagedFd);
@@ -635,7 +651,7 @@ function reuseCanonicalBackup(
 		if (!readFileSync(fd).equals(data)) return false;
 		if ((st.mode & 0o777) !== mode) {
 			try {
-				fchmodSync(fd, mode);
+				pinFdMode(fd, mode);
 			} catch {
 				// Could not re-tighten a stale/world-readable candidate. Do NOT
 				// claim it as a safe backup — reporting it as reused would leave
@@ -856,7 +872,7 @@ export function saveProfiles(profiles: Profile[]): void {
 			mode ?? 0o600,
 		);
 		writeFileSync(fd, JSON.stringify(profilesFile, null, 2));
-		if (mode !== undefined) fchmodSync(fd, mode);
+		if (mode !== undefined) pinFdMode(fd, mode);
 		closeSync(fd);
 		fd = undefined;
 		renameSync(tmp, profilesPath);
