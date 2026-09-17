@@ -5,6 +5,7 @@
  * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -478,18 +479,30 @@ function backupCorruptProfiles(
 		/* directory unreadable — fall through to a best-effort fresh backup */
 	}
 
-	const backup = `${profilesPath}.corrupt-${Date.now()}`;
-	try {
-		// Create with a restrictive mode up front (never the 0666 umask default)
-		// so a credential backup is never briefly world-readable, then chmod to
-		// pin the exact mode for an existing-name collision (where the create
-		// mode is ignored) or to unmask bits umask may have stripped.
-		writeFileSync(backup, data, { mode });
-		chmodSync(backup, mode);
-		return { backup, backedUp: true };
-	} catch {
-		return { backup, backedUp: false };
+	// Create the backup with an EXCLUSIVE (`wx`) open so two concurrent
+	// processes recovering the same corrupt file never clobber each other's
+	// copy: a same-millisecond `Date.now()` name collision fails with EEXIST
+	// instead of overwriting the bytes the other process just captured, and we
+	// retry under a fresh unique name. The random suffix makes a collision all
+	// but impossible; `wx` guarantees correctness even if one occurs.
+	let backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
+	for (let attempt = 0; attempt < 5; attempt++) {
+		backup = `${profilesPath}.corrupt-${Date.now()}-${randomUUID()}`;
+		try {
+			// Create with a restrictive mode up front (never the 0666 umask
+			// default) so a credential backup is never briefly world-readable,
+			// then chmod to unmask any bits umask may have stripped. `wx` =
+			// create-exclusive: never truncate a colliding backup.
+			writeFileSync(backup, data, { mode, flag: "wx" });
+			chmodSync(backup, mode);
+			return { backup, backedUp: true };
+		} catch (err) {
+			// Only a name collision is retryable; any other IO error is fatal.
+			if (isRecord(err) && err.code === "EEXIST") continue;
+			return { backup, backedUp: false };
+		}
 	}
+	return { backup, backedUp: false };
 }
 
 /** Back up the corrupt file (best-effort) and throw a recoverable error. */

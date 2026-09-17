@@ -319,7 +319,17 @@ describe("profile data integrity", () => {
 			);
 		});
 
-		test("saveProfiles is atomic — it replaces even a read-only target (rename, not truncate)", () => {
+		test("saveProfiles is atomic — it replaces even a read-only target (rename, not truncate)", (t) => {
+			// Root bypasses the 0400 read-only bit, so a direct
+			// `writeFileSync(target)` implementation would ALSO succeed under
+			// root and this test would falsely pass. Skip under root rather than
+			// assert an invariant we cannot enforce there — on a normal
+			// (non-root) runner the 0400 bit is honoured and the test truly
+			// distinguishes the rename path from a direct truncating write.
+			if (process.getuid?.() === 0) {
+				t.skip("cannot enforce read-only target as root");
+				return;
+			}
 			// A direct `writeFileSync(target)` would open the read-only target for
 			// writing and fail with EACCES (leaving it stale); an atomic temp-file
 			// + rename replaces it via the writable directory entry regardless. So
