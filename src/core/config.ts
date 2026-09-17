@@ -5,7 +5,14 @@
  * Modeler connections are read from settings.json (read-only) with "modeler:" prefix
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { OutputMode } from "./logger.ts";
@@ -331,7 +338,17 @@ interface ProfilesFile {
 }
 
 /**
- * Load c8ctl profiles from profiles.json
+ * Load c8ctl profiles from profiles.json.
+ *
+ * A MISSING file legitimately means "no profiles yet" → `[]`. But a file that
+ * exists and cannot be read/parsed is NOT empty — it is corrupt or transiently
+ * unreadable (e.g. a torn write from a crash or two c8ctl processes racing).
+ * Returning `[]` in that case is catastrophic: the very next `saveProfiles`
+ * (via `addProfile`/`ensureDefaultProfile`/`removeProfile`) would overwrite the
+ * file with a truncated set, silently DESTROYING every saved profile. So we
+ * distinguish the two: absent → `[]`; present-but-unreadable → THROW (after
+ * preserving the original bytes in a timestamped backup), so no caller can
+ * mistake corruption for emptiness and clobber the user's profiles.
  */
 export function loadProfiles(): Profile[] {
 	const profilesPath = getProfilesPath();
@@ -340,22 +357,65 @@ export function loadProfiles(): Profile[] {
 		return [];
 	}
 
+	let data: string;
 	try {
-		const data = readFileSync(profilesPath, "utf-8");
+		data = readFileSync(profilesPath, "utf-8");
+	} catch (err) {
+		throw new Error(
+			`Failed to read profiles at ${profilesPath}: ${err instanceof Error ? err.message : String(err)}. ` +
+				`Refusing to treat an unreadable profiles file as empty (that would ` +
+				`overwrite your saved profiles).`,
+		);
+	}
+
+	try {
 		const profilesFile: ProfilesFile = JSON.parse(data);
 		return profilesFile.profiles || [];
-	} catch {
-		return [];
+	} catch (err) {
+		// The file exists but is corrupt/torn. Preserve the original bytes in a
+		// timestamped backup (best-effort) so nothing is lost, then throw — never
+		// treat corruption as "no profiles", which would let a subsequent save
+		// clobber the file.
+		const backup = `${profilesPath}.corrupt-${Date.now()}`;
+		try {
+			writeFileSync(backup, data, "utf-8");
+		} catch {
+			/* best effort — the original file is still on disk regardless */
+		}
+		throw new Error(
+			`profiles.json at ${profilesPath} is corrupt and could not be parsed ` +
+				`(${err instanceof Error ? err.message : String(err)}). Its contents were backed up to ${backup}. ` +
+				`Refusing to overwrite it to avoid destroying your saved profiles — ` +
+				`fix or remove the file, then re-run.`,
+		);
 	}
 }
 
 /**
- * Save c8ctl profiles to profiles.json
+ * Save c8ctl profiles to profiles.json ATOMICALLY.
+ *
+ * A bare `writeFileSync` truncates the target and then streams the new bytes, so
+ * a crash, a full disk, or a second c8ctl process reading mid-write can observe
+ * a TORN file — which `loadProfiles` then can't parse, and (pre-fix) treated as
+ * "no profiles", cascading into a total wipe. Writing to a same-directory temp
+ * file and `rename`-ing over the target makes the swap atomic: a reader sees
+ * either the whole old file or the whole new one, never a partial one.
  */
 export function saveProfiles(profiles: Profile[]): void {
 	const profilesPath = getProfilesPath();
 	const profilesFile: ProfilesFile = { profiles };
-	writeFileSync(profilesPath, JSON.stringify(profilesFile, null, 2), "utf-8");
+	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.tmp`;
+	writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), "utf-8");
+	try {
+		renameSync(tmp, profilesPath);
+	} catch (err) {
+		try {
+			rmSync(tmp, { force: true });
+		} catch {
+			/* best effort */
+		}
+		throw err;
+	}
 }
 
 /**
@@ -636,9 +696,24 @@ export const DEFAULT_PROFILE_CONFIG: Profile = {
 /**
  * Ensure the default 'local' profile exists in profiles.json.
  * If no 'local' profile is configured, creates one with the localhost defaults.
+ *
+ * Runs on virtually every command (via `loadSessionState`). It MUST NOT be the
+ * thing that destroys a user's profiles: if `getProfile` throws because
+ * profiles.json is present but unreadable/corrupt, seeding here would reload the
+ * (still-unreadable) file, see zero profiles, and overwrite it — wiping every
+ * saved profile. So on a read failure we warn and leave the file untouched
+ * rather than reseed. `loadProfiles` already preserved the original bytes.
  */
 export function ensureDefaultProfile(): void {
-	const existing = getProfile(DEFAULT_PROFILE);
+	let existing: Profile | undefined;
+	try {
+		existing = getProfile(DEFAULT_PROFILE);
+	} catch (err) {
+		getLogger().warn(
+			`Skipping default-profile seeding: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
 	if (!existing) {
 		addProfile({ ...DEFAULT_PROFILE_CONFIG });
 	}
