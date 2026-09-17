@@ -17,14 +17,16 @@
 
 import assert from "node:assert";
 import {
+	chmodSync,
 	existsSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import {
@@ -121,4 +123,74 @@ describe("profile data integrity", () => {
 		assert.ok(!existsSync(profilesPath()));
 		assert.deepEqual(loadProfiles(), []);
 	});
+
+	// A syntactically valid JSON file can still be schema-corrupt. Pre-fix,
+	// `profilesFile.profiles || []` treated all of these as an empty store,
+	// reopening the wipe path. They must be rejected like unparseable files.
+	for (const malformed of [
+		"{}",
+		'{"profiles": null}',
+		"[]",
+		'{"profiles": [ { "baseUrl": "http://x" } ]}', // entry missing `name`
+		'{"profiles": [ { "name": "merlin" } ]}', // entry missing `baseUrl`
+		'{"profiles": "merlin"}',
+	]) {
+		test(`schema-corrupt profiles.json is rejected, not treated as empty: ${malformed}`, () => {
+			writeFileSync(profilesPath(), malformed, "utf-8");
+			assert.throws(() => loadProfiles(), /corrupt/i);
+			// And seeding must NOT clobber it (the wipe regression).
+			ensureDefaultProfile();
+			assert.equal(readFileSync(profilesPath(), "utf-8"), malformed);
+		});
+	}
+
+	test("an empty-but-valid profiles.json is zero profiles (not corrupt)", () => {
+		writeFileSync(profilesPath(), '{ "profiles": [] }', "utf-8");
+		assert.deepEqual(loadProfiles(), []);
+	});
+
+	test("repeated corrupt reads deduplicate backups (no unbounded copies)", () => {
+		const corrupt = "{ this is not json";
+		writeFileSync(profilesPath(), corrupt, "utf-8");
+		for (let i = 0; i < 5; i++) {
+			assert.throws(() => loadProfiles(), /corrupt/i);
+		}
+		const backups = readdirSync(dataDir).filter((f) =>
+			f.startsWith("profiles.json.corrupt-"),
+		);
+		assert.equal(
+			backups.length,
+			1,
+			"identical corrupt bytes must not spawn multiple backups",
+		);
+	});
+
+	// POSIX-only: permission bits are not meaningfully enforced on Windows.
+	if (platform() !== "win32") {
+		test("saveProfiles preserves a restrictive 0600 mode (no credential widening)", () => {
+			saveProfiles([MERLIN]);
+			chmodSync(profilesPath(), 0o600);
+			addProfile({
+				name: "local",
+				baseUrl: "http://localhost:8080/v2",
+			});
+			assert.equal(statSync(profilesPath()).mode & 0o777, 0o600);
+		});
+
+		test("a corrupt backup inherits the source file's restrictive mode", () => {
+			const corrupt = "{ torn";
+			writeFileSync(profilesPath(), corrupt, "utf-8");
+			chmodSync(profilesPath(), 0o600);
+			assert.throws(() => loadProfiles(), /corrupt/i);
+			const backups = readdirSync(dataDir).filter((f) =>
+				f.startsWith("profiles.json.corrupt-"),
+			);
+			assert.equal(backups.length, 1);
+			assert.equal(
+				statSync(join(dataDir, backups[0])).mode & 0o777,
+				0o600,
+				"backup holds credentials — it must not be world-readable",
+			);
+		});
+	}
 });

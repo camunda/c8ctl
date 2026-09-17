@@ -6,15 +6,18 @@
  */
 
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
@@ -338,6 +341,109 @@ interface ProfilesFile {
 }
 
 /**
+ * The permission bits (0oNNN) of an existing file, or `undefined` if it cannot
+ * be stat'd. Used to carry a user-protected `profiles.json` mode (e.g. 0600 —
+ * it holds client secrets and passwords) onto its backups and atomic-replace
+ * temp files, so persistence never silently widens the file to the umask
+ * default and exposes credentials to other local users.
+ */
+function fileMode(path: string): number | undefined {
+	try {
+		return statSync(path).mode & 0o777;
+	} catch {
+		return undefined;
+	}
+}
+
+/** A minimally well-formed profile entry: at least a name and a baseUrl. */
+function isValidProfile(value: unknown): value is Profile {
+	return (
+		isRecord(value) &&
+		typeof value.name === "string" &&
+		typeof value.baseUrl === "string"
+	);
+}
+
+/**
+ * Runtime schema validation for a parsed profiles.json. A compile-time
+ * `ProfilesFile` annotation is erased at runtime, so a syntactically valid but
+ * schema-corrupt file (`{}`, `{"profiles": null}`, `[]`, or entries missing a
+ * name/baseUrl) would otherwise slip through `profilesFile.profiles || []` as
+ * an "empty" store and reopen the silent-wipe path. Returns the validated
+ * profiles array, or `null` when the value is not a valid profiles file.
+ */
+function extractValidProfiles(parsed: unknown): Profile[] | null {
+	if (!isRecord(parsed)) return null;
+	const rawProfiles = parsed.profiles;
+	if (!Array.isArray(rawProfiles)) return null;
+	if (!rawProfiles.every(isValidProfile)) return null;
+	return rawProfiles;
+}
+
+/**
+ * Preserve the original bytes of a corrupt profiles.json in a timestamped,
+ * mode-preserving backup (best-effort). Returns the backup path and whether it
+ * actually exists on disk afterwards.
+ *
+ * - Deduplicates: `loadProfiles` runs on virtually every CLI startup (via
+ *   `loadSessionState`), so leaving the corrupt file in place would otherwise
+ *   spew a fresh full copy on every command and eventually fill the disk. If a
+ *   prior `profiles.json.corrupt-*` backup already holds the exact same bytes,
+ *   reuse it instead of writing another.
+ * - Restrictive mode: the backup carries credentials, so it inherits the source
+ *   file's permission bits (e.g. 0600) rather than the umask default.
+ */
+function backupCorruptProfiles(
+	profilesPath: string,
+	data: string,
+): { backup: string; backedUp: boolean } {
+	const prefix = `${basename(profilesPath)}.corrupt-`;
+	const dir = dirname(profilesPath);
+	try {
+		for (const name of readdirSync(dir)) {
+			if (!name.startsWith(prefix)) continue;
+			const candidate = join(dir, name);
+			try {
+				if (readFileSync(candidate, "utf-8") === data) {
+					return { backup: candidate, backedUp: true };
+				}
+			} catch {
+				/* unreadable candidate — ignore and keep scanning */
+			}
+		}
+	} catch {
+		/* directory unreadable — fall through to a best-effort fresh backup */
+	}
+
+	const backup = `${profilesPath}.corrupt-${Date.now()}`;
+	const mode = fileMode(profilesPath);
+	try {
+		writeFileSync(backup, data, "utf-8");
+		if (mode !== undefined) chmodSync(backup, mode);
+		return { backup, backedUp: true };
+	} catch {
+		return { backup, backedUp: false };
+	}
+}
+
+/** Back up the corrupt file (best-effort) and throw a recoverable error. */
+function throwCorruptProfiles(
+	profilesPath: string,
+	data: string,
+	detail: string,
+): never {
+	const { backup, backedUp } = backupCorruptProfiles(profilesPath, data);
+	const backupNote = backedUp
+		? `Its contents were backed up to ${backup}. `
+		: `A backup could not be written, but the original file is still on disk untouched. `;
+	throw new Error(
+		`profiles.json at ${profilesPath} is corrupt (${detail}). ${backupNote}` +
+			`Refusing to overwrite it to avoid destroying your saved profiles — ` +
+			`fix or remove the file, then re-run.`,
+	);
+}
+
+/**
  * Load c8ctl profiles from profiles.json.
  *
  * A MISSING file legitimately means "no profiles yet" → `[]`. But a file that
@@ -369,25 +475,32 @@ export function loadProfiles(): Profile[] {
 	}
 
 	try {
-		const profilesFile: ProfilesFile = JSON.parse(data);
-		return profilesFile.profiles || [];
-	} catch (err) {
-		// The file exists but is corrupt/torn. Preserve the original bytes in a
-		// timestamped backup (best-effort) so nothing is lost, then throw — never
-		// treat corruption as "no profiles", which would let a subsequent save
-		// clobber the file.
-		const backup = `${profilesPath}.corrupt-${Date.now()}`;
-		try {
-			writeFileSync(backup, data, "utf-8");
-		} catch {
-			/* best effort — the original file is still on disk regardless */
+		const parsed: unknown = JSON.parse(data);
+		const profiles = extractValidProfiles(parsed);
+		if (profiles === null) {
+			// Syntactically valid JSON, but not a valid profiles file. Treating
+			// this as "no profiles" would let a subsequent save clobber it, so
+			// back it up and throw exactly as for an unparseable file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				'does not contain a valid "profiles" array',
+			);
 		}
-		throw new Error(
-			`profiles.json at ${profilesPath} is corrupt and could not be parsed ` +
-				`(${err instanceof Error ? err.message : String(err)}). Its contents were backed up to ${backup}. ` +
-				`Refusing to overwrite it to avoid destroying your saved profiles — ` +
-				`fix or remove the file, then re-run.`,
-		);
+		return profiles;
+	} catch (err) {
+		if (err instanceof SyntaxError) {
+			// The file exists but is corrupt/torn. Preserve the original bytes in
+			// a backup (best-effort) so nothing is lost, then throw — never treat
+			// corruption as "no profiles", which would let a subsequent save
+			// clobber the file.
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				`could not be parsed: ${err.message}`,
+			);
+		}
+		throw err;
 	}
 }
 
@@ -405,10 +518,17 @@ export function saveProfiles(profiles: Profile[]): void {
 	const profilesPath = getProfilesPath();
 	const profilesFile: ProfilesFile = { profiles };
 	const tmp = `${profilesPath}.${process.pid}.${Date.now()}.tmp`;
-	writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), "utf-8");
+	// Preserve the existing file's permission bits (e.g. 0600) so an atomic
+	// replace never silently widens a user-protected profiles.json — it holds
+	// client secrets and passwords — to the umask default.
+	const mode = fileMode(profilesPath);
 	try {
+		writeFileSync(tmp, JSON.stringify(profilesFile, null, 2), "utf-8");
+		if (mode !== undefined) chmodSync(tmp, mode);
 		renameSync(tmp, profilesPath);
 	} catch (err) {
+		// Any failure — including the initial write (e.g. a full disk) — must not
+		// leave the temp file behind.
 		try {
 			rmSync(tmp, { force: true });
 		} catch {
