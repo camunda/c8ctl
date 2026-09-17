@@ -447,12 +447,27 @@ function backupCorruptProfiles(
 ): { backup: string; backedUp: boolean } {
 	const prefix = `${basename(profilesPath)}.corrupt-`;
 	const dir = dirname(profilesPath);
+	// The mode a credential backup must carry: the source file's bits (e.g.
+	// 0600) or a restrictive 0600 fallback. Computed up front so a REUSED
+	// backup can be re-tightened too, not just a freshly created one.
+	const mode = fileMode(profilesPath) ?? 0o600;
 	try {
 		for (const name of readdirSync(dir)) {
 			if (!name.startsWith(prefix)) continue;
 			const candidate = join(dir, name);
 			try {
 				if (readFileSync(candidate).equals(data)) {
+					// Repair a stale backup that predates a source-mode tightening:
+					// an older run may have created it 0644 (world-readable) before
+					// profiles.json was locked down to 0600. Reusing it as-is would
+					// keep a world-readable credential copy, so re-apply the mode.
+					try {
+						if ((statSync(candidate).mode & 0o777) !== mode) {
+							chmodSync(candidate, mode);
+						}
+					} catch {
+						/* best-effort mode repair — reuse the backup regardless */
+					}
 					return { backup: candidate, backedUp: true };
 				}
 			} catch {
@@ -464,14 +479,13 @@ function backupCorruptProfiles(
 	}
 
 	const backup = `${profilesPath}.corrupt-${Date.now()}`;
-	const mode = fileMode(profilesPath);
 	try {
 		// Create with a restrictive mode up front (never the 0666 umask default)
 		// so a credential backup is never briefly world-readable, then chmod to
-		// the exact source mode for an existing-name collision (where the create
+		// pin the exact mode for an existing-name collision (where the create
 		// mode is ignored) or to unmask bits umask may have stripped.
-		writeFileSync(backup, data, { mode: mode ?? 0o600 });
-		if (mode !== undefined) chmodSync(backup, mode);
+		writeFileSync(backup, data, { mode });
+		chmodSync(backup, mode);
 		return { backup, backedUp: true };
 	} catch {
 		return { backup, backedUp: false };
@@ -533,7 +547,23 @@ export function loadProfiles(): Profile[] {
 	}
 
 	try {
-		const parsed: unknown = JSON.parse(data.toString("utf-8"));
+		// Decode with FATAL UTF-8: a lenient `Buffer.toString("utf-8")` silently
+		// replaces malformed bytes with U+FFFD, so invalid bytes inside a quoted
+		// JSON value would still `JSON.parse` and validate as a healthy profile —
+		// letting a later save rewrite the file and lose the original bytes with
+		// no `.corrupt-*` backup. Route a decode failure through the same backup
+		// + throw path as a parse failure.
+		let text: string;
+		try {
+			text = new TextDecoder("utf-8", { fatal: true }).decode(data);
+		} catch {
+			throwCorruptProfiles(
+				profilesPath,
+				data,
+				"contains invalid UTF-8 byte sequences",
+			);
+		}
+		const parsed: unknown = JSON.parse(text);
 		const profiles = extractValidProfiles(parsed);
 		if (profiles === null) {
 			// Syntactically valid JSON, but not a valid profiles file. Treating

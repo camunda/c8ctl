@@ -210,6 +210,55 @@ describe("profile data integrity", () => {
 		);
 	});
 
+	test("invalid UTF-8 INSIDE a quoted value is corruption, not a healthy profile", () => {
+		// A torn write can leave invalid UTF-8 bytes inside a quoted string. A
+		// lenient decode would replace them with U+FFFD, leaving syntactically
+		// valid JSON that parses and schema-validates as a healthy profile — so a
+		// later save would rewrite the file and lose the original bytes with NO
+		// backup. Fatal decoding must route this through the corrupt path instead.
+		const rawBytes = Buffer.concat([
+			Buffer.from('{"profiles":[{"name":"m","baseUrl":"http://x'),
+			Buffer.from([0xff, 0xfe]), // invalid UTF-8 inside the quoted value
+			Buffer.from('"}]}'),
+		]);
+		writeFileSync(profilesPath(), rawBytes);
+		assert.throws(() => loadProfiles(), /corrupt/i);
+		const backups = readdirSync(dataDir).filter((f) =>
+			f.startsWith("profiles.json.corrupt-"),
+		);
+		assert.equal(backups.length, 1);
+		assert.ok(
+			readFileSync(join(dataDir, backups[0])).equals(rawBytes),
+			"backup must preserve the exact bytes, not a lossy re-encoding",
+		);
+		// And seeding must NOT clobber it (the wipe regression).
+		ensureDefaultProfile();
+		assert.ok(readFileSync(profilesPath()).equals(rawBytes));
+	});
+
+	test("an UNREADABLE (non-ENOENT) profiles.json throws and cannot be reseeded", () => {
+		// `existsSync` cannot tell an absent file from an unstattable one, so
+		// loadProfiles keys strictly on ENOENT: any OTHER read error must throw,
+		// never return `[]`. Force a deterministic ENOTDIR by pointing the data
+		// dir at a regular FILE, so `<file>/profiles.json` is unreadable.
+		const fileAsDir = join(
+			tmpdir(),
+			`c8ctl-notdir-${process.pid}-${Date.now()}`,
+		);
+		writeFileSync(fileAsDir, "not a directory");
+		process.env.C8CTL_DATA_DIR = fileAsDir;
+		try {
+			assert.throws(() => loadProfiles(), /Refusing to treat an unreadable/i);
+			// Seeding loads first; on the unreadable path it must warn and leave
+			// the path untouched, never reseed a default over it.
+			ensureDefaultProfile();
+			assert.equal(readFileSync(fileAsDir, "utf-8"), "not a directory");
+		} finally {
+			process.env.C8CTL_DATA_DIR = dataDir;
+			rmSync(fileAsDir, { force: true });
+		}
+	});
+
 	// POSIX-only: permission bits are not meaningfully enforced on Windows.
 	if (platform() !== "win32") {
 		test("saveProfiles preserves a restrictive 0600 mode (no credential widening)", () => {
@@ -236,6 +285,53 @@ describe("profile data integrity", () => {
 				0o600,
 				"backup holds credentials — it must not be world-readable",
 			);
+		});
+
+		test("reusing a stale world-readable backup re-tightens it to the source mode", () => {
+			// A backup written by an older version (or before the source was
+			// locked down) may be world-readable. Deduplication must not silently
+			// keep reusing that leaky credential copy: the reuse path re-applies
+			// the source mode.
+			const corrupt = "{ torn";
+			writeFileSync(profilesPath(), corrupt, "utf-8");
+			chmodSync(profilesPath(), 0o600);
+			assert.throws(() => loadProfiles(), /corrupt/i);
+			const backups = readdirSync(dataDir).filter((f) =>
+				f.startsWith("profiles.json.corrupt-"),
+			);
+			assert.equal(backups.length, 1);
+			const backupPath = join(dataDir, backups[0]);
+			// Simulate a stale, world-readable backup from an older run.
+			chmodSync(backupPath, 0o644);
+			// A second corrupt read hits the dedup/reuse path.
+			assert.throws(() => loadProfiles(), /corrupt/i);
+			assert.equal(
+				readdirSync(dataDir).filter((f) =>
+					f.startsWith("profiles.json.corrupt-"),
+				).length,
+				1,
+				"identical bytes must reuse, not spawn a second backup",
+			);
+			assert.equal(
+				statSync(backupPath).mode & 0o777,
+				0o600,
+				"the reused backup must be re-tightened, not left world-readable",
+			);
+		});
+
+		test("saveProfiles is atomic — it replaces even a read-only target (rename, not truncate)", () => {
+			// A direct `writeFileSync(target)` would open the read-only target for
+			// writing and fail with EACCES (leaving it stale); an atomic temp-file
+			// + rename replaces it via the writable directory entry regardless. So
+			// a successful replace here proves the rename path is actually used —
+			// delete `renameSync` and this test fails.
+			saveProfiles([MERLIN]);
+			chmodSync(profilesPath(), 0o400);
+			addProfile({ name: "local", baseUrl: "http://localhost:8080/v2" });
+			const names = loadProfiles()
+				.map((p) => p.name)
+				.sort();
+			assert.deepEqual(names, ["local", "merlin"]);
 		});
 	}
 });
