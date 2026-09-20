@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
@@ -14,6 +15,34 @@ const workflow = (name: string) =>
 		new URL(`../../.github/workflows/${name}`, import.meta.url),
 		"utf8",
 	);
+
+test("workflow sources, compiled YAML and the compiler pin use LF checkouts on every OS", () => {
+	const paths = [
+		...kinds.flatMap((kind) => [
+			`.github/workflows/agentic-${kind}.md`,
+			`.github/workflows/agentic-${kind}.lock.yml`,
+		]),
+		...[
+			"test",
+			"agentic-controller",
+			"agentic-maintenance",
+			"agentic-validate",
+		].map((name) => `.github/workflows/${name}.yml`),
+		".github/gh-aw-version",
+	];
+	const attributes = execFileSync(
+		"git",
+		["check-attr", "-z", "eol", "--", ...paths],
+		{
+			cwd: new URL("../../", import.meta.url),
+			encoding: "utf8",
+		},
+	).split("\0");
+	assert.deepEqual(attributes, [
+		...paths.flatMap((path) => [path, "eol", "lf"]),
+		"",
+	]);
+});
 
 describe("agentic worker control boundaries", () => {
 	for (const kind of kinds) {
