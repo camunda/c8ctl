@@ -536,8 +536,34 @@ export async function inspectCI(input: {
 				"jobs",
 			)
 		).map(object);
+		const failedPrerequisite = jobs.some(
+			(job) =>
+				["Lint", "Typecheck"].includes(string(job.name)) &&
+				["failure", "timed_out"].includes(string(job.conclusion)),
+		);
+		// GitHub skips a dependency-blocked job before expanding its matrix.
+		const collapsedUnitName = `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }})`;
+		const collapsedUnits = jobs.filter((job) => job.name === collapsedUnitName);
+		const skippedUnitMatrix =
+			failedPrerequisite &&
+			collapsedUnits.length === 1 &&
+			collapsedUnits[0]?.status === "completed" &&
+			collapsedUnits[0]?.conclusion === "skipped" &&
+			!jobs.some(
+				(job) =>
+					CI_JOBS.includes(string(job.name)) &&
+					string(job.name).startsWith("Unit Test"),
+			);
+		if (collapsedUnits.length > 0 && !skippedUnitMatrix)
+			throw new Error("Unexpected or duplicate unexpanded unit matrix");
+		const expectedJobs = skippedUnitMatrix
+			? [
+					...CI_JOBS.filter((name) => !name.startsWith("Unit Test")),
+					collapsedUnitName,
+				]
+			: CI_JOBS;
 		for (const name of [
-			...CI_JOBS,
+			...expectedJobs,
 			"Agentic CI Revision",
 			"Agentic CI Receipt",
 		]) {
@@ -560,7 +586,7 @@ export async function inspectCI(input: {
 		const groups = {
 			lint: ["Lint"],
 			typecheck: ["Typecheck"],
-			unit: CI_JOBS.filter((name) => name.startsWith("Unit Test")),
+			unit: expectedJobs.filter((name) => name.startsWith("Unit Test")),
 			integration: CI_JOBS.filter((name) =>
 				name.startsWith("Integration Test"),
 			),
@@ -582,13 +608,10 @@ export async function inspectCI(input: {
 			if (outcome === null || receipt.jobs[key] !== outcome)
 				throw new Error("CI receipt outcomes disagree with actual matrix jobs");
 		}
-		const required = jobs.filter((job) => CI_JOBS.includes(string(job.name)));
-		ci.artifact_id = integer(artifact.id);
-		const failedPrerequisite = required.some(
-			(job) =>
-				["Lint", "Typecheck"].includes(string(job.name)) &&
-				["failure", "timed_out"].includes(string(job.conclusion)),
+		const required = jobs.filter((job) =>
+			expectedJobs.includes(string(job.name)),
 		);
+		ci.artifact_id = integer(artifact.id);
 		if (
 			required.some(
 				(job) =>

@@ -428,6 +428,19 @@ test("CI requires an App-reserved immutable receipt and every original matrix jo
 		if (job.name.startsWith("Unit Test")) job.conclusion = "skipped";
 	receipt.jobs.unit = "skipped";
 	assert.equal((await inspectCI(options)).status, "failure");
+	jobs = jobs.filter((job) => !job.name.startsWith("Unit Test"));
+	const collapsed = {
+		name: `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }})`,
+		status: "completed",
+		conclusion: "skipped",
+	};
+	jobs.push(collapsed);
+	assert.equal((await inspectCI(options)).status, "failure");
+	jobs.push(collapsed);
+	assert.equal((await inspectCI(options)).status, "blocked");
+	jobs.pop();
+	for (const job of jobs) if (job.name === "Lint") job.conclusion = "success";
+	run.conclusion = "success";
 	receipt.jobs.lint = "success";
 	assert.equal((await inspectCI(options)).status, "blocked");
 });

@@ -854,6 +854,42 @@ test("ready-for-review and intent edits restart unchanged-SHA PRs without refund
 	}
 });
 
+test("GitHub's collapsed skipped unit matrix after failed typecheck starts one budgeted repair", async () => {
+	const f = fixture("pr");
+	await reconcile({ ...options, github: f.github });
+	for (const kind of ["review-copilot", "review-claude"] as const)
+		f.complete(kind, cleanReview);
+	const run = f.runs.find((item) => item.id === 501);
+	assert.ok(run);
+	run.conclusion = "failure";
+	const receipt = object(f.reports.get(501));
+	object(receipt.jobs).typecheck = "failure";
+	object(receipt.jobs).unit = "skipped";
+	const list = f.github.list;
+	f.github.list = async (path, key) => {
+		const result = await list(path, key);
+		if (!path.endsWith("/501/attempts/1/jobs")) return result;
+		return [
+			...result
+				.map(object)
+				.filter((job) => !string(job.name).startsWith("Unit Test"))
+				.map((job) =>
+					job.name === "Typecheck" ? { ...job, conclusion: "failure" } : job,
+				),
+			{
+				name: `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }})`,
+				status: "completed",
+				conclusion: "skipped",
+			},
+		];
+	};
+	await reconcile({ ...options, github: f.github });
+	assert.equal(f.state().phase, "implementing");
+	assert.equal(f.state().reimplementation_attempts, 1);
+	assert.equal(f.tasks.at(-1)?.kind, "reimplement");
+	assert.equal(f.statuses.at(-1)?.state, "pending");
+});
+
 function fixture(subject: "issue" | "pr" = "issue") {
 	const mutations: { method: string; path: string; body: unknown }[] = [];
 	const comments: Record<string, unknown>[] = [];
