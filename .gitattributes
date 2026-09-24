@@ -8,3 +8,8 @@
 *.js text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+
+# Compiler inputs and generated workflows must be byte-stable on Windows too.
+.github/workflows/** text eol=lf
+.github/gh-aw-version text eol=lf
+.github/workflows/*.lock.yml linguist-generated=true

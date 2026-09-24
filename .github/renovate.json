@@ -14,7 +14,18 @@
     "**/__fixtures__/**",
     "src/templates/**"
   ],
+  "automerge": false,
   "platformAutomerge": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/gh-aw-version$/"],
+      "matchStrings": ["(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\s*$"],
+      "depNameTemplate": "github/gh-aw",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ],
   "packageRules": [
     {
       "description": "AGENTS.md pins the toolchain to Node 22 LTS and treats .nvmrc as authoritative; never bump the Node version.",
@@ -22,9 +33,18 @@
       "enabled": false
     },
     {
-      "description": "Auto-merge minor and patch updates once CI is green.",
-      "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true
+      "description": "Check the compiler daily; GitHub release metadata, not numeric tag shape, decides stability. Toolchain changes require manual review.",
+      "matchPackageNames": ["github/gh-aw"],
+      "matchDatasources": ["github-releases"],
+      "ignoreUnstable": true,
+      "schedule": ["before 6am"],
+      "automerge": false
+    },
+    {
+      "description": "Compiled agentic workflows are derived files, regenerated only by trusted compiler maintenance.",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/*.lock.yml"],
+      "enabled": false
     },
     {
       "description": "assets/c8/8.8, 8.9 and 8.10 pin the camunda/camunda image to a specific test-matrix version (in docker-compose.yml via CAMUNDA_VERSION, and in .env). Renovate has already auto-bumped this pin twice (PR #500, PR #543), breaking the release; do not let it touch these paths again.",
