@@ -32,6 +32,11 @@ const businessIdSkip =
 	camundaVersion?.startsWith("8.8") === true
 		? `Business ID requires Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
 		: false;
+const suspendResumeSkip =
+	camundaVersion?.startsWith("8.8") === true ||
+	camundaVersion?.startsWith("8.9") === true
+		? `Process instance suspend/resume requires Camunda 8.10+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
@@ -391,6 +396,95 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 				`CLI should output error message for already completed process. Got: ${combinedOutput}`,
 			);
 		}
+	});
+
+	test("suspend process instance CLI suspends a running instance", {
+		skip: suspendResumeSkip,
+	}, async () => {
+		await deploy(testDir, "tests/fixtures/simple-user-task.bpmn");
+		const created = await client.createProcessInstance({
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-user-task"),
+		});
+		const instanceKey = created.processInstanceKey.toString();
+
+		await cli(testDir, "output", "json");
+
+		const suspendResult = await cli(testDir, "suspend", "pi", instanceKey);
+		assert.strictEqual(
+			suspendResult.status,
+			0,
+			`suspend should succeed. stderr: ${suspendResult.stderr}`,
+		);
+
+		const suspended = await pollUntil(
+			async () => {
+				const result = await client.getProcessInstance(
+					{ processInstanceKey: instanceKey },
+					{ consistency: { waitUpToMs: 0 } },
+				);
+				return result.state === "SUSPENDED";
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			suspended,
+			"process instance should transition to SUSPENDED after suspend",
+		);
+	});
+
+	test("resume process instance CLI resumes a suspended instance", {
+		skip: suspendResumeSkip,
+	}, async () => {
+		await deploy(testDir, "tests/fixtures/simple-user-task.bpmn");
+		const created = await client.createProcessInstance({
+			processDefinitionId: ProcessDefinitionId.assumeExists("simple-user-task"),
+		});
+		const instanceKey = created.processInstanceKey.toString();
+
+		await cli(testDir, "output", "json");
+
+		const suspendResult = await cli(testDir, "suspend", "pi", instanceKey);
+		assert.strictEqual(
+			suspendResult.status,
+			0,
+			`suspend setup failed. stderr: ${suspendResult.stderr}`,
+		);
+		const suspended = await pollUntil(
+			async () => {
+				const result = await client.getProcessInstance(
+					{ processInstanceKey: instanceKey },
+					{ consistency: { waitUpToMs: 0 } },
+				);
+				return result.state === "SUSPENDED";
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(suspended, "setup should reach SUSPENDED before resuming");
+
+		const resumeResult = await cli(testDir, "resume", "pi", instanceKey);
+		assert.strictEqual(
+			resumeResult.status,
+			0,
+			`resume should succeed. stderr: ${resumeResult.stderr}`,
+		);
+
+		const resumed = await pollUntil(
+			async () => {
+				const result = await client.getProcessInstance(
+					{ processInstanceKey: instanceKey },
+					{ consistency: { waitUpToMs: 0 } },
+				);
+				return result.state === "ACTIVE";
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			resumed,
+			"process instance should transition back to ACTIVE after resume",
+		);
 	});
 
 	test("create with awaitCompletion returns completed result with variables", async () => {

@@ -14,6 +14,13 @@ When a new SDK limitation is discovered during development, add it here followin
 
 ## Open Gaps
 
+- [ ] **Process instance suspend/resume endpoints not available before Camunda 8.10**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**
+  - **Behavior:** The SDK client exposes `suspendProcessInstance()`/`resumeProcessInstance()` (`POST /process-instances/{key}/suspension` and `/resumption`) and the types compile against every supported server version, but the REST API gateway on Camunda 8.8/8.9 returns `404 Not Found [suspendProcessInstance]: No endpoint POST /v2/process-instances/{key}/suspension.` — the endpoint only exists starting with 8.10.
+  - **Affected:** `c8ctl suspend process-instance` / `c8ctl resume process-instance` (#57996).
+  - **Impact:** Running either command against an 8.8/8.9 cluster surfaces the gateway's 404 as a normal command error (no special-casing needed — the framework's error path already renders it clearly). The live CLI integration tests for these commands (`tests/integration/process-instances.test.ts`) are skipped on `CAMUNDA_VERSION` 8.8/8.9 via `suspendResumeSkip`, mirroring the existing `businessIdSkip` pattern in the same file.
+  - **Remediation:** None needed — this is a platform version floor, not an SDK defect. Revisit only if a future SDK release needs adjusting for a change in the endpoint's shape.
+
 - [ ] **No config flag to disable the automatic `/v2` suffix on `CAMUNDA_REST_ADDRESS`**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**
   - **Behavior:** `hydrateConfig()` always appends `/v2` to `CAMUNDA_REST_ADDRESS` unless the value already ends with `/v2` or `/v2/`; there is no override.
