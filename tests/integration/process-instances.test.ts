@@ -75,6 +75,18 @@ function parseItems<T>(stdout: string): T[] {
 	return JSON.parse(stdout) as T[];
 }
 
+/** Read a process instance's `state` via `get pi <key>` (JSON output mode). */
+async function getProcessInstanceStateViaCli(
+	testDir: string,
+	key: string,
+): Promise<string | undefined> {
+	const result = await cli(testDir, "get", "pi", key, "--fields", "state");
+	if (result.status !== 0) return undefined;
+	// biome-ignore lint/plugin: parsing CLI JSON output; shape is known from the --fields flag
+	const data = JSON.parse(result.stdout) as { state?: string };
+	return data.state;
+}
+
 describe("Process Instance Integration Tests (requires Camunda 8 at localhost:8080)", () => {
 	let testDir: string;
 	let originalEnv: NodeJS.ProcessEnv;
@@ -417,13 +429,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		);
 
 		const suspended = await pollUntil(
-			async () => {
-				const result = await client.getProcessInstance(
-					{ processInstanceKey: instanceKey },
-					{ consistency: { waitUpToMs: 0 } },
-				);
-				return result.state === "SUSPENDED";
-			},
+			async () =>
+				(await getProcessInstanceStateViaCli(testDir, instanceKey)) ===
+				"SUSPENDED",
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
 		);
@@ -451,13 +459,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 			`suspend setup failed. stderr: ${suspendResult.stderr}`,
 		);
 		const suspended = await pollUntil(
-			async () => {
-				const result = await client.getProcessInstance(
-					{ processInstanceKey: instanceKey },
-					{ consistency: { waitUpToMs: 0 } },
-				);
-				return result.state === "SUSPENDED";
-			},
+			async () =>
+				(await getProcessInstanceStateViaCli(testDir, instanceKey)) ===
+				"SUSPENDED",
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
 		);
@@ -471,13 +475,9 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 		);
 
 		const resumed = await pollUntil(
-			async () => {
-				const result = await client.getProcessInstance(
-					{ processInstanceKey: instanceKey },
-					{ consistency: { waitUpToMs: 0 } },
-				);
-				return result.state === "ACTIVE";
-			},
+			async () =>
+				(await getProcessInstanceStateViaCli(testDir, instanceKey)) ===
+				"ACTIVE",
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
 		);
