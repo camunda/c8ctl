@@ -217,3 +217,53 @@ describe("CLI behavioural: cancel process-instance", () => {
 		);
 	});
 });
+
+// ─── suspend process-instance ────────────────────────────────────────────────
+
+describe("CLI behavioural: suspend process-instance", () => {
+	test("--dry-run emits POST to suspension endpoint", async () => {
+		const result = await c8("suspend", "pi", "--dry-run", "12345");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).includes("/process-instances/12345/suspension"));
+	});
+
+	test("rejects missing key with exit code 1", async () => {
+		const result = await c8("suspend", "pi");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Process instance key required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+});
+
+// ─── resume process-instance ─────────────────────────────────────────────────
+
+describe("CLI behavioural: resume process-instance", () => {
+	test("--dry-run emits POST to resumption endpoint", async () => {
+		const result = await c8("resume", "pi", "--dry-run", "12345");
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).includes("/process-instances/12345/resumption"));
+	});
+
+	test("rejects missing key with exit code 1", async () => {
+		const result = await c8("resume", "pi");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Process instance key required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+});
