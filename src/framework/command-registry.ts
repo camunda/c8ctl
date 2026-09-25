@@ -1137,6 +1137,36 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	suspend: {
+		description: "Suspend resource",
+		helpDescription: "Suspend a process instance",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show suspend command with all flags",
+		mutating: true,
+		requiresResource: true,
+		resources: ["pi"],
+		flags: {},
+		resourcePositionals: {
+			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
+	resume: {
+		description: "Resume resource",
+		helpDescription: "Resume a suspended process instance",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show resume command with all flags",
+		mutating: true,
+		requiresResource: true,
+		resources: ["pi"],
+		flags: {},
+		resourcePositionals: {
+			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
 	await: {
 		description:
 			"Create and await completion (alias for create --awaitCompletion)",

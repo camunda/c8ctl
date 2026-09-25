@@ -368,3 +368,51 @@ export const cancelProcessInstanceCommand = defineCommand(
 		return { kind: "success", message: `Process instance ${key} cancelled` };
 	},
 );
+
+/**
+ * Suspend process instance
+ */
+export const suspendProcessInstanceCommand = defineCommand(
+	"suspend",
+	"process-instance",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+
+		const dr = ctx.dryRun({
+			command: "suspend process-instance",
+			method: "POST",
+			endpoint: `/process-instances/${key}/suspension`,
+			profile,
+			body: {},
+		});
+		if (dr) return dr;
+
+		await client.suspendProcessInstance({ processInstanceKey: key });
+		return { kind: "success", message: `Process instance ${key} suspended` };
+	},
+);
+
+/**
+ * Resume process instance
+ */
+export const resumeProcessInstanceCommand = defineCommand(
+	"resume",
+	"process-instance",
+	async (ctx, _flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+
+		const dr = ctx.dryRun({
+			command: "resume process-instance",
+			method: "POST",
+			endpoint: `/process-instances/${key}/resumption`,
+			profile,
+			body: {},
+		});
+		if (dr) return dr;
+
+		await client.resumeProcessInstance({ processInstanceKey: key });
+		return { kind: "success", message: `Process instance ${key} resumed` };
+	},
+);
