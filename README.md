@@ -108,6 +108,8 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `create` - Create resource
 - `delete` - Delete resource
 - `cancel` - Cancel resource
+- `suspend` - Suspend resource
+- `resume` - Resume resource
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
 - `fail` - Fail a job
