@@ -188,6 +188,12 @@ At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8
 
 Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.
 
+### Logger output
+
+`logger.info(message)` writes plain text to stdout in text mode and a `{"status":"info","message":"..."}` envelope to stderr in JSON mode. Pass `{ stream: "stdout" }` as the second argument for a primary result, or `{ stream: "stderr" }` for a diagnostic in either mode. Formatting remains mode-aware; the override affects only that call and does not apply `--fields` filtering.
+
+Use `logger.output(content)` for raw stdout content and `logger.json(data)` for structured data with `--fields` filtering.
+
 ### Declaring the c8ctl version you need
 
 This surface grows: `npm({ ... })` is newer than the rest of it, and a plugin calling it on an older c8ctl gets `TypeError: c8ctl.npm is not a function` from inside its own handler. Declare the floor instead, in the plugin's `package.json` (#523):
