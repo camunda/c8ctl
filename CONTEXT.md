@@ -21,11 +21,12 @@ c8ctl help          # get structured JSON command reference
 
 ## Output Mode
 
-- Output mode is session-global, not per-command
+- Output mode defaults to the saved session preference; `C8CTL_OUTPUT_MODE` overrides it for one invocation, and `--json` takes precedence over both
 - `c8ctl output json` → all subsequent commands emit JSON to stdout
 - `c8ctl output text` → human-readable table output
 - In JSON mode: operational messages (info/warn/success/error) go to **stderr**;
   data output goes to **stdout**
+- `c8ctl --version` (or `-v`) always writes its result to **stdout**: `c8ctl v<version>` in text mode, or `{"status":"info","message":"c8ctl v<version>"}` in JSON mode. It exits 0, ignores `--fields`, and does not change the saved preference.
 - Exit code 1 + JSON error on stderr on failure
 
 ## Resource Aliases

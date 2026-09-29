@@ -445,6 +445,19 @@ c8 output json    # all commands output JSON
 c8 output text    # back to formatted tables (default)
 ```
 
+These commands save the output preference. Use `--json` or `C8CTL_OUTPUT_MODE=json` to select JSON for one invocation without changing the saved preference. The `--json` flag takes precedence over `C8CTL_OUTPUT_MODE`, which takes precedence over the saved preference.
+
+### Version output
+
+`c8ctl --version` (or `c8ctl -v`) always writes its result to stdout and exits `0`:
+
+| Effective output mode | stdout |
+| :-------------------- | :----- |
+| Text | `c8ctl v<version>` |
+| JSON | `{"status":"info","message":"c8ctl v<version>"}` |
+
+This applies whether JSON mode comes from `--json`, `C8CTL_OUTPUT_MODE`, or the saved preference. The version is primary command output, not a diagnostic, despite the JSON envelope's `status: "info"`. Diagnostics remain on stderr in JSON mode. The version payload is not filtered by `--fields`, and requesting the version does not change the saved preference.
+
 ## Environment variables
 
 | Variable                    | Description          |
