@@ -1556,6 +1556,18 @@ export function hasRunningClusterPidfiles(cacheDir) {
   return liveRecordedPids(cacheDir).length > 0;
 }
 
+// `c8run stop` only signals the cluster processes; Java can keep running for a
+// while as it shuts down. Wait for them to exit so a follow-up purge does not
+// mistake a shutting-down cluster for a live one. The timeout is a safety net.
+export async function waitForClusterExit(cacheDir, { timeoutMs = 60_000, intervalMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (hasRunningClusterPidfiles(cacheDir)) {
+    if (Date.now() >= deadline) return false;
+    await sleep(intervalMs);
+  }
+  return true;
+}
+
 export async function stopC8Run(config, debug = false) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
@@ -2797,6 +2809,15 @@ export const commands = {
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );
           } else {
+            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
+            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+            if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
+              throw new Error(
+                'Cluster processes are still shutting down, so runtime data was not purged. ' +
+                  `Once they have exited, run: c8ctl cluster purge ${stoppedVersion}`,
+              );
+            }
             await purgeClusterData(theCacheDir, stoppedVersion);
           }
         }

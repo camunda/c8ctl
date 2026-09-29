@@ -2586,6 +2586,111 @@ describe("Cluster Plugin – logs, list-remote, install, delete subcommands", ()
 		);
 	});
 
+	// c8run stop only signals the processes; Java may keep running for a while.
+	// stop --purge must wait for them to exit instead of refusing to purge.
+	// Builds a cache dir with runtime data and a cluster process (a shell that
+	// takes ~1s to exit after TERM) recorded via a .process pidfile. Resolves
+	// only once the shell has installed its TERM trap.
+	async function setupStopPurgeFixture({
+		killOnStop,
+	}: {
+		killOnStop: boolean;
+	}) {
+		const cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-stop-purge-"));
+		const installDir = join(cacheDir, "c8run-8.9", "c8run-8.9.1");
+		const dataDirs = [
+			join(installDir, "camunda-data"),
+			join(installDir, "camunda-zeebe-8.9.1", "data"),
+		];
+		for (const d of dataDirs) mkdirSync(d, { recursive: true });
+		const readyFile = join(cacheDir, "ready");
+		// Short sleeps in a loop (no long-lived background child) so nothing leaks
+		// once the shell exits; `touch` runs only after the trap is installed.
+		const slow = spawn(
+			"sh",
+			[
+				"-c",
+				`trap "sleep 1; exit 0" TERM; touch "${readyFile}"; while :; do sleep 0.1; done`,
+			],
+			{ stdio: "ignore" },
+		);
+		const pid = slow.pid;
+		assert.ok(pid, "slow process should have a pid");
+		const ready = await pollUntil(async () => existsSync(readyFile), 5000, 20);
+		assert.ok(ready, "slow process should install its TERM trap");
+		writeFileSync(join(installDir, "camunda.process"), String(pid));
+		writeFileSync(join(cacheDir, "cluster.active"), "running");
+		writeFileSync(join(cacheDir, "cluster.version"), "8.9");
+		// Fake c8run: signals the process like the real `c8run stop`, or does nothing.
+		writeFileSync(
+			join(installDir, C8RUN_BINARY),
+			`#!/bin/sh\n${killOnStop ? `kill -TERM ${pid}\n` : ""}exit 0\n`,
+			{ mode: 0o755 },
+		);
+		return { cacheDir, dataDirs, slow };
+	}
+
+	test("stop --purge waits for a slow-shutting-down cluster and then purges", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
+			killOnStop: true,
+		});
+		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
+		process.env.C8RUN_CACHE_DIR = cacheDir;
+		const restoreExit = mockProcessExit();
+		try {
+			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
+			slow.kill("SIGKILL");
+		}
+		const purged = dataDirs.every((d) => !existsSync(d));
+		rmSync(cacheDir, { recursive: true, force: true });
+		assert.ok(purged, "runtime data must be purged after stop --purge");
+	});
+
+	test("stop --purge keeps data and hints at manual purge when the cluster does not exit in time", {
+		skip: process.platform === "win32",
+	}, async () => {
+		// c8run stop does nothing here, so the process stays alive past the timeout.
+		const { cacheDir, dataDirs, slow } = await setupStopPurgeFixture({
+			killOnStop: false,
+		});
+		const prevCacheDir = process.env.C8RUN_CACHE_DIR;
+		const prevWait = process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
+		process.env.C8RUN_CACHE_DIR = cacheDir;
+		process.env.C8CTL_STOP_WAIT_TIMEOUT_MS = "300";
+		let exitCode: number | string | null | undefined;
+		const restoreExit = mockProcessExit((code) => {
+			exitCode = code;
+		});
+		try {
+			await plugin.commands.cluster(["stop", "--purge"]).catch(() => {});
+		} finally {
+			restoreExit();
+			if (prevCacheDir === undefined) delete process.env.C8RUN_CACHE_DIR;
+			else process.env.C8RUN_CACHE_DIR = prevCacheDir;
+			if (prevWait === undefined) delete process.env.C8CTL_STOP_WAIT_TIMEOUT_MS;
+			else process.env.C8CTL_STOP_WAIT_TIMEOUT_MS = prevWait;
+			slow.kill("SIGKILL");
+		}
+		const kept = dataDirs.every((d) => existsSync(d));
+		assert.strictEqual(exitCode, 1, "should exit non-zero");
+		const output = captured.join("\n");
+		rmSync(cacheDir, { recursive: true, force: true });
+		assert.ok(
+			kept,
+			"runtime data must not be purged while processes are alive",
+		);
+		assert.ok(
+			output.includes("c8ctl cluster purge 8.9"),
+			"should hint at the manual purge command",
+		);
+	});
+
 	test("secrets subcommand with no verb exits with a usage error", async () => {
 		const restoreExit = mockProcessExit();
 
