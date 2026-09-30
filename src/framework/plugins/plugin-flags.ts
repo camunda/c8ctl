@@ -24,7 +24,7 @@ export interface PluginFlagAnalysis {
 	reservedNames: string[];
 	/** Plugin short aliases that collide with a global alias: `{ name, short }`. The long flag still works. */
 	reservedShorts: { name: string; short: string }[];
-	/** The plugin's flags minus the reserved ones, with reserved short aliases removed — what help should show. */
+	/** The plugin's flags minus the reserved ones, with reserved short aliases removed — what help should show. Null-prototype. */
 	usable: Record<string, FlagDef>;
 }
 
@@ -40,7 +40,7 @@ export function analyzePluginFlags(
 	const options = globalOptions();
 	const reservedNames: string[] = [];
 	const reservedShorts: { name: string; short: string }[] = [];
-	const usable: Record<string, FlagDef> = {};
+	const usable: Record<string, FlagDef> = Object.create(null);
 
 	for (const [name, def] of Object.entries(flagDefs)) {
 		if (Object.hasOwn(globals, name)) {
