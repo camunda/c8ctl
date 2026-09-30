@@ -701,6 +701,14 @@ describe("two-stage parser: command-specific flags before the command are reject
 		assert.ok(out.includes("-z"), out);
 	});
 
+	test("the suggested order keeps the moved flag before a `--` terminator", async () => {
+		const out = await rejected("--limit", "5", "list", "pi", "--", "lit");
+		assert.ok(
+			out.includes("Did you mean: c8ctl list pi --limit 5 -- lit"),
+			out,
+		);
+	});
+
 	test("a one-letter long flag is shown as typed", async () => {
 		const out = await rejected("--z", "list", "pi");
 		assert.ok(out.includes("Flag --z is not"), out);

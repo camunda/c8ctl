@@ -607,7 +607,17 @@ function suggestOrder({
 				type: effectiveType,
 			})
 		) {
-			return `c8ctl ${[...remaining, ...moved].map(display).join(" ")}`;
+			// Before a `--` after the verb, past which it would be a positional.
+			const { rest } = splitGlobals(remaining);
+			const cut = rest.includes("--")
+				? remaining.length - rest.length + rest.indexOf("--")
+				: remaining.length;
+			const corrected = [
+				...remaining.slice(0, cut),
+				...moved,
+				...remaining.slice(cut),
+			];
+			return `c8ctl ${corrected.map(display).join(" ")}`;
 		}
 	}
 	return undefined;
