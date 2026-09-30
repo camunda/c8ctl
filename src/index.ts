@@ -262,7 +262,8 @@ async function main() {
 	// A global --version before the verb is the CLI version. After the verb
 	// it is command-scoped (definition-version filter on built-ins, plugin
 	// version on plugin verbs) and is parsed by stage 2 below.
-	if (stage1.globals.version === true) {
+	// Any value counts: lenient parsing yields a string for `--version=3`.
+	if (stage1.globals.version !== undefined) {
 		showVersion();
 		return;
 	}

@@ -472,6 +472,13 @@ describe("two-stage parser: --version is scoped by position", () => {
 		assert.match(result.stdout + result.stderr, /c8ctl v/);
 	});
 
+	test("`--version=<x>` before the verb also prints the CLI version and never dispatches", async () => {
+		const result = await c8("--version=3", "list", "pi", "--dry-run");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout + result.stderr, /c8ctl v/);
+		assert.ok(!result.stdout.includes("dryRun"), result.stdout);
+	});
+
 	test("bare `c8ctl --version` still prints the CLI version", async () => {
 		const result = await c8("--version");
 		assert.strictEqual(result.status, 0, result.stderr);
