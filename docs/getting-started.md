@@ -445,7 +445,9 @@ c8 output json    # all commands output JSON
 c8 output text    # back to formatted tables (default)
 ```
 
-These commands save the output preference. Use `--json` or `C8CTL_OUTPUT_MODE=json` to select JSON for one invocation without changing the saved preference. The `--json` flag takes precedence over `C8CTL_OUTPUT_MODE`, which takes precedence over the saved preference.
+These commands save the output preference. Use `--json` to select JSON for one invocation without changing the saved preference.
+
+For scripts that invoke multiple commands, set `C8CTL_OUTPUT_MODE=json` in their environment rather than adding `--json` to every invocation. `C8CTL_OUTPUT_MODE=text` also allows a temporary text override when the saved preference is JSON, without changing session state. An explicit `--json` flag takes precedence over the environment override, which takes precedence over the saved preference.
 
 ### Version output
 
