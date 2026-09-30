@@ -613,7 +613,11 @@ describe("Passthrough plugin contract (#366)", () => {
 			);
 			for (const line of lines) {
 				assert.ok(
-					line.includes("-n 'not __fish_seen_subcommand_from pass-through-cmd"),
+					// The guard lists every passthrough verb — the bundled `cluster`
+					// plugin is one too — so assert membership, not position.
+					/-n 'not __fish_seen_subcommand_from [^']*\bpass-through-cmd\b/.test(
+						line,
+					),
 					`every fish completion for non-global flag '--${nonGlobalFlag}' must be gated against passthrough verbs. line was: ${line}`,
 				);
 			}

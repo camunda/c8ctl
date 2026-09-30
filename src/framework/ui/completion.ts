@@ -135,6 +135,16 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 	return infos;
 }
 
+/**
+ * True when the resource position of `v` completes file paths: deploy/run/
+ * watch, and #366 passthrough verbs — unless the passthrough verb declared
+ * `subcommands` (e.g. the `cluster` plugin), in which case those are what
+ * the user wants offered.
+ */
+function completesFiles(v: VerbInfo): boolean {
+	return v.fileComplete || (v.passthrough && v.resources.length === 0);
+}
+
 /** Collect all unique flag names across all commands + global + search flags. */
 function deriveAllFlagNames(): string[] {
 	const names = new Set<string>();
@@ -328,7 +338,7 @@ function generateBashCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			// deploy/run/watch and #366 passthrough verbs complete with
 			// files. Include aliases in the case pattern so e.g. `c8ctl
 			// w <TAB>` (alias for `watch`) gets file completion too.
@@ -471,7 +481,7 @@ function generateZshCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			const casePattern =
 				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
 			resourceCases.push(
@@ -660,7 +670,7 @@ function generateFishCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			// Both `fileComplete` verbs (deploy/run/watch — they take file
 			// paths as their resource argument) and `passthrough` verbs
 			// (#366 — c8ctl can't know what the wrapped tool accepts, so

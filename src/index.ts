@@ -520,7 +520,7 @@ async function main() {
 			// Use rawVerb here because process.argv contains the original input.
 			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), rawVerb);
 			const forwarded = stripGlobalFlags(rawAfterVerb);
-			await executePluginCommand(verb, forwarded);
+			await executePluginCommand(verb, forwarded, undefined, pluginCtx);
 			return;
 		}
 

@@ -74,6 +74,22 @@ describe("Cluster Plugin – metadata", () => {
 		);
 	});
 
+	test("cluster command is a passthrough command so the host delivers its flags (#593)", () => {
+		// A bare-function command only receives parsed positionals; --purge,
+		// --debug, --c8-version and c8run's own secrets flags would be dropped.
+		const cmd = plugin.metadata.commands.cluster;
+		assert.strictEqual(cmd.passthrough, true);
+		assert.ok(
+			typeof cmd.passthroughHint === "string" && cmd.passthroughHint.length > 0,
+			"passthrough requires a non-empty passthroughHint",
+		);
+		assert.strictEqual(
+			cmd.flags,
+			undefined,
+			"passthrough and declared flags are mutually exclusive",
+		);
+	});
+
 	test("cluster command declares a secrets subcommand", () => {
 		const subcommands = plugin.metadata.commands.cluster.subcommands;
 		assert.ok(
@@ -398,6 +414,18 @@ describe("Cluster Plugin – parsePluginArgs", () => {
 		const result = plugin.parsePluginArgs(["start", "--c8-version", "8.8"]);
 		assert.strictEqual(result.subcommand, "start");
 		assert.strictEqual(result.version, "8.8");
+	});
+
+	test("parses --c8-version=<value> form", () => {
+		const result = plugin.parsePluginArgs(["start", "--c8-version=8.8"]);
+		assert.strictEqual(result.version, "8.8");
+	});
+
+	test("throws when --c8-version= has an empty value", () => {
+		assert.throws(
+			() => plugin.parsePluginArgs(["start", "--c8-version="]),
+			/Missing value for --c8-version/,
+		);
 	});
 
 	test("parses --debug flag", () => {
@@ -3532,150 +3560,54 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 	});
 });
 
-describe("Cluster Plugin – sliceSecretsArgv", () => {
-	function permutations<T>(items: readonly T[]): T[][] {
-		if (items.length <= 1) return [Array.from(items)];
-
-		return items.flatMap((item, index) =>
-			permutations([...items.slice(0, index), ...items.slice(index + 1)]).map(
-				(rest) => [item, ...rest],
-			),
+describe("Cluster Plugin – withForwardedYes", () => {
+	// --yes/-y are c8ctl GLOBAL flags: the passthrough host consumes them
+	// (ctx.yes) and strips them from the args, so the plugin restores the one
+	// c8run verb documented to take it.
+	test("re-adds --yes to `secrets delete` when the host saw --yes", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "API_KEY"], { yes: true }),
+			["delete", "API_KEY", "--yes"],
 		);
-	}
-
-	test("returns the raw tail after cluster secrets, flags intact", () => {
-		const argv = ["cluster", "secrets", "set", "API_KEY", "--stdin"];
-		const result = plugin.sliceSecretsArgv(argv, [
-			"secrets",
-			"set",
-			"API_KEY",
-			"--stdin",
-		]);
-		assert.deepStrictEqual(result, ["set", "API_KEY", "--stdin"]);
 	});
 
-	test("skips a leading global string flag and its value", () => {
-		const argv = ["--profile", "myprofile", "cluster", "secrets", "list"];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
-		assert.deepStrictEqual(result, ["list"]);
+	test("does nothing when --yes was not passed", () => {
+		const tail = ["delete", "API_KEY"];
+		assert.strictEqual(plugin.withForwardedYes(tail, { yes: false }), tail);
+		assert.strictEqual(plugin.withForwardedYes(tail, undefined), tail);
 	});
 
-	test("preserves every permutation of forwarded secrets flags after the cluster secrets boundary", () => {
-		const forwardedFlags = ["--stdin", "--all", "--yes"] as const;
-
-		for (const flags of permutations(forwardedFlags)) {
-			const result = plugin.parseSecretsArgs(
-				plugin.sliceSecretsArgv(
-					["cluster", "secrets", "opaque-verb", ...flags],
-					["secrets", "opaque-verb"],
-				),
-			);
-
-			assert.deepStrictEqual(
-				result,
-				{ version: null, passthrough: ["opaque-verb", ...flags] },
-				flags.join(" "),
-			);
-		}
+	test("never appends --yes to a verb other than delete", () => {
+		const tail = ["list"];
+		assert.strictEqual(plugin.withForwardedYes(tail, { yes: true }), tail);
 	});
 
-	test("preserves valid secrets switches and args unchanged after the cluster secrets boundary", () => {
-		const validSecretsTails = [
-			["set", "OPENAI_API_KEY"],
-			["set", "OPENAI_API_KEY", "--stdin"],
-			["list"],
-			["list", "--all"],
-			["path"],
-			["delete", "OPENAI_API_KEY", "--yes"],
-			["import", ".env.secrets"],
-		] as const;
-
-		for (const tail of validSecretsTails) {
-			const result = plugin.parseSecretsArgs(
-				plugin.sliceSecretsArgv(
-					["--profile", "prod", "cluster", "--verbose", "secrets", ...tail],
-					["secrets", ...tail.filter((token) => !token.startsWith("--"))],
-				),
-			);
-
-			assert.deepStrictEqual(
-				result,
-				{ version: null, passthrough: Array.from(tail) },
-				tail.join(" "),
-			);
-		}
+	test("finds the verb behind a leading --c8-version", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["--c8-version", "8.9", "delete", "K"], {
+				yes: true,
+			}),
+			["--c8-version", "8.9", "delete", "K", "--yes"],
+		);
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["--c8-version=8.9", "delete", "K"], {
+				yes: true,
+			}),
+			["--c8-version=8.9", "delete", "K", "--yes"],
+		);
 	});
 
-	test("is not fooled by a global flag value that reads 'cluster'", () => {
-		const argv = ["--profile", "cluster", "cluster", "secrets", "list"];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
-		assert.deepStrictEqual(result, ["list"]);
+	test("does not duplicate a --yes / -y that is already present", () => {
+		const a = ["delete", "K", "--yes"];
+		const b = ["delete", "K", "-y"];
+		assert.strictEqual(plugin.withForwardedYes(a, { yes: true }), a);
+		assert.strictEqual(plugin.withForwardedYes(b, { yes: true }), b);
 	});
 
-	test("falls back to hostArgs when argv has no cluster secrets pair", () => {
-		const argv = ["node", "test-runner.js", "--test"];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "API_KEY"]);
-		assert.deepStrictEqual(result, ["set", "API_KEY"]);
-	});
-
-	test("falls back to hostArgs when cluster is not followed by secrets", () => {
-		const argv = ["cluster", "start"];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "list"]);
-		assert.deepStrictEqual(result, ["list"]);
-	});
-
-	// The host's own top-level parser recognizes --profile/--verbose (real
-	// global flags) wherever they sit and strips them from positionals, but
-	// it also strips an unrecognized plugin-only flag like --stdin because it
-	// treats any unknown "--foo" as a boolean (#364) — so hostArgs here is
-	// what the host actually delivers: --stdin already gone. If
-	// sliceSecretsArgv fell back to hostArgs instead of correctly walking
-	// raw argv, --stdin would be lost for good.
-
-	test("skips a global string flag placed between cluster and secrets", () => {
-		const argv = [
-			"cluster",
-			"--profile",
-			"prod",
-			"secrets",
-			"set",
-			"KEY",
-			"--stdin",
-		];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
-		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
-	});
-
-	test("skips a global string flag in --flag=value form between cluster and secrets", () => {
-		const argv = [
-			"cluster",
-			"--profile=prod",
-			"secrets",
-			"set",
-			"KEY",
-			"--stdin",
-		];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
-		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
-	});
-
-	test("skips a global boolean flag placed between cluster and secrets", () => {
-		const argv = ["cluster", "--verbose", "secrets", "set", "KEY", "--stdin"];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
-		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
-	});
-
-	test("skips a global string flag in --flag=value form before cluster", () => {
-		const argv = [
-			"--profile=prod",
-			"cluster",
-			"secrets",
-			"set",
-			"KEY",
-			"--stdin",
-		];
-		const result = plugin.sliceSecretsArgv(argv, ["secrets", "set", "KEY"]);
-		assert.deepStrictEqual(result, ["set", "KEY", "--stdin"]);
+	test("does not mutate the tail it receives", () => {
+		const tail = ["delete", "K"];
+		plugin.withForwardedYes(tail, { yes: true });
+		assert.deepStrictEqual(tail, ["delete", "K"]);
 	});
 });
 

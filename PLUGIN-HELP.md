@@ -175,6 +175,48 @@ Commands declared as bare functions continue to work unchanged:
 - The handler signature `async (args)` remains valid
 - No migration required for commands that don't use custom flags
 
+### A bare-function handler receives only positionals
+
+**A bare-function command (`'my-command': async (args) => { ... }`) is handed only the parsed positional arguments that follow the command name. It never sees any flag.** The host parses the command line itself; every flag the command did not declare is consumed and discarded before the handler runs — c8ctl's global flags (`--profile`, `--json`, `--yes`, ...) take effect in the host, and unknown flags such as `--purge` or `--stdin` are silently dropped (the handler cannot even tell they were typed). A handler that checks `args.includes('--purge')` will never see it true.
+
+A command that needs flags must opt into one of the two supported forms:
+
+| Need | Use | The handler receives |
+|------|-----|----------------------|
+| A fixed set of flags you can enumerate | `{ flags, handler }` (see [Plugin Flags](#plugin-flags)) | `args` (positionals) and `flags` (typed, validated values) |
+| The raw command line, e.g. to forward to another tool, or a flag set you cannot enumerate | `passthrough: true` in the command's metadata (below) | `args` = every token after the command name except c8ctl's global flags |
+
+Do **not** work around this by re-reading `process.argv` inside a handler: it duplicates the host's global-flag handling, breaks when a global flag sits between the tokens you are looking for, and bypasses help and validation.
+
+### Passthrough commands
+
+```javascript
+export const metadata = {
+  name: 'my-plugin',
+  commands: {
+    'my-command': {
+      description: 'Wraps some-tool',
+      passthrough: true,
+      // Required: names the boundary in `c8ctl help my-command`.
+      passthroughHint: 'Forwards everything after the command name to some-tool',
+      // Optional, documentation only (not parsed by c8ctl).
+      flagsHint: ['--purge  Also delete data'],
+    },
+  },
+};
+
+export const commands = {
+  // Bare function; the third argument is the plugin host context.
+  'my-command': async (args, _flags, ctx) => {
+    // args: ['start', '--debug', 'x'] for `c8ctl my-command start --debug x`
+  },
+};
+```
+
+- A command is **either** passthrough **or** `{ flags, handler }` — declaring both is rejected at load time, so a command cannot mix declared flags with raw ones. A command whose subcommands need both (like `cluster`, which has its own `--purge` and forwards arbitrary flags to `c8run secrets`) should be a passthrough command and parse its own flags.
+- c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
+- A `--` terminator is forwarded too, and everything after it verbatim, global flag names included.
+
 ## Plugin Runtime API
 
 At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8ctl`.
