@@ -1265,7 +1265,11 @@ export const doctorPluginCommand = defineCommand(
 
 		if (collisions.length === 0) {
 			logger.info("");
-			logger.info("No plugin collisions detected.");
+			logger.info(
+				flagCollisions.length > 0
+					? "No plugin name or command collisions detected."
+					: "No plugin collisions detected.",
+			);
 			return;
 		}
 

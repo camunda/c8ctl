@@ -510,6 +510,19 @@ describe("Plugin Flags CLI subprocess — doctor reports reserved flags once", (
 			found.join(),
 		);
 	});
+
+	test("text report does not claim there are no collisions after listing flag collisions", async () => {
+		const result = await c8pluginText("doctor", "plugin");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.ok(
+			result.stdout.includes("Plugin flags that collide"),
+			result.stdout,
+		);
+		assert.ok(
+			!result.stdout.includes("No plugin collisions detected"),
+			result.stdout,
+		);
+	});
 });
 
 describe("Plugin Flags CLI subprocess — plugin flags before the verb are rejected", () => {
