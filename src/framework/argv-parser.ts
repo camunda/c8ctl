@@ -212,6 +212,18 @@ export function parseFlags({
 
 // ─── Stage 1 ─────────────────────────────────────────────────────────────────
 
+/** A flag found before the verb that is not a global flag. */
+export interface MisplacedFlag {
+	/** The token exactly as typed, e.g. `--limit` or `--limit=5`. */
+	token: string;
+	/** Flag name without dashes (`limit`, or `x` for `-x`). */
+	name: string;
+	/** True for the `--name=value` form (the value is part of the token). */
+	inlineValue: boolean;
+	/** Index of the token in argv. */
+	index: number;
+}
+
 export interface Stage1Result {
 	/** Global flags that appeared before the verb. `version` is `true` when `--version` / `-v` was given. */
 	globals: ParsedValues;
@@ -219,6 +231,12 @@ export interface Stage1Result {
 	verb: string | undefined;
 	/** Every argv token after the verb, verbatim. */
 	rest: string[];
+	/**
+	 * Non-global flags that appeared before the verb. Only globals are valid
+	 * there, so the host reports these instead of dispatching: the "verb"
+	 * stage 1 stopped at may really be such a flag's value.
+	 */
+	misplaced: MisplacedFlag[];
 }
 
 /**
@@ -229,15 +247,28 @@ export interface Stage1Result {
 export function splitGlobals(argv: readonly string[]): Stage1Result {
 	const options = stage1Options();
 	const { tokens, values } = parseFlags({ args: argv, options });
+	const verbToken = tokens.find((t) => t.kind === "positional");
+	const end = verbToken ? verbToken.index : argv.length;
+	const misplaced: MisplacedFlag[] = [];
 	for (const token of tokens) {
-		if (token.kind !== "positional") continue;
-		return {
-			globals: parseFlags({ args: argv.slice(0, token.index), options }).values,
-			verb: token.value,
-			rest: argv.slice(token.index + 1),
-		};
+		if (token.kind !== "option" || token.index >= end) continue;
+		if (Object.hasOwn(options, token.name)) continue;
+		misplaced.push({
+			token: argv[token.index],
+			name: token.name,
+			inlineValue: token.inlineValue === true,
+			index: token.index,
+		});
 	}
-	return { globals: values, verb: undefined, rest: [] };
+	if (!verbToken)
+		return { globals: values, verb: undefined, rest: [], misplaced };
+	return {
+		globals: parseFlags({ args: argv.slice(0, verbToken.index), options })
+			.values,
+		verb: verbToken.value,
+		rest: argv.slice(verbToken.index + 1),
+		misplaced,
+	};
 }
 
 // ─── Stage 2 (built-in verbs) ────────────────────────────────────────────────
@@ -464,4 +495,144 @@ export function stripBlockedFlagTokens({
 		i++;
 	}
 	return out;
+}
+
+// ─── Misplaced-flag diagnostics ──────────────────────────────────────────────
+
+type TypedFlagDefs = Record<
+	string,
+	{ type: string; short?: string } | undefined
+>;
+
+function findFlagType({
+	defs,
+	name,
+}: {
+	defs: TypedFlagDefs;
+	name: string;
+}): string | undefined {
+	if (Object.hasOwn(defs, name)) return defs[name]?.type;
+	return Object.values(defs).find((d) => d?.short === name)?.type;
+}
+
+/** Quote a token for display only when it needs it. */
+function display(token: string): string {
+	return /\s/.test(token) ? JSON.stringify(token) : token;
+}
+
+/** `--help/-h, --version/-v, --profile, ...` for one-line reference. */
+function globalFlagSummary(): string {
+	return Object.entries(GLOBAL_FLAGS)
+		.map(([name, def]) => {
+			const short = "short" in def ? def.short : undefined;
+			return short ? `--${name}/-${short}` : `--${name}`;
+		})
+		.join(", ");
+}
+
+/**
+ * Does the command that `argv` (minus the misplaced flag) dispatches to
+ * declare `flag` with `type`? Verifies a correction instead of guessing one.
+ */
+function commandDeclares({
+	argv,
+	pluginFlags,
+	name,
+	type,
+}: {
+	argv: readonly string[];
+	pluginFlags: Record<string, TypedFlagDefs>;
+	name: string;
+	type: string;
+}): boolean {
+	const { verb, rest } = splitGlobals(argv);
+	if (!verb) return false;
+	if (getCommandDef(verb)) {
+		const parsed = parseVerbArgs({ rawVerb: verb, rest });
+		const defs = stage2Options({
+			verb: parsed.verb,
+			resource: parsed.normalizedResource,
+		});
+		return findFlagType({ defs, name }) === type;
+	}
+	const defs = Object.hasOwn(pluginFlags, verb) ? pluginFlags[verb] : undefined;
+	return defs !== undefined && findFlagType({ defs, name }) === type;
+}
+
+/**
+ * The corrected command line for a single misplaced flag, or `undefined`
+ * when it cannot be verified. The flag may be boolean (only its token
+ * moves) or take a value (the next token moves with it); a hypothesis is
+ * accepted only when the command it leaves behind declares the flag with
+ * that type.
+ */
+function suggestOrder({
+	argv,
+	flag,
+	pluginFlags,
+}: {
+	argv: readonly string[];
+	flag: MisplacedFlag;
+	pluginFlags: Record<string, TypedFlagDefs>;
+}): string | undefined {
+	const hypotheses: { type: string; width: number }[] = [
+		{ type: "boolean", width: 1 },
+		...(flag.inlineValue || flag.index + 1 >= argv.length
+			? []
+			: [{ type: "string", width: 2 }]),
+	];
+	for (const { type, width } of hypotheses) {
+		const moved = argv.slice(flag.index, flag.index + width);
+		const remaining = [
+			...argv.slice(0, flag.index),
+			...argv.slice(flag.index + width),
+		];
+		// `--name=value` is a string flag spelled in one token.
+		const effectiveType = flag.inlineValue ? "string" : type;
+		if (
+			commandDeclares({
+				argv: remaining,
+				pluginFlags,
+				name: flag.name,
+				type: effectiveType,
+			})
+		) {
+			return `c8ctl ${[...remaining, ...moved].map(display).join(" ")}`;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Error text for non-global flags placed before the command. Names the
+ * surface (globals before the command, command flags after it) and, when it
+ * can be verified, shows the corrected order.
+ */
+export function describeMisplacedFlags({
+	argv,
+	misplaced,
+	pluginFlags,
+}: {
+	argv: readonly string[];
+	misplaced: readonly MisplacedFlag[];
+	pluginFlags: Record<string, TypedFlagDefs>;
+}): string {
+	const names = misplaced.map((m) =>
+		m.name.length === 1 ? `-${m.name}` : `--${m.name}`,
+	);
+	const list = names.join(", ");
+	const head =
+		misplaced.length === 1
+			? `Flag ${list} is not a global flag; command-specific flags go after the command`
+			: `Flags ${list} are not global flags; command-specific flags go after the command`;
+	const suggestion =
+		misplaced.length === 1
+			? suggestOrder({ argv, flag: misplaced[0], pluginFlags })
+			: undefined;
+	if (suggestion) return `${head}. Did you mean: ${suggestion}`;
+	return (
+		`${head}: c8ctl <command> [args] ${names[0]}. ` +
+		`Only global flags may come before the command (${globalFlagSummary()}). ` +
+		`Run "c8ctl help <command>" to see a command's flags.`
+	);
 }

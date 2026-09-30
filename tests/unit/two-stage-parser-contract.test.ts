@@ -633,3 +633,93 @@ describe("two-stage parser: unknown flags stay warn-only", () => {
 		);
 	});
 });
+
+describe("two-stage parser: command-specific flags before the command are rejected clearly", () => {
+	// Only globals may precede the command. The flag's value used to be taken
+	// for the verb and reported as "Unknown command: 5".
+	async function rejected(...args: string[]) {
+		const result = await c8(...args);
+		const out = result.stdout + result.stderr;
+		assert.notStrictEqual(
+			result.status,
+			0,
+			`c8ctl ${args.join(" ")} must fail`,
+		);
+		assert.ok(
+			!out.includes("Unknown command"),
+			`must not report the flag's value as a command: ${out}`,
+		);
+		assert.ok(/not (a )?global flags?/.test(out), out);
+		assert.ok(out.includes("go after the command"), out);
+		return out;
+	}
+
+	test("flag with a value: names the flag and suggests the corrected order", async () => {
+		const out = await rejected("--limit", "5", "list", "pi");
+		assert.ok(out.includes("--limit"), out);
+		assert.ok(out.includes("Did you mean: c8ctl list pi --limit 5"), out);
+	});
+
+	test("boolean flag", async () => {
+		const out = await rejected("--all", "list", "pi");
+		assert.ok(out.includes("Did you mean: c8ctl list pi --all"), out);
+	});
+
+	test("`--flag=value` form", async () => {
+		const out = await rejected("--limit=5", "list", "pi");
+		assert.ok(out.includes("Did you mean: c8ctl list pi --limit=5"), out);
+	});
+
+	test("globals that were already in the right place are kept in the suggestion", async () => {
+		const out = await rejected("--json", "--limit", "5", "list", "pi");
+		assert.ok(
+			out.includes("Did you mean: c8ctl --json list pi --limit 5"),
+			out,
+		);
+	});
+
+	test("a flag no command declares gets the general explanation, with the globals listed", async () => {
+		const out = await rejected("--foo", "2", "my-plugin", "local-command");
+		assert.ok(out.includes("--foo"), out);
+		assert.ok(
+			out.includes("Only global flags may come before the command"),
+			out,
+		);
+		assert.ok(out.includes("--profile") && out.includes("--dry-run"), out);
+		assert.ok(!out.includes("Did you mean"), `must not guess: ${out}`);
+	});
+
+	test("an unknown short flag", async () => {
+		const out = await rejected("-z", "list", "pi");
+		assert.ok(out.includes("-z"), out);
+	});
+
+	test("several misplaced flags are all named", async () => {
+		const out = await rejected("--all", "--fullValue", "list", "pi");
+		assert.ok(out.includes("--all") && out.includes("--fullValue"), out);
+	});
+
+	test("a misplaced flag with no command at all is still reported", async () => {
+		await rejected("--foo");
+	});
+
+	test("valid global-before-verb forms are unchanged", async () => {
+		const a = await dryRun("--json", "--dry-run", "get", "pi", "1");
+		assert.ok(String(a.url).endsWith("/process-instances/1"));
+		const b = await dryRun(
+			"--json",
+			"--dry-run",
+			"--profile",
+			"x",
+			"list",
+			"pi",
+		);
+		assert.strictEqual(b.command, "list process-instances");
+		const c = await c8("--json", "--dry-run", "--fields", "Key", "list", "pi");
+		assert.strictEqual(c.status, 0, c.stderr);
+		assert.ok(!c.stderr.includes("not a global flag"), c.stderr);
+		const v = await c8("--version");
+		assert.strictEqual(v.status, 0);
+		assert.match(v.stdout + v.stderr, /c8ctl v/);
+	});
+});

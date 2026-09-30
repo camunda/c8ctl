@@ -24,9 +24,11 @@ import {
 	type CommandContext,
 	commandRegistryEntries,
 	createDryRun,
+	describeMisplacedFlags,
 	detectUnknownFlags,
 	displayFlag,
 	executePluginCommand,
+	type FlagDef,
 	getCommandDef,
 	getPluginCommands,
 	getPluginVersionForCommand,
@@ -219,6 +221,24 @@ async function main() {
 
 	// Load installed plugins
 	await loadInstalledPlugins();
+
+	// Only global flags may precede the command. A command-specific flag
+	// there would also make stage 1 mistake the flag's value for the verb
+	// ("Unknown command: 5"), so name the real problem instead.
+	if (stage1.misplaced.length > 0) {
+		const pluginFlags: Record<string, Record<string, FlagDef>> = {};
+		for (const [name, cmd] of Object.entries(getPluginCommands())) {
+			if (typeof cmd !== "function") pluginFlags[name] = cmd.flags;
+		}
+		getLogger(c8ctl.outputMode).error(
+			describeMisplacedFlags({
+				argv: process.argv.slice(2),
+				misplaced: stage1.misplaced,
+				pluginFlags,
+			}),
+		);
+		process.exit(1);
+	}
 
 	const rawVerb = stage1.verb;
 

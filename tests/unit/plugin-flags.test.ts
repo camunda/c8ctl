@@ -506,3 +506,36 @@ describe("Plugin Flags CLI subprocess — doctor reports reserved flags once", (
 		);
 	});
 });
+
+describe("Plugin Flags CLI subprocess — plugin flags before the verb are rejected", () => {
+	test("`--source x test-flags` fails with a corrected-order suggestion, not 'Unknown command'", async () => {
+		const result = await c8plugin("--source", "x", "test-flags");
+		const out = result.stdout + result.stderr;
+		assert.notStrictEqual(result.status, 0);
+		assert.ok(!out.includes("Unknown command"), out);
+		assert.ok(out.includes("Flag --source is not a global flag"), out);
+		assert.ok(out.includes("Did you mean: c8ctl test-flags --source x"), out);
+	});
+
+	test("a boolean plugin flag before the verb", async () => {
+		const result = await c8plugin("--debug", "test-flags");
+		assert.notStrictEqual(result.status, 0);
+		assert.ok(
+			(result.stdout + result.stderr).includes(
+				"Did you mean: c8ctl test-flags --debug",
+			),
+			result.stderr,
+		);
+	});
+
+	test("the same flags after the verb still work", async () => {
+		const result = await c8plugin("test-flags", "--source", "x", "--debug");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(JSON.parse(result.stdout).flags.source, "x");
+	});
+
+	test("a global before the plugin verb still works", async () => {
+		const result = await c8plugin("--json", "test-flags", "--source", "x");
+		assert.strictEqual(result.status, 0, result.stderr);
+	});
+});
