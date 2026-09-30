@@ -97,8 +97,8 @@ export interface CommandDef {
 	 * resource `r` — only `resourceFlags[r]` is. Verb-level `flags` are
 	 * still treated as valid by `detectUnknownFlags`, so
 	 * `detectUnknownFlags`/`warnUnknownFlags` will not emit an
-	 * unknown-flag warning for them, and `deriveParseArgsOptions` still
-	 * includes them so they parse, but they will not flow into the
+	 * unknown-flag warning for them, and stage 2 of the argv parser
+	 * (`parseVerbArgs`) still parses them, but they will not flow into the
 	 * handler's typed parameter for any resource that has its own bucket.
 	 *
 	 * Practical guidance: if a flag must be visible to the handler for a
@@ -116,9 +116,9 @@ export interface CommandDef {
 	 * When a resource has an entry here, the framework resolves the
 	 * effective flag schema as `resourceFlags[resource]` and **ignores**
 	 * the verb-level `flags` for handler typing and `validateFlags`.
-	 * `deriveParseArgsOptions` still includes both buckets so they parse,
-	 * and the scoping lets `warnUnknownFlags` warn when a flag is passed
-	 * against a resource that does not declare it. See the doc on `flags`
+	 * Stage 2 of the argv parser parses `flags` plus only the requested
+	 * resource's bucket, and the scoping lets `warnUnknownFlags` warn when a
+	 * flag is passed against a resource that does not declare it. See the doc on `flags`
 	 * above for the full effective-resolution semantics.
 	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
@@ -815,9 +815,9 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). The flag is still parsed by `parseArgs`
-		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
-		// and the value is ignored — the warning is the user-facing signal.
+		// non-PD resource (#256). Stage 2 of the argv parser only parses the
+		// requested resource's bucket, so the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {
 			all: {
 				type: "boolean",
@@ -924,9 +924,9 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). The flag is still parsed by `parseArgs`
-		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
-		// and the value is ignored — the warning is the user-facing signal.
+		// non-PD resource (#256). Stage 2 of the argv parser only parses the
+		// requested resource's bucket, so the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {
 			...SEARCH_FLAGS,
 		},
@@ -1897,10 +1897,10 @@ export const COMMAND_REGISTRY = {
 		// `--shell` only applies to `completion install` — declared once in
 		// `resourceFlags.install` so it triggers an unknown-flag warning when
 		// passed to other resources (e.g. `completion zsh --shell bash`).
-		// This is the original #256 defect class. `parseArgs` still accepts
-		// the flag globally via `deriveParseArgsOptions` iterating
-		// `resourceFlags`, and the value is ignored on non-install branches
-		// of `completionCommand` — the warning is the user-facing signal.
+		// This is the original #256 defect class. Stage 2 of the argv parser
+		// only parses the requested resource's bucket, so on other resources
+		// the flag is reported as unknown and ignored — the warning is the
+		// user-facing signal.
 		flags: {},
 		resourceFlags: {
 			install: {
@@ -2113,9 +2113,15 @@ export function isValidCommand(verb: string, resource: string): boolean {
 }
 
 /**
- * Derive parseArgs options from the registry. This produces the flat
- * options object that node:util parseArgs expects, covering all flags
- * from all commands plus global flags.
+ * Derive a flat parseArgs options table from the registry: every flag of
+ * every command plus the globals.
+ *
+ * **Not used to parse the command line.** `src/index.ts` parses in two
+ * stages (`src/framework/argv-parser.ts`, #373), each against the flag table
+ * of the command actually being run, so a flag name never has to have one
+ * type for the whole CLI. This flat view remains as a registry-wide summary
+ * (used by the structural tests that assert every registered flag is
+ * representable).
  *
  * When the same flag name appears with different types across commands
  * (e.g. `--variables` is boolean for `get pi` but string for `create pi`),

@@ -102,6 +102,10 @@ export const commands = {
 };
 ```
 
+### Where flags go on the command line
+
+c8ctl parses the command line in two stages. Stage 1 reads only c8ctl's **global** flags from the front of the line and stops at the first positional — the command name. Stage 2 parses everything after the command name against `global flags ∪ the command's own flags`. So a plugin flag must follow the command name (`c8ctl my-command --label x`); `c8ctl --label x my-command` is not recognised. Global flags are accepted on either side of the command name. A plugin flag may reuse the name of a built-in verb's flag (such as `--limit`); only collisions with global flags are blocked.
+
 ### Flag Definition Structure
 
 Each flag can have the following properties:

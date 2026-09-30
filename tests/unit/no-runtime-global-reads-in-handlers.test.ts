@@ -92,4 +92,30 @@ describe("architectural guard: ctx, not the global runtime, carries per-invocati
 				`parameter (non-handler framework entry points) instead.`,
 		);
 	});
+
+	// Parsing is the composition root's job (two-stage parser, #373): stage 2
+	// parses every command's flags against that command's own table, so a
+	// handler never has a reason to recover flags from raw argv. The
+	// `process.argv` re-reads that used to live in `list pi` / `get pi` were
+	// workarounds for the old single flat option table.
+	test("no command/framework file reads `process.argv`", () => {
+		const violations: { file: string; line: number; text: string }[] = [];
+		for (const abs of files) {
+			for (const read of findRuntimeGlobalReads(abs, ["argv"], "process")) {
+				violations.push({
+					file: toRelative(abs),
+					line: read.line,
+					text: read.text,
+				});
+			}
+		}
+		assert.strictEqual(
+			violations.length,
+			0,
+			`Command and framework files must not re-read process.argv; declare ` +
+				`the flag in COMMAND_REGISTRY and read it from \`flags\` / \`ctx\`. ` +
+				`Found ${violations.length}:\n` +
+				violations.map((v) => `  - ${v.file}:${v.line} — ${v.text}`).join("\n"),
+		);
+	});
 });
