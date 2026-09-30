@@ -221,7 +221,7 @@ Commands declared as bare functions continue to work unchanged:
 
 ### A bare-function handler receives only positionals
 
-**A bare-function command (`'my-command': async (args) => { ... }`) is handed only the parsed positional arguments that follow the command name. It never sees any flag.** The host parses the command line itself; every flag the command did not declare is consumed and discarded before the handler runs — c8ctl's global flags (`--profile`, `--json`, `--yes`, ...) take effect in the host, and unknown flags such as `--purge` or `--stdin` are silently dropped (the handler cannot even tell they were typed). A handler that checks `args.includes('--purge')` will never see it true.
+**A bare-function command (`'my-command': async (args) => { ... }`) is handed only the parsed positional arguments that follow the command name. It never sees any flag.** The host parses the command line itself; every flag the command did not declare is consumed and discarded before the handler runs — c8ctl's global flags (`--profile`, `--json`, `--yes`, ...) take effect in the host, and unknown flags such as `--purge` or `--stdin` are dropped (the handler cannot even tell they were typed; c8ctl prints an `Unknown flag ... for '<command>'` warning so the user notices). A handler that checks `args.includes('--purge')` will never see it true.
 
 A command that needs flags must opt into one of the two supported forms:
 

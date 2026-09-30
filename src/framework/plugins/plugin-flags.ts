@@ -11,8 +11,8 @@
  */
 
 import {
+	type ArgToken,
 	globalOptions,
-	type ParsedValues,
 	type ParseOptions,
 } from "../argv-parser.ts";
 import type { FlagDef } from "../command-registry.ts";
@@ -90,18 +90,23 @@ export function typedReservedFlags({
 	return [...typed];
 }
 
-/** Display form of a parsed flag name: `--long` or `-s`. */
-export function displayFlag(name: string): string {
-	return name.length === 1 ? `-${name}` : `--${name}`;
-}
-
-/** Parsed flag names that are not in `options` — the flags the user typed that nothing declares. */
-export function undeclaredFlagNames({
-	values,
+/**
+ * The flags the user typed that nothing declares, spelled exactly as typed
+ * (`--x` or `-x` — the parsed name alone cannot tell them apart), in first-seen
+ * order without repeats. Tokens after a `--` terminator are positionals and
+ * never appear here.
+ */
+export function undeclaredFlags({
+	tokens,
 	options,
 }: {
-	values: ParsedValues;
+	tokens: readonly ArgToken[];
 	options: ParseOptions;
 }): string[] {
-	return Object.keys(values).filter((name) => !Object.hasOwn(options, name));
+	const seen = new Set<string>();
+	for (const token of tokens) {
+		if (token.kind !== "option" || Object.hasOwn(options, token.name)) continue;
+		seen.add(token.rawName);
+	}
+	return [...seen];
 }

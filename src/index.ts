@@ -26,7 +26,6 @@ import {
 	createDryRun,
 	describeMisplacedFlags,
 	detectUnknownFlags,
-	displayFlag,
 	executePluginCommand,
 	type FlagDef,
 	getCommandDef,
@@ -51,7 +50,7 @@ import {
 	stripBlockedFlagTokens,
 	stripGlobalFlags,
 	typedReservedFlags,
-	undeclaredFlagNames,
+	undeclaredFlags,
 	validateFlags,
 } from "./framework/index.ts";
 import { npm } from "./utils/index.ts";
@@ -111,7 +110,7 @@ function warnUndeclaredPluginFlags({
 	declared: string[];
 }): void {
 	if (names.length === 0) return;
-	const list = names.map(displayFlag).join(", ");
+	const list = names.join(", ");
 	const declaredText =
 		declared.length > 0
 			? `declared flags: ${declared.map((f) => `--${f}`).join(", ")}`
@@ -207,6 +206,24 @@ async function main() {
 	// applied again below once stage 2 has parsed them.
 	applyGlobalFlags(stage1.globals);
 
+	// The same three boolean globals may also follow the verb
+	// (`c8ctl list pi --json`), and plugin loading renders diagnostics in the
+	// output mode, so honour them now too. Only booleans: a global flag is
+	// never a plugin flag, and they cannot be mistaken for a flag's value.
+	// String globals (`--fields`, `--profile`) wait for the command's own
+	// flag table, below.
+	{
+		const {
+			json,
+			verbose,
+			"dry-run": dryRun,
+		} = parseFlags({
+			args: stage1.rest,
+			options: globalOptions(),
+		}).values;
+		applyGlobalFlags({ json, verbose, "dry-run": dryRun });
+	}
+
 	// Inject dependencies into the runtime (breaks circular imports)
 	// `npm` is the cross-platform runner from utils/. Assigning it here is also
 	// the compile-time check that it still satisfies the `NpmRunner` contract
@@ -260,10 +277,28 @@ async function main() {
 	// after the verb (lenient variant).
 	const parsed = parseVerbArgs({ rawVerb, rest: stage1.rest });
 	const { resource, args } = parsed;
-	const values: ParsedValues = { ...stage1.globals, ...parsed.values };
+	// A plugin verb that declares flags owns its own flag table: parse the
+	// tail against it so a string global (`--profile`) cannot swallow the
+	// plugin's flag that follows it (`--profile --flag1 x`).
+	let postVerbValues = parsed.values;
+	const declaringPlugin = Object.hasOwn(getPluginCommands(), parsed.verb)
+		? getPluginCommands()[parsed.verb]
+		: undefined;
+	if (
+		!getCommandDef(parsed.verb) &&
+		declaringPlugin !== undefined &&
+		typeof declaringPlugin !== "function" &&
+		!isPassthroughPluginCommand(parsed.verb)
+	) {
+		postVerbValues = parseFlags({
+			args: stage1.rest,
+			options: analyzePluginFlags(declaringPlugin.flags).options,
+		}).values;
+	}
+	const values: ParsedValues = { ...stage1.globals, ...postVerbValues };
 	// `--version` before the verb was handled above; only the post-verb
 	// (string) meaning reaches handlers.
-	values.version = parsed.values.version;
+	values.version = postVerbValues.version;
 	applyGlobalFlags(values);
 
 	// Initialize logger with current output mode from c8ctl runtime
@@ -462,8 +497,8 @@ async function main() {
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlagNames({
-					values: pluginParsed.values,
+				names: undeclaredFlags({
+					tokens: pluginParsed.tokens,
 					options: mergedOptions,
 				}),
 				declared: Object.keys(analysis.usable),
@@ -507,8 +542,8 @@ async function main() {
 			warnUndeclaredPluginFlags({
 				logger,
 				verb,
-				names: undeclaredFlagNames({
-					values: parsed.values,
+				names: undeclaredFlags({
+					tokens: parsed.tokens,
 					options: globalOptions(),
 				}),
 				declared: [],

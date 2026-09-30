@@ -57,7 +57,9 @@ export type ParsedValues = Record<
 >;
 
 /** A token as reported by `parseArgs({ tokens: true })`. */
-type ArgToken = NonNullable<ReturnType<typeof parseArgs>["tokens"]>[number];
+export type ArgToken = NonNullable<
+	ReturnType<typeof parseArgs>["tokens"]
+>[number];
 
 type FlagDefs = Record<
 	string,
@@ -334,6 +336,8 @@ export interface VerbArgs {
 	args: string[];
 	/** Post-verb flag values (globals included). */
 	values: ParsedValues;
+	/** The parse tokens of the post-verb argv (spelling as typed). */
+	tokens: ArgToken[];
 }
 
 /**
@@ -358,7 +362,7 @@ export function parseVerbArgs({
 	}).positionals;
 	const verb = resolveVerbAlias(rawVerb, located);
 	const normalizedResource = located ? resolveAlias(located) : "";
-	const { values, positionals } = parseFlags({
+	const { values, positionals, tokens } = parseFlags({
 		args: rest,
 		options: stage2Options({ verb, resource: normalizedResource }),
 	});
@@ -369,6 +373,7 @@ export function parseVerbArgs({
 		normalizedResource: resource ? resolveAlias(resource) : "",
 		args,
 		values,
+		tokens,
 	};
 }
 
@@ -472,6 +477,11 @@ export function stripBlockedFlagTokens({
 	let i = 0;
 	while (i < argv.length) {
 		const arg = argv[i];
+		if (arg === "--") {
+			// Terminator: it and everything after it are literal positionals.
+			out.push(...argv.slice(i));
+			break;
+		}
 		if (arg.startsWith("--")) {
 			const eqIdx = arg.indexOf("=");
 			const name = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);

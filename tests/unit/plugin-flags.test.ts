@@ -539,3 +539,49 @@ describe("Plugin Flags CLI subprocess — plugin flags before the verb are rejec
 		assert.strictEqual(result.status, 0, result.stderr);
 	});
 });
+
+describe("Plugin Flags CLI subprocess — `--` terminator and flag spelling", () => {
+	test("tokens after `--` are literal positionals, even a reserved flag name", async () => {
+		const result = await c8plugin(
+			"test-collision",
+			"--",
+			"--verbose",
+			"literal",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(JSON.parse(result.stdout).args, [
+			"--verbose",
+			"literal",
+		]);
+		assert.ok(!result.stderr.includes("reserved"), result.stderr);
+	});
+
+	test("a reserved flag before `--` is still stripped, the ones after it are kept", async () => {
+		const result = await c8plugin(
+			"test-collision",
+			"--verbose",
+			"--",
+			"--verbose",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(JSON.parse(result.stdout).args, ["--verbose"]);
+	});
+
+	test("an undeclared long flag is reported as --x, not -x", async () => {
+		const result = await c8plugin("test-flags", "--x");
+		assert.ok(result.stderr.includes("Unknown flag --x for"), result.stderr);
+		assert.ok(!/Unknown flag -x\b/.test(result.stderr), result.stderr);
+	});
+
+	test("an undeclared short flag is reported as -x, and a repeat is listed once", async () => {
+		const short = await c8plugin("test-flags", "-x");
+		assert.ok(short.stderr.includes("Unknown flag -x for"), short.stderr);
+		const both = await c8plugin("test-flags", "--x", "-x", "--x=1");
+		assert.ok(both.stderr.includes("Unknown flags --x, -x for"), both.stderr);
+	});
+
+	test("an undeclared flag after `--` is not reported", async () => {
+		const result = await c8plugin("test-flags", "--", "--nope");
+		assert.ok(!result.stderr.includes("Unknown flag"), result.stderr);
+	});
+});

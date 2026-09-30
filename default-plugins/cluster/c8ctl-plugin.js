@@ -1805,7 +1805,14 @@ export async function stopC8Run(config, debug = false) {
 export function withForwardedYes(tail, ctx) {
   const verbIndex = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
   if (ctx?.yes !== true || tail[verbIndex] !== 'delete') return tail;
-  return tail.includes('--yes') || tail.includes('-y') ? tail : [...tail, '--yes'];
+  // Everything after a `--` terminator is literal for c8run, so the flag goes
+  // immediately before it, and a `--yes` that only appears after it does not count.
+  const terminator = tail.indexOf('--');
+  const options = terminator < 0 ? tail : tail.slice(0, terminator);
+  if (options.includes('--yes') || options.includes('-y')) return tail;
+  return terminator < 0
+    ? [...tail, '--yes']
+    : [...tail.slice(0, terminator), '--yes', ...tail.slice(terminator)];
 }
 
 /**

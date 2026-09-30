@@ -3604,6 +3604,20 @@ describe("Cluster Plugin – withForwardedYes", () => {
 		assert.strictEqual(plugin.withForwardedYes(b, { yes: true }), b);
 	});
 
+	test("inserts --yes immediately before a forwarded `--` terminator", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "K", "--", "literal"], { yes: true }),
+			["delete", "K", "--yes", "--", "literal"],
+		);
+	});
+
+	test("a --yes / -y that only appears after `--` does not count as already present", () => {
+		assert.deepStrictEqual(
+			plugin.withForwardedYes(["delete", "K", "--", "--yes"], { yes: true }),
+			["delete", "K", "--yes", "--", "--yes"],
+		);
+	});
+
 	test("does not mutate the tail it receives", () => {
 		const tail = ["delete", "K"];
 		plugin.withForwardedYes(tail, { yes: true });
