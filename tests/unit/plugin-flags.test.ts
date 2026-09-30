@@ -460,6 +460,11 @@ describe("Plugin Flags CLI subprocess — collision warnings only on use", () =>
 
 		const typed = await c8plugin("test-short-collision", "-y", "a");
 		assert.ok(typed.stderr.includes("-y is reserved by c8ctl"), typed.stderr);
+		assert.deepStrictEqual(
+			JSON.parse(typed.stdout).args,
+			[],
+			"the value meant for the reserved alias must not leak into positionals",
+		);
 	});
 });
 

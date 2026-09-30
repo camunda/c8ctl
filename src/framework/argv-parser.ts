@@ -460,18 +460,22 @@ export function stripGlobalFlags(argv: readonly string[]): string[] {
  * Either way the value is meaningless to both sides (plugin's flag is
  * blocked; global is consumed by the host elsewhere) and must not leak
  * into the plugin's positional args. Strip the following non-flag token
- * if either side typed the flag as string.
+ * if either side typed the flag as string. A reserved short alias
+ * (`reservedShorts`, e.g. a plugin's `-y` that is also c8ctl's `-y`) is
+ * stripped the same way.
  */
 export function stripBlockedFlagTokens({
 	argv,
 	blocked,
+	reservedShorts = [],
 	pluginFlagDefs,
 	globalFlagDefs,
 }: {
 	argv: readonly string[];
 	blocked: ReadonlySet<string>;
+	reservedShorts?: readonly { name: string; short: string }[];
 	pluginFlagDefs: Record<string, { type: string }>;
-	globalFlagDefs: Record<string, { type: string }>;
+	globalFlagDefs: Record<string, { type: string; short?: string }>;
 }): string[] {
 	const out: string[] = [];
 	let i = 0;
@@ -500,6 +504,26 @@ export function stripBlockedFlagTokens({
 				i++;
 				continue;
 			}
+		}
+		const shortOwner =
+			arg.length === 2 && arg[0] === "-" && arg[1] !== "-"
+				? reservedShorts.find((r) => r.short === arg[1])?.name
+				: undefined;
+		if (shortOwner !== undefined) {
+			const eitherIsString =
+				pluginFlagDefs[shortOwner]?.type === "string" ||
+				Object.values(globalFlagDefs).some(
+					(g) => g.short === arg[1] && g.type === "string",
+				);
+			if (
+				eitherIsString &&
+				i + 1 < argv.length &&
+				!argv[i + 1].startsWith("-")
+			) {
+				i++;
+			}
+			i++;
+			continue;
 		}
 		out.push(arg);
 		i++;

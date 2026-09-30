@@ -488,6 +488,7 @@ async function main() {
 			const filteredArgv = stripBlockedFlagTokens({
 				argv: stage1.rest,
 				blocked: blockedFlags,
+				reservedShorts: analysis.reservedShorts,
 				pluginFlagDefs: cmdFlagDefs,
 				globalFlagDefs: builtinOptions,
 			});
