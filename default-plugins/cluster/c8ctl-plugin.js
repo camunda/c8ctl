@@ -28,7 +28,11 @@ import { fileURLToPath } from 'node:url';
 // Version aliases – dynamic discovery with package.json fallback
 // ---------------------------------------------------------------------------
 
-const DOWNLOAD_BASE_URL = 'https://downloads.camunda.cloud/release/camunda/c8run/';
+// C8CTL_C8RUN_DOWNLOAD_URL overrides the download center base URL (e.g. for
+// mirrors or tests that must not depend on network access).
+const DOWNLOAD_BASE_URL = (
+  process.env.C8CTL_C8RUN_DOWNLOAD_URL || 'https://downloads.camunda.cloud/release/camunda/c8run/'
+).replace(/\/*$/, '/');
 
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
@@ -484,7 +488,7 @@ function formatLocalVersionsHint(cacheDir) {
 
 function getDownloadUrl(version) {
   const platformInfo = getPlatformIdentifier();
-  return `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  return `${DOWNLOAD_BASE_URL}${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
 }
 
 async function downloadC8Run(config) {
@@ -508,7 +512,8 @@ async function downloadC8Run(config) {
     throw new Error(
       `Cannot reach the Camunda Download Center.\n` +
         `URL: ${downloadUrl}\n` +
-        `Error: ${error.message}\n\n` +
+        `Error: ${error.message}\n` +
+        `Please check your network connection and proxy settings, then try again.\n\n` +
         formatLocalVersionsHint(cacheDir),
     );
   });
