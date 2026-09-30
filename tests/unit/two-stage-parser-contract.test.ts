@@ -694,6 +694,11 @@ describe("two-stage parser: command-specific flags before the command are reject
 		assert.ok(out.includes("-z"), out);
 	});
 
+	test("a one-letter long flag is shown as typed", async () => {
+		const out = await rejected("--z", "list", "pi");
+		assert.ok(out.includes("Flag --z is not"), out);
+	});
+
 	test("several misplaced flags are all named", async () => {
 		const out = await rejected("--all", "--fullValue", "list", "pi");
 		assert.ok(out.includes("--all") && out.includes("--fullValue"), out);

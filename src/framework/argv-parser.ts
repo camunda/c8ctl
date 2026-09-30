@@ -628,7 +628,7 @@ export function describeMisplacedFlags({
 	pluginFlags: Record<string, TypedFlagDefs>;
 }): string {
 	const names = misplaced.map((m) =>
-		m.name.length === 1 ? `-${m.name}` : `--${m.name}`,
+		m.token.startsWith("--") ? `--${m.name}` : `-${m.name}`,
 	);
 	const list = names.join(", ");
 	const head =
