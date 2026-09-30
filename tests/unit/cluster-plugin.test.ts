@@ -35,6 +35,14 @@ const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
  */
 function liveSelfRecord(version = "8.9", pid: number = process.pid) {
 	const sig = plugin.processStartSignature(pid);
+	// Fail loudly rather than write a signature-less record that the plugin
+	// would reject on a fingerprinting platform — otherwise a slow signature
+	// lookup surfaces as a confusing "stopped" assertion further down.
+	if (!sig && plugin.platformSupportsProcessSignature()) {
+		throw new Error(
+			`liveSelfRecord: no start signature for pid ${pid} on ${process.platform}; the signature lookup failed or timed out`,
+		);
+	}
 	return {
 		version,
 		pids: [pid],

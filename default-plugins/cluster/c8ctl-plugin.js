@@ -1174,7 +1174,10 @@ export function processStartSignature(pid) {
           `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
             `if ($p) { $p.CreationDate.ToString('o') }`,
         ],
-        { encoding: 'utf-8', timeout: 5000 },
+        // PowerShell start-up plus a CIM query can exceed 5 s on a loaded
+        // machine; a timeout yields no signature, which makes a live orphan
+        // look stopped, so allow a generous budget.
+        { encoding: 'utf-8', timeout: 10000 },
       ).trim();
       return out ? `win:${out}` : null;
     }
