@@ -939,6 +939,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 				helpDescription: pluginInfo.helpDescription,
 				passthroughHint: pluginInfo.passthroughHint,
 				flagsHint: pluginInfo.flagsHint ?? [],
+				subcommands: pluginInfo.subcommands ?? [],
 				examples: pluginInfo.examples ?? [],
 				globalFlags: allHelp.globalFlags,
 				searchFlags: allHelp.searchFlags,
@@ -960,6 +961,13 @@ export async function showCommandHelp(command: string): Promise<void> {
 		lines.push(
 			`  ${pluginInfo.passthroughHint ?? ""}\n  c8ctl forwards args verbatim after stripping its global flags.`,
 		);
+		if (pluginInfo.subcommands && pluginInfo.subcommands.length > 0) {
+			lines.push("");
+			lines.push("Subcommands:");
+			for (const sub of pluginInfo.subcommands) {
+				lines.push(`  ${sub.name.padEnd(16)}${sub.description}`);
+			}
+		}
 		if (pluginInfo.flagsHint && pluginInfo.flagsHint.length > 0) {
 			lines.push("");
 			lines.push(

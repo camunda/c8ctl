@@ -6,7 +6,6 @@
 
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
 import { COMMAND_DISPATCH } from "./command-dispatch.ts";
 import {
 	c8ctl,
@@ -21,29 +20,37 @@ import {
 	startUpdateCheck,
 } from "./core/index.ts";
 import {
+	analyzePluginFlags,
 	type CommandContext,
 	commandRegistryEntries,
 	createDryRun,
-	deriveParseArgsOptions,
+	describeMisplacedFlags,
 	detectUnknownFlags,
 	executePluginCommand,
-	GLOBAL_FLAGS,
+	type FlagDef,
 	getCommandDef,
 	getPluginCommands,
 	getPluginVersionForCommand,
+	globalOptions,
 	isHostIncompatiblePluginCommand,
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
+	type ParsedValues,
 	type PluginCtx,
+	parseFlags,
+	parseVerbArgs,
 	confirm as promptConfirm,
 	select as promptSelect,
 	refreshCompletionsIfStale,
-	resolveAlias,
-	resolveVerbAlias,
 	showCommandHelp,
 	showHelp,
 	showVerbResources,
 	showVersion,
+	splitGlobals,
+	stripBlockedFlagTokens,
+	stripGlobalFlags,
+	typedReservedFlags,
+	undeclaredFlags,
 	validateFlags,
 } from "./framework/index.ts";
 import { npm } from "./utils/index.ts";
@@ -74,27 +81,6 @@ function parseVersionFlag(values: Record<string, unknown>): number | undefined {
 }
 
 /**
- * Parse command line arguments.
- * Options are derived from the command registry — no manual duplication.
- */
-function parseCliArgs() {
-	try {
-		const { values, positionals } = parseArgs({
-			args: process.argv.slice(2),
-			options: deriveParseArgsOptions(),
-			allowPositionals: true,
-			strict: false,
-		});
-
-		return { values, positionals };
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.error(`Error parsing arguments: ${message}`);
-		process.exit(1);
-	}
-}
-
-/**
  * Resolve process definition ID from --id, --processDefinitionId, or --bpmnProcessId flag
  */
 export function resolveProcessDefinitionId(
@@ -108,191 +94,31 @@ export function resolveProcessDefinitionId(
 }
 
 /**
- * Return the raw argv tokens that follow the verb position, where the
- * verb position is found by walking from the start and skipping leading
- * GLOBAL_FLAGS only (consuming the value of string-typed global flags).
- * The first non-flag token — or any unknown `--*`/`-*` token — is
- * treated as the verb candidate.
- *
- * This avoids `argv.indexOf(verb)`, which is unsafe because the verb
- * string may also appear as the value of a global string flag (e.g.
- * `--profile <verb>`). Returns `[]` if no verb token is found at or
- * after the scan position.
+ * Warn about flags a user typed on a plugin verb that the plugin never
+ * declared. The host drops them before the handler runs, so without this they
+ * would vanish silently. A warning, not an error (matching built-in verbs).
  */
-export function sliceArgvAfterVerb(argv: string[], verb: string): string[] {
-	const stringGlobalNames = new Set<string>();
-	const stringGlobalShorts = new Set<string>();
-	const booleanGlobalNames = new Set<string>();
-	const booleanGlobalShorts = new Set<string>();
-	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
-		const short = "short" in def ? def.short : undefined;
-		if (def.type === "string") {
-			stringGlobalNames.add(name);
-			if (short) stringGlobalShorts.add(short);
-		} else {
-			booleanGlobalNames.add(name);
-			if (short) booleanGlobalShorts.add(short);
-		}
-	}
-
-	let i = 0;
-	while (i < argv.length) {
-		const tok = argv[i];
-		if (tok === "--") {
-			// GNU `--` convention: end of options. The next token is the
-			// verb candidate. Skip the separator and continue scanning so
-			// `c8ctl -- <verb> <args...>` dispatches correctly with the
-			// full post-verb argv (rather than bailing and forwarding []).
-			i++;
-			continue;
-		}
-		if (tok.startsWith("--")) {
-			const eq = tok.indexOf("=");
-			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
-			if (booleanGlobalNames.has(name)) {
-				i++;
-				continue;
-			}
-			if (stringGlobalNames.has(name)) {
-				i += eq < 0 ? 2 : 1;
-				continue;
-			}
-			// Unknown long flag — do not silently consume a value. Fall through
-			// to the verb match below (and bail if it doesn't match).
-		} else if (tok.startsWith("-") && tok.length === 2) {
-			const short = tok.slice(1);
-			if (booleanGlobalShorts.has(short)) {
-				i++;
-				continue;
-			}
-			if (stringGlobalShorts.has(short)) {
-				i += 2;
-				continue;
-			}
-		}
-		// First token that is not a leading GLOBAL_FLAG must be the verb.
-		if (tok === verb) return argv.slice(i + 1);
-		return [];
-	}
-	return [];
-}
-
-/**
- * Strip GLOBAL_FLAGS (and the value of any string-typed global flag) from
- * a raw argv slice before forwarding to a passthrough plugin handler
- * (#366). GLOBAL_FLAGS already affect the c8ctl runtime via their
- * regular handling in `main()`; the plugin must not see them again.
- *
- * Conservative behaviour: an isolated `--` terminator is preserved and
- * everything after it is forwarded verbatim, matching POSIX convention.
- */
-export function stripGlobalFlags(argv: string[]): string[] {
-	const booleanFlags = new Set<string>();
-	const stringFlags = new Set<string>();
-	const booleanShorts = new Set<string>();
-	const stringShorts = new Set<string>();
-
-	for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
-		const short = "short" in def ? def.short : undefined;
-		if (def.type === "boolean") {
-			booleanFlags.add(name);
-			if (short) booleanShorts.add(short);
-		} else {
-			stringFlags.add(name);
-			if (short) stringShorts.add(short);
-		}
-	}
-
-	const out: string[] = [];
-	let i = 0;
-	let sawTerminator = false;
-	while (i < argv.length) {
-		const tok = argv[i];
-		if (sawTerminator) {
-			out.push(tok);
-			i++;
-			continue;
-		}
-		if (tok === "--") {
-			sawTerminator = true;
-			out.push(tok);
-			i++;
-			continue;
-		}
-		if (tok.startsWith("--")) {
-			const eq = tok.indexOf("=");
-			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
-			if (booleanFlags.has(name) || stringFlags.has(name)) {
-				if (eq < 0 && stringFlags.has(name)) i++; // consume value
-				i++;
-				continue;
-			}
-		} else if (tok.startsWith("-") && tok.length === 2) {
-			const short = tok.slice(1);
-			if (booleanShorts.has(short)) {
-				i++;
-				continue;
-			}
-			if (stringShorts.has(short)) {
-				i += 2; // consume short flag and its value
-				continue;
-			}
-		}
-		out.push(tok);
-		i++;
-	}
-	return out;
-}
-
-/**
- * Remove tokens for blocked plugin flags from an argv slice so they cannot
- * shift positionals during the plugin-flag re-parse.
- *
- * Post-#373, "blocked" exclusively means "collides with a GLOBAL flag".
- * The user may have supplied a value token (`--name value`) intending
- * either:
- *   - the GLOBAL's interpretation (global type === "string"), or
- *   - the PLUGIN's interpretation (plugin type === "string", e.g. global
- *     is boolean but the plugin declared the same name as string).
- *
- * Either way the value is meaningless to both sides (plugin's flag is
- * blocked; global is consumed by the host elsewhere) and must not leak
- * into the plugin's positional args. Strip the following non-flag token
- * if either side typed the flag as string.
- */
-function stripBlockedFlagTokens(
-	argv: string[],
-	blocked: Set<string>,
-	pluginFlagDefs: Record<string, { type: string }>,
-	globalFlagDefs: Record<string, { type: string }>,
-): string[] {
-	const out: string[] = [];
-	let i = 0;
-	while (i < argv.length) {
-		const arg = argv[i];
-		if (arg.startsWith("--")) {
-			const eqIdx = arg.indexOf("=");
-			const name = eqIdx >= 0 ? arg.slice(2, eqIdx) : arg.slice(2);
-			if (blocked.has(name)) {
-				const eitherIsString =
-					pluginFlagDefs[name]?.type === "string" ||
-					globalFlagDefs[name]?.type === "string";
-				if (
-					eqIdx < 0 &&
-					eitherIsString &&
-					i + 1 < argv.length &&
-					!argv[i + 1].startsWith("-")
-				) {
-					i++;
-				}
-				i++;
-				continue;
-			}
-		}
-		out.push(arg);
-		i++;
-	}
-	return out;
+function warnUndeclaredPluginFlags({
+	logger,
+	verb,
+	names,
+	declared,
+}: {
+	logger: ReturnType<typeof getLogger>;
+	verb: string;
+	names: string[];
+	declared: string[];
+}): void {
+	if (names.length === 0) return;
+	const list = names.join(", ");
+	const declaredText =
+		declared.length > 0
+			? `declared flags: ${declared.map((f) => `--${f}`).join(", ")}`
+			: "this command declares no flags";
+	logger.warn(
+		`Unknown flag${names.length === 1 ? "" : "s"} ${list} for '${verb}'; ${declaredText}. ` +
+			`${names.length === 1 ? "It" : "They"} will be ignored.`,
+	);
 }
 
 /**
@@ -320,17 +146,12 @@ const VERB_REQUIRES_RESOURCE = new Set(
 );
 
 /**
- * Main CLI handler
+ * Apply GLOBAL_FLAGS to the process-wide runtime: per-invocation output mode,
+ * `--fields`, `--dry-run` and `--verbose`. Idempotent — `main()`
+ * calls it once for the flags before the verb and again with the merged set
+ * once the flags after the verb have been parsed.
  */
-async function main() {
-	// Load session state from disk at startup
-	loadSessionState();
-
-	// Fire-and-forget: check for CLI updates in the background
-	startUpdateCheck(c8ctl.version);
-
-	const { values, positionals } = parseCliArgs();
-
+function applyGlobalFlags(values: ParsedValues): void {
 	// Apply per-invocation output mode override (#356).
 	// Precedence: --json flag > C8CTL_OUTPUT_MODE env var > persisted session.
 	// Setting `c8ctl.outputMode` directly is in-memory only; saveSessionState
@@ -345,24 +166,6 @@ async function main() {
 	}
 	// Any other C8CTL_OUTPUT_MODE value (including unset, empty, or
 	// "yaml"/typo) falls through to the persisted mode loaded above.
-
-	// Initialize logger with current output mode from c8ctl runtime
-	const logger = getLogger(c8ctl.outputMode);
-
-	// Resolve sort order from --asc / --desc flags (default: asc)
-	const sortOrder: SortOrder = values.desc ? "desc" : "asc";
-	if (values.asc && values.desc) {
-		logger.error("Cannot specify both --asc and --desc. Use one or the other.");
-		process.exit(1);
-	}
-
-	// Resolve --limit flag (max items to fetch)
-	const limitStr = str(values.limit);
-	const limit = limitStr ? parseInt(limitStr, 10) : undefined;
-	if (limit !== undefined && (Number.isNaN(limit) || limit < 1)) {
-		logger.error("--limit must be a positive integer.");
-		process.exit(1);
-	}
 
 	// Resolve --fields flag (agent feature: filter output keys)
 	if (values.fields && typeof values.fields === "string") {
@@ -381,6 +184,45 @@ async function main() {
 	if (values.verbose) {
 		c8ctl.verbose = true;
 	}
+}
+
+/**
+ * Main CLI handler
+ */
+async function main() {
+	// Load session state from disk at startup
+	loadSessionState();
+
+	// Fire-and-forget: check for CLI updates in the background
+	startUpdateCheck(c8ctl.version);
+
+	// Stage 1: parse GLOBAL_FLAGS from the front of argv and stop at
+	// the verb. Everything after the verb stays raw for stage 2, which parses
+	// it against that command's own flag table.
+	const stage1 = splitGlobals(process.argv.slice(2));
+
+	// Global flags given before the verb take effect now so plugin loading
+	// (which logs) sees the right output mode; flags after the verb are
+	// applied again below once stage 2 has parsed them.
+	applyGlobalFlags(stage1.globals);
+
+	// The same three boolean globals may also follow the verb
+	// (`c8ctl list pi --json`), and plugin loading renders diagnostics in the
+	// output mode, so honour them now too. Only booleans: a global flag is
+	// never a plugin flag, and they cannot be mistaken for a flag's value.
+	// String globals (`--fields`, `--profile`) wait for the command's own
+	// flag table, below.
+	{
+		const {
+			json,
+			verbose,
+			"dry-run": dryRun,
+		} = parseFlags({
+			args: stage1.rest,
+			options: globalOptions(),
+		}).values;
+		applyGlobalFlags({ json, verbose, "dry-run": dryRun });
+	}
 
 	// Inject dependencies into the runtime (breaks circular imports)
 	// `npm` is the cross-platform runner from utils/. Assigning it here is also
@@ -397,20 +239,32 @@ async function main() {
 	// Load installed plugins
 	await loadInstalledPlugins();
 
-	// Auto-refresh installed completions if CLI version changed
-	refreshCompletionsIfStale(c8ctl.dryRun ?? false);
-
-	// Extract command and resource
-	const [rawVerb, resource, ...args] = positionals;
-
-	// Handle global --version flag (only when no verb/command is provided)
-	if (values.version && !rawVerb) {
-		showVersion();
-		return;
+	// Only global flags may precede the command. A command-specific flag
+	// there would also make stage 1 mistake the flag's value for the verb
+	// ("Unknown command: 5"), so name the real problem instead.
+	if (stage1.misplaced.length > 0) {
+		const pluginFlags: Record<string, Record<string, FlagDef>> = {};
+		for (const [name, cmd] of Object.entries(getPluginCommands())) {
+			if (typeof cmd !== "function") pluginFlags[name] = cmd.flags;
+		}
+		getLogger(c8ctl.outputMode).error(
+			describeMisplacedFlags({
+				argv: process.argv.slice(2),
+				misplaced: stage1.misplaced,
+				pluginFlags,
+			}),
+		);
+		process.exit(1);
 	}
 
-	if (values.help && positionals.length === 0) {
-		showHelp();
+	const rawVerb = stage1.verb;
+
+	// A global --version before the verb is the CLI version. After the verb
+	// it is command-scoped (definition-version filter on built-ins, plugin
+	// version on plugin verbs) and is parsed by stage 2 below.
+	// Any value counts: lenient parsing yields a string for `--version=3`.
+	if (stage1.globals.version !== undefined) {
+		showVersion();
 		return;
 	}
 
@@ -418,6 +272,41 @@ async function main() {
 		showHelp();
 		return;
 	}
+
+	// Stage 2: parse everything after the verb against
+	// GLOBAL_FLAGS ∪ effectiveFlags(verb, resource). Globals stay accepted
+	// after the verb (lenient variant).
+	const parsed = parseVerbArgs({ rawVerb, rest: stage1.rest });
+	const { resource, args } = parsed;
+	// A plugin verb that declares flags owns its own flag table: parse the
+	// tail against it so a string global (`--profile`) cannot swallow the
+	// plugin's flag that follows it (`--profile --flag1 x`).
+	let postVerbValues = parsed.values;
+	const declaringPlugin = Object.hasOwn(getPluginCommands(), parsed.verb)
+		? getPluginCommands()[parsed.verb]
+		: undefined;
+	if (
+		!getCommandDef(parsed.verb) &&
+		declaringPlugin !== undefined &&
+		typeof declaringPlugin !== "function" &&
+		!isPassthroughPluginCommand(parsed.verb)
+	) {
+		postVerbValues = parseFlags({
+			args: stage1.rest,
+			options: analyzePluginFlags(declaringPlugin.flags).options,
+		}).values;
+	}
+	const values: ParsedValues = { ...stage1.globals, ...postVerbValues };
+	// `--version` before the verb was handled above; only the post-verb
+	// (string) meaning reaches handlers.
+	values.version = postVerbValues.version;
+	applyGlobalFlags(values);
+
+	// Initialize logger with current output mode from c8ctl runtime
+	const logger = getLogger(c8ctl.outputMode);
+
+	// Auto-refresh installed completions if CLI version changed
+	refreshCompletionsIfStale(c8ctl.dryRun ?? false);
 
 	// Handle help command
 	if (
@@ -437,10 +326,30 @@ async function main() {
 
 	// Resolve verb aliases to canonical verb name (e.g. "w" → "watch",
 	// "rm" → "remove" or "unload" depending on the resource argument).
-	// Must happen before --help and dispatch so the dispatch key uses the
-	// canonical verb (not the raw alias) and `c8ctl rm plugin --help`
-	// shows unload help (not remove help).
-	const verb = resolveVerbAlias(rawVerb, resource);
+	// Stage 2 already resolved it so the dispatch key uses the canonical verb
+	// (not the raw alias) and `c8ctl rm plugin --help` shows unload help
+	// (not remove help).
+	const verb = parsed.verb;
+
+	// Sort order and --limit only apply to built-in commands; a plugin verb
+	// owns its own flag namespace.
+	const isPluginVerb =
+		Object.hasOwn(getPluginCommands(), verb) && !getCommandDef(verb);
+
+	// Resolve sort order from --asc / --desc flags (default: asc)
+	const sortOrder: SortOrder = values.desc ? "desc" : "asc";
+	if (!isPluginVerb && values.asc && values.desc) {
+		logger.error("Cannot specify both --asc and --desc. Use one or the other.");
+		process.exit(1);
+	}
+
+	// Resolve --limit flag (max items to fetch)
+	const limitStr = isPluginVerb ? undefined : str(values.limit);
+	const limit = limitStr ? parseInt(limitStr, 10) : undefined;
+	if (limit !== undefined && (Number.isNaN(limit) || limit < 1)) {
+		logger.error("--limit must be a positive integer.");
+		process.exit(1);
+	}
 
 	// `c8ctl <verb> [<resource>] [args] --help` — uniformly route to the help
 	// renderer. Placed AFTER the `help`/`menu` reserved-verb handler and
@@ -456,9 +365,8 @@ async function main() {
 
 	// Check if this is a plugin command — only for verbs not claimed by a built-in.
 	// Placed after help/menu handling so those reserved verbs can never be shadowed.
-	const pluginCommands = getPluginCommands();
-	if (verb && Object.hasOwn(pluginCommands, verb) && !getCommandDef(verb)) {
-		const cmd = pluginCommands[verb];
+	if (isPluginVerb) {
+		const cmd = getPluginCommands()[verb];
 		const cmdFlagDefs = typeof cmd !== "function" ? cmd.flags : undefined;
 
 		// Plugin --version (#377): when a plugin verb is invoked with
@@ -513,14 +421,12 @@ async function main() {
 		// Validation at load time guarantees passthrough commands are the
 		// bare-function form and never carry a `flags` declaration.
 		if (isPassthroughPluginCommand(verb)) {
-			// Locate the verb token by walking process.argv from the start and
-			// skipping leading GLOBAL_FLAGS (consuming string-flag values).
-			// A naive `indexOf(verb)` is unsafe because `verb` may also appear
-			// as the value of a global string flag (e.g. `--profile <verb>`).
-			// Use rawVerb here because process.argv contains the original input.
-			const rawAfterVerb = sliceArgvAfterVerb(process.argv.slice(2), rawVerb);
-			const forwarded = stripGlobalFlags(rawAfterVerb);
-			await executePluginCommand(verb, forwarded);
+			// Stage 1 already located the verb token (skipping leading
+			// GLOBAL_FLAGS, so a verb name that is also the value of a string
+			// global like `--profile <verb>` is never mistaken for the verb);
+			// `rest` is everything after it, verbatim.
+			const forwarded = stripGlobalFlags(stage1.rest);
+			await executePluginCommand(verb, forwarded, undefined, pluginCtx);
 			return;
 		}
 
@@ -537,64 +443,38 @@ async function main() {
 			// host strips them from argv before the plugin parser sees
 			// them, so a plugin's same-named flag would never receive a
 			// value (#364).
-			const builtinOptions: Record<
-				string,
-				{ type: "string" | "boolean"; short?: string; multiple?: boolean }
-			> = {};
-			for (const [name, def] of Object.entries(GLOBAL_FLAGS)) {
-				const short = "short" in def ? def.short : undefined;
-				builtinOptions[name] = {
-					type: def.type,
-					...(short && { short }),
-				};
-			}
-			const builtinShorts = new Set(
-				Object.values(builtinOptions)
-					.map((o) => o.short)
-					.filter((s): s is string => s !== undefined),
-			);
-			// Use a null-prototype object so plugin-supplied flag names like
-			// `__proto__`, `constructor`, or `prototype` cannot pollute the
-			// prototype chain when later assigned (paired with the
-			// `Object.hasOwn` collision check below).
-			const mergedOptions: Record<string, (typeof builtinOptions)[string]> =
-				Object.assign(Object.create(null), builtinOptions);
-			const blockedFlags = new Set<string>();
-			for (const [name, def] of Object.entries(cmdFlagDefs)) {
-				if (Object.hasOwn(builtinOptions, name)) {
-					// A required plugin flag whose name collides with a global
-					// flag is unsatisfiable: the token is always stripped from
-					// argv before the plugin parser sees it, so the required
-					// check downstream would always fire with the misleading
-					// "--<name> is required" message even when the user did
-					// pass a value (#364). Fail fast here with a single
-					// actionable error instead.
-					if (def.required === true) {
-						logger.error(
-							`Plugin flag --${name} is declared required but conflicts with a global c8ctl flag of the same name; ` +
-								`it can never be satisfied. The plugin must rename this flag.`,
-						);
-						process.exit(1);
-					}
-					logger.warn(
-						`Plugin flag --${name} conflicts with a global c8ctl flag and will not be parsed`,
+			const analysis = analyzePluginFlags(cmdFlagDefs);
+			const blockedFlags = new Set(analysis.reservedNames);
+			for (const name of analysis.reservedNames) {
+				// A required plugin flag whose name collides with a global
+				// flag is unsatisfiable: the token is always consumed as the
+				// global before the plugin parser sees it, so the required
+				// check downstream would always fire with the misleading
+				// "--<name> is required" message even when the user did pass
+				// a value. The command can never succeed, so fail fast
+				// with a single actionable error on every invocation.
+				if (cmdFlagDefs[name].required === true) {
+					logger.error(
+						`Plugin flag --${name} is declared required but conflicts with a global c8ctl flag of the same name; ` +
+							`it can never be satisfied. The plugin must rename this flag.`,
 					);
-					blockedFlags.add(name);
-					continue;
+					process.exit(1);
 				}
-				const short =
-					def.short && builtinShorts.has(def.short) ? undefined : def.short;
-				if (def.short && !short) {
-					logger.warn(
-						`Plugin flag --${name} short alias -${def.short} conflicts with a global c8ctl alias and will be ignored`,
-					);
-				}
-				mergedOptions[name] = {
-					type: def.type,
-					...(short && { short }),
-					...(def.multiple && { multiple: true }),
-				};
 			}
+			// A collision only matters to a user who typed the flag, so warn
+			// then — not on every invocation. The plugin author sees every
+			// collision up front in `c8ctl doctor plugin`.
+			for (const flag of typedReservedFlags({
+				argv: stage1.rest,
+				analysis,
+			})) {
+				logger.warn(
+					`${flag} is reserved by c8ctl and is not passed to '${verb}' as a plugin flag. ` +
+						`Its value is available to the plugin through the context argument (ctx) where c8ctl exposes it.`,
+				);
+			}
+			const builtinOptions = globalOptions();
+			const mergedOptions = analysis.options;
 			// Strip blocked-flag tokens from argv before re-parse. Blocked
 			// names exclusively collide with GLOBAL_FLAGS (post-#373), but
 			// `mergedOptions` carries the global type for those names, so
@@ -603,25 +483,28 @@ async function main() {
 			// drift into positionals when the plugin typed the same name
 			// as string. The helper consults both type tables and strips
 			// the following non-flag token when either side is string.
-			const filteredArgv = stripBlockedFlagTokens(
-				process.argv.slice(2),
-				blockedFlags,
-				cmdFlagDefs,
-				builtinOptions,
-			);
-			let pluginParsed: ReturnType<typeof parseArgs>;
-			try {
-				pluginParsed = parseArgs({
-					args: filteredArgv,
+			// Stage 2 for a plugin verb: re-parse the raw tokens after the verb
+			// against `GLOBAL_FLAGS ∪ plugin.flags`.
+			const filteredArgv = stripBlockedFlagTokens({
+				argv: stage1.rest,
+				blocked: blockedFlags,
+				reservedShorts: analysis.reservedShorts,
+				pluginFlagDefs: cmdFlagDefs,
+				globalFlagDefs: builtinOptions,
+			});
+			const pluginParsed = parseFlags({
+				args: filteredArgv,
+				options: mergedOptions,
+			});
+			warnUndeclaredPluginFlags({
+				logger,
+				verb,
+				names: undeclaredFlags({
+					tokens: pluginParsed.tokens,
 					options: mergedOptions,
-					allowPositionals: true,
-					strict: false,
-				});
-			} catch (error: unknown) {
-				const message = error instanceof Error ? error.message : String(error);
-				console.error(`Error parsing arguments: ${message}`);
-				process.exit(1);
-			}
+				}),
+				declared: Object.keys(analysis.usable),
+			});
 			const extractedFlags: Record<string, unknown> = {};
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
 				if (blockedFlags.has(flagName)) continue;
@@ -651,14 +534,22 @@ async function main() {
 					process.exit(1);
 				}
 			}
-			const [_verb, _resource, ...pluginArgs] = pluginParsed.positionals;
 			await executePluginCommand(
 				verb,
-				_resource ? [_resource, ...pluginArgs] : pluginArgs,
+				pluginParsed.positionals,
 				extractedFlags,
 				pluginCtx,
 			);
 		} else {
+			warnUndeclaredPluginFlags({
+				logger,
+				verb,
+				names: undeclaredFlags({
+					tokens: parsed.tokens,
+					options: globalOptions(),
+				}),
+				declared: [],
+			});
 			await executePluginCommand(
 				verb,
 				resource ? [resource, ...args] : args,
@@ -670,7 +561,7 @@ async function main() {
 	}
 
 	// Normalize resource
-	const normalizedResource = resource ? resolveAlias(resource) : "";
+	const normalizedResource = parsed.normalizedResource;
 
 	// Resource validation guard — single chokepoint for all verbs that require a resource.
 	// Derived from COMMAND_REGISTRY.requiresResource.

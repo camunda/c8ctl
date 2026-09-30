@@ -22,6 +22,7 @@ import {
 	getLoadedPluginSummaries,
 	getPluginCollisions,
 	getPluginEntry,
+	getPluginFlagCollisions,
 	getPluginIncompatibilities,
 	getRegisteredPlugins,
 	getVersionFromSource,
@@ -1194,9 +1195,10 @@ export const doctorPluginCommand = defineCommand(
 		const loaded = getLoadedPluginSummaries();
 		const collisions = getPluginCollisions();
 		const incompatible = getPluginIncompatibilities();
+		const flagCollisions = getPluginFlagCollisions();
 
 		if (logger.mode === "json") {
-			logger.json({ loaded, collisions, incompatible });
+			logger.json({ loaded, collisions, incompatible, flagCollisions });
 			return;
 		}
 
@@ -1236,9 +1238,38 @@ export const doctorPluginCommand = defineCommand(
 			);
 		}
 
+		// Author-facing: a plugin flag named like a c8ctl global can never be
+		// delivered to the plugin. Reported here once, on demand, instead of on
+		// every invocation of the plugin command.
+		if (flagCollisions.length > 0) {
+			logger.info("");
+			logger.info(
+				`Plugin flags that collide with c8ctl global flags (${flagCollisions.length}):`,
+			);
+			logger.table(
+				flagCollisions.map((c) => ({
+					Plugin: c.plugin,
+					Command: c.command,
+					Flag:
+						c.kind === "short" ? `--${c.flag} (-${c.short})` : `--${c.flag}`,
+					Effect:
+						c.kind === "short"
+							? `-${c.short} is a c8ctl alias and is ignored; --${c.flag} still works`
+							: "reserved by c8ctl; never passed to the plugin (read it from ctx)",
+				})),
+			);
+			logger.info(
+				"To resolve, in the plugin: rename a reserved flag; change or drop a reserved short alias. A required flag with a reserved name makes the command unusable.",
+			);
+		}
+
 		if (collisions.length === 0) {
 			logger.info("");
-			logger.info("No plugin collisions detected.");
+			logger.info(
+				flagCollisions.length > 0
+					? "No plugin name or command collisions detected."
+					: "No plugin collisions detected.",
+			);
 			return;
 		}
 
