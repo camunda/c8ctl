@@ -537,6 +537,16 @@ describe("two-stage parser: a string flag never swallows a following known flag"
 		assert.strictEqual(payload.method, "POST");
 	});
 
+	test("a string flag given no value reads as `true`, never as the next flag's text", async () => {
+		// `--limit` without a value is ignored (as at the end of the line, where
+		// `parseArgs` has always reported `true`) instead of becoming
+		// `limit: "--dry-run"`, which used to fail validation and drop --dry-run.
+		const mid = await dryRun("--json", "list", "pi", "--limit", "--dry-run");
+		assert.strictEqual(mid.method, "POST");
+		const end = await dryRun("--json", "--dry-run", "list", "pi", "--limit");
+		assert.strictEqual(end.method, "POST");
+	});
+
 	test("a value that merely starts with a dash is still a value", async () => {
 		// `-1` is not a known flag; it is consumed as --limit's value and
 		// rejected by the --limit validator rather than being re-read as a flag.

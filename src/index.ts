@@ -20,10 +20,12 @@ import {
 	startUpdateCheck,
 } from "./core/index.ts";
 import {
+	analyzePluginFlags,
 	type CommandContext,
 	commandRegistryEntries,
 	createDryRun,
 	detectUnknownFlags,
+	displayFlag,
 	executePluginCommand,
 	getCommandDef,
 	getPluginCommands,
@@ -33,7 +35,6 @@ import {
 	isPassthroughPluginCommand,
 	loadInstalledPlugins,
 	type ParsedValues,
-	type ParseOptions,
 	type PluginCtx,
 	parseFlags,
 	parseVerbArgs,
@@ -47,6 +48,8 @@ import {
 	splitGlobals,
 	stripBlockedFlagTokens,
 	stripGlobalFlags,
+	typedReservedFlags,
+	undeclaredFlagNames,
 	validateFlags,
 } from "./framework/index.ts";
 import { npm } from "./utils/index.ts";
@@ -86,6 +89,34 @@ export function resolveProcessDefinitionId(
 		str(values.id) ||
 		str(values.processDefinitionId) ||
 		str(values.bpmnProcessId)
+	);
+}
+
+/**
+ * Warn about flags a user typed on a plugin verb that the plugin never
+ * declared. The host drops them before the handler runs, so without this they
+ * would vanish silently. A warning, not an error (matching built-in verbs).
+ */
+function warnUndeclaredPluginFlags({
+	logger,
+	verb,
+	names,
+	declared,
+}: {
+	logger: ReturnType<typeof getLogger>;
+	verb: string;
+	names: string[];
+	declared: string[];
+}): void {
+	if (names.length === 0) return;
+	const list = names.map(displayFlag).join(", ");
+	const declaredText =
+		declared.length > 0
+			? `declared flags: ${declared.map((f) => `--${f}`).join(", ")}`
+			: "this command declares no flags";
+	logger.warn(
+		`Unknown flag${names.length === 1 ? "" : "s"} ${list} for '${verb}'; ${declaredText}. ` +
+			`${names.length === 1 ? "It" : "They"} will be ignored.`,
 	);
 }
 
@@ -356,53 +387,38 @@ async function main() {
 			// host strips them from argv before the plugin parser sees
 			// them, so a plugin's same-named flag would never receive a
 			// value (#364).
-			const builtinOptions = globalOptions();
-			const builtinShorts = new Set(
-				Object.values(builtinOptions)
-					.map((o) => o.short)
-					.filter((s): s is string => s !== undefined),
-			);
-			// `globalOptions()` is a null-prototype table, so plugin-supplied
-			// flag names like `__proto__`, `constructor`, or `prototype`
-			// cannot pollute the prototype chain when assigned below (paired
-			// with the `Object.hasOwn` collision check).
-			const mergedOptions: ParseOptions = globalOptions();
-			const blockedFlags = new Set<string>();
-			for (const [name, def] of Object.entries(cmdFlagDefs)) {
-				if (Object.hasOwn(builtinOptions, name)) {
-					// A required plugin flag whose name collides with a global
-					// flag is unsatisfiable: the token is always stripped from
-					// argv before the plugin parser sees it, so the required
-					// check downstream would always fire with the misleading
-					// "--<name> is required" message even when the user did
-					// pass a value (#364). Fail fast here with a single
-					// actionable error instead.
-					if (def.required === true) {
-						logger.error(
-							`Plugin flag --${name} is declared required but conflicts with a global c8ctl flag of the same name; ` +
-								`it can never be satisfied. The plugin must rename this flag.`,
-						);
-						process.exit(1);
-					}
-					logger.warn(
-						`Plugin flag --${name} conflicts with a global c8ctl flag and will not be parsed`,
+			const analysis = analyzePluginFlags(cmdFlagDefs);
+			const blockedFlags = new Set(analysis.reservedNames);
+			for (const name of analysis.reservedNames) {
+				// A required plugin flag whose name collides with a global
+				// flag is unsatisfiable: the token is always consumed as the
+				// global before the plugin parser sees it, so the required
+				// check downstream would always fire with the misleading
+				// "--<name> is required" message even when the user did pass
+				// a value (#364). The command can never succeed, so fail fast
+				// with a single actionable error on every invocation.
+				if (cmdFlagDefs[name].required === true) {
+					logger.error(
+						`Plugin flag --${name} is declared required but conflicts with a global c8ctl flag of the same name; ` +
+							`it can never be satisfied. The plugin must rename this flag.`,
 					);
-					blockedFlags.add(name);
-					continue;
+					process.exit(1);
 				}
-				const short =
-					def.short && builtinShorts.has(def.short) ? undefined : def.short;
-				if (def.short && !short) {
-					logger.warn(
-						`Plugin flag --${name} short alias -${def.short} conflicts with a global c8ctl alias and will be ignored`,
-					);
-				}
-				mergedOptions[name] = {
-					type: def.type,
-					...(short && { short }),
-					...(def.multiple && { multiple: true }),
-				};
 			}
+			// A collision only matters to a user who typed the flag, so warn
+			// then — not on every invocation. The plugin author sees every
+			// collision up front in `c8ctl doctor plugin`.
+			for (const flag of typedReservedFlags({
+				argv: stage1.rest,
+				analysis,
+			})) {
+				logger.warn(
+					`${flag} is reserved by c8ctl and is not passed to '${verb}' as a plugin flag. ` +
+						`Its value is available to the plugin through the context argument (ctx) where c8ctl exposes it.`,
+				);
+			}
+			const builtinOptions = globalOptions();
+			const mergedOptions = analysis.options;
 			// Strip blocked-flag tokens from argv before re-parse. Blocked
 			// names exclusively collide with GLOBAL_FLAGS (post-#373), but
 			// `mergedOptions` carries the global type for those names, so
@@ -422,6 +438,15 @@ async function main() {
 			const pluginParsed = parseFlags({
 				args: filteredArgv,
 				options: mergedOptions,
+			});
+			warnUndeclaredPluginFlags({
+				logger,
+				verb,
+				names: undeclaredFlagNames({
+					values: pluginParsed.values,
+					options: mergedOptions,
+				}),
+				declared: Object.keys(analysis.usable),
 			});
 			const extractedFlags: Record<string, unknown> = {};
 			for (const [flagName, def] of Object.entries(cmdFlagDefs)) {
@@ -459,6 +484,15 @@ async function main() {
 				pluginCtx,
 			);
 		} else {
+			warnUndeclaredPluginFlags({
+				logger,
+				verb,
+				names: undeclaredFlagNames({
+					values: parsed.values,
+					options: globalOptions(),
+				}),
+				declared: [],
+			});
 			await executePluginCommand(
 				verb,
 				resource ? [resource, ...args] : args,

@@ -3,6 +3,11 @@
  */
 
 export const commands = {
+	// Bare-function command: receives positionals only, declares no flags.
+	'test-bare': async (args) => {
+		console.log(JSON.stringify({ args }));
+	},
+
 	'test-flags': {
 		flags: {
 			source: {
@@ -49,6 +54,20 @@ export const commands = {
 			safe: {
 				type: 'string',
 				description: 'A non-colliding flag',
+			},
+		},
+		handler: async (args, flags) => {
+			console.log(JSON.stringify({ args, flags: flags || {} }));
+		},
+	},
+
+	'test-short-collision': {
+		flags: {
+			// Long name is free; the `-y` alias collides with the global -y.
+			'label-value': {
+				type: 'string',
+				short: 'y',
+				description: 'Short alias collides with global -y',
 			},
 		},
 		handler: async (args, flags) => {

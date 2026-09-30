@@ -111,16 +111,56 @@ c8ctl parses the command line in two stages. Stage 1 reads only c8ctl's **global
 Each flag can have the following properties:
 
 - `type`: `'string'` or `'boolean'` (required)
-- `description`: Describes the flag for documentation purposes (required). Not currently shown in `c8ctl help` output.
+- `description`: Describes the flag (required). It is shown next to the flag in the `Flags:` block of `c8ctl help <command>`.
 - `short`: Single-character alias (optional, e.g., `'s'` for `-s`)
 - `required`: When `true`, the CLI exits with an error if the flag is omitted (optional, defaults to `false`)
+- `multiple`: When `true` (string flags only), the flag may be repeated and the handler receives an array
 
-> **Important:** Plugin flags are checked against c8ctl's built-in flags at runtime with different consequences depending on where the collision occurs:
-> - **Long-name collision** (e.g. `--output`, `--verbose`, `--dry-run`): the entire plugin flag is dropped. A warning is emitted and the handler will not receive the value.
-> - **Long-name collision combined with `required: true`**: the command is **unsatisfiable** — the colliding token is always stripped from argv before the plugin parser sees it, so no user input can satisfy the requirement. c8ctl refuses to dispatch the command and exits with an actionable error directing the plugin author to rename the flag (#364).
-> - **Short-alias collision** (e.g. `-v`, `-o`, `-h`): only the short alias is stripped. The long flag name still works — `--myflag value` is parsed correctly, but `-m value` is not.
->
-> Avoid long names like `--output`, `--limit`, `--all`, `--asc`, `--desc`, `--sort-by`, `--dry-run`, `--verbose`, `--fields`, `--profile`, `--help`, `--version`, and short aliases `-o`, `-l`, `-v`, `-p`, `-h`.
+#### Reserved names (flags c8ctl consumes itself)
+
+Only c8ctl's **global** flags are reserved. A plugin flag cannot use these names, because c8ctl consumes them before the plugin sees the command line:
+
+| Long name | Short |
+|-----------|-------|
+| `--help` | `-h` |
+| `--version` | `-v` |
+| `--profile` | |
+| `--dry-run` | |
+| `--verbose` | |
+| `--fields` | |
+| `--json` | |
+| `--yes` | `-y` |
+
+Everything else is yours, including names that some built-in commands use, such as `--limit`, `--all`, `--asc`, `--desc`, `--sortBy`, `--id` or `--name`. A plugin flag only ever competes with the globals.
+
+What happens when a plugin declares a reserved name:
+
+- **Long name** (e.g. `--verbose`): the plugin flag is never delivered; c8ctl treats the token as the global. It is left out of `c8ctl help <command>`. If a user types it, c8ctl warns that the flag is reserved and not passed to the plugin. Nothing is printed on invocations that do not use it, and `c8ctl doctor plugin` lists every such declaration for the plugin author.
+- **Long name with `required: true`**: the command can never succeed, so c8ctl refuses to run it and exits with an actionable error asking the author to rename the flag (#364).
+- **Short alias** (e.g. `short: 'y'`): only the alias is dropped. The long flag keeps working, `c8ctl help` does not advertise the alias, and typing the alias warns.
+
+#### Reading global values: the `ctx` argument
+
+A flag handler is called as `handler(args, flags, ctx)`. Read global flags from `ctx`, not from `flags`:
+
+| Global flag | `ctx` field |
+|-------------|-------------|
+| `--profile` (or the session profile) | `ctx.profile` |
+| `--dry-run` | `ctx.dryRun` |
+| `--verbose` | `ctx.verbose` |
+| `--json` / session output mode | `ctx.outputMode` |
+| `--yes` | `ctx.yes` |
+| `--fields` | `ctx.fields` |
+
+`ctx` also carries `ctx.logger`, `ctx.prompt` and a lazily created `ctx.client`. A bare-function handler receives `ctx` as its third argument too, after a `flags` argument that is `undefined`.
+
+#### How flag values are parsed
+
+- `--foo=x` and `--foo x` both give `foo: "x"`.
+- A string flag given **no value** — because the next token is another flag, or the line ends — gives `foo: true`. It never swallows the next flag: `--foo --bar` gives `foo: true` and `bar: true`. (Use `--foo=` for an explicit empty string.)
+- A value that only *starts* with a dash but is not a flag the command knows is still a value: `--foo -5` gives `foo: "-5"`.
+- After a `--` terminator nothing is parsed as a flag.
+- A flag the plugin did not declare (and that is not a global) is **not delivered**. c8ctl prints a warning, `Unknown flag --x for '<command>'; declared flags: ...`, and runs the command anyway. The warning is also printed for bare-function commands, which declare no flags.
 
 ### Example with Flags
 

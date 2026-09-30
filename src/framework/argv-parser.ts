@@ -133,13 +133,21 @@ function isKnownFlagToken({
 }
 
 /**
+ * Stand-in value for "a string flag that was given no value because the next
+ * token is another flag". NUL cannot occur in an argv entry, so it cannot
+ * collide with real input. {@link parseFlags} turns it into `true` — the same
+ * thing `parseArgs` reports for a string flag at the very end of the line.
+ */
+const NO_VALUE = "\u0000no-value";
+
+/**
  * `parseArgs` hands the next token to a string flag as its value even when
  * that token is itself a flag (`--fields --dry-run` yields
  * `fields: "--dry-run"` and silently drops `--dry-run`). Rewrite such a
- * string flag to the explicit empty-value form `--name=` so the following
- * known flag is parsed as a flag. Token positions are preserved. Only *known*
- * flags are treated this way, so values that merely start with a dash
- * (`--limit -1`) are untouched.
+ * string flag to `--name=<NO_VALUE>` so the following known flag is parsed as
+ * a flag and the string flag reads as `true` (given, no value). Token
+ * positions are preserved. Only *known* flags are treated this way, so
+ * values that merely start with a dash (`--limit -5`) are untouched.
  */
 function protectFlagLikeValues({
 	args,
@@ -166,7 +174,7 @@ function protectFlagLikeValues({
 		}
 		if (name === undefined || options[name]?.type !== "string") continue;
 		if (isKnownFlagToken({ token: out[i + 1], options })) {
-			out[i] = `--${name}=`;
+			out[i] = `--${name}=${NO_VALUE}`;
 		}
 	}
 	return out;
@@ -191,7 +199,15 @@ export function parseFlags({
 		strict: false,
 		tokens: true,
 	});
-	return { values, positionals, tokens: tokens ?? [] };
+	const resolved: ParsedValues = Object.create(null);
+	for (const [name, value] of Object.entries(values)) {
+		resolved[name] = Array.isArray(value)
+			? value.map((v) => (v === NO_VALUE ? true : v))
+			: value === NO_VALUE
+				? true
+				: value;
+	}
+	return { values: resolved, positionals, tokens: tokens ?? [] };
 }
 
 // ─── Stage 1 ─────────────────────────────────────────────────────────────────
