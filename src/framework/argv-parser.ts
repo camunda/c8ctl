@@ -425,7 +425,7 @@ export function stripGlobalFlags(argv: readonly string[]): string[] {
 			const eq = tok.indexOf("=");
 			const name = eq >= 0 ? tok.slice(2, eq) : tok.slice(2);
 			if (booleanFlags.has(name) || stringFlags.has(name)) {
-				if (eq < 0 && stringFlags.has(name)) i++; // consume value
+				if (eq < 0 && stringFlags.has(name) && argv[i + 1] !== "--") i++; // consume value, never the terminator
 				i++;
 				continue;
 			}
@@ -436,7 +436,7 @@ export function stripGlobalFlags(argv: readonly string[]): string[] {
 				continue;
 			}
 			if (stringShorts.has(short)) {
-				i += 2; // consume short flag and its value
+				i += argv[i + 1] === "--" ? 1 : 2; // consume short flag and its value, never the terminator
 				continue;
 			}
 		}

@@ -168,6 +168,20 @@ describe("Passthrough plugin contract (#366)", () => {
 			assert.deepStrictEqual(out.args, ["--from", "URL"]);
 		});
 
+		test("a value-less string global never consumes the `--` terminator", async () => {
+			const result = await c8(
+				"pass-through-cmd",
+				"--profile",
+				"--",
+				"--profile",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(JSON.parse(result.stdout).args, [
+				"--",
+				"--profile",
+			]);
+		});
+
 		test("strips GLOBAL_FLAGS in `--flag=value` form", async () => {
 			// stripGlobalFlags() and sliceArgvAfterVerb() both branch on the
 			// `=` syntax. Without this case, a regression in either path
