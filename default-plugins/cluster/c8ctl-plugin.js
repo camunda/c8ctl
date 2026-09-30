@@ -315,7 +315,7 @@ export const metadata = {
         'Manage local Camunda 8 cluster — start, stop, status, logs, install, delete, or list versions',
       // A bare-function plugin command only receives parsed positionals from
       // the host; every flag it does not declare is dropped before the handler
-      // runs (#593). This command needs raw flags for two reasons: its own
+      // runs. This command needs raw flags for two reasons: its own
       // --purge / --debug / --c8-version, and the arbitrary flags `cluster
       // secrets` forwards to c8run (--stdin, --all, ...). `passthrough` is the
       // supported way to receive them — the host strips only c8ctl's global

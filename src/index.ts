@@ -146,8 +146,8 @@ const VERB_REQUIRES_RESOURCE = new Set(
 );
 
 /**
- * Apply GLOBAL_FLAGS to the process-wide runtime: per-invocation output mode
- * (#356), `--fields`, `--dry-run` and `--verbose`. Idempotent — `main()`
+ * Apply GLOBAL_FLAGS to the process-wide runtime: per-invocation output mode,
+ * `--fields`, `--dry-run` and `--verbose`. Idempotent — `main()`
  * calls it once for the flags before the verb and again with the merged set
  * once the flags after the verb have been parsed.
  */
@@ -196,7 +196,7 @@ async function main() {
 	// Fire-and-forget: check for CLI updates in the background
 	startUpdateCheck(c8ctl.version);
 
-	// Stage 1 (#373): parse GLOBAL_FLAGS from the front of argv and stop at
+	// Stage 1: parse GLOBAL_FLAGS from the front of argv and stop at
 	// the verb. Everything after the verb stays raw for stage 2, which parses
 	// it against that command's own flag table.
 	const stage1 = splitGlobals(process.argv.slice(2));
@@ -273,7 +273,7 @@ async function main() {
 		return;
 	}
 
-	// Stage 2 (#373): parse everything after the verb against
+	// Stage 2: parse everything after the verb against
 	// GLOBAL_FLAGS ∪ effectiveFlags(verb, resource). Globals stay accepted
 	// after the verb (lenient variant).
 	const parsed = parseVerbArgs({ rawVerb, rest: stage1.rest });
@@ -451,7 +451,7 @@ async function main() {
 				// global before the plugin parser sees it, so the required
 				// check downstream would always fire with the misleading
 				// "--<name> is required" message even when the user did pass
-				// a value (#364). The command can never succeed, so fail fast
+				// a value. The command can never succeed, so fail fast
 				// with a single actionable error on every invocation.
 				if (cmdFlagDefs[name].required === true) {
 					logger.error(

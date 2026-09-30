@@ -74,7 +74,7 @@ describe("Cluster Plugin – metadata", () => {
 		);
 	});
 
-	test("cluster command is a passthrough command so the host delivers its flags (#593)", () => {
+	test("cluster command is a passthrough command so the host delivers its flags", () => {
 		// A bare-function command only receives parsed positionals; --purge,
 		// --debug, --c8-version and c8run's own secrets flags would be dropped.
 		const cmd = plugin.metadata.commands.cluster;

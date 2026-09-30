@@ -136,7 +136,7 @@ Everything else is yours, including names that some built-in commands use, such 
 What happens when a plugin declares a reserved name:
 
 - **Long name** (e.g. `--verbose`): the plugin flag is never delivered; c8ctl treats the token as the global. It is left out of `c8ctl help <command>`. If a user types it, c8ctl warns that the flag is reserved and not passed to the plugin. Nothing is printed on invocations that do not use it, and `c8ctl doctor plugin` lists every such declaration for the plugin author.
-- **Long name with `required: true`**: the command can never succeed, so c8ctl refuses to run it and exits with an actionable error asking the author to rename the flag (#364).
+- **Long name with `required: true`**: the command can never succeed, so c8ctl refuses to run it and exits with an actionable error asking the author to rename the flag.
 - **Short alias** (e.g. `short: 'y'`): only the alias is dropped. The long flag keeps working, `c8ctl help` does not advertise the alias, and typing the alias warns.
 
 #### Reading global values: the `ctx` argument

@@ -815,7 +815,7 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). Stage 2 of the argv parser only parses the
+		// non-PD resource. Stage 2 of the argv parser only parses the
 		// requested resource's bucket, so the flag is reported as unknown and
 		// ignored — the warning is the user-facing signal.
 		flags: {
@@ -924,7 +924,7 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). Stage 2 of the argv parser only parses the
+		// non-PD resource. Stage 2 of the argv parser only parses the
 		// requested resource's bucket, so the flag is reported as unknown and
 		// ignored — the warning is the user-facing signal.
 		flags: {
@@ -1897,10 +1897,9 @@ export const COMMAND_REGISTRY = {
 		// `--shell` only applies to `completion install` — declared once in
 		// `resourceFlags.install` so it triggers an unknown-flag warning when
 		// passed to other resources (e.g. `completion zsh --shell bash`).
-		// This is the original #256 defect class. Stage 2 of the argv parser
-		// only parses the requested resource's bucket, so on other resources
-		// the flag is reported as unknown and ignored — the warning is the
-		// user-facing signal.
+		// Stage 2 of the argv parser only parses the requested resource's
+		// bucket, so on other resources the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {},
 		resourceFlags: {
 			install: {
@@ -2117,7 +2116,7 @@ export function isValidCommand(verb: string, resource: string): boolean {
  * every command plus the globals.
  *
  * **Not used to parse the command line.** `src/index.ts` parses in two
- * stages (`src/framework/argv-parser.ts`, #373), each against the flag table
+ * stages (`src/framework/argv-parser.ts`), each against the flag table
  * of the command actually being run, so a flag name never has to have one
  * type for the whole CLI. This flat view remains as a registry-wide summary
  * (used by the structural tests that assert every registered flag is

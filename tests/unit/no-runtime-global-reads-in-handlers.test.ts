@@ -93,7 +93,7 @@ describe("architectural guard: ctx, not the global runtime, carries per-invocati
 		);
 	});
 
-	// Parsing is the composition root's job (two-stage parser, #373): stage 2
+	// Parsing is the composition root's job (two-stage parser): stage 2
 	// parses every command's flags against that command's own table, so a
 	// handler never has a reason to recover flags from raw argv. The
 	// `process.argv` re-reads that used to live in `list pi` / `get pi` were

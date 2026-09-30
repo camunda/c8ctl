@@ -1,5 +1,5 @@
 /**
- * Two-stage command-line parser (#373).
+ * Two-stage command-line parser.
  *
  * ```
  * c8ctl [global flags] <verb> [<resource>] [verb flags + post-verb globals] [args]
@@ -12,7 +12,7 @@
  * - **Stage 2** ({@link parseBuiltinVerbArgs} for built-in verbs, or
  *   {@link parseFlags} with a caller-built table for plugin verbs) parses
  *   `rest` against `GLOBAL_FLAGS ∪ effectiveFlags(verb, resource)`. Globals
- *   stay accepted after the verb (the lenient variant of #373), so
+ *   stay accepted after the verb (the lenient variant), so
  *   `c8ctl list pi --json` keeps working.
  *
  * Because each command is parsed against its own table, a flag name can mean
@@ -381,7 +381,7 @@ export function parseVerbArgs({
 
 /**
  * Strip GLOBAL_FLAGS (and the value of any string-typed global flag) from
- * the argv tail forwarded to a passthrough plugin handler (#366).
+ * the argv tail forwarded to a passthrough plugin handler.
  * GLOBAL_FLAGS already affect the c8ctl runtime via their regular handling in
  * `main()`; the plugin must not see them again.
  *
@@ -450,7 +450,7 @@ export function stripGlobalFlags(argv: readonly string[]): string[] {
  * Remove tokens for blocked plugin flags from an argv slice so they cannot
  * shift positionals during the plugin-flag re-parse.
  *
- * Post-#373, "blocked" exclusively means "collides with a GLOBAL flag".
+ * "Blocked" exclusively means "collides with a GLOBAL flag".
  * The user may have supplied a value token (`--name value`) intending
  * either:
  *   - the GLOBAL's interpretation (global type === "string"), or

@@ -137,7 +137,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 
 /**
  * True when the resource position of `v` completes file paths: deploy/run/
- * watch, and #366 passthrough verbs — unless the passthrough verb declared
+ * watch, and passthrough verbs — unless the passthrough verb declared
  * `subcommands` (e.g. the `cluster` plugin), in which case those are what
  * the user wants offered.
  */

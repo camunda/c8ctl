@@ -1,6 +1,6 @@
 /**
  * End-to-end tests for how the host delivers flags to the `cluster` default
- * plugin (#593).
+ * plugin.
  *
  * `cluster` used to be a bare-function plugin command, which only receives
  * parsed positionals — `--purge`, `--debug` and `--c8-version` were silently
@@ -37,7 +37,7 @@ after(() => {
 const cluster = (...args: string[]) =>
 	c8WithEnv({ C8RUN_CACHE_DIR: cacheDir }, "cluster", ...args);
 
-describe("cluster plugin: flags reach the handler (#593)", () => {
+describe("cluster plugin: flags reach the handler", () => {
 	test("`cluster status --purge` is rejected with the plugin's own message", async () => {
 		const result = await cluster("status", "--purge");
 		assert.strictEqual(result.status, 1, result.stdout + result.stderr);

@@ -41,7 +41,7 @@ export const listProcessInstancesCommand = defineCommand(
 		}
 
 		// `--version` is a global flag, parsed as a string after the verb
-		// (stage 2 of the two-stage parser, #373) and surfaced as ctx.version.
+		// (stage 2 of the two-stage parser) and surfaced as ctx.version.
 		const version = ctx.version;
 		if (version !== undefined && !Number.isNaN(version)) {
 			filter.filter.processDefinitionVersion = version;
