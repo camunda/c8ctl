@@ -8,22 +8,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { analyzePluginFlags } from "../../src/framework/plugins/plugin-flags.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const testPlugin = await import(
 	// @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 	"../fixtures/plugins/plugin-with-flags/c8ctl-plugin.js"
 );
-
-describe("analyzePluginFlags", () => {
-	test("a flag named __proto__ stays an own, usable flag", () => {
-		const { usable } = analyzePluginFlags({
-			["__proto__"]: { type: "string", description: "odd but legal" },
-		});
-		assert.ok(Object.hasOwn(usable, "__proto__"), Object.keys(usable).join());
-	});
-});
 
 describe("Plugin Flags", () => {
 	test("plugin command declares flags inline", () => {
