@@ -1259,7 +1259,7 @@ export const doctorPluginCommand = defineCommand(
 				})),
 			);
 			logger.info(
-				"To resolve: rename the flag in the plugin. A required flag with a reserved name makes the command unusable.",
+				"To resolve, in the plugin: rename a reserved flag; change or drop a reserved short alias. A required flag with a reserved name makes the command unusable.",
 			);
 		}
 

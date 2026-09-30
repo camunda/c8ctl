@@ -532,6 +532,10 @@ describe("Plugin Flags CLI subprocess — doctor reports reserved flags once", (
 			!result.stdout.includes("No plugin collisions detected"),
 			result.stdout,
 		);
+		assert.ok(
+			result.stdout.includes("change or drop a reserved short alias"),
+			`a short-alias row needs its own remedy: ${result.stdout}`,
+		);
 	});
 });
 
