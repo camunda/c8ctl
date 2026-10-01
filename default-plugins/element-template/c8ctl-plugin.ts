@@ -147,6 +147,9 @@ export const metadata = {
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
 				"is bound across multiple types — e.g. --set input:correlationKey=order-42.\n\n" +
+				"apply --values-file <path> loads a JSON object mapping binding names to values, equivalent to " +
+				"passing one --set per entry. Use --values-file - to read the JSON from stdin. " +
+				"When both --values-file and --set target the same property, --set wins.\n\n" +
 				"edit --set name=value updates a property on an element that already has a template applied, " +
 				"without re-running template application — it never resets other template-owned content " +
 				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
@@ -261,6 +264,12 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --values-file config.json --in-place",
+					description:
+						"Set multiple properties from a JSON file mapping binding names to values (use --values-file - to read from stdin)",
+				},
+				{
+					command:
 						"c8ctl element-template apply io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --set authentication.type=basic --set authentication.username=alice",
 					description:
 						"Conditional properties: child controls (e.g. authentication.username) apply only when the gating property is also set",
@@ -311,6 +320,11 @@ export const commands = {
 				multiple: true,
 				description:
 					"Set a property value: name=value (repeatable; binding name from get-properties; = auto-prepended for feel=required properties) [apply|edit]",
+			},
+			"values-file": {
+				type: "string",
+				description:
+					"Path to a JSON file mapping binding names to values (use - to read from stdin) [apply]",
 			},
 			detailed: {
 				type: "boolean",
