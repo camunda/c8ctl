@@ -49,34 +49,14 @@
  */
 
 import assert from "node:assert";
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
 import ts from "typescript";
+import { listTestFiles } from "../utils/test-files.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const TESTS_DIR = join(PROJECT_ROOT, "tests");
-
-function listTestFiles(): string[] {
-	const out: string[] = [];
-	function walk(dir: string): void {
-		// Sort entries so diagnostics order is stable across OS/filesystems
-		// (CI runs on both Ubuntu and macOS, which differ in readdir order).
-		const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-			a.name.localeCompare(b.name),
-		);
-		for (const entry of entries) {
-			const abs = join(dir, entry.name);
-			if (entry.isDirectory()) {
-				walk(abs);
-			} else if (entry.isFile() && entry.name.endsWith(".test.ts")) {
-				out.push(abs);
-			}
-		}
-	}
-	walk(TESTS_DIR);
-	return out;
-}
 
 /** Workspace-relative POSIX path under `tests/`. */
 function toTestsRelative(absPath: string): string {
@@ -195,7 +175,7 @@ function findViolations(absPath: string): Violation[] {
 }
 
 describe("architectural guard: tests must not import handlers from src/commands/** (#291)", () => {
-	const files = listTestFiles();
+	const files = listTestFiles({ testsDir: TESTS_DIR });
 
 	test("no test file imports runtime values from src/commands/**", () => {
 		const violations: Violation[] = [];

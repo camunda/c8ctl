@@ -1,20 +1,62 @@
 name: Test
+run-name: ${{ inputs.agentic_task != '' && format('c8ctl-ci-{0}', fromJSON(inputs.agentic_task).correlation) || github.event.pull_request.title || 'Test' }}
 
 on:
 
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      agentic_task:
+        description: Reserved immutable automation CI task; leave empty for ordinary CI
+        type: string
+        required: false
+        default: ''
 
 jobs:
+  agentic-revision:
+    name: Agentic CI Revision
+    if: ${{ inputs.agentic_task != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      checkout_sha: ${{ steps.revision.outputs.checkout_sha }}
+      correlation: ${{ steps.revision.outputs.correlation }}
+    steps:
+      - name: Checkout trusted workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - id: revision
+        name: Authenticate reserved PR, base, and synthetic merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_TASK_JSON: ${{ inputs.agentic_task }}
+          C8CTL_APP_BOT_LOGIN: ${{ vars.C8CTL_APP_BOT_LOGIN }}
+          C8CTL_AUTOMATION_ENABLED: ${{ vars.C8CTL_AUTOMATION_ENABLED }}
+        run: node --experimental-strip-types scripts/agentic/ci.ts prepare
+
   lint:
     name: Lint
+    needs: [agentic-revision]
+    if: ${{ !cancelled() && (inputs.agentic_task == '' || needs.agentic-revision.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.agentic_task != '' && needs.agentic-revision.outputs.checkout_sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v7
@@ -30,12 +72,17 @@ jobs:
 
   typecheck:
     name: Typecheck
+    needs: [agentic-revision]
+    if: ${{ !cancelled() && (inputs.agentic_task == '' || needs.agentic-revision.result == 'success') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.agentic_task != '' && needs.agentic-revision.outputs.checkout_sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v7
@@ -51,7 +98,8 @@ jobs:
 
   unit-test:
     name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
-    needs: [lint, typecheck]
+    needs: [agentic-revision, lint, typecheck]
+    if: ${{ !cancelled() && needs.lint.result == 'success' && needs.typecheck.result == 'success' && (inputs.agentic_task == '' || needs.agentic-revision.result == 'success') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -64,6 +112,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.agentic_task != '' && needs.agentic-revision.outputs.checkout_sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node }}
         uses: actions/setup-node@v7
@@ -94,6 +145,8 @@ jobs:
 
   integration-test:
     name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
+    needs: [agentic-revision]
+    if: ${{ !cancelled() && (inputs.agentic_task == '' || needs.agentic-revision.result == 'success') }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -107,6 +160,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.agentic_task != '' && needs.agentic-revision.outputs.checkout_sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node }}
         uses: actions/setup-node@v7
@@ -167,3 +223,42 @@ jobs:
         if: always()
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose down -v
+
+  agentic-ci-receipt:
+    name: Agentic CI Receipt
+    needs: [agentic-revision, lint, typecheck, unit-test, integration-test]
+    if: >-
+      always() && inputs.agentic_task != '' &&
+      needs.agentic-revision.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == vars.C8CTL_APP_BOT_LOGIN &&
+      github.run_attempt == '1' &&
+      vars.C8CTL_AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Publish immutable tested-revision receipt
+        env:
+          CI_TASK_JSON: ${{ inputs.agentic_task }}
+          CI_TESTED_SHA: ${{ needs.agentic-revision.outputs.checkout_sha }}
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_REPORT_OUT: ${{ runner.temp }}/report.json
+          C8CTL_APP_BOT_LOGIN: ${{ vars.C8CTL_APP_BOT_LOGIN }}
+          C8CTL_AUTOMATION_ENABLED: ${{ vars.C8CTL_AUTOMATION_ENABLED }}
+        run: node --experimental-strip-types scripts/agentic/ci.ts publish
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-report-${{ needs.agentic-revision.outputs.correlation }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/report.json
+          if-no-files-found: error
+          retention-days: 7
