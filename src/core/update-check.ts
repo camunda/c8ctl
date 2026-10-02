@@ -140,10 +140,6 @@ export function isNewer(local: string, remote: string): boolean {
 	return false;
 }
 
-/**
- * Fetch the latest version for a given dist-tag from the npm registry.
- * Returns undefined on any failure (offline, timeout, etc.).
- */
 type Transport = (
 	url: string,
 	init: { signal?: AbortSignal },
@@ -153,7 +149,7 @@ type Transport = (
  * GET via node:https with an unref'd socket. Unlike global fetch, aborting
  * destroys the in-flight connect, so the check never holds the process open.
  */
-const httpsTransport: Transport = (url, { signal }) =>
+export const httpsTransport: Transport = (url, { signal }) =>
 	new Promise((resolve, reject) => {
 		const req = get(url, { signal }, (res) => {
 			const chunks: Buffer[] = [];
@@ -171,6 +167,10 @@ const httpsTransport: Transport = (url, { signal }) =>
 
 let transport: Transport = httpsTransport;
 
+/**
+ * Fetch the latest version for a given dist-tag from the npm registry.
+ * Returns undefined on any failure (offline, timeout, etc.).
+ */
 export async function fetchRemoteVersion(
 	channel: string,
 	signal?: AbortSignal,
