@@ -16,7 +16,8 @@
  *   per day, and usually zero.
  *
  * Design constraints:
- * - Zero extra dependencies (uses global fetch + node:fs)
+ * - Zero extra dependencies (uses node:https + node:fs)
+ * - Never keeps the process alive: the socket is unref'd and destroyed on abort
  * - Never delays command execution (fire-and-forget with AbortController)
  * - Once-per-version notification (cache in the user data dir)
  * - Notification output suppressed in JSON output mode; skipped entirely
@@ -24,6 +25,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { get } from "node:https";
 import { join } from "node:path";
 import { getUserDataDir } from "./config.ts";
 import { isRecord } from "./logger.ts";
@@ -142,12 +144,39 @@ export function isNewer(local: string, remote: string): boolean {
  * Fetch the latest version for a given dist-tag from the npm registry.
  * Returns undefined on any failure (offline, timeout, etc.).
  */
+type Transport = (
+	url: string,
+	init: { signal?: AbortSignal },
+) => Promise<Response>;
+
+/**
+ * GET via node:https with an unref'd socket. Unlike global fetch, aborting
+ * destroys the in-flight connect, so the check never holds the process open.
+ */
+const httpsTransport: Transport = (url, { signal }) =>
+	new Promise((resolve, reject) => {
+		const req = get(url, { signal }, (res) => {
+			const chunks: Buffer[] = [];
+			res.on("data", (c: Buffer) => chunks.push(c));
+			res.on("end", () =>
+				resolve(
+					new Response(Buffer.concat(chunks), { status: res.statusCode ?? 0 }),
+				),
+			);
+			res.on("error", reject);
+		});
+		req.on("socket", (socket) => socket.unref());
+		req.on("error", reject);
+	});
+
+let transport: Transport = httpsTransport;
+
 export async function fetchRemoteVersion(
 	channel: string,
 	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	try {
-		const res = await fetch(REGISTRY_URL, { signal });
+		const res = await transport(REGISTRY_URL, { signal });
 		if (!res.ok) return undefined;
 		const data: unknown = await res.json();
 		if (!isRecord(data)) return undefined;
@@ -312,4 +341,9 @@ export function _resetForTesting(): void {
 	fetchSettled = undefined;
 	resolveFetchSettled = undefined;
 	fetchController = undefined;
+}
+
+/** Override the HTTP transport (for testing only). */
+export function _setTransportForTesting(t: Transport): void {
+	transport = t;
 }
