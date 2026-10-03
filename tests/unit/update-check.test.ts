@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { c8ctl } from "../../src/core/runtime.ts";
 import {
 	_resetForTesting,
+	_setTransportForTesting,
 	detectChannel,
 	isNewer,
 	printUpdateNotification,
@@ -112,6 +113,7 @@ describe("startUpdateCheck + printUpdateNotification", () => {
 
 		// Save originals
 		originalFetch = globalThis.fetch;
+		_setTransportForTesting((url, init) => globalThis.fetch(url, init));
 		originalOutputMode = c8ctl.outputMode;
 		originalCI = process.env.CI;
 		originalDataDir = process.env.C8CTL_DATA_DIR;
@@ -478,6 +480,7 @@ describe("patient vs impatient check timing", () => {
 			consoleLogOutput.push(args.join(" "));
 		};
 		originalFetch = globalThis.fetch;
+		_setTransportForTesting((url, init) => globalThis.fetch(url, init));
 		originalOutputMode = c8ctl.outputMode;
 		originalCI = process.env.CI;
 		originalDataDir = process.env.C8CTL_DATA_DIR;
