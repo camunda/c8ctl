@@ -398,6 +398,29 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
+	test("fails instead of hanging when the file stream errors while the next chunk is awaited", {
+		timeout: 5_000,
+	}, async () => {
+		server = await startServer((_req, res) => {
+			res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
+			// Send headers only, so the file open fails while the first read waits.
+			res.flushHeaders();
+			setTimeout(() => res.end(PAYLOAD), 100);
+		});
+
+		const error = await rejectionOf(
+			plugin.downloadWithRetry({
+				url: server.url,
+				targetFile: join(tempDir, "missing", "c8run.tar.gz"),
+				logger: recordingLogger().logger,
+				...fast,
+			}),
+		);
+
+		assert.strictEqual(server.requests.length, 1);
+		assert.match(`${error.message} ${prop(error, "code")}`, /ENOENT/);
+	});
+
 	test("asks for the identity encoding and ignores the sizes of a response encoded anyway", async () => {
 		const gzipped = gzipSync(PAYLOAD);
 		server = await startServer((_req, res) => {

@@ -1020,6 +1020,9 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
       }
       if (chunk.done) break;
 
+      // The stream may have failed while we awaited the read; writing to it then
+      // returns false and 'drain' never comes.
+      if (fileError) throw fileError;
       if (!fileStream.write(chunk.value)) {
         await once(fileStream, 'drain');
       }
