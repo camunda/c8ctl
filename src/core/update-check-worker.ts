@@ -10,9 +10,6 @@
 
 import { runUpdateCheck, WORKER_FETCH_TIMEOUT_MS } from "./update-check.ts";
 
-// Deliberately ref'd: the transport unrefs its socket (so it can never hold
-// the CLI open), which leaves this timer as what keeps the worker alive
-// until the fetch settles.
 setTimeout(() => process.exit(0), WORKER_FETCH_TIMEOUT_MS + 1000);
 
 const channel = process.argv[2];

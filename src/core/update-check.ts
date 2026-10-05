@@ -175,16 +175,13 @@ type Transport = (
 ) => Promise<Response>;
 
 /**
- * GET via node:https with an unref'd socket. Unlike global fetch, aborting
- * destroys the in-flight connect, so the check never holds the process open.
- *
- * `agent: false` is load-bearing: an abort can land before the request is
- * handed its socket, and the keep-alive global agent would then pool the
- * still-connecting socket (ref'd, never unref'd here) until its 5s timeout.
+ * GET via node:https. Runs only in the worker, whose deadline bounds a stall,
+ * so it uses the default agent: that keeps Node's env proxy support
+ * (NODE_USE_ENV_PROXY + HTTPS_PROXY), which a blocked network may need.
  */
 export const httpsTransport: Transport = (url, { signal }) =>
 	new Promise((resolve, reject) => {
-		const req = get(url, { signal, agent: false }, (res) => {
+		const req = get(url, { signal }, (res) => {
 			const chunks: Buffer[] = [];
 			res.on("data", (c: Buffer) => chunks.push(c));
 			res.on("end", () =>
@@ -194,7 +191,6 @@ export const httpsTransport: Transport = (url, { signal }) =>
 			);
 			res.on("error", reject);
 		});
-		req.on("socket", (socket) => socket.unref());
 		req.on("error", reject);
 	});
 

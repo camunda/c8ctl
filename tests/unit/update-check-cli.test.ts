@@ -13,6 +13,7 @@
 import assert from "node:assert";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -116,5 +117,56 @@ test("worker process records the registry's version", async () => {
 		assert.deepStrictEqual(state.versions, { latest: "9.9.9" });
 	} finally {
 		await new Promise((r) => server.close(r));
+	}
+});
+
+// NODE_USE_ENV_PROXY landed in Node 24.5 and 22.21.
+const [major, minor] = process.versions.node.split(".").map(Number);
+const envProxySupported =
+	major > 24 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);
+
+test("worker honours the env proxy", {
+	skip: !envProxySupported && "NODE_USE_ENV_PROXY unsupported",
+}, async () => {
+	// A blocked network may only reach npm through a proxy.
+	let resolveRequest: (line: string) => void = () => {};
+	const request = new Promise<string>((r) => {
+		resolveRequest = r;
+	});
+	const proxy = createTcpServer((socket) => {
+		socket.once("data", (chunk) => {
+			resolveRequest(chunk.toString().split("\r\n")[0]);
+			socket.destroy();
+		});
+	});
+	await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", r));
+	const address = proxy.address();
+	assert.ok(address && typeof address === "object");
+
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-update-proxy-"));
+	try {
+		const result = await asyncSpawn(
+			"node",
+			["src/core/update-check-worker.ts", "latest"],
+			{
+				env: {
+					...process.env,
+					C8CTL_DATA_DIR: dir,
+					NODE_USE_ENV_PROXY: "1",
+					HTTPS_PROXY: `http://127.0.0.1:${address.port}`,
+					NO_PROXY: "",
+				},
+				timeout: 30_000,
+			},
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		// The worker has exited, so a proxied request has already arrived.
+		const firstLine = await Promise.race([
+			request,
+			new Promise((r) => setTimeout(r, 1000, "no request reached the proxy")),
+		]);
+		assert.strictEqual(firstLine, "CONNECT registry.npmjs.org:443 HTTP/1.1");
+	} finally {
+		await new Promise((r) => proxy.close(r));
 	}
 });
