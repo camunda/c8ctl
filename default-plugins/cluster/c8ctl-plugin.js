@@ -737,7 +737,17 @@ function mirrorHint() {
   return 'Use a mirror: set C8CTL_C8RUN_DOWNLOAD_URL to a base URL with the same layout as the Camunda Download Center.';
 }
 
-function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytesReceived, total, targetFile, extraHints }) {
+function buildDownloadFailureMessage({
+  error,
+  url,
+  attempts,
+  connected,
+  maxBytesReceived,
+  total,
+  targetFile,
+  cleanupError,
+  extraHints,
+}) {
   const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
 
   // A local file-system failure has nothing to do with the network.
@@ -765,7 +775,9 @@ function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytes
   if (maxBytesReceived > 0) {
     lines.push(
       `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up; ` +
-        'the incomplete download was removed.',
+        (cleanupError
+          ? `the incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}), delete it yourself: ${targetFile}`
+          : 'the incomplete download was removed.'),
     );
   }
   const hints = [
@@ -897,10 +909,12 @@ export async function downloadWithRetry({
     }
   }
 
+  // An unremovable file must not hide why the download failed; the message says it was kept.
+  let cleanupError;
   try {
     rmSync(targetFile, { force: true });
-  } catch {
-    // Best effort: an unremovable path must not hide why the download failed.
+  } catch (error) {
+    cleanupError = error;
   }
 
   if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
@@ -916,6 +930,7 @@ export async function downloadWithRetry({
       maxBytesReceived: state.maxBytesReceived,
       total: state.total,
       targetFile,
+      cleanupError,
       extraHints,
     }),
     { cause: lastError, attempts: attempt },

@@ -17,13 +17,14 @@
  */
 
 import assert from "node:assert";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import fs, { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
+import { syncBuiltinESMExports } from "node:module";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -437,6 +438,48 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 					await s.close();
 				}
 			});
+		}
+	});
+
+	test("says where the incomplete download was kept when removing it fails", async () => {
+		server = await startServer((_req, res) => serveHalfThenDrop(res));
+		const realRmSync = fs.rmSync;
+		// The plugin's named rmSync import follows the fs object only after a sync.
+		const rmMock = mock.method(
+			fs,
+			"rmSync",
+			(...args: Parameters<typeof fs.rmSync>) => {
+				if (args[0] === targetFile) {
+					throw Object.assign(new Error("resource busy or locked"), {
+						code: "EBUSY",
+					});
+				}
+				return realRmSync(...args);
+			},
+		);
+		syncBuiltinESMExports();
+		try {
+			const error = await rejectionOf(
+				plugin.downloadWithRetry({
+					url: server.url,
+					targetFile,
+					logger: recordingLogger().logger,
+					...fast,
+				}),
+			);
+			assert.match(
+				error.message,
+				/before giving up; the incomplete download could not be removed \(EBUSY\), delete it yourself: .*c8run\.tar\.gz$/m,
+			);
+			assert.doesNotMatch(error.message, /was removed/);
+			assert.match(
+				error.message,
+				/Cause: (UND_ERR_SOCKET|ECONNRESET): /,
+				"the download cause is kept",
+			);
+		} finally {
+			rmMock.mock.restore();
+			syncBuiltinESMExports();
 		}
 	});
 
