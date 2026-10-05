@@ -2736,9 +2736,11 @@ describe("CLI behavioural: element-template cold-cache failures", () => {
 /**
  * In-process stand-in for the `camunda/connectors` GitHub releases API
  * plus its release-asset host. Serves a release listing at `/releases`
- * and one `connectors-bundle-templates-<tag>.tar.gz` per release that
- * declares templates, so a test can assert *which* releases sync picks
- * without touching the network.
+ * (and at the real API path, for requests redirected from
+ * `api.github.com`), the releases Atom feed at `/releases.atom`, and one
+ * `connectors-bundle-templates-<tag>.tar.gz` per release that declares
+ * templates, so a test can assert *which* releases sync picks without
+ * touching the network.
  */
 type ReleaseSpec = {
 	tag: string;
@@ -2749,10 +2751,23 @@ type ReleaseSpec = {
 	downloadStatus?: number;
 };
 
+type StubOptions = {
+	/** Answer the REST listing with this status (e.g. a rate-limit 403). */
+	listingStatus?: number;
+	/** Answer the Atom feed with this status instead of the feed. */
+	feedStatus?: number;
+};
+
 type StubServer = {
 	url: string;
+	/** URL of the releases Atom feed. */
+	feedUrl: string;
 	/** Tags whose bundle has been downloaded, in request order. */
 	downloads: () => string[];
+	/** `Authorization` header of each REST listing request (`""` if absent). */
+	listingAuthorizations: () => string[];
+	/** Number of Atom feed requests served. */
+	feedRequests: () => number;
 	close: () => Promise<void>;
 };
 
@@ -2803,8 +2818,42 @@ function bundleAssetName(tag: string): string {
 	return `connectors-bundle-templates-${tag}.tar.gz`;
 }
 
-async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
+/**
+ * The `releases.atom` shape GitHub serves: one `<entry>` per published
+ * release, newest first, linking to `<repo>/releases/tag/<tag>` — no
+ * asset or draft information.
+ */
+function buildReleasesFeed(base: string, releases: ReleaseSpec[]): string {
+	const entries = releases
+		.filter((release) => release.draft !== true)
+		.map(
+			(release) => `  <entry>
+    <id>tag:github.com,2008:Repository/1/${release.tag}</id>
+    <updated>2026-01-01T00:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="${base}/releases/tag/${release.tag}"/>
+    <title>${release.tag}</title>
+    <content type="html">&lt;h3&gt;Changes&lt;/h3&gt;&lt;link href=&quot;x&quot;&gt;</content>
+    <author><name>bot</name></author>
+  </entry>`,
+		);
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en-US">
+  <id>tag:github.com,2008:/camunda/connectors/releases</id>
+  <link type="text/html" rel="alternate" href="${base}/releases"/>
+  <link type="application/atom+xml" rel="self" href="${base}/releases.atom"/>
+  <title>Release notes from connectors</title>
+${entries.join("\n")}
+</feed>
+`;
+}
+
+async function startReleasesStub(
+	releases: ReleaseSpec[],
+	options: StubOptions = {},
+): Promise<StubServer> {
 	const downloads: string[] = [];
+	const listingAuthorizations: string[] = [];
+	let feedRequests = 0;
 	const bundles = new Map<string, Buffer>();
 	const failures = new Map<string, number>();
 	for (const release of releases) {
@@ -2823,7 +2872,17 @@ async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
 			return;
 		}
 		const base = `http://127.0.0.1:${getServerPort(server)}`;
-		if (req.url === "/releases") {
+		const { pathname } = new URL(req.url, base);
+		if (
+			pathname === "/releases" ||
+			pathname === "/repos/camunda/connectors/releases"
+		) {
+			listingAuthorizations.push(req.headers.authorization ?? "");
+			if (options.listingStatus !== undefined) {
+				res.statusCode = options.listingStatus;
+				res.end(JSON.stringify({ message: "API rate limit exceeded" }));
+				return;
+			}
 			res.setHeader("content-type", "application/json");
 			res.end(
 				JSON.stringify(
@@ -2843,7 +2902,22 @@ async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
 			);
 			return;
 		}
-		const download = /^\/download\/([^/]+)\/(.+)$/.exec(req.url);
+		if (pathname === "/releases.atom") {
+			feedRequests += 1;
+			if (options.feedStatus !== undefined) {
+				res.statusCode = options.feedStatus;
+				res.end();
+				return;
+			}
+			res.setHeader("content-type", "application/atom+xml");
+			res.end(buildReleasesFeed(base, releases));
+			return;
+		}
+		// `/download/...` is what the REST listing advertises,
+		// `/releases/download/...` what is derived from a feed entry.
+		const download = /^(?:\/releases)?\/download\/([^/]+)\/(.+)$/.exec(
+			pathname,
+		);
 		const failure = download ? failures.get(download[1]) : undefined;
 		if (download && failure !== undefined) {
 			downloads.push(download[1]);
@@ -2869,7 +2943,10 @@ async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
 	const port = getServerPort(server);
 	return {
 		url: `http://127.0.0.1:${port}/releases`,
+		feedUrl: `http://127.0.0.1:${port}/releases.atom`,
 		downloads: () => [...downloads],
+		listingAuthorizations: () => [...listingAuthorizations],
+		feedRequests: () => feedRequests,
 		close: () =>
 			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
 	};
@@ -2887,13 +2964,29 @@ function ootbTemplate(id: string, version: number) {
 	};
 }
 
-function syncEnv(dataDir: string, releasesUrl: string) {
-	return {
+/**
+ * Environment for a sync against a stub. The feed fallback points at the
+ * same stub (`<releasesUrl>.atom`) so no test can reach the real
+ * `github.com`, and any ambient GitHub token (CI sets one) is removed so
+ * the token tests opt in explicitly.
+ */
+function syncEnv(
+	dataDir: string,
+	releasesUrl: string,
+	extra: Record<string, string> = {},
+) {
+	const env: Record<string, string | undefined> = {
 		...process.env,
 		HOME: "/tmp/c8ctl-test-nonexistent-home",
 		C8CTL_DATA_DIR: dataDir,
 		C8CTL_CONNECTORS_RELEASES_URL: releasesUrl,
+		C8CTL_CONNECTORS_RELEASES_FEED_URL: `${releasesUrl}.atom`,
+		...extra,
 	};
+	for (const name of ["GITHUB_TOKEN", "GH_TOKEN"]) {
+		if (!(name in extra)) delete env[name];
+	}
+	return env;
 }
 
 function readCache(dataDir: string): Array<Record<string, unknown>> {
@@ -3229,6 +3322,337 @@ describe("CLI behavioural: element-template sync source (#530)", () => {
 		} finally {
 			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+});
+
+/**
+ * Preload for the CLI subprocess that sends every `api.github.com`
+ * request to a local stub instead, headers untouched. It lets a test run
+ * sync against the *default* listing URL and observe exactly what c8ctl
+ * would send to GitHub.
+ */
+const REDIRECT_GITHUB_API_PRELOAD = `
+const origin = process.env.C8CTL_TEST_GITHUB_API_ORIGIN;
+const realFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+	const url = new URL(input instanceof Request ? input.url : String(input));
+	if (url.hostname !== "api.github.com") return realFetch(input, init);
+	return realFetch(new URL(url.pathname + url.search, origin), init);
+};
+`;
+
+async function syncAgainstDefaultListing(
+	stub: StubServer,
+	dataDir: string,
+	tokenEnv: Record<string, string>,
+) {
+	const preload = join(dataDir, "redirect-github-api.mjs");
+	writeFileSync(preload, REDIRECT_GITHUB_API_PRELOAD);
+	const env = syncEnv(dataDir, stub.url, {
+		...tokenEnv,
+		C8CTL_TEST_GITHUB_API_ORIGIN: new URL(stub.url).origin,
+	});
+	delete env.C8CTL_CONNECTORS_RELEASES_URL;
+	return asyncSpawn(
+		"node",
+		[
+			"--experimental-strip-types",
+			"--import",
+			preload,
+			CLI,
+			"element-template",
+			"sync",
+		],
+		{ env },
+	);
+}
+
+/** Last JSON summary line of a `--json element-template sync` run. */
+function syncSummaryOf(stdout: string): Record<string, unknown> {
+	const line = stdout
+		.trim()
+		.split("\n")
+		.reverse()
+		.find(
+			(candidate) => candidate.startsWith("{") && candidate.includes("pruned"),
+		);
+	assert.ok(
+		line,
+		`expected a summary JSON line. Got stdout: ${stdout.slice(0, 500)}`,
+	);
+	const summary: unknown = JSON.parse(line);
+	assert.ok(isRecord(summary), "summary should be a JSON object");
+	return summary;
+}
+
+describe("CLI behavioural: element-template sync release listing auth and fallback", () => {
+	for (const tokenVar of ["GITHUB_TOKEN", "GH_TOKEN"]) {
+		test(`sends ${tokenVar} as a bearer token to api.github.com`, async () => {
+			const stub = await startReleasesStub([
+				{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] },
+			]);
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-token-"));
+			try {
+				const result = await syncAgainstDefaultListing(stub, dataDir, {
+					[tokenVar]: "test-token-123",
+				});
+				assert.strictEqual(
+					result.status,
+					0,
+					`sync should succeed. stderr: ${result.stderr}`,
+				);
+				assert.deepStrictEqual(stub.listingAuthorizations(), [
+					"Bearer test-token-123",
+				]);
+				assert.strictEqual(stub.feedRequests(), 0, "no fallback needed");
+			} finally {
+				await stub.close();
+				rmSync(dataDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("sends no Authorization header to api.github.com without a token", async () => {
+		const stub = await startReleasesStub([
+			{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] },
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-notoken-"));
+		try {
+			const result = await syncAgainstDefaultListing(stub, dataDir, {});
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(stub.listingAuthorizations(), [""]);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("never sends the GitHub token to a mirror set via C8CTL_CONNECTORS_RELEASES_URL", async () => {
+		const stub = await startReleasesStub([
+			{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] },
+		]);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-mirror-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: syncEnv(dataDir, stub.url, {
+						GITHUB_TOKEN: "secret-a",
+						GH_TOKEN: "secret-b",
+					}),
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(stub.listingAuthorizations(), [""]);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	for (const status of [401, 403, 429]) {
+		test(`falls back to the releases feed when the listing answers ${status}`, async () => {
+			// The feed carries no asset data: the bundle URL is derived from
+			// each entry's tag, and the same selection rules apply (RCs
+			// skipped, newest release per minor).
+			const stub = await startReleasesStub(
+				[
+					{ tag: "8.9.1-rc1", templates: [ootbTemplate("io.example.Rc", 1)] },
+					{ tag: "8.9.0", templates: [ootbTemplate("io.example.L9", 1)] },
+					{ tag: "8.8.18", templates: [ootbTemplate("io.example.L8", 2)] },
+					{ tag: "8.8.17", templates: [ootbTemplate("io.example.L8", 1)] },
+				],
+				{ listingStatus: status },
+			);
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-fallback-"));
+			try {
+				const result = await asyncSpawn(
+					"node",
+					["--experimental-strip-types", CLI, "element-template", "sync"],
+					{ env: syncEnv(dataDir, stub.url) },
+				);
+				assert.strictEqual(
+					result.status,
+					0,
+					`sync should succeed via the feed. stderr: ${result.stderr}`,
+				);
+				assert.strictEqual(stub.feedRequests(), 1);
+				assert.deepStrictEqual(stub.downloads().sort(), ["8.8.18", "8.9.0"]);
+				const combined = result.stdout + result.stderr;
+				assert.ok(
+					combined.includes(`HTTP ${status}`) &&
+						combined.includes(stub.feedUrl),
+					`expected a warning naming the status and the feed. Got: ${combined.slice(0, 500)}`,
+				);
+				for (const template of readCache(dataDir)) {
+					assert.ok(
+						upstreamRefOf(template).includes("/releases/download/"),
+						"feed-derived bundle URLs use the release download path",
+					);
+				}
+			} finally {
+				await stub.close();
+				rmSync(dataDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("falls back to the releases feed when the listing host is unreachable", async () => {
+		const stub = await startReleasesStub([
+			{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] },
+		]);
+		const closed = createServer();
+		await new Promise<void>((done) => closed.listen(0, "127.0.0.1", done));
+		const deadUrl = `http://127.0.0.1:${getServerPort(closed)}/releases`;
+		await new Promise<void>((done) => closed.close(() => done()));
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-unreachable-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: syncEnv(dataDir, deadUrl, {
+						C8CTL_CONNECTORS_RELEASES_FEED_URL: stub.feedUrl,
+					}),
+				},
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed via the feed. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(stub.downloads(), ["8.8.18"]);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("a feed-fallback sync never prunes and leaves fetched-at untouched", async () => {
+		// The feed lists only the newest releases, so the cached 8.7 line
+		// missing from it may still be supported: --prune must keep it.
+		const stub = await startReleasesStub(
+			[
+				{
+					tag: "8.8.18",
+					templates: [ootbTemplate("io.example.OnEightEight", 1)],
+				},
+			],
+			{ listingStatus: 403 },
+		);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-fallback-prune-"));
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		const base = stub.url.replace("/releases", "");
+		writeFileSync(
+			join(cacheDir, "templates.json"),
+			JSON.stringify([
+				{
+					id: "io.example.OnEightSeven",
+					name: "On 8.7",
+					version: 1,
+					properties: [],
+					metadata: {
+						upstreamRef: `${base}/download/8.7.24/${bundleAssetName("8.7.24")}#template-0.json`,
+					},
+				},
+			]),
+		);
+		writeFileSync(join(cacheDir, "fetched-at"), "1");
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+					"--prune",
+				],
+				{ env: { ...syncEnv(dataDir, stub.url), C8CTL_OUTPUT_MODE: "json" } },
+			);
+			assert.strictEqual(
+				result.status,
+				0,
+				`sync should succeed via the feed. stderr: ${result.stderr}`,
+			);
+			assert.deepStrictEqual(
+				readCache(dataDir)
+					.map((t) => t.id)
+					.sort(),
+				["io.example.OnEightEight", "io.example.OnEightSeven"],
+			);
+			assert.strictEqual(syncSummaryOf(result.stdout).pruned, 0);
+			assert.strictEqual(
+				readFileSync(join(cacheDir, "fetched-at"), "utf-8"),
+				"1",
+				"a partial listing must keep the staleness nudge armed",
+			);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("fails with a GITHUB_TOKEN hint when the listing is rate-limited and the feed fails too", async () => {
+		const stub = await startReleasesStub(
+			[{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] }],
+			{ listingStatus: 403, feedStatus: 503 },
+		);
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-bothfail-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, stub.url) },
+			);
+			assert.strictEqual(result.status, 1, "sync should fail");
+			const combined = result.stdout + result.stderr;
+			for (const expected of ["HTTP 403", "HTTP 503", "GITHUB_TOKEN"]) {
+				assert.ok(
+					combined.includes(expected),
+					`expected '${expected}' in the error. Got: ${combined.slice(0, 600)}`,
+				);
+			}
+			assert.deepStrictEqual(stub.downloads(), []);
+		} finally {
+			await stub.close();
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not fall back for listing errors other than a refusal", async () => {
+		// A 404/500 from a mirror is a broken listing, not a rate limit —
+		// silently switching to github.com would hide the misconfiguration.
+		for (const status of [404, 500]) {
+			const stub = await startReleasesStub(
+				[{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 1)] }],
+				{ listingStatus: status },
+			);
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-nofallback-"));
+			try {
+				const result = await asyncSpawn(
+					"node",
+					["--experimental-strip-types", CLI, "element-template", "sync"],
+					{ env: syncEnv(dataDir, stub.url) },
+				);
+				assert.strictEqual(result.status, 1, `sync should fail on ${status}`);
+				assert.strictEqual(stub.feedRequests(), 0, `no fallback on ${status}`);
+			} finally {
+				await stub.close();
+				rmSync(dataDir, { recursive: true, force: true });
+			}
 		}
 	});
 });

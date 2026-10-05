@@ -310,6 +310,15 @@ warning at the end (the property won't be applied).
    `github.com`. `raw.githubusercontent.com` is deliberately not used:
    it is blocked in many enterprise networks. Override the release
    listing endpoint via `C8CTL_CONNECTORS_RELEASES_URL` for testing.
+   The listing uses the GitHub REST API, which allows 60 unauthenticated
+   requests per hour per IP. Set `GITHUB_TOKEN` (or `GH_TOKEN`) to
+   authenticate it; the token is only sent to `api.github.com`. If the
+   API refuses the listing (401/403/429) or is unreachable, `sync` falls
+   back to the releases Atom feed (`github.com/camunda/connectors/
+   releases.atom`, overridable via `C8CTL_CONNECTORS_RELEASES_FEED_URL`).
+   The feed only lists the newest releases, so such a sync may cover
+   fewer minor lines; it then keeps the cached templates of the other
+   lines, skips `--prune`, and leaves the staleness hint armed.
 2. **Populate the cache once** via `c8ctl element-template sync`.
    Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
    `apply`, `get`) exit non-zero with a hint to run `sync` when the
