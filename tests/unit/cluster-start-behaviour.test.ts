@@ -171,8 +171,12 @@ describe("CLI behavioural: cluster start with a dropping download", () => {
 		const combined = result.stdout + result.stderr;
 		assert.strictEqual(result.status, 1, combined);
 		assert.ok(
-			combined.includes(`[verbose] Download URL: ${baseUrl}0.0.0-drop/`),
-			`Expected the download diagnostics in --verbose output, got:\n${combined}`,
+			result.stderr.includes(`[verbose] Download URL: ${baseUrl}0.0.0-drop/`),
+			`Expected the download diagnostics on stderr, got:\n${combined}`,
+		);
+		assert.ok(
+			!result.stdout.includes("[verbose]"),
+			`Expected no download diagnostics on stdout, got:\n${result.stdout}`,
 		);
 	});
 });
