@@ -599,7 +599,11 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 	}
 
 	test("reports progress in 5% steps with throughput and ETA", async () => {
-		server = await startServer((_req, res) => serveFull(res));
+		// Paced 1% slices, so the line count doesn't depend on how fetch() chunks the body.
+		server = await startServer((_req, res) => {
+			res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
+			trickle(res, { chunks: 99, delayMs: 1 });
+		});
 		const log = recordingLogger();
 
 		await plugin.downloadWithRetry({
