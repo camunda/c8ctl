@@ -679,17 +679,23 @@ function fileSizeOrZero(file) {
   }
 }
 
-/** Show a proxy URL without credentials. */
-function redactProxyUrl(value) {
+/**
+ * Show a URL without credentials: userinfo becomes `***`, and the query
+ * (e.g. a signed CDN redirect) and fragment are replaced by `?<redacted>`.
+ */
+function redactUrl(value, fallback = '(invalid URL)') {
   try {
     const url = new URL(value);
     if (url.username || url.password) {
       url.username = '***';
       url.password = '';
     }
-    return url.toString();
+    const query = url.search || url.hash ? '?<redacted>' : '';
+    url.search = '';
+    url.hash = '';
+    return `${url.toString()}${query}`;
   } catch {
-    return '(set)';
+    return fallback;
   }
 }
 
@@ -717,7 +723,7 @@ function mirrorHint() {
   const override = process.env.C8CTL_C8RUN_DOWNLOAD_URL;
   if (override) {
     return (
-      `C8CTL_C8RUN_DOWNLOAD_URL points the download at ${override}. ` +
+      `C8CTL_C8RUN_DOWNLOAD_URL points the download at ${redactUrl(override)}. ` +
       'Make sure that server is reachable, or unset it to use the Camunda Download Center.'
     );
   }
@@ -731,7 +737,7 @@ function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytes
   if (!isRetryableDownloadError(error) && codes.some((code) => FS_ERROR_CODES.has(code))) {
     return (
       `Could not save the download to ${targetFile}: ${rootCauseDetail(error)}\n` +
-      `URL: ${url}\n` +
+      `URL: ${redactUrl(url)}\n` +
       'What you can try:\n' +
       '  - Check that there is enough free disk space and that you can write to that directory.\n' +
       '  - Set C8RUN_CACHE_DIR to a different directory to download there instead.'
@@ -748,7 +754,7 @@ function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytes
   ];
   // Our own errors (stall, HTTP status, size mismatch) are fully described by `reason`.
   if (errorChain(error).length > 1 && detail !== reason) lines.push(`Cause: ${detail}`);
-  lines.push(`URL: ${url}`);
+  lines.push(`URL: ${redactUrl(url)}`);
   if (maxBytesReceived > 0) {
     lines.push(
       `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up; ` +
@@ -816,9 +822,9 @@ export async function downloadWithRetry({
 
   if (verbose) {
     const proxyVars = PROXY_ENV_VARS.filter((name) => process.env[name]).map((name) =>
-      name.toLowerCase() === 'no_proxy' ? `${name}=${process.env[name]}` : `${name}=${redactProxyUrl(process.env[name])}`,
+      name.toLowerCase() === 'no_proxy' ? `${name}=${process.env[name]}` : `${name}=${redactUrl(process.env[name], '(set)')}`,
     );
-    vlog(`Download URL: ${url}`);
+    vlog(`Download URL: ${redactUrl(url)}`);
     vlog(`Target file: ${targetFile}`);
     vlog(`Node.js ${process.version}; NODE_USE_ENV_PROXY=${process.env.NODE_USE_ENV_PROXY ?? '(not set)'}`);
     vlog(`Proxy environment: ${proxyVars.length > 0 ? proxyVars.join(', ') : '(none set)'}`);
@@ -925,7 +931,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
     'Accept-Encoding': 'identity',
     ...(resume ? { Range: `bytes=${state.written}-`, 'If-Range': state.validator } : {}),
   };
-  vlog(`GET ${url}`);
+  vlog(`GET ${redactUrl(url)}`);
   vlog(`Request headers: ${Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join(', ')}`);
 
   let response;
@@ -941,7 +947,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
 
   const header = (name) => response.headers.get(name);
   vlog(
-    `Response: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''} from ${response.url || url}` +
+    `Response: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''} from ${redactUrl(response.url || url)}` +
       `${response.redirected ? ' (after redirect)' : ''}`,
   );
   vlog(
@@ -1145,7 +1151,7 @@ async function downloadC8Run(config) {
     if (error.status !== undefined && !isRetryableDownloadError(error)) {
       throw new Error(
         `Failed to download c8run ${version}: HTTP ${error.status}\n` +
-          `URL: ${downloadUrl}\n` +
+          `URL: ${redactUrl(downloadUrl)}\n` +
           `Please check the version exists or try a different version.\n\n` +
           formatLocalVersionsHint(cacheDir),
       );

@@ -720,6 +720,64 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		);
 	});
 
+	test("redacts the query of a signed redirect target in verbose output", async () => {
+		server = await startServer((req, res) => {
+			if (!req.url?.includes("signed")) {
+				res.writeHead(302, {
+					location: "/signed.tar.gz?X-Amz-Signature=s3cret",
+				});
+				return res.end();
+			}
+			serveFull(res);
+		});
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			verbose: true,
+			...fast,
+		});
+
+		const all = log.messages().join("\n");
+		assert.ok(!all.includes("s3cret"), all);
+		assert.match(
+			all,
+			/from http:\/\/127\.0\.0\.1:\d+\/signed\.tar\.gz\?<redacted> \(after redirect\)/,
+		);
+	});
+
+	test("redacts credentials in the download and mirror URLs of the failure message", async () => {
+		const saved = process.env.C8CTL_C8RUN_DOWNLOAD_URL;
+		process.env.C8CTL_C8RUN_DOWNLOAD_URL =
+			"https://mirror.example/c8run/?token=m1rror";
+		server = await startServer((_req, res) => serveHalfThenDrop(res));
+		try {
+			const error = await rejectionOf(
+				plugin.downloadWithRetry({
+					url: `${server.url}?token=s3cret`,
+					targetFile,
+					logger: recordingLogger().logger,
+					...fast,
+				}),
+			);
+			assert.ok(!error.message.includes("s3cret"), error.message);
+			assert.ok(!error.message.includes("m1rror"), error.message);
+			assert.match(
+				error.message,
+				/^URL: http:\/\/127\.0\.0\.1:\d+\/\S+\.tar\.gz\?<redacted>$/m,
+			);
+			assert.match(
+				error.message,
+				/points the download at https:\/\/mirror\.example\/c8run\/\?<redacted>\./,
+			);
+		} finally {
+			if (saved === undefined) delete process.env.C8CTL_C8RUN_DOWNLOAD_URL;
+			else process.env.C8CTL_C8RUN_DOWNLOAD_URL = saved;
+		}
+	});
+
 	test("redacts proxy credentials in verbose output", async () => {
 		const saved = process.env.HTTPS_PROXY;
 		process.env.HTTPS_PROXY = "http://alice:s3cret@proxy.example:3128";
