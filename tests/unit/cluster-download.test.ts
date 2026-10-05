@@ -928,6 +928,26 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 });
 
 describe("Cluster Plugin – download failure descriptions", () => {
+	test("quoteForHint quotes paths safely for copy-paste on POSIX shells and Windows", () => {
+		assert.strictEqual(
+			plugin.quoteForHint("/home/me/.cache/c8run-8.9", "linux"),
+			"/home/me/.cache/c8run-8.9",
+		);
+		assert.strictEqual(
+			plugin.quoteForHint("/tmp/my dir/$HOME`id`'x'", "darwin"),
+			"'/tmp/my dir/$HOME`id`'\\''x'\\'''",
+		);
+		assert.strictEqual(plugin.quoteForHint("/tmp/a&b", "linux"), "'/tmp/a&b'");
+		assert.strictEqual(
+			plugin.quoteForHint("C:\\Users\\me\\c8run", "win32"),
+			"C:\\Users\\me\\c8run",
+		);
+		assert.strictEqual(
+			plugin.quoteForHint("C:\\Users\\Jane Doe\\c8run", "win32"),
+			'"C:\\Users\\Jane Doe\\c8run"',
+		);
+	});
+
 	const withCode = (message: string, code: string) =>
 		Object.assign(new Error(message), { code });
 	const terminated = (cause: Error) => new TypeError("terminated", { cause });

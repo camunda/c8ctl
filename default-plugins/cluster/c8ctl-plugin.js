@@ -1154,8 +1154,13 @@ export function formatErrorWithCause(error) {
 }
 
 /** Shell-quote a path for display in a hint when it contains spaces. */
-function quoteForHint(path) {
-  return /\s/.test(path) ? `"${path}"` : path;
+/** Quote a path for a copy-paste command: single quotes for POSIX shells, double quotes on Windows. */
+export function quoteForHint(path, platform = osPlatform()) {
+  if (platform === 'win32') {
+    // Windows paths cannot contain `"`; cmd and PowerShell both accept double quotes.
+    return /^[\w.:\\/-]+$/.test(path) ? path : `"${path}"`;
+  }
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
 async function downloadC8Run(config) {
