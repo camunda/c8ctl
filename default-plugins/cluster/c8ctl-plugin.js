@@ -1395,7 +1395,13 @@ export async function hasNewerVersionAvailable(config) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
+    // Same representation as the download, whose ETag was stored: with
+    // Vary: Accept-Encoding a gzip variant can carry a different ETag.
+    const response = await fetch(downloadUrl, {
+      method: 'HEAD',
+      headers: { 'Accept-Encoding': 'identity' },
+      signal: controller.signal,
+    });
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
