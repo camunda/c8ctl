@@ -418,7 +418,13 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		);
 
 		assert.strictEqual(server.requests.length, 1);
-		assert.match(`${error.message} ${prop(error, "code")}`, /ENOENT/);
+		assert.match(
+			error.message,
+			/^Could not save the download to .*: ENOENT: /,
+			"a file-system failure gets disk advice, not network advice",
+		);
+		assert.match(error.message, /C8RUN_CACHE_DIR/);
+		assert.doesNotMatch(error.message, /VPN|HTTPS_PROXY/);
 	});
 
 	test("asks for the identity encoding and ignores the sizes of a response encoded anyway", async () => {

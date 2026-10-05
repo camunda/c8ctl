@@ -510,7 +510,7 @@ const PROGRESS_INTERVAL_MS = 5_000;
 // Error codes of failures that a retry cannot fix: local file-system problems
 // and TLS certificate errors (Node's X509 verification codes, see
 // https://nodejs.org/api/tls.html#x509-certificate-error-codes, except OUT_OF_MEM).
-const FS_ERROR_CODES = new Set(['ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'EISDIR', 'ENOTDIR', 'EDQUOT']);
+const FS_ERROR_CODES = new Set(['ENOENT', 'ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'EISDIR', 'ENOTDIR', 'EDQUOT']);
 const TLS_ERROR_CODES = new Set([
   'UNABLE_TO_GET_ISSUER_CERT',
   'UNABLE_TO_GET_CRL',
