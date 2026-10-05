@@ -521,6 +521,39 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		});
 	});
 
+	test("retries a 206 with an unknown total (`*`) that ends before its range end", async () => {
+		const half = PAYLOAD.length / 2;
+		const short = 1024 * 1024;
+		server = await startServer((req, res, n) => {
+			if (n === 1) {
+				// Chunked, so the total size stays unknown; then drop.
+				res.writeHead(200, { etag: ETAG });
+				res.write(PAYLOAD.subarray(0, half), () => res.socket?.destroy());
+				return;
+			}
+			const start = Number(/^bytes=(\d+)-$/.exec(req.headers.range ?? "")?.[1]);
+			const end = n === 2 ? start + short : PAYLOAD.length;
+			res.writeHead(206, {
+				"content-length": end - start,
+				"content-range": `bytes ${start}-${PAYLOAD.length - 1}/*`,
+				etag: ETAG,
+			});
+			res.end(PAYLOAD.subarray(start, end));
+		});
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			...fast,
+		});
+
+		assert.strictEqual(server.requests.length, 3, log.messages().join("\n"));
+		assert.match(log.messages("warn")[1], /the download ended early/);
+		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
+	});
+
 	test("names the kept path when a file-system failure leaves something it cannot remove", async () => {
 		// A directory where the archive should go: writing fails with EISDIR and
 		// rmSync() without `recursive` refuses to delete it.

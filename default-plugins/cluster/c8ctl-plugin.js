@@ -1011,6 +1011,8 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
 
   const discardBody = () => response.body?.cancel().catch(() => {});
   let append = false;
+  // Where a 206 body must end; the only size check when the total is `*`.
+  let rangeEnd = 0;
   // A server may encode the body anyway; its sizes and ranges then don't apply.
   const encoded = !['', 'identity'].includes((header('content-encoding') ?? '').trim().toLowerCase());
 
@@ -1023,6 +1025,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
       throw downloadError(reason, { reason, retryable: true });
     }
     if (range.total > 0) state.total = range.total;
+    rangeEnd = range.end + 1;
     append = true;
   } else if (response.ok) {
     if (resume) {
@@ -1104,13 +1107,14 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
   }
 
   state.written = fileSizeOrZero(targetFile);
-  if (state.total > 0 && state.written !== state.total) {
+  const expected = state.total > 0 ? state.total : rangeEnd;
+  if (expected > 0 && state.written !== expected) {
     const reason =
-      state.written < state.total
-        ? `the download ended early (received ${formatSize(state.written)} of ${formatSize(state.total)})`
-        : `the download is larger than announced (${formatSize(state.written)} instead of ${formatSize(state.total)})`;
+      state.written < expected
+        ? `the download ended early (received ${formatSize(state.written)} of ${formatSize(expected)})`
+        : `the download is larger than announced (${formatSize(state.written)} instead of ${formatSize(expected)})`;
     // An oversized file cannot be repaired by resuming; start over.
-    if (state.written > state.total) state.written = 0;
+    if (state.written > expected) state.written = 0;
     throw downloadError(reason, { reason, retryable: true });
   }
 }
