@@ -196,11 +196,11 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 			warnings[0],
 			/^Download interrupted at \d+ (KB|MB) \/ 3 MB \(the connection was (closed by the server or a proxy|closed unexpectedly)\)\. Retrying \(1\/3\) in 1ms, resuming from \d+ (KB|MB)\.\.\.$/,
 		);
-		// Progress continues across the resume instead of restarting at 10%.
+		// Progress continues across the resume instead of starting over.
 		const progress = log
 			.messages("info")
-			.filter((m) => m.startsWith("Progress:"))
-			.map((m) => Number(/Progress: (\d+)%/.exec(m)?.[1]));
+			.filter((m) => m.startsWith("//>"))
+			.map((m) => Number(/^\/\/> (\d+)%/.exec(m)?.[1]));
 		assert.deepStrictEqual(
 			progress,
 			[...progress].sort((a, b) => a - b),
@@ -392,6 +392,104 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
+	const progressLines = (log: ReturnType<typeof recordingLogger>) =>
+		log.messages("info").filter((m) => m.startsWith("//>"));
+
+	/** Send `chunks` slices of the payload `delayMs` apart, then the rest. */
+	function trickle(
+		res: ServerResponse,
+		{ chunks, delayMs }: { chunks: number; delayMs: number },
+	): void {
+		const slice = Math.floor(PAYLOAD.length / 100);
+		let sent = 0;
+		const next = () => {
+			if (sent >= chunks * slice) {
+				res.end(PAYLOAD.subarray(sent));
+				return;
+			}
+			res.write(PAYLOAD.subarray(sent, sent + slice));
+			sent += slice;
+			setTimeout(next, delayMs);
+		};
+		next();
+	}
+
+	test("reports progress in 5% steps with throughput and ETA", async () => {
+		server = await startServer((_req, res) => serveFull(res));
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			...fast,
+		});
+
+		const lines = progressLines(log);
+		for (const line of lines) {
+			assert.match(
+				line,
+				/^\/\/> \d+% \(\d+\.\d MB \/ 3\.0 MB\) at ([\d.]+ MB\/s|n\/a)(, ETA (\d+s|\d+m \d{2}s))?$/,
+			);
+		}
+		const percentages = lines.map((m) => Number(/(\d+)%/.exec(m)?.[1]));
+		assert.ok(
+			percentages.length > 10,
+			`expected more than 10 progress lines, got:\n${lines.join("\n")}`,
+		);
+		assert.ok(
+			percentages.every((p, i) => p >= (percentages[i - 1] ?? 0) + 5),
+			lines.join("\n"),
+		);
+	});
+
+	test("reports progress below the 5% step once the progress interval has passed", async () => {
+		server = await startServer((_req, res) => {
+			res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
+			trickle(res, { chunks: 3, delayMs: 50 });
+		});
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			progressIntervalMs: 20,
+			...fast,
+		});
+
+		const lines = progressLines(log);
+		assert.ok(
+			lines.some((m) => Number(/(\d+)%/.exec(m)?.[1]) < 5),
+			`expected a progress line below 5%, got:\n${lines.join("\n")}`,
+		);
+	});
+
+	test("reports received bytes and throughput when the total size is unknown", async () => {
+		server = await startServer((_req, res) => {
+			res.writeHead(200, { etag: ETAG });
+			trickle(res, { chunks: 3, delayMs: 50 });
+		});
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			progressIntervalMs: 20,
+			...fast,
+		});
+
+		const lines = progressLines(log);
+		assert.ok(lines.length > 0, "expected progress without a known size");
+		for (const line of lines) {
+			assert.match(
+				line,
+				/^\/\/> \d+\.\d MB \(total size unknown\) at ([\d.]+ MB\/s|n\/a)$/,
+			);
+		}
+	});
+
 	test("reports a refused connection as an unreachable Download Center after all retries", async () => {
 		// Bind then close a server to obtain a port that refuses connections.
 		const closed = await startServer(() => {});
@@ -420,7 +518,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.match(error.message, /Cause: ECONNREFUSED: /);
 	});
 
-	test("logs [verbose] HTTP diagnostics (URL, environment, headers, per-attempt timing, cause chain, finer progress) only when verbose is set", async () => {
+	test("logs [verbose] HTTP diagnostics (URL, environment, headers, per-attempt timing, cause chain) only when verbose is set, without extra progress lines", async () => {
 		const run = async (verbose: boolean) => {
 			const s = await startServer((req, res, n) =>
 				n === 1 ? serveHalfThenDrop(res) : serveRange(req, res),
@@ -477,15 +575,14 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		has(
 			/^\[verbose\] Attempt 2\/4 completed after \S+: [\d.]+ MB received \(([\d.]+ MB\/s|n\/a)\)/,
 		);
-		has(/^\[verbose\] Progress: \d+% \([\d.]+ MB \/ 3\.0 MB\) at /);
-		// Finer-grained than the regular 10% steps.
-		const verboseProgress = diagnostics.filter((m) => m.includes("Progress:"));
-		const regularProgress = loud.log
-			.messages("info")
-			.filter((m) => m.startsWith("Progress:"));
+		assert.deepStrictEqual(
+			diagnostics.filter((m) => /\/\/>|Progress:/.test(m)),
+			[],
+			"verbose must not add progress lines",
+		);
 		assert.ok(
-			verboseProgress.length > regularProgress.length,
-			`verbose progress (${verboseProgress.length}) should be finer than regular (${regularProgress.length})`,
+			loud.log.messages("info").some((m) => m.startsWith("//>")),
+			"regular progress still shows with verbose",
 		);
 	});
 

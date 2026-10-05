@@ -504,8 +504,8 @@ const DOWNLOAD_MAX_RETRIES = 3;
 const DOWNLOAD_RETRY_BASE_DELAY_MS = 2_000;
 const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
 const MB = 1024 * 1024;
-const VERBOSE_PROGRESS_STEP_PERCENT = 2;
-const VERBOSE_PROGRESS_STEP_BYTES = 10 * MB;
+const PROGRESS_STEP_PERCENT = 5;
+const PROGRESS_INTERVAL_MS = 5_000;
 
 // Error codes of failures that a retry cannot fix: local file-system problems
 // and TLS certificate errors.
@@ -553,6 +553,11 @@ function formatDuration(ms) {
 
 function formatThroughput(bytes, ms) {
   return ms > 0 ? `${((bytes / MB) / (ms / 1000)).toFixed(1)} MB/s` : 'n/a';
+}
+
+function formatEta(ms) {
+  const s = Math.ceil(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
 function downloadError(message, props = {}) {
@@ -756,7 +761,7 @@ function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytes
  *   `status` so the caller can explain it.
  * - The partial file is kept between retries and deleted when giving up.
  * - With `verbose`, logs request/response details, per-attempt timing,
- *   finer-grained progress with throughput, and full error cause chains.
+ *   and full error cause chains.
  *
  * Resolves to `{ bytes, etag }`, where `etag` is the ETag (or Last-Modified)
  * of the downloaded content, or null.
@@ -769,6 +774,7 @@ export async function downloadWithRetry({
   maxRetries = DOWNLOAD_MAX_RETRIES,
   retryDelayMs = DOWNLOAD_RETRY_BASE_DELAY_MS,
   stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS,
+  progressIntervalMs = PROGRESS_INTERVAL_MS,
   extraHints = [],
 }) {
   const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr' }) : () => {};
@@ -779,8 +785,8 @@ export async function downloadWithRetry({
     validator: null,
     etag: null,
     reportedPercent: 0,
-    verboseReportedPercent: 0,
-    verboseReportedBytes: 0,
+    reportedBytes: 0,
+    reportedAt: Date.now(),
     connected: false,
     maxBytesReceived: 0,
     attemptBytes: 0,
@@ -808,7 +814,7 @@ export async function downloadWithRetry({
     state.attemptBytes = 0;
     vlog(`Attempt ${attempt}/${totalAttempts} started`);
     try {
-      await downloadAttempt({ url, targetFile, state, stallTimeoutMs, logger, vlog, startedAt });
+      await downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt });
       const elapsed = Date.now() - startedAt;
       vlog(
         `Attempt ${attempt}/${totalAttempts} completed after ${formatDuration(elapsed)}: ` +
@@ -870,7 +876,7 @@ export async function downloadWithRetry({
 }
 
 /** One HTTP request; updates `state` and throws a classified error on failure. */
-async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, logger, vlog, startedAt }) {
+async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt }) {
   const controller = new AbortController();
   let stallTimer;
   let stalled = false;
@@ -940,8 +946,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, logger,
     }
     state.written = 0;
     state.reportedPercent = 0;
-    state.verboseReportedPercent = 0;
-    state.verboseReportedBytes = 0;
+    state.reportedBytes = 0;
     state.total = Number.parseInt(header('content-length') || '0', 10) || 0;
     // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
     // values are date strings. Both are used as opaque version tokens for equality
@@ -997,7 +1002,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, logger,
       state.written += chunk.value.length;
       state.attemptBytes += chunk.value.length;
       state.maxBytesReceived = Math.max(state.maxBytesReceived, state.written);
-      reportDownloadProgress({ state, logger, vlog, startedAt });
+      reportDownloadProgress({ state, logger, startedAt, progressIntervalMs });
     }
     fileStream.end();
     await finished(fileStream);
@@ -1023,31 +1028,28 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, logger,
   }
 }
 
-function reportDownloadProgress({ state, logger, vlog, startedAt }) {
-  let printed = false;
-  if (state.total > 0) {
-    const percentage = Math.floor((state.written / state.total) * 100);
-    if (percentage >= state.reportedPercent + 10) {
-      logger.info(`Progress: ${percentage}% (${formatMB(state.written)} / ${formatMB(state.total)})`);
-      state.reportedPercent = percentage;
-      printed = true;
-    }
-    if (percentage >= state.verboseReportedPercent + VERBOSE_PROGRESS_STEP_PERCENT) {
-      state.verboseReportedPercent = percentage;
-      if (!printed) {
-        vlog(
-          `Progress: ${percentage}% (${formatMBPrecise(state.written)} / ${formatMBPrecise(state.total)}) at ` +
-            formatThroughput(state.attemptBytes, Date.now() - startedAt),
-        );
-      }
-    }
-  } else if (state.written >= state.verboseReportedBytes + VERBOSE_PROGRESS_STEP_BYTES) {
-    state.verboseReportedBytes = state.written;
-    vlog(
-      `Progress: ${formatMBPrecise(state.written)} (total size unknown) at ` +
-        formatThroughput(state.attemptBytes, Date.now() - startedAt),
-    );
-  }
+function reportDownloadProgress({ state, logger, startedAt, progressIntervalMs }) {
+  const now = Date.now();
+  const percentage = state.total > 0 ? Math.floor((state.written / state.total) * 100) : 0;
+  const stepReached = state.total > 0 && percentage >= state.reportedPercent + PROGRESS_STEP_PERCENT;
+  const intervalPassed = now - state.reportedAt >= progressIntervalMs && state.written > state.reportedBytes;
+  if (!stepReached && !intervalPassed) return;
+
+  const elapsed = now - startedAt;
+  const rate = formatThroughput(state.attemptBytes, elapsed);
+  const remaining = state.total - state.written;
+  const eta =
+    state.total > 0 && remaining > 0 && state.attemptBytes > 0 && elapsed > 0
+      ? `, ETA ${formatEta((remaining * elapsed) / state.attemptBytes)}`
+      : '';
+  logger.info(
+    state.total > 0
+      ? `//> ${percentage}% (${formatMBPrecise(state.written)} / ${formatMBPrecise(state.total)}) at ${rate}${eta}`
+      : `//> ${formatMBPrecise(state.written)} (total size unknown) at ${rate}`,
+  );
+  state.reportedPercent = percentage;
+  state.reportedBytes = state.written;
+  state.reportedAt = now;
 }
 
 /**
