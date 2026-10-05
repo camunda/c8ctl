@@ -68,6 +68,10 @@ function listTestFiles(): string[] {
 		for (const entry of entries) {
 			const abs = join(dir, entry.name);
 			if (entry.isDirectory()) {
+				// Skip dot-dirs: `plugin-host-compat.test.ts` stages and removes
+				// `tests/.tmp-hostver-*` concurrently, so walking into one races
+				// its deletion (ENOENT). They never hold real test sources (#610).
+				if (entry.name.startsWith(".")) continue;
 				walk(abs);
 			} else if (entry.isFile() && entry.name.endsWith(".test.ts")) {
 				out.push(abs);

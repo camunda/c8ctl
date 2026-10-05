@@ -40,20 +40,11 @@ export const listProcessInstancesCommand = defineCommand(
 			filter.filter.businessId = flags.businessId;
 		}
 
-		// version comes from global --version flag, not resource flags
-		const versionIdx = process.argv.indexOf("--version");
-		const vIdx = process.argv.indexOf("-v");
-		const versionArg =
-			versionIdx >= 0
-				? process.argv[versionIdx + 1]
-				: vIdx >= 0
-					? process.argv[vIdx + 1]
-					: undefined;
-		if (versionArg) {
-			const version = parseInt(versionArg, 10);
-			if (!Number.isNaN(version)) {
-				filter.filter.processDefinitionVersion = version;
-			}
+		// `--version` is a global flag, parsed as a string after the verb
+		// (stage 2 of the two-stage parser) and surfaced as ctx.version.
+		const version = ctx.version;
+		if (version !== undefined && !Number.isNaN(version)) {
+			filter.filter.processDefinitionVersion = version;
 		}
 
 		if (flags.state) {
@@ -112,13 +103,13 @@ export const listProcessInstancesCommand = defineCommand(
 export const getProcessInstanceCommand = defineCommand(
 	"get",
 	"process-instance",
-	async (ctx, _flags, args) => {
+	async (ctx, flags, args) => {
 		const { client, profile } = ctx;
 		const key = args.key;
 		const consistencyOptions = { consistency: { waitUpToMs: 0 } };
-		// --variables is registered as string type in parseArgs (for create pi --variables '{...}')
-		// but used as a boolean toggle for get pi. Check argv directly.
-		const includeVariables = process.argv.includes("--variables");
+		// --variables is a boolean toggle for `get pi` (and a string for
+		// `create pi`): stage 2 parses it against this command's own flag table.
+		const includeVariables = flags.variables === true;
 
 		const dr = ctx.dryRun({
 			command: "get process-instance",
