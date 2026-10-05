@@ -96,7 +96,7 @@ describe("isNewer", () => {
 
 let tempDir: string;
 let consoleLogOutput: string[];
-let spawned: string[];
+let spawned: number;
 let fetchCalls: number;
 let registry: () => Promise<Response>;
 let originalLog: typeof console.log;
@@ -118,7 +118,7 @@ const output = () => consoleLogOutput.join("\n");
 /** One CLI invocation: start the check, run the "command", print. */
 function invoke(version: string): void {
 	_resetForTesting();
-	_setSpawnerForTesting((channel) => spawned.push(channel));
+	_setSpawnerForTesting(() => spawned++);
 	startUpdateCheck(version);
 	printUpdateNotification();
 }
@@ -128,7 +128,7 @@ const worker = runUpdateCheck;
 
 beforeEach(() => {
 	consoleLogOutput = [];
-	spawned = [];
+	spawned = 0;
 	fetchCalls = 0;
 	registry = distTags({ latest: "2.0.0" });
 	originalFetch = globalThis.fetch;
@@ -172,30 +172,25 @@ describe("startUpdateCheck (CLI side)", () => {
 
 	test("spawns the worker when there is no previous check", () => {
 		invoke("1.0.0");
-		assert.deepStrictEqual(spawned, ["latest"]);
-	});
-
-	test("spawns the worker on the alpha channel for alpha builds", () => {
-		invoke("2.0.0-alpha.5");
-		assert.deepStrictEqual(spawned, ["alpha"]);
+		assert.strictEqual(spawned, 1);
 	});
 
 	test("does not spawn when the last check is recent", () => {
 		writeCheck({ checkedAt: Date.now(), versions: {} });
 		invoke("1.0.0");
-		assert.deepStrictEqual(spawned, []);
+		assert.strictEqual(spawned, 0);
 	});
 
 	test("spawns again once the check interval has passed", () => {
 		writeCheck({ checkedAt: Date.now() - CHECK_INTERVAL_MS, versions: {} });
 		invoke("1.0.0");
-		assert.deepStrictEqual(spawned, ["latest"]);
+		assert.strictEqual(spawned, 1);
 	});
 
 	test("ignores a corrupt check file", () => {
 		writeFileSync(checkFile(), "not json");
 		invoke("1.0.0");
-		assert.deepStrictEqual(spawned, ["latest"]);
+		assert.strictEqual(spawned, 1);
 		assert.ok(!output().includes("newer version"));
 	});
 });
@@ -269,29 +264,34 @@ describe("printUpdateNotification (from cached check)", () => {
 		fresh({ latest: "2.0.0" });
 		invoke("1.0.0");
 		assert.ok(!output().includes("newer version"));
-		assert.deepStrictEqual(spawned, []);
+		assert.strictEqual(spawned, 0);
 	});
 
 	test("suppressed for the development placeholder version", () => {
 		fresh({ latest: "2.0.0" });
 		invoke("0.0.0-semantically-released");
 		assert.ok(!output().includes("newer version"));
-		assert.deepStrictEqual(spawned, []);
+		assert.strictEqual(spawned, 0);
 	});
 });
 
 describe("runUpdateCheck (worker side)", () => {
-	test("records the channel's latest version", async () => {
+	test("records every dist-tag from one response", async () => {
 		registry = distTags({ latest: "2.0.0", alpha: "3.0.0-alpha.1" });
-		await worker("latest");
-		assert.deepStrictEqual(readCheck().versions, { latest: "2.0.0" });
+		await worker();
+		assert.deepStrictEqual(readCheck().versions, {
+			latest: "2.0.0",
+			alpha: "3.0.0-alpha.1",
+		});
 		assert.ok(Date.now() - readCheck().checkedAt < 5000);
 	});
 
-	test("keeps other channels' versions", async () => {
-		writeCheck({ checkedAt: 0, versions: { latest: "2.0.0" } });
+	test("replaces, not merges, the cached versions", async () => {
+		// Concurrent workers then can't lose each other's results: each one
+		// writes a complete, equally fresh set.
+		writeCheck({ checkedAt: 0, versions: { latest: "1.0.0", beta: "0.1.0" } });
 		registry = distTags({ latest: "2.0.0", alpha: "3.0.0-alpha.1" });
-		await worker("alpha");
+		await worker();
 		assert.deepStrictEqual(readCheck().versions, {
 			latest: "2.0.0",
 			alpha: "3.0.0-alpha.1",
@@ -311,7 +311,7 @@ describe("runUpdateCheck (worker side)", () => {
 		test(`${name}: records the attempt, keeps the last known version`, async () => {
 			writeCheck({ checkedAt: 0, versions: { latest: "2.0.0" } });
 			registry = failing;
-			await worker("latest");
+			await worker();
 			assert.deepStrictEqual(readCheck().versions, { latest: "2.0.0" });
 			assert.ok(readCheck().checkedAt > 0, "attempt throttles respawns");
 		});
@@ -322,12 +322,22 @@ describe("CLI and worker together", () => {
 	test("a version found by the worker is announced on the next run", async () => {
 		invoke("1.0.0");
 		assert.ok(!output().includes("newer version"), "nothing cached yet");
-		assert.deepStrictEqual(spawned, ["latest"]);
+		assert.strictEqual(spawned, 1);
 
-		await worker("latest");
+		await worker();
 
 		invoke("1.0.0");
 		assert.ok(output().includes("2.0.0"), output());
-		assert.deepStrictEqual(spawned, ["latest"], "fresh check: no respawn");
+		assert.strictEqual(spawned, 1, "fresh check: no respawn");
+	});
+
+	test("a check from a stable build also serves alpha builds", async () => {
+		registry = distTags({ latest: "2.0.0", alpha: "3.0.0-alpha.2" });
+		invoke("1.0.0");
+		await worker();
+
+		invoke("3.0.0-alpha.1");
+		assert.ok(output().includes("3.0.0-alpha.2"), output());
+		assert.strictEqual(spawned, 1, "fresh check: no respawn");
 	});
 });

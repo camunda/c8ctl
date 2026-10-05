@@ -151,67 +151,64 @@ export function isNewer(local: string, remote: string): boolean {
 }
 
 /**
- * Fetch the latest version for a given dist-tag from the npm registry.
+ * Fetch all dist-tags (e.g. `latest`, `alpha`) from the npm registry.
  * Returns undefined on any failure (offline, timeout, etc.).
  *
  * Plain global fetch is fine here: it only ever runs in the worker, whose
  * deadline bounds any stall. It also honours NODE_USE_ENV_PROXY +
  * HTTPS_PROXY, which a network that blocks the registry may need.
  */
-async function fetchRemoteVersion(
-	channel: string,
-): Promise<string | undefined> {
+async function fetchDistTags(): Promise<Record<string, string> | undefined> {
 	try {
 		const res = await fetch(REGISTRY_URL, {
 			signal: AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS),
 		});
 		if (!res.ok) return undefined;
 		const data: unknown = await res.json();
-		if (!isRecord(data)) return undefined;
-		const distTags = data["dist-tags"];
-		if (!isRecord(distTags)) return undefined;
-		const version = distTags[channel];
-		return typeof version === "string" ? version : undefined;
+		if (!isRecord(data) || !isRecord(data["dist-tags"])) return undefined;
+		const tags: Record<string, string> = {};
+		for (const [tag, version] of Object.entries(data["dist-tags"])) {
+			if (typeof version === "string") tags[tag] = version;
+		}
+		return tags;
 	} catch {
 		return undefined;
 	}
 }
 
 /**
- * Worker body: fetch the channel's latest version and record it.
+ * Worker body: fetch the dist-tags and record them.
  * Runs in the detached worker process, never in the CLI process.
  *
  * `checkedAt` is recorded before the fetch so that, while the registry is
  * unreachable, CLI invocations don't respawn a worker each time.
+ *
+ * Every channel is recorded from the one response, replacing the previous
+ * set: one check serves stable and alpha builds alike, and concurrent
+ * workers can't drop each other's results — each writes a complete set.
  */
-export async function runUpdateCheck(channel: string): Promise<void> {
-	const state = readCheckState();
-	writeJson(CHECK_FILE, { ...state, checkedAt: Date.now() });
+export async function runUpdateCheck(): Promise<void> {
+	const checkedAt = Date.now();
+	writeJson(CHECK_FILE, { ...readCheckState(), checkedAt });
 
-	const version = await fetchRemoteVersion(channel);
-	if (!version) return;
-
-	const latest = readCheckState();
-	writeJson(CHECK_FILE, {
-		...latest,
-		versions: { ...latest.versions, [channel]: version },
-	});
+	const versions = await fetchDistTags();
+	if (versions) writeJson(CHECK_FILE, { checkedAt, versions });
 }
 
-type Spawner = (channel: string) => void;
+type Spawner = () => void;
 
 /**
  * Launch the worker detached and unref'd: the CLI neither waits for it nor
  * shares its process group, so Ctrl-C or the shell prompt are unaffected.
  */
-const spawnWorker: Spawner = (channel) => {
+const spawnWorker: Spawner = () => {
 	// `.ts` when running from source, `.js` from dist
 	const ext = extname(fileURLToPath(import.meta.url));
 	const worker = fileURLToPath(
 		new URL(`./update-check-worker${ext}`, import.meta.url),
 	);
 	try {
-		const child = spawn(process.execPath, [worker, channel], {
+		const child = spawn(process.execPath, [worker], {
 			detached: true,
 			stdio: "ignore",
 			windowsHide: true,
@@ -248,7 +245,7 @@ export function startUpdateCheck(currentVersion: string): void {
 	const stale =
 		state.checkedAt === undefined ||
 		Date.now() - state.checkedAt >= CHECK_INTERVAL_MS;
-	if (stale) spawner(channel);
+	if (stale) spawner();
 
 	const remoteVersion = state.versions[channel];
 	if (!remoteVersion || !isNewer(currentVersion, remoteVersion)) return;
