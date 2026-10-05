@@ -11,8 +11,11 @@
  */
 
 import assert from "node:assert";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { c8WithEnv } from "../utils/cli.ts";
 
@@ -79,7 +82,11 @@ describe("CLI behavioural: cluster start failure", () => {
 		await new Promise<void>((resolve) => closed.close(() => resolve()));
 
 		const result = await c8WithEnv(
-			{ C8CTL_C8RUN_DOWNLOAD_URL: `http://127.0.0.1:${port}/c8run/` },
+			{
+				C8CTL_C8RUN_DOWNLOAD_URL: `http://127.0.0.1:${port}/c8run/`,
+				// Connection failures are retried; keep the backoff short.
+				C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+			},
 			"cluster",
 			"start",
 			"--c8-version",
@@ -96,5 +103,109 @@ describe("CLI behavioural: cluster start failure", () => {
 			combined.includes("check your network connection"),
 			`Expected connectivity hint in output, got:\n${combined}`,
 		);
+	});
+});
+
+describe("CLI behavioural: cluster start with a dropping download", () => {
+	const PAYLOAD = Buffer.alloc(2 * 1024 * 1024, 1);
+	let server: Server;
+	let baseUrl: string;
+	let requests = 0;
+	let cacheDir: string;
+
+	before(async () => {
+		// Every response announces the full archive, sends half, then kills
+		// the socket — the shape of the reported "TypeError: terminated".
+		server = createServer((_req, res) => {
+			requests++;
+			res.writeHead(200, {
+				"content-length": PAYLOAD.length,
+				etag: '"c8run-drop"',
+			});
+			res.write(PAYLOAD.subarray(0, PAYLOAD.length / 2), () => {
+				setTimeout(() => res.socket?.destroy(), 20);
+			});
+		});
+		baseUrl = `http://127.0.0.1:${await listen(server)}/c8run/`;
+		cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-cluster-drop-"));
+	});
+
+	after(() => {
+		server.close();
+		rmSync(cacheDir, { recursive: true, force: true });
+	});
+
+	const start = (...extra: string[]) =>
+		c8WithEnv(
+			{
+				C8CTL_C8RUN_DOWNLOAD_URL: baseUrl,
+				C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS: "1",
+				C8RUN_CACHE_DIR: cacheDir,
+			},
+			"cluster",
+			"start",
+			"--c8-version",
+			"0.0.0-drop",
+			...extra,
+		);
+
+	test("retries 3 times, then fails with the cause, the URL and actionable hints", async () => {
+		requests = 0;
+		const result = await start();
+
+		assert.notStrictEqual(result.status, 0, "Should exit with non-zero status");
+		const combined = result.stdout + result.stderr;
+		assert.strictEqual(requests, 4, `expected 1 + 3 attempts:\n${combined}`);
+		for (const expected of [
+			"Retrying (1/3)",
+			"Retrying (3/3)",
+			"Failed to start cluster",
+			"Download failed after 4 attempts",
+			`${baseUrl}0.0.0-drop/`,
+			"NODE_USE_ENV_PROXY=1",
+			"C8CTL_C8RUN_DOWNLOAD_URL",
+		]) {
+			assert.ok(
+				combined.includes(expected),
+				`Expected "${expected}" in output, got:\n${combined}`,
+			);
+		}
+		assert.match(
+			combined,
+			/the connection was (closed by the server or a proxy|closed unexpectedly)/,
+		);
+		assert.ok(
+			!combined.includes("[verbose]"),
+			`verbose diagnostics must not appear without --verbose:\n${combined}`,
+		);
+		assert.deepStrictEqual(
+			readdirSync(cacheDir).filter((f) => /\.(zip|tar\.gz)$/.test(f)),
+			[],
+			"the incomplete archive must be removed",
+		);
+	});
+
+	test("--verbose adds HTTP download diagnostics", async () => {
+		const result = await start("--verbose");
+
+		assert.notStrictEqual(result.status, 0, "Should exit with non-zero status");
+		const combined = result.stdout + result.stderr;
+		for (const expected of [
+			"[verbose] Download URL: ",
+			"[verbose] Node.js v",
+			"NODE_USE_ENV_PROXY=",
+			"[verbose] Proxy environment: ",
+			"[verbose] Attempt 1/4 started",
+			"[verbose] Request headers: Range: bytes=",
+			"[verbose] Response: HTTP 200 OK",
+			"[verbose] Response headers: content-length: ",
+			"[verbose]   caused by: TypeError: terminated",
+			"[verbose] Attempt 4/4 failed after ",
+		]) {
+			assert.ok(
+				combined.includes(expected),
+				`Expected "${expected}" in --verbose output, got:\n${combined}`,
+			);
+		}
 	});
 });

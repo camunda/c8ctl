@@ -172,6 +172,14 @@ Cache locations:
 
 Override the cache directory with the `C8RUN_CACHE_DIR` environment variable.
 
+### Download interruptions
+
+The c8run archive is several hundred MB. If the connection drops, `c8 cluster start` and `c8 cluster install` retry up to three times and resume from where the download stopped when the server supports it. An attempt that receives no data for 60 seconds is aborted and retried. If the download still fails, the error names the cause and suggests what to try:
+
+- Behind a proxy, set `HTTPS_PROXY` together with `NODE_USE_ENV_PROXY=1` (Node.js 22.21+ or 24.5+).
+- Set `C8CTL_C8RUN_DOWNLOAD_URL` to download from a mirror with the same layout as the Camunda Download Center.
+- Add `--verbose` to print HTTP details for each download attempt: request and response headers, timing, throughput, and the full error cause chain.
+
 ## Credential resolution
 
 `c8ctl` resolves credentials in the following order:
