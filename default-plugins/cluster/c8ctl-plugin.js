@@ -1653,7 +1653,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
   const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
-    env: resolveLocalStoreEnv(process.env, process.cwd()),
+    env: { ...resolveLocalStoreEnv(process.env, process.cwd()), C8RUN_CLI_NAME },
   });
 
   if (typeof proc.pid !== 'number') {
@@ -1700,7 +1700,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     // A failed tenant probe leaves healthy engines alive; preserve their identity
     // for stop/status even if the installation directory is subsequently replaced.
     try {
-      recordRunningClusterPids(config);
+      recordRunningClusterPids(config, { skipEmpty: true });
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
     }
@@ -2096,7 +2096,7 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-export function recordRunningClusterPids(config, { signatureOf = processStartSignature } = {}) {
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false } = {}) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
@@ -2124,7 +2124,9 @@ export function recordRunningClusterPids(config, { signatureOf = processStartSig
       pids.push(pid);
     }
   }
+  if (skipEmpty && pids.length === 0) return 0;
   writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
+  return pids.length;
 }
 
 /**
@@ -2596,6 +2598,10 @@ function forwardedPositionals(args, start, tenantScoped) {
   return positions;
 }
 
+// Tells c8run which command prefix to print in its hints ("c8ctl cluster tenants list"
+// instead of "c8run tenants list"); c8run builds without support ignore it.
+const C8RUN_CLI_NAME = 'c8ctl cluster';
+
 function resolveLocalStoreEnv(env, cwd) {
   let resolvedEnv = env;
   for (const name of ['C8RUN_SECRETS_DIR', 'C8RUN_TENANTS_FILE']) {
@@ -2717,7 +2723,7 @@ async function runClusterLocalCommand(
     const proc = spawnFn(binaryPath, [command, ...passthrough], {
       stdio: ['inherit', 'inherit', 'pipe'],
       cwd: dirname(binaryPath),
-      env: resolvedEnv,
+      env: { ...resolvedEnv, C8RUN_CLI_NAME },
     });
 
     let stderrTail = '';
@@ -3318,7 +3324,14 @@ export const commands = {
         return;
       }
       if (ctx?.dryRun) {
-        console.log(JSON.stringify({ dryRun: true, command: `cluster ${command}`, version: parsedLocal.version, args: parsedLocal.passthrough }));
+        // Local-only lookup (no download) so the preview shows the c8run that would run.
+        let version = null;
+        try {
+          version = await selectSecretsVersion(getCacheDir(), { explicit: parsedLocal.version });
+        } catch {
+          version = parsedLocal.version;
+        }
+        console.log(JSON.stringify({ dryRun: true, command: `cluster ${command}`, version, args: parsedLocal.passthrough }));
         return;
       }
       await runClusterLocalCommand(command, getCacheDir(), parsedLocal.passthrough, {

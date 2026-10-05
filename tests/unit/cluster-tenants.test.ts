@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -84,7 +85,7 @@ describe("cluster physical tenants through the CLI", {
 				`#!/bin/sh
 printf 'VERSION:${version}\\n'
 for a in "$@"; do printf 'ARG:%s\\n' "$a"; done
-printf 'TENANTS:%s\\nSECRETS:%s\\n' "$C8RUN_TENANTS_FILE" "$C8RUN_SECRETS_DIR"
+printf 'TENANTS:%s\\nSECRETS:%s\\nCLI:%s\\n' "$C8RUN_TENANTS_FILE" "$C8RUN_SECRETS_DIR" "$C8RUN_CLI_NAME"
 if [ "$1" = start ]; then exit 7; fi
 if [ "$2" = unsupported ]; then printf 'unsupported operation: tenants\\n' >&2; exit 1; fi
 if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
@@ -128,6 +129,8 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 				result.stdout.includes(`TENANTS:${resolve("local tenants.yaml")}`),
 			);
 			assert.ok(result.stdout.includes(`SECRETS:${resolve("local secrets")}`));
+			// c8run prints hints with this prefix, so users see commands they can run.
+			assert.ok(result.stdout.includes("CLI:c8ctl cluster"));
 		}
 	});
 
@@ -300,6 +303,13 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		}
 	});
 
+	test("a startup failure with no survivors leaves no process record behind", async () => {
+		rmSync(join(cacheDir, "cluster.pids"), { force: true });
+		const result = await cluster("start", "8.10.1", "--physical-tenants=hr");
+		assert.equal(result.status, 7);
+		assert.equal(existsSync(join(cacheDir, "cluster.pids")), false);
+	});
+
 	test("dry-run never launches c8run or consumes password input", async () => {
 		for (const args of [
 			["tenants", "add", "hr", "--password-stdin"],
@@ -311,6 +321,19 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 			assert.doesNotMatch(result.stdout + result.stderr, /VERSION:/);
 			assert.match(result.stdout, /"dryRun":\s*true/);
 		}
+	});
+
+	test("dry-run reports the locally selected version without downloading", async () => {
+		const implicit = await cluster("tenants", "list", "--dry-run");
+		assert.match(implicit.stdout, /"version":"8\.11\.0"/);
+		const pinned = await cluster(
+			"secrets",
+			"--c8-version",
+			"8.10.1",
+			"list",
+			"--dry-run",
+		);
+		assert.match(pinned.stdout, /"version":"8\.10\.1"/);
 	});
 
 	test("help and shell completion advertise physical tenants", async () => {
