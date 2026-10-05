@@ -71,22 +71,26 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		}
 	}
 
-	// ── Process-application mode (#227) ──────────────────────────────
-	// When --process-application is set, resolve the PA root from the
-	// watched paths and expand the watch scope to the PA root so the
-	// entire process application tree is monitored for changes.
-	const paMode = Boolean(flags["process-application"] || flags.pa);
-	let paRoot: string | null = null;
-	if (paMode) {
-		// Resolve PA root from every watched path and verify they all
-		// belong to the same process application.
+	// ── Project mode (#227) ──────────────────────────────────────────
+	// When --project (or the deprecated aliases --process-application /
+	// --pa) is set, resolve the project root from the watched paths and
+	// expand the watch scope to the project root so the entire Camunda
+	// project tree is monitored for changes. A project root is marked by
+	// a camunda.json descriptor or a legacy .process-application file.
+	const projectMode = Boolean(
+		flags.project || flags["process-application"] || flags.pa,
+	);
+	let projectRoot: string | null = null;
+	if (projectMode) {
+		// Resolve the project root from every watched path and verify they
+		// all belong to the same Camunda project.
 		let resolvedRoot: string | undefined;
 		for (const p of resolvedPaths) {
 			const root = findProcessApplicationRoot(p);
 			if (!root) {
 				throw new Error(
-					`--process-application: no .process-application marker found above ${p}. ` +
-						"Place a .process-application file at the root of your process application.",
+					`--project: no camunda.json or .process-application marker found above ${p}. ` +
+						"Place a camunda.json file at the root of your Camunda project.",
 				);
 			}
 			// Normalize via realpathSync so symlinks and equivalent
@@ -94,8 +98,8 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			const normalizedRoot = realpathSync(root);
 			if (resolvedRoot && normalizedRoot !== resolvedRoot) {
 				throw new Error(
-					"--process-application: all watched paths must belong to the same " +
-						`process application. Path ${p} resolves to ${normalizedRoot}, ` +
+					"--project: all watched paths must belong to the same " +
+						`Camunda project. Path ${p} resolves to ${normalizedRoot}, ` +
 						`but earlier paths resolved to ${resolvedRoot}`,
 				);
 			}
@@ -105,13 +109,13 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// so the loop above always runs at least once and sets resolvedRoot.
 		// This guard satisfies the type checker — it cannot fire at runtime.
 		if (!resolvedRoot) {
-			throw new Error("--process-application requires at least one watch path");
+			throw new Error("--project requires at least one watch path");
 		}
-		paRoot = resolvedRoot;
-		// Replace watched paths with the PA root so we monitor the entire
-		// process application tree, not just the user-specified subdirectory.
+		projectRoot = resolvedRoot;
+		// Replace watched paths with the project root so we monitor the
+		// entire project tree, not just the user-specified subdirectory.
 		resolvedPaths.length = 0;
-		resolvedPaths.push(paRoot);
+		resolvedPaths.push(projectRoot);
 	}
 
 	// ── Pre-flight version check ──
@@ -179,10 +183,10 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 					return;
 				}
 
-				// In PA mode, key debounce/cooldown by the PA root so that
-				// a burst of changes to different files collapses into a
-				// single full-PA deploy within the debounce window.
-				const debounceKey = paMode && paRoot ? paRoot : fullPath;
+				// In project mode, key debounce/cooldown by the project root
+				// so that a burst of changes to different files collapses
+				// into a single full-project deploy within the debounce window.
+				const debounceKey = projectMode && projectRoot ? projectRoot : fullPath;
 
 				// Clear any pending debounce for this key and restart the timer.
 				// This ensures we wait until the file system is quiet before reading.
@@ -206,9 +210,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 						}
 
 						// Check if file still exists (might have been deleted).
-						// In PA mode, deletions are meaningful changes — the PA
-						// should be redeployed without the removed file.
-						if (!paMode && !existsSync(fullPath)) {
+						// In project mode, deletions are meaningful changes — the
+						// project should be redeployed without the removed file.
+						if (!projectMode && !existsSync(fullPath)) {
 							logger.info(`⚠️  File deleted, skipping: ${basename(file)}`);
 							return;
 						}
@@ -216,9 +220,10 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 						logger.info(`\n🔄 Change detected: ${basename(file)}`);
 						recentlyDeployed.set(debounceKey, Date.now());
 
-						// In PA mode, deploy the entire PA root instead of the
-						// single changed file.
-						const deployPaths = paMode && paRoot ? [paRoot] : [fullPath];
+						// In project mode, deploy the entire project root instead
+						// of the single changed file.
+						const deployPaths =
+							projectMode && projectRoot ? [projectRoot] : [fullPath];
 
 						const ac = new AbortController();
 						inflightDeploys.add(ac);
@@ -241,7 +246,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 							// user-visible shutdown signal.
 							if (ac.signal.aborted) return;
 							logger.error(
-								`Failed to deploy ${paMode ? "process application" : basename(file)}`,
+								`Failed to deploy ${projectMode ? "project" : basename(file)}`,
 								normalizeToError(error, "Deployment request failed"),
 							);
 						} finally {
@@ -296,9 +301,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
 		logger.info(`📋 Monitoring extensions: ${effectiveExtensions.join(", ")}`);
-		if (paMode && paRoot) {
+		if (projectMode && projectRoot) {
 			logger.info(
-				`📦 Process application mode: deploying all resources from ${paRoot}`,
+				`📦 Project mode: deploying all resources from ${projectRoot}`,
 			);
 		}
 		if (flags.force) {

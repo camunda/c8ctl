@@ -12,7 +12,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Local Cluster**: Run a local Camunda 8 instance directly — no Docker required
 - **MCP Proxy**: Bridge local MCP clients to remote Camunda 8 for AI agent integration
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
-- **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
+- **Camunda Project Support**: Resources in folders with a `camunda.json` (or legacy `.process-application`) marker are marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for file changes and auto-redeploys (configurable extensions via `--extensions`)
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
