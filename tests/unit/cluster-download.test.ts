@@ -398,33 +398,46 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
-	test("fails instead of hanging when the file stream errors while the next chunk is awaited", {
-		timeout: 5_000,
-	}, async () => {
-		server = await startServer((_req, res) => {
-			res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
-			// Send headers only, so the file open fails while the first read waits.
-			res.flushHeaders();
-			setTimeout(() => res.end(PAYLOAD), 100);
-		});
-
-		const error = await rejectionOf(
-			plugin.downloadWithRetry({
-				url: server.url,
-				targetFile: join(tempDir, "missing", "c8run.tar.gz"),
-				logger: recordingLogger().logger,
-				...fast,
-			}),
-		);
-
-		assert.strictEqual(server.requests.length, 1);
-		assert.match(
-			error.message,
-			/^Could not save the download to .*: ENOENT: /,
-			"a file-system failure gets disk advice, not network advice",
-		);
-		assert.match(error.message, /C8RUN_CACHE_DIR/);
-		assert.doesNotMatch(error.message, /VPN|HTTPS_PROXY/);
+	test("fails with disk advice instead of hanging when the file stream errors while the next chunk is awaited", {
+		timeout: 10_000,
+	}, async (t) => {
+		const targets = {
+			"missing directory": () => join(tempDir, "missing", "c8run.tar.gz"),
+			"file name too long": () => join(tempDir, `${"x".repeat(300)}.tar.gz`),
+		};
+		for (const [name, target] of Object.entries(targets)) {
+			await t.test(name, async () => {
+				const s = await startServer((_req, res) => {
+					res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
+					// Send headers only, so the file open fails while the first read waits.
+					res.flushHeaders();
+					setTimeout(() => res.end(PAYLOAD), 100);
+				});
+				try {
+					const error = await rejectionOf(
+						plugin.downloadWithRetry({
+							url: s.url,
+							targetFile: target(),
+							logger: recordingLogger().logger,
+							...fast,
+						}),
+					);
+					assert.strictEqual(
+						s.requests.length,
+						1,
+						"a local failure is not retried",
+					);
+					assert.match(
+						error.message,
+						/^Could not save the download to .*: E[A-Z]+: /,
+					);
+					assert.match(error.message, /C8RUN_CACHE_DIR/);
+					assert.doesNotMatch(error.message, /VPN|HTTPS_PROXY/);
+				} finally {
+					await s.close();
+				}
+			});
+		}
 	});
 
 	test("rejects a URL that fetch() cannot send before making any request", async (t) => {

@@ -507,10 +507,9 @@ const MB = 1024 * 1024;
 const PROGRESS_STEP_PERCENT = 5;
 const PROGRESS_INTERVAL_MS = 5_000;
 
-// Error codes of failures that a retry cannot fix: local file-system problems
-// and TLS certificate errors (Node's X509 verification codes, see
-// https://nodejs.org/api/tls.html#x509-certificate-error-codes, except OUT_OF_MEM).
-const FS_ERROR_CODES = new Set(['ENOENT', 'ENOSPC', 'EACCES', 'EPERM', 'EROFS', 'EISDIR', 'ENOTDIR', 'EDQUOT']);
+// TLS certificate errors, which a retry cannot fix (Node's X509 verification
+// codes, see https://nodejs.org/api/tls.html#x509-certificate-error-codes,
+// except OUT_OF_MEM). File-system failures are tagged by fileSystemError().
 const TLS_ERROR_CODES = new Set([
   'UNABLE_TO_GET_ISSUER_CERT',
   'UNABLE_TO_GET_CRL',
@@ -541,7 +540,6 @@ const TLS_ERROR_CODES = new Set([
   'HOSTNAME_MISMATCH',
   'ERR_TLS_CERT_ALTNAME_INVALID',
 ]);
-const NON_RETRYABLE_ERROR_CODES = new Set([...FS_ERROR_CODES, ...TLS_ERROR_CODES]);
 
 /**
  * Read a millisecond override from the environment. These are internal knobs
@@ -653,8 +651,13 @@ function networkError(error) {
   return downloadError(describeDownloadFailure(error), {
     cause: error,
     reason: describeDownloadFailure(error),
-    retryable: !codes.some((code) => code && NON_RETRYABLE_ERROR_CODES.has(code)),
+    retryable: !codes.some((code) => code && TLS_ERROR_CODES.has(code)),
   });
+}
+
+/** Wrap a failure of the file stream: local, so neither retried nor a network problem. */
+function fileSystemError(error) {
+  return downloadError(error.message, { cause: error, reason: error.message, retryable: false, fileSystem: true });
 }
 
 function isRetryableDownloadError(error) {
@@ -734,7 +737,7 @@ function buildDownloadFailureMessage({ error, url, attempts, connected, maxBytes
   const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
 
   // A local file-system failure has nothing to do with the network.
-  if (!isRetryableDownloadError(error) && codes.some((code) => FS_ERROR_CODES.has(code))) {
+  if (error?.fileSystem === true) {
     return (
       `Could not save the download to ${targetFile}: ${rootCauseDetail(error)}\n` +
       `URL: ${redactUrl(url)}\n` +
@@ -890,7 +893,11 @@ export async function downloadWithRetry({
     }
   }
 
-  rmSync(targetFile, { force: true });
+  try {
+    rmSync(targetFile, { force: true });
+  } catch {
+    // Best effort: an unremovable path must not hide why the download failed.
+  }
 
   if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
     throw lastError;
@@ -1070,7 +1077,7 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
     await finished(fileStream).catch(() => {});
     // What actually reached the disk is what a resume continues from.
     state.written = fileSizeOrZero(targetFile);
-    throw error;
+    throw fileError ? fileSystemError(fileError) : error;
   }
 
   state.written = fileSizeOrZero(targetFile);
