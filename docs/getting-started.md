@@ -137,7 +137,7 @@ SECRET_OPENAI_API_KEY=sk-... c8 cluster start
 
 ### Local physical tenants
 
-Physical tenants are isolated engines inside one local Camunda process, each with its own data, users, secrets, and Connectors runtime. They require **Camunda 8.10 or newer and a c8run build that includes the physical-tenant CLI**. Older cached 8.10 builds can predate this feature; `cluster start` reuses cached installations, while `cluster install 8.10` checks for an updated distribution.
+Physical tenants are isolated engines inside one local Camunda process, each with its own data, users, secrets, and Connectors runtime. They require **Camunda 8.10 or newer and a c8run build that includes the physical-tenant CLI**. Older cached 8.10 builds can predate this feature. `cluster start` reuses cached installations, so upgrading c8ctl alone does not upgrade the cached c8run; `cluster install 8.10` checks for an updated distribution. Run `c8 cluster tenants help` to confirm support.
 
 ```bash
 # Install a supporting distribution, then save tenants without starting Java
@@ -163,9 +163,12 @@ c8 cluster secrets --tenant sales delete OPENAI_API_KEY --yes
 c8 cluster tenants remove sales --yes
 c8 cluster tenants path
 c8 cluster tenants help
+
+# Stop default and all tenants
+c8 cluster stop
 ```
 
-`cluster tenants` delegates to c8run, which owns tenant validation, password prompting, persistence, configuration, and readiness checks. It also supports `reset --yes` and `add <id> --no-connectors`. `--physical-tenants` is start-only, accepts comma-separated IDs, and can be repeated. The startup output includes per-tenant endpoints and readiness. A failed tenant can leave healthy engines running; the command returns a failure and `c8 cluster stop` stops the surviving processes.
+`cluster tenants` delegates to c8run, which owns tenant validation, password prompting, persistence, configuration, and readiness checks. It also supports `reset --yes` and `add <id> --no-connectors`. `remove` and `reset` ask for confirmation; non-interactive use requires `--yes`. `--physical-tenants` is start-only, accepts comma-separated IDs, and can be repeated. The startup output includes per-tenant endpoints and readiness. A failed tenant can leave healthy engines running; the command returns a failure and `c8 cluster stop` stops the surviving processes.
 
 Management commands select an explicit leading `--c8-version`, otherwise the running cluster's version, otherwise the highest locally installed version. They never download a distribution automatically. Keep the same version selected when configuring and starting a cluster. Both secrets and tenant commands preserve c8run's output and exit status; `--json` does not convert that output to JSON. Use the `help` subcommand for c8run help, because `--help` belongs to c8ctl. `--dry-run` previews these delegated calls and cluster starts without launching c8run or reading stdin.
 
