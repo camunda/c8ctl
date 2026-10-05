@@ -50,11 +50,10 @@ import {
 	getModdleString,
 } from "../moddle.ts";
 import {
-	findLocalTemplate,
 	parseTemplateRef,
 	readBpmnInput,
 	readTemplateFromPathOrUrl,
-	resolveOotbTemplate,
+	resolveTemplateId,
 } from "../template-ref.ts";
 import {
 	type BpmnElement,
@@ -129,10 +128,10 @@ async function resolveEditTemplate(
 		const ref = parseTemplateRef(templateArg);
 		const template =
 			ref?.kind === "id"
-				? await resolveOotbTemplate({
-						...ref,
-						version: ref.version ?? templateVersion,
-					})
+				? await resolveTemplateId(
+						{ ...ref, version: ref.version ?? templateVersion },
+						{ searchDir },
+					)
 				: await readTemplateFromPathOrUrl(templateArg);
 		if (template.id !== templateId || template.version !== templateVersion) {
 			throw new Error(
@@ -144,15 +143,11 @@ async function resolveEditTemplate(
 		return template;
 	}
 
-	const local = findLocalTemplate(searchDir, templateId, templateVersion);
-	if (local) return local;
-
 	try {
-		return await resolveOotbTemplate({
-			kind: "id",
-			id: templateId,
-			version: templateVersion,
-		});
+		return await resolveTemplateId(
+			{ kind: "id", id: templateId, version: templateVersion },
+			{ searchDir },
+		);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(

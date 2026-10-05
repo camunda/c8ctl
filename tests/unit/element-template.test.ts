@@ -2878,6 +2878,214 @@ describe("CLI behavioural: element-template cold-cache failures", () => {
 });
 
 // ---------------------------------------------------------------------------
+// element-template — `<id>` resolves .camunda/element-templates/ before the cache
+// ---------------------------------------------------------------------------
+
+const LOCAL_TEMPLATE_ID = "io.example.local.Http.v1";
+
+/**
+ * A copy of the HTTP JSON fixture under a custom id, with a
+ * `marker-v<version>` property so `get-properties` output reveals which
+ * version was resolved.
+ */
+function localTemplateVersion(
+	version: number,
+	engines?: string,
+): Record<string, unknown> {
+	const base = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+	return {
+		...base,
+		id: LOCAL_TEMPLATE_ID,
+		version,
+		engines: engines ? { camunda: engines } : undefined,
+		properties: [
+			...base.properties,
+			{
+				id: `marker-v${version}`,
+				label: "marker",
+				type: "String",
+				value: "x",
+				binding: { type: "zeebe:input", name: `marker-v${version}` },
+			},
+		],
+	};
+}
+
+/**
+ * A project dir whose `.camunda/element-templates/` holds v2 (^8.7) and v3
+ * (^8.9) of a custom template, with the BPMN (executionPlatformVersion
+ * 8.8.0) in a `processes/` subdirectory. `run` spawns the CLI in JSON mode
+ * from `cwd`, against a data dir whose OOTB cache is absent unless `cache`
+ * is given.
+ */
+async function withLocalTemplateProject(
+	{ cache }: { cache?: Array<Record<string, unknown>> },
+	fn: (ctx: {
+		projectDir: string;
+		bpmn: string;
+		run: (cwd: string, ...args: string[]) => ReturnType<typeof asyncSpawn>;
+	}) => Promise<void>,
+): Promise<void> {
+	const projectDir = mkdtempSync(join(tmpdir(), "c8ctl-et-project-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-cold-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+	if (cache) {
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		writeFileSync(join(cacheDir, "templates.json"), JSON.stringify(cache));
+		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	}
+	const localDir = join(projectDir, ".camunda", "element-templates");
+	mkdirSync(localDir, { recursive: true });
+	writeFileSync(
+		join(localDir, "custom.json"),
+		JSON.stringify([
+			localTemplateVersion(2, "^8.7"),
+			localTemplateVersion(3, "^8.9"),
+		]),
+	);
+	mkdirSync(join(projectDir, "processes"));
+	const bpmn = join(projectDir, "processes", "test.bpmn");
+	writeFileSync(bpmn, readFileSync(BPMN_FILE, "utf-8"));
+	const run = (cwd: string, ...args: string[]) =>
+		asyncSpawn(
+			"node",
+			["--experimental-strip-types", join(REPO_ROOT, CLI), ...args],
+			{
+				cwd,
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://test-cluster/v2",
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+				},
+			},
+		);
+	try {
+		await fn({ projectDir, bpmn, run });
+	} finally {
+		rmSync(projectDir, { recursive: true, force: true });
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: element-template <id> resolves .camunda/element-templates/ first", () => {
+	type Case = {
+		label: string;
+		args: (ref: string, bpmn: string) => string[];
+		/** `apply` searches from the BPMN's directory; the rest from cwd. */
+		cwd: (projectDir: string) => string;
+		resolvedVersion: (stdout: string) => number | undefined;
+		/** Unpinned: highest local version compatible with the engine. */
+		unpinned: number;
+		pinned: number;
+	};
+	const CASES: Case[] = [
+		{
+			label: "apply",
+			args: (ref, bpmn) => ["apply", ref, "Activity_17s7axj", bpmn],
+			cwd: () => tmpdir(),
+			resolvedVersion: (stdout) =>
+				Number(stdout.match(/zeebe:modelerTemplateVersion="(\d+)"/)?.[1]),
+			// The BPMN targets 8.8.0, so v3 (^8.9) is skipped.
+			unpinned: 2,
+			pinned: 3,
+		},
+		{
+			label: "info",
+			args: (ref) => ["info", ref],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get-properties",
+			args: (ref) => ["get-properties", ref, "marker-*"],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) =>
+				Number(
+					JSON.parse(stdout).properties[0]?.binding.name.slice(
+						"marker-v".length,
+					),
+				),
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get",
+			args: (ref) => ["get", ref],
+			cwd: (projectDir) => projectDir,
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+	];
+
+	for (const c of CASES) {
+		test(`${c.label}: cold cache resolves the highest compatible local version`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(LOCAL_TEMPLATE_ID, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.unpinned);
+			});
+		});
+
+		test(`${c.label}: cold cache resolves a pinned local version exactly`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(`${LOCAL_TEMPLATE_ID}@${c.pinned}`, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.pinned);
+			});
+		});
+
+		test(`${c.label}: a version missing locally falls back to the OOTB cache`, async () => {
+			await withLocalTemplateProject(
+				{ cache: [localTemplateVersion(5)] },
+				async ({ projectDir, bpmn, run }) => {
+					const result = await run(
+						c.cwd(projectDir),
+						"element-template",
+						...c.args(`${LOCAL_TEMPLATE_ID}@5`, bpmn),
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(c.resolvedVersion(result.stdout), 5);
+				},
+			);
+		});
+	}
+
+	test("info: no engine-compatible local version falls back to the OOTB cache", async () => {
+		await withLocalTemplateProject(
+			{ cache: [localTemplateVersion(5)] },
+			async ({ projectDir, run }) => {
+				const result = await run(
+					projectDir,
+					"element-template",
+					"info",
+					LOCAL_TEMPLATE_ID,
+					"--engine-version",
+					"8.6.0",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(JSON.parse(result.stdout).version, 5);
+			},
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // element-template — sync source (GitHub releases), lockfile, --prune count
 // ---------------------------------------------------------------------------
 

@@ -5,7 +5,7 @@
  *   - Classifying a `<template>` argument as URL, local path, or OOTB id.
  *   - Loading a template from any of those sources (cache lookup for ids,
  *     fetch/parse for URLs and paths).
- *   - Finding a project-local template under `.camunda/element-templates/`.
+ *   - Resolving an id against `.camunda/element-templates/`, then the cache.
  *   - Reading BPMN input from a file path or stdin.
  *   - Extracting `modeler:executionPlatformVersion` from BPMN XML.
  */
@@ -16,6 +16,7 @@ import type {} from "../../src/core/runtime.ts";
 import {
 	findById,
 	nudgeIfStale,
+	type PickVersionOptions,
 	pickVersion,
 	requireCachePresent,
 } from "./cache.ts";
@@ -195,22 +196,28 @@ export async function readTemplateFromPathOrUrl(
 }
 
 /**
- * Find a project-local template by exact id + version, following the
- * Desktop Modeler convention: `*.json` files (recursively) under
+ * Find a project-local template by id, following the Desktop Modeler
+ * convention: `*.json` files (recursively) under
  * `.camunda/element-templates/` in `startDir` or any of its ancestors,
  * nearest first. A file may hold one template or an array. Unreadable or
  * malformed files are skipped so an unrelated broken file can't block
  * resolution.
+ *
+ * Versions are picked with the cache's `pickVersion` rules, so local and
+ * OOTB resolution agree: a pinned version must match exactly; otherwise the
+ * highest version whose `engines.camunda` admits `executionPlatformVersion`
+ * wins. A directory with no such match defers to its parent.
  */
 export function findLocalTemplate(
 	startDir: string,
 	id: string,
-	version: number,
+	options: PickVersionOptions = {},
 ): Template | undefined {
 	let dir = resolvePath(startDir);
 	for (;;) {
 		const templatesDir = join(dir, ".camunda", "element-templates");
 		if (existsSync(templatesDir)) {
+			const candidates: Template[] = [];
 			const entries = readdirSync(templatesDir, {
 				recursive: true,
 				encoding: "utf-8",
@@ -224,20 +231,39 @@ export function findLocalTemplate(
 					continue;
 				}
 				for (const candidate of Array.isArray(parsed) ? parsed : [parsed]) {
-					if (
-						isTemplate(candidate) &&
-						candidate.id === id &&
-						candidate.version === version
-					) {
-						return candidate;
+					if (isTemplate(candidate) && candidate.id === id) {
+						candidates.push(candidate);
 					}
 				}
 			}
+			const picked = pickVersion(candidates, options);
+			if (picked) return picked;
 		}
 		const parent = dirname(dir);
 		if (parent === dir) return undefined;
 		dir = parent;
 	}
+}
+
+/**
+ * Resolve an `<id>[@<v>]` reference: a project-local template (searched from
+ * `searchDir` upward, see `findLocalTemplate`) wins, otherwise the OOTB
+ * cache. Only the fallback touches the cache, so a local hit works with a
+ * cold cache. Every subcommand that takes an id goes through here.
+ */
+export async function resolveTemplateId(
+	ref: TemplateRefId,
+	{
+		searchDir = process.cwd(),
+		executionPlatformVersion,
+	}: { searchDir?: string; executionPlatformVersion?: string | null } = {},
+): Promise<Template> {
+	return (
+		findLocalTemplate(searchDir, ref.id, {
+			version: ref.version,
+			executionPlatformVersion,
+		}) ?? resolveOotbTemplate(ref, { executionPlatformVersion })
+	);
 }
 
 /**
@@ -324,7 +350,7 @@ export async function loadTemplate(
 	if (ref.kind === "id") {
 		engineVersionIgnoredByPinnedVersion =
 			ref.version !== undefined && Boolean(executionPlatformVersion);
-		template = await resolveOotbTemplate(ref, {
+		template = await resolveTemplateId(ref, {
 			executionPlatformVersion:
 				ref.version === undefined ? executionPlatformVersion : undefined,
 		});

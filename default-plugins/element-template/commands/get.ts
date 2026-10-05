@@ -4,8 +4,8 @@
  *
  * For local paths and URLs we pass the source bytes through unchanged (no
  * parse/stringify round-trip — preserves whitespace, key order, trailing
- * newline). For OOTB ids we don't have the upstream bytes, so we
- * serialize the cached object with a 2-space indent. Designed for shell
+ * newline). For ids we don't have the upstream bytes, so we
+ * serialize the resolved object with a 2-space indent. Designed for shell
  * redirection:
  *
  *   c8ctl element-template get <id> > template.json
@@ -21,7 +21,7 @@ import {
 	readFileOrUrl,
 	type Template,
 } from "../helpers.ts";
-import { parseTemplateRef, resolveOotbTemplate } from "../template-ref.ts";
+import { parseTemplateRef, resolveTemplateId } from "../template-ref.ts";
 
 export async function getSubcommand(args: string[]): Promise<void> {
 	// `get` writes raw template JSON straight to stdout; consumers that
@@ -84,11 +84,11 @@ export async function getSubcommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	// OOTB id: no upstream bytes available — stringify the cached object.
-	// `resolveOotbTemplate` calls `requireCachePresent` under the hood, so
-	// a missing cache surfaces with the same "run sync first" message every
-	// other subcommand uses.
-	const template = await resolveOotbTemplate(ref);
+	// Id: resolved from .camunda/element-templates/ or the OOTB cache —
+	// stringify the resolved object (a local file may hold several
+	// templates). A cache miss surfaces with the same "run sync first"
+	// message every other subcommand uses.
+	const template = await resolveTemplateId(ref);
 
 	// The cache injects `metadata.upstreamRef` (our internal pointer for
 	// incremental sync); strip it so the output matches the template as

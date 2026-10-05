@@ -154,7 +154,7 @@ and faster than any lazy scheme.
 |---|---|---|
 | `https://...` | starts with `http(s)://` | fetched directly, no cache |
 | local path | contains `/`/`\`, starts with `.`, or ends with `.json` | read from disk |
-| `<id>` or `<id>@<version>` | otherwise | resolved against cache |
+| `<id>` or `<id>@<version>` | otherwise | `.camunda/element-templates/`, then the cache |
 
 For `<id>` (no `@<version>`):
 
@@ -167,6 +167,12 @@ For `<id>` (no `@<version>`):
 - `get-properties` has no BPMN context, so it picks the latest version
   and warns the user to pin with `id@<n>` if they want a specific one
   (same annotation as `info`).
+
+An id is first looked up in `.camunda/element-templates/**/*.json` (the
+Desktop Modeler convention) in the BPMN file's directory — or the current
+directory when there is no BPMN file — and its ancestors, nearest first,
+using the same version rules. Only when no local template matches does
+resolution fall back to the cache, so a local hit works with a cold cache.
 
 Errors include the available versions to make the next step obvious:
 

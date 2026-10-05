@@ -12,8 +12,9 @@
  *   c8ctl element-template search <query> [--engine-version <x.y.z>]
  *   c8ctl element-template sync [--prune]
  *
- * <template> can be a local path, an https:// URL, or an OOTB template id
- * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13).
+ * <template> can be a local path, an https:// URL, or a template id
+ * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13), looked up
+ * in .camunda/element-templates/ first, then in the OOTB cache.
  * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
  */
 
@@ -142,7 +143,9 @@ export const metadata = {
 				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
 				"search the out-of-the-box template catalogue, export raw template JSON, " +
 				"and manage the local template cache.\n\n" +
-				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).\n\n" +
+				"<template> is a local path, an https:// URL, or a template id (optionally @<version>). " +
+				"An id is looked up in .camunda/element-templates/ (next to the BPMN file, or in the current " +
+				"directory, or a parent of either) before the OOTB cache.\n\n" +
 				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +

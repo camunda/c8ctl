@@ -11,7 +11,7 @@ version resolution.
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
 | `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
-| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplate` (`.camunda/element-templates/` lookup for `edit`), `resolveOotbTemplate`, `loadTemplate` |
+| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplate` (`.camunda/element-templates/` lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
@@ -38,9 +38,11 @@ version resolution.
   pipelines, and racing cold-cache invocations would both download the
   same bundles. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
-- **Path/URL apply paths must not trigger the cache check.**
+- **Path/URL refs and local id hits must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
-  before any cache call.
+  before any cache call. An id found in `.camunda/element-templates/`
+  (`resolveTemplateId`) never reaches `requireCachePresent()`; only the
+  OOTB fallback does.
 - **`saveCache` and `apply --in-place` writes are atomic.** Both
   use a sibling temp file + `renameSync`. Anything else that
   overwrites a user-owned file (cache or BPMN) must follow the same

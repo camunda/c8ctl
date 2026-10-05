@@ -4,6 +4,7 @@
  */
 
 import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
 import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
@@ -25,7 +26,7 @@ import {
 	parseTemplateRef,
 	readBpmnInput,
 	readTemplateFromPathOrUrl,
-	resolveOotbTemplate,
+	resolveTemplateId,
 } from "../template-ref.ts";
 import {
 	type BpmnElement,
@@ -209,7 +210,10 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		const executionPlatformVersion = await getExecutionPlatformVersion(
 			input.xml,
 		);
-		template = await resolveOotbTemplate(ref, { executionPlatformVersion });
+		template = await resolveTemplateId(ref, {
+			searchDir: bpmnFilePath ? dirname(input.source) : process.cwd(),
+			executionPlatformVersion,
+		});
 		if (ref.version === undefined && !executionPlatformVersion) {
 			logger.warn(
 				"BPMN has no modeler:executionPlatformVersion — applying latest version " +
