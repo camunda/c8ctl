@@ -10,7 +10,8 @@
  *   - Extracting `modeler:executionPlatformVersion` from BPMN XML.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import type {} from "../../src/core/runtime.ts";
 import {
@@ -23,16 +24,18 @@ import {
 import {
 	getPropertyDetail,
 	getSettableProperties,
-	isTemplate,
+	isRecord,
 	type PropertyDetail,
 	parseTemplateJson,
 	readFileOrUrl,
 	type Template,
 	type TemplateProperty,
 } from "./helpers.ts";
+import { resolveVendorBundle, type VendorBundle } from "./vendor.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
+const require = createRequire(import.meta.url);
 
 export type BpmnInput = { xml: string; source: string };
 
@@ -196,53 +199,131 @@ export async function readTemplateFromPathOrUrl(
 }
 
 /**
- * Find a project-local template by id, following the Desktop Modeler
- * convention: `*.json` files (recursively) under
- * `.camunda/element-templates/` in `startDir` or any of its ancestors,
- * nearest first. A file may hold one template or an array. Unreadable or
- * malformed files are skipped so an unrelated broken file can't block
- * resolution.
- *
- * Versions are picked with the cache's `pickVersion` rules, so local and
- * OOTB resolution agree: a pinned version must match exactly; otherwise the
+ * Directories searched for local templates, nearest first — the walk mirrors
+ * Desktop Modeler's ElementTemplatesProvider
+ * (https://github.com/camunda/camunda-modeler/blob/main/app/lib/config/providers/ElementTemplatesProvider.js):
+ * `.camunda/element-templates` in `startDir` and every ancestor up to and
+ * including the filesystem root, then `resources/element-templates` in the
+ * Modeler's user-data dir.
+ */
+function localTemplateDirs(startDir: string): string[] {
+	const dirs: string[] = [];
+	for (let dir = resolvePath(startDir); ; dir = dirname(dir)) {
+		dirs.push(join(dir, ".camunda", "element-templates"));
+		if (dirname(dir) === dir) break;
+	}
+	dirs.push(join(c8ctl.getModelerDataDir(), "resources", "element-templates"));
+	return dirs;
+}
+
+type LocalTemplateEntry = { template: unknown; file: string };
+
+/** Follows symlinks, like the Modeler's glob; a dangling one is skipped. */
+function isFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Read every `**\/*.json` under `dirs`, in order; a file holds one template or
+ * an array. As in the Modeler, a missing or unreadable directory is skipped
+ * but a malformed file is an error.
+ */
+function readLocalTemplates(dirs: string[]): LocalTemplateEntry[] {
+	const result: LocalTemplateEntry[] = [];
+	for (const dir of dirs) {
+		let files: string[];
+		try {
+			files = readdirSync(dir, { recursive: true, withFileTypes: true })
+				.filter((e) => e.name.toLowerCase().endsWith(".json"))
+				.map((e) => join(e.parentPath, e.name))
+				.filter(isFile)
+				.sort();
+		} catch {
+			continue;
+		}
+		for (const file of files) {
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(readFileSync(file, "utf-8"));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				throw new Error(`template ${file} parse error: ${message}`);
+			}
+			for (const template of Array.isArray(parsed) ? parsed : [parsed]) {
+				result.push({ template, file });
+			}
+		}
+	}
+	return result;
+}
+
+/**
+ * Validate templates with bpmn-js-element-templates' Cloud validator — the
+ * `elementTemplatesLoader` of `CloudElementTemplatesCoreModule`, the same
+ * path the Modeler loads templates through: schema validation, and a
+ * duplicate id+version keeps the first (nearest) one. Rejected templates are
+ * reported as warnings, as the Modeler reports them without aborting.
+ */
+function validateLocalTemplates(
+	id: string,
+	entries: LocalTemplateEntry[],
+): Template[] {
+	const {
+		Modeler,
+		CloudElementTemplatesCoreModule,
+		ZeebeModdleExtension,
+		HeadlessTextRendererModule,
+	}: VendorBundle = require(resolveVendorBundle());
+	const modeler = new Modeler({
+		additionalModules: [
+			HeadlessTextRendererModule,
+			CloudElementTemplatesCoreModule,
+		],
+		moddleExtensions: { zeebe: ZeebeModdleExtension },
+	});
+	const fileOf = new Map(entries.map((e) => [e.template, e.file]));
+	const logger = c8ctl.getLogger();
+	modeler.get("eventBus").on("elementTemplates.errors", (event) => {
+		const errors =
+			isRecord(event) && Array.isArray(event.errors) ? event.errors : [];
+		for (const error of errors) {
+			const file = isRecord(error) ? fileOf.get(error.template) : undefined;
+			const message = error instanceof Error ? error.message : String(error);
+			logger.warn(
+				`Ignoring element template${file ? ` in ${file}` : ""}: ${message}`,
+			);
+		}
+	});
+	modeler
+		.get("elementTemplatesLoader")
+		.setTemplates(entries.map((e) => e.template));
+	return modeler.get("elementTemplates").getAll(id) ?? [];
+}
+
+/**
+ * Find a local template by id: every template with that id from the
+ * directories in `localTemplateDirs` is merged into one pool (no
+ * nearest-directory-wins fallback), validated, and the version picked once
+ * over the pool with the cache's `pickVersion` rules, so local and OOTB
+ * resolution agree: a pinned version must match exactly; otherwise the
  * highest version whose `engines.camunda` admits `executionPlatformVersion`
- * wins. A directory with no such match defers to its parent.
+ * wins. Only templates with the requested id are validated, so an unrelated
+ * invalid template doesn't produce noise.
  */
 export function findLocalTemplate(
 	startDir: string,
 	id: string,
 	options: PickVersionOptions = {},
 ): Template | undefined {
-	let dir = resolvePath(startDir);
-	for (;;) {
-		const templatesDir = join(dir, ".camunda", "element-templates");
-		if (existsSync(templatesDir)) {
-			const candidates: Template[] = [];
-			const entries = readdirSync(templatesDir, {
-				recursive: true,
-				encoding: "utf-8",
-			});
-			for (const entry of entries) {
-				if (!entry.toLowerCase().endsWith(".json")) continue;
-				let parsed: unknown;
-				try {
-					parsed = JSON.parse(readFileSync(join(templatesDir, entry), "utf-8"));
-				} catch {
-					continue;
-				}
-				for (const candidate of Array.isArray(parsed) ? parsed : [parsed]) {
-					if (isTemplate(candidate) && candidate.id === id) {
-						candidates.push(candidate);
-					}
-				}
-			}
-			const picked = pickVersion(candidates, options);
-			if (picked) return picked;
-		}
-		const parent = dirname(dir);
-		if (parent === dir) return undefined;
-		dir = parent;
-	}
+	const entries = readLocalTemplates(localTemplateDirs(startDir)).filter(
+		(e) => isRecord(e.template) && e.template.id === id,
+	);
+	if (entries.length === 0) return undefined;
+	return pickVersion(validateLocalTemplates(id, entries), options) ?? undefined;
 }
 
 /**

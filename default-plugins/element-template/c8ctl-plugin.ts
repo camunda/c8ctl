@@ -145,7 +145,8 @@ export const metadata = {
 				"and manage the local template cache.\n\n" +
 				"<template> is a local path, an https:// URL, or a template id (optionally @<version>). " +
 				"An id is looked up in .camunda/element-templates/ (next to the BPMN file, or in the current " +
-				"directory, or a parent of either) before the OOTB cache.\n\n" +
+				"directory, or any parent of either) and in Desktop Modeler's resources/element-templates/ " +
+				"before the OOTB cache.\n\n" +
 				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +

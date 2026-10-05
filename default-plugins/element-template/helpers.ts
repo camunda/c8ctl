@@ -748,7 +748,7 @@ function validateEngineVersion(value: string, usage: string): string {
  * "expected an object" instead of letting `unknown.properties` blow up
  * downstream.
  */
-export function isTemplate(value: unknown): value is Template {
+function isTemplate(value: unknown): value is Template {
 	return isRecord(value) && Array.isArray(value.properties);
 }
 
