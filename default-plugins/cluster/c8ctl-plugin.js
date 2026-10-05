@@ -23,7 +23,7 @@ import {
 import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
-import { join, dirname, isAbsolute, resolve, basename } from 'node:path';
+import { join, dirname, isAbsolute, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -489,9 +489,13 @@ function formatLocalVersionsHint(cacheDir) {
   return `Locally available versions:\n${versions.map(v => `  ${v}`).join('\n')}`;
 }
 
-function getDownloadUrl(version) {
+function getArchiveName(version) {
   const platformInfo = getPlatformIdentifier();
-  return `${DOWNLOAD_BASE_URL}${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  return `camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+}
+
+function getDownloadUrl(version) {
+  return `${DOWNLOAD_BASE_URL}${version}/${getArchiveName(version)}`;
 }
 
 // A c8run archive is several hundred MB, so a single dropped connection (a
@@ -1154,7 +1158,9 @@ async function downloadC8Run(config) {
   // A manually downloaded and extracted archive in the install dir is picked
   // up by isC8RunInstalled(), exactly like one c8ctl extracted itself.
   const installDir = join(cacheDir, `c8run-${version}`);
-  const archiveName = basename(new URL(downloadUrl).pathname);
+  // Not parsed from downloadUrl: a malformed C8CTL_C8RUN_DOWNLOAD_URL must reach
+  // downloadWithRetry()'s validation instead of throwing a bare TypeError here.
+  const archiveName = getArchiveName(version);
   const extract = resolveExtractCommand({
     archivePath: archiveName,
     targetDir: quoteForHint(installDir),

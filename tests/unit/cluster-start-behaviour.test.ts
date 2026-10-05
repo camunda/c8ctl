@@ -92,6 +92,24 @@ describe("CLI behavioural: cluster start failure", () => {
 			`Expected connectivity hint in output, got:\n${combined}`,
 		);
 	});
+
+	test("start with a malformed C8CTL_C8RUN_DOWNLOAD_URL names the variable instead of throwing Invalid URL", async () => {
+		const result = await c8WithEnv(
+			{ C8CTL_C8RUN_DOWNLOAD_URL: "not a url/" },
+			"cluster",
+			"start",
+			"--c8-version",
+			"0.0.0-nonexistent",
+		);
+
+		const combined = result.stdout + result.stderr;
+		assert.strictEqual(result.status, 1, combined);
+		assert.match(
+			combined,
+			/Cannot download from \(invalid URL\): not a valid URL\. Check C8CTL_C8RUN_DOWNLOAD_URL\./,
+		);
+		assert.doesNotMatch(combined, /TypeError/);
+	});
 });
 
 describe("CLI behavioural: cluster start with a dropping download", () => {
