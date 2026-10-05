@@ -447,8 +447,8 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		}
 	});
 
-	test("says where the incomplete download was kept when removing it fails", async () => {
-		server = await startServer((_req, res) => serveHalfThenDrop(res));
+	/** Run `fn` while fs.rmSync() fails with EBUSY for the target file. */
+	async function withTargetLocked(fn: () => Promise<void>): Promise<void> {
 		const realRmSync = fs.rmSync;
 		// The plugin's named rmSync import follows the fs object only after a sync.
 		const rmMock = mock.method(
@@ -465,9 +465,20 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		);
 		syncBuiltinESMExports();
 		try {
+			await fn();
+		} finally {
+			rmMock.mock.restore();
+			syncBuiltinESMExports();
+		}
+	}
+
+	test("says where the incomplete download was kept when removing it fails", async () => {
+		const s = await startServer((_req, res) => serveHalfThenDrop(res));
+		server = s;
+		await withTargetLocked(async () => {
 			const error = await rejectionOf(
 				plugin.downloadWithRetry({
-					url: server.url,
+					url: s.url,
 					targetFile,
 					logger: recordingLogger().logger,
 					...fast,
@@ -483,10 +494,31 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 				/Cause: (UND_ERR_SOCKET|ECONNRESET): /,
 				"the download cause is kept",
 			);
-		} finally {
-			rmMock.mock.restore();
-			syncBuiltinESMExports();
-		}
+		});
+	});
+
+	test("keeps the kept-file note on a non-retryable HTTP status after a partial attempt", async () => {
+		const s = await startServer((_req, res, n) => {
+			if (n === 1) return serveHalfThenDrop(res);
+			res.writeHead(404);
+			res.end();
+		});
+		server = s;
+		await withTargetLocked(async () => {
+			const error = await rejectionOf(
+				plugin.downloadWithRetry({
+					url: s.url,
+					targetFile,
+					logger: recordingLogger().logger,
+					...fast,
+				}),
+			);
+			assert.strictEqual(prop(error, "status"), 404);
+			assert.match(
+				String(prop(error, "keptFileNote")),
+				/^The incomplete download could not be removed \(EBUSY\); delete it yourself: .*c8run\.tar\.gz$/,
+			);
+		});
 	});
 
 	test("names the kept path when a file-system failure leaves something it cannot remove", async () => {

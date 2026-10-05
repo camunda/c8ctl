@@ -745,14 +745,10 @@ function buildDownloadFailureMessage({
   maxBytesReceived,
   total,
   targetFile,
-  cleanupError,
+  keptFileNote,
   extraHints,
 }) {
   const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
-
-  const keptFileNote = cleanupError
-    ? `The incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}); delete it yourself: ${targetFile}`
-    : null;
 
   // A local file-system failure has nothing to do with the network.
   if (error?.fileSystem === true) {
@@ -921,9 +917,12 @@ export async function downloadWithRetry({
   } catch (error) {
     if (existsSync(targetFile)) cleanupError = error;
   }
+  const keptFileNote = cleanupError
+    ? `The incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}); delete it yourself: ${targetFile}`
+    : undefined;
 
   if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
-    throw lastError;
+    throw Object.assign(lastError, { keptFileNote });
   }
 
   throw downloadError(
@@ -935,7 +934,7 @@ export async function downloadWithRetry({
       maxBytesReceived: state.maxBytesReceived,
       total: state.total,
       targetFile,
-      cleanupError,
+      keptFileNote,
       extraHints,
     }),
     { cause: lastError, attempts: attempt },
@@ -1213,6 +1212,7 @@ async function downloadC8Run(config) {
       throw new Error(
         `Failed to download c8run ${version}: HTTP ${error.status}\n` +
           `URL: ${redactUrl(downloadUrl)}\n` +
+          (error.keptFileNote ? `${error.keptFileNote}\n` : '') +
           `Please check the version exists or try a different version.\n\n` +
           formatLocalVersionsHint(cacheDir),
       );
