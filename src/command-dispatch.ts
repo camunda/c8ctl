@@ -91,6 +91,8 @@ import {
 	createProcessInstanceCommand,
 	getProcessInstanceCommand,
 	listProcessInstancesCommand,
+	resumeProcessInstanceCommand,
+	suspendProcessInstanceCommand,
 } from "./commands/process-instances.ts";
 import {
 	addProfileCommand,
@@ -156,6 +158,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["get:process-instance", getProcessInstanceCommand],
 	["create:process-instance", createProcessInstanceCommand],
 	["cancel:process-instance", cancelProcessInstanceCommand],
+	["suspend:process-instance", suspendProcessInstanceCommand],
+	["resume:process-instance", resumeProcessInstanceCommand],
 	["await:process-instance", awaitProcessInstanceCommand],
 
 	// ── Process definitions ────────────────────────────────────────────
