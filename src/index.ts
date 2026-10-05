@@ -211,7 +211,8 @@ async function main() {
 	// output mode, so honour them now too. Only booleans: a global flag is
 	// never a plugin flag, and they cannot be mistaken for a flag's value.
 	// String globals (`--fields`, `--profile`) wait for the command's own
-	// flag table, below.
+	// flag table, below. Merge over the pre-verb globals so an absent
+	// post-verb flag cannot let C8CTL_OUTPUT_MODE undo a pre-verb `--json`.
 	{
 		const {
 			json,
@@ -221,7 +222,12 @@ async function main() {
 			args: stage1.rest,
 			options: globalOptions(),
 		}).values;
-		applyGlobalFlags({ json, verbose, "dry-run": dryRun });
+		applyGlobalFlags({
+			...stage1.globals,
+			...(json !== undefined && { json }),
+			...(verbose !== undefined && { verbose }),
+			...(dryRun !== undefined && { "dry-run": dryRun }),
+		});
 	}
 
 	// Inject dependencies into the runtime (breaks circular imports)

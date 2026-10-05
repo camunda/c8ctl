@@ -88,6 +88,8 @@ For everything else, see the [documentation](#documentation) above.
 
 c8ctl ships flags built for AI agents and scripts — `--fields` (filter output columns), `--dry-run` (preview the API request without executing it), and machine-readable JSON help. They appear in their own section in `c8ctl help`.
 
+`c8ctl --version` always writes the version result to stdout, including when JSON mode is selected by `--json`, `C8CTL_OUTPUT_MODE`, or the saved preference. See [Output modes](docs/getting-started.md#output-modes) for the text and JSON formats.
+
 See [Development workflows → AI agents and scripting](docs/development-workflows.md#ai-agents-and-scripting) for details and examples. For a full machine-readable reference intended for agents, see [CONTEXT.md](CONTEXT.md).
 
 ## Command Structure

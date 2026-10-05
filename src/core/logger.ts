@@ -227,12 +227,20 @@ export class Logger {
 		this._logWriter.error(...data);
 	}
 
-	info(message: string): void {
-		if (this.mode === "text") {
-			this._writeLog(message);
+	/** Override the stream for primary output while preserving mode-aware formatting. */
+	info(
+		message: string,
+		{ stream }: { stream?: "stdout" | "stderr" } = {},
+	): void {
+		const content =
+			this.mode === "text"
+				? message
+				: JSON.stringify({ status: "info", message });
+		const outputStream = stream ?? (this.mode === "text" ? "stdout" : "stderr");
+		if (outputStream === "stdout") {
+			this._writeLog(content);
 		} else {
-			// unix convention suggest: info and warning messages should go to stderr, while only the main output goes to stdout
-			this._writeError(JSON.stringify({ status: "info", message }));
+			this._writeError(content);
 		}
 	}
 

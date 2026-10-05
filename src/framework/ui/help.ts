@@ -206,8 +206,7 @@ export function getVersion(): string {
  * Display version
  */
 export function showVersion(): void {
-	const logger = getLogger();
-	logger.info(`c8ctl v${getVersion()}`);
+	getLogger().info(`c8ctl v${getVersion()}`, { stream: "stdout" });
 }
 
 // ─── Derived help generation ─────────────────────────────────────────────────
