@@ -21,6 +21,7 @@ import type {
 	SelectResult,
 } from "../ui/prompt.ts";
 import { checkHostCompat, readHostRequirement } from "./plugin-compat.ts";
+import { analyzePluginFlags } from "./plugin-flags.ts";
 
 /**
  * Typed, documented host context passed to plugin command handlers as
@@ -904,6 +905,46 @@ export interface PluginCommandInfo {
 	flags?: Record<string, FlagDef>;
 }
 
+/** A plugin flag declaration that collides with a c8ctl global flag. */
+export interface PluginFlagCollision {
+	plugin: string;
+	command: string;
+	/** The declared flag name. */
+	flag: string;
+	/** `name`: the long flag is reserved and never delivered. `short`: only the `-x` alias is dropped. */
+	kind: "name" | "short";
+	/** The colliding short alias, for `kind: "short"`. */
+	short?: string;
+}
+
+/**
+ * Plugin flag declarations that collide with a global flag, across every
+ * loaded `{ flags, handler }` command. Author-facing: surfaced by
+ * `c8ctl doctor plugin`, not on every invocation.
+ */
+export function getPluginFlagCollisions(): PluginFlagCollision[] {
+	const out: PluginFlagCollision[] = [];
+	for (const plugin of loadedPlugins.values()) {
+		for (const [command, cmd] of Object.entries(plugin.commands)) {
+			if (typeof cmd === "function") continue;
+			const analysis = analyzePluginFlags(cmd.flags);
+			for (const flag of analysis.reservedNames) {
+				out.push({ plugin: plugin.name, command, flag, kind: "name" });
+			}
+			for (const { name, short } of analysis.reservedShorts) {
+				out.push({
+					plugin: plugin.name,
+					command,
+					flag: name,
+					kind: "short",
+					short,
+				});
+			}
+		}
+	}
+	return out;
+}
+
 export function getPluginCommandsInfo(): PluginCommandInfo[] {
 	const infos: PluginCommandInfo[] = [];
 
@@ -923,7 +964,9 @@ export function getPluginCommandsInfo(): PluginCommandInfo[] {
 				passthrough: meta?.passthrough === true ? true : undefined,
 				passthroughHint: meta?.passthroughHint,
 				flagsHint: meta?.flagsHint,
-				flags,
+				// Only the flags a user can actually pass: a flag named like a
+				// global is consumed by the host and must not be advertised.
+				flags: flags ? analyzePluginFlags(flags).usable : undefined,
 			});
 		}
 	}

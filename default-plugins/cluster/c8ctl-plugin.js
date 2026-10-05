@@ -28,7 +28,11 @@ import { fileURLToPath } from 'node:url';
 // Version aliases – dynamic discovery with package.json fallback
 // ---------------------------------------------------------------------------
 
-const DOWNLOAD_BASE_URL = 'https://downloads.camunda.cloud/release/camunda/c8run/';
+// C8CTL_C8RUN_DOWNLOAD_URL overrides the download center base URL (e.g. for
+// mirrors or tests that must not depend on network access).
+const DOWNLOAD_BASE_URL = (
+  process.env.C8CTL_C8RUN_DOWNLOAD_URL || 'https://downloads.camunda.cloud/release/camunda/c8run/'
+).replace(/\/*$/, '/');
 
 const _pluginPackageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf-8'),
@@ -313,6 +317,23 @@ export const metadata = {
     'cluster': {
       description:
         'Manage local Camunda 8 cluster — start, stop, status, logs, install, delete, or list versions',
+      // A bare-function plugin command only receives parsed positionals from
+      // the host; every flag it does not declare is dropped before the handler
+      // runs. This command needs raw flags for two reasons: its own
+      // --purge / --debug / --c8-version, and the arbitrary flags `cluster
+      // secrets` forwards to c8run (--stdin, --all, ...). `passthrough` is the
+      // supported way to receive them — the host strips only c8ctl's global
+      // flags (--profile, --json, --yes, ...) and forwards everything else
+      // verbatim. A command cannot combine `passthrough` with declared `flags`,
+      // so the subcommand flags are documented via `flagsHint` instead.
+      passthrough: true,
+      passthroughHint:
+        '--purge, --debug and --c8-version are read by the plugin; everything after `secrets` is forwarded to c8run',
+      flagsHint: [
+        '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
+        '--debug                 (start, stop) Stream raw c8run output',
+        '--purge                 (stop only) Also delete runtime data after stopping',
+      ],
       subcommands: [
         { name: 'start', description: 'Start local Camunda 8 cluster' },
         { name: 'stop', description: 'Stop local Camunda 8 cluster' },
@@ -467,7 +488,7 @@ function formatLocalVersionsHint(cacheDir) {
 
 function getDownloadUrl(version) {
   const platformInfo = getPlatformIdentifier();
-  return `https://downloads.camunda.cloud/release/camunda/c8run/${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  return `${DOWNLOAD_BASE_URL}${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
 }
 
 async function downloadC8Run(config) {
@@ -491,7 +512,8 @@ async function downloadC8Run(config) {
     throw new Error(
       `Cannot reach the Camunda Download Center.\n` +
         `URL: ${downloadUrl}\n` +
-        `Error: ${error.message}\n\n` +
+        `Error: ${error.message}\n` +
+        `Please check your network connection and proxy settings, then try again.\n\n` +
         formatLocalVersionsHint(cacheDir),
     );
   });
@@ -1152,7 +1174,10 @@ export function processStartSignature(pid) {
           `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
             `if ($p) { $p.CreationDate.ToString('o') }`,
         ],
-        { encoding: 'utf-8', timeout: 5000 },
+        // PowerShell start-up plus a CIM query can exceed 5 s on a loaded
+        // machine; a timeout yields no signature, which makes a live orphan
+        // look stopped, so allow a generous budget.
+        { encoding: 'utf-8', timeout: 10000 },
       ).trim();
       return out ? `win:${out}` : null;
     }
@@ -1539,6 +1564,18 @@ export function hasRunningClusterPidfiles(cacheDir) {
   return liveRecordedPids(cacheDir).length > 0;
 }
 
+// `c8run stop` only signals the cluster processes; Java can keep running for a
+// while as it shuts down. Wait for them to exit so a follow-up purge does not
+// mistake a shutting-down cluster for a live one. The timeout is a safety net.
+export async function waitForClusterExit(cacheDir, { timeoutMs = 60_000, intervalMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (hasRunningClusterPidfiles(cacheDir)) {
+    if (Date.now() >= deadline) return false;
+    await sleep(intervalMs);
+  }
+  return true;
+}
+
 export async function stopC8Run(config, debug = false) {
   const logger = getLogger();
   const markerFile = join(config.cacheDir, ACTIVE_MARKER_FILE);
@@ -1777,87 +1814,25 @@ export async function stopC8Run(config, debug = false) {
 // it only locates the right c8run binary and forwards the call to it.
 // ---------------------------------------------------------------------------
 
-// Global c8ctl flags, mirrored from src/framework/command-registry.ts's
-// GLOBAL_FLAGS (a plugin cannot import src/ — see the layering rules in
-// AGENTS.md). Needed to correctly identify the "cluster secrets" token pair
-// in raw argv: c8ctl accepts these flags anywhere on the command line, not
-// just before the verb, so one can legitimately sit between "cluster" and
-// "secrets" (e.g. `c8ctl cluster --profile prod secrets set KEY --stdin`).
-const GLOBAL_BOOLEAN_FLAGS = new Set(['--help', '-h', '--dry-run', '--verbose', '--json', '--yes', '-y']);
-const GLOBAL_STRING_FLAGS = new Set(['--profile', '--fields', '--version', '-v']);
-
-/** True for a recognized global boolean flag token (never consumes a following token). */
-function isGlobalBooleanFlagToken(token) {
-  return GLOBAL_BOOLEAN_FLAGS.has(token);
-}
-
 /**
- * True for a recognized global string flag token, in either "--flag value"
- * or "--flag=value" form. The caller still needs to know which form it was
- * to decide whether to also skip the next token — see `stringFlagTokenWidth`.
+ * `--yes` / `-y` are c8ctl GLOBAL flags, so the host consumes them (it sets
+ * `ctx.yes`) and strips them from a passthrough command's args. c8run's own
+ * `secrets delete` has a `--yes` flag that skips its confirmation prompt, so
+ * restore it when the user asked for it. Scoped to `delete` — the only verb
+ * documented to take it — so it is never appended to a c8run verb that may
+ * not accept the flag. Never mutates `tail`.
  */
-function isGlobalStringFlagToken(token) {
-  const name = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
-  return GLOBAL_STRING_FLAGS.has(name);
-}
-
-/** How many argv slots a global string flag token occupies: 1 for "--flag=value", 2 for "--flag value". */
-function stringFlagTokenWidth(token) {
-  return token.includes('=') ? 1 : 2;
-}
-
-/**
- * Recover the raw argv tail that follows "cluster secrets", reading
- * `argv` (normally `process.argv.slice(2)`) directly instead of the array
- * the c8ctl host passes to a plugin command. The host's top-level parser
- * treats an unrecognized flag as a boolean and strips it from the
- * positionals a plugin receives (see #364 in src/index.ts), which would
- * silently drop flags like --stdin, --all, and --yes before they ever
- * reached this plugin.
- *
- * Walks argv from the start, skipping recognized global flags (in both
- * "--flag value" and "--flag=value" form) wherever they appear — including
- * between "cluster" and "secrets" — until it finds that pair, then returns
- * everything after it. Falls back to `hostArgs.slice(1)` — the args array a
- * plugin host actually delivers — only when no such pair is found at all,
- * e.g. a direct/programmatic call, or "cluster" is followed by some other
- * verb.
- */
-export function sliceSecretsArgv(argv, hostArgs) {
-  let i = 0;
-  let foundCluster = false;
-
-  while (i < argv.length) {
-    const token = argv[i];
-
-    if (!foundCluster && token === 'cluster') {
-      foundCluster = true;
-      i += 1;
-      continue;
-    }
-
-    if (foundCluster && token === 'secrets') {
-      return argv.slice(i + 1);
-    }
-
-    if (isGlobalBooleanFlagToken(token)) {
-      i += 1;
-      continue;
-    }
-    if (isGlobalStringFlagToken(token)) {
-      i += stringFlagTokenWidth(token);
-      continue;
-    }
-
-    // After "cluster", anything that isn't a recognized global flag and
-    // isn't "secrets" means this isn't the invocation we're looking for
-    // (e.g. "cluster start") — give up and fall back.
-    if (foundCluster) break;
-
-    i += 1;
-  }
-
-  return hostArgs.slice(1);
+export function withForwardedYes(tail, ctx) {
+  const verbIndex = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
+  if (ctx?.yes !== true || tail[verbIndex] !== 'delete') return tail;
+  // Everything after a `--` terminator is literal for c8run, so the flag goes
+  // immediately before it, and a `--yes` that only appears after it does not count.
+  const terminator = tail.indexOf('--');
+  const options = terminator < 0 ? tail : tail.slice(0, terminator);
+  if (options.includes('--yes') || options.includes('-y')) return tail;
+  return terminator < 0
+    ? [...tail, '--yes']
+    : [...tail.slice(0, terminator), '--yes', ...tail.slice(terminator)];
 }
 
 /**
@@ -2549,6 +2524,18 @@ export function parsePluginArgs(args) {
       continue;
     }
 
+    if (arg.startsWith('--c8-version=')) {
+      const value = arg.slice('--c8-version='.length);
+      if (!value) {
+        throw new Error(
+          'Missing value for --c8-version. Please provide a version, for example: c8ctl cluster start --c8-version 8.6.0'
+        );
+      }
+      result.version = value;
+      i += 1;
+      continue;
+    }
+
     if (arg === '--debug') {
       result.debug = true;
       i += 1;
@@ -2587,7 +2574,10 @@ export function parsePluginArgs(args) {
 const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'purge', 'log', 'logs'];
 
 export const commands = {
-  'cluster': async (args) => {
+  // `cluster` is a passthrough command (see the metadata): `args` is the raw
+  // argv tail after `cluster` with c8ctl's global flags already removed, and
+  // `ctx` is the plugin host context. No need to re-read process.argv.
+  'cluster': async (args, _flags, ctx) => {
     const logger = getLogger();
 
     // Secrets passthrough (#314) is intercepted before parsePluginArgs:
@@ -2596,7 +2586,7 @@ export const commands = {
     if (args[0] === 'secrets') {
       let parsedSecrets;
       try {
-        parsedSecrets = parseSecretsArgs(sliceSecretsArgv(process.argv.slice(2), args));
+        parsedSecrets = parseSecretsArgs(withForwardedYes(args.slice(1), ctx));
       } catch (error) {
         logger.error(error.message);
         process.exit(1);
@@ -2608,7 +2598,14 @@ export const commands = {
       return;
     }
 
-    const parsed = parsePluginArgs(args);
+    let parsed;
+    try {
+      parsed = parsePluginArgs(args);
+    } catch (error) {
+      logger.error(error.message);
+      process.exit(1);
+      return;
+    }
 
     if (!parsed.subcommand || !VALID_SUBCOMMANDS.includes(parsed.subcommand)) {
       console.log('Usage:');
@@ -2820,6 +2817,15 @@ export const commands = {
               `Version ${stoppedVersion} is no longer installed; its runtime data is already gone. Nothing to purge.`,
             );
           } else {
+            // C8CTL_STOP_WAIT_TIMEOUT_MS is an internal override so tests can bound the wait.
+            const override = Number(process.env.C8CTL_STOP_WAIT_TIMEOUT_MS);
+            const timeoutMs = Number.isFinite(override) && override > 0 ? override : undefined;
+            if (!(await waitForClusterExit(theCacheDir, { timeoutMs }))) {
+              throw new Error(
+                'Cluster processes are still shutting down, so runtime data was not purged. ' +
+                  `Once they have exited, run: c8ctl cluster purge ${stoppedVersion}`,
+              );
+            }
             await purgeClusterData(theCacheDir, stoppedVersion);
           }
         }

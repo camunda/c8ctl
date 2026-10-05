@@ -168,6 +168,20 @@ describe("Passthrough plugin contract (#366)", () => {
 			assert.deepStrictEqual(out.args, ["--from", "URL"]);
 		});
 
+		test("a value-less string global never consumes the `--` terminator", async () => {
+			const result = await c8(
+				"pass-through-cmd",
+				"--profile",
+				"--",
+				"--profile",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(JSON.parse(result.stdout).args, [
+				"--",
+				"--profile",
+			]);
+		});
+
 		test("strips GLOBAL_FLAGS in `--flag=value` form", async () => {
 			// stripGlobalFlags() and sliceArgvAfterVerb() both branch on the
 			// `=` syntax. Without this case, a regression in either path
@@ -288,6 +302,22 @@ describe("Passthrough plugin contract (#366)", () => {
 	});
 
 	describe("Load-time validation", () => {
+		test("diagnostics render in JSON when --json follows the verb, same as when it precedes it", async () => {
+			// The data dir persists text mode; --json is per-invocation. The
+			// plugin validation warning is emitted while plugins load, so the
+			// post-verb --json must already be in effect by then.
+			const before = await c8("--json", "--dry-run", "list", "pi");
+			const after = await c8("list", "pi", "--json", "--dry-run");
+			for (const r of [before, after]) {
+				assert.strictEqual(r.status, 0, r.stderr);
+				assert.ok(
+					r.stderr.includes('"status":"warning"'),
+					`expected the plugin warning as JSON. stderr: ${r.stderr}`,
+				);
+			}
+			assert.strictEqual(after.stderr, before.stderr);
+		});
+
 		test("a command declaring both passthrough:true AND flags is rejected and unreachable", async () => {
 			// The fixture's `bad-passthrough-with-flags` command violates the
 			// mutual-exclusion rule. After load-time validation it must NOT
@@ -613,7 +643,11 @@ describe("Passthrough plugin contract (#366)", () => {
 			);
 			for (const line of lines) {
 				assert.ok(
-					line.includes("-n 'not __fish_seen_subcommand_from pass-through-cmd"),
+					// The guard lists every passthrough verb — the bundled `cluster`
+					// plugin is one too — so assert membership, not position.
+					/-n 'not __fish_seen_subcommand_from [^']*\bpass-through-cmd\b/.test(
+						line,
+					),
 					`every fish completion for non-global flag '--${nonGlobalFlag}' must be gated against passthrough verbs. line was: ${line}`,
 				);
 			}
