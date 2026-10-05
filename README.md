@@ -70,6 +70,9 @@ c8ctl cluster start
 # Store a secret for local development (values are never shown or stored by c8ctl)
 c8ctl cluster secrets set OPENAI_API_KEY
 
+# Manage isolated local physical tenants (requires a supporting c8run 8.10+ build)
+c8ctl cluster tenants add sales
+
 # Deploy a process and start an instance
 c8ctl deploy ./my-process.bpmn
 c8ctl run my-process

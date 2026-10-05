@@ -43,6 +43,22 @@ c8ctl cluster install 8.8
 c8ctl cluster delete 8.8
 ```
 
+## Physical tenants
+
+For physical tenants (supporting Camunda 8.10+ builds):
+
+```bash
+c8ctl cluster tenants --c8-version 8.10 add sales
+c8ctl cluster start 8.10
+c8ctl cluster tenants list
+c8ctl cluster secrets --tenant sales set OPENAI_API_KEY
+c8ctl cluster tenants remove sales --yes
+# Or choose tenants for one start only:
+c8ctl cluster start 8.10 --physical-tenants sales,hr
+```
+
+Tenant commands delegate to the selected installed c8run, following the same version selection and terminal behavior as `cluster secrets`. c8run owns tenant configuration and storage. See [local physical tenants](../../docs/getting-started.md#local-physical-tenants) for authentication, profiles, relative paths, and limitations.
+
 ## Version aliases
 
 The `stable` and `alpha` aliases are resolved dynamically by querying the
@@ -113,6 +129,18 @@ The c8run archive is several hundred MB. If the connection drops, `c8ctl cluster
 - Behind a proxy, set `HTTPS_PROXY` together with `NODE_USE_ENV_PROXY=1` (Node.js 22.21+ or 24.5+).
 - Set `C8CTL_C8RUN_DOWNLOAD_URL` to download from a mirror with the same layout as the Camunda Download Center.
 - Add `--verbose` to print HTTP details for each download attempt: request and response headers, timing, throughput, and the full error cause chain.
+
+## Physical-tenant verification
+
+The opt-in integration test owns the local cluster lifecycle and needs an installed c8run build with physical-tenant CLI support. Run it separately from the general integration suite, with no other cluster running and a dedicated cache containing that distribution:
+
+```bash
+C8RUN_CACHE_DIR=/path/to/scratch-cache \
+C8CTL_PHYSICAL_TENANTS_VERSION=8.10.1 \
+node --experimental-strip-types --test tests/integration/physical-tenants.test.ts
+```
+
+Set the version to the actual installed cache version. The test uses temporary tenant/secrets/profile files, validates authenticated profile routing and deployment isolation, restarts the cluster, and stops it on completion. Its tenant's engine data remains in the dedicated cache. The normal unit suite tests forwarding and failure handling without downloading or launching Java.
 
 ## Supported platforms
 
