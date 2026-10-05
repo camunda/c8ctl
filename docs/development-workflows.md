@@ -82,6 +82,8 @@ Use `--force` to disable extension filtering during directory discovery, deployi
 c8 deploy ./my-project --force
 ```
 
+When the project descriptor defines [`deployResources`](camunda-json.md#deployresources), the descriptor selects the deployable set instead: `--extensions`, `--all-extensions`, and the extension-bypass use of `--force` are rejected with an error. Files named explicitly on the command line are always deployed. Selection is independent of the target cluster version: the selected set is submitted unchanged, and the server may reject resource types it does not support.
+
 ### Building blocks and projects
 
 `c8ctl` recognizes two special folder conventions during deployment:
@@ -150,6 +152,26 @@ old-process.bpmn
 
 Place the `.c8ignore` file in the root of the directory you pass to `c8 deploy` or `c8 watch`. Patterns are matched against relative file paths within that directory.
 
+When the project defines [`deployResources`](#select-resources-with-deployresources), `.c8ignore` is ignored — the descriptor alone selects which files deploy.
+
+### Select resources with `deployResources`
+
+Define [`deployResources`](camunda-json.md#deployresources) in `camunda.json` to select the deployable set yourself — for example, to deploy generated resources or non-diagram files such as agent task prompts:
+
+```json
+{
+  "deployResources": [
+    "resources/**",
+    "target/classes/**",
+    "!target/classes/drafts/**",
+    "target/classes/drafts/keep.bpmn",
+    "resources/.prompt.md"
+  ]
+}
+```
+
+This selects everything under `resources/` and the generated resources under `target/classes/`, excludes drafts except `keep.bpmn`, and selects the hidden prompt file by explicit name. Use `["**/*"]` to select all non-hidden project files. For the full pattern semantics — ordering, default exclusions, hidden files — see the [`deployResources` specification](camunda-json.md#deployresources).
+
 ## Run
 
 The `run` command deploys a file and immediately creates a process instance in a single step:
@@ -192,6 +214,8 @@ When watching inside a project (a folder tree containing a `camunda.json` marker
 ```bash
 c8 watch ./my-app --project
 ```
+
+When the project defines `deployResources`, the descriptor-selected set is watched and redeployed.
 
 ### Continue watching after deployment errors
 
