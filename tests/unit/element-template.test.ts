@@ -18,6 +18,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
 import { isRecord } from "../../src/core/logger.ts";
 import { c8 } from "../utils/cli.ts";
@@ -3359,7 +3360,8 @@ async function syncAgainstDefaultListing(
 		[
 			"--experimental-strip-types",
 			"--import",
-			preload,
+			// A bare Windows path (`C:\\...`) is rejected by the ESM loader.
+			pathToFileURL(preload).href,
 			CLI,
 			"element-template",
 			"sync",
