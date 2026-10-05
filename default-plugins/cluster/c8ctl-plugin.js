@@ -806,6 +806,14 @@ export async function downloadWithRetry({
   extraHints = [],
 }) {
   const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr' }) : () => {};
+  const invalid = invalidDownloadUrlReason(url);
+  if (invalid) {
+    throw downloadError(
+      `Cannot download from ${redactUrl(url)}: ${invalid}.` +
+        (process.env.C8CTL_C8RUN_DOWNLOAD_URL ? ' Check C8CTL_C8RUN_DOWNLOAD_URL.' : ''),
+      { reason: invalid, retryable: false },
+    );
+  }
   const totalAttempts = maxRetries + 1;
   const state = {
     written: 0,
@@ -901,6 +909,21 @@ export async function downloadWithRetry({
     }),
     { cause: lastError, attempts: attempt },
   );
+}
+
+/** Why fetch() would reject `url` before sending anything, or null if it would not. */
+function invalidDownloadUrlReason(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'not a valid URL';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `unsupported protocol ${parsed.protocol} (use http or https)`;
+  }
+  if (parsed.username || parsed.password) return 'the URL contains credentials, which fetch() does not send';
+  return null;
 }
 
 /** One HTTP request; updates `state` and throws a classified error on failure. */

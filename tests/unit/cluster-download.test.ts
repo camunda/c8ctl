@@ -427,6 +427,43 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.doesNotMatch(error.message, /VPN|HTTPS_PROXY/);
 	});
 
+	test("rejects a URL that fetch() cannot send before making any request", async (t) => {
+		const s = await startServer((_req, res) => serveFull(res));
+		const port = new URL(s.url).port;
+		const urls = {
+			credentials: [
+				`http://user:pw@127.0.0.1:${port}/c8run.tar.gz`,
+				/contains credentials/,
+			],
+			"unsupported protocol": [
+				"ftp://127.0.0.1/c8run.tar.gz",
+				/unsupported protocol ftp:/,
+			],
+		} as const;
+		try {
+			for (const [name, [url, reason]] of Object.entries(urls)) {
+				await t.test(name, async () => {
+					const log = recordingLogger();
+					const error = await rejectionOf(
+						plugin.downloadWithRetry({
+							url,
+							targetFile,
+							logger: log.logger,
+							...fast,
+						}),
+					);
+					assert.match(error.message, /^Cannot download from /);
+					assert.match(error.message, reason);
+					assert.doesNotMatch(error.message, /pw/);
+					assert.deepStrictEqual(log.messages("warn"), [], "no retry");
+				});
+			}
+			assert.strictEqual(s.requests.length, 0);
+		} finally {
+			await s.close();
+		}
+	});
+
 	test("retries a body that ends before the announced size and resumes from what was saved", async () => {
 		const short = 1024 * 1024;
 		server = await startServer((req, res, n) => {
