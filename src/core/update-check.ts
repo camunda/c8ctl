@@ -15,7 +15,7 @@
  * and either one holds the event loop (and the shell prompt) open.
  *
  * Design constraints:
- * - Zero extra dependencies (uses node:https + node:fs + node:child_process)
+ * - Zero extra dependencies (global fetch + node:fs + node:child_process)
  * - Never delays command execution or exit
  * - Once-per-version notification
  * - Notification output suppressed in JSON output mode; skipped entirely
@@ -23,14 +23,7 @@
  */
 
 import { spawn } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	renameSync,
-	writeFileSync,
-} from "node:fs";
-import { get } from "node:https";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getUserDataDir } from "./config.ts";
@@ -59,11 +52,6 @@ interface CheckState {
 	versions: Record<string, string>;
 }
 
-interface NotificationState {
-	/** The remote version we last notified about. */
-	notifiedVersion?: string;
-}
-
 /**
  * Detect the npm dist-tag channel from the running version.
  * Versions like "1.2.0-alpha.5" → "alpha", everything else → "latest".
@@ -74,9 +62,9 @@ export function detectChannel(version: string): string {
 
 function readJson(file: string): Record<string, unknown> | undefined {
 	try {
-		const filePath = join(getUserDataDir(), file);
-		if (!existsSync(filePath)) return undefined;
-		const raw: unknown = JSON.parse(readFileSync(filePath, "utf-8"));
+		const raw: unknown = JSON.parse(
+			readFileSync(join(getUserDataDir(), file), "utf-8"),
+		);
 		return isRecord(raw) ? raw : undefined;
 	} catch {
 		return undefined;
@@ -112,13 +100,6 @@ function readCheckState(): CheckState {
 		checkedAt: typeof raw?.checkedAt === "number" ? raw.checkedAt : undefined,
 		versions,
 	};
-}
-
-function readNotificationState(): NotificationState {
-	const raw = readJson(NOTIFICATION_FILE);
-	return typeof raw?.notifiedVersion === "string"
-		? { notifiedVersion: raw.notifiedVersion }
-		: {};
 }
 
 /**
@@ -169,43 +150,21 @@ export function isNewer(local: string, remote: string): boolean {
 	return false;
 }
 
-type Transport = (
-	url: string,
-	init: { signal?: AbortSignal },
-) => Promise<Response>;
-
-/**
- * GET via node:https. Runs only in the worker, whose deadline bounds a stall,
- * so it uses the default agent: that keeps Node's env proxy support
- * (NODE_USE_ENV_PROXY + HTTPS_PROXY), which a blocked network may need.
- */
-export const httpsTransport: Transport = (url, { signal }) =>
-	new Promise((resolve, reject) => {
-		const req = get(url, { signal }, (res) => {
-			const chunks: Buffer[] = [];
-			res.on("data", (c: Buffer) => chunks.push(c));
-			res.on("end", () =>
-				resolve(
-					new Response(Buffer.concat(chunks), { status: res.statusCode ?? 0 }),
-				),
-			);
-			res.on("error", reject);
-		});
-		req.on("error", reject);
-	});
-
-let transport: Transport = httpsTransport;
-
 /**
  * Fetch the latest version for a given dist-tag from the npm registry.
  * Returns undefined on any failure (offline, timeout, etc.).
+ *
+ * Plain global fetch is fine here: it only ever runs in the worker, whose
+ * deadline bounds any stall. It also honours NODE_USE_ENV_PROXY +
+ * HTTPS_PROXY, which a network that blocks the registry may need.
  */
-export async function fetchRemoteVersion(
+async function fetchRemoteVersion(
 	channel: string,
-	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	try {
-		const res = await transport(REGISTRY_URL, { signal });
+		const res = await fetch(REGISTRY_URL, {
+			signal: AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS),
+		});
 		if (!res.ok) return undefined;
 		const data: unknown = await res.json();
 		if (!isRecord(data)) return undefined;
@@ -229,10 +188,7 @@ export async function runUpdateCheck(channel: string): Promise<void> {
 	const state = readCheckState();
 	writeJson(CHECK_FILE, { ...state, checkedAt: Date.now() });
 
-	const version = await fetchRemoteVersion(
-		channel,
-		AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS),
-	);
+	const version = await fetchRemoteVersion(channel);
 	if (!version) return;
 
 	const latest = readCheckState();
@@ -296,7 +252,7 @@ export function startUpdateCheck(currentVersion: string): void {
 
 	const remoteVersion = state.versions[channel];
 	if (!remoteVersion || !isNewer(currentVersion, remoteVersion)) return;
-	if (readNotificationState().notifiedVersion === remoteVersion) return;
+	if (readJson(NOTIFICATION_FILE)?.notifiedVersion === remoteVersion) return;
 
 	const installCmd =
 		channel === "alpha"
@@ -334,12 +290,6 @@ export function printUpdateNotification(): void {
 export function _resetForTesting(): void {
 	pendingNotification = undefined;
 	spawner = spawnWorker;
-	transport = httpsTransport;
-}
-
-/** Override the HTTP transport (for testing only). */
-export function _setTransportForTesting(t: Transport): void {
-	transport = t;
 }
 
 /** Override how the worker is launched (for testing only). */

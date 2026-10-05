@@ -17,7 +17,6 @@ import { c8ctl } from "../../src/core/runtime.ts";
 import {
 	_resetForTesting,
 	_setSpawnerForTesting,
-	_setTransportForTesting,
 	CHECK_INTERVAL_MS,
 	detectChannel,
 	isNewer,
@@ -98,9 +97,10 @@ describe("isNewer", () => {
 let tempDir: string;
 let consoleLogOutput: string[];
 let spawned: string[];
-let transportCalls: number;
+let fetchCalls: number;
 let registry: () => Promise<Response>;
 let originalLog: typeof console.log;
+let originalFetch: typeof globalThis.fetch;
 let originalOutputMode: typeof c8ctl.outputMode;
 let originalCI: string | undefined;
 let originalDataDir: string | undefined;
@@ -119,28 +119,23 @@ const output = () => consoleLogOutput.join("\n");
 function invoke(version: string): void {
 	_resetForTesting();
 	_setSpawnerForTesting((channel) => spawned.push(channel));
-	_setTransportForTesting(async () => {
-		transportCalls++;
-		return registry();
-	});
 	startUpdateCheck(version);
 	printUpdateNotification();
 }
 
 /** What the detached worker does, run in-process. */
-async function worker(channel: string): Promise<void> {
-	_setTransportForTesting(async () => {
-		transportCalls++;
-		return registry();
-	});
-	await runUpdateCheck(channel);
-}
+const worker = runUpdateCheck;
 
 beforeEach(() => {
 	consoleLogOutput = [];
 	spawned = [];
-	transportCalls = 0;
+	fetchCalls = 0;
 	registry = distTags({ latest: "2.0.0" });
+	originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => {
+		fetchCalls++;
+		return registry();
+	};
 	originalLog = console.log;
 	console.log = (...args: unknown[]) => {
 		consoleLogOutput.push(args.join(" "));
@@ -156,6 +151,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	console.log = originalLog;
+	globalThis.fetch = originalFetch;
 	c8ctl.outputMode = originalOutputMode;
 	if (originalCI !== undefined) process.env.CI = originalCI;
 	else delete process.env.CI;
@@ -171,7 +167,7 @@ describe("startUpdateCheck (CLI side)", () => {
 		invoke("1.0.0");
 		writeCheck({ checkedAt: 0, versions: { latest: "2.0.0" } });
 		invoke("1.0.0");
-		assert.strictEqual(transportCalls, 0);
+		assert.strictEqual(fetchCalls, 0);
 	});
 
 	test("spawns the worker when there is no previous check", () => {

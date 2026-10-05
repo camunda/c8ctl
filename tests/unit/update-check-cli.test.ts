@@ -5,7 +5,7 @@
  * make one: the check runs in a detached worker.
  *
  * The preload (passed via NODE_OPTIONS, so the worker inherits it) makes any
- * registry lookup in the CLI process hang on a ref'd timer — the same shape
+ * registry lookup or fetch in the CLI process hang on a ref'd timer — the same shape
  * as a resolver that never answers. In the worker it only records that the
  * worker was launched, then exits, so no real network call is made.
  */
@@ -42,6 +42,12 @@ test("CLI exits promptly and leaves the check to the worker when the registry ha
 			"	setTimeout(() => {}, 60_000);",
 			"};",
 			"syncBuiltinESMExports();",
+			"const fetch = globalThis.fetch;",
+			"globalThis.fetch = (url, ...rest) => {",
+			'	if (!String(url).includes("registry.npmjs.org")) return fetch(url, ...rest);',
+			'	process.stderr.write("[registry-lookup]\\n");',
+			"	return new Promise(() => setTimeout(() => {}, 60_000));",
+			"};",
 			// Pretend to be a released build so the check runs at all.
 			`const { c8ctl } = await import(${JSON.stringify(runtimeUrl)});`,
 			'c8ctl.env.version = "1.0.0";',
@@ -75,8 +81,7 @@ test("CLI exits promptly and leaves the check to the worker when the registry ha
 });
 
 test("worker process records the registry's version", async () => {
-	// A slow-ish registry: the worker must stay alive until it answers,
-	// even though the transport unrefs its socket.
+	// A slow-ish registry: the worker must stay alive until it answers.
 	const server = createServer((_req, res) => {
 		setTimeout(() => {
 			res.end(JSON.stringify({ "dist-tags": { latest: "9.9.9" } }));
@@ -91,11 +96,8 @@ test("worker process records the registry's version", async () => {
 	writeFileSync(
 		preload,
 		[
-			'import http from "node:http";',
-			'import https from "node:https";',
-			'import { syncBuiltinESMExports } from "node:module";',
-			`https.get = (_url, ...rest) => http.get("http://127.0.0.1:${address.port}/", ...rest);`,
-			"syncBuiltinESMExports();",
+			"const fetch = globalThis.fetch;",
+			`globalThis.fetch = (_url, init) => fetch("http://127.0.0.1:${address.port}/", init);`,
 		].join("\n"),
 	);
 
@@ -136,7 +138,7 @@ test("worker honours the env proxy", {
 	const proxy = createTcpServer((socket) => {
 		socket.once("data", (chunk) => {
 			resolveRequest(chunk.toString().split("\r\n")[0]);
-			socket.destroy();
+			socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
 		});
 	});
 	await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", r));
