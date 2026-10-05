@@ -5,12 +5,13 @@
  *   - Classifying a `<template>` argument as URL, local path, or OOTB id.
  *   - Loading a template from any of those sources (cache lookup for ids,
  *     fetch/parse for URLs and paths).
+ *   - Finding a project-local template under `.camunda/element-templates/`.
  *   - Reading BPMN input from a file path or stdin.
  *   - Extracting `modeler:executionPlatformVersion` from BPMN XML.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import type {} from "../../src/core/runtime.ts";
 import {
 	findById,
@@ -21,6 +22,7 @@ import {
 import {
 	getPropertyDetail,
 	getSettableProperties,
+	isTemplate,
 	type PropertyDetail,
 	parseTemplateJson,
 	readFileOrUrl,
@@ -190,6 +192,52 @@ export async function readTemplateFromPathOrUrl(
 ): Promise<Template> {
 	const content = await readFileOrUrl(input);
 	return parseTemplateJson(content);
+}
+
+/**
+ * Find a project-local template by exact id + version, following the
+ * Desktop Modeler convention: `*.json` files (recursively) under
+ * `.camunda/element-templates/` in `startDir` or any of its ancestors,
+ * nearest first. A file may hold one template or an array. Unreadable or
+ * malformed files are skipped so an unrelated broken file can't block
+ * resolution.
+ */
+export function findLocalTemplate(
+	startDir: string,
+	id: string,
+	version: number,
+): Template | undefined {
+	let dir = resolvePath(startDir);
+	for (;;) {
+		const templatesDir = join(dir, ".camunda", "element-templates");
+		if (existsSync(templatesDir)) {
+			const entries = readdirSync(templatesDir, {
+				recursive: true,
+				encoding: "utf-8",
+			});
+			for (const entry of entries) {
+				if (!entry.toLowerCase().endsWith(".json")) continue;
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(readFileSync(join(templatesDir, entry), "utf-8"));
+				} catch {
+					continue;
+				}
+				for (const candidate of Array.isArray(parsed) ? parsed : [parsed]) {
+					if (
+						isTemplate(candidate) &&
+						candidate.id === id &&
+						candidate.version === version
+					) {
+						return candidate;
+					}
+				}
+			}
+		}
+		const parent = dirname(dir);
+		if (parent === dir) return undefined;
+		dir = parent;
+	}
 }
 
 /**

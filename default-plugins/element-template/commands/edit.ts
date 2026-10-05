@@ -23,13 +23,15 @@
  * that pipeline's unrelated BPMNDI shape/edge reordering — same as `apply`
  * (see c8ctl#466; considered cosmetic/out of scope, not data loss).
  *
- * The template reference isn't a CLI argument — it's read off the target
- * element's own `zeebe:modelerTemplate`/`zeebe:modelerTemplateVersion`
- * attributes and resolved from the local OOTB cache, so `edit` only works
- * against templates `sync` knows about.
+ * The template is identified by the target element's own
+ * `zeebe:modelerTemplate`/`zeebe:modelerTemplateVersion` attributes. An
+ * explicit `--template <id[@version]|path|url>` wins (and must match that
+ * id/version); otherwise it's looked up in `.camunda/element-templates/`
+ * next to the BPMN file (or an ancestor directory), then in the OOTB cache.
  */
 
 import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
 import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
@@ -47,7 +49,13 @@ import {
 	getModdleNumber,
 	getModdleString,
 } from "../moddle.ts";
-import { readBpmnInput, resolveOotbTemplate } from "../template-ref.ts";
+import {
+	findLocalTemplate,
+	parseTemplateRef,
+	readBpmnInput,
+	readTemplateFromPathOrUrl,
+	resolveOotbTemplate,
+} from "../template-ref.ts";
 import {
 	type BpmnElement,
 	type ModdleElement,
@@ -73,6 +81,88 @@ type EditPlan = {
 };
 
 /**
+ * Strip `--template <ref>` / `--template=<ref>` (edit-only, so it isn't part
+ * of the `parseArgs` shared with `apply`). Last flag wins; content after
+ * `--` is treated as positional.
+ */
+function extractTemplateFlag(args: string[]): {
+	templateArg: string | undefined;
+	rest: string[];
+} {
+	let templateArg: string | undefined;
+	const rest: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--") {
+			rest.push(...args.slice(i));
+			break;
+		}
+		if (arg === "--template" || arg.startsWith("--template=")) {
+			const value =
+				arg === "--template" ? args[++i] : arg.slice("--template=".length);
+			if (!value) {
+				throw new Error(
+					"--template requires a value (an OOTB id[@version], a local path, or an https:// URL)",
+				);
+			}
+			templateArg = value;
+			continue;
+		}
+		rest.push(arg);
+	}
+	return { templateArg, rest };
+}
+
+/**
+ * Resolve the template recorded on the element. An explicit `--template`
+ * wins and must match the recorded id/version — `edit` never switches
+ * templates; that's `apply`'s job. Without one, a project-local template
+ * is preferred over the OOTB cache.
+ */
+async function resolveEditTemplate(
+	templateArg: string | undefined,
+	templateId: string,
+	templateVersion: number,
+	searchDir: string,
+): Promise<Template> {
+	if (templateArg) {
+		const ref = parseTemplateRef(templateArg);
+		const template =
+			ref?.kind === "id"
+				? await resolveOotbTemplate({
+						...ref,
+						version: ref.version ?? templateVersion,
+					})
+				: await readTemplateFromPathOrUrl(templateArg);
+		if (template.id !== templateId || template.version !== templateVersion) {
+			throw new Error(
+				`--template ${templateArg} (${template.id ?? "<no id>"} v${template.version ?? "?"}) does not match ` +
+					`the template recorded on the element (${templateId} v${templateVersion}). ` +
+					"Use 'apply' to switch templates or versions.",
+			);
+		}
+		return template;
+	}
+
+	const local = findLocalTemplate(searchDir, templateId, templateVersion);
+	if (local) return local;
+
+	try {
+		return await resolveOotbTemplate({
+			kind: "id",
+			id: templateId,
+			version: templateVersion,
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`${message}\nFor a custom template, place it under .camunda/element-templates/ next to the ` +
+				"BPMN file (or in a parent directory), or pass --template <path|url>.",
+		);
+	}
+}
+
+/**
  * Resolve the target element, its recorded template, and validate every
  * `--set` arg against the element's *already-materialized* moddle tree.
  * Shared by the real run and `--dry-run` so both use identical validation —
@@ -82,6 +172,8 @@ async function planEdit(
 	modeler: ModelerInstance,
 	elementId: string,
 	setArgs: string[],
+	templateArg: string | undefined,
+	searchDir: string,
 ): Promise<EditPlan> {
 	const elementRegistry = modeler.get("elementRegistry");
 	const element = elementRegistry.get(elementId);
@@ -108,11 +200,12 @@ async function planEdit(
 		);
 	}
 
-	const template = await resolveOotbTemplate({
-		kind: "id",
-		id: templateId,
-		version: templateVersion,
-	});
+	const template = await resolveEditTemplate(
+		templateArg,
+		templateId,
+		templateVersion,
+		searchDir,
+	);
 
 	const extensionElements = getModdleElement(
 		element.businessObject,
@@ -180,7 +273,8 @@ export async function editSubcommand(args: string[]): Promise<void> {
 	// install the EPIPE handler before any downstream `head -c N` or
 	// `| less` can sever the pipe.
 	installStdoutEpipeHandler();
-	const parsed = parseArgs(args);
+	const { templateArg, rest } = extractTemplateFlag(args);
+	const parsed = parseArgs(rest);
 
 	if (parsed.error) {
 		throw new Error(parsed.error);
@@ -234,7 +328,13 @@ export async function editSubcommand(args: string[]): Promise<void> {
 	let plan: EditPlan;
 	try {
 		await modeler.importXML(input.xml);
-		plan = await planEdit(modeler, elementId, parsed.setArgs);
+		plan = await planEdit(
+			modeler,
+			elementId,
+			parsed.setArgs,
+			templateArg,
+			bpmnFilePath ? dirname(input.source) : process.cwd(),
+		);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Error editing element: ${message}`);

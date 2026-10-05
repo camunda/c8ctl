@@ -5,7 +5,7 @@
  *
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
- *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] --set key=value
+ *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] [--template <template>] --set key=value
  *   c8ctl element-template info <template> [--engine-version <x.y.z>]
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
  *   c8ctl element-template get <template>
@@ -150,7 +150,10 @@ export const metadata = {
 				"edit --set name=value updates a property on an element that already has a template applied, " +
 				"without re-running template application — it never resets other template-owned content " +
 				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
-				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element). " +
+				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element and resolves it from " +
+				".camunda/element-templates/ next to the BPMN file or a parent directory, then the OOTB cache). " +
+				"Pass --template <template> to point at a custom template explicitly; it must match the element's " +
+				"recorded id/version. " +
 				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
 				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
 				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
@@ -337,6 +340,11 @@ export const commands = {
 			limit: {
 				type: "string",
 				description: "Cap the number of matches (default 20) [search]",
+			},
+			template: {
+				type: "string",
+				description:
+					"Template to resolve the element's recorded id/version against (id[@version], path, or URL) [edit]",
 			},
 			"engine-version": {
 				type: "string",

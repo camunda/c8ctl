@@ -2651,6 +2651,154 @@ describe("CLI behavioural: element-template edit", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+	/**
+	 * Apply a custom (non-OOTB) copy of the HTTP JSON fixture to a fresh BPMN
+	 * copy, then hand the caller the BPMN path and the custom template path.
+	 * Nothing about the custom template is in the OOTB cache.
+	 */
+	async function withCustomTemplatedBpmn(
+		fn: (ctx: {
+			tempDir: string;
+			tempBpmn: string;
+			customTemplate: Record<string, unknown>;
+			customTemplateFile: string;
+		}) => Promise<void>,
+		{ bpmnSubdir = "" }: { bpmnSubdir?: string } = {},
+	): Promise<void> {
+		const customTemplate = {
+			...JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8")),
+			id: "io.example.custom.Http.v1",
+			version: 3,
+		};
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const bpmnDir = join(tempDir, bpmnSubdir);
+		mkdirSync(bpmnDir, { recursive: true });
+		const tempBpmn = join(bpmnDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		const customTemplateFile = join(tempDir, "custom-template.json");
+		writeFileSync(customTemplateFile, JSON.stringify(customTemplate));
+		try {
+			const applied = await spawnAgainstEmptyCache(
+				"apply",
+				"-i",
+				customTemplateFile,
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=POST",
+			);
+			assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+			await fn({ tempDir, tempBpmn, customTemplate, customTemplateFile });
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	}
+
+	test("resolves a custom template from .camunda/element-templates/ in an ancestor of the BPMN file", async () => {
+		await withCustomTemplatedBpmn(
+			async ({ tempDir, tempBpmn, customTemplate }) => {
+				const localDir = join(tempDir, ".camunda", "element-templates");
+				mkdirSync(localDir, { recursive: true });
+				// Template files may hold a single template or an array.
+				writeFileSync(
+					join(localDir, "custom.json"),
+					JSON.stringify([customTemplate]),
+				);
+				await withSeededElementTemplateCache([], async (run) => {
+					const edited = await run(
+						"element-template",
+						"edit",
+						"Activity_17s7axj",
+						tempBpmn,
+						"--set",
+						"method=PUT",
+					);
+					assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+					assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+				});
+			},
+			{ bpmnSubdir: "processes" },
+		);
+	});
+
+	test("cold cache: resolves a local .camunda/element-templates/ template without the OOTB cache", async () => {
+		await withCustomTemplatedBpmn(async ({ tempDir, tempBpmn }) => {
+			const localDir = join(tempDir, ".camunda", "element-templates");
+			mkdirSync(localDir, { recursive: true });
+			writeFileSync(
+				join(localDir, "custom.json"),
+				readFileSync(join(tempDir, "custom-template.json"), "utf-8"),
+			);
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template <path> resolves an explicitly given custom template", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn, customTemplateFile }) => {
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				customTemplateFile,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template rejects a template that doesn't match the element's recorded id/version", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			const result = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				TEMPLATE_FILE,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("does not match") &&
+					output.includes("io.example.custom.Http.v1"),
+				`Should report the id/version mismatch. Got: ${output.slice(0, 400)}`,
+			);
+		});
+	});
+
+	test("unresolvable template: error points at --template and .camunda/element-templates/", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			await withSeededElementTemplateCache([], async (run) => {
+				const result = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 1);
+				const output = result.stdout + result.stderr;
+				assert.ok(
+					output.includes("--template") &&
+						output.includes(".camunda/element-templates/"),
+					`Should mention the escape hatches. Got: ${output.slice(0, 400)}`,
+				);
+			});
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------

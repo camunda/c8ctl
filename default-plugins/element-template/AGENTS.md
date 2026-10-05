@@ -11,7 +11,7 @@ version resolution.
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
 | `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
-| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
+| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplate` (`.camunda/element-templates/` lookup for `edit`), `resolveOotbTemplate`, `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
