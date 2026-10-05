@@ -17,7 +17,13 @@
  */
 
 import assert from "node:assert";
-import fs, { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import fs, {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+} from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
@@ -469,7 +475,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 			);
 			assert.match(
 				error.message,
-				/before giving up; the incomplete download could not be removed \(EBUSY\), delete it yourself: .*c8run\.tar\.gz$/m,
+				/before giving up\.\nThe incomplete download could not be removed \(EBUSY\); delete it yourself: .*c8run\.tar\.gz$/m,
 			);
 			assert.doesNotMatch(error.message, /was removed/);
 			assert.match(
@@ -481,6 +487,28 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 			rmMock.mock.restore();
 			syncBuiltinESMExports();
 		}
+	});
+
+	test("names the kept path when a file-system failure leaves something it cannot remove", async () => {
+		// A directory where the archive should go: writing fails with EISDIR and
+		// rmSync() without `recursive` refuses to delete it.
+		mkdirSync(targetFile);
+		server = await startServer((_req, res) => serveFull(res));
+
+		const error = await rejectionOf(
+			plugin.downloadWithRetry({
+				url: server.url,
+				targetFile,
+				logger: recordingLogger().logger,
+				...fast,
+			}),
+		);
+
+		assert.match(error.message, /^Could not save the download to /);
+		assert.match(
+			error.message,
+			/^The incomplete download could not be removed \(\S+\); delete it yourself: .*c8run\.tar\.gz$/m,
+		);
 	});
 
 	test("rejects a URL that fetch() cannot send before making any request", async (t) => {

@@ -750,10 +750,15 @@ function buildDownloadFailureMessage({
 }) {
   const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
 
+  const keptFileNote = cleanupError
+    ? `The incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}); delete it yourself: ${targetFile}`
+    : null;
+
   // A local file-system failure has nothing to do with the network.
   if (error?.fileSystem === true) {
     return (
       `Could not save the download to ${targetFile}: ${rootCauseDetail(error)}\n` +
+      (keptFileNote ? `${keptFileNote}\n` : '') +
       `URL: ${redactUrl(url)}\n` +
       'What you can try:\n' +
       '  - Check that there is enough free disk space and that you can write to that directory.\n' +
@@ -774,12 +779,11 @@ function buildDownloadFailureMessage({
   lines.push(`URL: ${redactUrl(url)}`);
   if (maxBytesReceived > 0) {
     lines.push(
-      `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up; ` +
-        (cleanupError
-          ? `the incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}), delete it yourself: ${targetFile}`
-          : 'the incomplete download was removed.'),
+      `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up` +
+        (keptFileNote ? '.' : '; the incomplete download was removed.'),
     );
   }
+  if (keptFileNote) lines.push(keptFileNote);
   const hints = [
     'Please check your network connection and VPN, then try again.',
     proxyHint(),
@@ -909,12 +913,13 @@ export async function downloadWithRetry({
     }
   }
 
-  // An unremovable file must not hide why the download failed; the message says it was kept.
+  // An unremovable file must not hide why the download failed; the message says
+  // it was kept (only if it is really there, e.g. not for ENAMETOOLONG).
   let cleanupError;
   try {
     rmSync(targetFile, { force: true });
   } catch (error) {
-    cleanupError = error;
+    if (existsSync(targetFile)) cleanupError = error;
   }
 
   if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
