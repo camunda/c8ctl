@@ -68,6 +68,26 @@ describe("httpsTransport", () => {
 		assert.ok(Date.now() - start < 1000);
 		await closed;
 	});
+
+	// The CLI aborts from a microtask chain, before Node's nextTick hands the
+	// socket to the request. A pooling agent then keeps the orphaned socket
+	// (connecting, ref'd) until its 5s idle timeout — against a blackholed
+	// registry that held every command open for 5s.
+	test("abort before the socket is assigned closes the socket", async () => {
+		const controller = new AbortController();
+		const pending = httpsTransport(url, { signal: controller.signal });
+		controller.abort();
+		await assert.rejects(pending, { name: "AbortError" });
+		// Either no connection is made at all, or it is closed right away.
+		const closed = onConnection.then(
+			(s) => new Promise((r) => s.once("close", r)),
+		);
+		await Promise.race([closed, new Promise((r) => setTimeout(r, 500))]);
+		assert.ok(
+			sockets.every((s) => s.closed),
+			"socket outlived the aborted request",
+		);
+	});
 });
 
 describe("CLI exit with stalled registry", () => {
@@ -87,7 +107,10 @@ describe("CLI exit with stalled registry", () => {
 				'import https from "node:https";',
 				'import { syncBuiltinESMExports } from "node:module";',
 				"const get = https.get;",
-				"https.get = (_url, ...rest) => get(process.env.STALL_URL, ...rest);",
+				"https.get = (_url, ...rest) => {",
+				'	process.stderr.write("[registry-get]\\n");',
+				"	return get(process.env.STALL_URL, ...rest);",
+				"};",
 				"syncBuiltinESMExports();",
 				`const { c8ctl } = await import(${JSON.stringify(runtimeUrl)});`,
 				'c8ctl.env.version = "1.0.0";',
@@ -114,7 +137,8 @@ describe("CLI exit with stalled registry", () => {
 
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /c8ctl v/);
-		await onConnection;
+		// The check must have fired; a fast exit that skipped it proves nothing.
+		assert.match(result.stderr, /\[registry-get\]/);
 		assert.ok(elapsed < 5000, `exit took ${elapsed}ms`);
 	});
 });
