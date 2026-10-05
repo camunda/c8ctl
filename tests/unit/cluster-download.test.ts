@@ -427,6 +427,46 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.doesNotMatch(error.message, /VPN|HTTPS_PROXY/);
 	});
 
+	test("retries a body that ends before the announced size and resumes from what was saved", async () => {
+		const short = 1024 * 1024;
+		server = await startServer((req, res, n) => {
+			if (n === 1) return serveHalfThenDrop(res);
+			if (n === 2) {
+				// A complete response whose body stops short of the Content-Range total.
+				const start = Number(
+					/^bytes=(\d+)-$/.exec(req.headers.range ?? "")?.[1],
+				);
+				res.writeHead(206, {
+					"content-length": short,
+					"content-range": `bytes ${start}-${PAYLOAD.length - 1}/${PAYLOAD.length}`,
+					etag: ETAG,
+				});
+				return res.end(PAYLOAD.subarray(start, start + short));
+			}
+			serveRange(req, res);
+		});
+		const log = recordingLogger();
+
+		await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			...fast,
+		});
+
+		assert.strictEqual(server.requests.length, 3);
+		const warnings = log.messages("warn");
+		assert.match(
+			warnings[1],
+			/\(the download ended early \(received \d+ (KB|MB) of 3 MB\)\)/,
+		);
+		const [second, third] = server.requests
+			.slice(1)
+			.map((r) => Number(/^bytes=(\d+)-$/.exec(r.range ?? "")?.[1]));
+		assert.strictEqual(third, second + short, "resumes after the short body");
+		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
+	});
+
 	test("asks for the identity encoding and ignores the sizes of a response encoded anyway", async () => {
 		const gzipped = gzipSync(PAYLOAD);
 		server = await startServer((_req, res) => {
