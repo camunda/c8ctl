@@ -108,7 +108,6 @@ test("worker process records the registry's version", async () => {
 				"--import",
 				pathToFileURL(preload).href,
 				"src/core/update-check-worker.ts",
-				"latest",
 			],
 			{ env: { ...process.env, C8CTL_DATA_DIR: dir }, timeout: 30_000 },
 		);
@@ -120,6 +119,39 @@ test("worker process records the registry's version", async () => {
 	} finally {
 		await new Promise((r) => server.close(r));
 	}
+});
+
+test("worker exits at its deadline when the registry never answers", async () => {
+	// fetch never settles and a ref'd handle stays open, like a getaddrinfo
+	// that never returns: only the worker's deadline can end the process.
+	// Long timers are sped up 20x so the test needn't wait the full deadline.
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-update-deadline-"));
+	const preload = join(dir, "preload.mjs");
+	writeFileSync(
+		preload,
+		[
+			"setInterval(() => {}, 1000);",
+			"globalThis.fetch = () => new Promise(() => {});",
+			"const setTimeout_ = globalThis.setTimeout;",
+			"globalThis.setTimeout = (fn, ms, ...args) =>",
+			"	setTimeout_(fn, ms >= 5000 ? ms / 20 : ms, ...args);",
+		].join("\n"),
+	);
+
+	const start = Date.now();
+	const result = await asyncSpawn(
+		"node",
+		[
+			"--import",
+			pathToFileURL(preload).href,
+			"src/core/update-check-worker.ts",
+		],
+		{ env: { ...process.env, C8CTL_DATA_DIR: dir }, timeout: 30_000 },
+	);
+	const elapsed = Date.now() - start;
+
+	assert.strictEqual(result.status, 0, result.stderr);
+	assert.ok(elapsed < 10_000, `worker took ${elapsed}ms`);
 });
 
 // NODE_USE_ENV_PROXY landed in Node 24.5 and 22.21.
@@ -149,7 +181,7 @@ test("worker honours the env proxy", {
 	try {
 		const result = await asyncSpawn(
 			"node",
-			["src/core/update-check-worker.ts", "latest"],
+			["src/core/update-check-worker.ts"],
 			{
 				env: {
 					...process.env,
