@@ -1488,9 +1488,10 @@ export const COMMAND_REGISTRY = {
 		description: "Deploy resources",
 		helpDescription:
 			"Deploy files to Camunda (auto-discovers deployable files in directories). " +
-			"When deploying a directory that is inside a process application " +
-			"(a parent directory contains a .process-application marker), the entire " +
-			"application root is deployed. Explicit file paths are not expanded.",
+			"When deploying a directory that is inside a Camunda project " +
+			"(a parent directory contains a camunda.json or .process-application " +
+			"marker), the entire project root is deployed. Explicit file paths " +
+			"are not expanded.",
 		helpResource: "[path...]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show deploy command with all flags",
@@ -1644,14 +1645,18 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description: "Watch all server-supported file extensions",
 			},
-			"process-application": {
+			project: {
 				type: "boolean",
 				description:
-					"Watch and deploy the entire process application (requires .process-application marker)",
+					"Watch and deploy the entire Camunda project (requires camunda.json or .process-application marker)",
+			},
+			"process-application": {
+				type: "boolean",
+				description: "Alias for --project (deprecated)",
 			},
 			pa: {
 				type: "boolean",
-				description: "Alias for --process-application",
+				description: "Alias for --project (deprecated)",
 			},
 		},
 		aliases: ["w"],

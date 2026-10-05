@@ -1,6 +1,7 @@
 /**
  * Shared deployment helpers — resource collection, deployment execution,
- * and process-application detection.
+ * and Camunda project marker detection (`camunda.json`, legacy
+ * `.process-application`).
  *
  * Consumed by:
  * - `src/commands/deploy.ts` (the `deployCommand` handler)
@@ -26,16 +27,18 @@ import {
 	SilentError,
 } from "../../core/index.ts";
 import {
+	CAMUNDA_PROJECT_FILE,
 	DEPLOYABLE_EXTENSIONS,
+	hasCamundaProjectFile,
 	type Ignore,
 	isIgnored,
 	loadDeployAlwaysRules,
 	loadIgnoreRules,
 	meetsMinExtensionVersion,
+	PROCESS_APPLICATION_FILE,
+	readCamundaProject,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
-
-const PROCESS_APPLICATION_FILE = ".process-application";
 
 /**
  * Helper to output messages that respect JSON mode for Unix pipe compatibility
@@ -150,6 +153,21 @@ function hasProcessApplicationFile(dirPath: string): boolean {
 }
 
 /**
+ * Check if a directory is a Camunda project root — it contains a
+ * `camunda.json` descriptor or a legacy `.process-application` marker.
+ *
+ * A present `camunda.json` is parsed and validated: malformed JSON is a
+ * hard error (the file must never silently count as a project marker).
+ */
+function hasProjectMarker(dirPath: string): boolean {
+	if (hasCamundaProjectFile(dirPath)) {
+		readCamundaProject(dirPath);
+		return true;
+	}
+	return hasProcessApplicationFile(dirPath);
+}
+
+/**
  * Find the root building block or process application folder by traversing up the path
  * Returns the path to the group root, or null if not in a group
  */
@@ -169,8 +187,9 @@ function findGroupRoot(
 			return { type: "bb", root: currentDir };
 		}
 
-		// Check if this directory has a .process-application file
-		if (hasProcessApplicationFile(currentDir)) {
+		// Check if this directory is a Camunda project root
+		// (camunda.json or legacy .process-application marker)
+		if (hasProjectMarker(currentDir)) {
 			return { type: "pa", root: currentDir };
 		}
 
@@ -190,12 +209,14 @@ function findGroupRoot(
 }
 
 /**
- * Walk up from `startDir` looking for a `.process-application` marker
- * file. Returns the directory that contains the marker, or `null` if
- * none is found before reaching the filesystem root.
+ * Walk up from `startDir` looking for a project marker — a `camunda.json`
+ * descriptor or a legacy `.process-application` file. Returns the
+ * directory that contains the marker, or `null` if none is found before
+ * reaching the filesystem root. Throws when a `camunda.json` exists but
+ * contains invalid JSON.
  *
  * `startDir` may be a file path — the walk starts from its parent
- * directory in that case (the initial `hasProcessApplicationFile` call
+ * directory in that case (the initial `hasProjectMarker` call
  * harmlessly returns false for non-directories).
  *
  * Unlike `findGroupRoot()` (which tags individual files for display),
@@ -207,7 +228,7 @@ export function findProcessApplicationRoot(startDir: string): string | null {
 	let currentDir = resolve(startDir);
 
 	while (true) {
-		if (hasProcessApplicationFile(currentDir)) {
+		if (hasProjectMarker(currentDir)) {
 			return currentDir;
 		}
 
@@ -304,8 +325,10 @@ function collectResourceFiles(
 					regularFolders.push(fullPath);
 				}
 			} else if (entryStat.isFile()) {
-				// Skip hidden files (e.g. .c8ignore, .process-application)
-				if (entry.startsWith(".")) {
+				// Skip hidden files (e.g. .c8ignore, .process-application) and
+				// the camunda.json project descriptor — it is metadata, never
+				// a deployable resource.
+				if (entry.startsWith(".") || entry === CAMUNDA_PROJECT_FILE) {
 					return;
 				}
 				// Skip ignored files
@@ -450,9 +473,10 @@ export function collectResourcesForPaths(
 	}
 
 	// ── Process-application auto-detection (#227) ──────────────────────
-	// For each directory path, walk up looking for a .process-application
-	// marker. If found, expand to the PA root so the entire application
-	// is deployed — matching Desktop Modeler behaviour.
+	// For each directory path, walk up looking for a project marker
+	// (camunda.json or legacy .process-application). If found, expand to
+	// the project root so the entire project is deployed — matching
+	// Desktop Modeler behaviour.
 	// File paths are NOT expanded so that watch-mode single-file deploys
 	// remain scoped to the changed file.
 	const effectivePaths: string[] = [];
