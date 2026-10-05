@@ -27,7 +27,7 @@ import {
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
@@ -392,6 +392,40 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
+	test("does not retry TLS certificate errors and adds the NODE_EXTRA_CA_CERTS hint", async (t) => {
+		for (const code of [
+			"CERT_NOT_YET_VALID",
+			"CERT_REVOKED",
+			"CERT_UNTRUSTED",
+		]) {
+			await t.test(code, async () => {
+				const fetchMock = mock.method(globalThis, "fetch", async () => {
+					throw new TypeError("fetch failed", {
+						cause: Object.assign(new Error(code.toLowerCase()), { code }),
+					});
+				});
+				try {
+					const error = await rejectionOf(
+						plugin.downloadWithRetry({
+							url: "https://downloads.example.invalid/c8run.tar.gz",
+							targetFile,
+							logger: recordingLogger().logger,
+							...fast,
+						}),
+					);
+					assert.strictEqual(fetchMock.mock.callCount(), 1, `${code} retried`);
+					assert.match(
+						error.message,
+						/the server certificate could not be verified/,
+					);
+					assert.match(error.message, /NODE_EXTRA_CA_CERTS/);
+				} finally {
+					fetchMock.mock.restore();
+				}
+			});
+		}
+	});
+
 	const progressLines = (log: ReturnType<typeof recordingLogger>) =>
 		log.messages("info").filter((m) => m.startsWith("//>"));
 
@@ -648,6 +682,12 @@ describe("Cluster Plugin – download failure descriptions", () => {
 				"the connection was refused",
 			],
 			[new TypeError("terminated"), "the connection was closed unexpectedly"],
+			...["CERT_NOT_YET_VALID", "CERT_REVOKED", "HOSTNAME_MISMATCH"].map(
+				(code): [Error, string] => [
+					new TypeError("fetch failed", { cause: withCode(code, code) }),
+					"the server certificate could not be verified",
+				],
+			),
 		];
 		for (const [error, expected] of cases) {
 			assert.strictEqual(plugin.describeDownloadFailure(error), expected);
