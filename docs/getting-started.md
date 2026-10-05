@@ -384,7 +384,7 @@ Opens the GitHub issues page in your browser to report bugs or request features.
 
 ## Update notifications
 
-`c8ctl` checks for newer versions in the background and displays a one-time notification when an update is available. This check is suppressed in CI environments, JSON output mode, and development versions.
+`c8ctl` checks for newer versions at most once an hour, in a detached background process, so an unreachable or blocked npm registry never delays a command. When that check finds an update, the next command displays a one-time notification. The check is suppressed in CI environments and development versions; the notification is also suppressed in JSON output mode.
 
 ## Shell completion
 
