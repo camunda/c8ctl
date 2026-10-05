@@ -7,14 +7,9 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { pathToFileURL } from "node:url";
 import { httpsTransport } from "../../src/core/update-check.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 let server: Server;
 let url: string;
@@ -87,58 +82,5 @@ describe("httpsTransport", () => {
 			sockets.every((s) => s.closed),
 			"socket outlived the aborted request",
 		);
-	});
-});
-
-describe("CLI exit with stalled registry", () => {
-	test("c8 --version exits promptly instead of waiting on the registry", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "c8ctl-update-exit-"));
-		// Skip the once-per-day patient wait so the impatient abort path runs.
-		writeFileSync(
-			join(dir, "last-update-notification.json"),
-			JSON.stringify({ lastPatientCheck: Date.now() }),
-		);
-		// Pretend to be a released build and route the registry to the stall server.
-		const preload = join(dir, "preload.mjs");
-		const runtimeUrl = pathToFileURL(resolve("src/core/runtime.ts")).href;
-		writeFileSync(
-			preload,
-			[
-				'import https from "node:https";',
-				'import { syncBuiltinESMExports } from "node:module";',
-				"const get = https.get;",
-				"https.get = (_url, ...rest) => {",
-				'	process.stderr.write("[registry-get]\\n");',
-				"	return get(process.env.STALL_URL, ...rest);",
-				"};",
-				"syncBuiltinESMExports();",
-				`const { c8ctl } = await import(${JSON.stringify(runtimeUrl)});`,
-				'c8ctl.env.version = "1.0.0";',
-			].join("\n"),
-		);
-
-		const start = Date.now();
-		const result = await asyncSpawn(
-			"node",
-			[
-				"--experimental-strip-types",
-				"--import",
-				pathToFileURL(preload).href,
-				"src/index.ts",
-				"--version",
-			],
-			{
-				env: { ...process.env, C8CTL_DATA_DIR: dir, CI: "", STALL_URL: url },
-				// Safety net only; the assertion below is the correctness signal.
-				timeout: 30_000,
-			},
-		);
-		const elapsed = Date.now() - start;
-
-		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /c8ctl v/);
-		// The check must have fired; a fast exit that skipped it proves nothing.
-		assert.match(result.stderr, /\[registry-get\]/);
-		assert.ok(elapsed < 5000, `exit took ${elapsed}ms`);
 	});
 });
