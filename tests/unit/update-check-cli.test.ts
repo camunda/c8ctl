@@ -84,7 +84,7 @@ test("worker process records the registry's version", async () => {
 	// A slow-ish registry: the worker must stay alive until it answers.
 	const server = createServer((_req, res) => {
 		setTimeout(() => {
-			res.end(JSON.stringify({ "dist-tags": { latest: "9.9.9" } }));
+			res.end(JSON.stringify({ latest: "9.9.9" }));
 		}, 200);
 	});
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));

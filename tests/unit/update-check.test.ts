@@ -106,7 +106,7 @@ let originalCI: string | undefined;
 let originalDataDir: string | undefined;
 
 const distTags = (tags: Record<string, string>) => async () =>
-	new Response(JSON.stringify({ "dist-tags": tags }), { status: 200 });
+	new Response(JSON.stringify(tags), { status: 200 });
 
 const checkFile = () => join(tempDir, "update-check.json");
 const notificationFile = () => join(tempDir, "last-update-notification.json");
@@ -304,8 +304,10 @@ describe("runUpdateCheck (worker side)", () => {
 		},
 		"non-200 response": async () => new Response("Not Found", { status: 404 }),
 		"malformed JSON": async () => new Response("not json", { status: 200 }),
-		"missing dist-tags": async () =>
+		"no dist-tags": async () =>
 			new Response(JSON.stringify({}), { status: 200 }),
+		"non-object JSON": async () =>
+			new Response(JSON.stringify(["4.2.0"]), { status: 200 }),
 	};
 	for (const [name, failing] of Object.entries(failures)) {
 		test(`${name}: records the attempt, keeps the last known version`, async () => {

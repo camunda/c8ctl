@@ -30,8 +30,12 @@ import { getUserDataDir } from "./config.ts";
 import { isRecord } from "./logger.ts";
 import { c8ctl, isUnversionedDevBuild } from "./runtime.ts";
 
-/** npm registry metadata endpoint (returns JSON with dist-tags). */
-const REGISTRY_URL = "https://registry.npmjs.org/@camunda8/cli";
+/**
+ * npm registry dist-tags endpoint: `{ latest, alpha, … }`, a few dozen bytes
+ * (the full package document is over half a megabyte).
+ */
+const REGISTRY_URL =
+	"https://registry.npmjs.org/-/package/@camunda8/cli/dist-tags";
 
 /** Minimum time between background registry checks (ms). */
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
@@ -165,12 +169,12 @@ async function fetchDistTags(): Promise<Record<string, string> | undefined> {
 		});
 		if (!res.ok) return undefined;
 		const data: unknown = await res.json();
-		if (!isRecord(data) || !isRecord(data["dist-tags"])) return undefined;
+		if (!isRecord(data)) return undefined;
 		const tags: Record<string, string> = {};
-		for (const [tag, version] of Object.entries(data["dist-tags"])) {
+		for (const [tag, version] of Object.entries(data)) {
 			if (typeof version === "string") tags[tag] = version;
 		}
-		return tags;
+		return Object.keys(tags).length > 0 ? tags : undefined;
 	} catch {
 		return undefined;
 	}
