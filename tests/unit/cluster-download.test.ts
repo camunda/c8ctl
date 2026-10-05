@@ -1,7 +1,14 @@
 /**
- * Unit tests for the cluster plugin's resilient c8run download
- * (`downloadWithRetry`): retry, HTTP Range resume, stall detection, cleanup,
- * user-facing messages and `--verbose` diagnostics.
+ * Unit tests for the cluster plugin's resilient c8run download, called
+ * directly: `downloadWithRetry` (resume, restart, retry policy, stall
+ * detection, cleanup, failure message, verbose diagnostics and proxy
+ * redaction) and the error helpers `describeDownloadFailure` and
+ * `formatErrorWithCause`.
+ *
+ * This file owns every download detail. What can only be observed through
+ * the CLI — that `cluster start` reports the failure and exits 1, and that
+ * `--verbose` reaches the download — lives in
+ * `cluster-start-behaviour.test.ts`, which does not re-assert these details.
  *
  * A real local HTTP server drops or stalls connections, so the failures are
  * the ones undici actually produces (e.g. `TypeError: terminated` caused by
@@ -17,10 +24,11 @@ import {
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import type { AddressInfo, Socket } from "node:net";
+import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
@@ -30,7 +38,6 @@ const ETAG = '"c8run-test-1"';
 /** Deterministic 3 MB payload, large enough to span many body chunks. */
 const PAYLOAD = Buffer.alloc(3 * 1024 * 1024);
 for (let i = 0; i < PAYLOAD.length; i++) PAYLOAD[i] = i % 251;
-const HALF = Math.floor(PAYLOAD.length / 2);
 
 type RecordedRequest = { range?: string; ifRange?: string };
 type Handler = (
@@ -60,17 +67,7 @@ async function startServer(handler: Handler): Promise<TestServer> {
 		sockets.add(socket);
 		socket.on("close", () => sockets.delete(socket));
 	});
-	const port = await new Promise<number>((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			if (address === null || typeof address === "string") {
-				reject(new Error("Expected a TCP address"));
-				return;
-			}
-			resolve((address satisfies AddressInfo).port);
-		});
-	});
+	const port = await listenOnLoopback(server);
 	return {
 		url: `http://127.0.0.1:${port}/c8run/8.8.1/camunda8-run-8.8.1-linux-x86_64.tar.gz`,
 		requests,
@@ -88,12 +85,9 @@ function serveFull(res: ServerResponse): void {
 	res.end(PAYLOAD);
 }
 
-/** Announce the full payload, send half of it, then kill the socket. */
+/** Announce the full payload with a strong ETag, send half, kill the socket. */
 function serveHalfThenDrop(res: ServerResponse): void {
-	res.writeHead(200, { "content-length": PAYLOAD.length, etag: ETAG });
-	res.write(PAYLOAD.subarray(0, HALF), () => {
-		setTimeout(() => res.socket?.destroy(), 20);
-	});
+	sendHalfThenDrop(res, PAYLOAD, { etag: ETAG });
 }
 
 /** Honour `Range: bytes=N-` with a 206 when If-Range matches; else full 200. */
@@ -245,12 +239,10 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 
 	test("does not send Range without a validator (no ETag / Last-Modified) and restarts instead", async () => {
 		server = await startServer((_req, res, n) => {
-			res.writeHead(200, { "content-length": PAYLOAD.length });
 			if (n === 1) {
-				res.write(PAYLOAD.subarray(0, HALF), () =>
-					setTimeout(() => res.socket?.destroy(), 20),
-				);
+				sendHalfThenDrop(res, PAYLOAD);
 			} else {
+				res.writeHead(200, { "content-length": PAYLOAD.length });
 				res.end(PAYLOAD);
 			}
 		});
@@ -270,7 +262,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.match(log.messages("warn")[0], /restarting from the beginning/);
 	});
 
-	test("gives up after 1 initial attempt + 3 retries, removes the partial file, and explains why", async () => {
+	test("gives up after 1 initial attempt + 3 retries, removes the partial file, and reports the cause, URL and hints", async () => {
 		server = await startServer((_req, res) => serveHalfThenDrop(res));
 		const log = recordingLogger();
 
@@ -316,49 +308,33 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(error.cause, "the final error keeps the cause chain");
 	});
 
-	test("does not retry a 404 and leaves no file behind", async () => {
-		server = await startServer((_req, res) => {
-			res.writeHead(404);
-			res.end("Not Found");
-		});
-		const log = recordingLogger();
-
-		const error = await rejectionOf(
-			plugin.downloadWithRetry({
-				url: server.url,
-				targetFile,
-				logger: log.logger,
-				...fast,
-			}),
-		);
-
-		assert.strictEqual(server.requests.length, 1);
-		assert.strictEqual(prop(error, "status"), 404);
-		assert.strictEqual(existsSync(targetFile), false);
-		assert.deepStrictEqual(log.messages("warn"), []);
-	});
-
-	test("4xx responses are never retried; 5xx and 429 are (class-scoped)", async () => {
+	test("fails a 4xx response (400/401/403/404/410) on the first attempt, with its status and no file left behind", async () => {
 		for (const status of [400, 401, 403, 404, 410]) {
 			const s = await startServer((_req, res) => {
 				res.writeHead(status);
 				res.end();
 			});
 			try {
+				const log = recordingLogger();
 				const error = await rejectionOf(
 					plugin.downloadWithRetry({
 						url: s.url,
 						targetFile,
-						logger: recordingLogger().logger,
+						logger: log.logger,
 						...fast,
 					}),
 				);
 				assert.strictEqual(s.requests.length, 1, `HTTP ${status} retried`);
 				assert.strictEqual(prop(error, "status"), status);
+				assert.deepStrictEqual(log.messages("warn"), [], `HTTP ${status}`);
+				assert.strictEqual(existsSync(targetFile), false, `HTTP ${status}`);
 			} finally {
 				await s.close();
 			}
 		}
+	});
+
+	test("retries a 429 or 5xx response (500/502/503/504) and completes the download", async () => {
 		for (const status of [429, 500, 502, 503, 504]) {
 			const s = await startServer((_req, res, n) => {
 				if (n === 1) {
@@ -416,7 +392,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
-	test("reports an unreachable server as such after all retries", async () => {
+	test("reports a refused connection as an unreachable Download Center after all retries", async () => {
 		// Bind then close a server to obtain a port that refuses connections.
 		const closed = await startServer(() => {});
 		const url = closed.url;
@@ -444,7 +420,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.match(error.message, /Cause: ECONNREFUSED: /);
 	});
 
-	test("verbose output appears only when verbose is enabled", async () => {
+	test("logs [verbose] HTTP diagnostics (URL, environment, headers, per-attempt timing, cause chain, finer progress) only when verbose is set", async () => {
 		const run = async (verbose: boolean) => {
 			const s = await startServer((req, res, n) =>
 				n === 1 ? serveHalfThenDrop(res) : serveRange(req, res),
@@ -513,7 +489,7 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		);
 	});
 
-	test("verbose output never prints proxy credentials", async () => {
+	test("redacts proxy credentials in verbose output", async () => {
 		const saved = process.env.HTTPS_PROXY;
 		process.env.HTTPS_PROXY = "http://alice:s3cret@proxy.example:3128";
 		server = await startServer((_req, res) => serveFull(res));
