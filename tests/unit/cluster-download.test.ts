@@ -28,6 +28,7 @@ import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
+import { gzipSync } from "node:zlib";
 import { listenOnLoopback, sendHalfThenDrop } from "../utils/http-server.ts";
 
 // @ts-expect-error — JS plugin has no declaration file; typed via runtime shape assertions below
@@ -39,7 +40,11 @@ const ETAG = '"c8run-test-1"';
 const PAYLOAD = Buffer.alloc(3 * 1024 * 1024);
 for (let i = 0; i < PAYLOAD.length; i++) PAYLOAD[i] = i % 251;
 
-type RecordedRequest = { range?: string; ifRange?: string };
+type RecordedRequest = {
+	range?: string;
+	ifRange?: string;
+	acceptEncoding?: string;
+};
 type Handler = (
 	req: IncomingMessage,
 	res: ServerResponse,
@@ -60,6 +65,7 @@ async function startServer(handler: Handler): Promise<TestServer> {
 		requests.push({
 			range: req.headers.range,
 			ifRange: typeof ifRange === "string" ? ifRange : undefined,
+			acceptEncoding: req.headers["accept-encoding"],
 		});
 		handler(req, res, requests.length);
 	});
@@ -392,6 +398,31 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
 	});
 
+	test("asks for the identity encoding and ignores the sizes of a response encoded anyway", async () => {
+		const gzipped = gzipSync(PAYLOAD);
+		server = await startServer((_req, res) => {
+			res.writeHead(200, {
+				"content-encoding": "gzip",
+				"content-length": gzipped.length,
+				etag: ETAG,
+			});
+			res.end(gzipped);
+		});
+		const log = recordingLogger();
+
+		const result = await plugin.downloadWithRetry({
+			url: server.url,
+			targetFile,
+			logger: log.logger,
+			...fast,
+		});
+
+		assert.strictEqual(server.requests.length, 1, log.messages().join("\n"));
+		assert.strictEqual(server.requests[0].acceptEncoding, "identity");
+		assert.ok(readFileSync(targetFile).equals(PAYLOAD));
+		assert.deepStrictEqual(result, { bytes: PAYLOAD.length, etag: ETAG });
+	});
+
 	test("does not retry TLS certificate errors and adds the NODE_EXTRA_CA_CERTS hint", async (t) => {
 		for (const code of [
 			"CERT_NOT_YET_VALID",
@@ -592,14 +623,14 @@ describe("Cluster Plugin – downloadWithRetry", () => {
 		has(/^\[verbose\] Node\.js v\d+\.\d+\.\d+; NODE_USE_ENV_PROXY=/);
 		has(/^\[verbose\] Proxy environment: /);
 		has(/^\[verbose\] Attempt 1\/4 started$/);
-		has(/^\[verbose\] Request headers: \(none beyond the Node\.js defaults\)$/);
+		has(/^\[verbose\] Request headers: Accept-Encoding: identity$/);
 		has(
-			/^\[verbose\] Request headers: Range: bytes=\d+-, If-Range: "c8run-test-1"$/,
+			/^\[verbose\] Request headers: Accept-Encoding: identity, Range: bytes=\d+-, If-Range: "c8run-test-1"$/,
 		);
 		has(/^\[verbose\] Response: HTTP 200 OK from /);
 		has(/^\[verbose\] Response: HTTP 206 Partial Content from /);
 		has(
-			/^\[verbose\] Response headers: content-length: \d+, content-range: bytes \d+-\d+\/\d+, etag: "c8run-test-1", last-modified: \(none\), accept-ranges: \(none\)$/,
+			/^\[verbose\] Response headers: content-length: \d+, content-range: bytes \d+-\d+\/\d+, content-encoding: \(none\), etag: "c8run-test-1", last-modified: \(none\), accept-ranges: \(none\)$/,
 		);
 		has(
 			/^\[verbose\] Attempt 1\/4 failed after \S+: [\d.]+ MB received in this attempt/,

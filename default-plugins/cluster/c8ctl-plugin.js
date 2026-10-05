@@ -919,13 +919,14 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
   };
 
   const resume = state.written > 0 && state.validator !== null;
-  const headers = resume ? { Range: `bytes=${state.written}-`, 'If-Range': state.validator } : {};
+  // fetch() decodes a Content-Encoding transparently, while Content-Length and
+  // byte ranges count encoded bytes; ask for the raw bytes so both match the file.
+  const headers = {
+    'Accept-Encoding': 'identity',
+    ...(resume ? { Range: `bytes=${state.written}-`, 'If-Range': state.validator } : {}),
+  };
   vlog(`GET ${url}`);
-  vlog(
-    `Request headers: ${
-      resume ? Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join(', ') : '(none beyond the Node.js defaults)'
-    }`,
-  );
+  vlog(`Request headers: ${Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join(', ')}`);
 
   let response;
   armStallTimer();
@@ -944,17 +945,19 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
       `${response.redirected ? ' (after redirect)' : ''}`,
   );
   vlog(
-    `Response headers: ${['content-length', 'content-range', 'etag', 'last-modified', 'accept-ranges']
+    `Response headers: ${['content-length', 'content-range', 'content-encoding', 'etag', 'last-modified', 'accept-ranges']
       .map((name) => `${name}: ${header(name) ?? '(none)'}`)
       .join(', ')}`,
   );
 
   const discardBody = () => response.body?.cancel().catch(() => {});
   let append = false;
+  // A server may encode the body anyway; its sizes and ranges then don't apply.
+  const encoded = !['', 'identity'].includes((header('content-encoding') ?? '').trim().toLowerCase());
 
   if (response.status === 206) {
     const range = parseContentRange(header('content-range'));
-    if (!resume || !range || range.start !== state.written) {
+    if (!resume || !range || range.start !== state.written || encoded) {
       await discardBody();
       state.written = 0;
       const reason = `the server sent an unexpected byte range (${header('content-range') ?? 'no Content-Range header'})`;
@@ -969,14 +972,14 @@ async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progres
     state.written = 0;
     state.reportedPercent = 0;
     state.reportedBytes = 0;
-    state.total = Number.parseInt(header('content-length') || '0', 10) || 0;
+    state.total = encoded ? 0 : Number.parseInt(header('content-length') || '0', 10) || 0;
     // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
     // values are date strings. Both are used as opaque version tokens for equality
     // comparison — the format difference does not affect correctness.
     state.etag = header('etag') || header('last-modified') || null;
     // If-Range needs a strong validator; a weak ETag (W/"...") must not be used.
     const strongEtag = header('etag') && !header('etag').startsWith('W/') ? header('etag') : null;
-    state.validator = strongEtag || header('last-modified') || null;
+    state.validator = encoded ? null : strongEtag || header('last-modified') || null;
   } else {
     await discardBody();
     if (response.status === 416 && resume) {
