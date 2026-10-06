@@ -336,6 +336,20 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		assert.match(pinned.stdout, /"version":"8\.10\.1"/);
 	});
 
+	test("start dry-run reports the locally resolved alias, not the alias name", async () => {
+		const mapping = join(cacheDir, "alias-stable.resolved");
+		writeFileSync(mapping, "8.10.1");
+		try {
+			const result = await cluster("start", "--dry-run");
+			assert.equal(result.status, 0, result.stderr);
+			assert.match(result.stdout, /"version":"8\.10\.1"/);
+			assert.match(result.stdout, /"requestedVersion":"stable"/);
+			assert.doesNotMatch(result.stdout + result.stderr, /VERSION:/);
+		} finally {
+			rmSync(mapping, { force: true });
+		}
+	});
+
 	test("help and shell completion advertise physical tenants", async () => {
 		const help = await c8WithEnv({}, "help", "cluster");
 		assert.match(help.stdout, /tenants/);

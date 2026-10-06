@@ -3429,11 +3429,6 @@ export const commands = {
       process.exit(1);
     }
 
-    if (ctx?.dryRun && parsed.subcommand === 'start') {
-      console.log(JSON.stringify({ dryRun: true, command: 'cluster start', version: parsed.version || 'stable', args: ['start', ...(parsed.startArgs || [])] }));
-      return;
-    }
-
     if (parsed.subcommand === 'status') {
       try {
         await clusterStatus(getCacheDir());
@@ -3523,6 +3518,14 @@ export const commands = {
       preferLocal: isStart,
       cacheDir: theCacheDir,
     });
+
+    // Dry-run start: report the version a real start would select (same
+    // local-preferred resolution), but skip install and launch.
+    if (ctx?.dryRun && isStart) {
+      console.log(JSON.stringify({ dryRun: true, command: 'cluster start', version, requestedVersion: versionSpec, args: ['start', ...(parsed.startArgs || [])] }));
+      return;
+    }
+
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
