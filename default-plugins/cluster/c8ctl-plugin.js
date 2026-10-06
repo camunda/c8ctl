@@ -331,11 +331,12 @@ export const metadata = {
       // so the subcommand flags are documented via `flagsHint` instead.
       passthrough: true,
       passthroughHint:
-        '--purge, --debug and --c8-version are read by the plugin; everything after `secrets` is forwarded to c8run',
+        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin; arguments after `secrets` or `tenants` are forwarded to c8run',
       flagsHint: [
         '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
         '--debug                 (start, stop) Stream raw c8run output',
         '--purge                 (stop only) Also delete runtime data after stopping',
+        '--physical-tenants <ids> (start only) Comma-separated physical tenants for this run (repeatable; Camunda 8.10+)',
       ],
       subcommands: [
         { name: 'start', description: 'Start local Camunda 8 cluster' },
@@ -349,6 +350,7 @@ export const metadata = {
         { name: 'logs', description: 'Stream cluster logs' },
         { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
         { name: 'secrets', description: 'Manage local development secrets (passed through to c8run)' },
+        { name: 'tenants', description: 'Manage local physical tenants (passed through to c8run; Camunda 8.10+)' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -367,6 +369,9 @@ export const metadata = {
         { command: 'c8ctl cluster secrets list', description: 'List secret names (values are never shown)' },
         { command: 'c8ctl cluster secrets import .env.secrets', description: 'Import secrets from a dotenv file' },
         { command: 'c8ctl cluster secrets delete OPENAI_API_KEY --yes', description: 'Delete a secret without prompting' },
+        { command: 'c8ctl cluster tenants --c8-version 8.10 add sales', description: 'Save a physical tenant using an installed 8.10 build' },
+        { command: 'c8ctl cluster start 8.10 --physical-tenants sales,hr', description: 'Start physical tenants for one run only' },
+        { command: 'c8ctl cluster secrets --tenant sales set OPENAI_API_KEY', description: 'Store a secret for one physical tenant' },
       ],
     },
   },
@@ -1591,7 +1596,7 @@ function printSummary(rawOutput, version) {
   console.log('');
 }
 
-async function startC8Run(config, debug = false) {
+async function startC8Run(config, debug = false, startArgs = []) {
   const logger = getLogger();
   const binaryPath = getC8RunBinaryPath(config);
   const logDir = join(dirname(binaryPath), 'log');
@@ -1645,9 +1650,10 @@ async function startC8Run(config, debug = false) {
 
   logger.info('Starting Camunda 8 local cluster...');
 
-  const proc = spawn(binaryPath, ['start'], {
+  const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
+    env: { ...resolveLocalStoreEnv(process.env, process.cwd()), C8RUN_CLI_NAME },
   });
 
   if (typeof proc.pid !== 'number') {
@@ -1691,8 +1697,18 @@ async function startC8Run(config, debug = false) {
   });
 
   if (exitCode !== 0) {
+    // A failed tenant probe leaves healthy engines alive; preserve their identity
+    // for stop/status even if the installation directory is subsequently replaced.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     if (startupOutput.trim()) {
       logger.error(`c8run output:\n${startupOutput.trim()}`);
+    }
+    if (startArgs.length > 0 && /flag provided but not defined: -physical-tenants/.test(startupOutput)) {
+      logger.error('This cached c8run build lacks --physical-tenants. Install a Camunda 8.10+ build containing physical-tenant CLI support with "c8ctl cluster install 8.10".');
     }
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
@@ -2080,7 +2096,7 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-export function recordRunningClusterPids(config, { signatureOf = processStartSignature } = {}) {
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false } = {}) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
@@ -2108,7 +2124,9 @@ export function recordRunningClusterPids(config, { signatureOf = processStartSig
       pids.push(pid);
     }
   }
+  if (skipEmpty && pids.length === 0) return 0;
   writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
+  return pids.length;
 }
 
 /**
@@ -2475,13 +2493,15 @@ export async function stopC8Run(config, debug = false) {
  * `--yes` / `-y` are c8ctl GLOBAL flags, so the host consumes them (it sets
  * `ctx.yes`) and strips them from a passthrough command's args. c8run's own
  * `secrets delete` has a `--yes` flag that skips its confirmation prompt, so
- * restore it when the user asked for it. Scoped to `delete` — the only verb
- * documented to take it — so it is never appended to a c8run verb that may
- * not accept the flag. Never mutates `tail`.
+ * restore it when the user asked for it. Tenant removal/reset also require
+ * confirmation. Skip tenant selectors when locating a secrets verb, and never
+ * append confirmation to a verb that does not accept it. Never mutates `tail`.
  */
-export function withForwardedYes(tail, ctx) {
-  const verbIndex = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
-  if (ctx?.yes !== true || tail[verbIndex] !== 'delete') return tail;
+export function withForwardedYes(tail, ctx, command = 'secrets') {
+  const versionEnd = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
+  const positions = forwardedPositionals(tail, versionEnd, command === 'secrets');
+  const verbs = command === 'tenants' ? ['remove', 'rm', 'reset'] : ['delete'];
+  if (ctx?.yes !== true || !verbs.includes(tail[positions[0]])) return tail;
   // Everything after a `--` terminator is literal for c8run, so the flag goes
   // immediately before it, and a `--yes` that only appears after it does not count.
   const terminator = tail.indexOf('--');
@@ -2504,7 +2524,7 @@ export function withForwardedYes(tail, ctx) {
  * unreleased c8run's verb set (including one c8ctl has never heard of) is
  * still forwarded and its own error surfaces as-is.
  */
-export function parseSecretsArgs(tail) {
+export function parseSecretsArgs(tail, command = 'secrets') {
   let version = null;
   let passthrough = tail;
 
@@ -2520,14 +2540,14 @@ export function parseSecretsArgs(tail) {
     }
     if (!version || version.startsWith('-')) {
       throw new Error(
-        'Missing value for --c8-version. Example: c8ctl cluster secrets --c8-version 8.10 list',
+        `Missing value for --c8-version. Example: c8ctl cluster ${command} --c8-version 8.10 list`,
       );
     }
   }
 
   if (passthrough.length === 0) {
     throw new Error(
-      'usage: c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>',
+      `usage: c8ctl cluster ${command} [--c8-version <version>] <${command === 'tenants' ? 'add|list|remove|reset|path|help|...' : 'set|list|path|delete|import|...'}>`,
     );
   }
 
@@ -2541,30 +2561,55 @@ export function parseSecretsArgs(tail) {
  * C8RUN_SECRETS_DIR would otherwise resolve against the wrong directory and
  * silently miss the file the user meant.
  *
- * Only touches an `import` positional and C8RUN_SECRETS_DIR; every other
+ * Only touches an `import` positional and the local store environment paths; every other
  * verb and flag passes through untouched. "-" (stdin) and already-absolute
  * paths are left alone. Never mutates the passthrough array or env object
  * it receives.
  */
 export function resolveSecretsPaths(passthrough, { cwd = process.cwd(), env = process.env } = {}) {
   let resolvedPassthrough = passthrough;
+  const positions = forwardedPositionals(passthrough, 0, true);
+  const [verbIndex, fileIndex] = positions;
   if (
-    passthrough[0] === 'import' &&
-    passthrough[1] &&
-    passthrough[1] !== '-' &&
-    !isAbsolute(passthrough[1])
+    passthrough[verbIndex] === 'import' &&
+    passthrough[fileIndex] &&
+    passthrough[fileIndex] !== '-' &&
+    !isAbsolute(passthrough[fileIndex])
   ) {
     resolvedPassthrough = [...passthrough];
-    resolvedPassthrough[1] = resolve(cwd, passthrough[1]);
+    resolvedPassthrough[fileIndex] = resolve(cwd, passthrough[fileIndex]);
   }
 
+  return { passthrough: resolvedPassthrough, env: resolveLocalStoreEnv(env, cwd) };
+}
+
+function forwardedPositionals(args, start, tenantScoped) {
+  const positions = [];
+  for (let i = start; i < args.length; i++) {
+    if (args[i] === '--') break;
+    if (tenantScoped && args[i] === '--tenant') {
+      i++;
+      continue;
+    }
+    if (tenantScoped && args[i].startsWith('--tenant=')) continue;
+    // Unknown options belong to c8run. Do not guess which tokens they consume.
+    positions.push(i);
+  }
+  return positions;
+}
+
+// Tells c8run which command prefix to print in its hints ("c8ctl cluster tenants list"
+// instead of "c8run tenants list"); c8run builds without support ignore it.
+const C8RUN_CLI_NAME = 'c8ctl cluster';
+
+function resolveLocalStoreEnv(env, cwd) {
   let resolvedEnv = env;
-  const secretsDir = env.C8RUN_SECRETS_DIR;
-  if (secretsDir && !isAbsolute(secretsDir)) {
-    resolvedEnv = { ...env, C8RUN_SECRETS_DIR: resolve(cwd, secretsDir) };
+  for (const name of ['C8RUN_SECRETS_DIR', 'C8RUN_TENANTS_FILE']) {
+    if (env[name] && !isAbsolute(env[name])) {
+      resolvedEnv = { ...resolvedEnv, [name]: resolve(cwd, env[name]) };
+    }
   }
-
-  return { passthrough: resolvedPassthrough, env: resolvedEnv };
+  return resolvedEnv;
 }
 
 /**
@@ -2639,6 +2684,15 @@ export function mapSecretsFailure(exitCode, stderrTail, version) {
 export async function runClusterSecrets(
   cacheDir,
   tail,
+  options = {},
+) {
+  return runClusterLocalCommand('secrets', cacheDir, tail, options);
+}
+
+async function runClusterLocalCommand(
+  command,
+  cacheDir,
+  tail,
   { explicitVersion, spawnFn = spawn, cwd = process.cwd(), env = process.env } = {},
 ) {
   const logger = getLogger();
@@ -2646,7 +2700,7 @@ export async function runClusterSecrets(
   const version = await selectSecretsVersion(cacheDir, { explicit: explicitVersion });
   if (!version) {
     logger.error(
-      'No c8run installed locally. Install one first: c8ctl cluster install alpha',
+      `No c8run installed locally. Install one first: c8ctl cluster install ${command === 'tenants' ? '8.10' : 'alpha'}`,
     );
     process.exit(1);
     return;
@@ -2656,18 +2710,20 @@ export async function runClusterSecrets(
   try {
     binaryPath = getC8RunBinaryPath({ cacheDir, version });
   } catch (error) {
-    logger.error(`Failed to run secrets command: ${error.message}`);
+    logger.error(`Failed to run ${command} command: ${error.message}`);
     process.exit(1);
     return;
   }
 
-  const { passthrough, env: resolvedEnv } = resolveSecretsPaths(tail, { cwd, env });
+  const { passthrough, env: resolvedEnv } = command === 'secrets'
+    ? resolveSecretsPaths(tail, { cwd, env })
+    : { passthrough: tail, env: resolveLocalStoreEnv(env, cwd) };
 
   const exitCode = await new Promise((resolvePromise, reject) => {
-    const proc = spawnFn(binaryPath, ['secrets', ...passthrough], {
+    const proc = spawnFn(binaryPath, [command, ...passthrough], {
       stdio: ['inherit', 'inherit', 'pipe'],
       cwd: dirname(binaryPath),
-      env: resolvedEnv,
+      env: { ...resolvedEnv, C8RUN_CLI_NAME },
     });
 
     let stderrTail = '';
@@ -2681,7 +2737,11 @@ export async function runClusterSecrets(
       reject(new Error(`Failed to spawn c8run: ${err.message}`));
     });
     proc.on('close', (code) => {
-      const hint = mapSecretsFailure(code ?? 1, stderrTail, version);
+      const hint = command === 'secrets'
+        ? mapSecretsFailure(code ?? 1, stderrTail, version)
+        : code !== 0 && /unsupported operation:\s*tenants/i.test(stderrTail)
+          ? `c8run ${version} does not support "tenants" yet. Install a Camunda 8.10+ c8run build containing physical-tenant CLI support with "c8ctl cluster install 8.10"; older cached builds may predate this feature.`
+          : null;
       if (hint) {
         logger.error(hint);
       }
@@ -3169,6 +3229,16 @@ export function parsePluginArgs(args) {
   while (i < args.length) {
     const arg = args[i];
 
+    if (arg === '--physical-tenants' || arg.startsWith('--physical-tenants=')) {
+      const value = arg === '--physical-tenants' ? args[i + 1] : arg.slice('--physical-tenants='.length);
+      if (!value || value.startsWith('-')) throw new Error('--physical-tenants requires comma-separated tenant IDs');
+      result.startArgs ??= [];
+      result.startArgs.push(arg);
+      if (arg === '--physical-tenants') { result.startArgs.push(value); i++; }
+      i++;
+      continue;
+    }
+
     if (arg === '--c8-version') {
       const next = args[i + 1];
       if (!next || next.startsWith('-')) {
@@ -3221,6 +3291,9 @@ export function parsePluginArgs(args) {
     i += 1;
   }
 
+  if (result.startArgs && result.subcommand !== 'start') {
+    throw new Error('--physical-tenants can only be used with the start subcommand');
+  }
   return result;
 }
 
@@ -3237,20 +3310,32 @@ export const commands = {
   'cluster': async (args, _flags, ctx) => {
     const logger = getLogger();
 
-    // Secrets passthrough (#314) is intercepted before parsePluginArgs:
+    // Local management passthrough is intercepted before parsePluginArgs:
     // its arguments (verbs, flags, positionals) belong to c8run, not to
     // c8ctl's own version/--debug/--purge parsing.
-    if (args[0] === 'secrets') {
-      let parsedSecrets;
+    if (args[0] === 'secrets' || args[0] === 'tenants') {
+      const command = args[0];
+      let parsedLocal;
       try {
-        parsedSecrets = parseSecretsArgs(withForwardedYes(args.slice(1), ctx));
+        parsedLocal = parseSecretsArgs(withForwardedYes(args.slice(1), ctx, command), command);
       } catch (error) {
         logger.error(error.message);
         process.exit(1);
         return;
       }
-      await runClusterSecrets(getCacheDir(), parsedSecrets.passthrough, {
-        explicitVersion: parsedSecrets.version,
+      if (ctx?.dryRun) {
+        // Local-only lookup (no download) so the preview shows the c8run that would run.
+        let version = null;
+        try {
+          version = await selectSecretsVersion(getCacheDir(), { explicit: parsedLocal.version });
+        } catch {
+          version = parsedLocal.version;
+        }
+        console.log(JSON.stringify({ dryRun: true, command: `cluster ${command}`, version, args: parsedLocal.passthrough }));
+        return;
+      }
+      await runClusterLocalCommand(command, getCacheDir(), parsedLocal.passthrough, {
+        explicitVersion: parsedLocal.version,
       });
       return;
     }
@@ -3276,6 +3361,7 @@ export const commands = {
       console.log('  c8ctl cluster delete <version>');
       console.log('  c8ctl cluster purge <version>');
       console.log('  c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>');
+      console.log('  c8ctl cluster tenants [--c8-version <version>] <add|list|remove|reset|path|help>');
       console.log('');
       console.log('Subcommands:');
       console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
@@ -3288,12 +3374,14 @@ export const commands = {
       console.log('  delete       Remove a locally cached version to reclaim disk space');
       console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
       console.log('  secrets      Manage local development secrets (forwarded verbatim to c8run)');
+      console.log('  tenants      Manage local physical tenants (Camunda 8.10+; forwarded to c8run)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
       console.log('  --purge                (stop only) also delete runtime data after stopping');
+      console.log('  --physical-tenants <ids> (start only) Extra physical tenants for this run; repeatable');
       console.log('');
       console.log('A <version> can be:');
       console.log('  stable / alpha         Named aliases');
@@ -3326,6 +3414,9 @@ export const commands = {
       console.log('  c8ctl cluster secrets list');
       console.log('  c8ctl cluster secrets import .env.secrets');
       console.log('  c8ctl cluster secrets delete OPENAI_API_KEY --yes');
+      console.log('  c8ctl cluster tenants --c8-version 8.10 add sales');
+      console.log('  c8ctl cluster start 8.10 --physical-tenants sales,hr');
+      console.log('  c8ctl cluster secrets --tenant sales set OPENAI_API_KEY');
       console.log('');
       console.log('secrets forwards everything after it to c8run\'s own "secrets" command —');
       console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
@@ -3427,6 +3518,14 @@ export const commands = {
       preferLocal: isStart,
       cacheDir: theCacheDir,
     });
+
+    // Dry-run start: report the version a real start would select (same
+    // local-preferred resolution), but skip install and launch.
+    if (ctx?.dryRun && isStart) {
+      console.log(JSON.stringify({ dryRun: true, command: 'cluster start', version, requestedVersion: versionSpec, args: ['start', ...(parsed.startArgs || [])] }));
+      return;
+    }
+
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
@@ -3452,7 +3551,7 @@ export const commands = {
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
-        await startC8Run(config, parsed.debug);
+        await startC8Run(config, parsed.debug, parsed.startArgs);
       } catch (error) {
         logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
         process.exit(1);
