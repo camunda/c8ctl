@@ -21,6 +21,7 @@ export interface TemplateProperty {
 	optional?: boolean;
 	constraints?: { notEmpty?: boolean };
 	condition?: unknown;
+	choices?: { name: string; value: string }[];
 	binding?: TemplateBinding;
 }
 
