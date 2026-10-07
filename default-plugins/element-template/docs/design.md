@@ -183,6 +183,34 @@ latest-version reduction, so the latest non-deprecated version of a connector
 surfaces even when its newest version is deprecated. Output is a flat sequence
 of template cards (no grouping by category).
 
+## Migrating between template versions
+
+`apply` registers one template, so re-applying a newer version has no old
+template to compare against and keeps a value only when the new template binds
+the same key. `update` and `change` register the applied template as well, so
+the library's own update semantics apply, and add a recipe on top for values
+that moved.
+
+- **Recipe location.** A recipe is carried by the template it migrates *to*, in
+  `metadata.migratesFrom`, so it travels with the template through the
+  marketplace and the cache. `metadata` is the schema's free-form area; it
+  needs no change to the element template schema and survives validation.
+  `--recipe` supplies the same format from a file for templates that carry none.
+- **Versioned and strict.** The recipe has a `schemaVersion`. A reader refuses a
+  version it does not know and any unknown key, rather than applying part of a
+  recipe or silently ignoring a typo.
+- **Steps.** An element on an old version climbs the version steps of its own
+  template in order, then makes at most one hop onto a different template. A
+  step that reads a key nothing produces makes the whole recipe unusable, and the
+  change falls back to carry-over with the reason in the report.
+- **The report is a diff.** What was dropped, added and changed comes from the
+  element's values before and after, so it describes the result rather than the
+  recipe's intent. Moves and notes come from the recipe.
+- **Output.** The BPMN goes to stdout (or the file with `--in-place`); the report
+  goes to stderr in that case so pipes stay clean.
+- **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
+  into a library once the recipe format is settled.
+
 ## Plugin dependencies
 
 `semver` is a root dep (added in this work) imported directly. Walking up from the plugin

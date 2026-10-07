@@ -16,6 +16,8 @@ The verb is organized as a workflow: discover → inspect → act → export →
 | `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). `--engine-version` resolves the latest compatible version. |
 | `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. `--engine-version` resolves the latest compatible version. |
 | `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
+| `update <element-id> [<file.bpmn>]` | Move an element to a newer version of its template, migrating its values. |
+| `change <template> <element-id> [<file.bpmn>]` | Move an element to another template, migrating its values. `--successor` picks the template that supersedes the applied one. |
 | `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
 | `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
 
@@ -100,6 +102,83 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 c8ctl element-template sync
 c8ctl element-template sync --prune    # also drop entries no longer in a selected release
 ```
+
+## Migrating to a newer template
+
+`update` and `change` move an element that already has a template to a newer
+version of it, or to a different template. Values the new template binds under
+another key are moved along instead of being dropped, and a report lists what
+happened.
+
+```bash
+# Preview moving an element to the latest compatible version of its template
+c8ctl element-template update Task_1 process.bpmn --dry-run
+
+# Move an element from a deprecated template to the one that supersedes it
+c8ctl element-template change --successor Agent_1 process.bpmn --in-place
+
+# Move to a specific template, with a recipe from a file
+c8ctl element-template change new-template.json Task_1 process.bpmn --recipe recipe.json
+
+# The report as data (needs --in-place or --dry-run, because stdout carries the BPMN otherwise)
+c8ctl element-template update Task_1 process.bpmn --dry-run --json
+```
+
+- `update` resolves the newest version of the applied template compatible with
+  the BPMN's `modeler:executionPlatformVersion`; `--to-version <n>` pins one.
+  It only works for templates in the local cache.
+- `change` takes a template like `apply` does. `--successor` picks the one
+  non-deprecated compatible template that declares a migration from the applied
+  one, and fails when there are none or several.
+- Without `--in-place` the BPMN goes to stdout and the report to stderr.
+- Colour and emoji markers are used in text mode. Colour follows the terminal
+  and honours `NO_COLOR` and `FORCE_COLOR`.
+
+### Migration recipes
+
+A recipe describes how values of older templates map onto the template that
+carries it. It lives in the target template as `metadata.migratesFrom`, or in
+a file passed with `--recipe`, which replaces the embedded one. Without a recipe,
+values are carried over by key and the rest is dropped; the report lists each
+drop with its old value.
+
+```json
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "sourceTemplateId": "io.example.connector.v1",
+      "minVersion": 3,
+      "paths": [
+        { "from": "provider", "to": "backend.provider",
+          "valueMap": { "rules": [{ "match": "azure", "value": "openai" }] } },
+        { "to": "backend.type", "set": "foundry",
+          "when": { "path": "provider", "equals": "azure" },
+          "note": { "level": "warning", "message": "Azure now runs on the Foundry backend." } }
+      ]
+    }
+  ]
+}
+```
+
+| Entry | Effect |
+|-------|--------|
+| `{ from, to, valueMap? }` | Moves a value to another key, optionally translating it (`*` globs, first match wins, optional `default`). |
+| `{ to, set }` | Writes a static value, for example a new discriminator. |
+| `{ to, template }` | Composes a value from source values with `${path}`. |
+| `{ when, rules: [...] }` | Applies the nested entries only when the guard holds. |
+
+Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally negated with `not`) and
+`note`: a message shown in the report when the entry took effect, either a string or
+`{ "level": "info" | "warning", "message": "..." }`. Paths are binding keys; prefix one with
+`input:`, `output:`, `header:`, `property:`, `taskDefinition:`, `agentDefinition:` or `adHoc:` when the
+same key is bound by several binding types.
+
+A source with a `minVersion` is a version step: an element on an older version climbs through each step
+in order. Without one it describes a hop from a different template. See
+[`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
+Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
+instead of being ignored. `metadata.migratesFrom` is not part of the official element template schema.
 
 ## Inspecting a template
 

@@ -105,6 +105,22 @@ describe("renderReportText", () => {
 		assert.doesNotMatch(text, /Dropped/);
 	});
 
+	test("does not repeat a deprecated marker the template name already has", () => {
+		const text = renderReportText(
+			report({
+				from: {
+					id: "o",
+					version: 2,
+					name: "Agent (Deprecated)",
+					deprecated: true,
+				},
+			}),
+			{ elementId: "A", color: false, dryRun: false },
+		);
+		assert.match(text, /Agent \(Deprecated\) v2 →/);
+		assert.doesNotMatch(text, /\(deprecated\)/);
+	});
+
 	test("names the group once when a value moves within it", () => {
 		const text = renderReportText(
 			report({

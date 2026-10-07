@@ -30,7 +30,10 @@ function styles(color: boolean) {
 }
 
 function templateName(ref: MigrationReport["from"]): string {
-	return `${ref.name ?? ref.id} v${ref.version}${ref.deprecated ? " (deprecated)" : ""}`;
+	const name = ref.name ?? ref.id;
+	const tag =
+		ref.deprecated && !/deprecated/i.test(name) ? " (deprecated)" : "";
+	return `${name} v${ref.version}${tag}`;
 }
 
 function fieldName(field: Field): string {
