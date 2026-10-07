@@ -6,6 +6,9 @@
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
  *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] --set key=value
+ *   c8ctl element-template update <element-id> [<file.bpmn>] [--to-version <n>] [--recipe <file>] [--in-place]
+ *   c8ctl element-template change <template> <element-id> [<file.bpmn>] [--recipe <file>] [--in-place]
+ *   c8ctl element-template change --successor <element-id> [<file.bpmn>] [--recipe <file>] [--in-place]
  *   c8ctl element-template info <template> [--engine-version <x.y.z>]
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
  *   c8ctl element-template get <template>
@@ -23,12 +26,14 @@ import type {
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
 import { applySubcommand } from "./commands/apply.ts";
+import { changeSubcommand } from "./commands/change.ts";
 import { editSubcommand } from "./commands/edit.ts";
 import { getSubcommand } from "./commands/get.ts";
 import { getPropertiesSubcommand } from "./commands/get-properties.ts";
 import { infoSubcommand } from "./commands/info.ts";
 import { searchSubcommand } from "./commands/search.ts";
 import { syncSubcommand } from "./commands/sync.ts";
+import { updateSubcommand } from "./commands/update.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -90,6 +95,8 @@ const subcommandHandlers: Record<
 	"get-properties": getPropertiesSubcommand,
 	apply: applySubcommand,
 	edit: editSubcommand,
+	update: updateSubcommand,
+	change: changeSubcommand,
 	get: getSubcommand,
 	sync: syncSubcommand,
 };
@@ -153,6 +160,11 @@ export const metadata = {
 				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element). " +
 				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
 				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
+				"update moves an element to a newer version of its template, and change moves it to another template " +
+				"(--successor picks the one that declares a migration from the applied template). Values the new template " +
+				"binds under another key are moved when the target template carries a migration recipe " +
+				"(metadata.migratesFrom) or one is passed with --recipe <file>; the rest carry over by key. " +
+				"A report lists what was dropped, added, moved and changed. Use --dry-run to preview without writing.\n\n" +
 				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
 				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
 				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
@@ -188,6 +200,16 @@ export const metadata = {
 					name: "edit",
 					description:
 						"Update a property on an element that already has a template applied, without re-applying it",
+				},
+				{
+					name: "update",
+					description:
+						"Move an element to a newer version of its template, migrating its values",
+				},
+				{
+					name: "change",
+					description:
+						"Move an element to another template, migrating its values",
 				},
 				{
 					name: "get",
@@ -279,6 +301,24 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template update Task_1 process.bpmn --dry-run",
+					description:
+						"Preview moving an element to the latest compatible version of its template, with a report of what changes",
+				},
+				{
+					command:
+						"c8ctl element-template change --successor Agent_1 process.bpmn --in-place",
+					description:
+						"Move an element from a deprecated template to the template that supersedes it",
+				},
+				{
+					command:
+						"c8ctl element-template change new-template.json Task_1 process.bpmn --recipe recipe.json",
+					description:
+						"Migrate with a recipe from a file instead of the one embedded in the template",
+				},
+				{
+					command:
 						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
 					description:
 						"Print the raw template JSON to stdout (redirect to save a copy)",
@@ -304,7 +344,7 @@ export const commands = {
 			"in-place": {
 				type: "boolean",
 				short: "i",
-				description: "Modify the BPMN file in place [apply|edit]",
+				description: "Modify the BPMN file in place [apply|edit|update|change]",
 			},
 			set: {
 				type: "string",
@@ -323,6 +363,21 @@ export const commands = {
 				multiple: true,
 				description:
 					"Filter to one or more group ids (repeatable) [get-properties]",
+			},
+			successor: {
+				type: "boolean",
+				description:
+					"Move to the template that declares a migration from the applied one [change]",
+			},
+			recipe: {
+				type: "string",
+				description:
+					"Migration recipe file, used instead of the one embedded in the target template [update|change]",
+			},
+			"to-version": {
+				type: "string",
+				description:
+					"Move to this template version instead of the latest compatible one [update]",
 			},
 			prune: {
 				type: "boolean",

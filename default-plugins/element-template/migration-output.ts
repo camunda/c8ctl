@@ -101,7 +101,11 @@ export function renderReportText(
 		section("↪️ ", "Moved", report.moved.length, s.green);
 		for (const m of report.moved) {
 			const from = fieldName(m.from);
-			const to = fieldName(m.to);
+			const fullTo = fieldName(m.to);
+			const sameGroup =
+				m.from.group !== undefined && m.from.group === m.to.group;
+			const to =
+				sameGroup && from !== fullTo ? (m.to.label ?? m.to.key) : fullTo;
 			const change = m.valueChange;
 			if (change) {
 				const values = `${valueText(change.from, change.fromName)} → ${s.bold(valueText(change.to, change.toName))}`;

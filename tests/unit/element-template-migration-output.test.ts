@@ -105,6 +105,26 @@ describe("renderReportText", () => {
 		assert.doesNotMatch(text, /Dropped/);
 	});
 
+	test("names the group once when a value moves within it", () => {
+		const text = renderReportText(
+			report({
+				moved: [
+					{
+						from: {
+							key: "a",
+							bindingType: null,
+							label: "Endpoint",
+							group: "Model",
+						},
+						to: { key: "b", bindingType: null, label: "URL", group: "Model" },
+					},
+				],
+			}),
+			{ elementId: "A", color: false, dryRun: false },
+		);
+		assert.match(text, /Model › Endpoint → URL/);
+	});
+
 	test("lists dropped values and warns in the footer", () => {
 		const text = renderReportText(
 			report({

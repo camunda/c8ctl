@@ -17,6 +17,7 @@ export type ElementTemplatesService = {
 		element: BpmnElement,
 		template: object,
 	): BpmnElement | undefined;
+	getCompatible(element: BpmnElement): unknown[];
 };
 export type Modeling = {
 	updateModdleProperties(
