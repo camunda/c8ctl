@@ -4,7 +4,7 @@
  */
 
 export interface TemplateBinding {
-	type: string;
+	type?: string;
 	name?: string;
 	source?: string;
 	key?: string;
@@ -20,8 +20,7 @@ export interface TemplateProperty {
 	feel?: string;
 	optional?: boolean;
 	constraints?: { notEmpty?: boolean };
-	condition?: unknown;
-	choices?: { name: string; value: string }[];
+	choices?: { name?: string; value: string }[];
 	binding?: TemplateBinding;
 }
 
@@ -31,7 +30,7 @@ export interface MigrationTemplate {
 	name?: string;
 	deprecated?: boolean | { message?: string };
 	appliesTo?: string[];
-	elementType?: { value?: string };
+	elementType?: { value: string };
 	groups?: { id: string; label: string }[];
 	properties: TemplateProperty[];
 	metadata?: unknown;
