@@ -869,7 +869,7 @@ Deploy files to Camunda (auto-discovers deployable files in directories). When d
 
 ```bash
 c8ctl deploy ./my-process.bpmn                              # Deploy a BPMN file
-c8ctl deploy                                                # Deploy from current directory (detects process application root)
+c8ctl deploy                                                # Deploy from current directory (detects Camunda project root)
 ```
 
 ---

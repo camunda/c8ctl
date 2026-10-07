@@ -1505,7 +1505,7 @@ export const COMMAND_REGISTRY = {
 			{
 				command: "c8ctl deploy",
 				description:
-					"Deploy from current directory (detects process application root)",
+					"Deploy from current directory (detects Camunda project root)",
 			},
 		],
 		resources: [],

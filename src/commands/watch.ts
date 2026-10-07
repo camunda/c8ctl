@@ -8,6 +8,7 @@ import { createClient, normalizeToError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
+	CAMUNDA_PROJECT_FILE,
 	DEPLOY_COOLDOWN,
 	DEPLOYABLE_EXTENSIONS,
 	isIgnored,
@@ -17,7 +18,7 @@ import {
 import {
 	checkServerSupportsExtensions,
 	deployResources,
-	findProcessApplicationRoot,
+	findProjectRoot,
 	logMessage,
 } from "./helpers/deploy-helpers.ts";
 
@@ -71,7 +72,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		}
 	}
 
-	// ── Project mode (#227) ──────────────────────────────────────────
+	// ── Project mode ───────────────────────────────────────────────────
 	// When --project (or the deprecated aliases --process-application /
 	// --pa) is set, resolve the project root from the watched paths and
 	// expand the watch scope to the project root so the entire Camunda
@@ -80,13 +81,18 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	const projectMode = Boolean(
 		flags.project || flags["process-application"] || flags.pa,
 	);
+	if (!flags.project && (flags["process-application"] || flags.pa)) {
+		logMessage(
+			"Warning: --process-application/--pa is deprecated, use --project instead.",
+		);
+	}
 	let projectRoot: string | null = null;
 	if (projectMode) {
 		// Resolve the project root from every watched path and verify they
 		// all belong to the same Camunda project.
 		let resolvedRoot: string | undefined;
 		for (const p of resolvedPaths) {
-			const root = findProcessApplicationRoot(p);
+			const root = findProjectRoot(p);
 			if (!root) {
 				throw new Error(
 					`--project: no camunda.json or .process-application marker found above ${p}. ` +
@@ -173,6 +179,13 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 
 				const ext = extname(filename);
 				if (!effectiveExtensions.includes(ext)) {
+					return;
+				}
+
+				// The project descriptor is metadata, never a deployable
+				// resource. In project mode a descriptor change still
+				// triggers a full project redeploy below.
+				if (!projectMode && basename(filename) === CAMUNDA_PROJECT_FILE) {
 					return;
 				}
 

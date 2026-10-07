@@ -29,7 +29,6 @@ import {
 import {
 	CAMUNDA_PROJECT_FILE,
 	DEPLOYABLE_EXTENSIONS,
-	hasCamundaProjectFile,
 	type Ignore,
 	isIgnored,
 	loadDeployAlwaysRules,
@@ -141,6 +140,14 @@ function isBuildingBlockFolder(path: string): boolean {
 }
 
 /**
+ * Per-invocation cache for project-marker checks. The marker predicate
+ * reads (and parses) `camunda.json`, and `findGroupRoot` runs once per
+ * collected file — without a cache the descriptor would be read and
+ * parsed again for every resource in the project.
+ */
+type ProjectMarkerCache = Map<string, boolean>;
+
+/**
  * Check if a directory contains a .process-application file
  */
 function hasProcessApplicationFile(dirPath: string): boolean {
@@ -156,24 +163,35 @@ function hasProcessApplicationFile(dirPath: string): boolean {
  * Check if a directory is a Camunda project root — it contains a
  * `camunda.json` descriptor or a legacy `.process-application` marker.
  *
- * A present `camunda.json` is parsed and validated: malformed JSON is a
- * hard error (the file must never silently count as a project marker).
+ * The descriptor is read once: a present `camunda.json` is parsed and
+ * validated, so malformed JSON is a hard error (the file must never
+ * silently count as a project marker) and an unreadable or concurrently
+ * removed descriptor does not select this directory as a root. Results
+ * are memoized in `cache` when one is provided.
  */
-function hasProjectMarker(dirPath: string): boolean {
-	if (hasCamundaProjectFile(dirPath)) {
-		readCamundaProject(dirPath);
-		return true;
+function hasProjectMarker(
+	dirPath: string,
+	cache?: ProjectMarkerCache,
+): boolean {
+	const cached = cache?.get(dirPath);
+	if (cached !== undefined) {
+		return cached;
 	}
-	return hasProcessApplicationFile(dirPath);
+	const result = readCamundaProject(dirPath)
+		? true
+		: hasProcessApplicationFile(dirPath);
+	cache?.set(dirPath, result);
+	return result;
 }
 
 /**
- * Find the root building block or process application folder by traversing up the path
+ * Find the root building block or Camunda project folder by traversing up the path
  * Returns the path to the group root, or null if not in a group
  */
 function findGroupRoot(
 	filePath: string,
 	basePath: string,
+	cache?: ProjectMarkerCache,
 ):
 	| { type: "bb"; root: string }
 	| { type: "pa"; root: string }
@@ -189,7 +207,7 @@ function findGroupRoot(
 
 		// Check if this directory is a Camunda project root
 		// (camunda.json or legacy .process-application marker)
-		if (hasProjectMarker(currentDir)) {
+		if (hasProjectMarker(currentDir, cache)) {
 			return { type: "pa", root: currentDir };
 		}
 
@@ -220,15 +238,18 @@ function findGroupRoot(
  * harmlessly returns false for non-directories).
  *
  * Unlike `findGroupRoot()` (which tags individual files for display),
- * this function determines the *deploy scope*: when a PA root is found,
- * `collectResourcesForPaths` expands the input to the PA root so that
- * the entire application is deployed.
+ * this function determines the *deploy scope*: when a project root is
+ * found, `collectResourcesForPaths` expands the input to the project
+ * root so that the entire project is deployed.
  */
-export function findProcessApplicationRoot(startDir: string): string | null {
+export function findProjectRoot(
+	startDir: string,
+	cache?: ProjectMarkerCache,
+): string | null {
 	let currentDir = resolve(startDir);
 
 	while (true) {
-		if (hasProjectMarker(currentDir)) {
+		if (hasProjectMarker(currentDir, cache)) {
 			return currentDir;
 		}
 
@@ -261,6 +282,7 @@ function collectResourceFiles(
 	skippedExtensions?: Set<string>,
 	skippedFiles?: string[],
 	deployAlways?: Ignore,
+	markerCache?: ProjectMarkerCache,
 ): ResourceFile[] {
 	if (!existsSync(dirPath)) {
 		return collected;
@@ -275,13 +297,18 @@ function collectResourceFiles(
 	}
 
 	if (stat.isFile()) {
+		// The camunda.json project descriptor is metadata, never a
+		// deployable resource — even when named explicitly.
+		if (basename(dirPath) === CAMUNDA_PROJECT_FILE) {
+			return collected;
+		}
 		if (ig && ignoreBaseDir && isIgnored(ig, dirPath, ignoreBaseDir)) {
 			return collected;
 		}
 		// Explicit file paths always pass through — the user named the
 		// file directly, so their intent is unambiguous. Extension
 		// filtering only applies during directory discovery (below).
-		const groupInfo = findGroupRoot(dirPath, basePath);
+		const groupInfo = findGroupRoot(dirPath, basePath, markerCache);
 		collected.push({
 			path: dirPath,
 			name: basename(dirPath),
@@ -321,6 +348,17 @@ function collectResourceFiles(
 				}
 				if (isBuildingBlockFolder(entry)) {
 					bbFolders.push(fullPath);
+				} else if (
+					basePath !== undefined &&
+					hasProjectMarker(basePath, markerCache) &&
+					hasProjectMarker(fullPath, markerCache)
+				) {
+					// A nested project marker inside a project is a boundary —
+					// Camunda projects do not nest. The subtree is a separate
+					// project and is excluded from this walk. (Markerless roots
+					// — e.g. a monorepo folder — still deploy sibling projects.)
+					logMessage(`Skipping nested Camunda project at ${fullPath}`);
+					return;
 				} else {
 					regularFolders.push(fullPath);
 				}
@@ -366,7 +404,7 @@ function collectResourceFiles(
 
 		// Process files in current directory first
 		files.forEach((file) => {
-			const groupInfo = findGroupRoot(file, basePath);
+			const groupInfo = findGroupRoot(file, basePath, markerCache);
 			collected.push({
 				path: file,
 				name: basename(file),
@@ -390,6 +428,7 @@ function collectResourceFiles(
 				skippedExtensions,
 				skippedFiles,
 				deployAlways,
+				markerCache,
 			);
 		});
 
@@ -406,6 +445,7 @@ function collectResourceFiles(
 				skippedExtensions,
 				skippedFiles,
 				deployAlways,
+				markerCache,
 			);
 		});
 	}
@@ -472,7 +512,7 @@ export function collectResourcesForPaths(
 		);
 	}
 
-	// ── Process-application auto-detection (#227) ──────────────────────
+	// ── Project auto-detection ─────────────────────────────────────────
 	// For each directory path, walk up looking for a project marker
 	// (camunda.json or legacy .process-application). If found, expand to
 	// the project root so the entire project is deployed — matching
@@ -481,13 +521,17 @@ export function collectResourcesForPaths(
 	// remain scoped to the changed file.
 	const effectivePaths: string[] = [];
 	const seenRoots = new Set<string>();
+	// Memoizes marker checks across the scope walk and the per-file
+	// display tagging below — the descriptor would otherwise be read and
+	// parsed once per collected file.
+	const markerCache: ProjectMarkerCache = new Map();
 	for (const p of paths) {
 		const abs = resolve(p);
 		let isFile = false;
 		try {
 			isFile = statSync(abs).isFile();
 		} catch {
-			// Path does not exist — skip PA detection and keep the
+			// Path does not exist — skip project detection and keep the
 			// absolute path so collectResourceFiles (which silently
 			// skips missing paths) falls through to the "No deployable
 			// files found" guard.
@@ -500,20 +544,26 @@ export function collectResourcesForPaths(
 			continue;
 		}
 
-		const paRoot = findProcessApplicationRoot(abs);
-		if (paRoot) {
-			// Deduplicate: multiple input dirs inside the same PA should
-			// only trigger one resource walk from the PA root. Use
-			// realpathSync for the dedup key to handle symlinks/case.
-			let canonical = paRoot;
+		const projectRoot = findProjectRoot(abs, markerCache);
+		if (projectRoot) {
+			// Deduplicate: multiple input dirs inside the same project
+			// should only trigger one resource walk from the project root.
+			// Use realpathSync for the dedup key to handle symlinks/case.
+			let canonical = projectRoot;
 			try {
-				canonical = realpathSync(paRoot);
+				canonical = realpathSync(projectRoot);
 			} catch {
 				// Best-effort fallback.
 			}
 			if (!seenRoots.has(canonical)) {
 				seenRoots.add(canonical);
-				effectivePaths.push(paRoot);
+				effectivePaths.push(projectRoot);
+				// Tell the user when the deploy scope widened beyond the
+				// paths they named — a stray marker in a parent directory
+				// should never silently expand the deploy.
+				if (projectRoot !== abs) {
+					logMessage(`📦 Deploying Camunda project at ${projectRoot}`);
+				}
 			}
 		} else {
 			effectivePaths.push(abs);
@@ -521,8 +571,8 @@ export function collectResourcesForPaths(
 	}
 
 	// Load .c8ignore rules from the effective target directory (which may
-	// be the PA root) so that `c8 deploy <target>` picks up the .c8ignore
-	// inside the target. (#258)
+	// be the project root) so that `c8 deploy <target>` picks up the
+	// .c8ignore inside the target. (#258)
 	const ignoreBaseDir = resolveIgnoreBaseDir(effectivePaths);
 	const ig = loadIgnoreRules(ignoreBaseDir);
 
@@ -548,14 +598,15 @@ export function collectResourcesForPaths(
 			skippedExtensions,
 			skippedFiles,
 			deployAlways ?? undefined,
+			markerCache,
 		);
 	});
 
 	// Deduplicate resources by canonical path — can happen when an explicit
-	// file path is also covered by a PA-root or scoped-directory walk, or
-	// when the same file is reachable via symlinks. The canonical path is
-	// used only as the dedup key; the original path/name are preserved for
-	// display and relative-path calculations.
+	// file path is also covered by a project-root or scoped-directory walk,
+	// or when the same file is reachable via symlinks. The canonical path
+	// is used only as the dedup key; the original path/name are preserved
+	// for display and relative-path calculations.
 	const seen = new Set<string>();
 	const deduped: ResourceFile[] = [];
 	for (const r of resources) {
