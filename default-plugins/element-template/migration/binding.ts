@@ -1,0 +1,174 @@
+/**
+ * Binding lookup: which moddle child and property a template binding reads
+ * or writes, and which key identifies a binding.
+ *
+ * Hand-rolled because `bpmn-js-element-templates` exports no property-write
+ * utility. Covers the Zeebe binding types connector templates use.
+ */
+
+import { getModdleList, type ModdleElement } from "./moddle.ts";
+import type { TemplateBinding, TemplateProperty } from "./types.ts";
+
+export type ExtensionContainers = {
+	ioMapping: ModdleElement | undefined;
+	taskHeaders: ModdleElement | undefined;
+	taskDefinition: ModdleElement | undefined;
+	zeebeProperties: ModdleElement | undefined;
+	agentDefinition: ModdleElement | undefined;
+	adHoc: ModdleElement | undefined;
+};
+
+/** Binding-type prefixes a recipe path may use, mapped to the full type. */
+const BINDING_TYPE_PREFIXES: Record<string, string> = {
+	input: "zeebe:input",
+	output: "zeebe:output",
+	header: "zeebe:taskHeader",
+	property: "zeebe:property",
+	taskDefinition: "zeebe:taskDefinition",
+	agentDefinition: "zeebe:agentDefinition",
+	adHoc: "zeebe:adHoc",
+};
+
+/** Split an optional binding-type prefix off a recipe path. */
+export function splitBindingPrefix(path: string): {
+	bindingType: string | null;
+	key: string;
+} {
+	const colon = path.indexOf(":");
+	if (colon !== -1) {
+		const bindingType = BINDING_TYPE_PREFIXES[path.slice(0, colon)];
+		if (bindingType) {
+			return { bindingType, key: path.slice(colon + 1) };
+		}
+	}
+	return { bindingType: null, key: path };
+}
+
+function findExtensionByType(
+	extensionElements: ModdleElement | undefined,
+	type: string,
+): ModdleElement | undefined {
+	return getModdleList(extensionElements, "values").find(
+		(v) => v.$type === type,
+	);
+}
+
+export function findExtensionContainers(
+	extensionElements: ModdleElement | undefined,
+): ExtensionContainers {
+	return {
+		ioMapping: findExtensionByType(extensionElements, "zeebe:IoMapping"),
+		taskHeaders: findExtensionByType(extensionElements, "zeebe:TaskHeaders"),
+		taskDefinition: findExtensionByType(
+			extensionElements,
+			"zeebe:TaskDefinition",
+		),
+		zeebeProperties: findExtensionByType(extensionElements, "zeebe:Properties"),
+		agentDefinition: findExtensionByType(
+			extensionElements,
+			"zeebe:AgentDefinition",
+		),
+		adHoc: findExtensionByType(extensionElements, "zeebe:AdHoc"),
+	};
+}
+
+/**
+ * The existing moddle child and property a binding writes to, or `undefined`
+ * when the backing entry does not exist (yet).
+ */
+export function resolveBindingTarget(
+	binding: TemplateBinding,
+	containers: ExtensionContainers,
+): { child: ModdleElement; property: string } | undefined {
+	switch (binding.type) {
+		case "zeebe:input": {
+			const inputs = getModdleList(containers.ioMapping, "inputParameters");
+			const child = inputs.find((p) => p.target === binding.name);
+			return child ? { child, property: "source" } : undefined;
+		}
+		case "zeebe:output": {
+			const outputs = getModdleList(containers.ioMapping, "outputParameters");
+			const child = outputs.find((p) => p.source === binding.source);
+			return child ? { child, property: "target" } : undefined;
+		}
+		case "zeebe:taskHeader": {
+			const headers = getModdleList(containers.taskHeaders, "values");
+			const child = headers.find((h) => h.key === binding.key);
+			return child ? { child, property: "value" } : undefined;
+		}
+		case "zeebe:property": {
+			const props = getModdleList(containers.zeebeProperties, "properties");
+			const child = props.find((p) => p.name === binding.name);
+			return child ? { child, property: "value" } : undefined;
+		}
+		case "zeebe:taskDefinition":
+			return containers.taskDefinition && binding.property
+				? { child: containers.taskDefinition, property: binding.property }
+				: undefined;
+		case "zeebe:agentDefinition":
+			return containers.agentDefinition && binding.property
+				? { child: containers.agentDefinition, property: binding.property }
+				: undefined;
+		case "zeebe:adHoc":
+			return containers.adHoc && binding.property
+				? { child: containers.adHoc, property: binding.property }
+				: undefined;
+		default:
+			return undefined;
+	}
+}
+
+/** The key that identifies where a binding writes, per binding type. */
+export function bindingTargetKey(
+	binding: TemplateBinding | undefined,
+): string | undefined {
+	if (!binding) {
+		return undefined;
+	}
+	switch (binding.type) {
+		case "zeebe:input":
+		case "zeebe:property":
+			return binding.name;
+		case "zeebe:output":
+			return binding.source;
+		case "zeebe:taskHeader":
+			return binding.key;
+		case "zeebe:taskDefinition":
+		case "zeebe:agentDefinition":
+		case "zeebe:adHoc":
+			return binding.property;
+		default:
+			return undefined;
+	}
+}
+
+/** Template properties bound to `key`, optionally restricted to a binding type. */
+export function findPropertiesByTarget(
+	properties: TemplateProperty[],
+	key: string,
+	bindingType: string | null,
+): TemplateProperty[] {
+	return properties.filter((p) => {
+		if (bindingTargetKey(p.binding) !== key) {
+			return false;
+		}
+		return bindingType === null || p.binding?.type === bindingType;
+	});
+}
+
+/**
+ * A `feel: required` property always stores a FEEL expression. Prepend `=`
+ * to a written value that lacks it, as the Modeler does.
+ */
+export function maybePrependFeel(
+	property: TemplateProperty,
+	value: string,
+): string {
+	if (property.feel !== "required") {
+		return value;
+	}
+	if (value === "" || value.startsWith("=")) {
+		return value;
+	}
+	return `=${value}`;
+}
