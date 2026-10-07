@@ -361,3 +361,17 @@ export function parseRecipe(raw: unknown): Recipe {
 
 	return { schemaVersion: SUPPORTED_SCHEMA_VERSION, sources };
 }
+
+/**
+ * The recipe a template carries in `metadata.migratesFrom`, or `undefined`
+ * when it has none. Throws `RecipeError` when the embedded recipe is invalid.
+ */
+export function readEmbeddedRecipe(template: {
+	metadata?: unknown;
+}): Recipe | undefined {
+	if (!isRecord(template.metadata)) {
+		return undefined;
+	}
+	const raw = template.metadata.migratesFrom;
+	return raw === undefined ? undefined : parseRecipe(raw);
+}
