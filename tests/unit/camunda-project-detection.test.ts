@@ -110,10 +110,37 @@ describe("Camunda project detection (camunda.json)", () => {
 		const projectRoot = join(tempDir, "my-project");
 		createProject(projectRoot, { "main.bpmn": MINIMAL_BPMN });
 
-		const result = await deployDryRun(projectRoot);
+		// --force disables extension filtering, so this guards the
+		// explicit camunda.json skip and not the .json extension default.
+		// Run from the parent so the test's data dir (created under cwd)
+		// is outside the walked tree.
+		const result = await deployDryRun(tempDir, [projectRoot, "--force"]);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 
 		assert.deepStrictEqual(parseResourceNames(result), ["main.bpmn"]);
+	});
+
+	test("explicit camunda.json path is rejected as a deployment resource", async () => {
+		const projectRoot = join(tempDir, "my-project");
+		createProject(projectRoot, { "main.bpmn": MINIMAL_BPMN });
+
+		// Only camunda.json named — nothing deployable remains
+		const only = await deployDryRun(tempDir, [
+			join(projectRoot, "camunda.json"),
+		]);
+		assert.notStrictEqual(
+			only.status,
+			0,
+			"Explicit camunda.json must not deploy the descriptor",
+		);
+
+		// Named alongside a real resource — only the resource is deployed
+		const alongside = await deployDryRun(tempDir, [
+			join(projectRoot, "camunda.json"),
+			join(projectRoot, "main.bpmn"),
+		]);
+		assert.strictEqual(alongside.status, 0, `stderr: ${alongside.stderr}`);
+		assert.deepStrictEqual(parseResourceNames(alongside), ["main.bpmn"]);
 	});
 
 	test("both markers in the same folder: project root deploys normally", async () => {
@@ -155,6 +182,21 @@ describe("Camunda project detection (camunda.json)", () => {
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 
 		assert.deepStrictEqual(parseResourceNames(result), ["inner.bpmn"]);
+	});
+
+	test("nested project is a boundary: deploying the outer root skips the inner project", async () => {
+		const outer = join(tempDir, "outer-project");
+		createProject(outer, { "outer.bpmn": MINIMAL_BPMN });
+
+		const inner = join(outer, "inner-project");
+		createProject(inner, { "inner.bpmn": MINIMAL_BPMN });
+
+		// Camunda projects do not nest — the inner subtree is a separate
+		// project and is excluded from the outer deploy.
+		const result = await deployDryRun(outer);
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+
+		assert.deepStrictEqual(parseResourceNames(result), ["outer.bpmn"]);
 	});
 
 	test("invalid camunda.json fails with a clear error", async () => {
