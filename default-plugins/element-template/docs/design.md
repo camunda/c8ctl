@@ -213,21 +213,93 @@ that moved.
   selected source applications, never the latest catalog version. The revised
   dialect keeps schema version 1 and rejects legacy `minVersion` fields.
   Owner-relative ID/version rules and duplicate markers are semantic checks.
-  Every selected template must exist before application. A
-  step that reads a key nothing produces makes the whole recipe unusable, and the
-  change falls back to carry-over with the reason in the report.
+  Every selected intermediate template must exist before application; the supplied
+  final target does not need a duplicate catalog entry. Coverage checks the applied
+  source shape and then each reached selected application, never an unselected
+  catalog version or a write removed by a later application. An unusable recipe
+  discards its selected steps and reports a refusal. Explicit file recipes fail
+  closed; embedded-recipe carry-over requires authorization outside dry-run.
 - **The report is a diff.** What was dropped, added and changed comes from the
   element's values before and after, so it describes the result rather than the
-  recipe's intent. Moves and notes come from the recipe.
+  recipe's intent. Moves and notes originate in the recipe, but surviving moves
+  and static/composed writes are reconciled against resolved stored values and
+  per-step snapshots. Removed lineage cannot be revived by a later default.
+  Simultaneous moves read the same pre-step snapshot; they are not collapsed into
+  a sequential chain. Binding type remains part of field identity.
+- **Read/write identity.** Unqualified rename, guard and interpolation reads fail
+  when several binding types match. Qualification selects a binding type; duplicate
+  backing identities or extension containers are rejected rather than selecting an
+  arbitrary value. Active destination aliases resolve to one canonical identity;
+  simultaneously active conflicting writes fail regardless of order.
+- **Destination validation.** Resolved recipe writes and populated non-Hidden
+  carry-over values are checked against active destination properties, including
+  conditional duplicates. Supported literal checks are choices, `notEmpty` and
+  patterns. FEEL optional/required expressions bypass literal choices/patterns,
+  while empty required expressions fail. Unsupported active constraints or
+  unsupported/cyclic conditions fail closed. This is not FEEL syntax validation.
+- **Context authority.** The supplied source must match the element's applied
+  identity and overrides its catalog shadow. The final returned element must carry
+  the target identity. Explicit target content is authoritative for its identity.
+  Shared `resolveCatalog` resolves catalog authority; MIG-004's catalog-order
+  counterexample and cache-target bypass have reported passing verification.
 - **Output.** The BPMN goes to stdout (or the file with `--in-place`); the report
-  goes to stderr in that case so pipes stay clean.
-- **Engine eligibility.** The CLI requires valid execution-platform version metadata,
-  rejects incompatible explicit targets, and supplies only engine-compatible source
-  templates to the standalone engine. A required incompatible intermediate version
-  is therefore unavailable and fails before application. Library callers MUST apply
-  the same eligibility policy to their catalog and target.
+  goes to stderr in that case so pipes stay clean. No-op XML output preserves the
+  original bytes, with its message on stderr; JSON emits a report envelope with
+  `noop: true` and empty change collections. In-place no-ops do not rewrite the
+  BPMN; dry-runs write neither BPMN files nor XML stdout. Recipe validation still
+  precedes a no-op return.
+- **Authorization.** Lossy in-place migrations and refused embedded-recipe fallback
+  require `--allow-lossy`. Explicit unusable recipes cannot be authorized. Diagnostics
+  distinguish syntax, coverage, source-ID and reached-floor refusal; empty recipe
+  flags fail. Preview/authorized reports retain refusal and authorization status.
+  MIG-006's shell-completion fixes have reported passing scoped verification.
+- **Sensitivity.** Rendering uses credential-like field identity and template
+  property/group metadata to redact report values. Known sensitive before/after,
+  default and report values are also scrubbed from notes and CLI diagnostics.
+  Rendering does not mutate engine reports or BPMN values. Custom secrets without
+  recognizable identity, unknown secret text and alternate encodings cannot be
+  inferred reliably. Raw XML deliberately retains secrets and is not safe to log.
+- **Engine eligibility.** Migration requires exactly one platform and version
+  attribute in the Modeler namespace `http://camunda.org/schema/modeler/1.0`,
+  regardless of prefix alias, with platform `Camunda Cloud`. Versions accept strict
+  `major.minor` (normalized to patch zero) or full semantic versions, including
+  standard prerelease/build syntax; coercible arbitrary strings fail. Standard
+  semver prerelease eligibility applies, without blanket prerelease inclusion.
+  Missing template engine constraints retain legacy eligibility; malformed declared
+  engine objects/ranges fail closed. The CLI rejects incompatible explicit targets
+  and supplies only engine-compatible source templates to the standalone engine.
+  Required incompatible intermediate versions fail before application. Library
+  callers MUST apply the same eligibility policy to their catalog and target.
+- **Filesystem boundary.** In-place migration holds an exclusive sibling
+  `.migration.lock` and compares original contents before temp preparation and
+  again immediately before rename. The post-temp check fixes lost external edits
+  during preparation. A sibling temp is renamed; EXDEV and other rename failures
+  do not trigger a direct overwrite. Cleanup preserves the primary operation error
+  while independently attempting descriptor close and lock unlink; temp cleanup
+  is best effort. The cooperative lock does not cover symlink aliases or the final
+  non-cooperative comparison-to-rename race; there is no atomic compare-and-swap.
+  CLI guards inject ENOSPC/EIO before bytes and after 64 actual sibling bytes.
+  SIGINT/SIGTERM guards pause a split write after actual bytes, preserving originals
+  and proving the manual stale-lock/temp recovery contract. They do not prove
+  physical disk exhaustion or interruption of a blocked kernel syscall. Windows
+  was not run; POSIX signal cases skip Windows. Confirm no writer is active before
+  manually inspecting/removing leftovers.
 - **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
   into a library once the recipe format is settled.
+
+Current implementation and independent-review evidence, MIG-012's completed
+48-case matrix and explicit limits, and MIG-014's PR-scoped Node 22 verification are tracked
+in [Migration Review PRD](migration-review-prd.md) and
+[Migration Test Coverage](migration-test-coverage.md). All 48 migration cases
+passed, including CLI `bpmn format` canonical preservation checks for unrelated
+elements, custom extensions, sequence flows and geometry. MIG-012 implementation
+and testing are complete, awaiting engineer acceptance of the documented limits.
+The final Node 22 pipeline passed 3,896 unit and 191 integration tests, with two
+integration skips and zero failures; MIG-014 current PR verification acceptance
+is closed. Historical failures are not shown attributable to this PR and impose
+no diagnosis obligation here. The unsuppressed external `typed-env` warning is
+recorded separately under general repository policy, without reopening MIG-014
+or adding upstream remediation to this PR. No warning-free release claim is made.
 
 ## Plugin dependencies
 
