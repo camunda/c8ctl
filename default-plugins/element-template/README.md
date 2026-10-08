@@ -147,8 +147,9 @@ drop with its old value.
   "schemaVersion": 1,
   "sources": [
     {
+      "kind": "change",
       "sourceTemplateId": "io.example.connector.v1",
-      "minVersion": 3,
+      "minSourceVersion": 3,
       "paths": [
         { "from": "provider", "to": "backend.provider",
           "valueMap": { "rules": [{ "match": "azure", "value": "openai" }] } },
@@ -174,8 +175,13 @@ Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally nega
 `input:`, `output:`, `header:`, `property:`, `taskDefinition:`, `agentDefinition:` or `adHoc:` when the
 same key is bound by several binding types.
 
-A source with a `minVersion` is a version step: an element on an older version climbs through each step
-in order. Without one it describes a hop from a different template. See
+A source with `kind: "upgrade"` requires `toVersion` and the recipe owner's ID: an element climbs
+each destination above its applied version in ascending order. A `kind: "change"` source must name
+a different ID and may require `minSourceVersion`, a floor on the version actually reached by
+source upgrades. Merely loading a newer template does not satisfy that floor. The highest reachable
+floor wins; an omitted floor is the fallback. File recipes replace only the target recipe.
+This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
+`kind` on every source. Older strict readers reject the new fields. See
 [`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
 Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
 instead of being ignored. `metadata.migratesFrom` is not part of the official element template schema.

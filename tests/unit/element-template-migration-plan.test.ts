@@ -24,7 +24,7 @@ function input(key: string, value: string): ElementValue {
 function entriesOf(...paths: unknown[]) {
 	const [source] = parseRecipe({
 		schemaVersion: 1,
-		sources: [{ sourceTemplateId: "old", paths }],
+		sources: [{ kind: "change", sourceTemplateId: "old", paths }],
 	}).sources;
 	return source.entries;
 }

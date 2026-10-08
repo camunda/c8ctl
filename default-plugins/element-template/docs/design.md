@@ -201,6 +201,12 @@ that moved.
   recipe or silently ignoring a typo.
 - **Steps.** An element on an old version climbs the version steps of its own
   template in order, then makes at most one hop onto a different template. A
+  source entry declares `kind: "upgrade"` with a destination `toVersion`, or
+  `kind: "change"` with an optional `minSourceVersion` floor. Floors use actual
+  selected source applications, never the latest catalog version. The revised
+  dialect keeps schema version 1 and rejects legacy `minVersion` fields.
+  Owner-relative ID/version rules and duplicate markers are semantic checks.
+  Every selected template must exist before application. A
   step that reads a key nothing produces makes the whole recipe unusable, and the
   change falls back to carry-over with the reason in the report.
 - **The report is a diff.** What was dropped, added and changed comes from the

@@ -72,6 +72,7 @@ const NEW: MigrationTemplate = {
 			schemaVersion: 1,
 			sources: [
 				{
+					kind: "change",
 					sourceTemplateId: "io.example.old",
 					paths: [
 						{
@@ -223,6 +224,7 @@ describe("migrateElement", () => {
 				schemaVersion: 1,
 				sources: [
 					{
+						kind: "change",
 						sourceTemplateId: "io.example.old",
 						paths: [{ from: "endpoint", to: "backend.provider" }],
 					},
@@ -252,6 +254,7 @@ describe("migrateElement", () => {
 						schemaVersion: 1,
 						sources: [
 							{
+								kind: "change",
 								sourceTemplateId: "io.example.old",
 								paths: [{ from: "provider", to: "nowhere" }],
 							},

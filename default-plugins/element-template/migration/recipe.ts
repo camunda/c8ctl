@@ -58,11 +58,16 @@ export interface TemplateEntry extends EntryBase {
 
 export type Entry = RenameEntry | SetEntry | TemplateEntry;
 
-export interface RecipeSource {
+interface SourceBase {
 	sourceTemplateId: string;
-	minVersion?: number;
 	entries: Entry[];
 }
+
+export type RecipeSource = SourceBase &
+	(
+		| { kind: "upgrade"; toVersion: number }
+		| { kind: "change"; minSourceVersion?: number }
+	);
 
 export interface Recipe {
 	schemaVersion: number;
@@ -299,29 +304,52 @@ function flattenNode(raw: unknown, at: string, inherited: Guard[]): Entry[] {
 
 function parseSource(raw: unknown, at: string): RecipeSource {
 	const obj = requireRecord(raw, at);
-	rejectUnknownKeys(obj, ["sourceTemplateId", "minVersion", "paths"], at);
-	const source: RecipeSource = {
+	if (obj.kind !== "upgrade" && obj.kind !== "change") {
+		throw new RecipeError(`${at}.kind must be "upgrade" or "change"`);
+	}
+	rejectUnknownKeys(
+		obj,
+		[
+			"kind",
+			"sourceTemplateId",
+			obj.kind === "upgrade" ? "toVersion" : "minSourceVersion",
+			"paths",
+		],
+		at,
+	);
+	const base: SourceBase = {
 		sourceTemplateId: requireString(
 			obj.sourceTemplateId,
 			`${at}.sourceTemplateId`,
 		),
 		entries: [],
 	};
-	if (obj.minVersion !== undefined) {
-		if (!Number.isInteger(obj.minVersion) || Number(obj.minVersion) < 0) {
-			throw new RecipeError(`${at}.minVersion must be a non-negative integer`);
-		}
-		source.minVersion = Number(obj.minVersion);
+	const field = obj.kind === "upgrade" ? "toVersion" : "minSourceVersion";
+	const version = obj[field];
+	if (
+		(obj.kind === "upgrade" || version !== undefined) &&
+		(typeof version !== "number" ||
+			!Number.isSafeInteger(version) ||
+			version < 0)
+	) {
+		throw new RecipeError(`${at}.${field} must be a non-negative safe integer`);
 	}
 	if (obj.paths !== undefined) {
 		if (!Array.isArray(obj.paths)) {
 			throw new RecipeError(`${at}.paths must be a list`);
 		}
-		source.entries = obj.paths.flatMap((node: unknown, i) =>
+		base.entries = obj.paths.flatMap((node: unknown, i) =>
 			flattenNode(node, `${at}.paths[${i}]`, []),
 		);
 	}
-	return source;
+	if (obj.kind === "upgrade" && typeof version === "number") {
+		return { ...base, kind: "upgrade", toVersion: version };
+	}
+	return {
+		...base,
+		kind: "change",
+		...(typeof version === "number" ? { minSourceVersion: version } : {}),
+	};
 }
 
 /**
@@ -350,16 +378,47 @@ export function parseRecipe(raw: unknown): Recipe {
 
 	const seen = new Set<string>();
 	for (const source of sources) {
-		const key = `${source.sourceTemplateId}@${source.minVersion ?? ""}`;
+		const version =
+			source.kind === "upgrade" ? source.toVersion : source.minSourceVersion;
+		const key = JSON.stringify([
+			source.kind,
+			source.sourceTemplateId,
+			version ?? null,
+		]);
 		if (seen.has(key)) {
 			throw new RecipeError(
-				`source "${source.sourceTemplateId}" is declared twice at minVersion ${source.minVersion ?? "(unset)"}`,
+				`source "${source.sourceTemplateId}" is declared twice for ${source.kind} at version ${version ?? "(unset)"}`,
 			);
 		}
 		seen.add(key);
 	}
 
 	return { schemaVersion: SUPPORTED_SCHEMA_VERSION, sources };
+}
+
+/** Owner-relative rules cannot be expressed by the standalone JSON schema. */
+export function validateRecipeOwner(
+	recipe: Recipe,
+	owner: { id: string; version?: number },
+): void {
+	for (const source of recipe.sources) {
+		if (source.kind === "upgrade") {
+			if (source.sourceTemplateId !== owner.id) {
+				throw new RecipeError(
+					`upgrade source must equal recipe owner "${owner.id}"`,
+				);
+			}
+			if (owner.version === undefined || source.toVersion > owner.version) {
+				throw new RecipeError(
+					`upgrade version ${source.toVersion} exceeds owner version ${owner.version ?? "(unset)"}`,
+				);
+			}
+		} else if (source.sourceTemplateId === owner.id) {
+			throw new RecipeError(
+				`change source must differ from recipe owner "${owner.id}"`,
+			);
+		}
+	}
 }
 
 /**

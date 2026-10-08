@@ -52,18 +52,30 @@
     },
     "source": {
       "type": "object",
-      "required": ["sourceTemplateId"],
+      "required": ["kind", "sourceTemplateId"],
       "additionalProperties": false,
+      "oneOf": [
+        { "properties": { "kind": { "const": "upgrade" }, "toVersion": {}, "minSourceVersion": false }, "required": ["toVersion"] },
+        { "properties": { "kind": { "const": "change" }, "toVersion": false } }
+      ],
       "properties": {
+        "kind": { "enum": ["upgrade", "change"] },
         "sourceTemplateId": {
           "type": "string",
           "minLength": 1,
           "description": "Id of the template an element is migrated from. The target's own id denotes a same-id version step."
         },
-        "minVersion": {
+        "toVersion": {
           "type": "integer",
           "minimum": 0,
-          "description": "Lowest source version this entry is authored against. Omit on a cross-id migration."
+          "maximum": 9007199254740991,
+          "description": "Destination template version for an upgrade. Source ID must equal the recipe owner's ID and the version must not exceed the owner's version."
+        },
+        "minSourceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Lowest actually reached source version accepted by a change. Omit to accept any reached version. Source ID must differ from the recipe owner's ID."
         },
         "paths": {
           "type": "array",

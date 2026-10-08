@@ -66,6 +66,7 @@ const NEW = {
 			schemaVersion: 1,
 			sources: [
 				{
+					kind: "change",
 					sourceTemplateId: "io.example.old",
 					paths: [
 						{ from: "provider", to: "backend.provider" },
@@ -105,8 +106,9 @@ const V2 = {
 			schemaVersion: 1,
 			sources: [
 				{
+					kind: "upgrade",
 					sourceTemplateId: "io.example.versioned",
-					minVersion: 2,
+					toVersion: 2,
 					paths: [{ from: "endpoint", to: "url" }],
 				},
 			],
@@ -355,6 +357,7 @@ describe("element-template change", () => {
 				schemaVersion: 1,
 				sources: [
 					{
+						kind: "change",
 						sourceTemplateId: "io.example.old",
 						paths: [{ from: "endpoint", to: "backend.provider" }],
 					},

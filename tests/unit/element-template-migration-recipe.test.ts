@@ -15,7 +15,14 @@ const SOURCE_ID = "io.example.old.v1";
 function recipeWith(...paths: unknown[]) {
 	return {
 		schemaVersion: 1,
-		sources: [{ sourceTemplateId: SOURCE_ID, minVersion: 3, paths }],
+		sources: [
+			{
+				kind: "change",
+				sourceTemplateId: SOURCE_ID,
+				minSourceVersion: 3,
+				paths,
+			},
+		],
 	};
 }
 
@@ -37,7 +44,8 @@ describe("parseRecipe", () => {
 		);
 		const [source] = recipe.sources;
 		assert.strictEqual(source.sourceTemplateId, SOURCE_ID);
-		assert.strictEqual(source.minVersion, 3);
+		assert.ok(source.kind === "change");
+		assert.strictEqual(source.minSourceVersion, 3);
 		assert.deepStrictEqual(
 			source.entries.map((e) => e.kind),
 			["rename", "set", "template"],
@@ -123,7 +131,7 @@ describe("parseRecipe", () => {
 	test("treats a source without paths as carry-over only", () => {
 		const [source] = parseRecipe({
 			schemaVersion: 1,
-			sources: [{ sourceTemplateId: SOURCE_ID }],
+			sources: [{ kind: "change", sourceTemplateId: SOURCE_ID }],
 		}).sources;
 		assert.deepStrictEqual(source.entries, []);
 	});
@@ -198,26 +206,56 @@ describe("parseRecipe", () => {
 		rejects(recipeWith({ from: "a", to: "b", note: {} }), /message must be/);
 	});
 
-	test("refuses a duplicate source at the same minVersion", () => {
+	test("refuses a duplicate source at the same change floor", () => {
 		rejects(
 			{
 				schemaVersion: 1,
 				sources: [
-					{ sourceTemplateId: SOURCE_ID, minVersion: 1 },
-					{ sourceTemplateId: SOURCE_ID, minVersion: 1 },
+					{ kind: "change", sourceTemplateId: SOURCE_ID, minSourceVersion: 1 },
+					{ kind: "change", sourceTemplateId: SOURCE_ID, minSourceVersion: 1 },
 				],
 			},
 			/declared twice/,
 		);
 	});
 
-	test("refuses an invalid minVersion", () => {
+	test("refuses an invalid source floor", () => {
 		rejects(
 			{
 				schemaVersion: 1,
-				sources: [{ sourceTemplateId: SOURCE_ID, minVersion: 1.5 }],
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: SOURCE_ID,
+						minSourceVersion: 1.5,
+					},
+				],
 			},
-			/non-negative integer/,
+			/non-negative safe integer/,
 		);
+	});
+	test("requires an explicit kind and rejects legacy markers and mixed fields", () => {
+		for (const source of [
+			{ sourceTemplateId: SOURCE_ID },
+			{ kind: "upgrade", sourceTemplateId: SOURCE_ID },
+			{ kind: "change", sourceTemplateId: SOURCE_ID, minVersion: 2 },
+			{ kind: "change", sourceTemplateId: SOURCE_ID, toVersion: 2 },
+			{
+				kind: "upgrade",
+				sourceTemplateId: SOURCE_ID,
+				toVersion: 2,
+				minSourceVersion: 1,
+			},
+			{
+				kind: "upgrade",
+				sourceTemplateId: SOURCE_ID,
+				toVersion: Number.MAX_SAFE_INTEGER + 1,
+			},
+		]) {
+			assert.throws(
+				() => parseRecipe({ schemaVersion: 1, sources: [source] }),
+				RecipeError,
+			);
+		}
 	});
 });

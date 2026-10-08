@@ -29,7 +29,9 @@ const validate = new Ajv({ strict: true }).compile(schema);
 function recipe(...paths: unknown[]) {
 	return {
 		schemaVersion: 1,
-		sources: [{ sourceTemplateId: "old", minVersion: 3, paths }],
+		sources: [
+			{ kind: "change", sourceTemplateId: "old", minSourceVersion: 3, paths },
+		],
 	};
 }
 
@@ -67,9 +69,9 @@ const VALID: Record<string, unknown> = {
 			{ path: "p", exists: false },
 		],
 	}),
-	"source without paths or minVersion": {
+	"change without paths or floor": {
 		schemaVersion: 1,
-		sources: [{ sourceTemplateId: "old" }],
+		sources: [{ kind: "change", sourceTemplateId: "old" }],
 	},
 	"schema reference": { $schema: "x", ...recipe(rename) },
 };
@@ -101,9 +103,11 @@ const INVALID: Record<string, unknown> = {
 	}),
 	"note without message": recipe({ ...rename, note: {} }),
 	"empty value map rules": recipe({ ...rename, valueMap: { rules: [] } }),
-	"fractional minVersion": {
+	"fractional source floor": {
 		schemaVersion: 1,
-		sources: [{ sourceTemplateId: "old", minVersion: 1.5 }],
+		sources: [
+			{ kind: "change", sourceTemplateId: "old", minSourceVersion: 1.5 },
+		],
 	},
 };
 

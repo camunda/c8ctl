@@ -9,7 +9,12 @@
  */
 
 import { findPropertiesByTarget, splitBindingPrefix } from "./binding.ts";
-import { type Entry, type Recipe, readEmbeddedRecipe } from "./recipe.ts";
+import {
+	type Entry,
+	type Recipe,
+	readEmbeddedRecipe,
+	validateRecipeOwner,
+} from "./recipe.ts";
 import type { MigrationTemplate } from "./types.ts";
 
 export interface Step {
@@ -106,7 +111,7 @@ function shapeBefore(
  * lineages skip numbers.
  */
 function findCoverageGap(
-	steps: { minVersion: number; entries: Entry[] }[],
+	steps: { toVersion: number; entries: Entry[] }[],
 	appliedId: string,
 	appliedVersion: number,
 	templates: MigrationTemplate[],
@@ -117,7 +122,7 @@ function findCoverageGap(
 			templates,
 			appliedId,
 			appliedVersion,
-			step.minVersion,
+			step.toVersion,
 		);
 		for (const entry of step.entries) {
 			for (const path of readPaths(entry)) {
@@ -129,7 +134,7 @@ function findCoverageGap(
 					findPropertiesByTarget(shape.properties, key, bindingType).length ===
 					0
 				) {
-					return `the recipe for ${appliedId} is incomplete: the step at version ${step.minVersion} reads "${path}", which version ${shape.version} does not define and no earlier step writes`;
+					return `the recipe for ${appliedId} is incomplete: the step at version ${step.toVersion} reads "${path}", which version ${shape.version} does not define and no earlier step writes`;
 				}
 			}
 		}
@@ -148,10 +153,17 @@ function reachableHop(
 ) {
 	let best: ReturnType<typeof recipeSourcesFor>[number] | undefined;
 	for (const s of recipeSourcesFor(recipe, sourceId)) {
-		if (s.minVersion !== undefined && s.minVersion > drainedVersion) {
+		if (
+			s.kind !== "change" ||
+			(s.minSourceVersion !== undefined && s.minSourceVersion > drainedVersion)
+		) {
 			continue;
 		}
-		if (!best || (s.minVersion ?? -1) > (best.minVersion ?? -1)) {
+		if (
+			!best ||
+			(s.minSourceVersion ?? -1) >
+				(best.kind === "change" ? (best.minSourceVersion ?? -1) : -1)
+		) {
 			best = s;
 		}
 	}
@@ -181,25 +193,26 @@ export function resolveSteps({
 	const sameId = target.id === appliedId;
 	const targetVersion = versionOf(target) ?? 0;
 	const targetRecipe = recipe ?? readEmbeddedRecipe(target);
+	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 
 	const sourceLatest = latestOf(templates, appliedId);
 	const sourceRecipe = sameId ? targetRecipe : safeRecipe(sourceLatest);
-	const drainedVersion = sameId
+	const limit = sameId
 		? targetVersion
-		: Math.max(
-				appliedVersion,
-				versionOf(sourceLatest ?? target) ?? appliedVersion,
-			);
+		: sourceLatest
+			? (versionOf(sourceLatest) ?? appliedVersion)
+			: appliedVersion;
 
 	const rungs = recipeSourcesFor(sourceRecipe, appliedId)
-		.filter(
-			(s) =>
-				s.minVersion !== undefined &&
-				s.minVersion > appliedVersion &&
-				s.minVersion <= drainedVersion,
+		.flatMap((s) =>
+			s.kind === "upgrade" &&
+			s.toVersion > appliedVersion &&
+			s.toVersion <= limit
+				? [{ toVersion: s.toVersion, entries: s.entries }]
+				: [],
 		)
-		.map((s) => ({ minVersion: s.minVersion ?? 0, entries: s.entries }))
-		.sort((a, b) => a.minVersion - b.minVersion);
+		.sort((a, b) => a.toVersion - b.toVersion);
+	for (const rung of rungs) loaded(templates, appliedId, rung.toVersion);
 
 	const refusal = findCoverageGap(rungs, appliedId, appliedVersion, templates);
 	if (refusal) {
@@ -209,12 +222,13 @@ export function resolveSteps({
 	const steps: Step[] = rungs.map((rung) => ({
 		kind: "version",
 		templateId: appliedId,
-		version: rung.minVersion,
+		version: rung.toVersion,
 		entries: rung.entries,
 	}));
 
 	if (!sameId) {
-		const hop = reachableHop(targetRecipe, appliedId, drainedVersion);
+		const reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
+		const hop = reachableHop(targetRecipe, appliedId, reachedVersion);
 		if (hop) {
 			steps.push({
 				kind: "hop",
@@ -235,7 +249,9 @@ function safeRecipe(
 		return undefined;
 	}
 	try {
-		return readEmbeddedRecipe(template);
+		const recipe = readEmbeddedRecipe(template);
+		if (recipe) validateRecipeOwner(recipe, template);
+		return recipe;
 	} catch {
 		return undefined;
 	}
@@ -252,11 +268,6 @@ export function findSuccessors(
 	appliedVersion: number,
 	templates: MigrationTemplate[],
 ): MigrationTemplate[] {
-	const sourceLatest = latestOf(templates, appliedId);
-	const drained = Math.max(
-		appliedVersion,
-		sourceLatest ? (versionOf(sourceLatest) ?? 0) : 0,
-	);
 	const ids = new Set(candidates.map((c) => c.id));
 	const found: MigrationTemplate[] = [];
 	for (const id of ids) {
@@ -265,8 +276,17 @@ export function findSuccessors(
 			id,
 		);
 		if (latest && latest.id !== appliedId) {
-			if (reachableHop(safeRecipe(latest), appliedId, drained)) {
-				found.push(latest);
+			try {
+				const result = resolveSteps({
+					appliedId,
+					appliedVersion,
+					target: latest,
+					templates: [...templates, latest],
+				});
+				if (!result.refusal && result.steps.some((s) => s.kind === "hop"))
+					found.push(latest);
+			} catch {
+				// Discovery excludes candidates whose recipe or required applications are unusable.
 			}
 		}
 	}
