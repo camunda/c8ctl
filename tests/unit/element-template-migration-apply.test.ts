@@ -141,6 +141,20 @@ async function setup(
 }
 
 describe("migrateElement", () => {
+	test("rejects inconsistent applied-template context before mutation", async () => {
+		const { migrationModeler, element } = await setup(OLD, {});
+		assert.throws(
+			() =>
+				migrateElement({
+					modeler: migrationModeler,
+					element,
+					fromTemplate: { ...OLD, version: 99 },
+					target: NEW,
+					templates: [OLD, NEW],
+				}),
+			/applied template/,
+		);
+	});
 	test("reports loss when a conditional destination never materializes", async () => {
 		const target = {
 			...NEW,

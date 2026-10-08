@@ -176,6 +176,16 @@ export function migrateElement({
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
 }): MigrationResult {
+	const applied = readAppliedTemplate(element.businessObject);
+	if (
+		!applied ||
+		applied.id !== fromTemplate.id ||
+		applied.version !== fromTemplate.version
+	) {
+		throw new Error(
+			"Migration context does not match the element's applied template.",
+		);
+	}
 	const { steps, refusal } = resolveSteps({
 		appliedId: fromTemplate.id,
 		appliedVersion: fromTemplate.version ?? 0,

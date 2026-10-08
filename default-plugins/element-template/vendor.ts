@@ -7,15 +7,22 @@ import { existsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModdleElement } from "./binding.ts";
+import type { TemplateProperty } from "./migration/types.ts";
 
 export type { ModdleElement };
 export type BpmnElement = { businessObject: ModdleElement };
 export type ElementRegistry = { get(id: string): BpmnElement | undefined };
 export type ElementTemplatesService = {
-	set(templates: object[]): void;
+	set(
+		templates: {
+			id?: string;
+			version?: number;
+			properties: TemplateProperty[];
+		}[],
+	): void;
 	applyTemplate(
 		element: BpmnElement,
-		template: object,
+		template: { id?: string; version?: number; properties: TemplateProperty[] },
 	): BpmnElement | undefined;
 	getCompatible(element: BpmnElement): unknown[];
 };
