@@ -88,7 +88,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isScalar(value: unknown): value is string | number | boolean {
 	return (
 		typeof value === "string" ||
-		typeof value === "number" ||
+		(typeof value === "number" && Number.isFinite(value)) ||
 		typeof value === "boolean"
 	);
 }
@@ -121,7 +121,7 @@ function requireString(value: unknown, at: string): string {
 
 function requireScalar(value: unknown, at: string): string {
 	if (!isScalar(value)) {
-		throw new RecipeError(`${at} must be a string, number or boolean`);
+		throw new RecipeError(`${at} must be a string, finite number or boolean`);
 	}
 	return String(value);
 }
@@ -132,7 +132,7 @@ function parseNote(raw: unknown, at: string): Note {
 	}
 	const obj = requireRecord(raw, at);
 	rejectUnknownKeys(obj, ["level", "message"], at);
-	const level = obj.level ?? "info";
+	const level = obj.level === undefined ? "info" : obj.level;
 	if (level !== "info" && level !== "warning") {
 		throw new RecipeError(`${at}.level must be "info" or "warning"`);
 	}

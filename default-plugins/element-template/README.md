@@ -198,6 +198,13 @@ This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` re
 [`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
 Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
 instead of being ignored. `metadata.migratesFrom` is not part of the official element template schema.
+Draft07 validation alone is insufficient: the parser also rejects duplicate source markers/floors,
+and owner validation checks source IDs and upgrade destinations against the template carrying the recipe.
+An optional `$schema` accepts any string, including blank strings. Paths, IDs, notes, templates,
+and match patterns require a non-whitespace character; surrounding whitespace is preserved.
+Scalar values accept strings (including blank strings), finite numbers, and booleans. An omitted
+note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
+but sources, groups, guard lists, and value-map rules must be non-empty.
 
 ## Inspecting a template
 

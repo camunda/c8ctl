@@ -15,7 +15,8 @@ modeler; the integration suites invoke CLI commands and reparse serialized XML.
 | Qualified bindings, destination aliases, ambiguous reads and duplicate backing values | Complex suite; planner tests |
 | Inactive destinations and removed intermediate destinations | Apply and report tests |
 | Explicit target precedence, incompatible engines and missing steps | CLI migration tests and step tests |
-| Schema structural boundaries, semantic owner and duplicate checks | Schema, recipe and step tests |
+| Schema structural boundaries, semantic owner and duplicate checks | 737 cases in `element-template-migration-schema.test.ts`; recipe and step tests |
+| Null note levels and non-finite scalars across every consumer | Schema suite: three note branches and five scalar positions, proven red before parser fix |
 | Credential redaction without mutating source values | Output tests |
 | XML-only stdout, JSON envelope, dry-run and unchanged files after refusal | CLI and integration suites |
 

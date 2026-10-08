@@ -31,7 +31,7 @@ subagent review occurred. Commits are local; nothing was pushed or synced.
 | Issue | Local Commit | Status And Remaining Work |
 | --- | --- | --- |
 | MIG-003 | `5c4d9bd` | Option B version 1 implemented, owner validation and reached-floor guards pass. Additional equality/mixed-entry variants remain desirable. |
-| MIG-007 | `552e6b3` | Structural parity fixes and boundary guards implemented. Semantic limitations documented. |
+| MIG-007 | `552e6b3` plus scoped review follow-up | Closed for the acceptance criteria below: 737 schema/parity tests pass, including semantic owner/uniqueness checks. Null note levels and non-finite scalars were proven red before the parser fix. Whole-worktree release verification remains blocked separately. |
 | MIG-004 | `6530f09` | Explicit target precedence implemented and CLI regression passes. HTTPS conflict fixture remains untested. |
 | MIG-005 | `b61bc4e` | Engine eligibility enforced; missing metadata and incompatible steps tested. Strict validation of malformed engine strings needs further review. |
 | MIG-001 | `7169022` | Missing final destinations and intermediate removals reported as loss. Full reconciliation of composed writes and mismatched resolved values remains open. |
@@ -54,6 +54,17 @@ subagent review occurred. Commits are local; nothing was pushed or synced.
 - Tests were shown red before the principal parser, target precedence, compatibility, loss reporting, write-conflict, source-ambiguity, destination-constraint, no-op, authorization, redaction, and context fixes.
 - The complex integration suite initially failed, exposing source defaults reset across repeated template application. It passed after retaining populated non-Hidden same-binding values.
 - Lock and no-op follow-up guards were added during the direct adversarial pass. Their pre-fix red runs were not recorded, so they are weaker evidence than the principal regression tests.
+
+### MIG-007 Independent Review Follow-Up
+
+- Runtime: Node 22.23.3 using `npx --yes --package=node@22 -c`.
+- Pre-fix schema matrix: 716 tests, 698 passed, 18 failed. Three null note-level cases and 15 non-finite scalar cases (set, map value/default, equals, and in) all failed because the parser accepted them while Draft07 rejected them.
+- Minimal parser fix: default only undefined note levels; require finite numeric scalars before stringification. Retained the field matrix and added finite numeric extremes and non-finite version boundaries. The expanded matrix still had exactly the same 18 reds before the fix.
+- Post-fix schema and parser suites: 757 tests passed (737 schema tests and 20 parser tests), zero failures or skips. Owned-file Biome checks and final `npm run typecheck` passed.
+- All MIG-007 acceptance criteria were inspected: both Option B branches, missing/null/type boundaries, whitespace and empty patterns, version bounds, unknown keys, empty collections, duplicate markers/floors, and owner-relative checks. No additional structural discrepancy was identified. README, design, and schema descriptions explicitly separate structural validation from semantic validation.
+- Final full unit invocation: 3,525 tests, 3,518 passed, seven failed in the concurrent source-read suite (nested interpolation ambiguity and duplicate input/header backing entries). These are active unresolved failures, not a green baseline. Integration was run separately: 147 tests, 145 passed, two skipped (fish unavailable and physical-tenant suite), zero failures.
+- `npm run build` stopped at two lint diagnostics in the concurrent `element-template-migration-source-reads.test.ts`. Test distribution builds emitted the unsuppressed `typed-env@2.0.0` warning caused by its string-valued `sideEffects`, through `@camunda8/orchestration-cluster-api@10.0.0-alpha.52`. The upstream dependency MUST be corrected; no local workaround was added. MIG-014 and the overall release gate remain open.
+- Local generated README/docs sync commands completed. No GitHub sync, push, or remote issue closure occurred.
 
 See [Migration Test Coverage](migration-test-coverage.md) for the feature matrix
 and residual coverage limits. The release gate below remains in force; unresolved

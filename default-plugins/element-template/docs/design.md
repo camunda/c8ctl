@@ -199,6 +199,13 @@ that moved.
 - **Versioned and strict.** The recipe has a `schemaVersion`. A reader refuses a
   version it does not know and any unknown key, rather than applying part of a
   recipe or silently ignoring a typo.
+- **Validation boundary.** Draft07 and the parser enforce the same JSON structure.
+  Schema validation alone is insufficient: keyed source uniqueness is checked by
+  the parser and owner-relative ID/version constraints by `validateRecipeOwner`.
+  `$schema` allows blank strings; paths, IDs, notes, templates and match patterns
+  require a non-whitespace character without trimming the accepted value. Scalar
+  strings may be blank, numbers MUST be finite, and explicit null note levels
+  MUST fail rather than default to info.
 - **Steps.** An element on an old version climbs the version steps of its own
   template in order, then makes at most one hop onto a different template. A
   source entry declares `kind: "upgrade"` with a destination `toVersion`, or
