@@ -38,6 +38,11 @@ function recipe(...paths: unknown[]) {
 const rename = { from: "a", to: "b" };
 
 const VALID: Record<string, unknown> = {
+	"upgrade at zero": {
+		schemaVersion: 1,
+		sources: [{ kind: "upgrade", sourceTemplateId: "old", toVersion: 0 }],
+	},
+	"empty schema reference": { $schema: "", ...recipe(rename) },
 	"rename, set and template": recipe(
 		rename,
 		{ to: "kind", set: "x" },
@@ -77,6 +82,38 @@ const VALID: Record<string, unknown> = {
 };
 
 const INVALID: Record<string, unknown> = {
+	"non-string schema reference": { $schema: 42, ...recipe(rename) },
+	"whitespace path": recipe({ from: " ", to: "b" }),
+	"whitespace note": recipe({ ...rename, note: " " }),
+	"empty match pattern": recipe({
+		...rename,
+		when: { path: "a", matches: "" },
+	}),
+	"blank match pattern": recipe({
+		...rename,
+		when: { path: "a", matches: " " },
+	}),
+	"missing kind": { schemaVersion: 1, sources: [{ sourceTemplateId: "old" }] },
+	"missing upgrade destination": {
+		schemaVersion: 1,
+		sources: [{ kind: "upgrade", sourceTemplateId: "old" }],
+	},
+	"unsafe destination": {
+		schemaVersion: 1,
+		sources: [
+			{ kind: "upgrade", sourceTemplateId: "old", toVersion: 9007199254740992 },
+		],
+	},
+	"negative floor": {
+		schemaVersion: 1,
+		sources: [
+			{ kind: "change", sourceTemplateId: "old", minSourceVersion: -1 },
+		],
+	},
+	"legacy marker": {
+		schemaVersion: 1,
+		sources: [{ kind: "change", sourceTemplateId: "old", minVersion: 1 }],
+	},
 	"missing schemaVersion": { sources: recipe(rename).sources },
 	"newer schemaVersion": { ...recipe(rename), schemaVersion: 2 },
 	"bare array": recipe(rename).sources,

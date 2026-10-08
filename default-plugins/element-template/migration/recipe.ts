@@ -359,6 +359,9 @@ function parseSource(raw: unknown, at: string): RecipeSource {
 export function parseRecipe(raw: unknown): Recipe {
 	const obj = requireRecord(raw, "recipe");
 	rejectUnknownKeys(obj, ["$schema", "schemaVersion", "sources"], "recipe");
+	if (obj.$schema !== undefined && typeof obj.$schema !== "string") {
+		throw new RecipeError("recipe.$schema must be a string");
+	}
 
 	if (obj.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
 		if (typeof obj.schemaVersion === "number" && obj.schemaVersion > 1) {
