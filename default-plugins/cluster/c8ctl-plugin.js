@@ -1700,7 +1700,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     // A failed tenant probe leaves healthy engines alive; preserve their identity
     // for stop/status even if the installation directory is subsequently replaced.
     try {
-      recordRunningClusterPids(config, { skipEmpty: true });
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
     }
@@ -2014,11 +2014,11 @@ export function readRunningClusterRecord(cacheDir) {
   } catch {
     return null;
   }
-  return { version, pids, signatures };
+  return { version, pids, signatures, ...(parsed.startupFailed === true ? { startupFailed: true } : {}) };
 }
 
 /** Persist the durable running-cluster PID record. */
-export function writeRunningClusterRecord(cacheDir, { version, pids, signatures }) {
+export function writeRunningClusterRecord(cacheDir, { version, pids, signatures, startupFailed }) {
   mkdirSync(cacheDir, { recursive: true });
   const cleanPids = Array.isArray(pids)
     ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
@@ -2043,6 +2043,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures 
     version: version ?? null,
     pids: cleanPids,
     signatures: cleanSignatures,
+    ...(startupFailed === true ? { startupFailed: true } : {}),
   });
   try {
     writeFileSync(tmpPath, payload);
@@ -2096,7 +2097,7 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false } = {}) {
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false, startupFailed = false } = {}) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
@@ -2125,7 +2126,7 @@ export function recordRunningClusterPids(config, { signatureOf = processStartSig
     }
   }
   if (skipEmpty && pids.length === 0) return 0;
-  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
+  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures, startupFailed });
   return pids.length;
 }
 
@@ -2800,16 +2801,18 @@ export async function clusterStatus(cacheDir) {
     // Health endpoint not reachable
   }
 
-  // A cluster process is alive but not tracked by a marker — typically an
-  // orphan left after its install dir was replaced/removed (#560).
+  // Only attribute a failure to survivors of that startup, never to unrelated
+  // pidfiles or a shared health endpoint that happens to respond.
+  const startupFailed = record?.startupFailed === true && liveRecordedPids(cacheDir).length > 0;
+  // A missing marker alone does not explain why processes are still running.
   const untracked = !markerExists && processesRunning;
 
-  // `untracked` takes precedence over a healthy probe: an orphaned process can
-  // still serve the health endpoint while holding its ports, and the operator
-  // must be told it is no longer tracked (and how to recover) rather than shown
-  // a plain "running". Healthy connection URLs are still surfaced below.
+  // Startup failure and missing-marker diagnostics take precedence over shared
+  // health: a responding endpoint does not establish readiness of every tenant.
   let status;
-  if (untracked) {
+  if (startupFailed) {
+    status = 'running after failed startup';
+  } else if (untracked) {
     status = 'running (untracked)';
   } else if (isHealthy) {
     status = 'running';
@@ -2819,17 +2822,19 @@ export async function clusterStatus(cacheDir) {
     status = 'stopped';
   }
 
+  const recovery = startupFailed
+    ? 'Cluster processes are still running after a failed startup. Review the startup error or c8run logs; a responding shared health endpoint does not mean all tenants are ready. Run c8ctl cluster stop before retrying.'
+    : untracked
+      ? 'Cluster processes are still running without an active c8ctl marker. The startup outcome is unknown. Stop them with: c8ctl cluster stop'
+      : undefined;
+
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
-    // Machine-readable status must carry the SAME recovery guidance the text
-    // renderer prints below for an orphan, otherwise a `--json` consumer sees
-    // `running (untracked)` with no actionable instruction (#560).
+    // Machine-readable status carries the same recovery guidance as text.
     logger.json({
       status,
       version,
       urls: isHealthy ? CLUSTER_URLS : undefined,
-      recovery: untracked
-        ? 'A cluster process is still running but is no longer tracked by c8ctl (its install directory was likely replaced or removed while running). Stop it with: c8ctl cluster stop'
-        : undefined,
+      recovery,
     });
     return;
   }
@@ -2857,12 +2862,10 @@ export async function clusterStatus(cacheDir) {
     console.log('  Default credentials: demo / demo');
   }
 
-  if (untracked) {
-    // Shown even when the orphan is healthy: it is still not tracked by c8ctl.
+  if (recovery) {
+    // Keep text and JSON diagnostics identical even when shared health is UP.
     console.log('');
-    console.log('  A cluster process is still running but is no longer tracked by c8ctl');
-    console.log('  (its install directory was likely replaced or removed while running).');
-    console.log('  Stop it with: c8ctl cluster stop');
+    console.log(`  ${recovery}`);
   } else if (!isHealthy) {
     console.log('');
     console.log('  The cluster appears to have been started but is not yet responding.');

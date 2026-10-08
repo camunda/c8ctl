@@ -78,6 +78,19 @@ c8 cluster status
 
 Reports whether a cluster is running, including connection details.
 
+If `cluster start` exits nonzero while Camunda or connector processes survive,
+status reports **`running after failed startup`**. Review the startup error or
+c8run logs, then run `c8 cluster stop` before retrying. A responding shared health
+endpoint does not mean every physical tenant is ready. The original startup exit
+code is preserved; stopping clears the failure record, and a successful restart
+replaces any stale failure state.
+
+**`running (untracked)`** means processes are alive without an active c8ctl
+marker and the startup outcome is unknown. Use `c8 cluster stop` to recover,
+including when an installation directory was replaced or deleted while running.
+JSON status (`c8 cluster status --json`) includes the same `status` and `recovery`
+guidance.
+
 ### View cluster logs
 
 ```bash
