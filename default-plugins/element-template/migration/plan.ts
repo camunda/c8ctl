@@ -60,10 +60,21 @@ function lookup(
 	path: string,
 ): ElementValue | undefined {
 	const { bindingType, key } = splitBindingPrefix(path);
-	return values.find(
+	const matches = values.filter(
 		(v) =>
 			v.key === key && (bindingType === null || v.bindingType === bindingType),
 	);
+	if (matches.length > 1) {
+		const types = new Set(matches.map((v) => v.bindingType));
+		const qualified = [...types].map(
+			(type) =>
+				`${type === "zeebe:taskHeader" ? "header" : type.replace("zeebe:", "")}:${key}`,
+		);
+		throw new Error(
+			`${types.size > 1 ? "Ambiguous" : "Duplicate"} source path "${path}"; use ${qualified.join(", ")}${types.size === 1 ? " after removing duplicate backing entries" : ""}`,
+		);
+	}
+	return matches[0];
 }
 
 function evalGuard(guard: Guard, values: ElementValue[]): boolean {
@@ -194,7 +205,7 @@ export function buildStepPlan(
 		}
 		const target = write(entry, entry.to, value);
 		facts.moved.push({
-			from: splitFrom(entry.from),
+			from: { key: source.key, bindingType: source.bindingType },
 			to: { key: target.key, bindingType: target.bindingType },
 			transformed,
 		});
@@ -202,11 +213,6 @@ export function buildStepPlan(
 
 	assertNoAmbiguousWrites(writes);
 	return { writes, facts };
-}
-
-function splitFrom(path: string): { key: string; bindingType: string | null } {
-	const { key, bindingType } = splitBindingPrefix(path);
-	return { key, bindingType };
 }
 
 /** Two active writes to the same target make the recipe ambiguous. */

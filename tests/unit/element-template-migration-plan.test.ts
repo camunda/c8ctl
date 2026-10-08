@@ -30,6 +30,30 @@ function entriesOf(...paths: unknown[]) {
 }
 
 describe("buildStepPlan", () => {
+	test("rejects ambiguous rename, guard and interpolation reads and duplicate backing values", () => {
+		const values = [
+			input("key", "INPUT"),
+			{ ...input("key", "HEADER"), bindingType: "zeebe:taskHeader" },
+		];
+		for (const path of [
+			{ from: "key", to: "b" },
+			{ to: "b", set: "x", when: { path: "key", exists: true } },
+			{ to: "b", template: `\${key}` },
+		]) {
+			assert.throws(
+				() => buildStepPlan(entriesOf(path), values),
+				/Ambiguous source.*input:key.*header:key/,
+			);
+		}
+		assert.throws(
+			() =>
+				buildStepPlan(entriesOf({ from: "input:key", to: "b" }), [
+					input("key", "one"),
+					input("key", "two"),
+				]),
+			/Duplicate source/,
+		);
+	});
 	test("renames a value and reports the move", () => {
 		const plan = buildStepPlan(entriesOf({ from: "a", to: "b" }), [
 			input("a", "1"),
@@ -40,7 +64,7 @@ describe("buildStepPlan", () => {
 		);
 		assert.deepStrictEqual(plan.facts.moved[0].from, {
 			key: "a",
-			bindingType: null,
+			bindingType: "zeebe:input",
 		});
 		assert.strictEqual(plan.facts.moved[0].transformed, false);
 	});

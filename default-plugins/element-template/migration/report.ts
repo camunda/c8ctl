@@ -88,7 +88,11 @@ export function mergeFacts(all: PlanFacts[]): PlanFacts {
 function chainMoves(moves: MovedFact[]): MovedFact[] {
 	const out: MovedFact[] = [];
 	for (const move of moves) {
-		const index = out.findIndex((m) => m.to.key === move.from.key);
+		const index = out.findIndex(
+			(m) =>
+				m.to.key === move.from.key &&
+				m.to.bindingType === move.from.bindingType,
+		);
 		if (index === -1) {
 			out.push(move);
 		} else {
