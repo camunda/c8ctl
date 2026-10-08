@@ -7,6 +7,7 @@ import assert from "node:assert";
 import { afterEach, describe, test } from "node:test";
 import type { MigrationReport } from "../../default-plugins/element-template/migration/report.ts";
 import {
+	redactMigrationDiagnostic,
 	renderReportText,
 	reportToJson,
 	shouldUseColor,
@@ -41,6 +42,212 @@ function report(partial: Partial<MigrationReport> = {}): MigrationReport {
 
 const ESC = "\u001b[";
 
+test("uses binding-qualified template identity metadata across all value collections", () => {
+	const field = { key: "opaque", bindingType: "zeebe:input" };
+	for (const metadata of [
+		{ id: "accessToken" },
+		{ label: "Password" },
+		{ group: "credentials" },
+		{ group: "auth" },
+	]) {
+		const redaction = {
+			templates: [
+				{
+					id: "old",
+					groups: [{ id: "auth", label: "Credentials" }],
+					properties: [
+						{ ...metadata, binding: { type: "zeebe:input", name: "opaque" } },
+					],
+				},
+			],
+		};
+		const raw = report({
+			dropped: [
+				{ ...field, value: "PRIVATE-DROP", valueName: "PRIVATE-DROP-NAME" },
+			],
+			added: [
+				{ ...field, value: "PRIVATE-ADD", valueName: "PRIVATE-ADD-NAME" },
+				{
+					key: "opaque",
+					bindingType: "zeebe:taskHeader",
+					value: "public-header",
+				},
+			],
+			changed: [
+				{
+					...field,
+					valueChange: {
+						from: "PRIVATE-OLD",
+						to: "PRIVATE-NEW",
+						fromName: "PRIVATE-OLD-NAME",
+						toName: "PRIVATE-NEW-NAME",
+					},
+				},
+			],
+			moved: [
+				{
+					from: field,
+					to: { key: "public", bindingType: "zeebe:input" },
+					valueChange: { from: "PRIVATE-FROM", to: "PRIVATE-TO" },
+				},
+				{
+					from: { key: "public", bindingType: "zeebe:input" },
+					to: field,
+					valueChange: { from: "PRIVATE-REVERSE", to: "PRIVATE-RESULT" },
+				},
+			],
+		});
+		const original = structuredClone(raw);
+		for (const dryRun of [false, true]) {
+			const text = renderReportText(raw, {
+				elementId: "Task",
+				color: false,
+				dryRun,
+				redaction,
+			});
+			const json = JSON.stringify(
+				reportToJson(raw, {
+					elementId: "Task",
+					action: "change",
+					recipe: "embedded",
+					dryRun,
+					redaction,
+				}),
+			);
+			for (const output of [text, json]) {
+				assert.doesNotMatch(output, /PRIVATE-/);
+				assert.match(output, /\[REDACTED\]/);
+				assert.match(output, /public-header/);
+			}
+		}
+		assert.deepStrictEqual(raw, original);
+	}
+});
+
+test("scrubs known sensitive values from notes, refusals, skipped diagnostics and other report strings", () => {
+	const secret = 'LONG-PRIVATE-"VALUE"\\line\nend';
+	const raw = report({
+		dropped: [{ key: "password", bindingType: "zeebe:input", value: secret }],
+		added: [
+			{ key: "public", bindingType: "zeebe:input", value: `copied ${secret}` },
+		],
+		notes: [{ level: "warning", message: `failed: ${secret}` }],
+		refusal: `cannot use ${secret}`,
+		skipped: {
+			guard: [{ from: secret, to: "b" }],
+			template: [{ to: "c", missing: [secret] }],
+			noMatch: [{ from: "d", to: secret }],
+			feel: [{ from: secret, to: "e" }],
+		},
+	});
+	const original = structuredClone(raw);
+	assert.doesNotMatch(
+		renderReportText(raw, { elementId: "Task", color: true, dryRun: true }),
+		/LONG-PRIVATE/,
+	);
+	assert.doesNotMatch(
+		JSON.stringify(
+			reportToJson(raw, {
+				elementId: "Task",
+				action: "update",
+				recipe: "file",
+				dryRun: true,
+			}),
+		),
+		/LONG-PRIVATE/,
+	);
+	assert.deepStrictEqual(raw, original);
+});
+
+test("diagnostics redact unchanged credentials and sensitive defaults using the same context", () => {
+	const redaction = {
+		templates: [
+			{
+				id: "old",
+				properties: [
+					{
+						id: "password",
+						binding: { type: "zeebe:input", name: "opaque" },
+						value: "PRIVATE-DEFAULT",
+					},
+				],
+			},
+		],
+		values: [
+			{
+				key: "opaque",
+				bindingType: "zeebe:input",
+				value: "PRIVATE-UNCHANGED",
+				isFeel: false,
+			},
+		],
+	};
+	const message =
+		"Invalid value PRIVATE-UNCHANGED; default PRIVATE-DEFAULT; keep useful reason";
+	assert.strictEqual(
+		redactMigrationDiagnostic(message, redaction),
+		"Invalid value [REDACTED]; default [REDACTED]; keep useful reason",
+	);
+	const raw = report({ notes: [{ level: "info", message }] });
+	assert.doesNotMatch(
+		renderReportText(raw, {
+			elementId: "Task",
+			color: false,
+			dryRun: true,
+			redaction,
+		}),
+		/PRIVATE-/,
+	);
+	assert.doesNotMatch(
+		JSON.stringify(
+			reportToJson(raw, {
+				elementId: "Task",
+				action: "change",
+				recipe: "none",
+				dryRun: true,
+				redaction,
+			}),
+		),
+		/PRIVATE-/,
+	);
+});
+
+test("redacts overlapping and JSON-escaped known values without hiding token limits or empty strings", () => {
+	const values = ["abc", "abcdef", 'quoted"password\\value'];
+	const raw = report({
+		dropped: values.map((value) => ({
+			key: "token",
+			bindingType: "zeebe:input",
+			value,
+		})),
+		added: [
+			{
+				key: "maxTokens",
+				label: "Maximum tokens",
+				bindingType: "zeebe:input",
+				value: "2000",
+			},
+		],
+	});
+	const message = `${values.join(" ")} ${JSON.stringify(values[2])}`;
+	assert.strictEqual(
+		redactMigrationDiagnostic(message, { report: raw }),
+		'[REDACTED] [REDACTED] [REDACTED] "[REDACTED]"',
+	);
+	assert.strictEqual(
+		redactMigrationDiagnostic("ordinary diagnostic", {
+			values: [
+				{ key: "token", bindingType: "zeebe:input", value: "", isFeel: false },
+			],
+		}),
+		"ordinary diagnostic",
+	);
+	assert.match(
+		renderReportText(raw, { elementId: "Task", color: false, dryRun: false }),
+		/2000/,
+	);
+});
+
 test("redacts sensitive values in every report collection without changing the source", () => {
 	const field = { key: "authentication.token", bindingType: "zeebe:input" };
 	const raw = report({
@@ -73,6 +280,50 @@ test("redacts sensitive values in every report collection without changing the s
 		/SECRET/,
 	);
 	assert.strictEqual(raw.dropped[0].value, "SECRET-DROP");
+});
+
+test("short credentials cannot corrupt redaction markers", () => {
+	const raw = report({
+		dropped: [{ key: "password", bindingType: "zeebe:input", value: "RED" }],
+	});
+	const json = reportToJson(raw, {
+		elementId: "Task",
+		action: "change",
+		recipe: "none",
+		dryRun: true,
+	});
+	assert.strictEqual(json.report.dropped[0].value, "[REDACTED]");
+});
+
+test("checks every duplicate metadata property and conservatively handles unknown binding types", () => {
+	const redaction = {
+		templates: [
+			{
+				id: "old",
+				properties: [
+					{ label: "Public", binding: { type: "zeebe:input", name: "opaque" } },
+					{ id: "apiKey", binding: { type: "zeebe:input", name: "opaque" } },
+				],
+			},
+		],
+	};
+	for (const bindingType of ["zeebe:input", null]) {
+		const raw = report({
+			added: [{ key: "opaque", bindingType, value: "PRIVATE-DUPLICATE" }],
+		});
+		assert.doesNotMatch(
+			JSON.stringify(
+				reportToJson(raw, {
+					elementId: "Task",
+					action: "change",
+					recipe: "none",
+					dryRun: true,
+					redaction,
+				}),
+			),
+			/PRIVATE-DUPLICATE/,
+		);
+	}
 });
 
 describe("renderReportText", () => {

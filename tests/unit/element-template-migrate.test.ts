@@ -216,6 +216,458 @@ process.on("exit", () => {
 	}
 });
 
+describe("migration catalog selection authority", () => {
+	test("rejects conflicting cached targets before selection on every cache-driven path", async () => {
+		const successor = {
+			...NEW,
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [{ kind: "change", sourceTemplateId: V1.id }],
+				},
+			},
+		};
+		for (const [target, commands] of [
+			[
+				V2,
+				[
+					["update", TASK, versionedBpmn],
+					["change", `${V2.id}@2`, TASK, versionedBpmn],
+					["change", V2.id, TASK, versionedBpmn],
+				],
+			],
+			[successor, [["change", "--successor", TASK, versionedBpmn]]],
+		] as const) {
+			const shadow = { ...target, name: "Conflicting cached target" };
+			const diagnostics: string[] = [];
+			for (const duplicates of [
+				[target, shadow],
+				[shadow, target],
+			]) {
+				const dataDir = dataDirWithCache([V1, ...duplicates]);
+				for (const command of commands) {
+					const result = await run(dataDir, ...command, "--dry-run", "--json");
+					assert.strictEqual(result.status, 1, result.stdout);
+					assert.strictEqual(result.stdout, "");
+					assert.match(result.stderr, /Conflicting definitions for template/);
+					diagnostics.push(
+						result.stderr.slice(
+							result.stderr.indexOf("Conflicting definitions"),
+						),
+					);
+				}
+			}
+			assert.ok(diagnostics.every((message) => message === diagnostics[0]));
+			for (const command of commands) {
+				const result = await run(
+					dataDirWithCache([V1, target, structuredClone(target)]),
+					...command,
+					"--dry-run",
+					"--json",
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.strictEqual(result.stderr, "");
+				assert.strictEqual(JSON.parse(result.stdout).to.id, target.id);
+			}
+		}
+	});
+});
+
+describe("migration engine eligibility", () => {
+	for (const namespace of ["urn:unrelated", "", undefined]) {
+		test(`rejects spoofed modeler namespace ${JSON.stringify(namespace)} on every selection path`, async () => {
+			const file = join(workDir, `spoofed-namespace-${String(namespace)}.bpmn`);
+			const xml = readFileSync(versionedBpmn, "utf-8").replace(
+				/ xmlns:modeler="[^"]*"/,
+				namespace === undefined ? "" : ` xmlns:modeler="${namespace}"`,
+			);
+			writeFileSync(file, xml);
+			for (const args of [
+				["update", TASK, file],
+				["change", `${V2.id}@2`, TASK, file],
+				["change", "--successor", TASK, file],
+			]) {
+				const result = await run(
+					dataDirWithCache([V1, V2]),
+					...args,
+					"--in-place",
+					"--allow-lossy",
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /Cannot verify template compatibility/);
+				assert.strictEqual(result.stdout, "");
+				assert.strictEqual(readFileSync(file, "utf-8"), xml);
+				assert.ok(!existsSync(`${file}.migration.lock`));
+			}
+		});
+	}
+	for (const splitPrefixes of [false, true]) {
+		test(`accepts namespace-qualified engine metadata with ${splitPrefixes ? "split" : "aliased"} prefixes`, async () => {
+			const file = join(workDir, `aliased-namespace-${splitPrefixes}.bpmn`);
+			const xml = readFileSync(versionedBpmn, "utf-8")
+				.replaceAll("modeler:", "metadata:")
+				.replace("xmlns:modeler=", "xmlns:metadata=")
+				.replace(
+					"metadata:executionPlatformVersion=",
+					splitPrefixes
+						? 'xmlns:engine="http://camunda.org/schema/modeler/1.0" engine:executionPlatformVersion='
+						: "metadata:executionPlatformVersion=",
+				);
+			writeFileSync(file, xml);
+			for (const [templates, args, version] of [
+				[[V1, V2], ["update", TASK, file], 2],
+				[[V1, V2], ["change", `${V2.id}@2`, TASK, file], 2],
+				[[V1, V2], ["change", V2.id, TASK, file], 2],
+				[[V1, NEW], ["change", "--successor", TASK, file], 1],
+			] as const) {
+				const cache = templates.map((template) =>
+					template.id === NEW.id
+						? {
+								...NEW,
+								metadata: {
+									migratesFrom: {
+										schemaVersion: 1,
+										sources: [{ kind: "change", sourceTemplateId: V1.id }],
+									},
+								},
+							}
+						: template,
+				);
+				const result = await run(dataDirWithCache(cache), ...args);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stdout,
+					new RegExp(`modelerTemplateVersion="${version}"`),
+				);
+			}
+		});
+	}
+	for (const version of [
+		"release-8.8.0",
+		"8.8.0-junk trailing",
+		"8.8.0.1",
+		"8",
+		"8.08.0",
+		"08.8",
+		"v8.8.0",
+		"8.8-alpha1",
+		"8.8.0-01",
+		"8.8.0-alpha..1",
+		"8.8.0+build..1",
+		"8.8.0&#10;",
+		"8.8.0&#13;",
+		"^8.8",
+		"",
+		undefined,
+	]) {
+		test(`rejects malformed document version ${JSON.stringify(version)} on every selection path`, async () => {
+			const file = join(
+				workDir,
+				`invalid-version-${encodeURIComponent(String(version))}.bpmn`,
+			);
+			const xml = readFileSync(versionedBpmn, "utf-8").replace(
+				/ modeler:executionPlatformVersion="[^"]*"/,
+				version === undefined
+					? ""
+					: ` modeler:executionPlatformVersion="${version}"`,
+			);
+			writeFileSync(file, xml);
+			for (const args of [
+				["update", TASK, file],
+				["change", `${V2.id}@2`, TASK, file],
+				["change", "--successor", TASK, file],
+			]) {
+				const result = await run(
+					dataDirWithCache([V1, V2]),
+					...args,
+					"--in-place",
+					"--allow-lossy",
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(
+					result.stderr,
+					/Cannot verify template compatibility.*executionPlatformVersion/,
+				);
+				assert.strictEqual(result.stdout, "");
+				assert.strictEqual(readFileSync(file, "utf-8"), xml);
+				assert.ok(!existsSync(`${file}.migration.lock`));
+			}
+		});
+	}
+	for (const platform of [
+		undefined,
+		"",
+		"Camunda Platform",
+		"Camunda Cloud junk",
+	]) {
+		test(`rejects unsupported document platform ${JSON.stringify(platform)}`, async () => {
+			const file = join(
+				workDir,
+				`invalid-platform-${encodeURIComponent(String(platform))}.bpmn`,
+			);
+			const xml = readFileSync(versionedBpmn, "utf-8").replace(
+				/ modeler:executionPlatform="[^"]*"/,
+				platform === undefined
+					? ""
+					: ` modeler:executionPlatform="${platform}"`,
+			);
+			writeFileSync(file, xml);
+			for (const args of [
+				["update", TASK, file],
+				["change", `${V2.id}@2`, TASK, file],
+				["change", "--successor", TASK, file],
+			]) {
+				const result = await run(
+					dataDirWithCache([V1, V2]),
+					...args,
+					"--in-place",
+					"--allow-lossy",
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(
+					result.stderr,
+					/Cannot verify template compatibility.*executionPlatform/,
+				);
+				assert.strictEqual(result.stdout, "");
+				assert.strictEqual(readFileSync(file, "utf-8"), xml);
+			}
+		});
+	}
+	for (const [name, engines] of [
+		["null engines", null],
+		["string engines", "^8.8"],
+		["array engines", []],
+		["boolean engines", false],
+		["null range", { camunda: null }],
+		["numeric range", { camunda: 8.8 }],
+		["boolean range", { camunda: false }],
+		["object range", { camunda: {} }],
+		["array range", { camunda: ["^8.8"] }],
+		["empty range", { camunda: "" }],
+		["blank range", { camunda: " " }],
+		["junk range", { camunda: "release-8.8.0" }],
+		["invalid prerelease range", { camunda: "8.8.0-01" }],
+		["incompatible range", { camunda: ">=99.0.0" }],
+	] as const) {
+		test(`rejects explicit targets with ${name} before writing`, async () => {
+			const target = { ...V2, engines };
+			const templatePath = join(workDir, `engine-target-${name}.json`);
+			writeFileSync(templatePath, JSON.stringify(target));
+			for (const args of [
+				["update", TASK, "--to-version", "2"],
+				["change", `${V2.id}@2`, TASK],
+				["change", templatePath, TASK],
+			]) {
+				const file = join(workDir, `engine-target-${name}.bpmn`);
+				const xml = readFileSync(versionedBpmn, "utf-8");
+				writeFileSync(file, xml);
+				const result = await run(
+					dataDirWithCache([V1, target]),
+					...args,
+					file,
+					"--in-place",
+					"--allow-lossy",
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /not compatible with Camunda/);
+				assert.strictEqual(result.stdout, "");
+				assert.strictEqual(readFileSync(file, "utf-8"), xml);
+			}
+		});
+		test(`excludes ${name} from automatic targets and source lineage`, async () => {
+			const invalidUpgrade = {
+				...OLD,
+				version: 2,
+				engines,
+				metadata: {
+					migratesFrom: {
+						schemaVersion: 1,
+						sources: [
+							{ kind: "upgrade", sourceTemplateId: OLD.id, toVersion: 2 },
+						],
+					},
+				},
+			};
+			const successor = {
+				...NEW,
+				metadata: {
+					migratesFrom: {
+						schemaVersion: 1,
+						sources: [
+							{ kind: "change", sourceTemplateId: OLD.id, minSourceVersion: 2 },
+						],
+					},
+				},
+			};
+			const cache = dataDirWithCache([OLD, invalidUpgrade, successor]);
+			const discovered = await run(
+				cache,
+				"change",
+				"--successor",
+				TASK,
+				oldBpmn,
+			);
+			assert.strictEqual(discovered.status, 1, discovered.stderr);
+			assert.match(discovered.stderr, /No template declares a migration/);
+			assert.strictEqual(discovered.stdout, "");
+			const update = await run(
+				dataDirWithCache([V1, { ...V2, engines }]),
+				"update",
+				TASK,
+				versionedBpmn,
+			);
+			assert.strictEqual(update.status, 0, update.stderr);
+			assert.strictEqual(update.stdout, readFileSync(versionedBpmn, "utf-8"));
+			const unpinned = await run(
+				dataDirWithCache([V1, { ...V2, engines }]),
+				"change",
+				V2.id,
+				TASK,
+				versionedBpmn,
+			);
+			assert.strictEqual(unpinned.status, 0, unpinned.stderr);
+			assert.strictEqual(unpinned.stdout, readFileSync(versionedBpmn, "utf-8"));
+			const chosen = await run(
+				dataDirWithCache([OLD, NEW, { ...NEW, version: 2, engines }]),
+				"change",
+				"--successor",
+				TASK,
+				oldBpmn,
+			);
+			assert.strictEqual(chosen.status, 0, chosen.stderr);
+			assert.match(chosen.stdout, /modelerTemplateVersion="1"/);
+		});
+		test(`rejects a required source step with ${name} before mutation`, async () => {
+			const latest = {
+				...OLD,
+				version: 3,
+				metadata: {
+					migratesFrom: {
+						schemaVersion: 1,
+						sources: [
+							{ kind: "upgrade", sourceTemplateId: OLD.id, toVersion: 2 },
+							{ kind: "upgrade", sourceTemplateId: OLD.id, toVersion: 3 },
+						],
+					},
+				},
+			};
+			const file = join(workDir, `engine-step-${name}.bpmn`);
+			const xml = readFileSync(oldBpmn, "utf-8");
+			writeFileSync(file, xml);
+			const result = await run(
+				dataDirWithCache([OLD, { ...OLD, version: 2, engines }, latest, NEW]),
+				"change",
+				`${NEW.id}@1`,
+				TASK,
+				file,
+				"--in-place",
+				"--allow-lossy",
+			);
+			assert.strictEqual(result.status, 1, result.stderr);
+			assert.match(result.stderr, /version 2 is not available/);
+			assert.strictEqual(result.stdout, "");
+			assert.strictEqual(readFileSync(file, "utf-8"), xml);
+		});
+	}
+	for (const version of ["8.8", "8.8.0", "8.8.0+build.1"]) {
+		test(`accepts document version ${version} with absent legacy engine constraints`, async () => {
+			const file = join(workDir, `valid-engine-${version}.bpmn`);
+			writeFileSync(
+				file,
+				readFileSync(versionedBpmn, "utf-8").replace(
+					/modeler:executionPlatformVersion="[^"]*"/,
+					`modeler:executionPlatformVersion="${version}"`,
+				),
+			);
+			for (const engines of [undefined, {}, { modeler: ">=5.0" }]) {
+				const result = await run(
+					dataDirWithCache([V1, { ...V2, engines }]),
+					"update",
+					TASK,
+					file,
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(result.stdout, /modelerTemplateVersion="2"/);
+			}
+		});
+	}
+	test("preserves prerelease semantics instead of coercing to a stable engine", async () => {
+		const file = join(workDir, "prerelease-engine.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(versionedBpmn, "utf-8").replace(
+				/modeler:executionPlatformVersion="[^"]*"/,
+				'modeler:executionPlatformVersion="8.8.0-alpha1"',
+			),
+		);
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			TASK,
+			file,
+			"--to-version",
+			"2",
+		);
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(result.stderr, /not compatible with Camunda 8\.8\.0-alpha1/);
+		assert.strictEqual(result.stdout, "");
+	});
+	test("automatically selects templates explicitly supporting a prerelease engine", async () => {
+		const file = join(workDir, "supported-prerelease-engine.bpmn");
+		writeFileSync(
+			file,
+			readFileSync(versionedBpmn, "utf-8").replace(
+				/modeler:executionPlatformVersion="[^"]*"/,
+				'modeler:executionPlatformVersion="8.8.0-alpha1"',
+			),
+		);
+		const engines = { camunda: "8.8.0-alpha1" };
+		for (const args of [
+			["update", TASK, file],
+			["change", V2.id, TASK, file],
+		]) {
+			const result = await run(
+				dataDirWithCache([
+					{ ...V1, engines },
+					{ ...V2, engines },
+				]),
+				...args,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /modelerTemplateVersion="2"/);
+		}
+	});
+	test("preserves unconstrained legacy eligibility for prerelease engines on every target path", async () => {
+		const file = join(workDir, "legacy-prerelease-engine.bpmn");
+		const xml = readFileSync(oldBpmn, "utf-8").replace(
+			/modeler:executionPlatformVersion="[^"]*"/,
+			'modeler:executionPlatformVersion="8.8.0-alpha.1+build.2"',
+		);
+		writeFileSync(file, xml);
+		for (const engines of [undefined, {}, { modeler: ">=5.0" }]) {
+			const source = { ...OLD, engines };
+			const successor = { ...NEW, engines };
+			const upgrade = { ...source, version: 2 };
+			const cache = dataDirWithCache([source, upgrade, successor]);
+			for (const args of [
+				["update", TASK, file],
+				["change", `${NEW.id}@1`, TASK, file],
+				["change", NEW.id, TASK, file],
+				["change", "--successor", TASK, file],
+			]) {
+				const result = await run(cache, ...args);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stdout,
+					args[0] === "update"
+						? /modelerTemplateVersion="2"/
+						: /modelerTemplate="io\.example\.new"/,
+				);
+			}
+		}
+	});
+});
+
 describe("element-template change", () => {
 	test("lossy in-place migration requires authorization and preserves the original on refusal", async () => {
 		const copy = join(workDir, "lossy-refused.bpmn");

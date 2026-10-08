@@ -3,44 +3,152 @@
  * markers for people, a plain data shape for `--json`.
  */
 
+import { isRecord } from "../../src/core/index.ts";
+import { bindingTargetKey } from "./migration/binding.ts";
+import type { ElementValue } from "./migration/element-values.ts";
 import type { Field, MigrationReport } from "./migration/report.ts";
+import type { MigrationTemplate } from "./migration/types.ts";
+
+/** Uses existing property/group identity metadata, not a custom sensitivity flag. */
+export interface MigrationRedactionContext {
+	templates?: readonly MigrationTemplate[];
+	/** Before/after values also cover credentials absent from the report diff. */
+	values?: readonly ElementValue[];
+	report?: MigrationReport;
+}
 
 export interface RenderOptions {
 	elementId: string;
 	color: boolean;
 	dryRun: boolean;
+	redaction?: MigrationRedactionContext;
 }
 
 type Style = (text: string) => string;
 
-function redactReport(report: MigrationReport): MigrationReport {
-	const sensitive = (field: Field) => {
-		const name = `${field.key} ${field.label ?? ""}`.replace(
-			/max(?:imum)?[ ._-]?tokens/gi,
-			"",
-		);
+function migrationRedactor(context: MigrationRedactionContext) {
+	const sensitiveName = (identity: string) => {
+		const name = identity.replace(/max(?:imum)?[ ._-]?tokens/gi, "");
 		return /password|passwd|secret|token|credential|api[._ -]?key|private[._ -]?key|authorization/i.test(
 			name,
 		);
 	};
+	const sensitive = (field: Field) =>
+		sensitiveName(`${field.key} ${field.label ?? ""} ${field.group ?? ""}`) ||
+		(context.templates ?? []).some((template) =>
+			template.properties.some(
+				(property) =>
+					bindingTargetKey(property.binding) === field.key &&
+					(field.bindingType === null ||
+						property.binding?.type === field.bindingType) &&
+					sensitiveName(
+						`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
+					),
+			),
+		);
+	const secrets = new Set<string>();
+	const remember = (...values: (string | undefined)[]) => {
+		for (const value of values) {
+			if (value) {
+				secrets.add(value);
+				secrets.add(JSON.stringify(value).slice(1, -1));
+			}
+		}
+	};
+	for (const value of context.values ?? []) {
+		if (sensitive(value)) remember(value.value);
+	}
+	for (const template of context.templates ?? []) {
+		for (const property of template.properties) {
+			const key = bindingTargetKey(property.binding);
+			if (
+				key !== undefined &&
+				sensitive({ key, bindingType: property.binding?.type ?? null }) &&
+				typeof property.value === "string"
+			)
+				remember(property.value);
+		}
+	}
+	if (context.report) {
+		for (const item of [...context.report.dropped, ...context.report.added]) {
+			if (sensitive(item)) remember(item.value, item.valueName);
+		}
+		for (const item of context.report.changed) {
+			if (sensitive(item))
+				remember(
+					item.valueChange.from,
+					item.valueChange.to,
+					item.valueChange.fromName,
+					item.valueChange.toName,
+				);
+		}
+		for (const item of context.report.moved) {
+			if (item.valueChange && (sensitive(item.from) || sensitive(item.to)))
+				remember(
+					item.valueChange.from,
+					item.valueChange.to,
+					item.valueChange.fromName,
+					item.valueChange.toName,
+				);
+		}
+	}
+	// A single replacement avoids partial matches and rescanning redaction markers.
+	const pattern = [...secrets]
+		.sort((a, b) => b.length - a.length)
+		.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+		.join("|");
+	const matcher = pattern ? new RegExp(pattern, "g") : undefined;
+	const text = (message: string) =>
+		matcher ? message.replace(matcher, "[REDACTED]") : message;
+	return { sensitive, text };
+}
+
+/** Custom fields with no credential-like identity cannot be inferred as sensitive. */
+export function redactMigrationDiagnostic(
+	message: string,
+	context: MigrationRedactionContext = {},
+): string {
+	return migrationRedactor(context).text(message);
+}
+
+function redactReport(
+	report: MigrationReport,
+	context: MigrationRedactionContext = {},
+): MigrationReport {
+	const { sensitive, text } = migrationRedactor({ ...context, report });
 	const change = { from: "[REDACTED]", to: "[REDACTED]" };
+	const redacted = structuredClone(report);
+	const scrub = (value: unknown): void => {
+		if (Array.isArray(value) || isRecord(value)) {
+			for (const [key, child] of Object.entries(value)) {
+				if (typeof child === "string") {
+					if (Array.isArray(value)) value[Number(key)] = text(child);
+					else value[key] = text(child);
+				} else scrub(child);
+			}
+		}
+	};
+	scrub(redacted);
 	return {
-		...report,
-		dropped: report.dropped.map((item) =>
-			sensitive(item)
+		...redacted,
+		dropped: redacted.dropped.map((item, index) =>
+			sensitive(report.dropped[index])
 				? { ...item, value: "[REDACTED]", valueName: undefined }
 				: item,
 		),
-		added: report.added.map((item) =>
-			sensitive(item)
+		added: redacted.added.map((item, index) =>
+			sensitive(report.added[index])
 				? { ...item, value: "[REDACTED]", valueName: undefined }
 				: item,
 		),
-		changed: report.changed.map((item) =>
-			sensitive(item) ? { ...item, valueChange: change } : item,
+		changed: redacted.changed.map((item, index) =>
+			sensitive(report.changed[index])
+				? { ...item, valueChange: change }
+				: item,
 		),
-		moved: report.moved.map((item) =>
-			item.valueChange && (sensitive(item.from) || sensitive(item.to))
+		moved: redacted.moved.map((item, index) =>
+			item.valueChange &&
+			(sensitive(report.moved[index].from) || sensitive(report.moved[index].to))
 				? { ...item, valueChange: change }
 				: item,
 		),
@@ -95,9 +203,10 @@ export function shouldUseColor(stream: { isTTY?: boolean }): boolean {
 
 export function renderReportText(
 	report: MigrationReport,
-	{ elementId, color, dryRun }: RenderOptions,
+	{ elementId, color, dryRun, redaction }: RenderOptions,
 ): string {
-	report = redactReport(report);
+	elementId = redactMigrationDiagnostic(elementId, { ...redaction, report });
+	report = redactReport(report, redaction);
 	const s = styles(color);
 	const lines: string[] = [];
 	const section = (
@@ -229,20 +338,23 @@ export function reportToJson(
 		recipe,
 		dryRun,
 		file,
+		redaction,
 	}: {
 		elementId: string;
 		action: "change" | "update";
 		recipe: RecipeSource;
 		dryRun: boolean;
 		file?: string;
+		redaction?: MigrationRedactionContext;
 	},
 ) {
-	report = redactReport(report);
+	const { text } = migrationRedactor({ ...redaction, report });
+	report = redactReport(report, redaction);
 	return {
-		elementId,
+		elementId: text(elementId),
 		action,
 		dryRun,
-		...(file ? { file } : {}),
+		...(file ? { file: text(file) } : {}),
 		from: report.from,
 		to: report.to,
 		recipe: {

@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
 import {
 	findById,
@@ -21,6 +22,7 @@ import {
 import {
 	getPropertyDetail,
 	getSettableProperties,
+	isRecord,
 	type PropertyDetail,
 	parseTemplateJson,
 	readFileOrUrl,
@@ -131,16 +133,67 @@ export function parseTemplateRef(arg: string | undefined): TemplateRef | null {
 
 export async function getExecutionPlatformVersion(
 	xml: string,
+	{ requireCamunda = false }: { requireCamunda?: boolean } = {},
 ): Promise<string | null> {
 	const { BpmnModdle } = await import("bpmn-moddle");
 	const moddle = new BpmnModdle();
 	try {
 		const { rootElement } = await moddle.fromXML(xml);
 		const version = rootElement.$attrs?.["modeler:executionPlatformVersion"];
+		if (requireCamunda) {
+			const attrs = rootElement.$attrs ?? {};
+			// XML prefixes are aliases; only the Modeler namespace owns this metadata.
+			const metadata = Object.entries(attrs).filter(([name]) => {
+				const [prefix, localName] = name.split(":");
+				return (
+					(localName === "executionPlatform" ||
+						localName === "executionPlatformVersion") &&
+					attrs[`xmlns:${prefix}`] === "http://camunda.org/schema/modeler/1.0"
+				);
+			});
+			const platforms = metadata.filter(([name]) =>
+				name.endsWith(":executionPlatform"),
+			);
+			const versions = metadata.filter(([name]) =>
+				name.endsWith(":executionPlatformVersion"),
+			);
+			const engineVersion = versions[0]?.[1];
+			if (
+				platforms.length !== 1 ||
+				versions.length !== 1 ||
+				platforms[0][1] !== "Camunda Cloud" ||
+				typeof engineVersion !== "string" ||
+				!/^\d+\.\d+(?:\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)?$/.test(
+					engineVersion,
+				)
+			)
+				return null;
+			return semver.valid(
+				/^\d+\.\d+$/.test(engineVersion) ? `${engineVersion}.0` : engineVersion,
+			);
+		}
 		return typeof version === "string" ? version : null;
 	} catch {
 		return null;
 	}
+}
+
+/** Missing constraints retain legacy eligibility; malformed declarations do not. */
+export function isEngineCompatible(
+	template: unknown,
+	engineVersion: string,
+): boolean {
+	if (!isRecord(template)) return false;
+	if (!("engines" in template)) return true;
+	if (!isRecord(template.engines)) return false;
+	if (!("camunda" in template.engines)) return true;
+	const range = template.engines.camunda;
+	return (
+		typeof range === "string" &&
+		range.trim() !== "" &&
+		semver.validRange(range) !== null &&
+		semver.satisfies(engineVersion, range)
+	);
 }
 
 /**
@@ -201,7 +254,11 @@ export async function resolveOotbTemplate(
 	ref: TemplateRefId,
 	{
 		executionPlatformVersion,
-	}: { executionPlatformVersion?: string | null } = {},
+		requireEngineCompatibility = false,
+	}: {
+		executionPlatformVersion?: string | null;
+		requireEngineCompatibility?: boolean;
+	} = {},
 ): Promise<Template> {
 	const logger = c8ctl.getLogger();
 	requireCachePresent();
@@ -215,9 +272,17 @@ export async function resolveOotbTemplate(
 		);
 	}
 
-	const picked = pickVersion(candidates, {
+	const eligible =
+		requireEngineCompatibility && ref.version === undefined
+			? candidates.filter((template) =>
+					isEngineCompatible(template, executionPlatformVersion ?? ""),
+				)
+			: candidates;
+	const picked = pickVersion(eligible, {
 		version: ref.version,
-		executionPlatformVersion,
+		executionPlatformVersion: requireEngineCompatibility
+			? undefined
+			: executionPlatformVersion,
 	});
 	if (!picked) {
 		if (ref.version !== undefined) {

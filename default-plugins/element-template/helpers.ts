@@ -60,33 +60,31 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * the same directory, then `renameSync` over the target. POSIX
  * `rename` is atomic on the same filesystem, so a kill mid-write
  * never destroys the user's BPMN file.
- *
- * Falls back to a direct `writeFileSync` if the rename fails with
- * EXDEV (cross-device link) — vanishingly rare for a file's own
- * sibling, but covers exotic setups like FUSE mounts.
+ * Replacement failures must leave the original untouched, including EXDEV.
  */
 export function atomicOverwriteFile(
 	targetPath: string,
 	contents: string,
+	expectedContents?: string,
 ): void {
 	const target = resolvePath(targetPath);
 	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
 	try {
 		writeFileSync(tmp, contents, "utf-8");
+		// Recheck after preparing the sibling; external writers can still race rename.
+		if (
+			expectedContents !== undefined &&
+			readFileSync(target, "utf-8") !== expectedContents
+		)
+			throw new Error(
+				"BPMN changed during migration; refusing to overwrite concurrent edits.",
+			);
 		renameSync(tmp, target);
 	} catch (error) {
 		try {
 			unlinkSync(tmp);
 		} catch {
 			// Best-effort cleanup — the original error is what matters.
-		}
-		const code =
-			isRecord(error) && typeof error.code === "string"
-				? error.code
-				: undefined;
-		if (code === "EXDEV") {
-			writeFileSync(target, contents, "utf-8");
-			return;
 		}
 		throw error;
 	}

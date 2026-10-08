@@ -7,7 +7,6 @@
 import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
-import semver from "semver";
 import type {} from "../../../src/core/runtime.ts";
 import { loadCache, pickVersion, requireCachePresent } from "../cache.ts";
 import {
@@ -21,6 +20,10 @@ import {
 	readAppliedTemplate,
 } from "../migration/apply.ts";
 import {
+	enumerateElementValues,
+	getExtensionElements,
+} from "../migration/element-values.ts";
+import {
 	parseRecipe,
 	type Recipe,
 	RecipeError,
@@ -28,16 +31,19 @@ import {
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport } from "../migration/report.ts";
-import { findSuccessors } from "../migration/steps.ts";
+import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
+	type MigrationRedactionContext,
 	type RecipeSource,
+	redactMigrationDiagnostic,
 	renderReportText,
 	reportToJson,
 	shouldUseColor,
 } from "../migration-output.ts";
 import {
 	getExecutionPlatformVersion,
+	isEngineCompatible,
 	parseTemplateRef,
 	readBpmnInput,
 	readTemplateFromPathOrUrl,
@@ -116,6 +122,7 @@ export function parseMigrateArgs(
 			parsed.successor = true;
 		} else if (arg === "--recipe" || arg.startsWith("--recipe=")) {
 			const { value, skip } = readFlagValue(args, i, "--recipe");
+			if (value === "") throw new Error("--recipe requires a value");
 			parsed.recipePath = value;
 			i += skip;
 		} else if (arg === "--to-version" || arg.startsWith("--to-version=")) {
@@ -166,11 +173,7 @@ function compatibleTemplates(
 	engineVersion: string,
 ): MigrationTemplate[] {
 	return migrationTemplates(
-		templates.filter(
-			(template) =>
-				!template.engines?.camunda ||
-				semver.satisfies(engineVersion, template.engines.camunda),
-		),
+		templates.filter((template) => isEngineCompatible(template, engineVersion)),
 	);
 }
 
@@ -226,20 +229,27 @@ async function resolveTarget({
 	modeler: ModelerInstance;
 	element: BpmnElement;
 	applied: { id: string; version: number };
-	executionPlatformVersion: string | null;
+	executionPlatformVersion: string;
 }): Promise<MigrationTemplate> {
 	if (mode === "update") {
 		requireCachePresent();
 		const versions = (loadCache() ?? []).filter((t) => t.id === applied.id);
+		resolveCatalog(migrationTemplates(versions));
 		if (versions.length === 0) {
 			throw new Error(
 				`Template '${applied.id}' is not in the local cache. update works for out-of-the-box templates; run 'c8ctl element-template sync' or use 'change' with a template file.`,
 			);
 		}
-		const target = pickVersion(versions, {
-			version: parsed.toVersion,
-			executionPlatformVersion,
-		});
+		const target = pickVersion(
+			parsed.toVersion === undefined
+				? versions.filter((template) =>
+						isEngineCompatible(template, executionPlatformVersion),
+					)
+				: versions,
+			{
+				version: parsed.toVersion,
+			},
+		);
 		if (!target || !isMigrationTemplate(target)) {
 			throw new Error(
 				parsed.toVersion === undefined
@@ -257,9 +267,8 @@ async function resolveTarget({
 
 	if (parsed.successor) {
 		requireCachePresent();
-		const cache = compatibleTemplates(
-			loadCache() ?? [],
-			executionPlatformVersion ?? "",
+		const cache = resolveCatalog(
+			compatibleTemplates(loadCache() ?? [], executionPlatformVersion ?? ""),
 		);
 		const service = modeler.get("elementTemplates");
 		service.set(cache);
@@ -287,9 +296,17 @@ async function resolveTarget({
 	if (!ref) {
 		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
 	}
+	if (ref.kind === "id") {
+		resolveCatalog(
+			migrationTemplates((loadCache() ?? []).filter((t) => t.id === ref.id)),
+		);
+	}
 	const target =
 		ref.kind === "id"
-			? await resolveOotbTemplate(ref, { executionPlatformVersion })
+			? await resolveOotbTemplate(ref, {
+					executionPlatformVersion,
+					requireEngineCompatibility: true,
+				})
 			: await readTemplateFromPathOrUrl(ref.value);
 	if (!isMigrationTemplate(target)) {
 		throw new Error("The target template has no id.");
@@ -300,6 +317,7 @@ async function resolveTarget({
 async function runMigrateInternal(
 	mode: MigrateMode,
 	args: string[],
+	redaction: MigrationRedactionContext,
 ): Promise<void> {
 	const logger = c8ctl.getLogger();
 	installStdoutEpipeHandler();
@@ -340,13 +358,12 @@ async function runMigrateInternal(
 			"No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.",
 		);
 	}
-	const executionPlatformVersion = await getExecutionPlatformVersion(input.xml);
-	const engineVersion = executionPlatformVersion
-		? semver.coerce(executionPlatformVersion)?.version
-		: undefined;
+	const engineVersion = await getExecutionPlatformVersion(input.xml, {
+		requireCamunda: true,
+	});
 	if (!engineVersion) {
 		throw new Error(
-			"Cannot verify template compatibility: set a valid modeler:executionPlatformVersion on the BPMN document.",
+			'Cannot verify template compatibility: set modeler:executionPlatform="Camunda Cloud" and a valid modeler:executionPlatformVersion (major.minor or semantic version) on the BPMN document.',
 		);
 	}
 
@@ -362,6 +379,12 @@ async function runMigrateInternal(
 			`Element "${elementId}" has no element template applied. Use 'apply' first.`,
 		);
 	}
+	redaction.values = enumerateElementValues(
+		getExtensionElements(element.businessObject),
+	);
+	const cachedTemplates = loadCache() ?? [];
+	redaction.templates = migrationTemplates(cachedTemplates);
+	const cache = compatibleTemplates(cachedTemplates, engineVersion);
 
 	const target = await resolveTarget({
 		mode,
@@ -371,19 +394,20 @@ async function runMigrateInternal(
 		applied,
 		executionPlatformVersion: engineVersion,
 	});
+	const templates = resolveCatalog(
+		cache.filter((t) => t.id === applied.id || t.id === target.id),
+		[target],
+	);
+	redaction.templates = templates;
+	const fromTemplate = templates.find(
+		(t) => t.id === applied.id && t.version === applied.version,
+	) ?? { id: applied.id, version: applied.version, properties: [] };
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
 		: undefined;
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
-	if (
-		"engines" in target &&
-		target.engines &&
-		typeof target.engines === "object" &&
-		"camunda" in target.engines &&
-		typeof target.engines.camunda === "string" &&
-		!semver.satisfies(engineVersion, target.engines.camunda)
-	) {
+	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
 			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,
 		);
@@ -415,12 +439,16 @@ async function runMigrateInternal(
 					recipe: "none",
 					dryRun,
 					file: parsed.inPlace ? bpmnFilePath : undefined,
+					redaction,
 				}),
 				noop: true,
 			});
 		} else {
 			logger.info(
-				`${elementId} is already on ${target.name ?? target.id} v${applied.version}; nothing to do.`,
+				redactMigrationDiagnostic(
+					`${elementId} is already on ${target.name ?? target.id} v${applied.version}; nothing to do.`,
+					redaction,
+				),
 				{ stream: writesXmlToStdout ? "stderr" : "stdout" },
 			);
 		}
@@ -429,15 +457,6 @@ async function runMigrateInternal(
 		}
 		return;
 	}
-
-	const cache = compatibleTemplates(loadCache() ?? [], engineVersion);
-	const templates = [
-		...cache.filter((t) => t.id === applied.id || t.id === target.id),
-		target,
-	];
-	const fromTemplate = templates.find(
-		(t) => t.id === applied.id && t.version === applied.version,
-	) ?? { id: applied.id, version: applied.version, properties: [] };
 
 	const recipeSource: RecipeSource = recipe
 		? "file"
@@ -452,38 +471,50 @@ async function runMigrateInternal(
 	};
 	let report: ReturnType<typeof migrateElement>["report"];
 	try {
-		({ report } = migrateElement({
+		const result = migrateElement({
 			modeler: migrationModeler,
 			element,
 			fromTemplate,
 			target,
 			templates,
 			recipe,
-		}));
+		});
+		report = result.report;
+		redaction.report = report;
+		redaction.values = [
+			...(redaction.values ?? []),
+			...enumerateElementValues(
+				getExtensionElements(result.element.businessObject),
+			),
+		];
 	} catch (error) {
+		redaction.values = [
+			...(redaction.values ?? []),
+			...enumerateElementValues(getExtensionElements(element.businessObject)),
+		];
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Cannot migrate ${elementId}: ${message}`);
 	}
-	const { xml } = await modeler.saveXML({ format: true });
 	if (recipe && (!report.usedRecipe || report.refusal)) {
 		throw new Error(
-			`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry or reachable source floor"}.`,
+			`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry"}.`,
 		);
 	}
 	const requiresAuthorization =
 		(parsed.inPlace && !report.lossless) || report.refusal !== null;
 	if (requiresAuthorization && !parsed.allowLossy && !dryRun) {
 		throw new Error(
-			"Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it.",
+			`${report.refusal ? `Recipe cannot be used: ${report.refusal}. ` : ""}Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it.`,
 		);
 	}
+	const { xml } = await modeler.saveXML({ format: true });
 
 	if (!dryRun && parsed.inPlace && bpmnFilePath) {
 		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
 			throw new Error(
 				"BPMN changed during migration; refusing to overwrite concurrent edits.",
 			);
-		atomicOverwriteFile(bpmnFilePath, xml);
+		atomicOverwriteFile(bpmnFilePath, xml, input.xml);
 	}
 	if (c8ctl.outputMode === "json") {
 		logger.json({
@@ -493,6 +524,7 @@ async function runMigrateInternal(
 				recipe: recipeSource,
 				dryRun,
 				file: parsed.inPlace ? bpmnFilePath : undefined,
+				redaction,
 			}),
 			requiresAuthorization,
 			authorized: parsed.allowLossy,
@@ -504,6 +536,7 @@ async function runMigrateInternal(
 				elementId,
 				color: shouldUseColor(stream),
 				dryRun,
+				redaction,
 			}),
 		);
 		if (requiresAuthorization)
@@ -519,22 +552,25 @@ async function runMigrateInternal(
 	}
 	if (parsed.inPlace && bpmnFilePath) {
 		if (c8ctl.outputMode !== "json") {
-			logger.info(`Updated ${bpmnFilePath}`);
+			logger.info(
+				redactMigrationDiagnostic(`Updated ${bpmnFilePath}`, redaction),
+			);
 		}
 		return;
 	}
 	process.stdout.write(xml);
 }
 
-export async function runMigrate(
+async function runLockedMigrate(
 	mode: MigrateMode,
 	args: string[],
+	redaction: MigrationRedactionContext,
 ): Promise<void> {
 	const parsed = parseMigrateArgs(args, mode);
 	const file =
 		parsed.positionals[mode === "change" && !parsed.successor ? 2 : 1];
 	if (!parsed.inPlace || !file || c8ctl.dryRun)
-		return runMigrateInternal(mode, args);
+		return runMigrateInternal(mode, args, redaction);
 	const lock = `${resolvePath(file)}.migration.lock`;
 	let descriptor: number;
 	try {
@@ -544,10 +580,33 @@ export async function runMigrate(
 			`Cannot acquire migration lock ${lock}. Another writer may be active; remove a stale lock only after checking that no migration is running.`,
 		);
 	}
+	let cleanupFailure: { error: unknown } | undefined;
 	try {
-		await runMigrateInternal(mode, args);
+		await runMigrateInternal(mode, args, redaction);
 	} finally {
-		closeSync(descriptor);
-		unlinkSync(lock);
+		try {
+			try {
+				closeSync(descriptor);
+			} finally {
+				unlinkSync(lock);
+			}
+		} catch (error) {
+			// Cleanup must not replace the diagnostic for a failed migration.
+			cleanupFailure = { error };
+		}
+	}
+	if (cleanupFailure) throw cleanupFailure.error;
+}
+
+export async function runMigrate(
+	mode: MigrateMode,
+	args: string[],
+): Promise<void> {
+	const redaction: MigrationRedactionContext = {};
+	try {
+		await runLockedMigrate(mode, args, redaction);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(redactMigrationDiagnostic(message, redaction));
 	}
 }
