@@ -531,7 +531,29 @@ describe("element-template update", () => {
 			versionedBpmn,
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout + result.stderr, /already on/);
+		assert.strictEqual(result.stdout, readFileSync(versionedBpmn, "utf-8"));
+		assert.match(result.stderr, /already on/);
+	});
+	test("JSON no-ops preserve the report envelope for update and change", async () => {
+		const templatePath = join(workDir, "same.json");
+		writeFileSync(templatePath, JSON.stringify(V1));
+		for (const args of [
+			["update", TASK, versionedBpmn],
+			["change", templatePath, TASK, versionedBpmn],
+		]) {
+			const result = await run(
+				dataDirWithCache([V1]),
+				...args,
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const json = JSON.parse(result.stdout);
+			assert.strictEqual(json.noop, true);
+			assert.strictEqual(json.lossless, true);
+			assert.deepStrictEqual(json.report.moved, []);
+			assert.strictEqual(result.stderr, "");
+		}
 	});
 
 	test("--to-version pins a version and refuses a missing one", async () => {

@@ -26,6 +26,7 @@ import {
 	RecipeError,
 	readEmbeddedRecipe,
 } from "../migration/recipe.ts";
+import { buildReport } from "../migration/report.ts";
 import { findSuccessors } from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
@@ -377,9 +378,40 @@ export async function runMigrate(
 	}
 
 	if (target.id === applied.id && target.version === applied.version) {
-		logger.info(
-			`${elementId} is already on ${target.name ?? target.id} v${applied.version}; nothing to do.`,
-		);
+		if (c8ctl.outputMode === "json") {
+			const report = buildReport({
+				fromTemplate: target,
+				toTemplate: target,
+				before: [],
+				after: [],
+				facts: {
+					moved: [],
+					set: [],
+					notes: [],
+					guardSkipped: [],
+					templateSkipped: [],
+					noMatch: [],
+					feelSkipped: [],
+				},
+				usedRecipe: false,
+				refusal: null,
+			});
+			logger.json({
+				...reportToJson(report, {
+					elementId,
+					action: mode,
+					recipe: "none",
+					dryRun,
+					file: parsed.inPlace ? bpmnFilePath : undefined,
+				}),
+				noop: true,
+			});
+		} else {
+			logger.info(
+				`${elementId} is already on ${target.name ?? target.id} v${applied.version}; nothing to do.`,
+				{ stream: writesXmlToStdout ? "stderr" : "stdout" },
+			);
+		}
 		if (writesXmlToStdout) {
 			process.stdout.write(input.xml);
 		}
