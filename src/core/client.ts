@@ -186,9 +186,14 @@ export function createClient(
 		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
 	}
 
-	// Add verbose/trace logging when --verbose flag is set
+	// SDK logging: trace with --verbose, debug when c8ctl debug logging is
+	// enabled, otherwise silent unless the user set CAMUNDA_SDK_LOG_LEVEL.
 	if (c8ctl.verbose) {
 		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "trace";
+	} else if (getLogger().debugEnabled) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "debug";
+	} else if (!process.env.CAMUNDA_SDK_LOG_LEVEL) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "silent";
 	}
 
 	const options: Partial<CamundaOptions> = {
