@@ -41,6 +41,40 @@ function report(partial: Partial<MigrationReport> = {}): MigrationReport {
 
 const ESC = "\u001b[";
 
+test("redacts sensitive values in every report collection without changing the source", () => {
+	const field = { key: "authentication.token", bindingType: "zeebe:input" };
+	const raw = report({
+		dropped: [{ ...field, value: "SECRET-DROP", valueName: "SECRET-NAME" }],
+		added: [{ ...field, value: "SECRET-ADD" }],
+		changed: [
+			{ ...field, valueChange: { from: "SECRET-OLD", to: "SECRET-NEW" } },
+		],
+		moved: [
+			{
+				from: field,
+				to: { ...field, key: "renamed" },
+				valueChange: { from: "SECRET-FROM", to: "SECRET-TO" },
+			},
+		],
+	});
+	assert.doesNotMatch(
+		renderReportText(raw, { elementId: "Task", color: false, dryRun: true }),
+		/SECRET/,
+	);
+	assert.doesNotMatch(
+		JSON.stringify(
+			reportToJson(raw, {
+				elementId: "Task",
+				action: "change",
+				recipe: "embedded",
+				dryRun: true,
+			}),
+		),
+		/SECRET/,
+	);
+	assert.strictEqual(raw.dropped[0].value, "SECRET-DROP");
+});
+
 describe("renderReportText", () => {
 	test("renders the header, sections and a lossless footer", () => {
 		const text = renderReportText(

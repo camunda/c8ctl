@@ -139,6 +139,9 @@ c8ctl element-template update Task_1 process.bpmn --dry-run --json
   Every required intermediate version must also be compatible and available.
 - Colour and emoji markers are used in text mode. Colour follows the terminal
   and honours `NO_COLOR` and `FORCE_COLOR`.
+- Report values with credential-like binding keys or labels are redacted in text
+  and JSON, including dry-run. This does not change BPMN values. Custom fields
+  with unrelated names cannot be identified reliably; avoid logging their values.
 
 ### Migration recipes
 

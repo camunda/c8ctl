@@ -13,6 +13,40 @@ export interface RenderOptions {
 
 type Style = (text: string) => string;
 
+function redactReport(report: MigrationReport): MigrationReport {
+	const sensitive = (field: Field) => {
+		const name = `${field.key} ${field.label ?? ""}`.replace(
+			/max(?:imum)?[ ._-]?tokens/gi,
+			"",
+		);
+		return /password|passwd|secret|token|credential|api[._ -]?key|private[._ -]?key|authorization/i.test(
+			name,
+		);
+	};
+	const change = { from: "[REDACTED]", to: "[REDACTED]" };
+	return {
+		...report,
+		dropped: report.dropped.map((item) =>
+			sensitive(item)
+				? { ...item, value: "[REDACTED]", valueName: undefined }
+				: item,
+		),
+		added: report.added.map((item) =>
+			sensitive(item)
+				? { ...item, value: "[REDACTED]", valueName: undefined }
+				: item,
+		),
+		changed: report.changed.map((item) =>
+			sensitive(item) ? { ...item, valueChange: change } : item,
+		),
+		moved: report.moved.map((item) =>
+			item.valueChange && (sensitive(item.from) || sensitive(item.to))
+				? { ...item, valueChange: change }
+				: item,
+		),
+	};
+}
+
 function styles(color: boolean) {
 	const wrap =
 		(open: number, close: number): Style =>
@@ -63,6 +97,7 @@ export function renderReportText(
 	report: MigrationReport,
 	{ elementId, color, dryRun }: RenderOptions,
 ): string {
+	report = redactReport(report);
 	const s = styles(color);
 	const lines: string[] = [];
 	const section = (
@@ -202,6 +237,7 @@ export function reportToJson(
 		file?: string;
 	},
 ) {
+	report = redactReport(report);
 	return {
 		elementId,
 		action,
