@@ -267,3 +267,167 @@ describe("CLI behavioural: resume process-instance", () => {
 		);
 	});
 });
+
+// ─── migrate process-instance ────────────────────────────────────────────────
+
+describe("CLI behavioural: migrate process-instance", () => {
+	test("--dry-run emits POST to the single-instance migration endpoint", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--targetProcessDefinitionKey",
+			"67890",
+			"--map",
+			"Task_A=Task_A2",
+			"--map",
+			"Task_B=Task_B",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).endsWith("/process-instances/12345/migration"));
+		assert.deepStrictEqual(out.body, {
+			targetProcessDefinitionKey: "67890",
+			mappingInstructions: [
+				{ sourceElementId: "Task_A", targetElementId: "Task_A2" },
+				{ sourceElementId: "Task_B", targetElementId: "Task_B" },
+			],
+		});
+	});
+
+	test("--processDefinitionKey without an instance key emits a batch migration", async () => {
+		const result = await c8(
+			"migrate",
+			"process-instances",
+			"--dry-run",
+			"--processDefinitionKey",
+			"11111",
+			"--targetProcessDefinitionKey",
+			"67890",
+			"--map",
+			"Task_A=Task_A2",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).endsWith("/process-instances/migration"));
+		assert.deepStrictEqual(out.body, {
+			filter: { processDefinitionKey: "11111" },
+			migrationPlan: {
+				targetProcessDefinitionKey: "67890",
+				mappingInstructions: [
+					{ sourceElementId: "Task_A", targetElementId: "Task_A2" },
+				],
+			},
+		});
+	});
+
+	test("rejects missing --targetProcessDefinitionKey", async () => {
+		const result = await c8("migrate", "pi", "12345", "--map", "a=b");
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("--targetProcessDefinitionKey is required"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects a non-numeric --targetProcessDefinitionKey", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"12345",
+			"--targetProcessDefinitionKey",
+			"not-a-key",
+			"--map",
+			"a=b",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Invalid --targetProcessDefinitionKey"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects missing --map", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--targetProcessDefinitionKey",
+			"67890",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("At least one --map"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects a malformed --map even in dry-run", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--targetProcessDefinitionKey",
+			"67890",
+			"--map",
+			"Task_A",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("Invalid --map"),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects neither an instance key nor --processDefinitionKey", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"--dry-run",
+			"--targetProcessDefinitionKey",
+			"67890",
+			"--map",
+			"a=b",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes(
+				"Process instance key or --processDefinitionKey required",
+			),
+			`stderr: ${result.stderr}`,
+		);
+	});
+
+	test("rejects both an instance key and --processDefinitionKey", async () => {
+		const result = await c8(
+			"migrate",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--processDefinitionKey",
+			"11111",
+			"--targetProcessDefinitionKey",
+			"67890",
+			"--map",
+			"a=b",
+		);
+
+		assert.strictEqual(result.status, 1);
+		assert.ok(result.stderr.includes("not both"), `stderr: ${result.stderr}`);
+	});
+});

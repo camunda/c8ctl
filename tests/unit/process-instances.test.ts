@@ -4,7 +4,10 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { processInstancesEmptyMessage } from "../../src/utils/index.ts";
+import {
+	parseMigrationMapping,
+	processInstancesEmptyMessage,
+} from "../../src/utils/index.ts";
 
 describe("Process Instances Table Formatting", () => {
 	/**
@@ -139,4 +142,36 @@ describe("processInstancesEmptyMessage", () => {
 			"No ACTIVE process instances found for startDate within the given range",
 		);
 	});
+});
+
+describe("parseMigrationMapping", () => {
+	test("splits source and target element IDs on '='", () => {
+		assert.deepStrictEqual(parseMigrationMapping("Task_A=Task_A2"), {
+			sourceElementId: "Task_A",
+			targetElementId: "Task_A2",
+		});
+	});
+
+	test("trims whitespace around both IDs", () => {
+		assert.deepStrictEqual(parseMigrationMapping(" Task_A = Task_A2 "), {
+			sourceElementId: "Task_A",
+			targetElementId: "Task_A2",
+		});
+	});
+
+	test("allows mapping an element onto the same ID", () => {
+		assert.deepStrictEqual(parseMigrationMapping("Task_A=Task_A"), {
+			sourceElementId: "Task_A",
+			targetElementId: "Task_A",
+		});
+	});
+
+	for (const invalid of ["Task_A", "=Task_A2", "Task_A=", " = ", "a=b=c", ""]) {
+		test(`rejects malformed mapping ${JSON.stringify(invalid)}`, () => {
+			assert.throws(
+				() => parseMigrationMapping(invalid),
+				/expected <sourceElementId>=<targetElementId>/,
+			);
+		});
+	}
 });
