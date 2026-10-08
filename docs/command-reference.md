@@ -654,6 +654,34 @@ Resume a suspended process instance (Camunda 8.10+)
 
 ---
 
+### `migrate`
+
+Migrate a process instance, or all active instances of a definition (batch), to another process definition
+
+**Usage:** `c8ctl migrate <resource> [key]`
+
+**Resources:** pi (process-instance)
+
+**Positional arguments:**
+
+- **process-instance:** `<key>` (optional)
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--targetProcessDefinitionKey` | string | Yes | Key of the process definition to migrate to |
+| `--map` | string |  | Element mapping as sourceElementId=targetElementId (repeatable) |
+| `--processDefinitionKey` | string |  | Batch mode: migrate all active instances of this source process definition key (omit the instance key) |
+
+**Examples:**
+
+```bash
+c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 --map Task_A=Task_A2  # Migrate a process instance to a new definition
+```
+
+---
+
 ### `await`
 
 Create and await process instance completion (server-side waiting)

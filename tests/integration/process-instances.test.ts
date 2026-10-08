@@ -17,7 +17,10 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
+import {
+	ProcessDefinitionId,
+	ProcessDefinitionKey,
+} from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/core/client.ts";
 import { parseJson } from "../utils/cli.ts";
 import { todayRange } from "../utils/date-helpers.ts";
@@ -85,6 +88,38 @@ async function getProcessInstanceStateViaCli(
 	if (result.status !== 0) return undefined;
 	const data = parseJson(result);
 	return typeof data.state === "string" ? data.state : undefined;
+}
+
+/**
+ * Deploy a single-process BPMN fixture (JSON output mode) and return the
+ * process definition key the deployment produced.
+ */
+async function deployAndGetDefinitionKey(
+	dataDir: string,
+	path: string,
+): Promise<string> {
+	const result = await deploy(dataDir, path);
+	const rows = parseItems<{ Key: string | number }>(result.stdout);
+	assert.strictEqual(rows.length, 1, `expected one deployed process: ${path}`);
+	return String(rows[0].Key);
+}
+
+/** Read a process instance's `processDefinitionKey` via `get pi <key>`. */
+async function getProcessDefinitionKeyViaCli(
+	testDir: string,
+	key: string,
+): Promise<string | undefined> {
+	const result = await cli(
+		testDir,
+		"get",
+		"pi",
+		key,
+		"--fields",
+		"processDefinitionKey",
+	);
+	if (result.status !== 0) return undefined;
+	const value = parseJson(result).processDefinitionKey;
+	return value === undefined || value === null ? undefined : String(value);
 }
 
 describe("Process Instance Integration Tests (requires Camunda 8 at localhost:8080)", () => {
@@ -614,6 +649,137 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 			items.length,
 			0,
 			"--between with past date range should return no instances",
+		);
+	});
+
+	/**
+	 * Deploy the migration source (v1), start an instance on it, then deploy
+	 * the target (v2). Each call yields fresh definition keys because v1 and
+	 * v2 differ, so a batch by source key only touches this test's instance.
+	 */
+	async function setUpMigration() {
+		const sourceKey = await deployAndGetDefinitionKey(
+			testDir,
+			"tests/fixtures/migration/migration-v1.bpmn",
+		);
+		const created = await client.createProcessInstance({
+			processDefinitionKey: ProcessDefinitionKey.assumeExists(sourceKey),
+		});
+		const targetKey = await deployAndGetDefinitionKey(
+			testDir,
+			"tests/fixtures/migration/migration-v2.bpmn",
+		);
+		return {
+			sourceKey,
+			instanceKey: created.processInstanceKey.toString(),
+			targetKey,
+		};
+	}
+
+	test("migrate pi moves a running instance to a new process definition version", async () => {
+		const { instanceKey, targetKey } = await setUpMigration();
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			instanceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_Review=Task_ReviewV2",
+		);
+		assert.strictEqual(
+			migrateResult.status,
+			0,
+			`migrate should succeed. stderr: ${migrateResult.stderr}`,
+		);
+
+		const migrated = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				targetKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			migrated,
+			`process instance ${instanceKey} should report target definition ${targetKey} after migrate`,
+		);
+	});
+
+	test("migrate pi surfaces the cluster's rejection of an unknown source element", async () => {
+		const { instanceKey, targetKey } = await setUpMigration();
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			instanceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_DoesNotExist=Task_ReviewV2",
+		);
+		assert.strictEqual(migrateResult.status, 1);
+		assert.ok(
+			migrateResult.stderr.includes("Task_DoesNotExist"),
+			`error should name the unknown element. stderr: ${migrateResult.stderr}`,
+		);
+	});
+
+	test("migrate pi --processDefinitionKey migrates active instances in a batch", async () => {
+		const { sourceKey, instanceKey, targetKey } = await setUpMigration();
+
+		// The batch selects instances through the search index, so wait until
+		// the new instance is visible there before starting it.
+		const indexed = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				sourceKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(indexed, "setup: instance should be searchable before batch");
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			"--processDefinitionKey",
+			sourceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_Review=Task_ReviewV2",
+		);
+		assert.strictEqual(
+			migrateResult.status,
+			0,
+			`batch migrate should succeed. stderr: ${migrateResult.stderr}`,
+		);
+		// JSON mode: the success line carries the batch operation key as `key`.
+		const success = JSON.parse(
+			`${migrateResult.stdout}${migrateResult.stderr}`
+				.split("\n")
+				.find((line) => line.includes('"status":"success"')) ?? "{}",
+		);
+		assert.match(
+			String(success.key),
+			/^\d+$/,
+			`batch migrate should report the batch operation key. stderr: ${migrateResult.stderr}`,
+		);
+
+		const migrated = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				targetKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			migrated,
+			`process instance ${instanceKey} should report target definition ${targetKey} after batch migrate`,
 		);
 	});
 });

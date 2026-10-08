@@ -115,6 +115,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `cancel` - Cancel resource
 - `suspend` - Suspend resource
 - `resume` - Resume resource
+- `migrate` - Migrate process instances to another process definition
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
 - `fail` - Fail a job
