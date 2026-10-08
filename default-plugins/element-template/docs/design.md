@@ -214,6 +214,11 @@ that moved.
   recipe's intent. Moves and notes come from the recipe.
 - **Output.** The BPMN goes to stdout (or the file with `--in-place`); the report
   goes to stderr in that case so pipes stay clean.
+- **Engine eligibility.** The CLI requires valid execution-platform version metadata,
+  rejects incompatible explicit targets, and supplies only engine-compatible source
+  templates to the standalone engine. A required incompatible intermediate version
+  is therefore unavailable and fails before application. Library callers MUST apply
+  the same eligibility policy to their catalog and target.
 - **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
   into a library once the recipe format is settled.
 

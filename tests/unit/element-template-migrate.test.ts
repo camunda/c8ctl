@@ -40,7 +40,7 @@ const OLD = {
 	version: 1,
 	deprecated: true,
 	appliesTo: ["bpmn:Task"],
-	engines: { camunda: "^8.10" },
+	engines: { camunda: "^8.8" },
 	groups: [{ id: "model", label: "Model" }],
 	properties: [
 		{
@@ -59,7 +59,7 @@ const NEW = {
 	name: "New connector",
 	version: 1,
 	appliesTo: ["bpmn:Task"],
-	engines: { camunda: "^8.10" },
+	engines: { camunda: "^8.8" },
 	groups: [{ id: "model", label: "Model" }],
 	metadata: {
 		migratesFrom: {
@@ -217,6 +217,19 @@ process.on("exit", () => {
 });
 
 describe("element-template change", () => {
+	test("rejects engine-incompatible explicit targets and successor candidates", async () => {
+		const incompatible = { ...NEW, engines: { camunda: ">=99.0.0" } };
+		const templatePath = join(workDir, "incompatible.json");
+		writeFileSync(templatePath, JSON.stringify(incompatible));
+		for (const args of [
+			["change", templatePath, TASK, oldBpmn],
+			["change", "--successor", TASK, oldBpmn],
+		]) {
+			const result = await run(dataDirWithCache([OLD, incompatible]), ...args);
+			assert.notStrictEqual(result.status, 0, result.stdout);
+			assert.match(result.stderr, /compatible|migration/);
+		}
+	});
 	test("explicit target content wins over a conflicting cached identity", async () => {
 		const templatePath = join(workDir, "authoritative.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
@@ -447,6 +460,56 @@ describe("element-template change", () => {
 });
 
 describe("element-template update", () => {
+	test("rejects missing engine metadata and incompatible required intermediate versions", async () => {
+		const missingEngine = join(workDir, "missing-engine.bpmn");
+		writeFileSync(
+			missingEngine,
+			readFileSync(versionedBpmn, "utf-8").replace(
+				/ modeler:executionPlatformVersion="[^"]*"/,
+				"",
+			),
+		);
+		const missing = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			TASK,
+			missingEngine,
+		);
+		assert.notStrictEqual(missing.status, 0);
+		assert.match(missing.stderr, /executionPlatformVersion/);
+		const v3 = {
+			...V2,
+			version: 3,
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 2,
+							paths: [{ from: "endpoint", to: "url" }],
+						},
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 3,
+							paths: [],
+						},
+					],
+				},
+			},
+		};
+		const result = await run(
+			dataDirWithCache([V1, { ...V2, engines: { camunda: ">=99" } }, v3]),
+			"update",
+			TASK,
+			versionedBpmn,
+			"--in-place",
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /version 2 is not available/);
+	});
 	test("moves to the newest version and applies its recipe", async () => {
 		const result = await run(
 			dataDirWithCache([V1, V2]),

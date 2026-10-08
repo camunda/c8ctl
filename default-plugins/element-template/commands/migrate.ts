@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
+import semver from "semver";
 import type {} from "../../../src/core/runtime.ts";
 import { loadCache, pickVersion, requireCachePresent } from "../cache.ts";
 import {
@@ -152,6 +153,19 @@ function migrationTemplates(templates: Template[]): MigrationTemplate[] {
 	return templates.filter(isMigrationTemplate);
 }
 
+function compatibleTemplates(
+	templates: Template[],
+	engineVersion: string,
+): MigrationTemplate[] {
+	return migrationTemplates(
+		templates.filter(
+			(template) =>
+				!template.engines?.camunda ||
+				semver.satisfies(engineVersion, template.engines.camunda),
+		),
+	);
+}
+
 function loadRecipeFile(path: string): Recipe {
 	let raw: unknown;
 	try {
@@ -235,7 +249,10 @@ async function resolveTarget({
 
 	if (parsed.successor) {
 		requireCachePresent();
-		const cache = migrationTemplates(loadCache() ?? []);
+		const cache = compatibleTemplates(
+			loadCache() ?? [],
+			executionPlatformVersion ?? "",
+		);
 		const service = modeler.get("elementTemplates");
 		service.set(cache);
 		const candidates = service.getCompatible(element).filter(looksLikeTemplate);
@@ -316,6 +333,14 @@ export async function runMigrate(
 		);
 	}
 	const executionPlatformVersion = await getExecutionPlatformVersion(input.xml);
+	const engineVersion = executionPlatformVersion
+		? semver.coerce(executionPlatformVersion)?.version
+		: undefined;
+	if (!engineVersion) {
+		throw new Error(
+			"Cannot verify template compatibility: set a valid modeler:executionPlatformVersion on the BPMN document.",
+		);
+	}
 
 	const modeler = createModeler();
 	await modeler.importXML(input.xml);
@@ -336,8 +361,20 @@ export async function runMigrate(
 		modeler,
 		element,
 		applied,
-		executionPlatformVersion,
+		executionPlatformVersion: engineVersion,
 	});
+	if (
+		"engines" in target &&
+		target.engines &&
+		typeof target.engines === "object" &&
+		"camunda" in target.engines &&
+		typeof target.engines.camunda === "string" &&
+		!semver.satisfies(engineVersion, target.engines.camunda)
+	) {
+		throw new Error(
+			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,
+		);
+	}
 
 	if (target.id === applied.id && target.version === applied.version) {
 		logger.info(
@@ -349,7 +386,7 @@ export async function runMigrate(
 		return;
 	}
 
-	const cache = migrationTemplates(loadCache() ?? []);
+	const cache = compatibleTemplates(loadCache() ?? [], engineVersion);
 	const templates = [
 		...cache.filter((t) => t.id === applied.id || t.id === target.id),
 		target,

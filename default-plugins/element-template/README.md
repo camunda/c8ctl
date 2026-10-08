@@ -131,6 +131,9 @@ c8ctl element-template update Task_1 process.bpmn --dry-run --json
   non-deprecated compatible template that declares a migration from the applied
   one, and fails when there are none or several.
 - Without `--in-place` the BPMN goes to stdout and the report to stderr.
+- Migration requires valid `modeler:executionPlatformVersion` metadata. Incompatible
+  explicit targets are rejected; automatic selection uses compatible source versions.
+  Every required intermediate version must also be compatible and available.
 - Colour and emoji markers are used in text mode. Colour follows the terminal
   and honours `NO_COLOR` and `FORCE_COLOR`.
 
