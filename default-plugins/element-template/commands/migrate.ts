@@ -63,6 +63,7 @@ export const USAGE: Record<MigrateMode, string> = {
 
 interface MigrateArgs {
 	inPlace: boolean;
+	allowLossy: boolean;
 	successor: boolean;
 	recipePath: string | undefined;
 	toVersion: number | undefined;
@@ -91,6 +92,7 @@ export function parseMigrateArgs(
 ): MigrateArgs {
 	const parsed: MigrateArgs = {
 		inPlace: false,
+		allowLossy: false,
 		successor: false,
 		recipePath: undefined,
 		toVersion: undefined,
@@ -104,6 +106,8 @@ export function parseMigrateArgs(
 		}
 		if (arg === "--in-place" || arg === "-i") {
 			parsed.inPlace = true;
+		} else if (arg === "--allow-lossy") {
+			parsed.allowLossy = true;
 		} else if (arg === "--successor") {
 			if (mode !== "change") {
 				throw new Error("--successor is only valid for change");
@@ -456,17 +460,31 @@ export async function runMigrate(
 		throw new Error(`Cannot migrate ${elementId}: ${message}`);
 	}
 	const { xml } = await modeler.saveXML({ format: true });
+	if (recipe && (!report.usedRecipe || report.refusal)) {
+		throw new Error(
+			`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry or reachable source floor"}.`,
+		);
+	}
+	const requiresAuthorization =
+		(parsed.inPlace && !report.lossless) || report.refusal !== null;
+	if (requiresAuthorization && !parsed.allowLossy && !dryRun) {
+		throw new Error(
+			"Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it.",
+		);
+	}
 
 	if (c8ctl.outputMode === "json") {
-		logger.json(
-			reportToJson(report, {
+		logger.json({
+			...reportToJson(report, {
 				elementId,
 				action: mode,
 				recipe: recipeSource,
 				dryRun,
 				file: parsed.inPlace ? bpmnFilePath : undefined,
 			}),
-		);
+			requiresAuthorization,
+			authorized: parsed.allowLossy,
+		});
 	} else {
 		const stream = writesXmlToStdout ? process.stderr : process.stdout;
 		stream.write(
@@ -476,6 +494,12 @@ export async function runMigrate(
 				dryRun,
 			}),
 		);
+		if (requiresAuthorization)
+			stream.write(
+				parsed.allowLossy
+					? "Lossy migration authorized with --allow-lossy.\n"
+					: "Requires --allow-lossy authorization before writing.\n",
+			);
 	}
 
 	if (dryRun) {

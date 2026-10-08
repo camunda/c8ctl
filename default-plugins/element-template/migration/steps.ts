@@ -196,7 +196,13 @@ export function resolveSteps({
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 
 	const sourceLatest = latestOf(templates, appliedId);
-	const sourceRecipe = sameId ? targetRecipe : safeRecipe(sourceLatest);
+	const sourceRecipe = sameId
+		? targetRecipe
+		: sourceLatest
+			? readEmbeddedRecipe(sourceLatest)
+			: undefined;
+	if (!sameId && sourceRecipe && sourceLatest)
+		validateRecipeOwner(sourceRecipe, sourceLatest);
 	const limit = sameId
 		? targetVersion
 		: sourceLatest
@@ -239,22 +245,6 @@ export function resolveSteps({
 		}
 	}
 	return { steps, refusal: null };
-}
-
-/** An unusable recipe on a template other than the target is ignored. */
-function safeRecipe(
-	template: MigrationTemplate | undefined,
-): Recipe | undefined {
-	if (!template) {
-		return undefined;
-	}
-	try {
-		const recipe = readEmbeddedRecipe(template);
-		if (recipe) validateRecipeOwner(recipe, template);
-		return recipe;
-	} catch {
-		return undefined;
-	}
 }
 
 /**

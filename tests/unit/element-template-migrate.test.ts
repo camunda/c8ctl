@@ -217,6 +217,48 @@ process.on("exit", () => {
 });
 
 describe("element-template change", () => {
+	test("lossy in-place migration requires authorization and preserves the original on refusal", async () => {
+		const copy = join(workDir, "lossy-refused.bpmn");
+		const before = readFileSync(oldBpmn, "utf-8");
+		writeFileSync(copy, before);
+		const templatePath = join(workDir, "lossy-target.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const result = await run(
+			dataDirWithCache([OLD]),
+			"change",
+			templatePath,
+			TASK,
+			copy,
+			"--in-place",
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /--allow-lossy/);
+		assert.strictEqual(readFileSync(copy, "utf-8"), before);
+	});
+	test("explicit recipe with the wrong source fails even with loss authorization", async () => {
+		const templatePath = join(workDir, "wrong-source-target.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const recipePath = join(workDir, "wrong-source-recipe.json");
+		writeFileSync(
+			recipePath,
+			JSON.stringify({
+				schemaVersion: 1,
+				sources: [{ kind: "change", sourceTemplateId: "unrelated" }],
+			}),
+		);
+		const result = await run(
+			dataDirWithCache([OLD]),
+			"change",
+			templatePath,
+			TASK,
+			oldBpmn,
+			"--recipe",
+			recipePath,
+			"--allow-lossy",
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /source|applicable/);
+	});
 	test("rejects engine-incompatible explicit targets and successor candidates", async () => {
 		const incompatible = { ...NEW, engines: { camunda: ">=99.0.0" } };
 		const templatePath = join(workDir, "incompatible.json");
@@ -284,6 +326,7 @@ describe("element-template change", () => {
 			TASK,
 			copy,
 			"--in-place",
+			"--allow-lossy",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(

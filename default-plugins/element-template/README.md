@@ -131,6 +131,9 @@ c8ctl element-template update Task_1 process.bpmn --dry-run --json
   non-deprecated compatible template that declares a migration from the applied
   one, and fails when there are none or several.
 - Without `--in-place` the BPMN goes to stdout and the report to stderr.
+- Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
+  Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
+  even with authorization; correct the source entry or source-version floor.
 - Migration requires valid `modeler:executionPlatformVersion` metadata. Incompatible
   explicit targets are rejected; automatic selection uses compatible source versions.
   Every required intermediate version must also be compatible and available.

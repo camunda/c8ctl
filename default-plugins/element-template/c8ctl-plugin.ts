@@ -341,6 +341,11 @@ export const metadata = {
 export const commands = {
 	"element-template": {
 		flags: {
+			"allow-lossy": {
+				type: "boolean",
+				description:
+					"Authorize lossy in-place migration or embedded-recipe fallback [update|change]",
+			},
 			"in-place": {
 				type: "boolean",
 				short: "i",
