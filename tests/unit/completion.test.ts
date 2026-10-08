@@ -3,9 +3,172 @@
  */
 
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	after,
+	afterEach,
+	before,
+	beforeEach,
+	describe,
+	test,
+} from "node:test";
 import { showCompletion } from "../../src/framework/ui/completion.ts";
+import { c8WithEnv } from "../utils/cli.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
+import { asyncSpawn } from "../utils/spawn.ts";
+
+describe("Loaded plugin flag completions", () => {
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-flags-"));
+	before(() => {
+		for (const name of ["plugin-with-flags", "plugin-with-verb-scoped-flag"]) {
+			const destination = join(dir, "plugins", "node_modules", name);
+			mkdirSync(destination, { recursive: true });
+			cpSync(
+				new URL(`../fixtures/plugins/${name}/`, import.meta.url),
+				destination,
+				{
+					recursive: true,
+				},
+			);
+		}
+	});
+	after(() => rmSync(dir, { recursive: true, force: true }));
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		test(`${shell} scopes plugin flags and metadata to their owning command`, {
+			skip:
+				shell !== "fish" && spawnSync(shell, ["--version"]).status !== 0
+					? `${shell} is not installed`
+					: false,
+		}, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			if (shell === "fish") {
+				for (const [command, name, description] of [
+					["test-flags", "source", "Source element ID"],
+					["test-required", "required-name", "A required string flag"],
+					["verb-scoped-demo", "limit", "Plugin"],
+				]) {
+					const lines = result.stdout
+						.split("\n")
+						.filter(
+							(line) =>
+								line.includes(`-l ${name} `) && line.includes(description),
+						);
+					assert.strictEqual(lines.length, 2);
+					for (const line of lines) {
+						assert.ok(
+							line.includes(`-n '__fish_seen_subcommand_from ${command}'`),
+							line,
+						);
+						assert.ok(line.endsWith(" -r"), line);
+					}
+				}
+				return;
+			}
+			for (const [command, expected, excluded] of [
+				["test-flags", "--source", "--required-name"],
+				["test-required", "--required-name", "--source"],
+				["verb-scoped-demo", "--limit", "--source"],
+				["test-bare", "--profile", "--source"],
+				["list", "--profile", "--source"],
+				["cluster", "--profile", "--source"],
+				["missing-command", "--profile", "--source"],
+			]) {
+				for (const argument of command.startsWith("test-") ||
+				command === "verb-scoped-demo"
+					? ["argument ", ""]
+					: ["argument "]) {
+					const script =
+						shell === "bash"
+							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${command} ${argument}--)\nCOMP_CWORD=${argument ? 3 : 2}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
+							: `${result.stdout}\n_arguments() { printf '%s\\n' "$@"; }\nwords=(c8ctl ${command} ${argument}--)\nCURRENT=${argument ? 4 : 3}\n_c8ctl`;
+					const completed = await asyncSpawn(
+						shell,
+						shell === "bash"
+							? ["--norc", "--noprofile", "-c", script]
+							: ["-f", "-c", script],
+					);
+					assert.strictEqual(completed.status, 0, completed.stderr);
+					assert.ok(
+						completed.stdout.includes(expected),
+						`${command}: missing ${expected}`,
+					);
+					assert.ok(
+						!completed.stdout.includes(excluded),
+						`${command}: leaked ${excluded}`,
+					);
+					if (command === "verb-scoped-demo" && shell === "zsh") {
+						assert.ok(completed.stdout.includes("Plugin"), completed.stdout);
+						assert.ok(completed.stdout.includes("]:limit:"), completed.stdout);
+					}
+				}
+			}
+		});
+
+		test(`${shell} includes usable flags from every loaded plugin command`, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			for (const name of [
+				"source",
+				"target",
+				"debug",
+				"required-name",
+				"safe",
+				"label-value",
+				"limit",
+				"between",
+			]) {
+				const token = shell === "fish" ? `-l ${name} ` : `--${name}`;
+				assert.ok(
+					result.stdout.includes(token),
+					`Missing plugin flag ${token}`,
+				);
+			}
+			assert.ok(
+				!result.stdout.includes("Collides with built-in --verbose flag"),
+			);
+			assert.ok(!result.stdout.includes("Plugin's own --profile"));
+			if (shell === "bash") {
+				const flags = result.stdout
+					.match(/local flags="([^"]*)"/)?.[1]
+					?.split(" ");
+				assert.ok(flags);
+				assert.strictEqual(flags.length, new Set(flags).size);
+			} else if (shell === "zsh") {
+				assert.ok(
+					result.stdout.includes("--source[Source element ID]:source:"),
+				);
+				assert.ok(result.stdout.includes("--debug[Enable debug output]'"));
+				assert.ok(!result.stdout.includes("-y[Short alias collides"));
+				assert.strictEqual(result.stdout.match(/'--limit\[Plugin/g)?.length, 1);
+			} else {
+				assert.ok(
+					result.stdout.includes("-l source -d 'Source element ID' -r"),
+				);
+				assert.ok(
+					result.stdout.includes("-l debug -d 'Enable debug output'\n"),
+				);
+				assert.ok(!result.stdout.includes("-s y -l label-value"));
+				assert.strictEqual(
+					result.stdout.match(/-l limit -d 'Plugin/g)?.length,
+					2,
+				);
+			}
+		});
+	}
+});
 
 describe("Completion Module", () => {
 	let consoleLogSpy: unknown[];
