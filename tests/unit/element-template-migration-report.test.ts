@@ -73,6 +73,30 @@ const newTemplate: MigrationTemplate = {
 };
 
 describe("buildReport", () => {
+	test("does not claim removed intermediate moves or static additions", () => {
+		const report = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("maxTokens", "secret")],
+			after: [],
+			facts: facts({
+				moved: [
+					{
+						from: { key: "maxTokens", bindingType: null },
+						to: { key: "intermediate", bindingType: null },
+						transformed: false,
+					},
+				],
+				set: [{ key: "temporary", bindingType: null, value: "gone" }],
+			}),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(report.moved, []);
+		assert.deepStrictEqual(report.added, []);
+		assert.strictEqual(report.dropped.length, 1);
+		assert.strictEqual(report.lossless, false);
+	});
 	test("lists values the new template does not bind as dropped, with labels", () => {
 		const report = buildReport({
 			fromTemplate: oldTemplate,

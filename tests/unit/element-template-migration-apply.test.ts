@@ -141,6 +141,43 @@ async function setup(
 }
 
 describe("migrateElement", () => {
+	test("reports loss when a conditional destination never materializes", async () => {
+		const target = {
+			...NEW,
+			properties: [
+				input("kind", "off", { id: "kind" }),
+				input("b", "", { condition: { property: "kind", equals: "on" } }),
+			],
+			metadata: undefined,
+		};
+		const { modeler, migrationModeler, element } = await setup(OLD, {
+			provider: "secret",
+		});
+		const { report } = migrateElement({
+			modeler: migrationModeler,
+			element,
+			fromTemplate: OLD,
+			target,
+			templates: [OLD, target],
+			recipe: parseRecipe({
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: OLD.id,
+						paths: [{ from: "provider", to: "b" }],
+					},
+				],
+			}),
+		});
+		assert.deepStrictEqual(report.moved, []);
+		assert.ok(report.dropped.some((item) => item.key === "provider"));
+		assert.strictEqual(report.lossless, false);
+		assert.doesNotMatch(
+			(await modeler.saveXML({ format: true })).xml,
+			/target="b"/,
+		);
+	});
 	test("moves, translates and sets values per the embedded recipe", async () => {
 		const { modeler, migrationModeler, element } = await setup(OLD, {
 			provider: "azure",

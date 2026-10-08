@@ -187,31 +187,47 @@ export function buildReport({
 	usedRecipe: boolean;
 	refusal: string | null;
 }): MigrationReport {
+	const survivingMoves = facts.moved.filter((m) => {
+		const source = find(before, m.from.key, m.from.bindingType);
+		const target = find(after, m.to.key, m.to.bindingType);
+		return (
+			source !== undefined &&
+			target !== undefined &&
+			(source.value === "" || target.value !== "")
+		);
+	});
+	const survivingSets = facts.set.filter((s) =>
+		find(after, s.key, s.bindingType),
+	);
 	const claimedFrom = (v: ElementValue) =>
-		facts.moved.some(
+		survivingMoves.some(
 			(m) =>
 				m.from.key === v.key &&
 				(m.from.bindingType === null || m.from.bindingType === v.bindingType),
 		);
 	const claimedTo = (v: ElementValue) =>
-		facts.moved.some(
+		survivingMoves.some(
 			(m) =>
 				m.to.key === v.key &&
 				(m.to.bindingType === null || m.to.bindingType === v.bindingType),
 		) ||
-		facts.set.some(
+		survivingSets.some(
 			(s) =>
 				s.key === v.key &&
 				(s.bindingType === null || s.bindingType === v.bindingType),
 		);
 
-	const moved: MovedItem[] = facts.moved.map((m) => {
+	const moved: MovedItem[] = survivingMoves.map((m) => {
 		const from = fieldOf(fromTemplate, m.from.key, m.from.bindingType);
 		const to = fieldOf(toTemplate, m.to.key, m.to.bindingType);
 		const fromValue = find(before, m.from.key, m.from.bindingType)?.value;
 		const toValue = find(after, m.to.key, m.to.bindingType)?.value;
 		const item: MovedItem = { from, to };
-		if (m.transformed && fromValue !== undefined && toValue !== undefined) {
+		if (
+			(m.transformed || fromValue !== toValue) &&
+			fromValue !== undefined &&
+			toValue !== undefined
+		) {
 			item.valueChange = {
 				from: fromValue,
 				to: toValue,
@@ -253,12 +269,13 @@ export function buildReport({
 			};
 		});
 
-	for (const s of facts.set) {
+	for (const s of survivingSets) {
 		const field = fieldOf(toTemplate, s.key, s.bindingType);
+		const actual = find(after, s.key, s.bindingType)?.value ?? "";
 		added.push({
 			...field,
-			value: s.value,
-			...withNames(toTemplate, field, s.value),
+			value: actual,
+			...withNames(toTemplate, field, actual),
 		});
 	}
 
