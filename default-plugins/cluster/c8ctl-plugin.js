@@ -1644,8 +1644,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     if (record?.version) {
       logger.info(`Detected running version from the durable PID record: ${record.version}`);
     }
-    logger.info('Stop it first with "c8ctl cluster stop".');
-    return;
+    throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
   logger.info('Starting Camunda 8 local cluster...');
@@ -1747,6 +1746,13 @@ async function startC8Run(config, debug = false, startArgs = []) {
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
   } else {
+    // Readiness can fail even after c8run exits successfully. Retain the same
+    // recovery handle as a nonzero launcher exit before reporting failure.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     logger.error(
       'Cluster failed to start within timeout.',
     );

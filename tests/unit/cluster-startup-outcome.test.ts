@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
-	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -17,9 +16,7 @@ import { pathToFileURL } from "node:url";
 import { c8WithEnv, parseJson } from "../utils/cli.ts";
 import { pollUntil } from "../utils/polling.ts";
 
-describe("cluster startup outcomes through the CLI", {
-	skip: process.platform === "win32", // The fake c8run launcher is a POSIX shell script.
-}, () => {
+describe("cluster startup outcomes through the CLI", () => {
 	let cacheDir: string;
 	let installDir: string;
 	let preload: string;
@@ -33,7 +30,25 @@ describe("cluster startup outcomes through the CLI", {
 		preload = join(cacheDir, "health.mjs");
 		writeFileSync(
 			preload,
-			`globalThis.fetch = async () => new Response(JSON.stringify({ status: process.env.TEST_HEALTH }), { status: 200 });`,
+			`import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { join } from 'node:path';
+const spawn = childProcess.spawn;
+const installDir = join(process.env.C8RUN_CACHE_DIR, 'c8run-8.10.1');
+const binary = join(installDir, process.platform === 'win32' ? 'c8run.exe' : 'c8run');
+// Replace only the fixture executable; PID identity and cleanup use real OS processes.
+childProcess.spawn = (command, args, options) => command === binary
+  ? spawn(process.execPath, [join(installDir, 'launcher.mjs'), ...args], options)
+  : spawn(command, args, options);
+syncBuiltinESMExports();
+const now = Date.now;
+let elapsed = 0;
+Date.now = () => now() + elapsed;
+globalThis.fetch = async () => {
+  // Advance past readiness's deadline after an unsuccessful probe, without a wall-clock race.
+  if (process.env.TEST_HEALTH === 'TIMEOUT') elapsed += 120001;
+  return new Response(JSON.stringify({ status: process.env.TEST_HEALTH }), { status: 200 });
+};`,
 		);
 	});
 
@@ -74,34 +89,46 @@ describe("cluster startup outcomes through the CLI", {
 			assert.ok(child.pid);
 			writeFileSync(join(cacheDir, `${name}.pid`), String(child.pid));
 		}
-		const binary = join(installDir, "c8run");
+		const binary = join(
+			installDir,
+			process.platform === "win32" ? "c8run.exe" : "c8run",
+		);
+		writeFileSync(binary, "fixture executable redirected by preload");
 		writeFileSync(
-			binary,
-			`#!/bin/sh
-if [ "$1" = start ]; then
-  for name in camunda connectors connectors-sales; do
-    cp "../$name.pid" "$name.process"
-  done
-  if [ ${exitCode} != 0 ]; then printf 'sales NOT READY\n' >&2; fi
-  exit ${exitCode}
-fi
-exit 0
+			join(installDir, "launcher.mjs"),
+			`import { copyFileSync, appendFileSync } from 'node:fs';
+appendFileSync('invocations.log', process.argv[2] + '\\n');
+if (process.argv[2] === 'start') {
+  for (const name of ['camunda', 'connectors', 'connectors-sales']) {
+    copyFileSync('../' + name + '.pid', name + '.process');
+  }
+  if (${exitCode} !== 0) console.error('sales NOT READY');
+  process.exitCode = ${exitCode};
+}
 `,
 		);
-		chmodSync(binary, 0o755);
 	}
 
-	for (const health of ["UP", "DOWN"]) {
+	for (const { health, exitCode, expectedCode, error } of [
+		{ health: "UP", exitCode: 7, expectedCode: 7, error: /sales NOT READY/ },
+		{ health: "DOWN", exitCode: 7, expectedCode: 7, error: /sales NOT READY/ },
+		{
+			health: "TIMEOUT",
+			exitCode: 0,
+			expectedCode: 1,
+			error: /Cluster failed to start within timeout/,
+		},
+	]) {
 		test(`failed startup remains degraded with shared health ${health}, then stops all survivors`, async () => {
-			await launcher(7);
+			await launcher(exitCode);
 			const start = await cluster(
 				health,
 				"start",
 				"8.10.1",
 				"--physical-tenants=sales",
 			);
-			assert.equal(start.status, 7);
-			assert.match(start.stderr, /sales NOT READY/);
+			assert.equal(start.status, expectedCode);
+			assert.match(start.stderr, error);
 			assert.equal(existsSync(join(cacheDir, "cluster.active")), false);
 			const text = await cluster(health, "status");
 			assert.equal(text.status, 0);
@@ -136,6 +163,39 @@ exit 0
 				parseJson(await cluster("DOWN", "status", "--json")).status,
 				"stopped",
 			);
+		});
+	}
+
+	for (const outcome of ["failed", "unknown", "pidfiles only"]) {
+		test(`retry with live survivors and ${outcome} outcome fails without launching or replacing records`, async () => {
+			await launcher(7);
+			assert.equal((await cluster("UP", "start", "8.10.1")).status, 7);
+			const file = join(cacheDir, "cluster.pids");
+			if (outcome === "unknown") {
+				const record = parseJson({
+					stdout: readFileSync(file, "utf8"),
+					stderr: "",
+					status: 0,
+				});
+				delete record.startupFailed;
+				writeFileSync(file, JSON.stringify(record));
+			} else if (outcome === "pidfiles only") {
+				rmSync(file);
+			}
+			const recordBefore = existsSync(file) ? readFileSync(file, "utf8") : null;
+			const retry = await cluster("UP", "start", "8.10.1");
+			assert.equal(retry.status, 1, retry.stdout + retry.stderr);
+			assert.match(retry.stdout + retry.stderr, /c8ctl cluster stop/);
+			assert.equal(
+				readFileSync(join(installDir, "invocations.log"), "utf8"),
+				"start\n",
+			);
+			assert.equal(
+				existsSync(file) ? readFileSync(file, "utf8") : null,
+				recordBefore,
+			);
+			assert.equal(existsSync(join(cacheDir, "cluster.active")), false);
+			assert.equal((await cluster("DOWN", "stop")).status, 0);
 		});
 	}
 
