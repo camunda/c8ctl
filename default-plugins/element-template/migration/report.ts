@@ -13,6 +13,14 @@ import type { MovedFact, PlanFacts } from "./plan.ts";
 import type { Note } from "./recipe.ts";
 import type { MigrationTemplate, TemplateProperty } from "./types.ts";
 
+export interface ReportFacts extends PlanFacts {
+	/** Expected stored values, including FEEL normalization. */
+	moved: (MovedFact & { value?: string })[];
+	/** Step snapshots prevent removed lineage from being revived later. */
+	after?: ElementValue[];
+	failedWrites?: boolean;
+}
+
 export interface Field {
 	key: string;
 	bindingType: string | null;
@@ -72,38 +80,78 @@ export function templateRef(template: MigrationTemplate): TemplateRef {
 	};
 }
 
-export function mergeFacts(all: PlanFacts[]): PlanFacts {
+export function mergeFacts(all: ReportFacts[]): ReportFacts {
+	let moved: ReportFacts["moved"] = [];
+	let set: PlanFacts["set"] = [];
+	let failedWrites = false;
+	for (const facts of all) {
+		const same = (
+			a: { key: string; bindingType: string | null },
+			b: { key: string; bindingType: string | null },
+		) => a.key === b.key && a.bindingType === b.bindingType;
+		// All moves read the pre-step snapshot, never another move's result.
+		const priorMoved = moved;
+		const priorSet = set;
+		const overwritten = (field: { key: string; bindingType: string | null }) =>
+			facts.moved.some((move) => same(move.to, field)) ||
+			facts.set.some((write) => same(write, field));
+		const forwarded = (field: { key: string; bindingType: string | null }) =>
+			facts.moved.some((move) => same(move.from, field));
+		failedWrites ||= priorMoved.some(
+			(move) => overwritten(move.to) && !forwarded(move.to),
+		);
+		moved = priorMoved.filter(
+			(move) => !overwritten(move.to) && !forwarded(move.to),
+		);
+		set = priorSet.filter((write) => !overwritten(write) && !forwarded(write));
+		for (const move of facts.moved) {
+			const addition = priorSet.find((write) => same(write, move.from));
+			if (addition) {
+				set.push({ ...move.to, value: move.value ?? addition.value });
+			} else {
+				const prior = priorMoved.find((item) => same(item.to, move.from));
+				moved.push({
+					...move,
+					from: prior?.from ?? move.from,
+					transformed: Boolean(prior?.transformed) || move.transformed,
+				});
+			}
+		}
+		for (const write of facts.set) {
+			moved = moved.filter((move) => !same(move.to, write));
+			set = set.filter((prior) => !same(prior, write));
+			set.push(write);
+		}
+		if (facts.after) {
+			const after = facts.after;
+			const surviving = (
+				field: { key: string; bindingType: string | null },
+				value: string | undefined,
+			) => {
+				const actual = find(after, field.key, field.bindingType);
+				return (
+					actual !== undefined &&
+					(value === undefined || actual.value === value)
+				);
+			};
+			failedWrites ||=
+				moved.some((move) => !surviving(move.to, move.value)) ||
+				set.some((write) => !surviving(write, write.value));
+			moved = moved.filter((move) => surviving(move.to, move.value));
+			set = set.filter((write) => surviving(write, write.value));
+		}
+		failedWrites ||= Boolean(facts.failedWrites);
+	}
 	return {
-		moved: chainMoves(all.flatMap((f) => f.moved)),
-		set: all.flatMap((f) => f.set),
+		moved,
+		set,
+		failedWrites,
 		notes: all.flatMap((f) => f.notes),
 		guardSkipped: all.flatMap((f) => f.guardSkipped),
 		templateSkipped: all.flatMap((f) => f.templateSkipped),
 		noMatch: all.flatMap((f) => f.noMatch),
 		feelSkipped: all.flatMap((f) => f.feelSkipped),
 	};
-}
-
-/** A value moved twice (a to b, then b to c) is one move (a to c). */
-function chainMoves(moves: MovedFact[]): MovedFact[] {
-	const out: MovedFact[] = [];
-	for (const move of moves) {
-		const index = out.findIndex(
-			(m) =>
-				m.to.key === move.from.key &&
-				m.to.bindingType === move.from.bindingType,
-		);
-		if (index === -1) {
-			out.push(move);
-		} else {
-			out[index] = {
-				from: out[index].from,
-				to: move.to,
-				transformed: out[index].transformed || move.transformed,
-			};
-		}
-	}
-	return out;
 }
 
 function propertyFor(
@@ -187,7 +235,7 @@ export function buildReport({
 	toTemplate: MigrationTemplate;
 	before: ElementValue[];
 	after: ElementValue[];
-	facts: PlanFacts;
+	facts: ReportFacts;
 	usedRecipe: boolean;
 	refusal: string | null;
 }): MigrationReport {
@@ -197,11 +245,15 @@ export function buildReport({
 		return (
 			source !== undefined &&
 			target !== undefined &&
-			(source.value === "" || target.value !== "")
+			(m.value !== undefined
+				? target.value === m.value
+				: m.transformed
+					? source.value === "" || target.value !== ""
+					: target.value === source.value)
 		);
 	});
-	const survivingSets = facts.set.filter((s) =>
-		find(after, s.key, s.bindingType),
+	const survivingSets = facts.set.filter(
+		(s) => find(after, s.key, s.bindingType)?.value === s.value,
 	);
 	const claimedFrom = (v: ElementValue) =>
 		survivingMoves.some(
@@ -327,6 +379,12 @@ export function buildReport({
 		notes: facts.notes,
 		skipped,
 		lossless:
+			!facts.failedWrites &&
+			survivingMoves.length ===
+				facts.moved.filter((move) =>
+					find(before, move.from.key, move.from.bindingType),
+				).length &&
+			survivingSets.length === facts.set.length &&
 			dropped.length === 0 &&
 			skipped.guard.length === 0 &&
 			skipped.template.length === 0 &&

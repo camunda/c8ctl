@@ -9,6 +9,10 @@ import { before, describe, test } from "node:test";
 import type { MigrationModeler } from "../../default-plugins/element-template/migration/apply.ts";
 import { migrateElement } from "../../default-plugins/element-template/migration/apply.ts";
 import {
+	enumerateElementValues,
+	getExtensionElements,
+} from "../../default-plugins/element-template/migration/element-values.ts";
+import {
 	getModdleElement,
 	getModdleList,
 } from "../../default-plugins/element-template/migration/moddle.ts";
@@ -141,6 +145,659 @@ async function setup(
 }
 
 describe("migrateElement", () => {
+	for (const feel of ["optional", "required"]) {
+		test(`accepts populated ${feel} FEEL despite literal choices and patterns`, async () => {
+			const old = { ...OLD, properties: [input("a", "=secretVariable")] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [
+					input("b", "", {
+						feel,
+						constraints: { notEmpty: true, pattern: { value: "^allowed$" } },
+						choices: [{ name: "Allowed", value: "allowed" }],
+					}),
+				],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const { element: migrated, report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [{ from: "a", to: "b" }],
+						},
+					],
+				}),
+			});
+			assert.strictEqual(
+				enumerateElementValues(
+					getExtensionElements(migrated.businessObject),
+				).find((v) => v.key === "b")?.value,
+				"=secretVariable",
+			);
+			assert.strictEqual(report.lossless, true);
+		});
+	}
+	for (const carry of [false, true]) {
+		for (const reversed of [false, true]) {
+			test(`writes only active duplicates with correct FEEL semantics (carry=${carry}, reversed=${reversed})`, async () => {
+				const old = {
+					...OLD,
+					properties: [input(carry ? "b" : "a", "secret")],
+				};
+				const duplicates = [
+					input("b", "", {
+						feel: "required",
+						condition: { property: "mode", equals: "on" },
+					}),
+					input("b", "", {
+						condition: { property: "mode", equals: "off" },
+						constraints: { pattern: { value: "^other$" } },
+					}),
+				];
+				const target = {
+					...NEW,
+					metadata: undefined,
+					properties: [
+						input("mode", "on", { id: "mode" }),
+						...(reversed ? duplicates.reverse() : duplicates),
+					],
+				};
+				const { migrationModeler, element } = await setup(old, {});
+				const { element: migrated, report } = migrateElement({
+					modeler: migrationModeler,
+					element,
+					fromTemplate: old,
+					target,
+					templates: [old, target],
+					...(carry
+						? {}
+						: {
+								recipe: parseRecipe({
+									schemaVersion: 1,
+									sources: [
+										{
+											kind: "change",
+											sourceTemplateId: old.id,
+											paths: [{ from: "a", to: "b" }],
+										},
+									],
+								}),
+							}),
+				});
+				assert.strictEqual(
+					enumerateElementValues(
+						getExtensionElements(migrated.businessObject),
+					).find((v) => v.key === "b")?.value,
+					"=secret",
+				);
+				if (!carry) {
+					assert.strictEqual(report.moved[0]?.valueChange?.to, "=secret");
+					assert.strictEqual(report.lossless, true);
+				}
+			});
+		}
+	}
+	for (const property of [
+		{ type: "Number", value: "2" },
+		{ type: "Boolean", value: "false" },
+	]) {
+		test(`normalizes ${property.type} writes as the real Modeler does`, async () => {
+			const old = { ...OLD, properties: [input("a", property.value)] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [input("b", "", { type: property.type })],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const { element: migrated, report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [{ from: "a", to: "b" }],
+						},
+					],
+				}),
+			});
+			assert.strictEqual(
+				enumerateElementValues(
+					getExtensionElements(migrated.businessObject),
+				).find((v) => v.key === "b")?.value,
+				`=${property.value}`,
+			);
+			assert.strictEqual(
+				report.moved[0]?.valueChange?.to,
+				`=${property.value}`,
+			);
+			assert.strictEqual(report.lossless, true);
+		});
+	}
+	for (const rule of [
+		{ constraints: { notEmpty: true }, value: "   ", diagnostic: /notEmpty/ },
+		{
+			choices: [{ name: "Allowed", value: "allowed" }],
+			value: "SECRET",
+			diagnostic: /choice/,
+		},
+		{
+			constraints: { pattern: { value: "^allowed$" } },
+			value: "SECRET",
+			diagnostic: /pattern/,
+		},
+		{
+			constraints: { minLength: 1 },
+			value: "SECRET",
+			diagnostic: /unsupported constraint minLength/,
+		},
+	]) {
+		test(`rejects invalid carry-over before real-modeler mutation (${rule.diagnostic})`, async () => {
+			const old = { ...OLD, properties: [input("b", rule.value)] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [input("b", "allowed", rule)],
+			};
+			const { modeler, migrationModeler, element } = await setup(old, {});
+			const before = (await modeler.saveXML({ format: true })).xml;
+			assert.throws(
+				() =>
+					migrateElement({
+						modeler: migrationModeler,
+						element,
+						fromTemplate: old,
+						target,
+						templates: [old, target],
+					}),
+				(error) =>
+					error instanceof Error &&
+					/carry-over.*input:b/.test(error.message) &&
+					rule.diagnostic.test(error.message) &&
+					!error.message.includes("SECRET"),
+			);
+			assert.strictEqual((await modeler.saveXML({ format: true })).xml, before);
+		});
+	}
+	for (const crossType of [false, true]) {
+		for (const swap of [false, true]) {
+			test(`reconciles simultaneous ${swap ? "swap" : "chain"} writes (cross-type=${crossType})`, async () => {
+				const b = crossType
+					? {
+							type: "String",
+							value: "second",
+							binding: { type: "zeebe:taskHeader", key: "b" },
+						}
+					: input("b", "second");
+				const old = { ...OLD, properties: [input("a", "first"), b] };
+				const target = {
+					...NEW,
+					metadata: undefined,
+					properties: [input(swap ? "a" : "c", ""), b],
+				};
+				const { modeler, migrationModeler, element } = await setup(old, {});
+				const { element: migrated, report } = migrateElement({
+					modeler: migrationModeler,
+					element,
+					fromTemplate: old,
+					target,
+					templates: [old, target],
+					recipe: parseRecipe({
+						schemaVersion: 1,
+						sources: [
+							{
+								kind: "change",
+								sourceTemplateId: old.id,
+								paths: [
+									{ from: "input:a", to: crossType ? "header:b" : "input:b" },
+									{
+										from: crossType ? "header:b" : "input:b",
+										to: swap ? "input:a" : "input:c",
+									},
+								],
+							},
+						],
+					}),
+				});
+				const values = enumerateElementValues(
+					getExtensionElements(migrated.businessObject),
+				);
+				assert.strictEqual(
+					values.find((item) => item.key === "b")?.value,
+					"first",
+				);
+				assert.strictEqual(
+					values.find((item) => item.key === (swap ? "a" : "c"))?.value,
+					"second",
+				);
+				assert.deepStrictEqual(
+					report.moved.map((move) => [move.from.key, move.to.key]),
+					[
+						["a", "b"],
+						["b", swap ? "a" : "c"],
+					],
+				);
+				assert.strictEqual(report.moved[0]?.to.bindingType, b.binding.type);
+				assert.deepStrictEqual(report.dropped, []);
+				assert.strictEqual(report.lossless, true);
+				assert.match((await modeler.saveXML({ format: true })).xml, /second/);
+			});
+		}
+	}
+
+	for (const kind of ["set", "template"] as const) {
+		test(`marks a mismatched ${kind} write lossy with no source drop`, async () => {
+			const old = { ...OLD, properties: [input("a", "secret")] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [input("a", ""), input("b", "")],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const applyTemplate =
+				migrationModeler.elementTemplates.applyTemplate.bind(
+					migrationModeler.elementTemplates,
+				);
+			migrationModeler.elementTemplates = {
+				set: migrationModeler.elementTemplates.set.bind(
+					migrationModeler.elementTemplates,
+				),
+				applyTemplate(current, template) {
+					const applied = applyTemplate(current, template) ?? current;
+					const io = getModdleList(
+						getExtensionElements(applied.businessObject),
+						"values",
+					).find((item) => item.$type === "zeebe:IoMapping");
+					const param = getModdleList(io, "inputParameters").find(
+						(item) => item.target === "b",
+					);
+					assert.ok(param);
+					migrationModeler.modeling.updateModdleProperties(applied, param, {
+						source: "unrelated",
+					});
+					return applied;
+				},
+			};
+			const { report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [
+								kind === "set"
+									? { to: "b", set: "expected" }
+									: { to: "b", template: `prefix-\${a}` },
+							],
+						},
+					],
+				}),
+			});
+			assert.deepStrictEqual(report.dropped, []);
+			assert.deepStrictEqual(
+				report.added.map((item) => item.value),
+				["unrelated"],
+			);
+			assert.strictEqual(report.lossless, false);
+		});
+	}
+
+	for (const kind of ["set", "template"] as const) {
+		test(`marks an inactive ${kind} write lossy even when there is no source to drop`, async () => {
+			const old = { ...OLD, properties: [input("a", "secret")] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [
+					input("a", ""),
+					input("kind", "off", { id: "kind" }),
+					input("b", "", { condition: { property: "kind", equals: "on" } }),
+				],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const { report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [
+								kind === "set"
+									? { to: "b", set: "static" }
+									: { to: "b", template: `prefix-\${a}` },
+							],
+						},
+					],
+				}),
+			});
+			assert.deepStrictEqual(report.dropped, []);
+			assert.deepStrictEqual(
+				report.added.map((item) => item.key),
+				["kind"],
+			);
+			assert.strictEqual(report.lossless, false);
+		});
+	}
+
+	for (const kind of ["move", "set", "template"] as const) {
+		test(`reconciles FEEL-normalized ${kind} writes`, async () => {
+			const old = { ...OLD, properties: [input("a", "secret")] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [input("b", "", { feel: "required" })],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const { element: migrated, report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [
+								kind === "move"
+									? { from: "a", to: "b" }
+									: kind === "set"
+										? { to: "b", set: "secret" }
+										: { to: "b", template: `\${a}` },
+							],
+						},
+					],
+				}),
+			});
+			assert.strictEqual(
+				enumerateElementValues(
+					getExtensionElements(migrated.businessObject),
+				).find((item) => item.key === "b")?.value,
+				"=secret",
+			);
+			if (kind === "move") {
+				assert.strictEqual(report.moved[0]?.valueChange?.to, "=secret");
+				assert.strictEqual(report.lossless, true);
+			} else assert.strictEqual(report.added[0]?.value, "=secret");
+		});
+	}
+	for (const kind of ["move", "translated", "set", "template"] as const) {
+		for (const finalState of [
+			"removed",
+			"overwritten",
+			"forwarded",
+			"reappeared",
+		] as const) {
+			test(`reconciles ${kind} writes that are ${finalState} across steps`, async () => {
+				const old = { ...OLD, properties: [input("a", "secret")] };
+				const intermediate = {
+					...old,
+					version: 2,
+					properties: [input("b", "")],
+				};
+				const target = {
+					...old,
+					version: 3,
+					properties: [
+						input("c", ""),
+						...(finalState === "overwritten" ? [input("b", "")] : []),
+					],
+				};
+				const expected =
+					kind === "move"
+						? "secret"
+						: kind === "translated"
+							? "translated"
+							: kind === "set"
+								? "static"
+								: "prefix-secret";
+				const final =
+					finalState === "reappeared"
+						? { ...old, version: 4, properties: [input("b", expected)] }
+						: target;
+				const { modeler, migrationModeler, element } = await setup(old, {});
+				const { element: migrated, report } = migrateElement({
+					modeler: migrationModeler,
+					element,
+					fromTemplate: old,
+					target: final,
+					templates: [old, intermediate, target, final],
+					recipe: parseRecipe({
+						schemaVersion: 1,
+						sources: [
+							{
+								kind: "upgrade",
+								sourceTemplateId: old.id,
+								toVersion: 2,
+								paths: [
+									kind === "move" || kind === "translated"
+										? {
+												from: "a",
+												to: "b",
+												...(kind === "translated"
+													? {
+															valueMap: {
+																rules: [
+																	{ match: "secret", value: "translated" },
+																],
+															},
+														}
+													: {}),
+											}
+										: kind === "set"
+											? { to: "b", set: "static" }
+											: { to: "b", template: `prefix-\${a}` },
+								],
+							},
+							{
+								kind: "upgrade",
+								sourceTemplateId: old.id,
+								toVersion: 3,
+								paths:
+									finalState === "forwarded"
+										? [{ from: "b", to: "c" }]
+										: finalState === "overwritten"
+											? [{ to: "b", set: "replacement" }]
+											: [],
+							},
+							...(finalState === "reappeared"
+								? [
+										{
+											kind: "upgrade",
+											sourceTemplateId: old.id,
+											toVersion: 4,
+											paths: [],
+										},
+									]
+								: []),
+						],
+					}),
+				});
+				const values = enumerateElementValues(
+					getExtensionElements(migrated.businessObject),
+				);
+				if (finalState === "forwarded") {
+					assert.strictEqual(
+						values.find((item) => item.key === "c")?.value,
+						expected,
+					);
+					assert.deepStrictEqual(
+						report.moved.map((item) => [item.from.key, item.to.key]),
+						kind === "move" || kind === "translated" ? [["a", "c"]] : [],
+					);
+					assert.deepStrictEqual(
+						report.added.map((item) => [item.key, item.value]),
+						kind === "move" || kind === "translated" ? [] : [["c", expected]],
+					);
+				} else {
+					assert.deepStrictEqual(report.moved, []);
+					assert.deepStrictEqual(
+						report.added.map((item) => [item.key, item.value]),
+						finalState === "overwritten"
+							? [["b", "replacement"]]
+							: finalState === "reappeared"
+								? [["b", expected]]
+								: [],
+					);
+					assert.ok(
+						report.dropped.some(
+							(item) => item.key === "a" && item.value === "secret",
+						),
+					);
+					assert.strictEqual(report.lossless, false);
+				}
+				const { xml } = await modeler.saveXML({ format: true });
+				if (finalState === "removed") assert.doesNotMatch(xml, /target="b"/);
+			});
+		}
+	}
+
+	for (const transformed of [false, true]) {
+		test(`rejects final value mismatches for ${transformed ? "translated" : "plain"} moves`, async () => {
+			const old = { ...OLD, properties: [input("a", "secret")] };
+			const target = {
+				...NEW,
+				metadata: undefined,
+				properties: [input("b", "")],
+			};
+			const { migrationModeler, element } = await setup(old, {});
+			const applyTemplate =
+				migrationModeler.elementTemplates.applyTemplate.bind(
+					migrationModeler.elementTemplates,
+				);
+			migrationModeler.elementTemplates = {
+				set: migrationModeler.elementTemplates.set.bind(
+					migrationModeler.elementTemplates,
+				),
+				applyTemplate(current, template) {
+					const applied = applyTemplate(current, template) ?? current;
+					const io = getModdleList(
+						getExtensionElements(applied.businessObject),
+						"values",
+					).find((item) => item.$type === "zeebe:IoMapping");
+					const param = getModdleList(io, "inputParameters").find(
+						(item) => item.target === "b",
+					);
+					assert.ok(param);
+					migrationModeler.modeling.updateModdleProperties(applied, param, {
+						source: "unrelated",
+					});
+					return applied;
+				},
+			};
+			const { report } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+				recipe: parseRecipe({
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "change",
+							sourceTemplateId: old.id,
+							paths: [
+								{
+									from: "a",
+									to: "b",
+									...(transformed
+										? {
+												valueMap: {
+													rules: [{ match: "secret", value: "translated" }],
+												},
+											}
+										: {}),
+								},
+							],
+						},
+					],
+				}),
+			});
+			assert.deepStrictEqual(report.moved, []);
+			assert.deepStrictEqual(
+				report.dropped.map((item) => item.value),
+				["secret"],
+			);
+			assert.deepStrictEqual(
+				report.added.map((item) => item.value),
+				["unrelated"],
+			);
+			assert.strictEqual(report.lossless, false);
+		});
+	}
+
+	test("preserves a move when a discriminator write activates its conditional destination", async () => {
+		const old = { ...OLD, properties: [input("a", "secret")] };
+		const target = {
+			...NEW,
+			metadata: undefined,
+			properties: [
+				input("kind", "off", { id: "kind" }),
+				input("b", "", { condition: { property: "kind", equals: "on" } }),
+			],
+		};
+		const { migrationModeler, element } = await setup(old, {});
+		const { element: migrated, report } = migrateElement({
+			modeler: migrationModeler,
+			element,
+			fromTemplate: old,
+			target,
+			templates: [old, target],
+			recipe: parseRecipe({
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: old.id,
+						paths: [
+							{ from: "a", to: "b" },
+							{ to: "kind", set: "on" },
+						],
+					},
+				],
+			}),
+		});
+		assert.strictEqual(
+			enumerateElementValues(
+				getExtensionElements(migrated.businessObject),
+			).find((item) => item.key === "b")?.value,
+			"secret",
+		);
+		assert.deepStrictEqual(
+			report.moved.map((item) => [item.from.key, item.to.key]),
+			[["a", "b"]],
+		);
+		assert.strictEqual(report.lossless, true);
+	});
 	test("rejects inconsistent applied-template context before mutation", async () => {
 		const { migrationModeler, element } = await setup(OLD, {});
 		assert.throws(

@@ -48,15 +48,20 @@ function findExtensionByType(
 	extensionElements: ModdleElement | undefined,
 	type: string,
 ): ModdleElement | undefined {
-	return getModdleList(extensionElements, "values").find(
+	const matches = getModdleList(extensionElements, "values").filter(
 		(v) => v.$type === type,
 	);
+	if (matches.length > 1)
+		throw new Error(
+			`Duplicate backing container ${type}; remove duplicate extension containers before migrating.`,
+		);
+	return matches[0];
 }
 
 export function findExtensionContainers(
 	extensionElements: ModdleElement | undefined,
 ): ExtensionContainers {
-	return {
+	const containers = {
 		ioMapping: findExtensionByType(extensionElements, "zeebe:IoMapping"),
 		taskHeaders: findExtensionByType(extensionElements, "zeebe:TaskHeaders"),
 		taskDefinition: findExtensionByType(
@@ -70,6 +75,25 @@ export function findExtensionContainers(
 		),
 		adHoc: findExtensionByType(extensionElements, "zeebe:AdHoc"),
 	};
+	// Check identities before reading values: missing values still occupy a path.
+	for (const [container, list, key, prefix] of [
+		[containers.ioMapping, "inputParameters", "target", "input"],
+		[containers.ioMapping, "outputParameters", "source", "output"],
+		[containers.taskHeaders, "values", "key", "header"],
+		[containers.zeebeProperties, "properties", "name", "property"],
+	] as const) {
+		const seen = new Set<string>();
+		for (const child of getModdleList(container, list)) {
+			const identity = child.get(key);
+			if (typeof identity !== "string") continue;
+			if (seen.has(identity))
+				throw new Error(
+					`Duplicate source backing path ${prefix}:${identity}; remove duplicate backing entries before migrating.`,
+				);
+			seen.add(identity);
+		}
+	}
+	return containers;
 }
 
 /**

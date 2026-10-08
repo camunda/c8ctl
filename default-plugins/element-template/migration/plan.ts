@@ -7,13 +7,14 @@
  */
 
 import {
+	bindingTargetKey,
 	findPropertiesByTarget,
 	maybePrependFeel,
 	splitBindingPrefix,
 } from "./binding.ts";
 import type { ElementValue } from "./element-values.ts";
 import type { Entry, Guard, Note } from "./recipe.ts";
-import type { MigrationTemplate } from "./types.ts";
+import type { MigrationTemplate, TemplateProperty } from "./types.ts";
 
 export interface Write {
 	/** Target key, without binding-type prefix. */
@@ -101,6 +102,196 @@ function isPopulated(value: string | undefined): value is string {
 	return value !== undefined && value !== "";
 }
 
+/** Mirror the Modeler's FEEL storage for typed input/output parameters. */
+export function normalizeDestinationValue(
+	property: TemplateProperty,
+	value: string,
+): string {
+	const feel =
+		property.feel ??
+		(["zeebe:input", "zeebe:output"].includes(property.binding?.type ?? "")
+			? "static"
+			: undefined);
+	if (value.startsWith("=")) return value;
+	if (
+		feel === "required" ||
+		(["optional", "static"].includes(feel ?? "") &&
+			["Number", "Boolean"].includes(property.type ?? ""))
+	) {
+		return `=${property.type === "Boolean" ? value !== "false" && value !== "" : value}`;
+	}
+	return value;
+}
+
+/** Validate recipe writes and the populated, non-Hidden values apply carries over. */
+export function validateDestinationValues(
+	writes: Write[],
+	sourceValues: ElementValue[],
+	template: MigrationTemplate,
+): Set<TemplateProperty> {
+	const activeProperties = new Set<TemplateProperty>();
+	const resolvedValue = (property: TemplateProperty): unknown => {
+		const key = bindingTargetKey(property.binding);
+		const write = writes.find(
+			(w) => w.key === key && w.bindingType === property.binding?.type,
+		);
+		if (
+			write &&
+			!(write.entry.label === "carry-over" && property.type === "Hidden")
+		)
+			return normalizeDestinationValue(property, write.value);
+		if (property.type !== "Hidden" && key !== undefined) {
+			const source = lookup(
+				sourceValues,
+				`${property.binding?.type === "zeebe:taskHeader" ? "header" : property.binding?.type?.replace("zeebe:", "")}:${key}`,
+			);
+			if (source && isPopulated(source.value))
+				return normalizeDestinationValue(property, source.value);
+		}
+		return property.value;
+	};
+	const isActive = (
+		property: TemplateProperty,
+		visiting = new Set<TemplateProperty>(),
+	): boolean => {
+		if (!("condition" in property) || !property.condition) return true;
+		if (visiting.has(property))
+			throw new Error("Cyclic destination property condition");
+		const next = new Set(visiting).add(property);
+		const evaluate = (condition: unknown): boolean => {
+			if (typeof condition !== "object" || condition === null)
+				throw new Error("Unsupported destination property condition");
+			if ("allMatch" in condition && Array.isArray(condition.allMatch))
+				return condition.allMatch.every(evaluate);
+			if (!("property" in condition) || typeof condition.property !== "string")
+				throw new Error("Unsupported destination property condition");
+			const related = template.properties.find(
+				(p) => p.id === condition.property,
+			);
+			if ("isActive" in condition && typeof condition.isActive === "boolean")
+				return condition.isActive
+					? !!related && isActive(related, next)
+					: !related || !isActive(related, next);
+			if (
+				!("equals" in condition) &&
+				!("oneOf" in condition && Array.isArray(condition.oneOf)) &&
+				!("isEmpty" in condition && typeof condition.isEmpty === "boolean")
+			)
+				throw new Error("Unsupported destination property condition");
+			if (!related) return false;
+			const value = resolvedValue(related);
+			if ("isEmpty" in condition)
+				return (
+					condition.isEmpty ===
+					(value === undefined || value === null || value === "")
+				);
+			const compare = (expected: unknown) => {
+				if (value === undefined || value === null) return false;
+				const literal = (v: unknown) =>
+					typeof v === "string" && v.startsWith("=") ? v.slice(1) : v;
+				if (related.type === "Number")
+					return Number(literal(value)) === Number(literal(expected));
+				if (related.type === "Boolean")
+					return (
+						(String(literal(value)) !== "false") ===
+						(typeof expected === "string" && expected.startsWith("=")
+							? literal(expected) !== "false"
+							: expected)
+					);
+				return (
+					(related.feel === "required" ? literal(value) : value) ===
+					literal(expected)
+				);
+			};
+			return "equals" in condition
+				? compare(condition.equals)
+				: "oneOf" in condition &&
+						Array.isArray(condition.oneOf) &&
+						condition.oneOf.some(compare);
+		};
+		return evaluate(property.condition);
+	};
+	const candidates = [...writes];
+	for (const source of sourceValues) {
+		if (
+			!isPopulated(source.value) ||
+			writes.some(
+				(w) => w.key === source.key && w.bindingType === source.bindingType,
+			)
+		)
+			continue;
+		if (
+			!findPropertiesByTarget(
+				template.properties,
+				source.key,
+				source.bindingType,
+			).some((p) => p.type !== "Hidden")
+		)
+			continue;
+		candidates.push({
+			...source,
+			entry: {
+				kind: "set",
+				to: source.key,
+				value: source.value,
+				when: [],
+				label: "carry-over",
+			},
+		});
+	}
+	for (const write of candidates) {
+		const path = `${write.bindingType === "zeebe:taskHeader" ? "header" : write.bindingType?.replace("zeebe:", "")}:${write.key}`;
+		const at = `${write.entry.label}: destination "${path}"`;
+		for (const property of findPropertiesByTarget(
+			template.properties,
+			write.key,
+			write.bindingType,
+		)) {
+			if (write.entry.label === "carry-over" && property.type === "Hidden")
+				continue;
+			let active: boolean;
+			try {
+				active = isActive(property);
+			} catch {
+				throw new Error(`${at} has unsupported or cyclic condition`);
+			}
+			if (!active) continue;
+			activeProperties.add(property);
+			const constraints = property.constraints;
+			for (const constraint of Object.keys(constraints ?? {})) {
+				if (constraint !== "notEmpty" && constraint !== "pattern")
+					throw new Error(`${at} has unsupported constraint ${constraint}`);
+			}
+			const stored = maybePrependFeel(property, write.value);
+			const isExpression =
+				stored.startsWith("=") &&
+				(property.feel === "optional" || property.feel === "required");
+			if (
+				constraints?.notEmpty &&
+				(isExpression ? stored.slice(1) : stored).trim() === ""
+			)
+				throw new Error(`${at} violates notEmpty constraint`);
+			if (isExpression) continue;
+			if (
+				property.choices &&
+				!property.choices.some((choice) => choice.value === stored)
+			)
+				throw new Error(`${at} violates choice constraint`);
+			if (constraints?.pattern) {
+				let pattern: RegExp;
+				try {
+					pattern = new RegExp(constraints.pattern.value);
+				} catch {
+					throw new Error(`${at} has invalid pattern constraint`);
+				}
+				if (!pattern.test(stored))
+					throw new Error(`${at} violates pattern constraint`);
+			}
+		}
+	}
+	return activeProperties;
+}
+
 export function buildStepPlan(
 	entries: Entry[],
 	sourceValues: ElementValue[],
@@ -127,35 +318,6 @@ export function buildStepPlan(
 				target.bindingType,
 			);
 			target.bindingType = properties[0].binding?.type ?? null;
-			for (const property of properties) {
-				const at = `${entry.label}: destination "${to}"`;
-				const constraints = property.constraints;
-				for (const constraint of Object.keys(constraints ?? {})) {
-					if (constraint !== "notEmpty" && constraint !== "pattern")
-						throw new Error(`${at} has unsupported constraint ${constraint}`);
-				}
-				const stored = maybePrependFeel(property, value);
-				if (
-					constraints?.notEmpty &&
-					(stored.trim() === "" || stored.trim() === "=")
-				)
-					throw new Error(`${at} violates notEmpty constraint`);
-				const isExpression =
-					stored.startsWith("=") &&
-					(property.feel === "optional" || property.feel === "required");
-				if (
-					!isExpression &&
-					property.choices &&
-					!property.choices.some((choice) => choice.value === stored)
-				)
-					throw new Error(`${at} violates choice constraint`);
-				if (
-					!isExpression &&
-					constraints?.pattern &&
-					!new RegExp(constraints.pattern.value).test(stored)
-				)
-					throw new Error(`${at} violates pattern constraint`);
-			}
 		}
 		writes.push({
 			key: target.key,
@@ -245,6 +407,7 @@ export function buildStepPlan(
 	}
 
 	assertNoAmbiguousWrites(writes);
+	if (template) validateDestinationValues(writes, sourceValues, template);
 	return { writes, facts };
 }
 

@@ -8,9 +8,12 @@ import { describe, test } from "node:test";
 import type { ElementValue } from "../../default-plugins/element-template/migration/element-values.ts";
 import {
 	buildStepPlan,
+	normalizeDestinationValue,
+	validateDestinationValues,
 	validateTargets,
 } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
+import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 
 function input(key: string, value: string): ElementValue {
 	return {
@@ -30,6 +33,405 @@ function entriesOf(...paths: unknown[]) {
 }
 
 describe("buildStepPlan", () => {
+	test("shares active-property identity with apply and normalizes upstream typed FEEL storage", () => {
+		for (const bindingType of [
+			"zeebe:input",
+			"zeebe:output",
+			"zeebe:taskHeader",
+		]) {
+			for (const feel of [undefined, "static", "optional", "required"]) {
+				for (const type of ["String", "Number", "Boolean"]) {
+					const property = { type, feel, binding: { type: bindingType } };
+					const cast =
+						feel === "required" ||
+						(type !== "String" &&
+							(feel !== undefined || bindingType !== "zeebe:taskHeader"));
+					const value = type === "Boolean" ? "false" : "2";
+					assert.strictEqual(
+						normalizeDestinationValue(property, value),
+						cast ? `=${value}` : value,
+					);
+					assert.strictEqual(
+						normalizeDestinationValue(property, "=expr"),
+						"=expr",
+					);
+				}
+			}
+		}
+		const active = {
+			type: "String",
+			binding: { type: "zeebe:input", name: "b" },
+		};
+		const inactive = {
+			...active,
+			condition: { property: "missing", isActive: true },
+		};
+		const target = { id: "new", properties: [inactive, active] };
+		const plan = buildStepPlan(
+			entriesOf({ to: "b", set: "allowed" }),
+			[],
+			target,
+		);
+		assert.deepStrictEqual(
+			validateDestinationValues(plan.writes, [], target),
+			new Set([active]),
+		);
+	});
+	test("matches condition values with upstream Number, Boolean and required FEEL coercion", () => {
+		for (const discriminator of [
+			{ type: "Number", value: 2, equals: "=2" },
+			{ type: "Boolean", value: true, equals: true },
+			{ type: "Boolean", value: false, equals: false },
+			{ type: "String", feel: "required", value: "=on", equals: "on" },
+		]) {
+			const target = {
+				id: "new",
+				properties: [
+					{
+						...discriminator,
+						id: "mode",
+						binding: { type: "zeebe:input", name: "mode" },
+					},
+					{
+						condition: { property: "mode", equals: discriminator.equals },
+						constraints: { notEmpty: true },
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.throws(
+				() => buildStepPlan(entriesOf({ to: "b", set: "" }), [], target),
+				/notEmpty/,
+			);
+		}
+	});
+
+	test("does not treat a static leading equals sign as an empty expression", () => {
+		assert.doesNotThrow(() =>
+			buildStepPlan(entriesOf({ to: "b", set: "=" }), [], {
+				id: "new",
+				properties: [
+					{
+						constraints: { notEmpty: true },
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			}),
+		);
+	});
+
+	test("validates every simultaneously active duplicate and skips all inactive duplicates", () => {
+		const target = {
+			id: "new",
+			properties: [
+				{
+					constraints: { notEmpty: true },
+					binding: { type: "zeebe:input", name: "b" },
+				},
+				{
+					constraints: { pattern: { value: "^allowed$" } },
+					binding: { type: "zeebe:input", name: "b" },
+				},
+			],
+		};
+		assert.throws(
+			() => buildStepPlan(entriesOf({ to: "b", set: "other" }), [], target),
+			/pattern/,
+		);
+		assert.doesNotThrow(() =>
+			buildStepPlan(entriesOf({ to: "b", set: "" }), [], {
+				...target,
+				properties: target.properties.map((p) => ({
+					...p,
+					condition: { property: "missing", isActive: true },
+				})),
+			}),
+		);
+	});
+	test("validates only active duplicate properties using all resolved discriminator writes", () => {
+		const target = {
+			id: "new",
+			properties: [
+				{
+					id: "mode",
+					value: "off",
+					binding: { type: "zeebe:input", name: "mode" },
+				},
+				{
+					condition: { property: "mode", equals: "on" },
+					choices: [{ value: "allowed" }],
+					binding: { type: "zeebe:input", name: "b" },
+				},
+				{
+					condition: { property: "mode", equals: "off" },
+					constraints: { pattern: { value: "^other$" } },
+					binding: { type: "zeebe:input", name: "b" },
+				},
+			],
+		};
+		const paths = [
+			{ to: "b", set: "allowed" },
+			{ to: "mode", set: "on" },
+		];
+		for (const ordered of [paths, [...paths].reverse()]) {
+			assert.doesNotThrow(() =>
+				buildStepPlan(entriesOf(...ordered), [], target),
+			);
+			assert.throws(
+				() =>
+					buildStepPlan(
+						entriesOf(
+							...ordered.map((p) =>
+								p.to === "b" ? { ...p, set: "SECRET" } : p,
+							),
+						),
+						[],
+						target,
+					),
+				/input:b.*choice/,
+			);
+		}
+	});
+
+	test("validates populated non-Hidden carry-over values without adding recipe facts", () => {
+		for (const property of [
+			{ constraints: { notEmpty: true }, value: "   " },
+			{ choices: [{ value: "allowed" }], value: "SECRET" },
+			{ constraints: { pattern: { value: "^allowed$" } }, value: "SECRET" },
+		]) {
+			const target = {
+				id: "new",
+				properties: [
+					{
+						...property,
+						type: "String",
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.throws(
+				() => buildStepPlan([], [input("b", property.value)], target),
+				(error) =>
+					error instanceof Error &&
+					/carry-over.*input:b.*constraint/.test(error.message) &&
+					!error.message.includes("SECRET"),
+			);
+			assert.doesNotThrow(() =>
+				buildStepPlan(
+					entriesOf({ to: "b", set: "allowed" }),
+					[input("b", property.value)],
+					target,
+				),
+			);
+			assert.doesNotThrow(() =>
+				buildStepPlan([], [input("b", property.value)], {
+					...target,
+					properties: target.properties.map((p) => ({ ...p, type: "Hidden" })),
+				}),
+			);
+		}
+		const plan = buildStepPlan([], [input("b", "allowed")], {
+			id: "new",
+			properties: [{ binding: { type: "zeebe:input", name: "b" } }],
+		});
+		assert.deepStrictEqual(plan.writes, []);
+		assert.deepStrictEqual(plan.facts.set, []);
+	});
+
+	test("uses defaults, qualified carry-over, allMatch, oneOf, isEmpty and recursive isActive conditions", () => {
+		const target = {
+			id: "new",
+			properties: [
+				{
+					id: "mode",
+					value: "on",
+					binding: { type: "zeebe:input", name: "mode" },
+				},
+				{
+					id: "gate",
+					condition: { property: "mode", oneOf: ["on"] },
+					binding: { type: "zeebe:input", name: "gate" },
+				},
+				{
+					condition: {
+						allMatch: [
+							{ property: "gate", isActive: true },
+							{ property: "gate", isEmpty: true },
+						],
+					},
+					constraints: { notEmpty: true },
+					binding: { type: "zeebe:input", name: "b" },
+				},
+			],
+		};
+		assert.throws(
+			() => buildStepPlan(entriesOf({ to: "b", set: "" }), [], target),
+			/notEmpty/,
+		);
+		assert.doesNotThrow(() =>
+			buildStepPlan(
+				entriesOf({ to: "b", set: "" }),
+				[
+					input("mode", "off"),
+					{ ...input("mode", "on"), bindingType: "zeebe:taskHeader" },
+				],
+				target,
+			),
+		);
+		assert.doesNotThrow(() =>
+			buildStepPlan(
+				entriesOf({ to: "b", set: "" }, { to: "gate", set: "populated" }),
+				[],
+				target,
+			),
+		);
+	});
+
+	test("rejects empty FEEL bodies but bypasses literal choices and patterns for expressions", () => {
+		for (const feel of ["optional", "required"]) {
+			const target = {
+				id: "new",
+				properties: [
+					{
+						feel,
+						constraints: { notEmpty: true, pattern: { value: "^allowed$" } },
+						choices: [{ value: "allowed" }],
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.doesNotThrow(() =>
+				buildStepPlan(
+					entriesOf({ to: "b", set: "=secretVariable" }),
+					[],
+					target,
+				),
+			);
+			for (const value of ["", " ", "=", "=   "])
+				assert.throws(
+					() => buildStepPlan(entriesOf({ to: "b", set: value }), [], target),
+					/notEmpty/,
+				);
+		}
+		assert.throws(
+			() =>
+				buildStepPlan(entriesOf({ to: "b", set: "=expr" }), [], {
+					id: "new",
+					properties: [
+						{
+							choices: [{ value: "allowed" }],
+							binding: { type: "zeebe:input", name: "b" },
+						},
+					],
+				}),
+			/choice/,
+		);
+	});
+
+	test("identifies entries and qualified destinations while sanitizing invalid pattern diagnostics", () => {
+		const entries = entriesOf({ to: "b", set: "SECRET" });
+		assert.throws(
+			() =>
+				buildStepPlan(entries, [], {
+					id: "new",
+					properties: [
+						{
+							constraints: { pattern: { value: "[SECRET", message: "SECRET" } },
+							binding: { type: "zeebe:input", name: "b" },
+						},
+					],
+				}),
+			(error) =>
+				error instanceof Error &&
+				error.message.includes(entries[0].label) &&
+				/input:b.*pattern/.test(error.message) &&
+				!error.message.includes("SECRET"),
+		);
+	});
+
+	test("explicitly rejects unsupported active constraints, including for FEEL and carry-over", () => {
+		for (const constraints of [
+			{ minLength: 1 },
+			{ maxLength: 2 },
+			{ custom: true },
+		]) {
+			const target = {
+				id: "new",
+				properties: [
+					{
+						feel: "optional",
+						constraints,
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.throws(
+				() => buildStepPlan(entriesOf({ to: "b", set: "=expr" }), [], target),
+				/unsupported constraint/,
+			);
+			assert.throws(
+				() => buildStepPlan([], [input("b", "SECRET")], target),
+				/unsupported constraint/,
+			);
+			assert.doesNotThrow(() =>
+				buildStepPlan(entriesOf({ to: "b", set: "SECRET" }), [], {
+					...target,
+					properties: [
+						{
+							...target.properties[0],
+							...{ condition: { property: "missing", isActive: true } },
+						},
+					],
+				}),
+			);
+		}
+	});
+
+	test("validates mapped and composed values against active constraints", () => {
+		const target = {
+			id: "new",
+			properties: [
+				{
+					choices: [{ value: "allowed" }],
+					binding: { type: "zeebe:input", name: "b" },
+				},
+			],
+		};
+		for (const path of [
+			{
+				from: "a",
+				to: "b",
+				valueMap: { rules: [{ match: "*", value: "SECRET" }] },
+			},
+			{ to: "b", template: `\${a}` },
+		])
+			assert.throws(
+				() => buildStepPlan(entriesOf(path), [input("a", "SECRET")], target),
+				/choice/,
+			);
+	});
+
+	test("fails closed on unsupported and cyclic destination conditions", () => {
+		for (const condition of [
+			{ property: "b", custom: true },
+			{ property: "b", isActive: true },
+		]) {
+			const target: MigrationTemplate = {
+				id: "new",
+				properties: [
+					{
+						id: "b",
+						...{ condition },
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.throws(
+				() => buildStepPlan(entriesOf({ to: "b", set: "SECRET" }), [], target),
+				/condition/,
+			);
+		}
+	});
 	test("validates required, choice and pattern destination values without echoing them", () => {
 		for (const property of [
 			{ constraints: { notEmpty: true }, value: "" },

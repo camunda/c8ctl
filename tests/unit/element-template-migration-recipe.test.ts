@@ -258,4 +258,58 @@ describe("parseRecipe", () => {
 			);
 		}
 	});
+
+	test("rejects duplicate upgrade markers and omitted change floors without merging", () => {
+		for (const source of [
+			{ kind: "upgrade", sourceTemplateId: SOURCE_ID, toVersion: 0 },
+			{ kind: "upgrade", sourceTemplateId: SOURCE_ID, toVersion: 2 },
+			{ kind: "change", sourceTemplateId: SOURCE_ID },
+			{ kind: "change", sourceTemplateId: SOURCE_ID, minSourceVersion: 0 },
+		]) {
+			rejects(
+				{ schemaVersion: 1, sources: [source, { ...source, paths: [] }] },
+				/declared twice/,
+			);
+		}
+	});
+
+	test("accepts mixed kinds and source IDs with omitted or empty paths", () => {
+		const recipe = parseRecipe({
+			schemaVersion: 1,
+			sources: [
+				{ kind: "upgrade", sourceTemplateId: "owner", toVersion: 0 },
+				{ kind: "upgrade", sourceTemplateId: "owner", toVersion: 2, paths: [] },
+				{ kind: "change", sourceTemplateId: SOURCE_ID, minSourceVersion: 0 },
+				{ kind: "change", sourceTemplateId: SOURCE_ID, paths: [] },
+				{ kind: "change", sourceTemplateId: "other" },
+			],
+		});
+		assert.strictEqual(recipe.schemaVersion, 1);
+		assert.strictEqual(recipe.sources.length, 5);
+		assert.ok(recipe.sources.every((source) => source.entries.length === 0));
+	});
+
+	test("validates both version fields as non-negative safe integers", () => {
+		for (const kind of ["upgrade", "change"]) {
+			const field = kind === "upgrade" ? "toVersion" : "minSourceVersion";
+			for (const version of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, null, "2"]) {
+				rejects(
+					{
+						schemaVersion: 1,
+						sources: [{ kind, sourceTemplateId: SOURCE_ID, [field]: version }],
+					},
+					/non-negative safe integer/,
+				);
+			}
+			for (const version of [0, Number.MAX_SAFE_INTEGER]) {
+				assert.strictEqual(
+					parseRecipe({
+						schemaVersion: 1,
+						sources: [{ kind, sourceTemplateId: SOURCE_ID, [field]: version }],
+					}).sources.length,
+					1,
+				);
+			}
+		}
+	});
 });

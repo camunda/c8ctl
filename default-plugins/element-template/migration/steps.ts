@@ -27,7 +27,7 @@ export interface Step {
 
 export interface ResolvedSteps {
 	steps: Step[];
-	/** Why a declared recipe was not used; the change falls back to carry-over. */
+	/** Why a declared recipe was not used; callers must authorize carry-over. */
 	refusal: string | null;
 }
 
@@ -42,12 +42,69 @@ function versionOf(template: MigrationTemplate): number | undefined {
 	return typeof template.version === "number" ? template.version : undefined;
 }
 
+function sameContent(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		return (
+			Array.isArray(left) &&
+			Array.isArray(right) &&
+			left.length === right.length &&
+			left.every((value, index) => sameContent(value, right[index]))
+		);
+	}
+	if (
+		typeof left !== "object" ||
+		left === null ||
+		typeof right !== "object" ||
+		right === null
+	)
+		return false;
+	const leftEntries = Object.entries(left);
+	const rightEntries = Object.entries(right);
+	return (
+		leftEntries.length === rightEntries.length &&
+		leftEntries.every(([key, value]) =>
+			rightEntries.some(
+				([otherKey, otherValue]) =>
+					key === otherKey && sameContent(value, otherValue),
+			),
+		)
+	);
+}
+
+/** Explicit definitions replace catalog shadows; all other identities must agree. */
+export function resolveCatalog(
+	templates: MigrationTemplate[],
+	authoritative: MigrationTemplate[] = [],
+): MigrationTemplate[] {
+	const identity = (template: MigrationTemplate) =>
+		JSON.stringify([template.id, template.version]);
+	const overrides = new Map(authoritative.map((t) => [identity(t), t]));
+	const catalog = new Map<string, MigrationTemplate>();
+	const conflicts = new Set<string>();
+	for (const candidate of [...authoritative, ...templates]) {
+		const key = identity(candidate);
+		const template = overrides.get(key) ?? candidate;
+		const existing = catalog.get(key);
+		if (existing && !sameContent(existing, template)) conflicts.add(key);
+		else if (!existing) catalog.set(key, template);
+	}
+	const conflict = [...conflicts].sort()[0];
+	if (conflict) {
+		const template = catalog.get(conflict);
+		throw new Error(
+			`Conflicting definitions for template "${template?.id}" version ${template?.version}; supply one definition per identity.`,
+		);
+	}
+	return [...catalog.values()];
+}
+
 export function latestOf(
 	templates: MigrationTemplate[],
 	id: string,
 ): MigrationTemplate | undefined {
 	let best: MigrationTemplate | undefined;
-	for (const t of templates) {
+	for (const t of resolveCatalog(templates)) {
 		const v = versionOf(t);
 		if (
 			t.id === id &&
@@ -81,32 +138,9 @@ function readPaths(entry: Entry): string[] {
 	return paths;
 }
 
-/** Newest loaded version of `id` in `[appliedVersion, before)`. */
-function shapeBefore(
-	templates: MigrationTemplate[],
-	id: string,
-	appliedVersion: number,
-	before: number,
-): MigrationTemplate | undefined {
-	let best: MigrationTemplate | undefined;
-	for (const t of templates) {
-		const v = versionOf(t);
-		if (
-			t.id === id &&
-			v !== undefined &&
-			v >= appliedVersion &&
-			v < before &&
-			(!best || v > (versionOf(best) ?? -1))
-		) {
-			best = t;
-		}
-	}
-	return best;
-}
-
 /**
- * Every version step must read a shape something produces: an earlier step
- * of the same recipe, or the loaded template it runs against. Checks
+ * Every version step must read the applied shape or the preceding selected
+ * application, never an unselected catalog version or a removed write. Checks
  * coverage of the recipe, not contiguity of version numbers, since published
  * lineages skip numbers.
  */
@@ -116,31 +150,27 @@ function findCoverageGap(
 	appliedVersion: number,
 	templates: MigrationTemplate[],
 ): string | null {
-	const produced = new Set<string>();
+	let shape = templates.find(
+		(t) => t.id === appliedId && versionOf(t) === appliedVersion,
+	);
 	for (const step of steps) {
-		const shape = shapeBefore(
-			templates,
-			appliedId,
-			appliedVersion,
-			step.toVersion,
-		);
 		for (const entry of step.entries) {
 			for (const path of readPaths(entry)) {
 				const { bindingType, key } = splitBindingPrefix(path);
-				if (produced.has(key) || !shape) {
+				if (!shape) {
 					continue;
 				}
 				if (
 					findPropertiesByTarget(shape.properties, key, bindingType).length ===
 					0
 				) {
-					return `the recipe for ${appliedId} is incomplete: the step at version ${step.toVersion} reads "${path}", which version ${shape.version} does not define and no earlier step writes`;
+					return `the recipe for ${appliedId} is incomplete: the step at version ${step.toVersion} reads "${path}", which reached version ${shape.version} does not define`;
 				}
 			}
 		}
-		for (const entry of step.entries) {
-			produced.add(splitBindingPrefix(entry.to).key);
-		}
+		shape = templates.find(
+			(t) => t.id === appliedId && versionOf(t) === step.toVersion,
+		);
 	}
 	return null;
 }
@@ -174,8 +204,8 @@ function reachableHop(
  * Resolve the steps for moving an element from `appliedId@appliedVersion`
  * to `target`. `recipe` overrides the recipe embedded in the target.
  *
- * A refusal is a message, never a throw: the change still lands through the
- * library's carry-over.
+ * A refusal is a message, never a throw. It discards all recipe steps so
+ * callers can reject explicit recipes or authorize embedded carry-over.
  */
 export function resolveSteps({
 	appliedId,
@@ -190,6 +220,7 @@ export function resolveSteps({
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
 }): ResolvedSteps {
+	templates = resolveCatalog(templates, [target]);
 	const sameId = target.id === appliedId;
 	const targetVersion = versionOf(target) ?? 0;
 	const targetRecipe = recipe ?? readEmbeddedRecipe(target);
@@ -218,7 +249,10 @@ export function resolveSteps({
 				: [],
 		)
 		.sort((a, b) => a.toVersion - b.toVersion);
-	for (const rung of rungs) loaded(templates, appliedId, rung.toVersion);
+	for (const rung of rungs) {
+		if (!sameId || rung.toVersion !== targetVersion)
+			loaded(templates, appliedId, rung.toVersion);
+	}
 
 	const refusal = findCoverageGap(rungs, appliedId, appliedVersion, templates);
 	if (refusal) {
@@ -242,7 +276,30 @@ export function resolveSteps({
 				version: targetVersion,
 				entries: hop.entries,
 			});
+		} else if (targetRecipe) {
+			const sources = recipeSourcesFor(targetRecipe, appliedId).filter(
+				(source) => source.kind === "change",
+			);
+			return {
+				steps: [],
+				refusal:
+					sources.length === 0
+						? `wrong source ID: the recipe has no change entry for "${appliedId}"`
+						: `unmet source floor: the recipe requires source version ${Math.min(...sources.map((source) => source.minSourceVersion ?? 0))}, but reached version is ${reachedVersion}`,
+			};
 		}
+	} else if (
+		targetRecipe &&
+		steps.length === 0 &&
+		targetVersion !== appliedVersion
+	) {
+		return {
+			steps: [],
+			refusal:
+				recipeSourcesFor(targetRecipe, appliedId).length === 0
+					? `wrong source ID: the recipe has no upgrade entry for "${appliedId}"`
+					: `no applicable upgrade: the recipe has no upgrade above applied version ${appliedVersion} through target version ${targetVersion}`,
+		};
 	}
 	return { steps, refusal: null };
 }
@@ -258,6 +315,8 @@ export function findSuccessors(
 	appliedVersion: number,
 	templates: MigrationTemplate[],
 ): MigrationTemplate[] {
+	candidates = resolveCatalog(candidates);
+	templates = resolveCatalog([...templates, ...candidates]);
 	const ids = new Set(candidates.map((c) => c.id));
 	const found: MigrationTemplate[] = [];
 	for (const id of ids) {
@@ -307,12 +366,10 @@ export function resolveApplications(
 	steps: Step[],
 	target: MigrationTemplate,
 ): Application[] {
+	templates = resolveCatalog(templates, [target]);
 	const applications: Application[] = steps.map((step) => ({
 		step,
-		template:
-			step.templateId === target.id && step.version === versionOf(target)
-				? target
-				: loaded(templates, step.templateId, step.version),
+		template: loaded(templates, step.templateId, step.version),
 	}));
 	const last = applications[applications.length - 1];
 	if (

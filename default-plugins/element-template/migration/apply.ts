@@ -11,7 +11,6 @@
 import {
 	findExtensionContainers,
 	findPropertiesByTarget,
-	maybePrependFeel,
 	resolveBindingTarget,
 } from "./binding.ts";
 import {
@@ -24,12 +23,23 @@ import {
 	getModdleString,
 	type ModdleElement,
 } from "./moddle.ts";
-import { buildStepPlan, type PlanFacts, validateTargets } from "./plan.ts";
+import {
+	buildStepPlan,
+	normalizeDestinationValue,
+	validateDestinationValues,
+	validateTargets,
+} from "./plan.ts";
 import type { Recipe } from "./recipe.ts";
-import { buildReport, type MigrationReport, mergeFacts } from "./report.ts";
+import {
+	buildReport,
+	type MigrationReport,
+	mergeFacts,
+	type ReportFacts,
+} from "./report.ts";
 import {
 	type Application,
 	resolveApplications,
+	resolveCatalog,
 	resolveSteps,
 } from "./steps.ts";
 import type { MigrationTemplate } from "./types.ts";
@@ -92,7 +102,7 @@ function applyApplication(
 	catalog: MigrationTemplate[],
 	element: BpmnElement,
 	application: Application,
-): { element: BpmnElement; facts: PlanFacts } | null {
+): { element: BpmnElement; facts: ReportFacts } | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
 	if (applied?.id === template.id && applied.version === template.version) {
@@ -138,15 +148,19 @@ function applyApplication(
 
 	// Seed the template so optional and empty targets materialise on apply.
 	const clone = structuredClone(template);
+	const activeProperties = validateDestinationValues(
+		writes,
+		valuesOf(element),
+		clone,
+	);
 	for (const w of writes) {
 		for (const property of findPropertiesByTarget(
 			clone.properties,
 			w.key,
 			w.bindingType,
 		)) {
-			if (w.entry.label === "carry-over" && property.type === "Hidden")
-				continue;
-			property.value = maybePrependFeel(property, w.value);
+			if (!activeProperties.has(property)) continue;
+			property.value = normalizeDestinationValue(property, w.value);
 		}
 	}
 	modeler.elementTemplates.set(
@@ -168,22 +182,56 @@ function applyApplication(
 			w.key,
 			w.bindingType,
 		)) {
-			if (w.entry.label === "carry-over" && property.type === "Hidden")
-				continue;
+			if (!activeProperties.has(property)) continue;
 			if (!property.binding) {
 				continue;
 			}
 			const target = resolveBindingTarget(property.binding, containers);
 			if (target) {
 				modeler.modeling.updateModdleProperties(current, target.child, {
-					[target.property]: maybePrependFeel(property, w.value),
+					[target.property]: normalizeDestinationValue(property, w.value),
 				});
 			}
 		}
 	}
 
 	current = modeler.elementTemplates.applyTemplate(current, clone) ?? current;
-	return { element: current, facts };
+	const resolvedValue = (key: string, bindingType: string | null) => {
+		const write = writes.find(
+			(w) => w.key === key && w.bindingType === bindingType,
+		);
+		const property = findPropertiesByTarget(
+			clone.properties,
+			key,
+			bindingType,
+		).find((property) => activeProperties.has(property));
+		return write && property
+			? normalizeDestinationValue(property, write.value)
+			: undefined;
+	};
+	return {
+		element: current,
+		facts: {
+			...facts,
+			after: valuesOf(current),
+			moved: facts.moved.map((move) => ({
+				...move,
+				value: resolvedValue(move.to.key, move.to.bindingType),
+			})),
+			set: writes
+				.filter(
+					(write) =>
+						(write.entry.kind === "set" &&
+							write.entry.label !== "carry-over") ||
+						write.entry.kind === "template",
+				)
+				.map((write) => ({
+					key: write.key,
+					bindingType: write.bindingType,
+					value: resolvedValue(write.key, write.bindingType) ?? write.value,
+				})),
+		},
+	};
 }
 
 /**
@@ -221,6 +269,7 @@ export function migrateElement({
 			"Migration context does not match the element's applied template.",
 		);
 	}
+	templates = resolveCatalog(templates, [fromTemplate, target]);
 	const { steps, refusal } = resolveSteps({
 		appliedId: fromTemplate.id,
 		appliedVersion: fromTemplate.version ?? 0,
@@ -235,13 +284,13 @@ export function migrateElement({
 		}
 	}
 
-	const catalog = [fromTemplate, ...applications.map((a) => a.template)].filter(
-		(t, i, all) =>
-			all.findIndex((o) => o.id === t.id && o.version === t.version) === i,
+	const catalog = resolveCatalog(
+		[fromTemplate, ...applications.map((a) => a.template)],
+		[fromTemplate, target],
 	);
 
 	const before = valuesOf(element);
-	const allFacts: PlanFacts[] = [];
+	const allFacts: ReportFacts[] = [];
 	let current = element;
 	for (const application of applications) {
 		const result = applyApplication(modeler, catalog, current, application);
@@ -249,6 +298,15 @@ export function migrateElement({
 			current = result.element;
 			allFacts.push(result.facts);
 		}
+	}
+
+	const finalApplied = readAppliedTemplate(current.businessObject);
+	if (
+		!finalApplied ||
+		finalApplied.id !== target.id ||
+		finalApplied.version !== target.version
+	) {
+		throw new Error("Migration did not apply the target template identity.");
 	}
 
 	const report = buildReport({
