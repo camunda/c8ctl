@@ -99,6 +99,22 @@ and always leaves the install directory itself in place. Stop the cluster first.
 If a process does end up orphaned (e.g. the directory was removed outside
 c8ctl), `cluster stop` terminates it directly using the recorded PID.
 
+When `cluster start` exits nonzero with surviving Camunda or connector processes,
+the PID record also retains the failed startup outcome. `cluster status` reports
+**`running after failed startup`**, even if the shared health endpoint responds:
+that response does not establish readiness of every physical tenant. Review the
+startup error or c8run logs, then run `c8ctl cluster stop` before retrying. The
+original startup exit code is preserved. Stop clears the record once all recorded
+processes are gone; a successful start replaces any stale failure metadata.
+This also applies when c8run exits successfully but c8ctl's readiness check times
+out: `cluster start` exits 1 and retains the failed startup outcome. Retrying
+while processes survive without an active marker exits 1 without launching a new
+instance or replacing the recovery record.
+
+Without a known failed startup, live processes lacking an active marker are
+reported as **`running (untracked)`**, with neutral recovery guidance. Both text
+and JSON status include instructions to stop the surviving processes.
+
 ## How it works
 
 1. **Download**: Automatically downloads the correct c8run binary for your platform from the Camunda Download Center
