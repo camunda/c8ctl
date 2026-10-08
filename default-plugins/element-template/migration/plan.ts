@@ -89,6 +89,7 @@ function isPopulated(value: string | undefined): value is string {
 export function buildStepPlan(
 	entries: Entry[],
 	sourceValues: ElementValue[],
+	template?: MigrationTemplate,
 ): StepPlan {
 	const facts: PlanFacts = {
 		moved: [],
@@ -103,6 +104,15 @@ export function buildStepPlan(
 
 	const write = (entry: Entry, to: string, value: string) => {
 		const target = splitBindingPrefix(to);
+		if (template) {
+			validateTargets([entry], template);
+			target.bindingType =
+				findPropertiesByTarget(
+					template.properties,
+					target.key,
+					target.bindingType,
+				)[0].binding?.type ?? null;
+		}
 		writes.push({
 			key: target.key,
 			bindingType: target.bindingType,

@@ -102,6 +102,7 @@ function applyApplication(
 	const { writes, facts } = buildStepPlan(
 		step?.entries ?? [],
 		valuesOf(element),
+		template,
 	);
 
 	// Seed the template so optional and empty targets materialise on apply.

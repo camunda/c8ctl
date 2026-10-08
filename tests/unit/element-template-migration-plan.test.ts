@@ -214,6 +214,23 @@ describe("buildStepPlan", () => {
 			/Ambiguous migration/,
 		);
 	});
+	test("rejects qualified and unqualified writes to the same resolved binding", () => {
+		const paths = [
+			{ from: "a", to: "b" },
+			{ to: "input:b", set: "overwrite" },
+		];
+		const target = {
+			id: "new",
+			properties: [{ binding: { type: "zeebe:input", name: "b" } }],
+		};
+		for (const ordered of [paths, [...paths].reverse()]) {
+			assert.throws(
+				() =>
+					buildStepPlan(entriesOf(...ordered), [input("a", "secret")], target),
+				/Ambiguous migration/,
+			);
+		}
+	});
 });
 
 describe("validateTargets", () => {
