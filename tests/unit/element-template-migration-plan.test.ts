@@ -30,6 +30,36 @@ function entriesOf(...paths: unknown[]) {
 }
 
 describe("buildStepPlan", () => {
+	test("validates required, choice and pattern destination values without echoing them", () => {
+		for (const property of [
+			{ constraints: { notEmpty: true }, value: "" },
+			{ choices: [{ name: "Allowed", value: "allowed" }], value: "SECRET" },
+			{ constraints: { pattern: { value: "^allowed$" } }, value: "SECRET" },
+		]) {
+			const target = {
+				id: "new",
+				properties: [
+					{
+						...property,
+						type: "String",
+						binding: { type: "zeebe:input", name: "b" },
+					},
+				],
+			};
+			assert.throws(
+				() =>
+					buildStepPlan(
+						entriesOf({ to: "b", set: property.value }),
+						[],
+						target,
+					),
+				(error) =>
+					error instanceof Error &&
+					/destination|constraint|choice|pattern/.test(error.message) &&
+					!error.message.includes("SECRET"),
+			);
+		}
+	});
 	test("rejects ambiguous rename, guard and interpolation reads and duplicate backing values", () => {
 		const values = [
 			input("key", "INPUT"),

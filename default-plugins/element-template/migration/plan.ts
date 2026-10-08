@@ -6,7 +6,11 @@
  * entry's write, so the result does not depend on entry order.
  */
 
-import { findPropertiesByTarget, splitBindingPrefix } from "./binding.ts";
+import {
+	findPropertiesByTarget,
+	maybePrependFeel,
+	splitBindingPrefix,
+} from "./binding.ts";
 import type { ElementValue } from "./element-values.ts";
 import type { Entry, Guard, Note } from "./recipe.ts";
 import type { MigrationTemplate } from "./types.ts";
@@ -117,12 +121,41 @@ export function buildStepPlan(
 		const target = splitBindingPrefix(to);
 		if (template) {
 			validateTargets([entry], template);
-			target.bindingType =
-				findPropertiesByTarget(
-					template.properties,
-					target.key,
-					target.bindingType,
-				)[0].binding?.type ?? null;
+			const properties = findPropertiesByTarget(
+				template.properties,
+				target.key,
+				target.bindingType,
+			);
+			target.bindingType = properties[0].binding?.type ?? null;
+			for (const property of properties) {
+				const at = `${entry.label}: destination "${to}"`;
+				const constraints = property.constraints;
+				for (const constraint of Object.keys(constraints ?? {})) {
+					if (constraint !== "notEmpty" && constraint !== "pattern")
+						throw new Error(`${at} has unsupported constraint ${constraint}`);
+				}
+				const stored = maybePrependFeel(property, value);
+				if (
+					constraints?.notEmpty &&
+					(stored.trim() === "" || stored.trim() === "=")
+				)
+					throw new Error(`${at} violates notEmpty constraint`);
+				const isExpression =
+					stored.startsWith("=") &&
+					(property.feel === "optional" || property.feel === "required");
+				if (
+					!isExpression &&
+					property.choices &&
+					!property.choices.some((choice) => choice.value === stored)
+				)
+					throw new Error(`${at} violates choice constraint`);
+				if (
+					!isExpression &&
+					constraints?.pattern &&
+					!new RegExp(constraints.pattern.value).test(stored)
+				)
+					throw new Error(`${at} violates pattern constraint`);
+			}
 		}
 		writes.push({
 			key: target.key,

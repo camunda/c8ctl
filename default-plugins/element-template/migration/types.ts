@@ -19,7 +19,11 @@ export interface TemplateProperty {
 	value?: unknown;
 	feel?: string;
 	optional?: boolean;
-	constraints?: { notEmpty?: boolean };
+	constraints?: {
+		notEmpty?: boolean;
+		pattern?: { value: string; message?: string };
+		[key: string]: unknown;
+	};
 	choices?: { name?: string; value: string }[];
 	binding?: TemplateBinding;
 }
