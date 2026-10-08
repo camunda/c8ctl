@@ -4,7 +4,7 @@
  * carrying its values along with the recipe the target template declares.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
@@ -25,6 +25,7 @@ import {
 	type Recipe,
 	RecipeError,
 	readEmbeddedRecipe,
+	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport } from "../migration/report.ts";
 import { findSuccessors } from "../migration/steps.ts";
@@ -126,6 +127,8 @@ export function parseMigrateArgs(
 				throw new Error(`--to-version must be a whole number, got "${value}"`);
 			}
 			parsed.toVersion = Number(value);
+			if (!Number.isSafeInteger(parsed.toVersion))
+				throw new Error("--to-version must be a safe integer");
 			i += skip;
 		} else if (arg.startsWith("-")) {
 			throw new Error(`Unknown flag: ${arg}`);
@@ -294,7 +297,7 @@ async function resolveTarget({
 	return target;
 }
 
-export async function runMigrate(
+async function runMigrateInternal(
 	mode: MigrateMode,
 	args: string[],
 ): Promise<void> {
@@ -368,6 +371,11 @@ export async function runMigrate(
 		applied,
 		executionPlatformVersion: engineVersion,
 	});
+	const recipe = parsed.recipePath
+		? loadRecipeFile(parsed.recipePath)
+		: undefined;
+	const targetRecipe = recipe ?? embeddedRecipe(target);
+	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (
 		"engines" in target &&
 		target.engines &&
@@ -431,9 +439,6 @@ export async function runMigrate(
 		(t) => t.id === applied.id && t.version === applied.version,
 	) ?? { id: applied.id, version: applied.version, properties: [] };
 
-	const recipe = parsed.recipePath
-		? loadRecipeFile(parsed.recipePath)
-		: undefined;
 	const recipeSource: RecipeSource = recipe
 		? "file"
 		: embeddedRecipe(target)
@@ -473,6 +478,13 @@ export async function runMigrate(
 		);
 	}
 
+	if (!dryRun && parsed.inPlace && bpmnFilePath) {
+		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
+			throw new Error(
+				"BPMN changed during migration; refusing to overwrite concurrent edits.",
+			);
+		atomicOverwriteFile(bpmnFilePath, xml);
+	}
 	if (c8ctl.outputMode === "json") {
 		logger.json({
 			...reportToJson(report, {
@@ -506,11 +518,36 @@ export async function runMigrate(
 		return;
 	}
 	if (parsed.inPlace && bpmnFilePath) {
-		atomicOverwriteFile(bpmnFilePath, xml);
 		if (c8ctl.outputMode !== "json") {
 			logger.info(`Updated ${bpmnFilePath}`);
 		}
 		return;
 	}
 	process.stdout.write(xml);
+}
+
+export async function runMigrate(
+	mode: MigrateMode,
+	args: string[],
+): Promise<void> {
+	const parsed = parseMigrateArgs(args, mode);
+	const file =
+		parsed.positionals[mode === "change" && !parsed.successor ? 2 : 1];
+	if (!parsed.inPlace || !file || c8ctl.dryRun)
+		return runMigrateInternal(mode, args);
+	const lock = `${resolvePath(file)}.migration.lock`;
+	let descriptor: number;
+	try {
+		descriptor = openSync(lock, "wx");
+	} catch {
+		throw new Error(
+			`Cannot acquire migration lock ${lock}. Another writer may be active; remove a stale lock only after checking that no migration is running.`,
+		);
+	}
+	try {
+		await runMigrateInternal(mode, args);
+	} finally {
+		closeSync(descriptor);
+		unlinkSync(lock);
+	}
 }

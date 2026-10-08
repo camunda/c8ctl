@@ -134,6 +134,10 @@ c8ctl element-template update Task_1 process.bpmn --dry-run --json
 - Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
   Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
   even with authorization; correct the source entry or source-version floor.
+- In-place migrations take a sibling `.migration.lock` and reject changes to the
+  input observed before replacement. A killed writer can leave a stale lock;
+  confirm no writer is active before removing it. External editors and symlink
+  aliases are not covered by the cooperative lock.
 - Migration requires valid `modeler:executionPlatformVersion` metadata. Incompatible
   explicit targets are rejected; automatic selection uses compatible source versions.
   Every required intermediate version must also be compatible and available.

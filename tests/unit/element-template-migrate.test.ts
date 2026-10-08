@@ -503,6 +503,43 @@ describe("element-template change", () => {
 });
 
 describe("element-template update", () => {
+	test("no-op still validates a supplied recipe", async () => {
+		const recipePath = join(workDir, "invalid-noop-recipe.json");
+		writeFileSync(
+			recipePath,
+			JSON.stringify({ schemaVersion: 2, sources: [] }),
+		);
+		const result = await run(
+			dataDirWithCache([V1]),
+			"update",
+			TASK,
+			versionedBpmn,
+			"--recipe",
+			recipePath,
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /schemaVersion/);
+	});
+	test("an existing writer lock prevents overwriting and is not removed", async () => {
+		const file = join(workDir, "locked.bpmn");
+		const before = readFileSync(versionedBpmn, "utf-8");
+		writeFileSync(file, before);
+		writeFileSync(`${file}.migration.lock`, "another writer");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			TASK,
+			file,
+			"--in-place",
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /migration lock/);
+		assert.strictEqual(readFileSync(file, "utf-8"), before);
+		assert.strictEqual(
+			readFileSync(`${file}.migration.lock`, "utf-8"),
+			"another writer",
+		);
+	});
 	test("rejects missing engine metadata and incompatible required intermediate versions", async () => {
 		const missingEngine = join(workDir, "missing-engine.bpmn");
 		writeFileSync(

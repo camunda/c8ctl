@@ -73,7 +73,7 @@ export function readAppliedTemplate(
 		asString !== undefined && asString !== ""
 			? Number(asString)
 			: getModdleNumber(businessObject, "modelerTemplateVersion");
-	return version === undefined || Number.isNaN(version)
+	return version === undefined || !Number.isSafeInteger(version) || version < 0
 		? undefined
 		: { id, version };
 }
@@ -104,6 +104,37 @@ function applyApplication(
 		valuesOf(element),
 		template,
 	);
+	for (const source of valuesOf(element)) {
+		if (
+			writes.some(
+				(write) =>
+					write.key === source.key && write.bindingType === source.bindingType,
+			)
+		)
+			continue;
+		const properties = findPropertiesByTarget(
+			template.properties,
+			source.key,
+			source.bindingType,
+		);
+		if (
+			source.value !== "" &&
+			properties.some((property) => property.type !== "Hidden")
+		) {
+			writes.push({
+				key: source.key,
+				bindingType: source.bindingType,
+				value: source.value,
+				entry: {
+					kind: "set",
+					to: source.key,
+					value: source.value,
+					when: [],
+					label: "carry-over",
+				},
+			});
+		}
+	}
 
 	// Seed the template so optional and empty targets materialise on apply.
 	const clone = structuredClone(template);
@@ -113,6 +144,8 @@ function applyApplication(
 			w.key,
 			w.bindingType,
 		)) {
+			if (w.entry.label === "carry-over" && property.type === "Hidden")
+				continue;
 			property.value = maybePrependFeel(property, w.value);
 		}
 	}
@@ -135,6 +168,8 @@ function applyApplication(
 			w.key,
 			w.bindingType,
 		)) {
+			if (w.entry.label === "carry-over" && property.type === "Hidden")
+				continue;
 			if (!property.binding) {
 				continue;
 			}
