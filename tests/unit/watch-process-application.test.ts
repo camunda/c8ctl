@@ -115,7 +115,7 @@ describe("watch --process-application (#227)", () => {
 
 		const output = (result.stdout || "") + (result.stderr || "");
 		assert.ok(
-			output.includes("Process application mode"),
+			output.includes("Project mode"),
 			`Watch should indicate PA mode in output, got:\n${output}`,
 		);
 	});
@@ -253,8 +253,8 @@ describe("watch --process-application (#227)", () => {
 		);
 		const output = (result.stdout || "") + (result.stderr || "");
 		assert.ok(
-			output.includes("same process application"),
-			`Error should mention same process application, got:\n${output}`,
+			output.includes("same Camunda project"),
+			`Error should mention same Camunda project, got:\n${output}`,
 		);
 	});
 });

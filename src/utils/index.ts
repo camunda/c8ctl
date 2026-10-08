@@ -10,6 +10,7 @@ export * from "./command-local/open-helpers.ts";
 export * from "./command-local/process-instance-helpers.ts";
 export * from "./command-local/search-helpers.ts";
 export * from "./command-local/watch-constants.ts";
+export * from "./shared/camunda-json.ts";
 export * from "./shared/date-filter.ts";
 export * from "./shared/ignore.ts";
 export * from "./shared/npm-exec.ts";
