@@ -217,6 +217,24 @@ process.on("exit", () => {
 });
 
 describe("element-template change", () => {
+	test("explicit target content wins over a conflicting cached identity", async () => {
+		const templatePath = join(workDir, "authoritative.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const stale = { ...NEW, properties: [input("stale", "STALE", "Stale")] };
+		const result = await run(
+			dataDirWithCache([OLD, stale]),
+			"change",
+			templatePath,
+			TASK,
+			oldBpmn,
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(
+			result.stdout,
+			/source="https:\/\/x" target="backend.endpoint"/,
+		);
+		assert.doesNotMatch(result.stdout, /STALE/);
+	});
 	test("migrates to a template file, printing the BPMN and a report on stderr", async () => {
 		const templatePath = join(workDir, "new.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));

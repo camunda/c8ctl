@@ -152,14 +152,6 @@ function migrationTemplates(templates: Template[]): MigrationTemplate[] {
 	return templates.filter(isMigrationTemplate);
 }
 
-function uniqueTemplates(templates: MigrationTemplate[]): MigrationTemplate[] {
-	return templates.filter(
-		(t, i) =>
-			templates.findIndex((o) => o.id === t.id && o.version === t.version) ===
-			i,
-	);
-}
-
 function loadRecipeFile(path: string): Recipe {
 	let raw: unknown;
 	try {
@@ -358,10 +350,10 @@ export async function runMigrate(
 	}
 
 	const cache = migrationTemplates(loadCache() ?? []);
-	const templates = uniqueTemplates([
+	const templates = [
 		...cache.filter((t) => t.id === applied.id || t.id === target.id),
 		target,
-	]);
+	];
 	const fromTemplate = templates.find(
 		(t) => t.id === applied.id && t.version === applied.version,
 	) ?? { id: applied.id, version: applied.version, properties: [] };

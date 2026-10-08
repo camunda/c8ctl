@@ -319,7 +319,10 @@ export function resolveApplications(
 ): Application[] {
 	const applications: Application[] = steps.map((step) => ({
 		step,
-		template: loaded(templates, step.templateId, step.version),
+		template:
+			step.templateId === target.id && step.version === versionOf(target)
+				? target
+				: loaded(templates, step.templateId, step.version),
 	}));
 	const last = applications[applications.length - 1];
 	if (
