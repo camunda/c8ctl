@@ -13,6 +13,10 @@ import {
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
+import { maybePrependFeel } from "./migration/binding.ts";
+
+export { maybePrependFeel } from "./migration/binding.ts";
+export { globToRegex } from "./migration/plan.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -55,38 +59,37 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+export const CONCURRENT_EDIT_MESSAGE =
+	"BPMN changed during migration; refusing to overwrite concurrent edits.";
+
 /**
  * Overwrite `targetPath` atomically: write to a sibling temp file in
  * the same directory, then `renameSync` over the target. POSIX
  * `rename` is atomic on the same filesystem, so a kill mid-write
  * never destroys the user's BPMN file.
- *
- * Falls back to a direct `writeFileSync` if the rename fails with
- * EXDEV (cross-device link) — vanishingly rare for a file's own
- * sibling, but covers exotic setups like FUSE mounts.
+ * Replacement failures must leave the original untouched, including EXDEV.
  */
 export function atomicOverwriteFile(
 	targetPath: string,
 	contents: string,
+	expectedContents?: string,
 ): void {
 	const target = resolvePath(targetPath);
 	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
 	try {
 		writeFileSync(tmp, contents, "utf-8");
+		// Recheck after preparing the sibling; external writers can still race rename.
+		if (
+			expectedContents !== undefined &&
+			readFileSync(target, "utf-8") !== expectedContents
+		)
+			throw new Error(CONCURRENT_EDIT_MESSAGE);
 		renameSync(tmp, target);
 	} catch (error) {
 		try {
 			unlinkSync(tmp);
 		} catch {
 			// Best-effort cleanup — the original error is what matters.
-		}
-		const code =
-			isRecord(error) && typeof error.code === "string"
-				? error.code
-				: undefined;
-		if (code === "EXDEV") {
-			writeFileSync(target, contents, "utf-8");
-			return;
 		}
 		throw error;
 	}
@@ -402,20 +405,6 @@ export function getPropertyDetail(
 }
 
 /**
- * Compile a shell-style glob to a regex. Only `*` is special — every
- * other character matches literally. Used for `show-properties auth*`
- * style positional matching.
- *
- *   "auth*"   → /^auth.*$/
- *   "url"     → /^url$/
- *   "a.b.*c"  → /^a\.b\..*c$/
- */
-export function globToRegex(pattern: string): RegExp {
-	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
-}
-
-/**
  * Parse a --set key=value string. If key contains a `:` prefix,
  * resolve the binding type shorthand.
  *
@@ -458,30 +447,6 @@ export function parseSetArg(arg: string): ParsedSetArg {
 	}
 
 	return { bindingTypeFilter: null, name: key, value };
-}
-
-/**
- * For a property with `feel: "required"`, Modeler always stores the value
- * as a FEEL expression (prefixed with `=`). Auto-prepend `=` when the
- * user-supplied value doesn't already start with one, so `--set key=orderId`
- * behaves like Modeler instead of producing invalid BPMN.
- *
- * The prepend is skipped when:
- *  - `prop.feel` is not `"required"` (no-op for `optional` / `static` / absent)
- *  - the value is already a FEEL expression (starts with `=`)
- *  - the value is empty (would produce `=` alone — leave as-is for validation)
- */
-export function maybePrependFeel(
-	prop: TemplateProperty,
-	value: string,
-): string {
-	if (prop.feel !== "required") {
-		return value;
-	}
-	if (value === "" || value.startsWith("=")) {
-		return value;
-	}
-	return `=${value}`;
 }
 
 /**

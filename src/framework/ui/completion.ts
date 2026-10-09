@@ -30,6 +30,13 @@ function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
 	return Object.entries(flags);
 }
 
+/** Flat flag list for a plugin command (name merged into each flag def). */
+function pluginFlagList(
+	cmd: PluginCommandInfo,
+): (FlagDef & { name: string })[] {
+	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
+}
+
 // ─── Derived completion data ─────────────────────────────────────────────────
 
 /** Reverse map: canonical resource → all names that resolve to it (including itself). */
@@ -145,7 +152,7 @@ function completesFiles(v: VerbInfo): boolean {
 	return v.fileComplete || (v.passthrough && v.resources.length === 0);
 }
 
-/** Collect all unique flag names across all commands + global + search flags. */
+/** Collect all unique built-in flag names. */
 function deriveAllFlagNames(): string[] {
 	const names = new Set<string>();
 
@@ -393,6 +400,12 @@ ${resourceVars.join("\n")}
   # everything else is forwarded verbatim to the external tool.
   local passthrough_verbs="${passthroughVerbsStr}"
 
+  if [[ \${cur} == -* ]]; then
+    case "\${words[1]}" in
+${pluginCmds.map((cmd) => `      ${cmd.commandName})\n        COMPREPLY=( $(compgen -W "${[...globalFlags, ...Object.keys(cmd.flags ?? {}).map((name) => `--${name}`)].join(" ")}" -- "\${cur}") )\n        return ;;`).join("\n")}
+    esac
+  fi
+
   case \${cword} in
     1)
       # Complete verbs
@@ -464,6 +477,14 @@ function generateZshCompletion(): string {
 	};
 	const flagEntryLines = allFlags.map(toZshFlagEntry);
 	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
+	const pluginCaseLines = pluginCmds.map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        flags=(\n${pluginFlagList(cmd)
+				.map(toZshFlagEntry)
+				.join(
+					"\n",
+				)}\n        )\n        _arguments \${global_flags[@]} \${flags[@]}; return ;;`,
+	);
 
 	// Passthrough verbs (#366) for the case branch in the default arm.
 	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
@@ -523,6 +544,12 @@ ${flagEntryLines.join("\n")}
 ${globalFlagEntryLines.join("\n")}
   )
 
+  if (( CURRENT > 3 )) || [[ \${words[CURRENT]} == -* ]]; then
+    case "\${words[2]}" in
+${pluginCaseLines.join("\n")}
+    esac
+  fi
+
   case $CURRENT in
     2)
       _describe 'command' verbs
@@ -574,6 +601,13 @@ function generateFishCompletion(): string {
 		passthroughTokens.length > 0
 			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
 			: "";
+	const flagAwarePluginCmds = pluginCmds.filter((cmd) => !cmd.passthrough);
+	const flagAwareTokens = flagAwarePluginCmds.map((cmd) => cmd.commandName);
+	const builtinGuard =
+		nonGlobalGuard +
+		(flagAwareTokens.length > 0
+			? ` -n 'not __fish_seen_subcommand_from ${flagAwareTokens.join(" ")}'`
+			: "");
 	const globalNames = new Set(globalFlags.map((f) => f.name));
 
 	const lines: string[] = [
@@ -610,24 +644,28 @@ function generateFishCompletion(): string {
 			? `# Non-global flags (suppressed under passthrough verbs: ${passthroughTokens.join(", ")})`
 			: "# Non-global flags",
 	);
-	for (const f of allFlags) {
-		if (globalNames.has(f.name)) continue;
-		const desc = escFish(f.description);
-		const req = f.type === "string" ? " -r" : "";
-		if (f.short) {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-		} else {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
+	for (const { flags, guard } of [
+		{ flags: allFlags, guard: builtinGuard },
+		...flagAwarePluginCmds.map((cmd) => ({
+			flags: pluginFlagList(cmd),
+			guard: ` -n '__fish_seen_subcommand_from ${cmd.commandName}'`,
+		})),
+	]) {
+		for (const f of flags) {
+			if (globalNames.has(f.name)) continue;
+			const desc = escFish(f.description);
+			const req = f.type === "string" ? " -r" : "";
+			if (f.short) {
+				lines.push(
+					`complete -c c8ctl${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+				lines.push(
+					`complete -c c8${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+			} else {
+				lines.push(`complete -c c8ctl${guard} -l ${f.name} -d '${desc}'${req}`);
+				lines.push(`complete -c c8${guard} -l ${f.name} -d '${desc}'${req}`);
+			}
 		}
 	}
 	lines.push("");
