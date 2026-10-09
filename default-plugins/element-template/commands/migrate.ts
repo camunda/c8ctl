@@ -1,16 +1,23 @@
 /**
- * Shared runner for `element-template update` and `element-template change`:
- * migrate one element to another template version or to another template,
- * carrying its values along with the recipe the target template declares.
+ * Runner for `element-template update`: migrate every element that uses a
+ * template to a newer version of it, or to another template, carrying values
+ * along with the recipe the target template declares.
  */
 
-import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	openSync,
+	readFileSync,
+	unlinkSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
-import { loadCache, pickVersion, requireCachePresent } from "../cache.ts";
+import { loadCache, requireCachePresent } from "../cache.ts";
 import {
 	atomicOverwriteFile,
+	BINDING_TYPE_SHORTHANDS,
 	CONCURRENT_EDIT_MESSAGE,
 	installStdoutEpipeHandler,
 	type Template,
@@ -19,8 +26,10 @@ import {
 	type MigrationModeler,
 	migrateElement,
 	readAppliedTemplate,
+	type ValueMap,
 } from "../migration/apply.ts";
 import {
+	type ElementValue,
 	enumerateElementValues,
 	getExtensionElements,
 } from "../migration/element-values.ts";
@@ -32,11 +41,10 @@ import {
 	readEmbeddedRecipe,
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
-import { buildReport } from "../migration/report.ts";
+import { buildReport, type MigrationReport } from "../migration/report.ts";
 import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
-	type MigrateMode,
 	type MigrationRedactionContext,
 	type RecipeOrigin,
 	redactMigrationDiagnostic,
@@ -63,18 +71,16 @@ if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
 
-const USAGE: Record<MigrateMode, string> = {
-	change:
-		"c8ctl element-template change <template> <element-id> [<file.bpmn>] | change --successor <element-id> [<file.bpmn>]",
-	update: "c8ctl element-template update <element-id> [<file.bpmn>]",
-};
+const COMMAND = "element-template update";
+const USAGE =
+	"c8ctl element-template update <template-id> [<element-id>] [<file.bpmn>] [--to <template>[@<n>]] [--recipe <file>] [--map <from>=<to>]... [--in-place]";
 
 interface MigrateArgs {
 	inPlace: boolean;
 	allowLossy: boolean;
-	successor: boolean;
+	to: string | undefined;
 	recipePath: string | undefined;
-	toVersion: number | undefined;
+	maps: string[];
 	positionals: string[];
 }
 
@@ -94,15 +100,17 @@ function readFlagValue(
 	return { value: next, skip: 1 };
 }
 
-function parseMigrateArgs(args: string[], mode: MigrateMode): MigrateArgs {
+function parseMigrateArgs(args: string[]): MigrateArgs {
 	const parsed: MigrateArgs = {
 		inPlace: false,
 		allowLossy: false,
-		successor: false,
+		to: undefined,
 		recipePath: undefined,
-		toVersion: undefined,
+		maps: [],
 		positionals: [],
 	};
+	const valueFlag = (arg: string, flag: string) =>
+		arg === flag || arg.startsWith(`${flag}=`);
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === "--") {
@@ -113,27 +121,19 @@ function parseMigrateArgs(args: string[], mode: MigrateMode): MigrateArgs {
 			parsed.inPlace = true;
 		} else if (arg === "--allow-lossy") {
 			parsed.allowLossy = true;
-		} else if (arg === "--successor") {
-			if (mode !== "change") {
-				throw new Error("--successor is only valid for change");
-			}
-			parsed.successor = true;
-		} else if (arg === "--recipe" || arg.startsWith("--recipe=")) {
+		} else if (valueFlag(arg, "--recipe")) {
 			const { value, skip } = readFlagValue(args, i, "--recipe");
 			if (value === "") throw new Error("--recipe requires a value");
 			parsed.recipePath = value;
 			i += skip;
-		} else if (arg === "--to-version" || arg.startsWith("--to-version=")) {
-			if (mode !== "update") {
-				throw new Error("--to-version is only valid for update");
-			}
-			const { value, skip } = readFlagValue(args, i, "--to-version");
-			if (!/^\d+$/.test(value)) {
-				throw new Error(`--to-version must be a whole number, got "${value}"`);
-			}
-			parsed.toVersion = Number(value);
-			if (!Number.isSafeInteger(parsed.toVersion))
-				throw new Error("--to-version must be a safe integer");
+		} else if (valueFlag(arg, "--to")) {
+			const { value, skip } = readFlagValue(args, i, "--to");
+			if (value === "") throw new Error("--to requires a value");
+			parsed.to = value;
+			i += skip;
+		} else if (valueFlag(arg, "--map")) {
+			const { value, skip } = readFlagValue(args, i, "--map");
+			parsed.maps.push(value);
 			i += skip;
 		} else if (arg.startsWith("-")) {
 			throw new Error(`Unknown flag: ${arg}`);
@@ -146,53 +146,72 @@ function parseMigrateArgs(args: string[], mode: MigrateMode): MigrateArgs {
 
 interface ResolvedMigrateArgs {
 	parsed: MigrateArgs;
-	/** Empty when the mode takes no template argument. */
-	templateArg: string;
-	elementId: string;
+	templateId: string;
+	elementId: string | undefined;
 	bpmnFilePath: string | undefined;
 }
 
-function resolveMigrateArgs(
-	args: string[],
-	mode: MigrateMode,
-): ResolvedMigrateArgs {
-	const parsed = parseMigrateArgs(args, mode);
-	const takesTemplate = mode === "change" && !parsed.successor;
-	const positionalCount = takesTemplate ? 3 : 2;
-	if (parsed.positionals.length > positionalCount) {
+function resolveMigrateArgs(args: string[]): ResolvedMigrateArgs {
+	const parsed = parseMigrateArgs(args);
+	const [templateId, ...rest] = parsed.positionals;
+	if (!templateId) {
+		throw new Error(`Missing template-id argument. Usage: ${USAGE}`);
+	}
+	if (templateId.toLowerCase().endsWith(".bpmn")) {
 		throw new Error(
-			`Unexpected argument: ${parsed.positionals[positionalCount]}. Usage: ${USAGE[mode]}`,
+			`"${templateId}" is a BPMN file; the first argument is the applied template ID. Usage: ${USAGE}`,
 		);
 	}
-	const templateArg = takesTemplate ? (parsed.positionals[0] ?? "") : "";
-	const [elementId, bpmnFilePath] = takesTemplate
-		? parsed.positionals.slice(1)
-		: parsed.positionals;
-	if (takesTemplate && !templateArg) {
-		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
+	if (templateId.includes("@")) {
+		throw new Error(
+			`The template selector does not take a version ("${templateId}"). To pick the target version, use --to <template-id>@<n>.`,
+		);
 	}
-	if (!elementId) {
-		throw new Error(`Missing element-id argument. Usage: ${USAGE[mode]}`);
+	if (rest.length > 2) {
+		throw new Error(`Unexpected argument: ${rest[2]}. Usage: ${USAGE}`);
 	}
-	return { parsed, templateArg, elementId, bpmnFilePath };
+	let elementId: string | undefined;
+	let bpmnFilePath: string | undefined;
+	if (rest.length === 2) {
+		[elementId, bpmnFilePath] = rest;
+	} else if (rest.length === 1) {
+		if (rest[0].toLowerCase().endsWith(".bpmn") || existsSync(rest[0])) {
+			bpmnFilePath = rest[0];
+		} else {
+			elementId = rest[0];
+		}
+	}
+	return { parsed, templateId, elementId, bpmnFilePath };
+}
+
+/** Parse `--map <from>=<to>`; each side may carry a binding-type prefix. */
+function parseMapArg(arg: string): ValueMap {
+	const eq = arg.indexOf("=");
+	if (eq <= 0 || eq === arg.length - 1) {
+		throw new Error(
+			`Invalid --map format: "${arg}". Expected <from>=<to> (e.g. --map maxTokens=limit)`,
+		);
+	}
+	const side = (text: string) => {
+		const colon = text.indexOf(":");
+		if (colon === -1) return { key: text, bindingType: null };
+		const prefix = text.slice(0, colon);
+		const bindingType = BINDING_TYPE_SHORTHANDS[prefix];
+		if (!bindingType) {
+			const valid = Object.keys(BINDING_TYPE_SHORTHANDS).join(", ");
+			throw new Error(
+				`Unknown binding type prefix "${prefix}" in --map "${arg}". Valid prefixes: ${valid}`,
+			);
+		}
+		return { key: text.slice(colon + 1), bindingType };
+	};
+	return { from: side(arg.slice(0, eq)), to: side(arg.slice(eq + 1)) };
 }
 
 function isMigrationTemplate(
 	template: Template,
 ): template is Template & { id: string } {
 	return typeof template.id === "string";
-}
-
-/** A template object returned by the modeler service. */
-function looksLikeTemplate(value: unknown): value is MigrationTemplate {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"id" in value &&
-		typeof value.id === "string" &&
-		"properties" in value &&
-		Array.isArray(value.properties)
-	);
 }
 
 function migrationTemplates(templates: Template[]): MigrationTemplate[] {
@@ -243,92 +262,22 @@ function createModeler(): ModelerInstance {
 	});
 }
 
-function describeTemplates(templates: MigrationTemplate[]): string {
-	return templates.map((t) => `${t.name ?? t.id} (${t.id})`).join(", ");
-}
-
+/** The target template: `--to`, else the latest compatible version of `templateId`. */
 async function resolveTarget({
-	mode,
-	parsed,
-	templateArg,
-	modeler,
-	element,
-	applied,
+	templateId,
+	to,
 	executionPlatformVersion,
 	cachedTemplates,
-	compatible,
 }: {
-	mode: MigrateMode;
-	parsed: MigrateArgs;
-	templateArg: string;
-	modeler: ModelerInstance;
-	element: BpmnElement;
-	applied: { id: string; version: number };
+	templateId: string;
+	to: string | undefined;
 	executionPlatformVersion: string;
 	cachedTemplates: Template[];
-	compatible: MigrationTemplate[];
 }): Promise<MigrationTemplate> {
-	if (mode === "update") {
-		requireCachePresent();
-		const versions = cachedTemplates.filter((t) => t.id === applied.id);
-		resolveCatalog(migrationTemplates(versions));
-		if (versions.length === 0) {
-			throw new Error(
-				`Template '${applied.id}' is not in the local cache. update works for out-of-the-box templates; run 'c8ctl element-template sync' or use 'change' with a template file.`,
-			);
-		}
-		const target = pickVersion(
-			parsed.toVersion === undefined
-				? versions.filter((template) =>
-						isEngineCompatible(template, executionPlatformVersion),
-					)
-				: versions,
-			{
-				version: parsed.toVersion,
-			},
-		);
-		if (!target || !isMigrationTemplate(target)) {
-			throw new Error(
-				parsed.toVersion === undefined
-					? `No version of '${applied.id}' is compatible with Camunda ${executionPlatformVersion}.`
-					: `Template '${applied.id}' has no version ${parsed.toVersion}.`,
-			);
-		}
-		if ((target.version ?? 0) < applied.version) {
-			throw new Error(
-				`Template '${applied.id}' is already at version ${applied.version}; refusing to move back to ${target.version}.`,
-			);
-		}
-		return target;
-	}
-
-	if (parsed.successor) {
-		requireCachePresent();
-		const cache = resolveCatalog(compatible);
-		const service = modeler.get("elementTemplates");
-		service.set(cache);
-		const candidates = service.getCompatible(element).filter(looksLikeTemplate);
-		const successors = findSuccessors(
-			candidates,
-			applied.id,
-			applied.version,
-			cache,
-		);
-		if (successors.length === 0) {
-			throw new Error(
-				`No template declares a migration from '${applied.id}'. Pick a target explicitly: ${USAGE.change}`,
-			);
-		}
-		if (successors.length > 1) {
-			throw new Error(
-				`Several templates declare a migration from '${applied.id}': ${describeTemplates(successors)}. Pick one explicitly: ${USAGE.change}`,
-			);
-		}
-		return successors[0];
-	}
-
-	const ref = parseTemplateRef(templateArg);
+	const arg = to ?? templateId;
+	const ref = parseTemplateRef(arg);
 	if (ref?.kind === "id") {
+		requireCachePresent();
 		resolveCatalog(
 			migrationTemplates(cachedTemplates.filter((t) => t.id === ref.id)),
 		);
@@ -340,31 +289,104 @@ async function resolveTarget({
 					requireEngineCompatibility: true,
 					templates: cachedTemplates,
 				})
-			: await readTemplateFromPathOrUrl(templateArg);
+			: await readTemplateFromPathOrUrl(arg);
 	if (!isMigrationTemplate(target)) {
 		throw new Error("The target template has no id.");
 	}
 	return target;
 }
 
+/** Elements of the diagram that use `templateId`, once each, in diagram order. */
+function selectElements(
+	modeler: ModelerInstance,
+	templateId: string,
+	elementId: string | undefined,
+): { element: BpmnElement; id: string }[] {
+	const registry = modeler.get("elementRegistry");
+	if (elementId !== undefined) {
+		const element = registry.get(elementId);
+		if (!element) {
+			throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
+		}
+		const applied = readAppliedTemplate(element.businessObject);
+		if (!applied) {
+			throw new Error(
+				`Element "${elementId}" has no element template applied. Use 'apply' first.`,
+			);
+		}
+		if (applied.id !== templateId) {
+			throw new Error(
+				`Element "${elementId}" uses template '${applied.id}', not '${templateId}'.`,
+			);
+		}
+		return [{ element, id: elementId }];
+	}
+	const seen = new Set<string>();
+	const selected: { element: BpmnElement; id: string }[] = [];
+	for (const candidate of registry.getAll()) {
+		const id = candidate.businessObject.id;
+		if (typeof id !== "string" || seen.has(id)) continue;
+		const element = registry.get(id);
+		if (
+			element &&
+			readAppliedTemplate(element.businessObject)?.id === templateId
+		) {
+			seen.add(id);
+			selected.push({ element, id });
+		}
+	}
+	if (selected.length === 0) {
+		throw new Error(
+			`No element in the BPMN diagram uses template '${templateId}'.`,
+		);
+	}
+	return selected;
+}
+
+type Outcome =
+	| {
+			status: "updated";
+			id: string;
+			report: MigrationReport;
+			requiresAuthorization: boolean;
+	  }
+	| { status: "unchanged"; id: string; version: number }
+	| {
+			status: "skipped";
+			id: string;
+			from: number;
+			to: number;
+	  }
+	| { status: "failed"; id: string; error: string };
+
+function describeDropped(report: MigrationReport): string {
+	const names = report.dropped.map((d) => d.key);
+	return names.length > 0
+		? `${names.length} dropped (${names.join(", ")})`
+		: report.refusal
+			? `recipe not used: ${report.refusal}`
+			: "values not migrated";
+}
+
 async function runMigrateInternal(
-	mode: MigrateMode,
-	{ parsed, templateArg, elementId, bpmnFilePath }: ResolvedMigrateArgs,
+	{ parsed, templateId, elementId, bpmnFilePath }: ResolvedMigrateArgs,
 	redaction: MigrationRedactionContext,
 ): Promise<void> {
 	const logger = c8ctl.getLogger();
 	installStdoutEpipeHandler();
 
 	const dryRun = c8ctl.dryRun === true;
+	const json = c8ctl.outputMode === "json";
 	if (parsed.inPlace && !bpmnFilePath) {
 		throw new Error("--in-place cannot be used with stdin input");
 	}
 	const writesXmlToStdout = !parsed.inPlace && !dryRun;
-	if (c8ctl.outputMode === "json" && writesXmlToStdout) {
+	if (json && writesXmlToStdout) {
 		throw new Error(
 			"--json needs --in-place or --dry-run, because stdout carries the BPMN otherwise",
 		);
 	}
+	const maps = parsed.maps.map(parseMapArg);
 
 	const input = await readBpmnInput(bpmnFilePath);
 	if (!input) {
@@ -383,45 +405,35 @@ async function runMigrateInternal(
 
 	const modeler = createModeler();
 	await modeler.importXML(input.xml);
-	const element = modeler.get("elementRegistry").get(elementId);
-	if (!element) {
-		throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
-	}
-	const applied = readAppliedTemplate(element.businessObject);
-	if (!applied) {
-		throw new Error(
-			`Element "${elementId}" has no element template applied. Use 'apply' first.`,
-		);
-	}
-	redaction.values = enumerateElementValues(
-		getExtensionElements(element.businessObject),
-	);
+	const selected = selectElements(modeler, templateId, elementId);
+	const valuesOf = (element: BpmnElement): ElementValue[] =>
+		enumerateElementValues(getExtensionElements(element.businessObject));
+	redaction.values = selected.flatMap(({ element }) => valuesOf(element));
+
 	const cachedTemplates = loadCache() ?? [];
 	redaction.templates = migrationTemplates(cachedTemplates);
 	const cache = compatibleTemplates(cachedTemplates, engineVersion);
 
-	const target = await resolveTarget({
-		mode,
-		parsed,
-		templateArg,
-		modeler,
-		element,
-		applied,
-		executionPlatformVersion: engineVersion,
-		cachedTemplates,
-		compatible: cache,
-	});
-	const templates = resolveCatalog(
-		cache.filter((t) => t.id === applied.id || t.id === target.id),
-		[target],
-	);
-	redaction.templates = templates;
-	const fromTemplate = templates.find(
-		(t) => t.id === applied.id && t.version === applied.version,
-	) ?? { id: applied.id, version: applied.version, properties: [] };
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
 		: undefined;
+	if (recipe && !recipe.sources.some((s) => s.sourceTemplateId === templateId)) {
+		throw new Error(
+			`Recipe ${parsed.recipePath} has no source entry for template '${templateId}'.`,
+		);
+	}
+
+	const target = await resolveTarget({
+		templateId,
+		to: parsed.to,
+		executionPlatformVersion: engineVersion,
+		cachedTemplates,
+	});
+	const templates = resolveCatalog(
+		cache.filter((t) => t.id === templateId || t.id === target.id),
+		[target],
+	);
+	redaction.templates = templates;
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (!isEngineCompatible(target, engineVersion)) {
@@ -429,44 +441,6 @@ async function runMigrateInternal(
 			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,
 		);
 	}
-
-	if (target.id === applied.id && target.version === applied.version) {
-		if (c8ctl.outputMode === "json") {
-			const report = buildReport({
-				fromTemplate: target,
-				toTemplate: target,
-				before: [],
-				after: [],
-				facts: emptyFacts(),
-				usedRecipe: false,
-				refusal: null,
-			});
-			logger.json({
-				...reportToJson(report, {
-					elementId,
-					action: mode,
-					recipe: "none",
-					dryRun,
-					file: parsed.inPlace ? bpmnFilePath : undefined,
-					redaction,
-				}),
-				noop: true,
-			});
-		} else {
-			logger.info(
-				redactMigrationDiagnostic(
-					`${elementId} is already on ${target.name ?? target.id} v${applied.version}; nothing to do.`,
-					redaction,
-				),
-				{ stream: writesXmlToStdout ? "stderr" : "stdout" },
-			);
-		}
-		if (writesXmlToStdout) {
-			process.stdout.write(input.xml);
-		}
-		return;
-	}
-
 	const recipeSource: RecipeOrigin = recipe
 		? "file"
 		: targetRecipe
@@ -478,105 +452,250 @@ async function runMigrateInternal(
 		elementTemplates: service,
 		modeling: modeler.get("modeling"),
 	};
-	let report: ReturnType<typeof migrateElement>["report"];
-	try {
-		const result = migrateElement({
-			modeler: migrationModeler,
-			element,
-			fromTemplate,
-			target,
-			templates,
-			recipe,
-		});
-		report = result.report;
-		redaction.report = report;
-		redaction.values = [
-			...(redaction.values ?? []),
-			...enumerateElementValues(
-				getExtensionElements(result.element.businessObject),
-			),
-		];
-	} catch (error) {
-		redaction.values = [
-			...(redaction.values ?? []),
-			...enumerateElementValues(getExtensionElements(element.businessObject)),
-		];
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Cannot migrate ${elementId}: ${message}`);
-	}
-	if (recipe && (!report.usedRecipe || report.refusal)) {
-		throw new Error(
-			`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry"}.`,
-		);
-	}
-	const requiresAuthorization =
-		(parsed.inPlace && !report.lossless) || report.refusal !== null;
-	if (requiresAuthorization && !parsed.allowLossy && !dryRun) {
-		throw new Error(
-			`${report.refusal ? `Recipe cannot be used: ${report.refusal}. ` : ""}Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it.`,
-		);
-	}
-	const saved = dryRun ? undefined : await modeler.saveXML({ format: true });
 
+	const outcomes: Outcome[] = [];
+	for (const { element, id } of selected) {
+		const applied = readAppliedTemplate(element.businessObject);
+		if (!applied) continue;
+		if (target.id === applied.id && target.version === applied.version) {
+			outcomes.push({ status: "unchanged", id, version: applied.version });
+			continue;
+		}
+		if (target.id === applied.id && (target.version ?? 0) < applied.version) {
+			outcomes.push({
+				status: "skipped",
+				id,
+				from: applied.version,
+				to: target.version ?? 0,
+			});
+			continue;
+		}
+		const fromTemplate = templates.find(
+			(t) => t.id === applied.id && t.version === applied.version,
+		) ?? { id: applied.id, version: applied.version, properties: [] };
+		try {
+			const result = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate,
+				target,
+				templates,
+				recipe,
+				maps,
+			});
+			redaction.values = [...(redaction.values ?? []), ...valuesOf(result.element)];
+			const { report } = result;
+			if (recipe && (!report.usedRecipe || report.refusal)) {
+				throw new Error(
+					`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry"}.`,
+				);
+			}
+			outcomes.push({
+				status: "updated",
+				id,
+				report,
+				requiresAuthorization:
+					((parsed.inPlace || dryRun) && !report.lossless) ||
+					report.refusal !== null,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			outcomes.push({
+				status: "failed",
+				id,
+				error: `Cannot migrate ${id}: ${message}`,
+			});
+		}
+	}
+
+	const updated = outcomes.filter((o) => o.status === "updated");
+	const failed = outcomes.filter((o) => o.status === "failed");
+	const blocked = updated.filter(
+		(o) => o.requiresAuthorization && !parsed.allowLossy,
+	);
+	const droppedCount = updated.reduce(
+		(sum, o) => sum + o.report.dropped.length,
+		0,
+	);
+	const wouldBlock = blocked.length > 0;
+
+	if (wouldBlock && !dryRun && failed.length === 0) {
+		throw new Error(
+			`Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it. Blocked: ${blocked
+				.map((o) => `${o.id} (${describeDropped(o.report)})`)
+				.join("; ")}`,
+		);
+	}
+
+	const canWrite = !dryRun && failed.length === 0 && !wouldBlock;
+	const saved =
+		canWrite && updated.length > 0
+			? await modeler.saveXML({ format: true })
+			: undefined;
 	if (saved && parsed.inPlace && bpmnFilePath) {
 		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
 			throw new Error(CONCURRENT_EDIT_MESSAGE);
 		atomicOverwriteFile(bpmnFilePath, saved.xml, input.xml);
 	}
-	if (c8ctl.outputMode === "json") {
+
+	const summary = {
+		updated: updated.length,
+		skipped: outcomes.filter((o) => o.status === "skipped").length,
+		unchanged: outcomes.filter((o) => o.status === "unchanged").length,
+		failed: failed.length,
+		dropped: droppedCount,
+		blocked: blocked.length,
+	};
+
+	if (json) {
+		const file = parsed.inPlace ? bpmnFilePath : undefined;
+		const emptyReport = (version: number) =>
+			buildReport({
+				fromTemplate: { ...target, version },
+				toTemplate: target,
+				before: [],
+				after: [],
+				facts: emptyFacts(),
+				usedRecipe: false,
+				refusal: null,
+			});
 		logger.json({
-			...reportToJson(report, {
-				elementId,
-				action: mode,
-				recipe: recipeSource,
-				dryRun,
-				file: parsed.inPlace ? bpmnFilePath : undefined,
-				redaction,
+			dryRun,
+			command: COMMAND,
+			results: outcomes.map((o) => {
+				switch (o.status) {
+					case "updated":
+						return {
+							status: o.status,
+							...reportToJson(o.report, {
+								elementId: o.id,
+								recipe: recipeSource,
+								dryRun,
+								file,
+								redaction,
+							}),
+							requiresAuthorization: o.requiresAuthorization,
+							authorized: parsed.allowLossy,
+						};
+					case "unchanged":
+						return {
+							status: o.status,
+							...reportToJson(emptyReport(o.version), {
+								elementId: o.id,
+								recipe: "none",
+								dryRun,
+								file,
+								redaction,
+							}),
+							noop: true,
+						};
+					case "skipped":
+						return {
+							status: o.status,
+							elementId: redactMigrationDiagnostic(o.id, redaction),
+							from: { id: templateId, version: o.from },
+							to: { id: target.id, version: o.to },
+						};
+					case "failed":
+						return {
+							status: o.status,
+							elementId: redactMigrationDiagnostic(o.id, redaction),
+							error: redactMigrationDiagnostic(o.error, redaction),
+						};
+				}
 			}),
-			requiresAuthorization,
-			authorized: parsed.allowLossy,
+			summary,
 		});
 	} else {
 		const stream = writesXmlToStdout ? process.stderr : process.stdout;
-		stream.write(
-			renderReportText(report, {
-				elementId,
-				color: shouldUseColor(stream),
-				dryRun,
-				redaction,
-			}),
-		);
-		if (requiresAuthorization)
-			stream.write(
-				parsed.allowLossy
-					? "Lossy migration authorized with --allow-lossy.\n"
-					: "Requires --allow-lossy authorization before writing.\n",
+		const color = shouldUseColor(stream);
+		const lines: string[] = [];
+		const latest = templates
+			.filter((t) => t.id === templateId)
+			.sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+		if (latest?.deprecated) {
+			let successors: MigrationTemplate[] = [];
+			try {
+				successors = findSuccessors(
+					cache,
+					templateId,
+					latest.version ?? 0,
+					templates,
+				);
+			} catch {
+				// The hint is informational; a catalog conflict must not fail the run.
+			}
+			lines.push(
+				`Template '${templateId}' is deprecated.${
+					successors.length > 0
+						? ` Templates that declare a migration from it: ${successors.map((t) => t.id).join(", ")}. Use --to <template>.`
+						: ""
+				}\n`,
 			);
+		}
+		for (const o of outcomes) {
+			if (o.status === "updated") {
+				lines.push(
+					renderReportText(o.report, {
+						elementId: o.id,
+						color,
+						dryRun,
+						redaction,
+					}),
+				);
+				if (o.requiresAuthorization)
+					lines.push(
+						parsed.allowLossy
+							? "Lossy migration authorized with --allow-lossy.\n"
+							: "Requires --allow-lossy authorization before writing.\n",
+					);
+			} else if (o.status === "unchanged") {
+				lines.push(
+					`${o.id} is already on ${target.name ?? target.id} v${o.version}; nothing to do.\n`,
+				);
+			} else if (o.status === "skipped") {
+				lines.push(
+					`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`,
+				);
+			} else {
+				lines.push(`${o.error}\n`);
+			}
+		}
+		lines.push(
+			`Summary: ${summary.updated} updated, ${summary.skipped} skipped, ${summary.unchanged} unchanged, ${summary.failed} failed, ${summary.dropped} values dropped.\n`,
+		);
+		if (failed.length > 0) {
+			lines.push("Nothing was written because an element failed.\n");
+		} else if (wouldBlock && dryRun) {
+			lines.push("A write would be blocked: pass --allow-lossy to authorize it.\n");
+		}
+		stream.write(redactMigrationDiagnostic(lines.join("\n"), redaction));
 	}
 
-	if (!saved) {
-		return;
+	if (failed.length > 0 || (wouldBlock && dryRun)) {
+		process.exitCode = 1;
 	}
-	if (parsed.inPlace && bpmnFilePath) {
-		if (c8ctl.outputMode !== "json") {
+	if (saved && parsed.inPlace && bpmnFilePath) {
+		if (!json) {
 			logger.info(
 				redactMigrationDiagnostic(`Updated ${bpmnFilePath}`, redaction),
 			);
 		}
 		return;
 	}
-	process.stdout.write(saved.xml);
+	if (writesXmlToStdout && failed.length === 0) {
+		process.stdout.write(saved ? saved.xml : input.xml);
+	}
 }
 
 async function runLockedMigrate(
-	mode: MigrateMode,
 	args: string[],
 	redaction: MigrationRedactionContext,
 ): Promise<void> {
-	const resolved = resolveMigrateArgs(args, mode);
+	const resolved = resolveMigrateArgs(args);
 	const file = resolved.bpmnFilePath;
 	if (!resolved.parsed.inPlace || !file || c8ctl.dryRun)
-		return runMigrateInternal(mode, resolved, redaction);
+		return runMigrateInternal(resolved, redaction);
 	const lock = `${resolvePath(file)}.migration.lock`;
 	let descriptor: number;
 	try {
@@ -588,7 +707,7 @@ async function runLockedMigrate(
 	}
 	let cleanupFailure: { error: unknown } | undefined;
 	try {
-		await runMigrateInternal(mode, resolved, redaction);
+		await runMigrateInternal(resolved, redaction);
 	} finally {
 		try {
 			try {
@@ -604,13 +723,10 @@ async function runLockedMigrate(
 	if (cleanupFailure) throw cleanupFailure.error;
 }
 
-export async function runMigrate(
-	mode: MigrateMode,
-	args: string[],
-): Promise<void> {
+export async function runMigrate(args: string[]): Promise<void> {
 	const redaction: MigrationRedactionContext = {};
 	try {
-		await runLockedMigrate(mode, args, redaction);
+		await runLockedMigrate(args, redaction);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(redactMigrationDiagnostic(message, redaction));

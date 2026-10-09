@@ -16,8 +16,7 @@ The verb is organized as a workflow: discover → inspect → act → export →
 | `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). `--engine-version` resolves the latest compatible version. |
 | `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. `--engine-version` resolves the latest compatible version. |
 | `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
-| `update <element-id> [<file.bpmn>]` | Move an element to a newer version of its template, migrating its values. |
-| `change <template> <element-id> [<file.bpmn>]` | Move an element to another template, migrating its values. `--successor` picks the template that supersedes the applied one. |
+| `update <template-id> [<element-id>] [<file.bpmn>]` | Move all elements that use a template to its latest version, or to another template with `--to`, migrating their values. |
 | `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
 | `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
 
@@ -105,31 +104,44 @@ c8ctl element-template sync --prune    # also drop entries no longer in a select
 
 ## Migrating to a newer template
 
-`update` and `change` move an element that already has a template to a newer
+`update <template-id>` moves every element that uses that template to a newer
 version of it, or to a different template. Values the new template binds under
 another key are moved along instead of being dropped, and a report lists what
 happened.
 
 ```bash
-# Preview moving an element to the latest compatible version of its template
-c8ctl element-template update Task_1 process.bpmn --dry-run
+# Preview moving all elements to the latest compatible version of their template
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 process.bpmn --dry-run
 
-# Move an element from a deprecated template to the one that supersedes it
-c8ctl element-template change --successor Agent_1 process.bpmn --in-place
+# Update one element, pinned to a version
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn \
+  --to io.camunda.connectors.HttpJson.v2@15 --in-place
 
-# Move to a specific template, with a recipe from a file
-c8ctl element-template change new-template.json Task_1 process.bpmn --recipe recipe.json
+# Move all elements to another template (its embedded recipe moves renamed values)
+c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
+  --to io.camunda.connectors.agenticai.aiagent.v2 --in-place
+
+# Same, with a recipe from a file, or a single value moved by hand
+c8ctl element-template update old.id process.bpmn --to new.json --recipe recipe.json -i
+c8ctl element-template update old.id process.bpmn --to new.json --map maxTokens=limit -i
 
 # The report as data (needs --in-place or --dry-run, because stdout carries the BPMN otherwise)
-c8ctl element-template update Task_1 process.bpmn --dry-run --json
+c8ctl element-template update old.id process.bpmn --dry-run --json
 ```
 
-- `update` resolves the newest version of the applied template compatible with
-  the BPMN's `modeler:executionPlatformVersion`; `--to-version <n>` pins one.
-  It only works for templates in the local cache.
-- `change` takes a template like `apply` does. `--successor` picks the one
-  non-deprecated compatible template that declares a migration from the applied
-  one, and fails when there are none or several.
+- The first argument is the applied template ID (never a path or `id@n`).
+  An optional element ID limits the update to one element; a run that selects
+  no element fails. For several files, loop in the shell.
+- Without `--to`, the target is the newest version of the same template ID
+  compatible with the BPMN's `modeler:executionPlatformVersion`. The command
+  never changes the template ID unless `--to` names another template
+  (`<id>[@<n>]`, path or URL). Elements already on a newer version are skipped.
+- `--map <from>=<to>` moves the original value of one binding to another on every
+  selected element, after the recipe steps. A moved value does not count as
+  dropped. Prefixes such as `input:` work as in `apply --set`.
+- All selected elements migrate in memory and the file is written once, only if
+  every element succeeds. A dry run exits 1 when the write would fail or need
+  `--allow-lossy`. JSON output is one document: `{dryRun, command, results, summary}`.
 - Without `--in-place` the BPMN goes to stdout and the report to stderr.
 - Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
   Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,

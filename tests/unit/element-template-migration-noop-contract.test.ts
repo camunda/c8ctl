@@ -38,7 +38,9 @@ const template = {
 		},
 	],
 };
-const modes = ["update", "change"] as const;
+// "latest" resolves the target from the cache; "to-file" passes it with --to <path>.
+const modes = ["latest", "to-file"] as const;
+type Mode = (typeof modes)[number];
 let root: string;
 let original: string;
 
@@ -141,15 +143,16 @@ function argsFor({
 	path,
 	file,
 }: {
-	mode: "update" | "change";
+	mode: Mode;
 	path: string;
 	file?: string;
 }) {
 	return [
-		mode,
-		...(mode === "change" ? [path] : []),
+		"update",
+		ID,
 		TASK,
 		...(file ? [file] : []),
+		...(mode === "to-file" ? ["--to", path] : []),
 	];
 }
 
@@ -173,19 +176,33 @@ function filesystemSnapshot(dir: string) {
 
 function assertNoopJson({
 	stdout,
-	mode,
 	dryRun,
 	file,
 }: {
 	stdout: string;
-	mode: "update" | "change";
+	mode: Mode;
 	dryRun: boolean;
 	file?: string;
 }) {
-	const envelope: unknown = JSON.parse(stdout);
+	const document: unknown = JSON.parse(stdout);
+	assert.ok(isRecord(document));
+	assert.equal(document.dryRun, dryRun);
+	assert.equal(document.command, "element-template update");
+	assert.deepEqual(document.summary, {
+		updated: 0,
+		skipped: 0,
+		unchanged: 1,
+		failed: 0,
+		dropped: 0,
+		blocked: 0,
+	});
+	assert.ok(Array.isArray(document.results));
+	assert.equal(document.results.length, 1);
+	const envelope: unknown = document.results[0];
 	assert.ok(isRecord(envelope));
+	assert.equal(envelope.status, "unchanged");
 	assert.equal(envelope.elementId, TASK);
-	assert.equal(envelope.action, mode);
+	assert.equal(envelope.action, undefined);
 	assert.equal(envelope.noop, true);
 	assert.equal(envelope.dryRun, dryRun);
 	assert.equal(envelope.lossless, true);
@@ -411,7 +428,7 @@ describe("no-op global output settings and error channels", () => {
 							? []
 							: ["--json", output === "dry-json" ? "--dry-run" : "--in-place"]),
 						"--fields",
-						"NOOP,Action,Dry-Run,Report",
+						"Results,Dry-Run,Command",
 					],
 				});
 				assert.equal(result.status, 0, result.stderr);
@@ -420,19 +437,18 @@ describe("no-op global output settings and error channels", () => {
 					assert.match(result.stderr, /already on.*nothing to do/);
 				} else {
 					assert.equal(result.stderr, "");
-					assert.deepEqual(JSON.parse(result.stdout), {
-						action: mode,
-						dryRun: output === "dry-json",
-						report: {
-							dropped: [],
-							added: [],
-							changed: [],
-							moved: [],
-							notes: [],
-							skipped: { guard: [], template: [], noMatch: [], feel: [] },
-						},
-						noop: true,
-					});
+					const filtered: unknown = JSON.parse(result.stdout);
+					assert.ok(isRecord(filtered));
+					assert.deepEqual(Object.keys(filtered).sort(), [
+						"command",
+						"dryRun",
+						"results",
+					]);
+					assert.equal(filtered.dryRun, output === "dry-json");
+					assert.equal(filtered.command, "element-template update");
+					assert.ok(Array.isArray(filtered.results));
+					assert.ok(isRecord(filtered.results[0]));
+					assert.equal(filtered.results[0].noop, true);
 				}
 				assert.deepEqual(filesystemSnapshot(dir), snapshot);
 			});

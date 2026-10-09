@@ -51,6 +51,8 @@ export interface MovedItem {
 	to: Field;
 	/** Set when the value was rewritten on the way, or differs after the move. */
 	valueChange?: ValueChange;
+	/** Set when the move did not come from a recipe entry, such as `--map`. */
+	via?: string;
 }
 
 export interface MigrationReport {
@@ -264,6 +266,9 @@ export function buildReport({
 		const fromValue = find(before, m.from.key, m.from.bindingType)?.value;
 		const toValue = find(after, m.to.key, m.to.bindingType)?.value;
 		const item: MovedItem = { from, to };
+		if (m.via) {
+			item.via = m.via;
+		}
 		if (
 			(m.transformed || fromValue !== toValue) &&
 			fromValue !== undefined &&

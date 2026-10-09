@@ -32,6 +32,8 @@ export interface MovedFact {
 	from: FieldKey;
 	to: FieldKey;
 	transformed: boolean;
+	/** What produced the move when it is not a recipe entry, such as `--map`. */
+	via?: string;
 }
 
 export interface PlanFacts {
@@ -444,7 +446,7 @@ export function buildStepPlan(
 }
 
 /** Two active writes to the same target make the recipe ambiguous. */
-function assertNoAmbiguousWrites(writes: Write[]): void {
+export function assertNoAmbiguousWrites(writes: Write[]): void {
 	const seen = new Map<string, Write>();
 	for (const w of writes) {
 		const id = `${w.bindingType ?? ""} ${w.key}`;

@@ -11,7 +11,10 @@ import type { TemplateProperty } from "./migration/types.ts";
 
 export type { ModdleElement };
 export type BpmnElement = { businessObject: ModdleElement };
-export type ElementRegistry = { get(id: string): BpmnElement | undefined };
+export type ElementRegistry = {
+	get(id: string): BpmnElement | undefined;
+	getAll(): BpmnElement[];
+};
 export type ElementTemplatesService = {
 	set(
 		templates: {

@@ -124,6 +124,7 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 for (const flags of [
 	["--dry-run"],
 	["--dry-run", "--json"],
+	["--dry-run", "--allow-lossy"],
 	[],
 	["--in-place", "--allow-lossy", "--json"],
 ]) {
@@ -134,13 +135,18 @@ for (const flags of [
 		const result = await c8WithEnv(
 			env,
 			"element-template",
-			"change",
-			targetPath,
+			"update",
+			source.id,
 			TASK,
 			file,
+			"--to",
+			targetPath,
 			...flags,
 		);
-		assert.equal(result.status, 0, result.stderr);
+		// A lossy dry run predicts the blocked write without --allow-lossy.
+		const blocked =
+			flags.includes("--dry-run") && !flags.includes("--allow-lossy");
+		assert.equal(result.status, blocked ? 1 : 0, result.stderr);
 		const xmlOutput = flags.length === 0;
 		assertPrivateAbsent(result.stderr);
 		if (!xmlOutput) assertPrivateAbsent(result.stdout);
@@ -148,7 +154,7 @@ for (const flags of [
 		assert.match(reporting, /\[REDACTED\]/);
 		assert.match(reporting, /unchanged credential/);
 		if (flags.includes("--json")) {
-			const diff = JSON.parse(reporting).report;
+			const diff = JSON.parse(reporting).results[0].report;
 			for (const collection of ["dropped", "added", "changed", "moved"])
 				assert.ok(diff[collection].length > 0, reporting);
 		} else {
@@ -209,6 +215,7 @@ for (const json of [false, true]) {
 				{ ...env, C8CTL_DATA_DIR: data },
 				"element-template",
 				"update",
+				source.id,
 				TASK,
 				file,
 				"--in-place",
@@ -245,10 +252,12 @@ for (const json of [false, true]) {
 			const result = await c8WithEnv(
 				env,
 				"element-template",
-				"change",
-				path,
+				"update",
+				source.id,
 				TASK,
 				bpmn,
+				"--to",
+				path,
 				"--in-place",
 				"--verbose",
 				...(json ? ["--json"] : []),
@@ -277,10 +286,12 @@ for (const flags of [
 		const result = await c8WithEnv(
 			env,
 			"element-template",
-			"change",
-			noopPath,
+			"update",
+			source.id,
 			TASK,
 			bpmn,
+			"--to",
+			noopPath,
 			...flags,
 		);
 		assert.equal(result.status, 0, result.stderr);
@@ -289,7 +300,7 @@ for (const flags of [
 		else assertPrivateAbsent(result.stdout);
 		assert.equal(readFileSync(bpmn, "utf8"), original);
 		if (flags.includes("--json"))
-			assert.equal(JSON.parse(result.stdout).noop, true);
+			assert.equal(JSON.parse(result.stdout).results[0].noop, true);
 	});
 }
 
@@ -306,10 +317,12 @@ for (const json of [false, true]) {
 			const result = await c8WithEnv(
 				env,
 				"element-template",
-				"change",
-				targetPath,
+				"update",
+				source.id,
 				TASK,
 				bpmn,
+				"--to",
+				targetPath,
 				"--recipe",
 				recipePath,
 				"--in-place",

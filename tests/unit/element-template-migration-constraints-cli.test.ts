@@ -175,21 +175,29 @@ describe("migration destination constraints through CLI", () => {
 					["--dry-run", "--json"],
 				]) {
 					const result = await run(
-						action,
-						...(action === "change" ? [targetPath] : []),
+						"update",
+						old.id,
 						TASK,
 						file,
+						...(action === "change" ? ["--to", target.id] : []),
 						...flags,
 					);
 					assert.equal(result.status, 1, result.stderr);
-					assert.equal(result.stdout, "");
-					assert.match(result.stderr, /input:b/);
-					assert.match(result.stderr, scenario.rule);
-					assert.match(
-						result.stderr,
-						scenario.paths ? /paths\[/ : /carry-over/,
-					);
-					assert.doesNotMatch(result.stderr, /SECRET/);
+					const json = flags.includes("--json");
+					let diagnostic = result.stderr;
+					if (json) {
+						assert.equal(result.stderr, "");
+						const doc = JSON.parse(result.stdout);
+						assert.equal(doc.results[0].status, "failed");
+						assert.equal(doc.summary.failed, 1);
+						diagnostic = doc.results[0].error;
+					} else {
+						assert.equal(result.stdout, "");
+					}
+					assert.match(diagnostic, /input:b/);
+					assert.match(diagnostic, scenario.rule);
+					assert.match(diagnostic, scenario.paths ? /paths\[/ : /carry-over/);
+					assert.doesNotMatch(result.stdout + result.stderr, /SECRET/);
 					assert.deepEqual(readFileSync(file), bytes);
 					assert.equal(statSync(file).mtimeMs, mtime);
 				}

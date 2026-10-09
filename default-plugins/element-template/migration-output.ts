@@ -261,15 +261,20 @@ export function renderReportText(
 			const to =
 				sameGroup && from !== fullTo ? (m.to.label ?? m.to.key) : fullTo;
 			const change = m.valueChange;
+			const keys =
+				from === to && m.from.key !== m.to.key
+					? s.dim(` (${m.from.key} → ${m.to.key})`)
+					: "";
+			const via = m.via ? s.dim(` [${m.via}]`) : "";
 			if (change) {
 				const values = `${valueText(change.from, change.fromName)} → ${s.bold(valueText(change.to, change.toName))}`;
 				item(
 					from === to
-						? `${from}  ${values}`
-						: `${from} → ${s.bold(to)}  ${values}`,
+						? `${from}${keys}  ${values}${via}`
+						: `${from} → ${s.bold(to)}  ${values}${via}`,
 				);
 			} else {
-				item(`${s.dim(from)} → ${s.bold(to)}`);
+				item(`${s.dim(from)} → ${s.bold(to)}${keys}${via}`);
 			}
 		}
 	}
@@ -335,21 +340,18 @@ export function renderReportText(
 }
 
 export type RecipeOrigin = "file" | "embedded" | "none";
-export type MigrateMode = "change" | "update";
 
 /** The report as plain data for `--json`. */
 export function reportToJson(
 	report: MigrationReport,
 	{
 		elementId,
-		action,
 		recipe,
 		dryRun,
 		file,
 		redaction,
 	}: {
 		elementId: string;
-		action: MigrateMode;
 		recipe: RecipeOrigin;
 		dryRun: boolean;
 		file?: string;
@@ -361,7 +363,6 @@ export function reportToJson(
 	report = redactReport(report, redactor);
 	return {
 		elementId: text(elementId),
-		action,
 		dryRun,
 		...(file ? { file: text(file) } : {}),
 		from: report.from,

@@ -109,11 +109,10 @@ after(() => {
 
 describe("migrate loads the template cache once per run", () => {
 	const cases: [string, () => string[]][] = [
-		["update", () => ["update", TASK, bpmn, "--dry-run"]],
-		["change <id>", () => ["change", NEXT.id, TASK, bpmn, "--dry-run"]],
+		["update", () => ["update", SOURCE.id, TASK, bpmn, "--dry-run"]],
 		[
-			"change --successor",
-			() => ["change", "--successor", TASK, bpmn, "--dry-run"],
+			"update --to <id>",
+			() => ["update", SOURCE.id, TASK, bpmn, "--to", NEXT.id, "--dry-run"],
 		],
 	];
 	for (const [name, args] of cases) {

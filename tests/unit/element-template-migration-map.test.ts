@@ -1,0 +1,220 @@
+/**
+ * `--map` value moves applied after the step chain
+ * (default-plugins/element-template/migration/apply.ts)
+ */
+
+import assert from "node:assert";
+import { createRequire } from "node:module";
+import { before, describe, test } from "node:test";
+import type {
+	BpmnElement,
+	MigrationModeler,
+} from "../../default-plugins/element-template/migration/apply.ts";
+import { migrateElement } from "../../default-plugins/element-template/migration/apply.ts";
+import {
+	enumerateElementValues,
+	getExtensionElements,
+} from "../../default-plugins/element-template/migration/element-values.ts";
+import {
+	getModdleElement,
+	getModdleList,
+} from "../../default-plugins/element-template/migration/moddle.ts";
+import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
+import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
+import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
+import { resolveVendorBundle } from "../../default-plugins/element-template/vendor.ts";
+
+const require = createRequire(import.meta.url);
+
+const DIAGRAM = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <bpmn:process id="Process_1" isExecutable="true">
+    <bpmn:serviceTask id="Task_1" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+      <bpmndi:BPMNShape id="Task_1_di" bpmnElement="Task_1">
+        <dc:Bounds x="100" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+
+function input(name: string, value: string, extra = {}) {
+	return {
+		type: "String",
+		value,
+		binding: { type: "zeebe:input", name },
+		...extra,
+	};
+}
+
+let vendor: VendorBundle;
+
+before(() => {
+	vendor = require(resolveVendorBundle());
+});
+
+async function setup(
+	applied: MigrationTemplate,
+	values: Record<string, string>,
+) {
+	const modeler = new vendor.Modeler({
+		additionalModules: [
+			vendor.HeadlessTextRendererModule,
+			vendor.CloudElementTemplatesCoreModule,
+		],
+		moddleExtensions: { zeebe: vendor.ZeebeModdleExtension },
+	});
+	await modeler.importXML(DIAGRAM);
+	const elementTemplates = modeler.get("elementTemplates");
+	const modeling = modeler.get("modeling");
+	elementTemplates.set([applied]);
+	const element = modeler.get("elementRegistry").get("Task_1");
+	assert.ok(element);
+	const seeded = elementTemplates.applyTemplate(element, applied) ?? element;
+	for (const [name, value] of Object.entries(values)) {
+		const ext = getModdleElement(seeded.businessObject, "extensionElements");
+		const io = getModdleList(ext, "values").find(
+			(v) => v.$type === "zeebe:IoMapping",
+		);
+		const param = getModdleList(io, "inputParameters").find(
+			(p) => p.target === name,
+		);
+		assert.ok(param);
+		modeling.updateModdleProperties(seeded, param, { source: value });
+	}
+	const migrationModeler: MigrationModeler = { elementTemplates, modeling };
+	return { modeler, migrationModeler, element: seeded };
+}
+
+const hidden = (id: string) => ({
+	type: "Hidden",
+	value: id,
+	binding: { type: "zeebe:taskDefinition", property: "type" },
+});
+
+const OLD: MigrationTemplate = {
+	id: "io.example.old",
+	version: 1,
+	name: "Old",
+	appliesTo: ["bpmn:Task"],
+	properties: [hidden("io.example.old"), input("maxTokens", "")],
+};
+
+const NEW: MigrationTemplate = {
+	id: "io.example.new",
+	version: 1,
+	name: "New",
+	appliesTo: ["bpmn:Task"],
+	properties: [
+		hidden("io.example.new"),
+		input("limit", ""),
+		input("mode", "off", { id: "mode" }),
+		input("extra", "", { condition: { property: "mode", equals: "on" } }),
+	],
+};
+
+const valueAt = (migrated: BpmnElement, key: string) =>
+	enumerateElementValues(getExtensionElements(migrated.businessObject)).find(
+		(v) => v.key === key,
+	)?.value;
+
+const run = async (
+	maps: Parameters<typeof migrateElement>[0]["maps"],
+	values: Record<string, string> = { maxTokens: "512" },
+	recipe?: Parameters<typeof migrateElement>[0]["recipe"],
+	target: MigrationTemplate = NEW,
+) => {
+	const { migrationModeler, element } = await setup(OLD, values);
+	return migrateElement({
+		modeler: migrationModeler,
+		element,
+		fromTemplate: OLD,
+		target,
+		templates: [OLD, target],
+		recipe,
+		maps,
+	});
+};
+
+const map = (from: string, to: string) => ({
+	from: { key: from, bindingType: null },
+	to: { key: to, bindingType: null },
+});
+
+describe("migrateElement maps", () => {
+	test("moves a dropped value, losslessly", async () => {
+		const { element, report } = await run([map("maxTokens", "limit")]);
+		assert.strictEqual(valueAt(element, "limit"), "512");
+		assert.strictEqual(report.dropped.length, 0);
+		assert.strictEqual(report.lossless, true);
+		assert.strictEqual(report.moved[0].from.key, "maxTokens");
+		assert.strictEqual(report.moved[0].to.key, "limit");
+	});
+
+	test("without the map the value is dropped", async () => {
+		const { report } = await run([]);
+		assert.strictEqual(report.dropped.length, 1);
+		assert.strictEqual(report.lossless, false);
+	});
+
+	test("skips a source that holds no value", async () => {
+		const { element, report } = await run([map("maxTokens", "limit")], {});
+		assert.strictEqual(valueAt(element, "limit") ?? "", "");
+		assert.strictEqual(report.moved.length, 0);
+		assert.strictEqual(report.lossless, true);
+	});
+
+	test("materializes a binding whose condition the moved value satisfies", async () => {
+		const old = { ...OLD, properties: [hidden(OLD.id), input("flag", "")] };
+		const { migrationModeler, element: el } = await setup(old, { flag: "on" });
+		const result = migrateElement({
+			modeler: migrationModeler,
+			element: el,
+			fromTemplate: old,
+			target: NEW,
+			templates: [old, NEW],
+			maps: [map("flag", "mode"), map("flag", "extra")],
+		});
+		assert.strictEqual(valueAt(result.element, "extra"), "on");
+	});
+
+	test("fails on a destination the target does not bind and lists names", async () => {
+		await assert.rejects(
+			() => run([map("maxTokens", "nope")]),
+			/destination "nope".*Available: .*limit/,
+		);
+	});
+
+	test("fails on a source the source template does not bind", async () => {
+		await assert.rejects(
+			() => run([map("nope", "limit")]),
+			/source "nope".*Available: .*maxTokens/,
+		);
+	});
+
+	test("fails when a recipe entry also writes the destination", async () => {
+		const recipe = parseRecipe({
+			schemaVersion: 1,
+			sources: [
+				{
+					kind: "change",
+					sourceTemplateId: OLD.id,
+					paths: [{ to: "limit", set: "1" }],
+				},
+			],
+		});
+		await assert.rejects(
+			() => run([map("maxTokens", "limit")], undefined, recipe),
+			/Ambiguous migration/,
+		);
+	});
+
+	test("fails when two maps write the same destination", async () => {
+		await assert.rejects(
+			() => run([map("maxTokens", "limit"), map("maxTokens", "limit")]),
+			/Ambiguous migration/,
+		);
+	});
+});

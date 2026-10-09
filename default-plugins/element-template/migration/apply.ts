@@ -9,9 +9,13 @@
  */
 
 import {
+	bindingPath,
+	bindingTargetKey,
+	type FieldKey,
 	findExtensionContainers,
 	findPropertiesByTarget,
 	resolveBindingTarget,
+	sameTarget,
 } from "./binding.ts";
 import {
 	type ElementValue,
@@ -24,11 +28,15 @@ import {
 	type ModdleElement,
 } from "./moddle.ts";
 import {
+	assertNoAmbiguousWrites,
 	buildStepPlan,
 	CARRY_OVER_LABEL,
 	carryOverWrites,
+	type MovedFact,
 	normalizeDestinationValue,
+	validateDestinationValues,
 	validateTargets,
+	type Write,
 } from "./plan.ts";
 import type { Recipe } from "./recipe.ts";
 import {
@@ -94,6 +102,100 @@ export interface MigrationResult {
 	report: MigrationReport;
 }
 
+/** Move the original value at `from` to `to` on the final target. */
+export interface ValueMap {
+	from: FieldKey;
+	to: FieldKey;
+}
+
+interface MapWrites {
+	writes: Write[];
+	moved: MovedFact[];
+}
+
+function availableNames(template: MigrationTemplate): string {
+	return [
+		...new Set(
+			template.properties
+				.filter((p) => p.type !== "Hidden" && p.binding)
+				.map((p) => bindingPath(p.binding?.type, bindingTargetKey(p.binding) ?? "")),
+		),
+	].join(", ");
+}
+
+/**
+ * Resolve `maps` against the element's original values. Pure: throws before
+ * anything is modified when a path is unbound or ambiguous. A map whose
+ * source holds no value is skipped.
+ */
+function resolveMapWrites(
+	maps: ValueMap[],
+	before: ElementValue[],
+	fromTemplate: MigrationTemplate,
+	target: MigrationTemplate,
+): MapWrites {
+	const result: MapWrites = { writes: [], moved: [] };
+	for (const map of maps) {
+		const fromPath = bindingPath(map.from.bindingType, map.from.key);
+		const toPath = bindingPath(map.to.bindingType, map.to.key);
+		const label = `--map ${map.from.bindingType ? fromPath : map.from.key}=${map.to.bindingType ? toPath : map.to.key}`;
+		if (
+			fromTemplate.properties.length > 0 &&
+			findPropertiesByTarget(
+				fromTemplate.properties,
+				map.from.key,
+				map.from.bindingType,
+			).length === 0
+		) {
+			throw new Error(
+				`${label}: source "${map.from.key}" is not a binding in template ${fromTemplate.id}@${fromTemplate.version}. Available: ${availableNames(fromTemplate)}`,
+			);
+		}
+		const entry: Write["entry"] = {
+			kind: "set",
+			to: map.to.bindingType ? toPath : map.to.key,
+			value: "",
+			when: [],
+			label,
+		};
+		const destinations = findPropertiesByTarget(
+			target.properties,
+			map.to.key,
+			map.to.bindingType,
+		).filter((p) => p.type !== "Hidden");
+		if (destinations.length === 0) {
+			throw new Error(
+				`${label}: destination "${map.to.key}" is not a settable binding in template ${target.id}@${target.version}. Available: ${availableNames(target)}`,
+			);
+		}
+		validateTargets([entry], target);
+
+		const sources = before.filter((v) => sameTarget(v, map.from));
+		if (new Set(sources.map((v) => v.bindingType)).size > 1) {
+			throw new Error(
+				`${label}: source "${map.from.key}" is bound by several binding types; add a prefix such as input: or header:`,
+			);
+		}
+		const source = sources[0];
+		if (!source || source.value === "") continue;
+
+		const bindingType = destinations[0].binding?.type ?? null;
+		result.writes.push({
+			key: map.to.key,
+			bindingType,
+			value: source.value,
+			entry: { ...entry, value: source.value },
+		});
+		result.moved.push({
+			from: { key: source.key, bindingType: source.bindingType },
+			to: { key: map.to.key, bindingType },
+			transformed: false,
+			via: "--map",
+		});
+	}
+	return result;
+}
+
 function valuesOf(element: BpmnElement): ElementValue[] {
 	return enumerateElementValues(getExtensionElements(element.businessObject));
 }
@@ -103,6 +205,7 @@ function applyApplication(
 	catalog: MigrationTemplate[],
 	element: BpmnElement,
 	application: Application,
+	mapWrites: Write[] = [],
 ): { element: BpmnElement; facts: ReportFacts } | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
@@ -117,10 +220,16 @@ function applyApplication(
 		facts,
 		activeProperties,
 	} = buildStepPlan(step?.entries ?? [], values, clone);
+	assertNoAmbiguousWrites([...recipeWrites, ...mapWrites]);
+	const stepWrites = [...recipeWrites, ...mapWrites];
 	const writes = [
-		...recipeWrites,
-		...carryOverWrites(recipeWrites, values, template),
+		...stepWrites,
+		...carryOverWrites(stepWrites, values, template),
 	];
+	const active =
+		mapWrites.length > 0
+			? validateDestinationValues(stepWrites, values, clone)
+			: activeProperties;
 
 	// Seed the template so optional and empty targets materialise on apply.
 	for (const w of writes) {
@@ -129,7 +238,7 @@ function applyApplication(
 			w.key,
 			w.bindingType,
 		)) {
-			if (!activeProperties.has(property)) continue;
+			if (!active.has(property)) continue;
 			property.value = normalizeDestinationValue(property, w.value);
 		}
 	}
@@ -152,7 +261,7 @@ function applyApplication(
 			w.key,
 			w.bindingType,
 		)) {
-			if (!activeProperties.has(property)) continue;
+			if (!active.has(property)) continue;
 			if (!property.binding) {
 				continue;
 			}
@@ -174,7 +283,7 @@ function applyApplication(
 			clone.properties,
 			key,
 			bindingType,
-		).find((property) => activeProperties.has(property));
+		).find((property) => active.has(property));
 		return write && property
 			? normalizeDestinationValue(property, write.value)
 			: undefined;
@@ -221,6 +330,7 @@ export function migrateElement({
 	target,
 	templates,
 	recipe,
+	maps = [],
 }: {
 	modeler: MigrationModeler;
 	element: BpmnElement;
@@ -228,6 +338,8 @@ export function migrateElement({
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
+	/** Moves of original values to the final target, applied after all steps. */
+	maps?: ValueMap[];
 }): MigrationResult {
 	const applied = readAppliedTemplate(element.businessObject);
 	if (
@@ -260,13 +372,23 @@ export function migrateElement({
 	);
 
 	const before = valuesOf(element);
+	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
 	let current = element;
-	for (const application of applications) {
-		const result = applyApplication(modeler, catalog, current, application);
+	let mapsApplied = false;
+	for (const [index, application] of applications.entries()) {
+		const isFinal = index === applications.length - 1;
+		const result = applyApplication(
+			modeler,
+			catalog,
+			current,
+			application,
+			isFinal ? mapPlan.writes : [],
+		);
 		if (result) {
 			current = result.element;
 			allFacts.push(result.facts);
+			mapsApplied ||= isFinal;
 		}
 	}
 
@@ -279,12 +401,34 @@ export function migrateElement({
 		throw new Error("Migration did not apply the target template identity.");
 	}
 
+	const facts = mergeFacts(allFacts);
+	if (mapsApplied) {
+		// Maps read the original values, so they bypass step-to-step chaining.
+		facts.moved.push(
+			...mapPlan.moved.map((move) => {
+				const property = findPropertiesByTarget(
+					target.properties,
+					move.to.key,
+					move.to.bindingType,
+				)[0];
+				const write = mapPlan.writes.find((w) => sameTarget(w, move.to));
+				return {
+					...move,
+					value:
+						property && write
+							? normalizeDestinationValue(property, write.value)
+							: undefined,
+				};
+			}),
+		);
+	}
+
 	const report = buildReport({
 		fromTemplate,
 		toTemplate: target,
 		before,
 		after: allFacts.at(-1)?.after ?? before,
-		facts: mergeFacts(allFacts),
+		facts,
 		usedRecipe: steps.length > 0,
 		refusal,
 	});

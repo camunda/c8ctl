@@ -38,6 +38,19 @@ const upgrade = {
 	},
 };
 let original: string;
+const XML = /<\?xml|<bpmn:definitions/;
+const out = (result: { stdout: string; stderr: string }) =>
+	result.stdout + result.stderr;
+// A failed or blocked run exits 1, prints its report, and never prints BPMN.
+function assertRefused(
+	result: { status: number | null; stdout: string; stderr: string },
+	flags: string[],
+) {
+	assert.equal(result.status, 1, result.stderr);
+	assert.doesNotMatch(result.stdout, XML);
+	if (!flags.includes("--in-place") && !flags.includes("--dry-run"))
+		assert.equal(result.stdout, "");
+}
 
 before(async () => {
 	const path = join(dir, "source.json");
@@ -120,10 +133,11 @@ function setup({
 			c8WithEnv(
 				{ C8CTL_DATA_DIR: work, C8CTL_OUTPUT_MODE: "text", NO_COLOR: "1" },
 				"element-template",
-				action,
-				...(action === "change" ? [targetPath] : []),
+				"update",
+				source.id,
 				TASK,
 				file,
+				...(action === "change" ? ["--to", targetPath] : []),
 				...(recipe !== undefined && !embedded ? ["--recipe", recipePath] : []),
 				...flags,
 			),
@@ -144,6 +158,8 @@ for (const action of ["change", "update"] as const) {
 			name: "wrong source ID",
 			sources: [{ kind: "change", sourceTemplateId: "unrelated.source" }],
 			diagnostic: /wrong source ID.*refusal\.source/i,
+			// An explicit recipe without an entry for the source is refused up front.
+			explicitDiagnostic: /no source entry for template 'refusal\.source'/,
 			lineage: [upgrade],
 		},
 		{
@@ -206,9 +222,11 @@ for (const action of ["change", "update"] as const) {
 				});
 				for (const flags of [[], ["--in-place"], ["--in-place", "--json"]]) {
 					const result = await fixture.run(...flags);
-					assert.equal(result.status, 1, result.stderr);
-					assert.equal(result.stdout, "");
-					assert.match(result.stderr, scenario.diagnostic);
+					assertRefused(result, flags);
+					assert.match(
+						out(result),
+						(!embedded && scenario.explicitDiagnostic) || scenario.diagnostic,
+					);
 					if (embedded) assert.match(result.stderr, /--allow-lossy/);
 					fixture.assertUnchanged();
 				}
@@ -220,20 +238,24 @@ for (const action of ["change", "update"] as const) {
 						["--dry-run", "--json", "--allow-lossy"],
 					]) {
 						const result = await fixture.run(...flags);
-						assert.equal(result.status, 1, result.stderr);
-						assert.equal(result.stdout, "");
-						assert.match(result.stderr, scenario.diagnostic);
+						assertRefused(result, flags);
+						assert.match(
+							out(result),
+							(!embedded && scenario.explicitDiagnostic) || scenario.diagnostic,
+						);
 						fixture.assertUnchanged();
 					}
 				} else {
 					const textPreview = await fixture.run("--dry-run");
-					assert.equal(textPreview.status, 0, textPreview.stderr);
+					assertRefused(textPreview, ["--dry-run"]);
 					assert.match(textPreview.stdout, scenario.diagnostic);
 					assert.match(textPreview.stdout, /Requires --allow-lossy/);
 					fixture.assertUnchanged();
 					const preview = await fixture.run("--dry-run", "--json");
-					assert.equal(preview.status, 0, preview.stderr);
-					const envelope = JSON.parse(preview.stdout);
+					assertRefused(preview, ["--dry-run", "--json"]);
+					const doc = JSON.parse(preview.stdout);
+					assert.equal(doc.summary.blocked, 1);
+					const envelope = doc.results[0];
 					assert.equal(envelope.requiresAuthorization, true);
 					assert.equal(envelope.authorized, false);
 					assert.equal(envelope.recipe.used, false);
@@ -246,7 +268,7 @@ for (const action of ["change", "update"] as const) {
 						const result = await fixture.run(...flags);
 						assert.equal(result.status, 0, result.stderr);
 						if (flags.includes("--json")) {
-							const authorized = JSON.parse(result.stdout);
+							const authorized = JSON.parse(result.stdout).results[0];
 							assert.equal(authorized.authorized, true);
 							assert.match(authorized.recipe.refusal, scenario.diagnostic);
 						} else {
@@ -270,7 +292,7 @@ for (const action of ["change", "update"] as const) {
 				});
 				const result = await fixture.run("--dry-run", "--json");
 				assert.equal(result.status, 0, result.stderr);
-				const envelope = JSON.parse(result.stdout);
+				const envelope = JSON.parse(result.stdout).results[0];
 				assert.equal(envelope.recipe.used, true);
 				assert.equal(envelope.recipe.refusal, null);
 				assert.equal(envelope.requiresAuthorization, false);
@@ -349,9 +371,8 @@ test("invalid required source recipe cannot silently satisfy a target floor", as
 		["--dry-run", "--json"],
 	]) {
 		const result = await fixture.run(...flags);
-		assert.equal(result.status, 1, result.stderr);
-		assert.equal(result.stdout, "");
-		assert.match(result.stderr, /Invalid migration recipe.*unknown/);
+		assertRefused(result, flags);
+		assert.match(out(result), /Invalid migration recipe.*unknown/);
 		fixture.assertUnchanged();
 	}
 });
@@ -364,9 +385,12 @@ test("ordinary carry-over previews losses and requires authorization only for ov
 			"--dry-run",
 			...(json ? ["--json"] : []),
 		);
-		assert.equal(preview.status, 0, preview.stderr);
+		// The equivalent --in-place run would be blocked, so the preview exits 1.
+		assertRefused(preview, ["--in-place", "--dry-run"]);
 		if (json) {
-			const envelope = JSON.parse(preview.stdout);
+			const doc = JSON.parse(preview.stdout);
+			assert.equal(doc.summary.blocked, 1);
+			const envelope = doc.results[0];
 			assert.equal(envelope.requiresAuthorization, true);
 			assert.equal(envelope.authorized, false);
 			assert.equal(envelope.lossless, false);
@@ -395,7 +419,7 @@ test("ordinary carry-over previews losses and requires authorization only for ov
 	fixture.assertUnchanged();
 	const authorized = await fixture.run("--in-place", "--allow-lossy", "--json");
 	assert.equal(authorized.status, 0, authorized.stderr);
-	assert.equal(JSON.parse(authorized.stdout).authorized, true);
+	assert.equal(JSON.parse(authorized.stdout).results[0].authorized, true);
 	assert.doesNotMatch(readFileSync(fixture.file, "utf8"), /lost-value/);
 });
 
@@ -409,10 +433,10 @@ test("loaded source versions without upgrades do not satisfy an explicit floor",
 		},
 		lineage: [{ ...source, version: 2 }],
 	});
-	const result = await fixture.run("--in-place", "--allow-lossy", "--json");
-	assert.equal(result.status, 1, result.stderr);
-	assert.equal(result.stdout, "");
-	assert.match(result.stderr, /unmet source floor.*2.*reached.*1/i);
+	const flags = ["--in-place", "--allow-lossy", "--json"];
+	const result = await fixture.run(...flags);
+	assertRefused(result, flags);
+	assert.match(out(result), /unmet source floor.*2.*reached.*1/i);
 	fixture.assertUnchanged();
 });
 
@@ -427,9 +451,10 @@ test("embedded fallback dry-run reports prospective losses without authorization
 	});
 	for (const json of [false, true]) {
 		const result = await fixture.run("--dry-run", ...(json ? ["--json"] : []));
-		assert.equal(result.status, 0, result.stderr);
+		// Without --allow-lossy the equivalent write would be blocked.
+		assertRefused(result, ["--dry-run"]);
 		if (json) {
-			const envelope = JSON.parse(result.stdout);
+			const envelope = JSON.parse(result.stdout).results[0];
 			assert.equal(envelope.lossless, false);
 			assert.equal(envelope.requiresAuthorization, true);
 			assert.equal(envelope.recipe.used, false);

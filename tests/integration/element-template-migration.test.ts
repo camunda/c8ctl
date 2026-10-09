@@ -252,27 +252,42 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 		assert.equal(seeded.status, 0, seeded.stderr);
 		writeFileSync(bpmn, seeded.stdout);
 		const dry = await run(
-			"change",
-			targetPath,
+			"update",
+			old.id,
 			TASK,
 			bpmn,
+			"--to",
+			targetPath,
 			"--in-place",
 			"--dry-run",
 			"--json",
 		);
-		assert.equal(dry.status, 0, dry.stderr);
-		const preview = JSON.parse(dry.stdout);
+		// A lossy preview exits 1 because the equivalent --in-place run is blocked.
+		assert.equal(dry.status, 1, dry.stderr);
+		const previewDoc = JSON.parse(dry.stdout);
+		assert.equal(previewDoc.summary.blocked, 1);
+		const preview = previewDoc.results[0];
 		assert.equal(preview.requiresAuthorization, true);
 		assert.equal(preview.report.dropped[0].key, "drop");
 		assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);
-		const refused = await run("change", targetPath, TASK, bpmn, "--in-place");
+		const refused = await run(
+			"update",
+			old.id,
+			TASK,
+			bpmn,
+			"--to",
+			targetPath,
+			"--in-place",
+		);
 		assert.notEqual(refused.status, 0);
 		assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);
 		const changed = await run(
-			"change",
-			targetPath,
+			"update",
+			old.id,
 			TASK,
 			bpmn,
+			"--to",
+			targetPath,
 			"--in-place",
 			"--allow-lossy",
 			"--json",
@@ -285,7 +300,15 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 		assert.doesNotMatch(migrated, /target="drop"/);
 		const piped = await asyncSpawnWithStdin(
 			"node",
-			["src/index.ts", "element-template", "change", targetPath, TASK],
+			[
+				"src/index.ts",
+				"element-template",
+				"update",
+				old.id,
+				TASK,
+				"--to",
+				targetPath,
+			],
 			(stdin) => {
 				stdin.write(seeded.stdout);
 			},
@@ -316,15 +339,15 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 		assert.match(migrated, /name="Do Something"/);
 		assert.match(migrated, /sourceRef="StartEvent_1"/);
 		const noop = await run(
-			"change",
-			targetPath,
+			"update",
+			target.id,
 			TASK,
 			bpmn,
 			"--in-place",
 			"--json",
 		);
 		assert.equal(noop.status, 0, noop.stderr);
-		assert.equal(JSON.parse(noop.stdout).noop, true);
+		assert.equal(JSON.parse(noop.stdout).results[0].noop, true);
 		assert.equal(readFileSync(bpmn, "utf-8"), migrated);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -474,16 +497,21 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 		writeFileSync(bpmn, seeded.stdout);
 		for (const recipeArgs of [[], ["--recipe", recipePath]]) {
 			const preview = await run(
-				"change",
-				targetPath,
+				"update",
+				source1.id,
 				TASK,
 				bpmn,
+				"--to",
+				targetPath,
 				...recipeArgs,
 				"--dry-run",
 				"--json",
 			);
-			assert.equal(preview.status, 0, preview.stderr);
-			const report = JSON.parse(preview.stdout).report;
+			// The migration drops values, so the equivalent write would be blocked.
+			assert.equal(preview.status, 1, preview.stderr);
+			const previewDoc = JSON.parse(preview.stdout);
+			assert.equal(previewDoc.summary.blocked, 1);
+			const report = previewDoc.results[0].report;
 			assert.equal(report.skipped.feel.length, 1, preview.stdout);
 			assert.equal(report.skipped.noMatch.length, 1);
 			assert.equal(report.skipped.template.length, 1);
@@ -494,10 +522,12 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 				),
 			);
 			const changed = await run(
-				"change",
-				targetPath,
+				"update",
+				source1.id,
 				TASK,
 				bpmn,
+				"--to",
+				targetPath,
 				...recipeArgs,
 			);
 			assert.equal(changed.status, 0, changed.stderr);
@@ -633,10 +663,11 @@ for (const mode of ["change", "update"] as const) {
 				writeFileSync(bpmn, canonical.stdout);
 				const original = readFileSync(bpmn);
 				const args = [
-					mode,
-					...(mode === "change" ? [targetPath] : []),
+					"update",
+					source.id,
 					TASK,
 					bpmn,
+					...(mode === "change" ? ["--to", targetPath] : []),
 					"--in-place",
 					"--json",
 				];
@@ -695,10 +726,8 @@ for (const mode of ["change", "update"] as const) {
 					for (const [flags, diagnostic] of [
 						[["--unknown-migration-flag"], /Unknown flag/],
 						[["--recipe"], /--recipe requires a value/],
-						[
-							[mode === "change" ? "--to-version=2" : "--successor"],
-							/only valid for/,
-						],
+						[["--to-version=2"], /Unknown flag/],
+						[["--successor"], /Unknown flag/],
 					] as const) {
 						const invalid = await run(...args, ...flags);
 						assert.equal(invalid.status, 1, invalid.stderr);
@@ -719,7 +748,7 @@ for (const mode of ["change", "update"] as const) {
 					assert.deepEqual(readFileSync(bpmn), original);
 					const result = await paused.resume();
 					assert.equal(result.status, 0, result.stderr);
-					const envelope = JSON.parse(result.stdout);
+					const envelope = JSON.parse(result.stdout).results[0];
 					assert.equal(envelope.lossless, true);
 					assert.equal(envelope.to.id, target.id);
 					assert.equal(envelope.to.version, target.version);
@@ -758,9 +787,16 @@ for (const mode of ["change", "update"] as const) {
 							[...before],
 						);
 					}
-					const noop = await run(...args);
+					const noop = await run(
+						"update",
+						target.id,
+						TASK,
+						bpmn,
+						"--in-place",
+						"--json",
+					);
 					assert.equal(noop.status, 0, noop.stderr);
-					assert.equal(JSON.parse(noop.stdout).noop, true);
+					assert.equal(JSON.parse(noop.stdout).results[0].noop, true);
 					assert.equal(readFileSync(bpmn, "utf-8"), formatted.stdout);
 					assert.equal(existsSync(lock), false);
 					assert.deepEqual(temps(), []);

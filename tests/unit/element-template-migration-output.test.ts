@@ -108,7 +108,6 @@ test("uses binding-qualified template identity metadata across all value collect
 			const json = JSON.stringify(
 				reportToJson(raw, {
 					elementId: "Task",
-					action: "change",
 					recipe: "embedded",
 					dryRun,
 					redaction,
@@ -149,7 +148,6 @@ test("scrubs known sensitive values from notes, refusals, skipped diagnostics an
 		JSON.stringify(
 			reportToJson(raw, {
 				elementId: "Task",
-				action: "update",
 				recipe: "file",
 				dryRun: true,
 			}),
@@ -202,7 +200,6 @@ test("diagnostics redact unchanged credentials and sensitive defaults using the 
 		JSON.stringify(
 			reportToJson(raw, {
 				elementId: "Task",
-				action: "change",
 				recipe: "none",
 				dryRun: true,
 				redaction,
@@ -272,7 +269,6 @@ test("redacts sensitive values in every report collection without changing the s
 		JSON.stringify(
 			reportToJson(raw, {
 				elementId: "Task",
-				action: "change",
 				recipe: "embedded",
 				dryRun: true,
 			}),
@@ -288,7 +284,6 @@ test("short credentials cannot corrupt redaction markers", () => {
 	});
 	const json = reportToJson(raw, {
 		elementId: "Task",
-		action: "change",
 		recipe: "none",
 		dryRun: true,
 	});
@@ -315,7 +310,6 @@ test("checks every duplicate metadata property and conservatively handles unknow
 			JSON.stringify(
 				reportToJson(raw, {
 					elementId: "Task",
-					action: "change",
 					recipe: "none",
 					dryRun: true,
 					redaction,
@@ -541,7 +535,6 @@ describe("reportToJson", () => {
 	test("exposes the report as plain data", () => {
 		const json = reportToJson(report(), {
 			elementId: "A",
-			action: "change",
 			recipe: "embedded",
 			dryRun: true,
 			file: "p.bpmn",

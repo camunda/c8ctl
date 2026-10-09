@@ -187,7 +187,7 @@ of template cards (no grouping by category).
 
 `apply` registers one template, so re-applying a newer version has no old
 template to compare against and keeps a value only when the new template binds
-the same key. `update` and `change` register the applied template as well, so
+the same key. `update` registers the applied template as well, so
 the library's own update semantics apply, and add a recipe on top for values
 that moved.
 

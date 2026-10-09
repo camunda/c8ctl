@@ -1,5 +1,5 @@
 /**
- * Behavioural tests for `element-template update` and `element-template change`
+ * Behavioural tests for `element-template update`
  * (default-plugins/element-template/commands/migrate.ts)
  */
 
@@ -10,6 +10,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -259,12 +260,15 @@ describe("migration catalog selection authority", () => {
 			[
 				V2,
 				[
-					["update", TASK, versionedBpmn],
-					["change", `${V2.id}@2`, TASK, versionedBpmn],
-					["change", V2.id, TASK, versionedBpmn],
+					["update", V1.id, TASK, versionedBpmn],
+					["update", V1.id, TASK, versionedBpmn, "--to", `${V2.id}@2`],
+					["update", V1.id, TASK, versionedBpmn, "--to", V2.id],
 				],
 			],
-			[successor, [["change", "--successor", TASK, versionedBpmn]]],
+			[
+				successor,
+				[["update", V1.id, TASK, versionedBpmn, "--to", successor.id]],
+			],
 		] as const) {
 			const shadow = { ...target, name: "Conflicting cached target" };
 			const diagnostics: string[] = [];
@@ -291,11 +295,15 @@ describe("migration catalog selection authority", () => {
 					dataDirWithCache([V1, target, structuredClone(target)]),
 					...command,
 					"--dry-run",
+					"--allow-lossy",
 					"--json",
 				);
 				assert.strictEqual(result.status, 0, result.stderr);
 				assert.strictEqual(result.stderr, "");
-				assert.strictEqual(JSON.parse(result.stdout).to.id, target.id);
+				assert.strictEqual(
+					JSON.parse(result.stdout).results[0].to.id,
+					target.id,
+				);
 			}
 		}
 	});
@@ -311,9 +319,9 @@ describe("migration engine eligibility", () => {
 			);
 			writeFileSync(file, xml);
 			for (const args of [
-				["update", TASK, file],
-				["change", `${V2.id}@2`, TASK, file],
-				["change", "--successor", TASK, file],
+				["update", V1.id, TASK, file],
+				["update", V1.id, TASK, file, "--to", `${V2.id}@2`],
+				["update", V1.id, TASK, file, "--to", V2.id],
 			]) {
 				const result = await run(
 					dataDirWithCache([V1, V2]),
@@ -343,10 +351,10 @@ describe("migration engine eligibility", () => {
 				);
 			writeFileSync(file, xml);
 			for (const [templates, args, version] of [
-				[[V1, V2], ["update", TASK, file], 2],
-				[[V1, V2], ["change", `${V2.id}@2`, TASK, file], 2],
-				[[V1, V2], ["change", V2.id, TASK, file], 2],
-				[[V1, NEW], ["change", "--successor", TASK, file], 1],
+				[[V1, V2], ["update", V1.id, TASK, file], 2],
+				[[V1, V2], ["update", V1.id, TASK, file, "--to", `${V2.id}@2`], 2],
+				[[V1, V2], ["update", V1.id, TASK, file, "--to", V2.id], 2],
+				[[V1, NEW], ["update", V1.id, TASK, file, "--to", NEW.id], 1],
 			] as const) {
 				const cache = templates.map((template) =>
 					template.id === NEW.id
@@ -401,9 +409,9 @@ describe("migration engine eligibility", () => {
 			);
 			writeFileSync(file, xml);
 			for (const args of [
-				["update", TASK, file],
-				["change", `${V2.id}@2`, TASK, file],
-				["change", "--successor", TASK, file],
+				["update", V1.id, TASK, file],
+				["update", V1.id, TASK, file, "--to", `${V2.id}@2`],
+				["update", V1.id, TASK, file, "--to", V2.id],
 			]) {
 				const result = await run(
 					dataDirWithCache([V1, V2]),
@@ -441,9 +449,9 @@ describe("migration engine eligibility", () => {
 			);
 			writeFileSync(file, xml);
 			for (const args of [
-				["update", TASK, file],
-				["change", `${V2.id}@2`, TASK, file],
-				["change", "--successor", TASK, file],
+				["update", V1.id, TASK, file],
+				["update", V1.id, TASK, file, "--to", `${V2.id}@2`],
+				["update", V1.id, TASK, file, "--to", V2.id],
 			]) {
 				const result = await run(
 					dataDirWithCache([V1, V2]),
@@ -481,18 +489,18 @@ describe("migration engine eligibility", () => {
 			const target = { ...V2, engines };
 			const templatePath = join(workDir, `engine-target-${name}.json`);
 			writeFileSync(templatePath, JSON.stringify(target));
-			for (const args of [
-				["update", TASK, "--to-version", "2"],
-				["change", `${V2.id}@2`, TASK],
-				["change", templatePath, TASK],
-			]) {
+			for (const to of [`${V2.id}@2`, templatePath]) {
 				const file = join(workDir, `engine-target-${name}.bpmn`);
 				const xml = readFileSync(versionedBpmn, "utf-8");
 				writeFileSync(file, xml);
 				const result = await run(
 					dataDirWithCache([V1, target]),
-					...args,
+					"update",
+					V1.id,
+					TASK,
 					file,
+					"--to",
+					to,
 					"--in-place",
 					"--allow-lossy",
 				);
@@ -528,19 +536,14 @@ describe("migration engine eligibility", () => {
 				},
 			};
 			const cache = dataDirWithCache([OLD, invalidUpgrade, successor]);
-			const discovered = await run(
-				cache,
-				"change",
-				"--successor",
-				TASK,
-				oldBpmn,
-			);
-			assert.strictEqual(discovered.status, 1, discovered.stderr);
-			assert.match(discovered.stderr, /No template declares a migration/);
-			assert.strictEqual(discovered.stdout, "");
+			const discovered = await run(cache, "update", OLD.id, TASK, oldBpmn);
+			assert.strictEqual(discovered.status, 0, discovered.stderr);
+			assert.strictEqual(discovered.stdout, readFileSync(oldBpmn, "utf-8"));
+			assert.match(discovered.stderr, /already on/);
 			const update = await run(
 				dataDirWithCache([V1, { ...V2, engines }]),
 				"update",
+				V1.id,
 				TASK,
 				versionedBpmn,
 			);
@@ -548,19 +551,23 @@ describe("migration engine eligibility", () => {
 			assert.strictEqual(update.stdout, readFileSync(versionedBpmn, "utf-8"));
 			const unpinned = await run(
 				dataDirWithCache([V1, { ...V2, engines }]),
-				"change",
-				V2.id,
+				"update",
+				V1.id,
 				TASK,
 				versionedBpmn,
+				"--to",
+				V2.id,
 			);
 			assert.strictEqual(unpinned.status, 0, unpinned.stderr);
 			assert.strictEqual(unpinned.stdout, readFileSync(versionedBpmn, "utf-8"));
 			const chosen = await run(
 				dataDirWithCache([OLD, NEW, { ...NEW, version: 2, engines }]),
-				"change",
-				"--successor",
+				"update",
+				OLD.id,
 				TASK,
 				oldBpmn,
+				"--to",
+				NEW.id,
 			);
 			assert.strictEqual(chosen.status, 0, chosen.stderr);
 			assert.match(chosen.stdout, /modelerTemplateVersion="1"/);
@@ -584,16 +591,18 @@ describe("migration engine eligibility", () => {
 			writeFileSync(file, xml);
 			const result = await run(
 				dataDirWithCache([OLD, { ...OLD, version: 2, engines }, latest, NEW]),
-				"change",
-				`${NEW.id}@1`,
+				"update",
+				OLD.id,
 				TASK,
 				file,
+				"--to",
+				`${NEW.id}@1`,
 				"--in-place",
 				"--allow-lossy",
 			);
 			assert.strictEqual(result.status, 1, result.stderr);
-			assert.match(result.stderr, /version 2 is not available/);
-			assert.strictEqual(result.stdout, "");
+			assert.match(result.stdout + result.stderr, /version 2 is not available/);
+			assert.match(result.stdout, /Nothing was written/);
 			assert.strictEqual(readFileSync(file, "utf-8"), xml);
 		});
 	}
@@ -611,6 +620,7 @@ describe("migration engine eligibility", () => {
 				const result = await run(
 					dataDirWithCache([V1, { ...V2, engines }]),
 					"update",
+					V1.id,
 					TASK,
 					file,
 				);
@@ -631,10 +641,11 @@ describe("migration engine eligibility", () => {
 		const result = await run(
 			dataDirWithCache([V1, V2]),
 			"update",
+			V1.id,
 			TASK,
 			file,
-			"--to-version",
-			"2",
+			"--to",
+			`${V2.id}@2`,
 		);
 		assert.strictEqual(result.status, 1, result.stderr);
 		assert.match(result.stderr, /not compatible with Camunda 8\.8\.0-alpha1/);
@@ -651,8 +662,8 @@ describe("migration engine eligibility", () => {
 		);
 		const engines = { camunda: "8.8.0-alpha1" };
 		for (const args of [
-			["update", TASK, file],
-			["change", V2.id, TASK, file],
+			["update", V1.id, TASK, file],
+			["update", V1.id, TASK, file, "--to", V2.id],
 		]) {
 			const result = await run(
 				dataDirWithCache([
@@ -677,26 +688,26 @@ describe("migration engine eligibility", () => {
 			const successor = { ...NEW, engines };
 			const upgrade = { ...source, version: 2 };
 			const cache = dataDirWithCache([source, upgrade, successor]);
-			for (const args of [
-				["update", TASK, file],
-				["change", `${NEW.id}@1`, TASK, file],
-				["change", NEW.id, TASK, file],
-				["change", "--successor", TASK, file],
-			]) {
+			for (const [args, expected] of [
+				[["update", OLD.id, TASK, file], /modelerTemplateVersion="2"/],
+				[
+					["update", OLD.id, TASK, file, "--to", `${NEW.id}@1`],
+					/modelerTemplate="io\.example\.new"/,
+				],
+				[
+					["update", OLD.id, TASK, file, "--to", NEW.id],
+					/modelerTemplate="io\.example\.new"/,
+				],
+			] as const) {
 				const result = await run(cache, ...args);
 				assert.strictEqual(result.status, 0, result.stderr);
-				assert.match(
-					result.stdout,
-					args[0] === "update"
-						? /modelerTemplateVersion="2"/
-						: /modelerTemplate="io\.example\.new"/,
-				);
+				assert.match(result.stdout, expected);
 			}
 		}
 	});
 });
 
-describe("element-template change", () => {
+describe("element-template update to another template", () => {
 	test("lossy in-place migration requires authorization and preserves the original on refusal", async () => {
 		const copy = join(workDir, "lossy-refused.bpmn");
 		const before = readFileSync(oldBpmn, "utf-8");
@@ -705,10 +716,12 @@ describe("element-template change", () => {
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			copy,
+			"--to",
+			templatePath,
 			"--in-place",
 		);
 		assert.notStrictEqual(result.status, 0);
@@ -728,10 +741,12 @@ describe("element-template change", () => {
 		);
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--recipe",
 			recipePath,
 			"--allow-lossy",
@@ -739,15 +754,20 @@ describe("element-template change", () => {
 		assert.notStrictEqual(result.status, 0);
 		assert.match(result.stderr, /source|applicable/);
 	});
-	test("rejects engine-incompatible explicit targets and successor candidates", async () => {
+	test("rejects engine-incompatible explicit targets", async () => {
 		const incompatible = { ...NEW, engines: { camunda: ">=99.0.0" } };
 		const templatePath = join(workDir, "incompatible.json");
 		writeFileSync(templatePath, JSON.stringify(incompatible));
-		for (const args of [
-			["change", templatePath, TASK, oldBpmn],
-			["change", "--successor", TASK, oldBpmn],
-		]) {
-			const result = await run(dataDirWithCache([OLD, incompatible]), ...args);
+		for (const to of [templatePath, incompatible.id]) {
+			const result = await run(
+				dataDirWithCache([OLD, incompatible]),
+				"update",
+				OLD.id,
+				TASK,
+				oldBpmn,
+				"--to",
+				to,
+			);
 			assert.notStrictEqual(result.status, 0, result.stdout);
 			assert.match(result.stderr, /compatible|migration/);
 		}
@@ -756,12 +776,15 @@ describe("element-template change", () => {
 		const templatePath = join(workDir, "authoritative.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const stale = { ...NEW, properties: [input("stale", "STALE", "Stale")] };
+		// Not deprecated: a deprecated source also scans cached successors, which conflict with the file.
 		const result = await run(
-			dataDirWithCache([OLD, stale]),
-			"change",
-			templatePath,
+			dataDirWithCache([{ ...OLD, deprecated: undefined }, stale]),
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(
@@ -775,10 +798,12 @@ describe("element-template change", () => {
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /modelerTemplate="io.example.new"/);
@@ -791,6 +816,7 @@ describe("element-template change", () => {
 		assert.match(result.stderr, /Model › Maximum tokens {2}2000/);
 		assert.match(result.stderr, /Moved \(2\)/);
 		assert.match(result.stderr, /Backend chosen for you/);
+		assert.match(result.stderr, /Summary: 1 updated, 0 skipped/);
 		assert.doesNotMatch(result.stdout, /Dropped/);
 	});
 
@@ -801,10 +827,12 @@ describe("element-template change", () => {
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			copy,
+			"--to",
+			templatePath,
 			"--in-place",
 			"--allow-lossy",
 		);
@@ -823,15 +851,38 @@ describe("element-template change", () => {
 		const before = readFileSync(oldBpmn, "utf-8");
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--dry-run",
+			"--allow-lossy",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Dry run: nothing was written/);
 		assert.doesNotMatch(result.stdout, /<bpmn:definitions/);
+		assert.strictEqual(readFileSync(oldBpmn, "utf-8"), before);
+	});
+
+	test("a lossy --dry-run without --allow-lossy exits 1 and still prints the report", async () => {
+		const templatePath = join(workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const before = readFileSync(oldBpmn, "utf-8");
+		const result = await run(
+			dataDirWithCache([OLD]),
+			"update",
+			OLD.id,
+			TASK,
+			oldBpmn,
+			"--to",
+			templatePath,
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 1, result.stderr);
+		assert.match(result.stdout, /Dropped \(1\)/);
+		assert.match(result.stdout, /A write would be blocked/);
 		assert.strictEqual(readFileSync(oldBpmn, "utf-8"), before);
 	});
 
@@ -841,7 +892,16 @@ describe("element-template change", () => {
 		const result = await runWithEnv(
 			dataDirWithCache([OLD]),
 			{ NODE_OPTIONS: failingSaveXmlPreload() },
-			["change", templatePath, TASK, oldBpmn, "--dry-run"],
+			[
+				"update",
+				OLD.id,
+				TASK,
+				oldBpmn,
+				"--to",
+				templatePath,
+				"--dry-run",
+				"--allow-lossy",
+			],
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Dry run: nothing was written/);
@@ -853,31 +913,50 @@ describe("element-template change", () => {
 		const result = await runWithEnv(
 			dataDirWithCache([OLD]),
 			{ NODE_OPTIONS: failingSaveXmlPreload() },
-			["change", templatePath, TASK, oldBpmn],
+			["update", OLD.id, TASK, oldBpmn, "--to", templatePath],
 		);
 		assert.notStrictEqual(result.status, 0);
 		assert.match(result.stderr, /saveXML must not run/);
 	});
 
-	test("--json --dry-run emits the report as JSON", async () => {
+	test("--json --dry-run emits the report as one JSON document", async () => {
 		const templatePath = join(workDir, "new.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--dry-run",
+			"--allow-lossy",
 			"--json",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		const json = JSON.parse(result.stdout);
-		assert.strictEqual(json.action, "change");
-		assert.strictEqual(json.recipe.source, "embedded");
-		assert.strictEqual(json.lossless, false);
-		assert.strictEqual(json.report.dropped[0].value, "2000");
-		assert.strictEqual(json.report.moved.length, 2);
+		assert.strictEqual(json.command, "element-template update");
+		assert.strictEqual(json.dryRun, true);
+		assert.strictEqual(json.results.length, 1);
+		const [entry] = json.results;
+		assert.strictEqual(entry.status, "updated");
+		assert.strictEqual(entry.action, undefined);
+		assert.strictEqual(entry.elementId, TASK);
+		assert.strictEqual(entry.recipe.source, "embedded");
+		assert.strictEqual(entry.lossless, false);
+		assert.strictEqual(entry.requiresAuthorization, true);
+		assert.strictEqual(entry.authorized, true);
+		assert.strictEqual(entry.report.dropped[0].value, "2000");
+		assert.strictEqual(entry.report.moved.length, 2);
+		assert.deepStrictEqual(json.summary, {
+			updated: 1,
+			skipped: 0,
+			unchanged: 0,
+			failed: 0,
+			dropped: 1,
+			blocked: 0,
+		});
 	});
 
 	test("--json without --in-place or --dry-run is refused", async () => {
@@ -885,10 +964,12 @@ describe("element-template change", () => {
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--json",
 		);
 		assert.notStrictEqual(result.status, 0);
@@ -898,31 +979,18 @@ describe("element-template change", () => {
 		);
 	});
 
-	test("--successor picks the template that declares a migration", async () => {
+	test("without --to a deprecated template stays put and the report names declared successors", async () => {
 		const result = await run(
 			dataDirWithCache([OLD, NEW]),
-			"change",
-			"--successor",
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /modelerTemplate="io.example.new"/);
-	});
-
-	test("--successor fails when no template declares a migration", async () => {
-		const result = await run(
-			dataDirWithCache([OLD]),
-			"change",
-			"--successor",
-			TASK,
-			oldBpmn,
-		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(
-			result.stderr + result.stdout,
-			/No template declares a migration from 'io.example.old'/,
-		);
+		assert.strictEqual(result.stdout, readFileSync(oldBpmn, "utf-8"));
+		assert.match(result.stderr, /deprecated.*io\.example\.new/s);
+		assert.doesNotMatch(result.stdout, /io\.example\.new/);
 	});
 
 	test("--recipe overrides the embedded recipe", async () => {
@@ -944,10 +1012,12 @@ describe("element-template change", () => {
 		);
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--recipe",
 			recipePath,
 		);
@@ -968,10 +1038,12 @@ describe("element-template change", () => {
 		);
 		const result = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			oldBpmn,
+			"--to",
+			templatePath,
 			"--recipe",
 			recipePath,
 		);
@@ -984,10 +1056,12 @@ describe("element-template change", () => {
 		writeFileSync(templatePath, JSON.stringify(NEW));
 		const noTemplate = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			TASK,
 			FIXTURE_BPMN,
+			"--to",
+			templatePath,
 		);
 		assert.notStrictEqual(noTemplate.status, 0);
 		assert.match(
@@ -996,10 +1070,12 @@ describe("element-template change", () => {
 		);
 		const unknown = await run(
 			dataDirWithCache([OLD]),
-			"change",
-			templatePath,
+			"update",
+			OLD.id,
 			"Nope",
 			oldBpmn,
+			"--to",
+			templatePath,
 		);
 		assert.notStrictEqual(unknown.status, 0);
 		assert.match(unknown.stderr + unknown.stdout, /Element "Nope" not found/);
@@ -1016,6 +1092,7 @@ describe("element-template update", () => {
 		const result = await run(
 			dataDirWithCache([V1]),
 			"update",
+			V1.id,
 			TASK,
 			versionedBpmn,
 			"--recipe",
@@ -1032,6 +1109,7 @@ describe("element-template update", () => {
 		const result = await run(
 			dataDirWithCache([V1, V2]),
 			"update",
+			V1.id,
 			TASK,
 			file,
 			"--in-place",
@@ -1056,6 +1134,7 @@ describe("element-template update", () => {
 		const missing = await run(
 			dataDirWithCache([V1, V2]),
 			"update",
+			V1.id,
 			TASK,
 			missingEngine,
 		);
@@ -1084,20 +1163,26 @@ describe("element-template update", () => {
 				},
 			},
 		};
+		const file = join(workDir, "missing-intermediate.bpmn");
+		const xml = readFileSync(versionedBpmn, "utf-8");
+		writeFileSync(file, xml);
 		const result = await run(
 			dataDirWithCache([V1, { ...V2, engines: { camunda: ">=99" } }, v3]),
 			"update",
+			V1.id,
 			TASK,
-			versionedBpmn,
+			file,
 			"--in-place",
 		);
 		assert.notStrictEqual(result.status, 0);
-		assert.match(result.stderr, /version 2 is not available/);
+		assert.match(result.stdout + result.stderr, /version 2 is not available/);
+		assert.strictEqual(readFileSync(file, "utf-8"), xml);
 	});
 	test("moves to the newest version and applies its recipe", async () => {
 		const result = await run(
 			dataDirWithCache([V1, V2]),
 			"update",
+			V1.id,
 			TASK,
 			versionedBpmn,
 		);
@@ -1111,6 +1196,7 @@ describe("element-template update", () => {
 		const result = await run(
 			dataDirWithCache([V1]),
 			"update",
+			V1.id,
 			TASK,
 			versionedBpmn,
 		);
@@ -1118,36 +1204,41 @@ describe("element-template update", () => {
 		assert.strictEqual(result.stdout, readFileSync(versionedBpmn, "utf-8"));
 		assert.match(result.stderr, /already on/);
 	});
-	test("JSON no-ops preserve the report envelope for update and change", async () => {
+	test("JSON no-ops preserve the report envelope with and without --to", async () => {
 		const templatePath = join(workDir, "same.json");
 		writeFileSync(templatePath, JSON.stringify(V1));
-		for (const args of [
-			["update", TASK, versionedBpmn],
-			["change", templatePath, TASK, versionedBpmn],
-		]) {
+		for (const extra of [[], ["--to", templatePath]]) {
 			const result = await run(
 				dataDirWithCache([V1]),
-				...args,
+				"update",
+				V1.id,
+				TASK,
+				versionedBpmn,
+				...extra,
 				"--dry-run",
 				"--json",
 			);
 			assert.strictEqual(result.status, 0, result.stderr);
 			const json = JSON.parse(result.stdout);
-			assert.strictEqual(json.noop, true);
-			assert.strictEqual(json.lossless, true);
-			assert.deepStrictEqual(json.report.moved, []);
+			assert.strictEqual(json.results.length, 1);
+			const [entry] = json.results;
+			assert.strictEqual(entry.status, "unchanged");
+			assert.strictEqual(entry.noop, true);
+			assert.strictEqual(entry.lossless, true);
+			assert.deepStrictEqual(entry.report.moved, []);
 			assert.strictEqual(result.stderr, "");
 		}
 	});
 
-	test("--to-version pins a version and refuses a missing one", async () => {
+	test("--to <id>@<n> pins a version and refuses a missing one", async () => {
 		const missing = await run(
 			dataDirWithCache([V1, V2]),
 			"update",
+			V1.id,
 			TASK,
 			versionedBpmn,
-			"--to-version",
-			"7",
+			"--to",
+			`${V1.id}@7`,
 		);
 		assert.notStrictEqual(missing.status, 0);
 		assert.match(missing.stderr + missing.stdout, /has no version 7/);
@@ -1157,26 +1248,570 @@ describe("element-template update", () => {
 		const result = await run(
 			dataDirWithCache([NEW]),
 			"update",
+			V1.id,
 			TASK,
 			versionedBpmn,
 		);
 		assert.notStrictEqual(result.status, 0);
-		assert.match(result.stderr + result.stdout, /not in the local cache/);
+		assert.match(
+			result.stderr + result.stdout,
+			/Element template .* not found/,
+		);
 	});
 
-	test("rejects --successor on update", async () => {
-		const successor = await run(
+	test("the removed --successor and --to-version flags are not recognized", async () => {
+		// The global parser warns and ignores unknown flags, so the update never changes the template id.
+		for (const removed of [["--successor"], ["--to-version", "2"]]) {
+			const result = await run(
+				dataDirWithCache([V1, V2]),
+				"update",
+				V1.id,
+				TASK,
+				versionedBpmn,
+				...removed,
+			);
+			assert.match(result.stderr, new RegExp(`Unknown flag ${removed[0]}`));
+			assert.doesNotMatch(result.stdout, /io\.example\.new/);
+		}
+	});
+
+	test("the change subcommand no longer exists", async () => {
+		const result = await run(
 			dataDirWithCache([V1, V2]),
-			"update",
-			"--successor",
+			"change",
+			V1.id,
 			TASK,
 			versionedBpmn,
 		);
-		assert.notStrictEqual(successor.status, 0);
-		assert.match(
-			successor.stderr + successor.stdout,
-			/--successor is only valid for change/,
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stdout + result.stderr, /Unknown subcommand 'change'/);
+	});
+});
+
+const V3 = { ...V2, version: 3, metadata: undefined };
+const SRC = {
+	...OLD,
+	id: "io.example.mapsrc",
+	name: "Map source",
+	deprecated: undefined,
+	properties: [
+		{
+			type: "Hidden",
+			value: "io.example.mapsrc",
+			binding: { type: "zeebe:taskDefinition", property: "type" },
+		},
+		input("provider", "azure", "Provider"),
+		input("endpoint", "", "Endpoint"),
+	],
+};
+const DST = {
+	...NEW,
+	id: "io.example.mapdst",
+	name: "Map destination",
+	metadata: undefined,
+	properties: [
+		{
+			type: "Hidden",
+			value: "io.example.mapdst",
+			binding: { type: "zeebe:taskDefinition", property: "type" },
+		},
+		input("provider", "azure", "Provider"),
+		input("url", "", "URL"),
+	],
+};
+
+/** simple.bpmn plus extra tasks, each with a shape so the modeler registers it. */
+function multiTaskXml(): string {
+	const tasks = ["Task_B", "Task_C", "Task_X"];
+	return readFileSync(FIXTURE_BPMN, "utf-8")
+		.replace(
+			"</bpmn:process>",
+			`${tasks.map((id) => `<bpmn:task id="${id}" />`).join("")}</bpmn:process>`,
+		)
+		.replace(
+			"</bpmndi:BPMNPlane>",
+			`${tasks
+				.map(
+					(id, i) =>
+						`<bpmndi:BPMNShape id="${id}_di" bpmnElement="${id}"><dc:Bounds x="270" y="${200 + i * 100}" width="100" height="80" /></bpmndi:BPMNShape>`,
+				)
+				.join("")}</bpmndi:BPMNPlane>`,
 		);
+}
+
+/** Applies each template to its element, one `apply` per element, and returns the file. */
+async function seedMulti(
+	name: string,
+	applications: [elementId: string, template: object, values: string[]][],
+): Promise<string> {
+	const file = join(workDir, `${name}.bpmn`);
+	writeFileSync(file, multiTaskXml());
+	for (const [index, [elementId, template, values]] of applications.entries()) {
+		const templatePath = join(workDir, `${name}.${index}.template.json`);
+		writeFileSync(templatePath, JSON.stringify(template));
+		const result = await run(
+			dataDirWithCache([]),
+			"apply",
+			templatePath,
+			elementId,
+			file,
+			...values.flatMap((v) => ["--set", v]),
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		writeFileSync(file, result.stdout);
+	}
+	return file;
+}
+
+function taskXml(xml: string, id: string): string {
+	const match = xml.match(
+		new RegExp(`<bpmn:task id="${id}"(?:[^>]*/>|[\\s\\S]*?</bpmn:task>)`),
+	);
+	assert.ok(match, `task ${id} not found`);
+	return match[0];
+}
+
+function versionOf(xml: string, id: string): string | undefined {
+	return taskXml(xml, id).match(/modelerTemplateVersion="(\d+)"/)?.[1];
+}
+
+function copyOf(file: string, name: string): { copy: string; before: string } {
+	const copy = join(workDir, name);
+	const before = readFileSync(file, "utf-8");
+	writeFileSync(copy, before);
+	return { copy, before };
+}
+
+describe("element-template update selection and write-once", () => {
+	let multi: string;
+	before(async () => {
+		multi = await seedMulti("multi", [
+			[TASK, V1, ["provider=azure", "endpoint=https://a"]],
+			["Task_B", V1, ["provider=azure", "endpoint=https://b"]],
+			["Task_C", V1, ["provider=azure", "endpoint=https://c"]],
+		]);
+	});
+
+	test("selects every element on the template and writes the file once", async () => {
+		const { copy } = copyOf(multi, "multi-all.bpmn");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			V1.id,
+			copy,
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const xml = readFileSync(copy, "utf-8");
+		for (const [id, value] of [
+			[TASK, "https://a"],
+			["Task_B", "https://b"],
+			["Task_C", "https://c"],
+		]) {
+			assert.strictEqual(versionOf(xml, id), "2", id);
+			assert.match(
+				taskXml(xml, id),
+				new RegExp(`source="${value}" target="url"`),
+			);
+		}
+		assert.strictEqual(versionOf(xml, "Task_X"), undefined);
+		assert.strictEqual(result.stdout.match(/Updated /g)?.length, 1);
+		assert.match(
+			result.stdout,
+			/Summary: 3 updated, 0 skipped, 0 unchanged, 0 failed/,
+		);
+		assert.ok(!existsSync(`${copy}.migration.lock`));
+	});
+
+	test("an element id restricts the update to that element", async () => {
+		const { copy } = copyOf(multi, "multi-one.bpmn");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			V1.id,
+			"Task_B",
+			copy,
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const xml = readFileSync(copy, "utf-8");
+		assert.strictEqual(versionOf(xml, "Task_B"), "2");
+		assert.strictEqual(versionOf(xml, TASK), "1");
+		assert.strictEqual(versionOf(xml, "Task_C"), "1");
+		assert.match(result.stdout, /Summary: 1 updated/);
+	});
+
+	test("fails with the template id when no element uses it", async () => {
+		const { copy, before } = copyOf(multi, "multi-nomatch.bpmn");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			"io.example.nope",
+			copy,
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(
+			result.stderr,
+			/No element in the BPMN diagram uses template 'io\.example\.nope'\./,
+		);
+		assert.strictEqual(readFileSync(copy, "utf-8"), before);
+	});
+
+	test("fails with the applied template when the element uses another template", async () => {
+		const { copy, before } = copyOf(multi, "multi-wrong.bpmn");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			OLD.id,
+			"Task_B",
+			copy,
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(
+			result.stderr,
+			new RegExp(`Element "Task_B" uses template '${V1.id}', not '${OLD.id}'`),
+		);
+		assert.strictEqual(readFileSync(copy, "utf-8"), before);
+	});
+
+	test("rejects a BPMN file or a version as the first positional", async () => {
+		const file = await run(dataDirWithCache([V1, V2]), "update", multi, TASK);
+		assert.strictEqual(file.status, 1);
+		assert.match(
+			file.stderr,
+			/is a BPMN file; the first argument is the applied template ID/,
+		);
+		const versioned = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			`${V1.id}@1`,
+			TASK,
+			multi,
+		);
+		assert.strictEqual(versioned.status, 1);
+		assert.match(
+			versioned.stderr,
+			/does not take a version.*--to <template-id>@<n>/,
+		);
+		assert.strictEqual(versioned.stdout, "");
+	});
+
+	test("skips an element already on a higher version of the target", async () => {
+		const file = await seedMulti("skipped", [
+			[TASK, V1, ["provider=azure", "endpoint=https://a"]],
+			["Task_B", V3, ["provider=azure", "url=https://b"]],
+		]);
+		const { copy } = copyOf(file, "skipped-copy.bpmn");
+		const result = await run(
+			dataDirWithCache([V1, V2, V3]),
+			"update",
+			V1.id,
+			copy,
+			"--to",
+			`${V1.id}@2`,
+			"--in-place",
+			"--json",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const json = JSON.parse(result.stdout);
+		const byId = Object.fromEntries(
+			json.results.map((r: { elementId: string }) => [r.elementId, r]),
+		);
+		assert.strictEqual(byId[TASK].status, "updated");
+		assert.deepStrictEqual(byId.Task_B, {
+			status: "skipped",
+			elementId: "Task_B",
+			from: { id: V1.id, version: 3 },
+			to: { id: V1.id, version: 2 },
+		});
+		assert.deepStrictEqual(json.summary, {
+			updated: 1,
+			skipped: 1,
+			unchanged: 0,
+			failed: 0,
+			dropped: 0,
+			blocked: 0,
+		});
+		const xml = readFileSync(copy, "utf-8");
+		assert.strictEqual(versionOf(xml, TASK), "2");
+		assert.strictEqual(versionOf(xml, "Task_B"), "3");
+		const text = await run(
+			dataDirWithCache([V1, V2, V3]),
+			"update",
+			V1.id,
+			file,
+			"--to",
+			`${V1.id}@2`,
+			"--dry-run",
+		);
+		assert.strictEqual(text.status, 0, text.stderr);
+		assert.match(text.stdout, /Task_B is on v3, newer than v2; skipped/);
+	});
+
+	test("a failing element leaves the file byte-identical and exits 1 with the report", async () => {
+		const v2Intermediate = { ...V2, engines: { camunda: ">=99" } };
+		const v3 = {
+			...V3,
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 2,
+							paths: [{ from: "endpoint", to: "url" }],
+						},
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 3,
+							paths: [],
+						},
+					],
+				},
+			},
+		};
+		const file = await seedMulti("partial", [
+			[TASK, V1, ["provider=azure", "endpoint=https://a"]],
+			["Task_B", V2, ["provider=azure", "url=https://b"]],
+		]);
+		const cache = [V1, v2Intermediate, v3];
+		const { copy, before } = copyOf(file, "partial-copy.bpmn");
+		const text = await run(
+			dataDirWithCache(cache),
+			"update",
+			V1.id,
+			copy,
+			"--in-place",
+			"--allow-lossy",
+		);
+		assert.strictEqual(text.status, 1, text.stderr);
+		assert.match(text.stdout, /Cannot migrate .*version 2 is not available/);
+		assert.match(
+			text.stdout,
+			/Summary: 1 updated, 0 skipped, 0 unchanged, 1 failed/,
+		);
+		assert.match(text.stdout, /Nothing was written/);
+		assert.strictEqual(readFileSync(copy, "utf-8"), before);
+		assert.ok(!existsSync(`${copy}.migration.lock`));
+
+		const json = await run(
+			dataDirWithCache(cache),
+			"update",
+			V1.id,
+			copy,
+			"--in-place",
+			"--allow-lossy",
+			"--json",
+		);
+		assert.strictEqual(json.status, 1, json.stderr);
+		const document = JSON.parse(json.stdout);
+		assert.deepStrictEqual(
+			document.results.map((r: { status: string }) => r.status).sort(),
+			["failed", "updated"],
+		);
+		const failed = document.results.find(
+			(r: { status: string }) => r.status === "failed",
+		);
+		assert.match(failed.error, /version 2 is not available/);
+		assert.strictEqual(document.summary.failed, 1);
+		assert.strictEqual(readFileSync(copy, "utf-8"), before);
+
+		const stdoutRun = await run(dataDirWithCache(cache), "update", V1.id, copy);
+		assert.strictEqual(stdoutRun.status, 1, stdoutRun.stderr);
+		assert.strictEqual(stdoutRun.stdout, "");
+		assert.match(stdoutRun.stderr, /Nothing was written/);
+	});
+
+	test("a run where every element is already on the target does not rewrite the file", async () => {
+		const file = await seedMulti("allnoop", [
+			[TASK, V2, ["provider=azure", "url=https://a"]],
+			["Task_B", V2, ["provider=azure", "url=https://b"]],
+		]);
+		const before = readFileSync(file, "utf-8");
+		const mtime = statSync(file).mtimeMs;
+		const result = await runWithEnv(
+			dataDirWithCache([V1, V2]),
+			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			["update", V1.id, file, "--in-place"],
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Summary: 0 updated, 0 skipped, 2 unchanged/);
+		assert.doesNotMatch(result.stdout, /Updated /);
+		assert.strictEqual(readFileSync(file, "utf-8"), before);
+		assert.strictEqual(statSync(file).mtimeMs, mtime);
+	});
+
+	test("--json prints one document with dryRun, command, results and summary", async () => {
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			V1.id,
+			multi,
+			"--dry-run",
+			"--json",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const json = JSON.parse(result.stdout);
+		assert.deepStrictEqual(Object.keys(json).sort(), [
+			"command",
+			"dryRun",
+			"results",
+			"summary",
+		]);
+		assert.strictEqual(json.dryRun, true);
+		assert.strictEqual(json.command, "element-template update");
+		assert.deepStrictEqual(
+			json.results.map((r: { elementId: string }) => r.elementId).sort(),
+			[TASK, "Task_B", "Task_C"].sort(),
+		);
+		for (const entry of json.results) {
+			assert.strictEqual(entry.status, "updated");
+			assert.strictEqual(entry.action, undefined);
+			assert.strictEqual(entry.lossless, true);
+			assert.strictEqual(entry.requiresAuthorization, false);
+			assert.strictEqual(entry.authorized, false);
+		}
+		assert.deepStrictEqual(json.summary, {
+			updated: 3,
+			skipped: 0,
+			unchanged: 0,
+			failed: 0,
+			dropped: 0,
+			blocked: 0,
+		});
+	});
+});
+
+describe("element-template update --map", () => {
+	let multi: string;
+	before(async () => {
+		multi = await seedMulti("mapped", [
+			[TASK, SRC, ["provider=azure", "endpoint=https://a"]],
+			["Task_B", SRC, ["provider=azure", "endpoint=https://b"]],
+		]);
+	});
+	const cache = () => dataDirWithCache([SRC, DST]);
+
+	test("without --map the renamed value is dropped and a dry run is blocked", async () => {
+		const result = await run(
+			cache(),
+			"update",
+			SRC.id,
+			multi,
+			"--to",
+			DST.id,
+			"--dry-run",
+			"--json",
+		);
+		assert.strictEqual(result.status, 1, result.stderr);
+		const json = JSON.parse(result.stdout);
+		assert.strictEqual(json.summary.dropped, 2);
+		assert.strictEqual(json.summary.blocked, 2);
+	});
+
+	test("moves each element's own value, is lossless and needs no --allow-lossy", async () => {
+		const dry = await run(
+			cache(),
+			"update",
+			SRC.id,
+			multi,
+			"--to",
+			DST.id,
+			"--map",
+			"endpoint=url",
+			"--dry-run",
+			"--json",
+		);
+		assert.strictEqual(dry.status, 0, dry.stderr);
+		const json = JSON.parse(dry.stdout);
+		for (const entry of json.results) {
+			assert.strictEqual(entry.lossless, true);
+			assert.strictEqual(entry.requiresAuthorization, false);
+		}
+		assert.strictEqual(json.summary.dropped, 0);
+		assert.strictEqual(json.summary.blocked, 0);
+
+		const { copy } = copyOf(multi, "mapped-copy.bpmn");
+		const result = await run(
+			cache(),
+			"update",
+			SRC.id,
+			copy,
+			"--to",
+			DST.id,
+			"--map",
+			"endpoint=url",
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const xml = readFileSync(copy, "utf-8");
+		assert.match(taskXml(xml, TASK), /source="https:\/\/a" target="url"/);
+		assert.doesNotMatch(taskXml(xml, TASK), /https:\/\/b/);
+		assert.match(taskXml(xml, "Task_B"), /source="https:\/\/b" target="url"/);
+		assert.doesNotMatch(taskXml(xml, "Task_B"), /https:\/\/a/);
+		assert.match(taskXml(xml, TASK), new RegExp(`modelerTemplate="${DST.id}"`));
+	});
+
+	test("accepts a binding-type prefix on both sides", async () => {
+		const result = await run(
+			cache(),
+			"update",
+			SRC.id,
+			multi,
+			"--to",
+			DST.id,
+			"--map",
+			"input:endpoint=input:url",
+			"--dry-run",
+			"--json",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(JSON.parse(result.stdout).summary.dropped, 0);
+	});
+
+	test("fails before writing when a name is not bound by the templates", async () => {
+		for (const map of ["nope=url", "endpoint=nope"]) {
+			const { copy, before } = copyOf(multi, "mapped-bad.bpmn");
+			const result = await run(
+				cache(),
+				"update",
+				SRC.id,
+				copy,
+				"--to",
+				DST.id,
+				"--map",
+				map,
+				"--in-place",
+				"--allow-lossy",
+			);
+			assert.strictEqual(result.status, 1, result.stderr);
+			assert.match(
+				result.stdout + result.stderr,
+				/not (a|an?) .*binding|not a settable binding/,
+			);
+			assert.match(result.stdout + result.stderr, /nope/);
+			assert.strictEqual(readFileSync(copy, "utf-8"), before);
+		}
+	});
+
+	test("rejects a malformed --map", async () => {
+		const result = await run(
+			cache(),
+			"update",
+			SRC.id,
+			multi,
+			"--to",
+			DST.id,
+			"--map",
+			"endpoint",
+			"--dry-run",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /Invalid --map format/);
 	});
 });
 

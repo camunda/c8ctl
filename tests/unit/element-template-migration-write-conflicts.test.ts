@@ -532,10 +532,23 @@ for (const reversed of [false, true]) {
 			["--in-place", "--allow-lossy"],
 			["--in-place", "--dry-run", "--json"],
 		]) {
-			const result = await run("change", targetPath, TASK, bpmn, ...flags);
+			const result = await run(
+				"update",
+				old.id,
+				TASK,
+				bpmn,
+				"--to",
+				targetPath,
+				...flags,
+			);
 			assert.equal(result.status, 1, result.stderr);
-			assert.match(result.stderr, /Ambiguous migration/);
-			assert.equal(result.stdout, "");
+			// The failure report goes to stdout only when no XML would be printed there.
+			const reportStream = flags.includes("--in-place")
+				? result.stdout
+				: result.stderr;
+			assert.match(reportStream, /Ambiguous migration/);
+			assert.doesNotMatch(result.stdout, /<bpmn:definitions|<\?xml/);
+			if (!flags.includes("--in-place")) assert.equal(result.stdout, "");
 			assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);
 			assert.equal(existsSync(`${bpmn}.migration.lock`), false);
 		}
@@ -607,15 +620,17 @@ test("CLI persists independent qualified input/header writes with the same key",
 		writeFileSync(targetPath, JSON.stringify(target));
 		writeFileSync(bpmn, seeded.stdout);
 		const result = await run(
-			"change",
-			targetPath,
+			"update",
+			old.id,
 			TASK,
 			bpmn,
+			"--to",
+			targetPath,
 			"--in-place",
 			"--json",
 		);
 		assert.equal(result.status, 0, result.stderr);
-		const envelope = JSON.parse(result.stdout);
+		const envelope = JSON.parse(result.stdout).results[0];
 		assert.equal(envelope.lossless, true);
 		assert.deepEqual(envelope.report.dropped, []);
 		assert.deepEqual(

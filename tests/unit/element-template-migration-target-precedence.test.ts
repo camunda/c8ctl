@@ -215,7 +215,17 @@ describe("explicit migration targets take precedence over cached identities", ()
 					writeFileSync(bpmn, seededXml);
 					const mtime = statSync(bpmn).mtimeMs;
 					const migrate = (...flags: string[]) =>
-						run(work, "element-template", "change", ref, TASK, bpmn, ...flags);
+						run(
+							work,
+							"element-template",
+							"update",
+							SOURCE.id,
+							TASK,
+							bpmn,
+							"--to",
+							ref,
+							...flags,
+						);
 					const preview = await migrate("--dry-run", "--json");
 					assert.equal(
 						preview.status,
@@ -256,7 +266,7 @@ describe("explicit migration targets take precedence over cached identities", ()
 					assert.equal(migrated.status, 0, migrated.stderr);
 					assert.equal(migrated.stderr, "");
 					for (const result of [preview, migrated]) {
-						const report = JSON.parse(result.stdout);
+						const report = JSON.parse(result.stdout).results[0];
 						assert.deepEqual(report.to, {
 							id: explicit.id,
 							version: 2,
