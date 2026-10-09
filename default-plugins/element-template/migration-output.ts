@@ -26,6 +26,8 @@ export interface RenderOptions {
 
 type Style = (text: string) => string;
 
+type MigrationRedactor = ReturnType<typeof migrationRedactor>;
+
 function migrationRedactor(context: MigrationRedactionContext) {
 	const sensitiveName = (identity: string) => {
 		const name = identity.replace(/max(?:imum)?[ ._-]?tokens/gi, "");
@@ -113,9 +115,9 @@ export function redactMigrationDiagnostic(
 
 function redactReport(
 	report: MigrationReport,
-	context: MigrationRedactionContext = {},
+	redactor: MigrationRedactor,
 ): MigrationReport {
-	const { sensitive, text } = migrationRedactor({ ...context, report });
+	const { sensitive, text } = redactor;
 	const change = { from: "[REDACTED]", to: "[REDACTED]" };
 	const redacted = structuredClone(report);
 	const scrub = (value: unknown): void => {
@@ -205,8 +207,9 @@ export function renderReportText(
 	report: MigrationReport,
 	{ elementId, color, dryRun, redaction }: RenderOptions,
 ): string {
-	elementId = redactMigrationDiagnostic(elementId, { ...redaction, report });
-	report = redactReport(report, redaction);
+	const redactor = migrationRedactor({ ...redaction, report });
+	elementId = redactor.text(elementId);
+	report = redactReport(report, redactor);
 	const s = styles(color);
 	const lines: string[] = [];
 	const section = (
@@ -348,8 +351,9 @@ export function reportToJson(
 		redaction?: MigrationRedactionContext;
 	},
 ) {
-	const { text } = migrationRedactor({ ...redaction, report });
-	report = redactReport(report, redaction);
+	const redactor = migrationRedactor({ ...redaction, report });
+	const { text } = redactor;
+	report = redactReport(report, redactor);
 	return {
 		elementId: text(elementId),
 		action,
