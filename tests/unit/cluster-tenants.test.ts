@@ -129,6 +129,26 @@ test("cluster help explains the physical tenant selector translation", async () 
 	}
 });
 
+test("cluster fallback usage explains selector translation for missing and invalid subcommands", async () => {
+	for (const args of [[], ["unknown-subcommand"]]) {
+		const result = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: "text" },
+			"cluster",
+			...args,
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /^Usage:/m);
+		assert.match(
+			result.stdout,
+			/--physical-tenant is rewritten to --tenant before forwarding \(except after --\)/,
+		);
+		assert.doesNotMatch(
+			result.stdout,
+			/forwarded verbatim|forwards everything/,
+		);
+	}
+});
+
 describe("cluster physical tenants through the CLI", {
 	skip: process.platform === "win32",
 }, () => {

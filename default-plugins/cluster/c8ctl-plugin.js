@@ -3407,7 +3407,7 @@ export const commands = {
       console.log('  install      Download a version without starting it');
       console.log('  delete       Remove a locally cached version to reclaim disk space');
       console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
-      console.log('  secrets      Manage local development secrets (forwarded verbatim to c8run)');
+      console.log('  secrets      Manage local development secrets (forwarded to c8run)');
       console.log('  physical-tenants  Manage local physical tenants (Camunda 8.10+; forwarded to c8run; aliases: tenants, pt)');
       console.log('');
       console.log('Options:');
@@ -3453,7 +3453,8 @@ export const commands = {
       console.log('  c8ctl cluster start 8.10 --physical-tenants sales,hr');
       console.log('  c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY');
       console.log('');
-      console.log('secrets forwards everything after it to c8run\'s own "secrets" command —');
+      console.log('secrets delegates to c8run\'s own "secrets" command.');
+      console.log('--physical-tenant is rewritten to --tenant before forwarding (except after --).');
       console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
       console.log('for c8run\'s own secrets help (--help here belongs to c8ctl).');
       return;
