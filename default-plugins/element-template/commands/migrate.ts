@@ -145,6 +145,39 @@ function parseMigrateArgs(args: string[], mode: MigrateMode): MigrateArgs {
 	return parsed;
 }
 
+interface ResolvedMigrateArgs {
+	parsed: MigrateArgs;
+	/** Empty when the mode takes no template argument. */
+	templateArg: string;
+	elementId: string;
+	bpmnFilePath: string | undefined;
+}
+
+function resolveMigrateArgs(
+	args: string[],
+	mode: MigrateMode,
+): ResolvedMigrateArgs {
+	const parsed = parseMigrateArgs(args, mode);
+	const takesTemplate = mode === "change" && !parsed.successor;
+	const positionalCount = takesTemplate ? 3 : 2;
+	if (parsed.positionals.length > positionalCount) {
+		throw new Error(
+			`Unexpected argument: ${parsed.positionals[positionalCount]}. Usage: ${USAGE[mode]}`,
+		);
+	}
+	const templateArg = takesTemplate ? (parsed.positionals[0] ?? "") : "";
+	const [elementId, bpmnFilePath] = takesTemplate
+		? parsed.positionals.slice(1)
+		: parsed.positionals;
+	if (takesTemplate && !templateArg) {
+		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
+	}
+	if (!elementId) {
+		throw new Error(`Missing element-id argument. Usage: ${USAGE[mode]}`);
+	}
+	return { parsed, templateArg, elementId, bpmnFilePath };
+}
+
 function isMigrationTemplate(
 	template: Template,
 ): template is Template & { id: string } {
@@ -218,6 +251,7 @@ function describeTemplates(templates: MigrationTemplate[]): string {
 async function resolveTarget({
 	mode,
 	parsed,
+	templateArg,
 	modeler,
 	element,
 	applied,
@@ -227,6 +261,7 @@ async function resolveTarget({
 }: {
 	mode: MigrateMode;
 	parsed: MigrateArgs;
+	templateArg: string;
 	modeler: ModelerInstance;
 	element: BpmnElement;
 	applied: { id: string; version: number };
@@ -293,23 +328,20 @@ async function resolveTarget({
 		return successors[0];
 	}
 
-	const ref = parseTemplateRef(parsed.positionals[0]);
-	if (!ref) {
-		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
-	}
-	if (ref.kind === "id") {
+	const ref = parseTemplateRef(templateArg);
+	if (ref?.kind === "id") {
 		resolveCatalog(
 			migrationTemplates(cachedTemplates.filter((t) => t.id === ref.id)),
 		);
 	}
 	const target =
-		ref.kind === "id"
+		ref?.kind === "id"
 			? await resolveOotbTemplate(ref, {
 					executionPlatformVersion,
 					requireEngineCompatibility: true,
 					templates: cachedTemplates,
 				})
-			: await readTemplateFromPathOrUrl(ref.value);
+			: await readTemplateFromPathOrUrl(templateArg);
 	if (!isMigrationTemplate(target)) {
 		throw new Error("The target template has no id.");
 	}
@@ -318,30 +350,11 @@ async function resolveTarget({
 
 async function runMigrateInternal(
 	mode: MigrateMode,
-	args: string[],
+	{ parsed, templateArg, elementId, bpmnFilePath }: ResolvedMigrateArgs,
 	redaction: MigrationRedactionContext,
 ): Promise<void> {
 	const logger = c8ctl.getLogger();
 	installStdoutEpipeHandler();
-	const parsed = parseMigrateArgs(args, mode);
-
-	const positionalCount = mode === "update" || parsed.successor ? 2 : 3;
-	if (parsed.positionals.length > positionalCount) {
-		throw new Error(
-			`Unexpected argument: ${parsed.positionals[positionalCount]}. Usage: ${USAGE[mode]}`,
-		);
-	}
-	const positionals =
-		mode === "change" && !parsed.successor
-			? parsed.positionals.slice(1)
-			: parsed.positionals;
-	const [elementId, bpmnFilePath] = positionals;
-	if (mode === "change" && !parsed.successor && !parsed.positionals[0]) {
-		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
-	}
-	if (!elementId) {
-		throw new Error(`Missing element-id argument. Usage: ${USAGE[mode]}`);
-	}
 
 	const dryRun = c8ctl.dryRun === true;
 	if (parsed.inPlace && !bpmnFilePath) {
@@ -391,6 +404,7 @@ async function runMigrateInternal(
 	const target = await resolveTarget({
 		mode,
 		parsed,
+		templateArg,
 		modeler,
 		element,
 		applied,
@@ -560,11 +574,10 @@ async function runLockedMigrate(
 	args: string[],
 	redaction: MigrationRedactionContext,
 ): Promise<void> {
-	const parsed = parseMigrateArgs(args, mode);
-	const file =
-		parsed.positionals[mode === "change" && !parsed.successor ? 2 : 1];
-	if (!parsed.inPlace || !file || c8ctl.dryRun)
-		return runMigrateInternal(mode, args, redaction);
+	const resolved = resolveMigrateArgs(args, mode);
+	const file = resolved.bpmnFilePath;
+	if (!resolved.parsed.inPlace || !file || c8ctl.dryRun)
+		return runMigrateInternal(mode, resolved, redaction);
 	const lock = `${resolvePath(file)}.migration.lock`;
 	let descriptor: number;
 	try {
@@ -576,7 +589,7 @@ async function runLockedMigrate(
 	}
 	let cleanupFailure: { error: unknown } | undefined;
 	try {
-		await runMigrateInternal(mode, args, redaction);
+		await runMigrateInternal(mode, resolved, redaction);
 	} finally {
 		try {
 			try {
