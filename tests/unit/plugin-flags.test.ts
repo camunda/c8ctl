@@ -469,6 +469,25 @@ describe("Plugin Flags CLI subprocess — collision warnings only on use", () =>
 });
 
 describe("Plugin Flags CLI subprocess — help hides reserved flags", () => {
+	test("flag-aware plugin help aligns short and long subcommands with a gap", async () => {
+		const result = await c8pluginText("help", "test-flags");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const columns: number[] = [];
+		for (const [name, description] of [
+			["list", "List entries"],
+			["physical-tenants", "Manage physical tenants"],
+			["a-much-longer-subcommand-name", "Manage extended entries"],
+		]) {
+			const line = result.stdout
+				.split("\n")
+				.find((entry) => entry.startsWith(`  ${name}`));
+			assert.ok(line, `Missing subcommand ${name}`);
+			assert.match(line, new RegExp(`^  ${name} {2,}${description}$`));
+			columns.push(line.indexOf(description));
+		}
+		assert.strictEqual(new Set(columns).size, 1);
+	});
+
 	test("`help <verb>` lists usable flags but not flags named like a global", async () => {
 		const result = await c8pluginText("help", "test-collision");
 		assert.strictEqual(result.status, 0, result.stderr);

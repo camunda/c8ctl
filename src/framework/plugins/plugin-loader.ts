@@ -127,7 +127,8 @@ export interface PluginCommandMeta {
 	passthroughHint?: string;
 	/**
 	 * Optional documentation-only flag list rendered in help under
-	 * passthrough commands. NOT parsed by c8ctl.
+	 * passthrough commands. The host does not parse these declarations;
+	 * the plugin or underlying tool handles the arguments.
 	 */
 	flagsHint?: string[];
 }
