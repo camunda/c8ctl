@@ -55,6 +55,9 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+export const CONCURRENT_EDIT_MESSAGE =
+	"BPMN changed during migration; refusing to overwrite concurrent edits.";
+
 /**
  * Overwrite `targetPath` atomically: write to a sibling temp file in
  * the same directory, then `renameSync` over the target. POSIX
@@ -76,9 +79,7 @@ export function atomicOverwriteFile(
 			expectedContents !== undefined &&
 			readFileSync(target, "utf-8") !== expectedContents
 		)
-			throw new Error(
-				"BPMN changed during migration; refusing to overwrite concurrent edits.",
-			);
+			throw new Error(CONCURRENT_EDIT_MESSAGE);
 		renameSync(tmp, target);
 	} catch (error) {
 		try {

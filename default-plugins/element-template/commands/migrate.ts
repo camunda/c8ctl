@@ -16,6 +16,7 @@ import {
 } from "../cache.ts";
 import {
 	atomicOverwriteFile,
+	CONCURRENT_EDIT_MESSAGE,
 	installStdoutEpipeHandler,
 	type Template,
 } from "../helpers.ts";
@@ -504,9 +505,7 @@ async function runMigrateInternal(
 
 	if (!dryRun && parsed.inPlace && bpmnFilePath) {
 		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
-			throw new Error(
-				"BPMN changed during migration; refusing to overwrite concurrent edits.",
-			);
+			throw new Error(CONCURRENT_EDIT_MESSAGE);
 		atomicOverwriteFile(bpmnFilePath, xml, input.xml);
 	}
 	if (c8ctl.outputMode === "json") {
