@@ -100,16 +100,21 @@ function isPopulated(value: string | undefined): value is string {
 	return value !== undefined && value !== "";
 }
 
+function effectiveFeel(property: TemplateProperty): string | undefined {
+	return (
+		property.feel ??
+		(["zeebe:input", "zeebe:output"].includes(property.binding?.type ?? "")
+			? "static"
+			: undefined)
+	);
+}
+
 /** Mirror the Modeler's FEEL storage for typed input/output parameters. */
 export function normalizeDestinationValue(
 	property: TemplateProperty,
 	value: string,
 ): string {
-	const feel =
-		property.feel ??
-		(["zeebe:input", "zeebe:output"].includes(property.binding?.type ?? "")
-			? "static"
-			: undefined);
+	const feel = effectiveFeel(property);
 	if (value.startsWith("=")) return value;
 	if (
 		feel === "required" ||
@@ -280,15 +285,22 @@ export function validateDestinationValues(
 			const isExpression =
 				stored.startsWith("=") &&
 				(property.feel === "optional" || property.feel === "required");
+			// Static Number and Boolean values are stored as `=<literal>`.
+			const literal =
+				effectiveFeel(property) === "static" &&
+				["Number", "Boolean"].includes(property.type ?? "") &&
+				stored.startsWith("=")
+					? stored.slice(1)
+					: stored;
 			if (
 				constraints?.notEmpty &&
-				(isExpression ? stored.slice(1) : stored).trim() === ""
+				(isExpression ? stored.slice(1) : literal).trim() === ""
 			)
 				throw new Error(`${at} violates notEmpty constraint`);
 			if (isExpression) continue;
 			if (
 				property.choices &&
-				!property.choices.some((choice) => choice.value === stored)
+				!property.choices.some((choice) => choice.value === literal)
 			)
 				throw new Error(`${at} violates choice constraint`);
 			if (constraints?.pattern) {
@@ -298,7 +310,7 @@ export function validateDestinationValues(
 				} catch {
 					throw new Error(`${at} has invalid pattern constraint`);
 				}
-				if (!pattern.test(stored))
+				if (!pattern.test(literal))
 					throw new Error(`${at} violates pattern constraint`);
 			}
 		}

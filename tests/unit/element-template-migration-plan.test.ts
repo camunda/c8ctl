@@ -762,3 +762,114 @@ describe("carryOverWrites", () => {
 		assert.deepStrictEqual(carryOverWrites([], [input("b", "")], target), []);
 	});
 });
+
+describe("validateDestinationValues static Number and Boolean values", () => {
+	function templateOf(
+		...properties: MigrationTemplate["properties"]
+	): MigrationTemplate {
+		return {
+			id: "new",
+			properties: properties.map((p) => ({
+				binding: { type: "zeebe:input", name: "b" },
+				...p,
+			})),
+		};
+	}
+	const numberPattern = {
+		type: "Number",
+		feel: "static",
+		constraints: { notEmpty: true, pattern: { value: "^\\d+$" } },
+	};
+
+	test("validates the literal of a carried-over FEEL-stored value", () => {
+		const target = templateOf(numberPattern);
+		const sources = [input("b", "=20")];
+		assert.doesNotThrow(() => validateDestinationValues([], sources, target));
+		assert.deepStrictEqual(
+			carryOverWrites([], sources, target).map((w) => w.value),
+			["=20"],
+		);
+	});
+
+	test("treats a missing feel on an input binding as static", () => {
+		const target = templateOf({ ...numberPattern, feel: undefined });
+		assert.doesNotThrow(() =>
+			validateDestinationValues([], [input("b", "=20")], target),
+		);
+	});
+
+	test("still rejects a literal that violates the pattern", () => {
+		assert.throws(
+			() =>
+				validateDestinationValues(
+					[],
+					[input("b", "=abc")],
+					templateOf(numberPattern),
+				),
+			/violates pattern constraint/,
+		);
+	});
+
+	test("keeps skipping the pattern for optional FEEL expressions", () => {
+		assert.doesNotThrow(() =>
+			validateDestinationValues(
+				[],
+				[input("b", "=someVar")],
+				templateOf({ ...numberPattern, feel: "optional" }),
+			),
+		);
+	});
+
+	test("treats a bare = as empty", () => {
+		assert.throws(
+			() =>
+				validateDestinationValues(
+					[],
+					[input("b", "=")],
+					templateOf({
+						type: "Number",
+						feel: "static",
+						constraints: { notEmpty: true },
+					}),
+				),
+			/notEmpty/,
+		);
+	});
+
+	test("checks choices against the Boolean literal", () => {
+		const target = templateOf({
+			type: "Boolean",
+			feel: "static",
+			choices: [{ value: "true" }],
+		});
+		assert.doesNotThrow(() =>
+			validateDestinationValues([], [input("b", "=true")], target),
+		);
+		assert.throws(
+			() => validateDestinationValues([], [input("b", "=false")], target),
+			/choice/,
+		);
+	});
+
+	test("matches conditions on the stored literal", () => {
+		const dependent = {
+			id: "dep",
+			binding: { type: "zeebe:input", name: "d" },
+			condition: { property: "n", oneOf: [20, 30] },
+			constraints: { notEmpty: true },
+		};
+		const target = templateOf(
+			{ id: "n", type: "Number", feel: "static" },
+			dependent,
+		);
+		assert.throws(
+			() =>
+				validateDestinationValues(
+					[],
+					[input("b", "=20"), input("d", " ")],
+					target,
+				),
+			/notEmpty/,
+		);
+	});
+});
