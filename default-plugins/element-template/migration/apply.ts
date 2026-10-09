@@ -28,7 +28,6 @@ import {
 	CARRY_OVER_LABEL,
 	carryOverWrites,
 	normalizeDestinationValue,
-	validateDestinationValues,
 	validateTargets,
 } from "./plan.ts";
 import type { Recipe } from "./recipe.ts";
@@ -112,23 +111,18 @@ function applyApplication(
 	}
 
 	const values = valuesOf(element);
-	const { writes: recipeWrites, facts } = buildStepPlan(
-		step?.entries ?? [],
-		values,
-		template,
-	);
+	const clone = structuredClone(template);
+	const {
+		writes: recipeWrites,
+		facts,
+		activeProperties,
+	} = buildStepPlan(step?.entries ?? [], values, clone);
 	const writes = [
 		...recipeWrites,
 		...carryOverWrites(recipeWrites, values, template),
 	];
 
 	// Seed the template so optional and empty targets materialise on apply.
-	const clone = structuredClone(template);
-	const activeProperties = validateDestinationValues(
-		recipeWrites,
-		values,
-		clone,
-	);
 	for (const w of writes) {
 		for (const property of findPropertiesByTarget(
 			clone.properties,
@@ -149,10 +143,10 @@ function applyApplication(
 		modeler.elementTemplates.applyTemplate(element, clone) ?? element;
 
 	// Re-applying keeps existing values, so write each resolved value directly.
+	const containers = findExtensionContainers(
+		getExtensionElements(current.businessObject),
+	);
 	for (const w of writes) {
-		const containers = findExtensionContainers(
-			getExtensionElements(current.businessObject),
-		);
 		for (const property of findPropertiesByTarget(
 			clone.properties,
 			w.key,
@@ -289,7 +283,7 @@ export function migrateElement({
 		fromTemplate,
 		toTemplate: target,
 		before,
-		after: valuesOf(current),
+		after: allFacts.at(-1)?.after ?? before,
 		facts: mergeFacts(allFacts),
 		usedRecipe: steps.length > 0,
 		refusal,

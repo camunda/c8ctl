@@ -51,6 +51,7 @@ export interface PlanFacts {
 export interface StepPlan {
 	writes: Write[];
 	facts: PlanFacts;
+	activeProperties: Set<TemplateProperty>;
 }
 
 export const TEMPLATE_REF = /\$\{([^}]+)\}/g;
@@ -425,8 +426,10 @@ export function buildStepPlan(
 	}
 
 	assertNoAmbiguousWrites(writes);
-	if (template) validateDestinationValues(writes, sourceValues, template);
-	return { writes, facts };
+	const activeProperties = template
+		? validateDestinationValues(writes, sourceValues, template)
+		: new Set<TemplateProperty>();
+	return { writes, facts, activeProperties };
 }
 
 /** Two active writes to the same target make the recipe ambiguous. */
