@@ -8,7 +8,12 @@ import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
-import { loadCache, pickVersion, requireCachePresent } from "../cache.ts";
+import {
+	findById,
+	loadCache,
+	pickVersion,
+	requireCachePresent,
+} from "../cache.ts";
 import {
 	atomicOverwriteFile,
 	installStdoutEpipeHandler,
@@ -23,6 +28,7 @@ import {
 	enumerateElementValues,
 	getExtensionElements,
 } from "../migration/element-values.ts";
+import { emptyFacts } from "../migration/plan.ts";
 import {
 	parseRecipe,
 	type Recipe,
@@ -62,7 +68,7 @@ const require = createRequire(import.meta.url);
 
 export type MigrateMode = "change" | "update";
 
-export const USAGE: Record<MigrateMode, string> = {
+const USAGE: Record<MigrateMode, string> = {
 	change:
 		"c8ctl element-template change <template> <element-id> [<file.bpmn>] | change --successor <element-id> [<file.bpmn>]",
 	update: "c8ctl element-template update <element-id> [<file.bpmn>]",
@@ -93,10 +99,7 @@ function readFlagValue(
 	return { value: next, skip: 1 };
 }
 
-export function parseMigrateArgs(
-	args: string[],
-	mode: MigrateMode,
-): MigrateArgs {
+function parseMigrateArgs(args: string[], mode: MigrateMode): MigrateArgs {
 	const parsed: MigrateArgs = {
 		inPlace: false,
 		allowLossy: false,
@@ -233,7 +236,7 @@ async function resolveTarget({
 }): Promise<MigrationTemplate> {
 	if (mode === "update") {
 		requireCachePresent();
-		const versions = (loadCache() ?? []).filter((t) => t.id === applied.id);
+		const versions = findById(applied.id);
 		resolveCatalog(migrationTemplates(versions));
 		if (versions.length === 0) {
 			throw new Error(
@@ -268,7 +271,7 @@ async function resolveTarget({
 	if (parsed.successor) {
 		requireCachePresent();
 		const cache = resolveCatalog(
-			compatibleTemplates(loadCache() ?? [], executionPlatformVersion ?? ""),
+			compatibleTemplates(loadCache() ?? [], executionPlatformVersion),
 		);
 		const service = modeler.get("elementTemplates");
 		service.set(cache);
@@ -297,9 +300,7 @@ async function resolveTarget({
 		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
 	}
 	if (ref.kind === "id") {
-		resolveCatalog(
-			migrationTemplates((loadCache() ?? []).filter((t) => t.id === ref.id)),
-		);
+		resolveCatalog(migrationTemplates(findById(ref.id)));
 	}
 	const target =
 		ref.kind === "id"
@@ -420,15 +421,7 @@ async function runMigrateInternal(
 				toTemplate: target,
 				before: [],
 				after: [],
-				facts: {
-					moved: [],
-					set: [],
-					notes: [],
-					guardSkipped: [],
-					templateSkipped: [],
-					noMatch: [],
-					feelSkipped: [],
-				},
+				facts: emptyFacts(),
 				usedRecipe: false,
 				refusal: null,
 			});
@@ -460,7 +453,7 @@ async function runMigrateInternal(
 
 	const recipeSource: RecipeSource = recipe
 		? "file"
-		: embeddedRecipe(target)
+		: targetRecipe
 			? "embedded"
 			: "none";
 

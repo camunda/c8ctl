@@ -7,6 +7,7 @@
  */
 
 import {
+	bindingPath,
 	bindingTargetKey,
 	findPropertiesByTarget,
 	maybePrependFeel,
@@ -52,10 +53,10 @@ export interface StepPlan {
 	facts: PlanFacts;
 }
 
-const TEMPLATE_REF = /\$\{([^}]+)\}/g;
+export const TEMPLATE_REF = /\$\{([^}]+)\}/g;
 
 /** Compile a `*`-only glob to an anchored regex. */
-export function globToRegex(pattern: string): RegExp {
+function globToRegex(pattern: string): RegExp {
 	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
 }
@@ -71,10 +72,7 @@ function lookup(
 	);
 	if (matches.length > 1) {
 		const types = new Set(matches.map((v) => v.bindingType));
-		const qualified = [...types].map(
-			(type) =>
-				`${type === "zeebe:taskHeader" ? "header" : type.replace("zeebe:", "")}:${key}`,
-		);
+		const qualified = [...types].map((type) => bindingPath(type, key));
 		throw new Error(
 			`${types.size > 1 ? "Ambiguous" : "Duplicate"} source path "${path}"; use ${qualified.join(", ")}${types.size === 1 ? " after removing duplicate backing entries" : ""}`,
 		);
@@ -143,7 +141,7 @@ export function validateDestinationValues(
 		if (property.type !== "Hidden" && key !== undefined) {
 			const source = lookup(
 				sourceValues,
-				`${property.binding?.type === "zeebe:taskHeader" ? "header" : property.binding?.type?.replace("zeebe:", "")}:${key}`,
+				bindingPath(property.binding?.type, key),
 			);
 			if (source && isPopulated(source.value))
 				return normalizeDestinationValue(property, source.value);
@@ -240,7 +238,7 @@ export function validateDestinationValues(
 		});
 	}
 	for (const write of candidates) {
-		const path = `${write.bindingType === "zeebe:taskHeader" ? "header" : write.bindingType?.replace("zeebe:", "")}:${write.key}`;
+		const path = bindingPath(write.bindingType, write.key);
 		const at = `${write.entry.label}: destination "${path}"`;
 		for (const property of findPropertiesByTarget(
 			template.properties,
@@ -292,12 +290,8 @@ export function validateDestinationValues(
 	return activeProperties;
 }
 
-export function buildStepPlan(
-	entries: Entry[],
-	sourceValues: ElementValue[],
-	template?: MigrationTemplate,
-): StepPlan {
-	const facts: PlanFacts = {
+export function emptyFacts(): PlanFacts {
+	return {
 		moved: [],
 		set: [],
 		notes: [],
@@ -306,6 +300,14 @@ export function buildStepPlan(
 		noMatch: [],
 		feelSkipped: [],
 	};
+}
+
+export function buildStepPlan(
+	entries: Entry[],
+	sourceValues: ElementValue[],
+	template?: MigrationTemplate,
+): StepPlan {
+	const facts = emptyFacts();
 	const writes: Write[] = [];
 
 	const write = (entry: Entry, to: string, value: string) => {

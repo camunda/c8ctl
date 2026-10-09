@@ -44,6 +44,18 @@ export function splitBindingPrefix(path: string): {
 	return { bindingType: null, key: path };
 }
 
+/** Qualify a key with its binding-type prefix, as a recipe path. */
+export function bindingPath(
+	bindingType: string | null | undefined,
+	key: string,
+): string {
+	const prefix =
+		bindingType === "zeebe:taskHeader"
+			? "header"
+			: bindingType?.replace("zeebe:", "");
+	return `${prefix}:${key}`;
+}
+
 function findExtensionByType(
 	extensionElements: ModdleElement | undefined,
 	type: string,

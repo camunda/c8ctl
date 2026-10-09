@@ -9,6 +9,7 @@
  */
 
 import { findPropertiesByTarget, splitBindingPrefix } from "./binding.ts";
+import { TEMPLATE_REF } from "./plan.ts";
 import {
 	type Entry,
 	type Recipe,
@@ -35,8 +36,6 @@ export interface Application {
 	step: Step | null;
 	template: MigrationTemplate;
 }
-
-const TEMPLATE_REF = /\$\{([^}]+)\}/g;
 
 function versionOf(template: MigrationTemplate): number | undefined {
 	return typeof template.version === "number" ? template.version : undefined;

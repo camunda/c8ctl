@@ -9,7 +9,7 @@
  * Self-contained on purpose: nothing in `migration/` imports from c8ctl.
  */
 
-export const SUPPORTED_SCHEMA_VERSION = 1;
+const SUPPORTED_SCHEMA_VERSION = 1;
 
 export type NoteLevel = "info" | "warning";
 

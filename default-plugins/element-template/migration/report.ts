@@ -71,7 +71,7 @@ export interface MigrationReport {
 	lossless: boolean;
 }
 
-export function templateRef(template: MigrationTemplate): TemplateRef {
+function templateRef(template: MigrationTemplate): TemplateRef {
 	return {
 		id: template.id,
 		version: template.version ?? 0,
