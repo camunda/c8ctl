@@ -25,6 +25,8 @@ import {
 } from "./moddle.ts";
 import {
 	buildStepPlan,
+	CARRY_OVER_LABEL,
+	carryOverWrites,
 	normalizeDestinationValue,
 	validateDestinationValues,
 	validateTargets,
@@ -109,48 +111,22 @@ function applyApplication(
 		return null;
 	}
 
-	const { writes, facts } = buildStepPlan(
+	const values = valuesOf(element);
+	const { writes: recipeWrites, facts } = buildStepPlan(
 		step?.entries ?? [],
-		valuesOf(element),
+		values,
 		template,
 	);
-	for (const source of valuesOf(element)) {
-		if (
-			writes.some(
-				(write) =>
-					write.key === source.key && write.bindingType === source.bindingType,
-			)
-		)
-			continue;
-		const properties = findPropertiesByTarget(
-			template.properties,
-			source.key,
-			source.bindingType,
-		);
-		if (
-			source.value !== "" &&
-			properties.some((property) => property.type !== "Hidden")
-		) {
-			writes.push({
-				key: source.key,
-				bindingType: source.bindingType,
-				value: source.value,
-				entry: {
-					kind: "set",
-					to: source.key,
-					value: source.value,
-					when: [],
-					label: "carry-over",
-				},
-			});
-		}
-	}
+	const writes = [
+		...recipeWrites,
+		...carryOverWrites(recipeWrites, values, template),
+	];
 
 	// Seed the template so optional and empty targets materialise on apply.
 	const clone = structuredClone(template);
 	const activeProperties = validateDestinationValues(
-		writes,
-		valuesOf(element),
+		recipeWrites,
+		values,
 		clone,
 	);
 	for (const w of writes) {
@@ -222,7 +198,7 @@ function applyApplication(
 				.filter(
 					(write) =>
 						(write.entry.kind === "set" &&
-							write.entry.label !== "carry-over") ||
+							write.entry.label !== CARRY_OVER_LABEL) ||
 						write.entry.kind === "template",
 				)
 				.map((write) => ({

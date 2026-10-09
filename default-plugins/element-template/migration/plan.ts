@@ -121,6 +121,46 @@ export function normalizeDestinationValue(
 	return value;
 }
 
+export const CARRY_OVER_LABEL = "carry-over";
+
+/**
+ * Populated source values that no recipe write covers and that a non-Hidden
+ * target property binds. Checked against `writes` only.
+ */
+export function carryOverWrites(
+	writes: Write[],
+	sourceValues: ElementValue[],
+	template: MigrationTemplate,
+): Write[] {
+	return sourceValues
+		.filter(
+			(source) =>
+				isPopulated(source.value) &&
+				!writes.some(
+					(w) => w.key === source.key && w.bindingType === source.bindingType,
+				) &&
+				findPropertiesByTarget(
+					template.properties,
+					source.key,
+					source.bindingType,
+				).some((p) => p.type !== "Hidden"),
+		)
+		.map(
+			(source): Write => ({
+				key: source.key,
+				bindingType: source.bindingType,
+				value: source.value,
+				entry: {
+					kind: "set",
+					to: source.key,
+					value: source.value,
+					when: [],
+					label: CARRY_OVER_LABEL,
+				},
+			}),
+		);
+}
+
 /** Validate recipe writes and the populated, non-Hidden values apply carries over. */
 export function validateDestinationValues(
 	writes: Write[],
@@ -135,7 +175,7 @@ export function validateDestinationValues(
 		);
 		if (
 			write &&
-			!(write.entry.label === "carry-over" && property.type === "Hidden")
+			!(write.entry.label === CARRY_OVER_LABEL && property.type === "Hidden")
 		)
 			return normalizeDestinationValue(property, write.value);
 		if (property.type !== "Hidden" && key !== undefined) {
@@ -209,34 +249,10 @@ export function validateDestinationValues(
 		};
 		return evaluate(property.condition);
 	};
-	const candidates = [...writes];
-	for (const source of sourceValues) {
-		if (
-			!isPopulated(source.value) ||
-			writes.some(
-				(w) => w.key === source.key && w.bindingType === source.bindingType,
-			)
-		)
-			continue;
-		if (
-			!findPropertiesByTarget(
-				template.properties,
-				source.key,
-				source.bindingType,
-			).some((p) => p.type !== "Hidden")
-		)
-			continue;
-		candidates.push({
-			...source,
-			entry: {
-				kind: "set",
-				to: source.key,
-				value: source.value,
-				when: [],
-				label: "carry-over",
-			},
-		});
-	}
+	const candidates = [
+		...writes,
+		...carryOverWrites(writes, sourceValues, template),
+	];
 	for (const write of candidates) {
 		const path = bindingPath(write.bindingType, write.key);
 		const at = `${write.entry.label}: destination "${path}"`;
@@ -245,7 +261,7 @@ export function validateDestinationValues(
 			write.key,
 			write.bindingType,
 		)) {
-			if (write.entry.label === "carry-over" && property.type === "Hidden")
+			if (write.entry.label === CARRY_OVER_LABEL && property.type === "Hidden")
 				continue;
 			let active: boolean;
 			try {

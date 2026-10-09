@@ -8,6 +8,8 @@ import { describe, test } from "node:test";
 import type { ElementValue } from "../../default-plugins/element-template/migration/element-values.ts";
 import {
 	buildStepPlan,
+	CARRY_OVER_LABEL,
+	carryOverWrites,
 	normalizeDestinationValue,
 	validateDestinationValues,
 	validateTargets,
@@ -717,5 +719,46 @@ describe("validateTargets", () => {
 			/several binding types/,
 		);
 		validateTargets(entriesOf({ from: "a", to: "input:dup" }), template);
+	});
+});
+
+describe("carryOverWrites", () => {
+	const target = {
+		id: "new",
+		properties: [
+			{ type: "String", binding: { type: "zeebe:input", name: "b" } },
+			{ type: "Hidden", binding: { type: "zeebe:input", name: "h" } },
+		],
+	};
+
+	test("returns one write per populated duplicate, checked against recipe writes only", () => {
+		const writes = carryOverWrites(
+			[],
+			[input("b", "first"), input("b", "second"), input("c", "x")],
+			target,
+		);
+		assert.deepStrictEqual(
+			writes.map((w) => [w.key, w.value, w.entry.label]),
+			[
+				["b", "first", CARRY_OVER_LABEL],
+				["b", "second", CARRY_OVER_LABEL],
+			],
+		);
+	});
+
+	test("skips recipe-written, empty and Hidden-only targets", () => {
+		const recipe = buildStepPlan(
+			entriesOf({ to: "input:b", set: "recipe" }),
+			[],
+		).writes;
+		assert.deepStrictEqual(
+			carryOverWrites(
+				recipe,
+				[input("b", "first"), input("b", "second"), input("h", "x")],
+				target,
+			),
+			[],
+		);
+		assert.deepStrictEqual(carryOverWrites([], [input("b", "")], target), []);
 	});
 });
