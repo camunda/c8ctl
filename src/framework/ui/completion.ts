@@ -30,6 +30,13 @@ function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
 	return Object.entries(flags);
 }
 
+/** Flat flag list for a plugin command (name merged into each flag def). */
+function pluginFlagList(
+	cmd: PluginCommandInfo,
+): (FlagDef & { name: string })[] {
+	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
+}
+
 // ─── Derived completion data ─────────────────────────────────────────────────
 
 /** Reverse map: canonical resource → all names that resolve to it (including itself). */
@@ -470,6 +477,14 @@ function generateZshCompletion(): string {
 	};
 	const flagEntryLines = allFlags.map(toZshFlagEntry);
 	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
+	const pluginCaseLines = pluginCmds.map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        flags=(\n${pluginFlagList(cmd)
+				.map(toZshFlagEntry)
+				.join(
+					"\n",
+				)}\n        )\n        _arguments \${global_flags[@]} \${flags[@]}; return ;;`,
+	);
 
 	// Passthrough verbs (#366) for the case branch in the default arm.
 	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
@@ -531,18 +546,7 @@ ${globalFlagEntryLines.join("\n")}
 
   if (( CURRENT > 3 )) || [[ \${words[CURRENT]} == -* ]]; then
     case "\${words[2]}" in
-${pluginCmds
-	.map(
-		(cmd) =>
-			`      ${cmd.commandName})\n        flags=(\n${flagEntries(
-				cmd.flags ?? {},
-			)
-				.map(([name, def]) => toZshFlagEntry({ name, ...def }))
-				.join(
-					"\n",
-				)}\n        )\n        _arguments \${global_flags[@]} \${flags[@]}; return ;;`,
-	)
-	.join("\n")}
+${pluginCaseLines.join("\n")}
     esac
   fi
 
@@ -597,9 +601,8 @@ function generateFishCompletion(): string {
 		passthroughTokens.length > 0
 			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
 			: "";
-	const flagAwareTokens = pluginCmds
-		.filter((cmd) => !cmd.passthrough)
-		.map((cmd) => cmd.commandName);
+	const flagAwarePluginCmds = pluginCmds.filter((cmd) => !cmd.passthrough);
+	const flagAwareTokens = flagAwarePluginCmds.map((cmd) => cmd.commandName);
 	const builtinGuard =
 		nonGlobalGuard +
 		(flagAwareTokens.length > 0
@@ -643,15 +646,10 @@ function generateFishCompletion(): string {
 	);
 	for (const { flags, guard } of [
 		{ flags: allFlags, guard: builtinGuard },
-		...pluginCmds
-			.filter((cmd) => !cmd.passthrough)
-			.map((cmd) => ({
-				flags: flagEntries(cmd.flags ?? {}).map(([name, def]) => ({
-					name,
-					...def,
-				})),
-				guard: ` -n '__fish_seen_subcommand_from ${cmd.commandName}'`,
-			})),
+		...flagAwarePluginCmds.map((cmd) => ({
+			flags: pluginFlagList(cmd),
+			guard: ` -n '__fish_seen_subcommand_from ${cmd.commandName}'`,
+		})),
 	]) {
 		for (const f of flags) {
 			if (globalNames.has(f.name)) continue;
