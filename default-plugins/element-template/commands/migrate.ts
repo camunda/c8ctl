@@ -36,8 +36,9 @@ import { buildReport } from "../migration/report.ts";
 import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
+	type MigrateMode,
 	type MigrationRedactionContext,
-	type RecipeSource,
+	type RecipeOrigin,
 	redactMigrationDiagnostic,
 	renderReportText,
 	reportToJson,
@@ -61,8 +62,6 @@ import {
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
-
-export type MigrateMode = "change" | "update";
 
 const USAGE: Record<MigrateMode, string> = {
 	change:
@@ -468,7 +467,7 @@ async function runMigrateInternal(
 		return;
 	}
 
-	const recipeSource: RecipeSource = recipe
+	const recipeSource: RecipeOrigin = recipe
 		? "file"
 		: targetRecipe
 			? "embedded"

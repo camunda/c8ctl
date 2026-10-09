@@ -334,7 +334,8 @@ export function renderReportText(
 	return `${lines.join("\n")}\n`;
 }
 
-export type RecipeSource = "file" | "embedded" | "none";
+export type RecipeOrigin = "file" | "embedded" | "none";
+export type MigrateMode = "change" | "update";
 
 /** The report as plain data for `--json`. */
 export function reportToJson(
@@ -348,8 +349,8 @@ export function reportToJson(
 		redaction,
 	}: {
 		elementId: string;
-		action: "change" | "update";
-		recipe: RecipeSource;
+		action: MigrateMode;
+		recipe: RecipeOrigin;
 		dryRun: boolean;
 		file?: string;
 		redaction?: MigrationRedactionContext;
