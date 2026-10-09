@@ -90,6 +90,15 @@ version resolution.
   The release listing endpoint is overridable via
   `C8CTL_CONNECTORS_RELEASES_URL` — useful for tests against a local
   fixture server.
+- **The REST listing is rate-limited; the Atom feed is the fallback.**
+  `GITHUB_TOKEN`/`GH_TOKEN` is sent as a bearer token to `api.github.com`
+  only — never to a `C8CTL_CONNECTORS_RELEASES_URL` mirror. On a
+  401/403/429 or a network error, `fetchConnectorReleases()` lists
+  `releases.atom` instead (`C8CTL_CONNECTORS_RELEASES_FEED_URL`) and
+  returns `complete: false`: the feed holds only the newest releases and
+  no asset data, so `syncTemplates` skips `--prune` and doesn't stamp
+  `fetched-at`. Other HTTP errors are reported as is. Tests must point
+  both URLs at the stub (`syncEnv()` does).
 
 ## Testing
 

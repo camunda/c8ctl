@@ -29,6 +29,7 @@ import {
 	extractJsonEntries,
 	fetchConnectorReleases,
 	fetchReleaseAsset,
+	getReleasesFeedUrl,
 	getReleasesUrl,
 } from "./releases.ts";
 
@@ -453,7 +454,8 @@ function sortTemplates(templates: Template[]): Template[] {
  * - Deduplicates `id@version` across bundles, preferring the newest
  *   release's copy.
  * - With `prune: true`, drops cached entries that no longer belong to a
- *   selected release.
+ *   selected release — unless a download failed or the listing came
+ *   from the (partial) release feed fallback.
  *
  * Per-release fetch failures are logged + counted but do not abort the run.
  *
@@ -478,10 +480,10 @@ async function syncTemplatesLocked({
 }): Promise<SyncSummary> {
 	const releasesUrl = getReleasesUrl();
 	logger.info(`Fetching connector releases from ${releasesUrl} ...`);
-	const releases = await fetchConnectorReleases();
+	const { releases, complete } = await fetchConnectorReleases({ logger });
 	if (releases.length === 0) {
 		throw new Error(
-			`No connector release with an element-template bundle found at ${releasesUrl}.`,
+			`No connector release with an element-template bundle found at ${complete ? releasesUrl : getReleasesFeedUrl()}.`,
 		);
 	}
 	logger.info(
@@ -584,10 +586,18 @@ async function syncTemplatesLocked({
 	// them while its replacement failed to download would delete a whole
 	// minor line's templates over one transient HTTP error, so pruning
 	// only happens on a fully successful sync.
-	const pruning = prune && errors === 0;
+	//
+	// The same holds when the releases came from the feed fallback: it
+	// only lists the newest releases, so a line missing from it has not
+	// necessarily been dropped.
+	const pruning = prune && errors === 0 && complete;
 	if (prune && errors > 0) {
 		logger.warn(
 			`Skipping prune: ${errors} bundle(s) failed to download — cached templates were kept.`,
+		);
+	} else if (prune && !complete) {
+		logger.warn(
+			"Skipping prune: the release feed fallback lists only the newest releases — cached templates were kept.",
 		);
 	}
 
@@ -611,9 +621,10 @@ async function syncTemplatesLocked({
 		);
 	}
 
-	// A partial sync leaves the previous `fetched-at` in place so the
-	// staleness nudge keeps asking for a full refresh.
-	saveCache(next, { stampFetchedAt: errors === 0 });
+	// A partial sync (failed downloads, or a feed-fallback listing) leaves
+	// the previous `fetched-at` in place so the staleness nudge keeps
+	// asking for a full refresh.
+	saveCache(next, { stampFetchedAt: errors === 0 && complete });
 
 	const summary: SyncSummary = {
 		total: next.length,
