@@ -4,6 +4,9 @@
  *
  * Hand-rolled because `bpmn-js-element-templates` exports no property-write
  * utility. Covers the Zeebe binding types connector templates use.
+ *
+ * This is a superset of the plugin-level `../binding.ts`. Do not merge them:
+ * `migration/` MUST NOT import from outside itself.
  */
 
 import { getModdleList, type ModdleElement } from "./moddle.ts";

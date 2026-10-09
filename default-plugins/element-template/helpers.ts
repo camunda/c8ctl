@@ -13,6 +13,10 @@ import {
 import { resolve as resolvePath } from "node:path";
 import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
+import { maybePrependFeel } from "./migration/binding.ts";
+
+export { maybePrependFeel } from "./migration/binding.ts";
+export { globToRegex } from "./migration/plan.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -401,20 +405,6 @@ export function getPropertyDetail(
 }
 
 /**
- * Compile a shell-style glob to a regex. Only `*` is special — every
- * other character matches literally. Used for `show-properties auth*`
- * style positional matching.
- *
- *   "auth*"   → /^auth.*$/
- *   "url"     → /^url$/
- *   "a.b.*c"  → /^a\.b\..*c$/
- */
-export function globToRegex(pattern: string): RegExp {
-	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
-}
-
-/**
  * Parse a --set key=value string. If key contains a `:` prefix,
  * resolve the binding type shorthand.
  *
@@ -457,30 +447,6 @@ export function parseSetArg(arg: string): ParsedSetArg {
 	}
 
 	return { bindingTypeFilter: null, name: key, value };
-}
-
-/**
- * For a property with `feel: "required"`, Modeler always stores the value
- * as a FEEL expression (prefixed with `=`). Auto-prepend `=` when the
- * user-supplied value doesn't already start with one, so `--set key=orderId`
- * behaves like Modeler instead of producing invalid BPMN.
- *
- * The prepend is skipped when:
- *  - `prop.feel` is not `"required"` (no-op for `optional` / `static` / absent)
- *  - the value is already a FEEL expression (starts with `=`)
- *  - the value is empty (would produce `=` alone — leave as-is for validation)
- */
-export function maybePrependFeel(
-	prop: TemplateProperty,
-	value: string,
-): string {
-	if (prop.feel !== "required") {
-		return value;
-	}
-	if (value === "" || value.startsWith("=")) {
-		return value;
-	}
-	return `=${value}`;
 }
 
 /**

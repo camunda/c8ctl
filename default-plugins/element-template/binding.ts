@@ -14,6 +14,10 @@
  * `getPropertyValue`/`setPropertyValue`/`validateProperty`/`applyConditions`/
  * `isConditionMet`. Once #236 merges and ships in a release, this module
  * should be replaced by calls into that subpath instead of maintained here.
+ *
+ * `migration/binding.ts` is a superset of this file (adds `agentDefinition`,
+ * `adHoc` and duplicate-container errors). The two MUST NOT be merged:
+ * `migration/` stays self-contained.
  */
 
 import type { TemplateBinding } from "./helpers.ts";

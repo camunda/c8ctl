@@ -56,7 +56,7 @@ export interface StepPlan {
 export const TEMPLATE_REF = /\$\{([^}]+)\}/g;
 
 /** Compile a `*`-only glob to an anchored regex. */
-function globToRegex(pattern: string): RegExp {
+export function globToRegex(pattern: string): RegExp {
 	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
 	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
 }
