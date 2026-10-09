@@ -270,6 +270,7 @@ At runtime, c8ctl injects a global `c8ctl` object for plugins via `globalThis.c8
 - Tenant resolver: `resolveTenantId(profile?)`
 - Logger accessor: `getLogger()`
 - User data directory: `getUserDataDir()`
+- Camunda Desktop Modeler data directory: `getModelerDataDir()`
 - Cross-platform npm runner: `npm({ args, stdout?, stdio? })`
 
 Use the client factory when your plugin needs direct Camunda API access, `resolveTenantId` to mirror c8ctl tenant fallback behavior, and `getLogger()` to emit output-mode-aware logs.

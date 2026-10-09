@@ -160,6 +160,7 @@ describe("c8ctl.npm (injected dependency)", () => {
 			throw new Error("not used by these tests");
 		},
 		getUserDataDir: () => "/tmp/c8ctl-runtime-test",
+		getModelerDataDir: () => "/tmp/c8ctl-runtime-test-modeler",
 		npm: npmStub,
 	};
 

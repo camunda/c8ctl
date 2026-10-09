@@ -2651,6 +2651,154 @@ describe("CLI behavioural: element-template edit", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+	/**
+	 * Apply a custom (non-OOTB) copy of the HTTP JSON fixture to a fresh BPMN
+	 * copy, then hand the caller the BPMN path and the custom template path.
+	 * Nothing about the custom template is in the OOTB cache.
+	 */
+	async function withCustomTemplatedBpmn(
+		fn: (ctx: {
+			tempDir: string;
+			tempBpmn: string;
+			customTemplate: Record<string, unknown>;
+			customTemplateFile: string;
+		}) => Promise<void>,
+		{ bpmnSubdir = "" }: { bpmnSubdir?: string } = {},
+	): Promise<void> {
+		const customTemplate = {
+			...JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8")),
+			id: "io.example.custom.Http.v1",
+			version: 3,
+		};
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const bpmnDir = join(tempDir, bpmnSubdir);
+		mkdirSync(bpmnDir, { recursive: true });
+		const tempBpmn = join(bpmnDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		const customTemplateFile = join(tempDir, "custom-template.json");
+		writeFileSync(customTemplateFile, JSON.stringify(customTemplate));
+		try {
+			const applied = await spawnAgainstEmptyCache(
+				"apply",
+				"-i",
+				customTemplateFile,
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=POST",
+			);
+			assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+			await fn({ tempDir, tempBpmn, customTemplate, customTemplateFile });
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	}
+
+	test("resolves a custom template from .camunda/element-templates/ in an ancestor of the BPMN file", async () => {
+		await withCustomTemplatedBpmn(
+			async ({ tempDir, tempBpmn, customTemplate }) => {
+				const localDir = join(tempDir, ".camunda", "element-templates");
+				mkdirSync(localDir, { recursive: true });
+				// Template files may hold a single template or an array.
+				writeFileSync(
+					join(localDir, "custom.json"),
+					JSON.stringify([customTemplate]),
+				);
+				await withSeededElementTemplateCache([], async (run) => {
+					const edited = await run(
+						"element-template",
+						"edit",
+						"Activity_17s7axj",
+						tempBpmn,
+						"--set",
+						"method=PUT",
+					);
+					assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+					assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+				});
+			},
+			{ bpmnSubdir: "processes" },
+		);
+	});
+
+	test("cold cache: resolves a local .camunda/element-templates/ template without the OOTB cache", async () => {
+		await withCustomTemplatedBpmn(async ({ tempDir, tempBpmn }) => {
+			const localDir = join(tempDir, ".camunda", "element-templates");
+			mkdirSync(localDir, { recursive: true });
+			writeFileSync(
+				join(localDir, "custom.json"),
+				readFileSync(join(tempDir, "custom-template.json"), "utf-8"),
+			);
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template <path> resolves an explicitly given custom template", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn, customTemplateFile }) => {
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				customTemplateFile,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template rejects a template that doesn't match the element's recorded id/version", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			const result = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				TEMPLATE_FILE,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("does not match") &&
+					output.includes("io.example.custom.Http.v1"),
+				`Should report the id/version mismatch. Got: ${output.slice(0, 400)}`,
+			);
+		});
+	});
+
+	test("unresolvable template: error points at --template and .camunda/element-templates/", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			await withSeededElementTemplateCache([], async (run) => {
+				const result = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 1);
+				const output = result.stdout + result.stderr;
+				assert.ok(
+					output.includes("--template") &&
+						output.includes(".camunda/element-templates/"),
+					`Should mention the escape hatches. Got: ${output.slice(0, 400)}`,
+				);
+			});
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2727,6 +2875,338 @@ describe("CLI behavioural: element-template cold-cache failures", () => {
 			);
 		});
 	}
+});
+
+// ---------------------------------------------------------------------------
+// element-template — `<id>` resolves .camunda/element-templates/ before the cache
+// ---------------------------------------------------------------------------
+
+const LOCAL_TEMPLATE_ID = "io.example.local.Http.v1";
+
+/**
+ * A copy of the HTTP JSON fixture under a custom id, with a
+ * `marker-v<version>` property so `get-properties` output reveals which
+ * version was resolved.
+ */
+function localTemplateVersion(
+	version: number,
+	engines?: string,
+): Record<string, unknown> {
+	const base = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+	return {
+		...base,
+		id: LOCAL_TEMPLATE_ID,
+		version,
+		engines: engines ? { camunda: engines } : undefined,
+		properties: [
+			...base.properties,
+			{
+				id: `marker-v${version}`,
+				label: "marker",
+				type: "String",
+				value: "x",
+				binding: { type: "zeebe:input", name: `marker-v${version}` },
+			},
+		],
+	};
+}
+
+/**
+ * A project dir whose `.camunda/element-templates/` holds v2 (^8.7) and v3
+ * (^8.9) of a custom template, with the BPMN (executionPlatformVersion
+ * 8.8.0) in a `processes/` subdirectory. `run` spawns the CLI in JSON mode
+ * from `cwd`, against a data dir whose OOTB cache is absent unless `cache`
+ * is given, and an empty Desktop Modeler user-data dir (`modelerDir`).
+ */
+async function withLocalTemplateProject(
+	{ cache }: { cache?: Array<Record<string, unknown>> },
+	fn: (ctx: {
+		projectDir: string;
+		modelerDir: string;
+		bpmn: string;
+		run: (cwd: string, ...args: string[]) => ReturnType<typeof asyncSpawn>;
+	}) => Promise<void>,
+): Promise<void> {
+	const projectDir = mkdtempSync(join(tmpdir(), "c8ctl-et-project-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-cold-"));
+	const modelerDir = mkdtempSync(join(tmpdir(), "c8ctl-et-modeler-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+	if (cache) {
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		writeFileSync(join(cacheDir, "templates.json"), JSON.stringify(cache));
+		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	}
+	const localDir = join(projectDir, ".camunda", "element-templates");
+	mkdirSync(localDir, { recursive: true });
+	writeFileSync(
+		join(localDir, "custom.json"),
+		JSON.stringify([
+			localTemplateVersion(2, "^8.7"),
+			localTemplateVersion(3, "^8.9"),
+		]),
+	);
+	mkdirSync(join(projectDir, "processes"));
+	const bpmn = join(projectDir, "processes", "test.bpmn");
+	writeFileSync(bpmn, readFileSync(BPMN_FILE, "utf-8"));
+	const run = (cwd: string, ...args: string[]) =>
+		asyncSpawn(
+			"node",
+			["--experimental-strip-types", join(REPO_ROOT, CLI), ...args],
+			{
+				cwd,
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://test-cluster/v2",
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+					C8CTL_MODELER_DIR: modelerDir,
+				},
+			},
+		);
+	try {
+		await fn({ projectDir, modelerDir, bpmn, run });
+	} finally {
+		rmSync(projectDir, { recursive: true, force: true });
+		rmSync(dataDir, { recursive: true, force: true });
+		rmSync(modelerDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: element-template <id> resolves .camunda/element-templates/ first", () => {
+	type Case = {
+		label: string;
+		args: (ref: string, bpmn: string) => string[];
+		/** `apply` searches from the BPMN's directory; the rest from cwd. */
+		cwd: (projectDir: string) => string;
+		resolvedVersion: (stdout: string) => number | undefined;
+		/** Unpinned: highest local version compatible with the engine. */
+		unpinned: number;
+		pinned: number;
+	};
+	const CASES: Case[] = [
+		{
+			label: "apply",
+			args: (ref, bpmn) => ["apply", ref, "Activity_17s7axj", bpmn],
+			cwd: () => tmpdir(),
+			resolvedVersion: (stdout) =>
+				Number(stdout.match(/zeebe:modelerTemplateVersion="(\d+)"/)?.[1]),
+			// The BPMN targets 8.8.0, so v3 (^8.9) is skipped.
+			unpinned: 2,
+			pinned: 3,
+		},
+		{
+			label: "info",
+			args: (ref) => ["info", ref],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get-properties",
+			args: (ref) => ["get-properties", ref, "marker-*"],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) =>
+				Number(
+					JSON.parse(stdout).properties[0]?.binding.name.slice(
+						"marker-v".length,
+					),
+				),
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get",
+			args: (ref) => ["get", ref],
+			cwd: (projectDir) => projectDir,
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+	];
+
+	for (const c of CASES) {
+		test(`${c.label}: cold cache resolves the highest compatible local version`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(LOCAL_TEMPLATE_ID, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.unpinned);
+			});
+		});
+
+		test(`${c.label}: cold cache resolves a pinned local version exactly`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(`${LOCAL_TEMPLATE_ID}@${c.pinned}`, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.pinned);
+			});
+		});
+
+		test(`${c.label}: a version missing locally falls back to the OOTB cache`, async () => {
+			await withLocalTemplateProject(
+				{ cache: [localTemplateVersion(5)] },
+				async ({ projectDir, bpmn, run }) => {
+					const result = await run(
+						c.cwd(projectDir),
+						"element-template",
+						...c.args(`${LOCAL_TEMPLATE_ID}@5`, bpmn),
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(c.resolvedVersion(result.stdout), 5);
+				},
+			);
+		});
+	}
+
+	test("info: no engine-compatible local version falls back to the OOTB cache", async () => {
+		await withLocalTemplateProject(
+			{ cache: [localTemplateVersion(5)] },
+			async ({ projectDir, run }) => {
+				const result = await run(
+					projectDir,
+					"element-template",
+					"info",
+					LOCAL_TEMPLATE_ID,
+					"--engine-version",
+					"8.6.0",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(JSON.parse(result.stdout).version, 5);
+			},
+		);
+	});
+});
+
+describe("CLI behavioural: element-template local lookup matches Desktop Modeler", () => {
+	/** Write `templates` to `<dir>/.camunda/element-templates/<name>`. */
+	function writeLocal(dir: string, name: string, templates: unknown): void {
+		const localDir = join(dir, ".camunda", "element-templates");
+		mkdirSync(localDir, { recursive: true });
+		writeFileSync(join(localDir, name), JSON.stringify(templates));
+	}
+
+	test("picks the version over all ancestors, not the nearest directory with a match", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			// The project root holds v2 and v3; the nearer dir only v1.
+			const processes = join(projectDir, "processes");
+			writeLocal(processes, "v1.json", localTemplateVersion(1));
+			const result = await run(
+				processes,
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).version, 3);
+		});
+	});
+
+	test("duplicate id+version: the nearest wins and the duplicate is reported", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			const processes = join(projectDir, "processes");
+			writeLocal(processes, "v3.json", {
+				...localTemplateVersion(3, "^8.9"),
+				name: "nearest",
+			});
+			const result = await run(
+				processes,
+				"element-template",
+				"get",
+				`${LOCAL_TEMPLATE_ID}@3`,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).name, "nearest");
+			assert.ok(
+				result.stderr.includes("already used"),
+				`Should report the shadowed duplicate. Got: ${result.stderr}`,
+			);
+		});
+	});
+
+	test("a malformed template file is an error, not skipped", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			writeFileSync(
+				join(projectDir, ".camunda", "element-templates", "broken.json"),
+				"{ not json",
+			);
+			const result = await run(
+				join(projectDir, "processes"),
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.match(
+				output,
+				/template \S*broken\.json parse error/,
+				"Should name the malformed file",
+			);
+		});
+	});
+
+	test("an invalid local template is reported and skipped", async () => {
+		const otherId = `${LOCAL_TEMPLATE_ID}.other`;
+		await withLocalTemplateProject(
+			{ cache: [{ ...localTemplateVersion(5), id: otherId }] },
+			async ({ projectDir, run }) => {
+				// The only local candidate lacks `$schema`, so the cache answers.
+				const { $schema: _, ...invalid } = localTemplateVersion(9);
+				writeLocal(join(projectDir, "processes"), "invalid.json", {
+					...invalid,
+					id: otherId,
+				});
+				const result = await run(
+					join(projectDir, "processes"),
+					"element-template",
+					"get",
+					otherId,
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(JSON.parse(result.stdout).version, 5);
+				assert.ok(
+					result.stderr.includes("missing $schema"),
+					`Should report why the template was skipped. Got: ${result.stderr}`,
+				);
+			},
+		);
+	});
+
+	test("cold cache: resolves a template from the Desktop Modeler user-data dir", async () => {
+		await withLocalTemplateProject({}, async ({ modelerDir, run }) => {
+			const userTemplates = join(
+				modelerDir,
+				"resources",
+				"element-templates",
+				"nested",
+			);
+			mkdirSync(userTemplates, { recursive: true });
+			writeFileSync(
+				join(userTemplates, "custom.json"),
+				JSON.stringify(localTemplateVersion(7)),
+			);
+			const result = await run(
+				tmpdir(),
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).version, 7);
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -66,6 +66,7 @@ export interface C8ctlDeps {
 	resolveTenantId(profileFlag?: string): string;
 	getLogger(mode?: OutputMode): Logger;
 	getUserDataDir(): string;
+	getModelerDataDir(): string;
 	npm: NpmRunner;
 }
 
@@ -99,6 +100,12 @@ export interface C8ctlPluginRuntime {
 	 * Overridable via C8CTL_DATA_DIR.
 	 */
 	getUserDataDir(): string;
+	/**
+	 * Camunda Desktop Modeler user data directory (`camunda-modeler` under
+	 * the same per-platform base as `getUserDataDir`).
+	 * Overridable via C8CTL_MODELER_DIR.
+	 */
+	getModelerDataDir(): string;
 	/**
 	 * Run npm the way c8ctl itself does, portably.
 	 *
@@ -232,6 +239,13 @@ class C8ctl implements C8ctlPluginRuntime {
 			throw new Error("c8ctl.init() must be called before getUserDataDir()");
 		}
 		return this._deps.getUserDataDir();
+	}
+
+	getModelerDataDir(): string {
+		if (!this._deps) {
+			throw new Error("c8ctl.init() must be called before getModelerDataDir()");
+		}
+		return this._deps.getModelerDataDir();
 	}
 
 	npm(options: NpmRunOptionsWithOutput): { stdout: string };

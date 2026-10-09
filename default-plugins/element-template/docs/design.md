@@ -154,7 +154,7 @@ and faster than any lazy scheme.
 |---|---|---|
 | `https://...` | starts with `http(s)://` | fetched directly, no cache |
 | local path | contains `/`/`\`, starts with `.`, or ends with `.json` | read from disk |
-| `<id>` or `<id>@<version>` | otherwise | resolved against cache |
+| `<id>` or `<id>@<version>` | otherwise | `.camunda/element-templates/`, then the cache |
 
 For `<id>` (no `@<version>`):
 
@@ -167,6 +167,39 @@ For `<id>` (no `@<version>`):
 - `get-properties` has no BPMN context, so it picks the latest version
   and warns the user to pin with `id@<n>` if they want a specific one
   (same annotation as `info`).
+
+An id is first looked up locally, the way Desktop Modeler's
+[`ElementTemplatesProvider`](https://github.com/camunda/camunda-modeler/blob/main/app/lib/config/providers/ElementTemplatesProvider.js)
+finds templates:
+
+- `.camunda/element-templates/**/*.json` in the BPMN file's directory (or
+  the current directory when there is no BPMN file) and every ancestor, up
+  to and including the filesystem root, nearest first;
+- then `resources/element-templates/**/*.json` in the Modeler's user-data
+  dir (`camunda-modeler` under `%APPDATA%`, `$XDG_CONFIG_HOME` or
+  `~/.config`, `~/Library/Application Support`; overridable via
+  `C8CTL_MODELER_DIR`).
+
+A file holds one template or an array; a malformed file is an error
+(`template <path> parse error`), as in the Modeler. All templates with the
+id are merged into one pool and validated with the
+`CloudElementTemplatesCoreModule` loader from `bpmn-js-element-templates`
+(schema validation; a duplicate id+version keeps the first, i.e. nearest,
+one). Rejected templates are reported as warnings and skipped. The version
+is then picked once over the pool with the same rules as for the cache.
+Only when no local template matches does resolution fall back to the
+cache, so a local hit works with a cold cache.
+
+The validator is reached through the core module's loader rather than the
+package-root `CloudElementTemplatesValidator` export: the root entry also
+pulls in the properties panel, which touches `document` at load time and
+cannot be loaded in Node.
+
+Version picking differs slightly from the Modeler's `getLatest`, which is
+tied to a Modeler instance: c8ctl checks only the `camunda` engine (the
+Modeler also checks the other engines it knows, e.g. `elementTemplates`),
+and a deprecated latest compatible version is still picked, where
+`getLatest` returns nothing.
 
 Errors include the available versions to make the next step obvious:
 
