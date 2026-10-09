@@ -3,6 +3,8 @@
  * test-visible in the `utils` layer.
  */
 
+import { ElementId } from "@camunda8/orchestration-cluster-api";
+
 /**
  * Builds an explicit empty-result message for `c8ctl list process-instance`,
  * naming the filters that were actually applied so the user understands the
@@ -52,4 +54,32 @@ export function processInstancesEmptyMessage(
 
 	const base = `No ${noun} found`;
 	return qualifiers.length > 0 ? `${base} for ${qualifiers.join(", ")}` : base;
+}
+
+/**
+ * Parses one `--map <sourceElementId>=<targetElementId>` value of
+ * `c8ctl migrate process-instance` into a migration mapping instruction.
+ *
+ * Splits on the first `=` only: BPMN element IDs are XML NCNames and cannot
+ * contain `=`, so anything after it belongs to the target ID and a second
+ * `=` surfaces as an invalid target rather than being silently dropped.
+ * Throws on malformed input so the flag-validation boundary reports
+ * `Invalid --map: …` before the command runs.
+ */
+export function parseMigrationMapping(value: string): {
+	sourceElementId: ElementId;
+	targetElementId: ElementId;
+} {
+	const separator = value.indexOf("=");
+	const source = separator === -1 ? "" : value.slice(0, separator).trim();
+	const target = separator === -1 ? "" : value.slice(separator + 1).trim();
+	if (!source || !target || target.includes("=")) {
+		throw new Error(
+			`expected <sourceElementId>=<targetElementId>, got "${value}" (e.g. --map Task_Review=Task_ReviewV2)`,
+		);
+	}
+	return {
+		sourceElementId: ElementId.assumeExists(source),
+		targetElementId: ElementId.assumeExists(target),
+	};
 }

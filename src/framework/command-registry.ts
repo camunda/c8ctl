@@ -728,6 +728,14 @@ const GET_PI_POSITIONALS = [
 	},
 ] as const satisfies readonly PositionalDef[];
 
+/** Optional: omitting the key selects batch migration by source definition. */
+const MIGRATE_PI_POSITIONALS = [
+	{
+		name: "key",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
 const GET_INCIDENT_POSITIONALS = [
 	{
 		name: "key",
@@ -1164,6 +1172,47 @@ export const COMMAND_REGISTRY = {
 		flags: {},
 		resourcePositionals: {
 			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
+	migrate: {
+		description: "Migrate process instances to another process definition",
+		helpDescription:
+			"Migrate a process instance, or all active instances of a definition (batch), to another process definition",
+		helpResource: "<resource> [key]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show migrate command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					"c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 --map Task_A=Task_A2",
+				description: "Migrate a process instance to a new definition",
+			},
+		],
+		resources: ["pi"],
+		flags: {
+			targetProcessDefinitionKey: {
+				type: "string",
+				description: "Key of the process definition to migrate to",
+				required: true,
+			},
+			map: {
+				type: "string",
+				multiple: true,
+				description:
+					"Element mapping as sourceElementId=targetElementId (repeatable)",
+			},
+			processDefinitionKey: {
+				type: "string",
+				description:
+					"Batch mode: migrate all active instances of this source process definition key (omit the instance key)",
+				validate: ProcessDefinitionKey.assumeExists,
+			},
+		},
+		resourcePositionals: {
+			"process-instance": MIGRATE_PI_POSITIONALS,
 		},
 	},
 
