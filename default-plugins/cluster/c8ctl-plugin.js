@@ -331,13 +331,13 @@ export const metadata = {
       // so the subcommand flags are documented via `flagsHint` instead.
       passthrough: true,
       passthroughHint:
-        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. Local management commands are forwarded to c8run; for secrets, --physical-tenant is rewritten to --tenant before forwarding (except after --).',
+        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. For local management, physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.',
       flagsHint: [
         '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
         '--debug                 (start, stop) Stream raw c8run output',
         '--purge                 (stop only) Also delete runtime data after stopping',
         '--physical-tenants <ids> (start only) Comma-separated physical tenants for this run (repeatable; Camunda 8.10+)',
-        '--physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (alias: --tenant)',
+        '--physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)',
       ],
       subcommands: [
         { name: 'start', description: 'Start local Camunda 8 cluster' },
@@ -352,8 +352,6 @@ export const metadata = {
         { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
         { name: 'secrets', description: 'Manage local development secrets (passed through to c8run)' },
         { name: 'physical-tenants', description: 'Manage local physical tenants (passed through to c8run; Camunda 8.10+)' },
-        { name: 'tenants', description: 'Alias for physical-tenants' },
-        { name: 'pt', description: 'Alias for physical-tenants' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -2524,8 +2522,7 @@ export function withForwardedYes(tail, ctx, command = 'secrets') {
 
 /**
  * Split a `cluster secrets` argv tail into an optional pinned c8run version
- * and the passthrough arguments that go to `c8run secrets` unchanged — except
- * that a `--physical-tenant` selector is forwarded as c8run's `--tenant`.
+ * and the passthrough arguments that go to `c8run secrets` unchanged.
  *
  * Only strips --c8-version (in either "--c8-version value" or
  * "--c8-version=value" form, matching how the rest of c8ctl accepts string
@@ -2562,22 +2559,7 @@ export function parseSecretsArgs(tail, command = 'secrets') {
     );
   }
 
-  return { version, passthrough: command === 'secrets' ? withC8RunTenantSelector(passthrough) : passthrough };
-}
-
-/**
- * `--physical-tenant` is c8ctl's name for c8run's `--tenant` secrets selector,
- * kept distinct from c8ctl's logical tenants. Rewrite it to the name every
- * supporting c8run accepts. Arguments after a `--` terminator are literal.
- */
-function withC8RunTenantSelector(args) {
-  const terminator = args.indexOf('--');
-  return args.map((arg, i) => {
-    if (terminator >= 0 && i >= terminator) return arg;
-    if (arg === '--physical-tenant') return '--tenant';
-    if (arg.startsWith('--physical-tenant=')) return `--tenant=${arg.slice('--physical-tenant='.length)}`;
-    return arg;
-  });
+  return { version, passthrough };
 }
 
 /**
@@ -2613,20 +2595,19 @@ function forwardedPositionals(args, start, tenantScoped) {
   const positions = [];
   for (let i = start; i < args.length; i++) {
     if (args[i] === '--') break;
-    if (tenantScoped && (args[i] === '--tenant' || args[i] === '--physical-tenant')) {
+    if (tenantScoped && args[i] === '--physical-tenant') {
       i++;
       continue;
     }
-    if (tenantScoped && (args[i].startsWith('--tenant=') || args[i].startsWith('--physical-tenant='))) continue;
+    if (tenantScoped && args[i].startsWith('--physical-tenant=')) continue;
     // Unknown options belong to c8run. Do not guess which tokens they consume.
     positions.push(i);
   }
   return positions;
 }
 
-// Tells c8run which command prefix to print in its hints ("c8ctl cluster tenants list"
-// instead of "c8run tenants list"); c8run builds without support ignore it.
-// `tenants` stays a c8ctl alias of `physical-tenants`, so those hints keep working.
+// Tells c8run which command prefix to print in its hints ("c8ctl cluster physical-tenants list"
+// instead of "c8run physical-tenants list"); c8run builds without support ignore it.
 const C8RUN_CLI_NAME = 'c8ctl cluster';
 
 function resolveLocalStoreEnv(env, cwd) {
@@ -2747,9 +2728,7 @@ async function runClusterLocalCommand(
     : { passthrough: tail, env: resolveLocalStoreEnv(env, cwd) };
 
   const exitCode = await new Promise((resolvePromise, reject) => {
-    // Every c8run build with physical-tenant support accepts `tenants`; newer
-    // builds also accept `physical-tenants` and `pt`.
-    const proc = spawnFn(binaryPath, [command === 'secrets' ? 'secrets' : 'tenants', ...passthrough], {
+    const proc = spawnFn(binaryPath, [command, ...passthrough], {
       stdio: ['inherit', 'inherit', 'pipe'],
       cwd: dirname(binaryPath),
       env: { ...resolvedEnv, C8RUN_CLI_NAME },
@@ -2768,7 +2747,7 @@ async function runClusterLocalCommand(
     proc.on('close', (code) => {
       const hint = command === 'secrets'
         ? mapSecretsFailure(code ?? 1, stderrTail, version)
-        : code !== 0 && /unsupported operation:\s*tenants/i.test(stderrTail)
+        : code !== 0 && /unsupported operation:\s*physical-tenants/i.test(stderrTail)
           ? `c8run ${version} does not support "physical-tenants" yet. Install a Camunda 8.10+ c8run build containing physical-tenant CLI support with "c8ctl cluster install 8.10"; older cached builds may predate this feature.`
           : null;
       if (hint) {
@@ -3332,9 +3311,6 @@ export function parsePluginArgs(args) {
 // Plugin commands export
 // ---------------------------------------------------------------------------
 
-// `tenants` and `pt` are aliases of `physical-tenants`, matching c8run's own aliases.
-const PHYSICAL_TENANT_COMMANDS = ['physical-tenants', 'tenants', 'pt'];
-
 const VALID_SUBCOMMANDS = ['start', 'stop', 'status', 'list', 'list-remote', 'install', 'delete', 'purge', 'log', 'logs'];
 
 export const commands = {
@@ -3347,7 +3323,7 @@ export const commands = {
     // Local management passthrough is intercepted before parsePluginArgs:
     // its arguments (verbs, flags, positionals) belong to c8run, not to
     // c8ctl's own version/--debug/--purge parsing.
-    if (args[0] === 'secrets' || PHYSICAL_TENANT_COMMANDS.includes(args[0])) {
+    if (args[0] === 'secrets' || args[0] === 'physical-tenants') {
       const command = args[0] === 'secrets' ? 'secrets' : 'physical-tenants';
       let parsedLocal;
       try {
@@ -3408,7 +3384,7 @@ export const commands = {
       console.log('  delete       Remove a locally cached version to reclaim disk space');
       console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
       console.log('  secrets      Manage local development secrets (forwarded to c8run)');
-      console.log('  physical-tenants  Manage local physical tenants (Camunda 8.10+; forwarded to c8run; aliases: tenants, pt)');
+      console.log('  physical-tenants  Manage local physical tenants (Camunda 8.10+; forwarded to c8run)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
@@ -3416,7 +3392,7 @@ export const commands = {
       console.log('  --debug                Stream raw c8run output during start');
       console.log('  --purge                (stop only) also delete runtime data after stopping');
       console.log('  --physical-tenants <ids> (start only) Extra physical tenants for this run; repeatable');
-      console.log('  --physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (alias: --tenant)');
+      console.log('  --physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)');
       console.log('');
       console.log('A <version> can be:');
       console.log('  stable / alpha         Named aliases');
@@ -3454,9 +3430,10 @@ export const commands = {
       console.log('  c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY');
       console.log('');
       console.log('secrets delegates to c8run\'s own "secrets" command.');
-      console.log('--physical-tenant is rewritten to --tenant before forwarding (except after --).');
+      console.log('physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.');
       console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
       console.log('for c8run\'s own secrets help (--help here belongs to c8ctl).');
+      if (parsed.subcommand) process.exitCode = 1;
       return;
     }
 

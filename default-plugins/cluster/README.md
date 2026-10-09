@@ -57,7 +57,7 @@ c8ctl cluster physical-tenants remove sales --yes
 c8ctl cluster start 8.10 --physical-tenants sales,hr
 ```
 
-`cluster physical-tenants` (aliases: `tenants`, `pt`) delegates to the selected installed c8run, following the same version selection and terminal behavior as `cluster secrets`. `cluster secrets --physical-tenant <id>` (alias: `--tenant`) scopes secrets to one physical tenant. These are distinct from logical tenants (`c8ctl list tenants`, `c8ctl use tenant`). c8run owns physical tenant configuration and storage. See [local physical tenants](../../docs/getting-started.md#local-physical-tenants) for authentication, profiles, relative paths, and limitations.
+`cluster physical-tenants` delegates to the selected installed c8run, following the same version selection and terminal behavior as `cluster secrets`. `cluster secrets --physical-tenant <id>` (or `--physical-tenant=<id>`) scopes secrets to one physical tenant. The command and selector are forwarded unchanged. These are distinct from logical tenants (`c8ctl list tenants`, `c8ctl use tenant`). c8run owns physical tenant configuration and storage. See [local physical tenants](../../docs/getting-started.md#local-physical-tenants) for authentication, profiles, relative paths, and limitations.
 
 ## Version aliases
 
