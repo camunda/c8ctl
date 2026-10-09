@@ -884,7 +884,7 @@ function showFlagAwarePluginHelp(command: string): void {
 	if (pluginInfo.subcommands && pluginInfo.subcommands.length > 0) {
 		lines.push("");
 		lines.push("Subcommands:");
-		const SUB_COL = 16;
+		const SUB_COL = subcommandColumn(pluginInfo.subcommands);
 		for (const sub of pluginInfo.subcommands) {
 			lines.push(`  ${sub.name.padEnd(SUB_COL)}${sub.description}`);
 		}
@@ -898,6 +898,11 @@ function showFlagAwarePluginHelp(command: string): void {
 		}
 	}
 	logger.info(lines.join("\n"));
+}
+
+/** Subcommand name column: at least 16 wide, always leaving a gap before the description. */
+function subcommandColumn(subcommands: readonly { name: string }[]): number {
+	return Math.max(16, ...subcommands.map((sub) => sub.name.length + 2));
 }
 
 /**
@@ -963,8 +968,9 @@ export async function showCommandHelp(command: string): Promise<void> {
 		if (pluginInfo.subcommands && pluginInfo.subcommands.length > 0) {
 			lines.push("");
 			lines.push("Subcommands:");
+			const subCol = subcommandColumn(pluginInfo.subcommands);
 			for (const sub of pluginInfo.subcommands) {
-				lines.push(`  ${sub.name.padEnd(16)}${sub.description}`);
+				lines.push(`  ${sub.name.padEnd(subCol)}${sub.description}`);
 			}
 		}
 		if (pluginInfo.flagsHint && pluginInfo.flagsHint.length > 0) {

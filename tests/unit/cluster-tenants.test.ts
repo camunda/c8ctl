@@ -15,7 +15,12 @@ import { after, before, describe, test } from "node:test";
 
 // @ts-expect-error — JS plugin has no declaration file, as in cluster-plugin.test.ts
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
-const { parsePluginArgs, resolveSecretsPaths, withForwardedYes } = plugin;
+const {
+	parsePluginArgs,
+	parseSecretsArgs,
+	resolveSecretsPaths,
+	withForwardedYes,
+} = plugin;
 
 import { c8WithEnv } from "../utils/cli.ts";
 
@@ -44,6 +49,48 @@ describe("physical tenant argument handling on all platforms", () => {
 		assert.deepEqual(
 			withForwardedYes(["--", "remove"], { yes: true }, "tenants"),
 			["--", "remove"],
+		);
+	});
+	test("every physical tenant command name restores confirmation", () => {
+		for (const command of ["physical-tenants", "tenants", "pt"]) {
+			assert.deepEqual(
+				withForwardedYes(["remove", "sales"], { yes: true }, command),
+				["remove", "sales", "--yes"],
+			);
+		}
+	});
+	test("secrets accept --physical-tenant and forward it as c8run's tenant selector", () => {
+		for (const [selector, forwarded] of [
+			[
+				["--physical-tenant", "sales"],
+				["--tenant", "sales"],
+			],
+			[["--physical-tenant=sales"], ["--tenant=sales"]],
+			[
+				["--tenant", "sales"],
+				["--tenant", "sales"],
+			],
+		]) {
+			const tail = [...selector, "delete", "KEY"];
+			assert.deepEqual(withForwardedYes(tail, { yes: true }), [
+				...tail,
+				"--yes",
+			]);
+			assert.deepEqual(parseSecretsArgs(tail).passthrough, [
+				...forwarded,
+				"delete",
+				"KEY",
+			]);
+		}
+		assert.deepEqual(
+			parseSecretsArgs(["set", "--", "--physical-tenant"]).passthrough,
+			["set", "--", "--physical-tenant"],
+		);
+	});
+	test("usage errors name the physical-tenants command", () => {
+		assert.throws(
+			() => parseSecretsArgs([], "physical-tenants"),
+			/c8ctl cluster physical-tenants/,
 		);
 	});
 	test("scoped imports resolve only the file and configured store paths", () => {
@@ -132,6 +179,32 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 			// c8run prints hints with this prefix, so users see commands they can run.
 			assert.ok(result.stdout.includes("CLI:c8ctl cluster"));
 		}
+	});
+
+	test("physical-tenants and pt are forwarded like tenants", async () => {
+		for (const command of ["physical-tenants", "pt"]) {
+			const result = await cluster(command, "add", "sales");
+			assert.equal(result.status, 0, result.stderr);
+			assert.deepEqual(argv(result.stdout), ["tenants", "add", "sales"]);
+		}
+	});
+
+	test("secrets --physical-tenant is forwarded as c8run's tenant selector", async () => {
+		const result = await cluster(
+			"secrets",
+			"--physical-tenant",
+			"sales",
+			"import",
+			"values.env",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(argv(result.stdout), [
+			"secrets",
+			"--tenant",
+			"sales",
+			"import",
+			resolve("values.env"),
+		]);
 	});
 
 	test("pins the version without forwarding c8ctl flags", async () => {
@@ -236,7 +309,10 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		assert.doesNotMatch(failure.stderr, /does not support/);
 		const unsupported = await cluster("tenants", "unsupported");
 		assert.equal(unsupported.status, 1);
-		assert.match(unsupported.stderr, /8\.11\.0.*does not support.*tenants/);
+		assert.match(
+			unsupported.stderr,
+			/8\.11\.0.*does not support.*physical-tenants/,
+		);
 	});
 
 	test("forwards repeated and equals-form startup flags without interpreting IDs as versions", async () => {
@@ -351,12 +427,19 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 	});
 
 	test("help and shell completion advertise physical tenants", async () => {
-		const help = await c8WithEnv({}, "help", "cluster");
-		assert.match(help.stdout, /tenants/);
-		assert.match(help.stdout, /physical-tenants/);
+		const help = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: "text" },
+			"help",
+			"cluster",
+		);
+		assert.match(help.stdout, /cluster physical-tenants/);
+		assert.match(help.stdout, /^ {2}physical-tenants\s+Manage/m);
+		assert.match(help.stdout, /--physical-tenant /);
+		assert.doesNotMatch(help.stdout, /cluster tenants /);
+		assert.doesNotMatch(help.stdout, /secrets --tenant /);
 		for (const shell of ["bash", "zsh", "fish"]) {
 			const completion = await c8WithEnv({}, "completion", shell);
-			assert.match(completion.stdout, /tenants/);
+			assert.match(completion.stdout, /physical-tenants/);
 		}
 	});
 });
