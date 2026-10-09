@@ -8,12 +8,7 @@ import { closeSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve as resolvePath } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
-import {
-	findById,
-	loadCache,
-	pickVersion,
-	requireCachePresent,
-} from "../cache.ts";
+import { loadCache, pickVersion, requireCachePresent } from "../cache.ts";
 import {
 	atomicOverwriteFile,
 	CONCURRENT_EDIT_MESSAGE,
@@ -227,6 +222,8 @@ async function resolveTarget({
 	element,
 	applied,
 	executionPlatformVersion,
+	cachedTemplates,
+	compatible,
 }: {
 	mode: MigrateMode;
 	parsed: MigrateArgs;
@@ -234,10 +231,12 @@ async function resolveTarget({
 	element: BpmnElement;
 	applied: { id: string; version: number };
 	executionPlatformVersion: string;
+	cachedTemplates: Template[];
+	compatible: MigrationTemplate[];
 }): Promise<MigrationTemplate> {
 	if (mode === "update") {
 		requireCachePresent();
-		const versions = findById(applied.id);
+		const versions = cachedTemplates.filter((t) => t.id === applied.id);
 		resolveCatalog(migrationTemplates(versions));
 		if (versions.length === 0) {
 			throw new Error(
@@ -271,9 +270,7 @@ async function resolveTarget({
 
 	if (parsed.successor) {
 		requireCachePresent();
-		const cache = resolveCatalog(
-			compatibleTemplates(loadCache() ?? [], executionPlatformVersion),
-		);
+		const cache = resolveCatalog(compatible);
 		const service = modeler.get("elementTemplates");
 		service.set(cache);
 		const candidates = service.getCompatible(element).filter(looksLikeTemplate);
@@ -301,13 +298,16 @@ async function resolveTarget({
 		throw new Error(`Missing template argument. Usage: ${USAGE.change}`);
 	}
 	if (ref.kind === "id") {
-		resolveCatalog(migrationTemplates(findById(ref.id)));
+		resolveCatalog(
+			migrationTemplates(cachedTemplates.filter((t) => t.id === ref.id)),
+		);
 	}
 	const target =
 		ref.kind === "id"
 			? await resolveOotbTemplate(ref, {
 					executionPlatformVersion,
 					requireEngineCompatibility: true,
+					templates: cachedTemplates,
 				})
 			: await readTemplateFromPathOrUrl(ref.value);
 	if (!isMigrationTemplate(target)) {
@@ -395,6 +395,8 @@ async function runMigrateInternal(
 		element,
 		applied,
 		executionPlatformVersion: engineVersion,
+		cachedTemplates,
+		compatible: cache,
 	});
 	const templates = resolveCatalog(
 		cache.filter((t) => t.id === applied.id || t.id === target.id),

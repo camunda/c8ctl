@@ -255,16 +255,21 @@ export async function resolveOotbTemplate(
 	{
 		executionPlatformVersion,
 		requireEngineCompatibility = false,
+		templates,
 	}: {
 		executionPlatformVersion?: string | null;
 		requireEngineCompatibility?: boolean;
+		/** Preloaded cache contents; skips re-reading `templates.json`. */
+		templates?: Template[];
 	} = {},
 ): Promise<Template> {
 	const logger = c8ctl.getLogger();
 	requireCachePresent();
 	nudgeIfStale(logger);
 
-	const candidates = findById(ref.id);
+	const candidates = templates
+		? templates.filter((t) => t.id === ref.id)
+		: findById(ref.id);
 	if (candidates.length === 0) {
 		throw new Error(
 			`Element template '${ref.id}' not found. Run 'c8ctl element-template sync' to refresh the cache, ` +
