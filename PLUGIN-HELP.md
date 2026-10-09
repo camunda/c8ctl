@@ -261,7 +261,7 @@ export const commands = {
 - c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
 - A `--` terminator is forwarded too, and everything after it verbatim, global flag names included.
 - `flagsHint` documents flags handled by the plugin or underlying tool. It does not declare host-parsed flags or shell completions. Passthrough flag completion offers only global flags; subcommands and file completion remain available.
-- Use `passthroughHint` to describe any plugin-side argument transformations. For example, `cluster secrets` rewrites `--physical-tenant` to c8run's `--tenant` before forwarding, except after `--`.
+- Use `passthroughHint` to describe which arguments the plugin handles and which it forwards. For example, `cluster secrets` handles a leading `--c8-version` and forwards `--physical-tenant` unchanged to c8run.
 
 ## Plugin Runtime API
 
