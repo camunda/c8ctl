@@ -4,7 +4,7 @@
  */
 
 import { isRecord } from "../../src/core/index.ts";
-import { bindingTargetKey } from "./migration/binding.ts";
+import { bindingTargetKey, sameTarget } from "./migration/binding.ts";
 import type { ElementValue } from "./migration/element-values.ts";
 import type { Field, MigrationReport } from "./migration/report.ts";
 import type { MigrationTemplate } from "./migration/types.ts";
@@ -40,9 +40,13 @@ function migrationRedactor(context: MigrationRedactionContext) {
 		(context.templates ?? []).some((template) =>
 			template.properties.some(
 				(property) =>
-					bindingTargetKey(property.binding) === field.key &&
-					(field.bindingType === null ||
-						property.binding?.type === field.bindingType) &&
+					sameTarget(
+						{
+							key: bindingTargetKey(property.binding),
+							bindingType: property.binding?.type,
+						},
+						field,
+					) &&
 					sensitiveName(
 						`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
 					),

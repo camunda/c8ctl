@@ -9,8 +9,10 @@
 import {
 	bindingPath,
 	bindingTargetKey,
+	type FieldKey,
 	findPropertiesByTarget,
 	maybePrependFeel,
+	sameTarget,
 	splitBindingPrefix,
 } from "./binding.ts";
 import type { ElementValue } from "./element-values.ts";
@@ -27,15 +29,15 @@ export interface Write {
 
 /** A value moved to another key, possibly translated on the way. */
 export interface MovedFact {
-	from: { key: string; bindingType: string | null };
-	to: { key: string; bindingType: string | null };
+	from: FieldKey;
+	to: FieldKey;
 	transformed: boolean;
 }
 
 export interface PlanFacts {
 	moved: MovedFact[];
 	/** Values written from a `set` entry. */
-	set: { key: string; bindingType: string | null; value: string }[];
+	set: (FieldKey & { value: string })[];
 	/** Notes of the entries that took effect. */
 	notes: Note[];
 	/** A guard rejected an entry whose source value is populated. */
@@ -67,10 +69,7 @@ function lookup(
 	path: string,
 ): ElementValue | undefined {
 	const { bindingType, key } = splitBindingPrefix(path);
-	const matches = values.filter(
-		(v) =>
-			v.key === key && (bindingType === null || v.bindingType === bindingType),
-	);
+	const matches = values.filter((v) => sameTarget(v, { key, bindingType }));
 	if (matches.length > 1) {
 		const types = new Set(matches.map((v) => v.bindingType));
 		const qualified = [...types].map((type) => bindingPath(type, key));

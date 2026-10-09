@@ -7,7 +7,11 @@
  * intent of the recipe.
  */
 
-import { bindingTargetKey } from "./binding.ts";
+import {
+	type FieldKey,
+	findPropertiesByTarget,
+	sameTarget,
+} from "./binding.ts";
 import type { ElementValue } from "./element-values.ts";
 import type { MovedFact, PlanFacts } from "./plan.ts";
 import type { Note } from "./recipe.ts";
@@ -80,23 +84,22 @@ function templateRef(template: MigrationTemplate): TemplateRef {
 	};
 }
 
+const sameField = (a: FieldKey, b: FieldKey) =>
+	a.key === b.key && a.bindingType === b.bindingType;
+
 export function mergeFacts(all: ReportFacts[]): ReportFacts {
 	let moved: ReportFacts["moved"] = [];
 	let set: PlanFacts["set"] = [];
 	let failedWrites = false;
 	for (const facts of all) {
-		const same = (
-			a: { key: string; bindingType: string | null },
-			b: { key: string; bindingType: string | null },
-		) => a.key === b.key && a.bindingType === b.bindingType;
 		// All moves read the pre-step snapshot, never another move's result.
 		const priorMoved = moved;
 		const priorSet = set;
-		const overwritten = (field: { key: string; bindingType: string | null }) =>
-			facts.moved.some((move) => same(move.to, field)) ||
-			facts.set.some((write) => same(write, field));
-		const forwarded = (field: { key: string; bindingType: string | null }) =>
-			facts.moved.some((move) => same(move.from, field));
+		const overwritten = (field: FieldKey) =>
+			facts.moved.some((move) => sameField(move.to, field)) ||
+			facts.set.some((write) => sameField(write, field));
+		const forwarded = (field: FieldKey) =>
+			facts.moved.some((move) => sameField(move.from, field));
 		failedWrites ||= priorMoved.some(
 			(move) => overwritten(move.to) && !forwarded(move.to),
 		);
@@ -105,11 +108,11 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 		);
 		set = priorSet.filter((write) => !overwritten(write) && !forwarded(write));
 		for (const move of facts.moved) {
-			const addition = priorSet.find((write) => same(write, move.from));
+			const addition = priorSet.find((write) => sameField(write, move.from));
 			if (addition) {
 				set.push({ ...move.to, value: move.value ?? addition.value });
 			} else {
-				const prior = priorMoved.find((item) => same(item.to, move.from));
+				const prior = priorMoved.find((item) => sameField(item.to, move.from));
 				moved.push({
 					...move,
 					from: prior?.from ?? move.from,
@@ -118,16 +121,13 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 			}
 		}
 		for (const write of facts.set) {
-			moved = moved.filter((move) => !same(move.to, write));
-			set = set.filter((prior) => !same(prior, write));
+			moved = moved.filter((move) => !sameField(move.to, write));
+			set = set.filter((prior) => !sameField(prior, write));
 			set.push(write);
 		}
 		if (facts.after) {
 			const after = facts.after;
-			const surviving = (
-				field: { key: string; bindingType: string | null },
-				value: string | undefined,
-			) => {
+			const surviving = (field: FieldKey, value: string | undefined) => {
 				const actual = find(after, field.key, field.bindingType);
 				return (
 					actual !== undefined &&
@@ -159,11 +159,11 @@ function propertyFor(
 	key: string,
 	bindingType: string | null,
 ): TemplateProperty | undefined {
-	return template?.properties.find(
-		(p) =>
-			bindingTargetKey(p.binding) === key &&
-			(bindingType === null || p.binding?.type === bindingType),
-	);
+	return findPropertiesByTarget(
+		template?.properties ?? [],
+		key,
+		bindingType,
+	)[0];
 }
 
 function fieldOf(
@@ -198,10 +198,7 @@ function choiceName(
 }
 
 function find(values: ElementValue[], key: string, bindingType: string | null) {
-	return values.find(
-		(v) =>
-			v.key === key && (bindingType === null || v.bindingType === bindingType),
-	);
+	return values.find((v) => sameTarget(v, { key, bindingType }));
 }
 
 function isHidden(
@@ -256,22 +253,10 @@ export function buildReport({
 		(s) => find(after, s.key, s.bindingType)?.value === s.value,
 	);
 	const claimedFrom = (v: ElementValue) =>
-		survivingMoves.some(
-			(m) =>
-				m.from.key === v.key &&
-				(m.from.bindingType === null || m.from.bindingType === v.bindingType),
-		);
+		survivingMoves.some((m) => sameTarget(v, m.from));
 	const claimedTo = (v: ElementValue) =>
-		survivingMoves.some(
-			(m) =>
-				m.to.key === v.key &&
-				(m.to.bindingType === null || m.to.bindingType === v.bindingType),
-		) ||
-		survivingSets.some(
-			(s) =>
-				s.key === v.key &&
-				(s.bindingType === null || s.bindingType === v.bindingType),
-		);
+		survivingMoves.some((m) => sameTarget(v, m.to)) ||
+		survivingSets.some((s) => sameTarget(v, s));
 
 	const moved: MovedItem[] = survivingMoves.map((m) => {
 		const from = fieldOf(fromTemplate, m.from.key, m.from.bindingType);

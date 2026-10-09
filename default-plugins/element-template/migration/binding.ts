@@ -181,18 +181,39 @@ export function bindingTargetKey(
 	}
 }
 
+/** A binding target: a key and, when known, the binding type it lives under. */
+export interface FieldKey {
+	key: string;
+	bindingType: string | null;
+}
+
+/** Whether `candidate` is `target`; a null target binding type matches any. */
+export function sameTarget(
+	candidate: {
+		key: string | undefined;
+		bindingType: string | null | undefined;
+	},
+	target: FieldKey,
+): boolean {
+	return (
+		candidate.key === target.key &&
+		(target.bindingType === null ||
+			candidate.bindingType === target.bindingType)
+	);
+}
+
 /** Template properties bound to `key`, optionally restricted to a binding type. */
 export function findPropertiesByTarget(
 	properties: TemplateProperty[],
 	key: string,
 	bindingType: string | null,
 ): TemplateProperty[] {
-	return properties.filter((p) => {
-		if (bindingTargetKey(p.binding) !== key) {
-			return false;
-		}
-		return bindingType === null || p.binding?.type === bindingType;
-	});
+	return properties.filter((p) =>
+		sameTarget(
+			{ key: bindingTargetKey(p.binding), bindingType: p.binding?.type },
+			{ key, bindingType },
+		),
+	);
 }
 
 /**
