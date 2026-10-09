@@ -501,12 +501,12 @@ async function runMigrateInternal(
 			`${report.refusal ? `Recipe cannot be used: ${report.refusal}. ` : ""}Migration may lose values or discard its recipe; preview with --dry-run and pass --allow-lossy to authorize it.`,
 		);
 	}
-	const { xml } = await modeler.saveXML({ format: true });
+	const saved = dryRun ? undefined : await modeler.saveXML({ format: true });
 
-	if (!dryRun && parsed.inPlace && bpmnFilePath) {
+	if (saved && parsed.inPlace && bpmnFilePath) {
 		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
 			throw new Error(CONCURRENT_EDIT_MESSAGE);
-		atomicOverwriteFile(bpmnFilePath, xml, input.xml);
+		atomicOverwriteFile(bpmnFilePath, saved.xml, input.xml);
 	}
 	if (c8ctl.outputMode === "json") {
 		logger.json({
@@ -539,7 +539,7 @@ async function runMigrateInternal(
 			);
 	}
 
-	if (dryRun) {
+	if (!saved) {
 		return;
 	}
 	if (parsed.inPlace && bpmnFilePath) {
@@ -550,7 +550,7 @@ async function runMigrateInternal(
 		}
 		return;
 	}
-	process.stdout.write(xml);
+	process.stdout.write(saved.xml);
 }
 
 async function runLockedMigrate(

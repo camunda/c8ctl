@@ -157,7 +157,11 @@ function dataDirWithCache(templates: object[]): string {
 	return dataDir;
 }
 
-async function run(dataDir: string, ...args: string[]) {
+async function runWithEnv(
+	dataDir: string,
+	extraEnv: Record<string, string>,
+	args: string[],
+) {
 	return asyncSpawn(
 		"node",
 		["--experimental-strip-types", CLI, "element-template", ...args],
@@ -168,9 +172,33 @@ async function run(dataDir: string, ...args: string[]) {
 				HOME: "/tmp/c8ctl-test-nonexistent-home",
 				C8CTL_DATA_DIR: dataDir,
 				NO_COLOR: "1",
+				...extraEnv,
 			},
 		},
 	);
+}
+
+function run(dataDir: string, ...args: string[]) {
+	return runWithEnv(dataDir, {}, args);
+}
+
+function failingSaveXmlPreload(): string {
+	const bundle = resolve(
+		import.meta.dirname,
+		"..",
+		"..",
+		"dist",
+		"vendor",
+		"bpmn-element-templates.cjs",
+	);
+	const preload = join(workDir, "fail-save-xml.cjs");
+	writeFileSync(
+		preload,
+		`const v = require(${JSON.stringify(bundle)});
+v.Modeler.prototype.saveXML = () => Promise.reject(new Error("saveXML must not run"));
+`,
+	);
+	return `--require "${preload}"`;
 }
 
 async function seedBpmn(
@@ -805,6 +833,30 @@ describe("element-template change", () => {
 		assert.match(result.stdout, /Dry run: nothing was written/);
 		assert.doesNotMatch(result.stdout, /<bpmn:definitions/);
 		assert.strictEqual(readFileSync(oldBpmn, "utf-8"), before);
+	});
+
+	test("--dry-run does not serialize the diagram", async () => {
+		const templatePath = join(workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const result = await runWithEnv(
+			dataDirWithCache([OLD]),
+			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			["change", templatePath, TASK, oldBpmn, "--dry-run"],
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Dry run: nothing was written/);
+	});
+
+	test("serialization failure surfaces without --dry-run", async () => {
+		const templatePath = join(workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const result = await runWithEnv(
+			dataDirWithCache([OLD]),
+			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			["change", templatePath, TASK, oldBpmn],
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /saveXML must not run/);
 	});
 
 	test("--json --dry-run emits the report as JSON", async () => {
