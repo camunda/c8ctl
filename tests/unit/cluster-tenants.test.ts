@@ -117,6 +117,18 @@ describe("physical tenant argument handling on all platforms", () => {
 	});
 });
 
+test("cluster help explains the physical tenant selector translation", async () => {
+	for (const outputMode of ["text", "json"]) {
+		const result = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: outputMode },
+			"help",
+			"cluster",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /--physical-tenant is rewritten to --tenant/);
+	}
+});
+
 describe("cluster physical tenants through the CLI", {
 	skip: process.platform === "win32",
 }, () => {

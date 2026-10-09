@@ -331,7 +331,7 @@ export const metadata = {
       // so the subcommand flags are documented via `flagsHint` instead.
       passthrough: true,
       passthroughHint:
-        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin; arguments after `secrets` or `physical-tenants` are forwarded to c8run',
+        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. Local management commands are forwarded to c8run; for secrets, --physical-tenant is rewritten to --tenant before forwarding (except after --).',
       flagsHint: [
         '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
         '--debug                 (start, stop) Stream raw c8run output',

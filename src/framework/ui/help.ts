@@ -963,7 +963,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 		lines.push("");
 		lines.push("Passthrough command");
 		lines.push(
-			`  ${pluginInfo.passthroughHint ?? ""}\n  c8ctl forwards args verbatim after stripping its global flags.`,
+			`  ${pluginInfo.passthroughHint ?? ""}\n  c8ctl forwards args to the plugin verbatim after stripping its global flags.`,
 		);
 		if (pluginInfo.subcommands && pluginInfo.subcommands.length > 0) {
 			lines.push("");
@@ -976,7 +976,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 		if (pluginInfo.flagsHint && pluginInfo.flagsHint.length > 0) {
 			lines.push("");
 			lines.push(
-				"Underlying tool flags (documentation only — not parsed by c8ctl):",
+				"Plugin/tool flags (handled by the plugin or underlying tool):",
 			);
 			for (const f of pluginInfo.flagsHint) {
 				lines.push(`  ${f}`);

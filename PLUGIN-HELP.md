@@ -243,7 +243,7 @@ export const metadata = {
       passthrough: true,
       // Required: names the boundary in `c8ctl help my-command`.
       passthroughHint: 'Forwards everything after the command name to some-tool',
-      // Optional, documentation only (not parsed by c8ctl).
+      // Optional documentation; the plugin or tool parses these arguments.
       flagsHint: ['--purge  Also delete data'],
     },
   },
@@ -260,6 +260,8 @@ export const commands = {
 - A command is **either** passthrough **or** `{ flags, handler }` — declaring both is rejected at load time, so a command cannot mix declared flags with raw ones. A command whose subcommands need both (like `cluster`, which has its own `--purge` and forwards arbitrary flags to `c8run secrets`) should be a passthrough command and parse its own flags.
 - c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
 - A `--` terminator is forwarded too, and everything after it verbatim, global flag names included.
+- `flagsHint` documents flags handled by the plugin or underlying tool. It does not declare host-parsed flags or shell completions. Passthrough flag completion offers only global flags; subcommands and file completion remain available.
+- Use `passthroughHint` to describe any plugin-side argument transformations. For example, `cluster secrets` rewrites `--physical-tenant` to c8run's `--tenant` before forwarding, except after `--`.
 
 ## Plugin Runtime API
 
