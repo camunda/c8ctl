@@ -481,7 +481,8 @@ async function runMigrateInternal(
 		cache.filter((t) => t.id === templateId || t.id === target.id),
 		[target],
 	);
-	redaction.templates = templates;
+	// Keep every cached template: a filtered-out source still marks secrets.
+	redaction.templates = [...migrationTemplates(cachedTemplates), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (!isEngineCompatible(target, engineVersion)) {

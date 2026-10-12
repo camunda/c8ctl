@@ -319,3 +319,58 @@ for (const json of [false, true]) {
 		});
 	}
 }
+
+test("redacts a secret-marked field of a source template the engine filters out", async () => {
+	const data = join(dir, "incompatible-source");
+	const marked = "PRIVATE-MARKED-4839";
+	const legacy = {
+		id: "redaction.legacy",
+		name: "Legacy",
+		version: 1,
+		appliesTo: ["bpmn:Task"],
+		engines: { camunda: "^99.0.0" },
+		properties: [input("neutral", marked, { secret: true })],
+	};
+	const modern = {
+		id: "redaction.modern",
+		name: "Modern",
+		version: 1,
+		appliesTo: ["bpmn:Task"],
+		properties: [input("other", "")],
+	};
+	seedTemplateCache(data, [legacy, modern]);
+	const legacyPath = join(data, "legacy.json");
+	const modernPath = join(data, "modern.json");
+	const file = join(data, "legacy.bpmn");
+	writeFileSync(legacyPath, JSON.stringify(legacy));
+	writeFileSync(modernPath, JSON.stringify(modern));
+	const seeded = await c8WithEnv(
+		{ ...env, C8CTL_DATA_DIR: data },
+		"element-template",
+		"apply",
+		legacyPath,
+		TASK,
+		"tests/fixtures/simple.bpmn",
+	);
+	assert.equal(seeded.status, 0, seeded.stderr);
+	writeFileSync(file, seeded.stdout);
+	for (const json of [false, true]) {
+		const result = await c8WithEnv(
+			{ ...env, C8CTL_DATA_DIR: data },
+			"element-template",
+			"update",
+			legacy.id,
+			TASK,
+			file,
+			"--to",
+			modernPath,
+			"--dry-run",
+			"--allow-lossy",
+			...(json ? ["--json"] : []),
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.ok(!result.stdout.includes(marked), result.stdout);
+		assert.ok(!result.stderr.includes(marked), result.stderr);
+		assert.match(result.stdout + result.stderr, /\[REDACTED\]/);
+	}
+});
