@@ -48,16 +48,16 @@ c8ctl cluster delete 8.8
 For physical tenants (supporting Camunda 8.10+ builds):
 
 ```bash
-c8ctl cluster tenants --c8-version 8.10 add sales
+c8ctl cluster physical-tenants --c8-version 8.10 add sales
 c8ctl cluster start 8.10
-c8ctl cluster tenants list
-c8ctl cluster secrets --tenant sales set OPENAI_API_KEY
-c8ctl cluster tenants remove sales --yes
-# Or choose tenants for one start only:
+c8ctl cluster physical-tenants list
+c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY
+c8ctl cluster physical-tenants remove sales --yes
+# Or choose physical tenants for one start only:
 c8ctl cluster start 8.10 --physical-tenants sales,hr
 ```
 
-Tenant commands delegate to the selected installed c8run, following the same version selection and terminal behavior as `cluster secrets`. c8run owns tenant configuration and storage. See [local physical tenants](../../docs/getting-started.md#local-physical-tenants) for authentication, profiles, relative paths, and limitations.
+`cluster physical-tenants` delegates to the selected installed c8run, following the same version selection and terminal behavior as `cluster secrets`. `cluster secrets --physical-tenant <id>` (or `--physical-tenant=<id>`) scopes secrets to one physical tenant. The command and selector are forwarded unchanged. These are distinct from logical tenants (`c8ctl list tenants`, `c8ctl use tenant`). c8run owns physical tenant configuration and storage. See [local physical tenants](../../docs/getting-started.md#local-physical-tenants) for authentication, profiles, relative paths, and limitations.
 
 ## Version aliases
 

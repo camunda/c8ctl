@@ -15,7 +15,12 @@ import { after, before, describe, test } from "node:test";
 
 // @ts-expect-error — JS plugin has no declaration file, as in cluster-plugin.test.ts
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
-const { parsePluginArgs, resolveSecretsPaths, withForwardedYes } = plugin;
+const {
+	parsePluginArgs,
+	parseSecretsArgs,
+	resolveSecretsPaths,
+	withForwardedYes,
+} = plugin;
 
 import { c8WithEnv } from "../utils/cli.ts";
 
@@ -37,24 +42,63 @@ describe("physical tenant argument handling on all platforms", () => {
 			withForwardedYes(
 				["--c8-version=8.10", "remove", "sales", "--", "--yes"],
 				{ yes: true },
-				"tenants",
+				"physical-tenants",
 			),
 			["--c8-version=8.10", "remove", "sales", "--yes", "--", "--yes"],
 		);
 		assert.deepEqual(
-			withForwardedYes(["--", "remove"], { yes: true }, "tenants"),
+			withForwardedYes(["--", "remove"], { yes: true }, "physical-tenants"),
 			["--", "remove"],
+		);
+	});
+	test("physical tenant removal operations restore confirmation", () => {
+		for (const operation of ["remove", "rm", "reset"]) {
+			assert.deepEqual(
+				withForwardedYes([operation], { yes: true }, "physical-tenants"),
+				[operation, "--yes"],
+			);
+		}
+	});
+	test("secrets forward both physical-tenant selector forms unchanged", () => {
+		for (const selector of [
+			["--physical-tenant", "sales"],
+			["--physical-tenant=sales"],
+		]) {
+			const tail = [...selector, "delete", "KEY"];
+			assert.deepEqual(withForwardedYes(tail, { yes: true }), [
+				...tail,
+				"--yes",
+			]);
+			assert.deepEqual(parseSecretsArgs(tail).passthrough, [
+				...selector,
+				"delete",
+				"KEY",
+			]);
+		}
+		assert.deepEqual(
+			parseSecretsArgs(["set", "--", "--physical-tenant"]).passthrough,
+			["set", "--", "--physical-tenant"],
+		);
+	});
+	test("usage errors name the physical-tenants command", () => {
+		assert.throws(
+			() => parseSecretsArgs([], "physical-tenants"),
+			/c8ctl cluster physical-tenants/,
 		);
 	});
 	test("scoped imports resolve only the file and configured store paths", () => {
 		const cwd = resolve("caller");
-		const input = ["--tenant=hr", "import", "values.env"];
+		const input = ["--physical-tenant=hr", "import", "values.env"];
 		const env = {
 			C8RUN_TENANTS_FILE: "tenants.yaml",
 			C8RUN_SECRETS_DIR: "secrets",
 		};
 		assert.deepEqual(resolveSecretsPaths(input, { cwd, env }), {
-			passthrough: ["--tenant=hr", "import", resolve(cwd, "values.env")],
+			passthrough: [
+				"--physical-tenant=hr",
+				"import",
+				resolve(cwd, "values.env"),
+			],
 			env: {
 				C8RUN_TENANTS_FILE: resolve(cwd, "tenants.yaml"),
 				C8RUN_SECRETS_DIR: resolve(cwd, "secrets"),
@@ -68,6 +112,41 @@ describe("physical tenant argument handling on all platforms", () => {
 			["import", "--", "values.env"],
 		);
 	});
+});
+
+test("cluster help explains canonical physical tenant forwarding", async () => {
+	for (const outputMode of ["text", "json"]) {
+		const result = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: outputMode },
+			"help",
+			"cluster",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(
+			result.stdout,
+			/physical-tenants and --physical-tenant are forwarded unchanged/,
+		);
+	}
+});
+
+test("cluster fallback usage explains canonical forwarding for missing and invalid subcommands", async () => {
+	for (const args of [[], ["unknown-subcommand"]]) {
+		const result = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: "text" },
+			"cluster",
+			...args,
+		);
+		assert.equal(result.status, args.length === 0 ? 0 : 1, result.stderr);
+		assert.match(result.stdout, /^Usage:/m);
+		assert.match(
+			result.stdout,
+			/physical-tenants and --physical-tenant are forwarded unchanged/,
+		);
+		assert.doesNotMatch(
+			result.stdout,
+			/forwarded verbatim|forwards everything/,
+		);
+	}
 });
 
 describe("cluster physical tenants through the CLI", {
@@ -87,7 +166,7 @@ printf 'VERSION:${version}\\n'
 for a in "$@"; do printf 'ARG:%s\\n' "$a"; done
 printf 'TENANTS:%s\\nSECRETS:%s\\nCLI:%s\\n' "$C8RUN_TENANTS_FILE" "$C8RUN_SECRETS_DIR" "$C8RUN_CLI_NAME"
 if [ "$1" = start ]; then exit 7; fi
-if [ "$2" = unsupported ]; then printf 'unsupported operation: tenants\\n' >&2; exit 1; fi
+if [ "$2" = unsupported ]; then printf 'unsupported operation: physical-tenants\\n' >&2; exit 1; fi
 if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 `,
 			);
@@ -121,9 +200,9 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 			["help"],
 			["future-command", "--future-flag"],
 		]) {
-			const result = await cluster("tenants", ...args);
+			const result = await cluster("physical-tenants", ...args);
 			assert.equal(result.status, 0, result.stderr);
-			assert.deepEqual(argv(result.stdout), ["tenants", ...args]);
+			assert.deepEqual(argv(result.stdout), ["physical-tenants", ...args]);
 			assert.match(result.stdout, /VERSION:8\.11\.0/);
 			assert.ok(
 				result.stdout.includes(`TENANTS:${resolve("local tenants.yaml")}`),
@@ -134,10 +213,37 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		}
 	});
 
+	test("unsupported command names fail before launching c8run", async () => {
+		for (const command of ["tenants", "pt", "unknown-command"]) {
+			const result = await cluster(command, "add", "sales");
+			assert.equal(result.status, 1, result.stderr);
+			assert.match(result.stdout, /^Usage:/m);
+			assert.doesNotMatch(result.stdout + result.stderr, /VERSION:/);
+		}
+	});
+
+	test("secrets --physical-tenant is forwarded unchanged", async () => {
+		const result = await cluster(
+			"secrets",
+			"--physical-tenant",
+			"sales",
+			"import",
+			"values.env",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.deepEqual(argv(result.stdout), [
+			"secrets",
+			"--physical-tenant",
+			"sales",
+			"import",
+			resolve("values.env"),
+		]);
+	});
+
 	test("pins the version without forwarding c8ctl flags", async () => {
 		for (const flags of [["--c8-version", "8.10.1"], ["--c8-version=8.10.1"]]) {
 			const result = await cluster(
-				"tenants",
+				"physical-tenants",
 				...flags,
 				"add",
 				"hr",
@@ -146,7 +252,7 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 				"--password-stdin",
 			);
 			assert.deepEqual(argv(result.stdout), [
-				"tenants",
+				"physical-tenants",
 				"add",
 				"hr",
 				"--username",
@@ -159,11 +265,15 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 
 	test("restores confirmation only for operations accepting it", async () => {
 		for (const operation of ["remove", "rm", "reset"]) {
-			const result = await cluster("tenants", operation, "--yes");
-			assert.deepEqual(argv(result.stdout), ["tenants", operation, "--yes"]);
+			const result = await cluster("physical-tenants", operation, "--yes");
+			assert.deepEqual(argv(result.stdout), [
+				"physical-tenants",
+				operation,
+				"--yes",
+			]);
 		}
-		const result = await cluster("tenants", "list", "--yes");
-		assert.deepEqual(argv(result.stdout), ["tenants", "list"]);
+		const result = await cluster("physical-tenants", "list", "--yes");
+		assert.deepEqual(argv(result.stdout), ["physical-tenants", "list"]);
 	});
 
 	test("prefers a live running version and ignores stale markers", async () => {
@@ -172,10 +282,10 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		const pidfile = join(cacheDir, "c8run-8.10.1", "camunda.process");
 		writeFileSync(pidfile, String(process.pid));
 		try {
-			const running = await cluster("tenants", "list");
+			const running = await cluster("physical-tenants", "list");
 			assert.match(running.stdout, /VERSION:8\.10\.1/);
 			rmSync(pidfile);
-			const stale = await cluster("tenants", "list");
+			const stale = await cluster("physical-tenants", "list");
 			assert.match(stale.stdout, /VERSION:8\.11\.0/);
 		} finally {
 			rmSync(pidfile, { force: true });
@@ -185,7 +295,10 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 	});
 
 	test("preserves tenant-scoped secret imports and confirmation regardless of tenant flag position", async () => {
-		for (const tenant of [["--tenant", "sales"], ["--tenant=sales"]]) {
+		for (const tenant of [
+			["--physical-tenant", "sales"],
+			["--physical-tenant=sales"],
+		]) {
 			const result = await cluster(
 				"secrets",
 				...tenant,
@@ -216,27 +329,30 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 		const result = await cluster(
 			"secrets",
 			"import",
-			"--tenant",
+			"--physical-tenant",
 			"sales",
 			"values.env",
 		);
 		assert.deepEqual(argv(result.stdout), [
 			"secrets",
 			"import",
-			"--tenant",
+			"--physical-tenant",
 			"sales",
 			resolve("values.env"),
 		]);
 	});
 
 	test("preserves child failures and supplies a capability hint only for missing support", async () => {
-		const failure = await cluster("tenants", "failure");
+		const failure = await cluster("physical-tenants", "failure");
 		assert.equal(failure.status, 3);
 		assert.match(failure.stderr, /tenant validation failed/);
 		assert.doesNotMatch(failure.stderr, /does not support/);
-		const unsupported = await cluster("tenants", "unsupported");
+		const unsupported = await cluster("physical-tenants", "unsupported");
 		assert.equal(unsupported.status, 1);
-		assert.match(unsupported.stderr, /8\.11\.0.*does not support.*tenants/);
+		assert.match(
+			unsupported.stderr,
+			/8\.11\.0.*does not support.*physical-tenants/,
+		);
 	});
 
 	test("forwards repeated and equals-form startup flags without interpreting IDs as versions", async () => {
@@ -312,8 +428,8 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 
 	test("dry-run never launches c8run or consumes password input", async () => {
 		for (const args of [
-			["tenants", "add", "hr", "--password-stdin"],
-			["secrets", "--tenant=hr", "set", "KEY", "--stdin"],
+			["physical-tenants", "add", "hr", "--password-stdin"],
+			["secrets", "--physical-tenant=hr", "set", "KEY", "--stdin"],
 			["start", "--physical-tenants=hr"],
 		]) {
 			const result = await cluster(...args, "--dry-run");
@@ -324,7 +440,7 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 	});
 
 	test("dry-run reports the locally selected version without downloading", async () => {
-		const implicit = await cluster("tenants", "list", "--dry-run");
+		const implicit = await cluster("physical-tenants", "list", "--dry-run");
 		assert.match(implicit.stdout, /"version":"8\.11\.0"/);
 		const pinned = await cluster(
 			"secrets",
@@ -351,12 +467,21 @@ if [ "$2" = failure ]; then printf 'tenant validation failed\\n' >&2; exit 3; fi
 	});
 
 	test("help and shell completion advertise physical tenants", async () => {
-		const help = await c8WithEnv({}, "help", "cluster");
-		assert.match(help.stdout, /tenants/);
-		assert.match(help.stdout, /physical-tenants/);
+		const help = await c8WithEnv(
+			{ C8CTL_OUTPUT_MODE: "text" },
+			"help",
+			"cluster",
+		);
+		assert.match(help.stdout, /cluster physical-tenants/);
+		assert.match(help.stdout, /^ {2}physical-tenants\s+Manage/m);
+		assert.match(help.stdout, /--physical-tenant /);
+		assert.doesNotMatch(help.stdout, /cluster tenants /);
+		assert.doesNotMatch(help.stdout, /secrets --tenant /);
+		assert.doesNotMatch(help.stdout, /^ {2}(tenants|pt)\s/m);
+		assert.doesNotMatch(help.stdout, /alias: --tenant/);
 		for (const shell of ["bash", "zsh", "fish"]) {
 			const completion = await c8WithEnv({}, "completion", shell);
-			assert.match(completion.stdout, /tenants/);
+			assert.match(completion.stdout, /physical-tenants/);
 		}
 	});
 });

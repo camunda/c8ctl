@@ -41,12 +41,21 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 		return result;
 	};
 	try {
+		for (const args of [
+			["tenants", "list"],
+			["pt", "list"],
+			["secrets", "--tenant", tenant, "list"],
+			["secrets", `--tenant=${tenant}`, "list"],
+		]) {
+			const result = await run("cluster", ...args);
+			assert.equal(result.status, 1, result.stdout + result.stderr);
+		}
 		const added = await asyncSpawnWithStdin(
 			"node",
 			[
 				cli,
 				"cluster",
-				"tenants",
+				"physical-tenants",
 				"--c8-version",
 				version,
 				"add",
@@ -71,7 +80,7 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 			"secrets",
 			"--c8-version",
 			version,
-			"--tenant",
+			"--physical-tenant",
 			tenant,
 			"import",
 			"values.env",
@@ -81,8 +90,7 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 			"secrets",
 			"--c8-version",
 			version,
-			"--tenant",
-			tenant,
+			`--physical-tenant=${tenant}`,
 			"list",
 		);
 		assert.match(secrets.stdout, /C8CTL_E2E_SECRET/);
@@ -189,7 +197,7 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 			"secrets",
 			"--c8-version",
 			version,
-			"--tenant",
+			"--physical-tenant",
 			tenant,
 			"delete",
 			"C8CTL_E2E_SECRET",
@@ -197,7 +205,7 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 		);
 		await successful(
 			"cluster",
-			"tenants",
+			"physical-tenants",
 			"--c8-version",
 			version,
 			"remove",
@@ -213,7 +221,7 @@ test("physical tenants: setup, authentication, isolated deployment, secrets, res
 		);
 		const saved = await successful(
 			"cluster",
-			"tenants",
+			"physical-tenants",
 			"--c8-version",
 			version,
 			"list",

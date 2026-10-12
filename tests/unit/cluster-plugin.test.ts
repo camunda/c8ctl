@@ -280,14 +280,15 @@ describe("Cluster Plugin – command usage output", () => {
 		assert.ok(output.includes("stop"), 'Usage should mention "stop"');
 	});
 
-	test("prints usage when called with an invalid subcommand", async () => {
-		await plugin.commands.cluster(["invalid"]);
-
-		const output = captured.join("\n");
-		assert.ok(
-			output.includes("Usage"),
-			"Should print usage for unrecognised subcommand",
-		);
+	test("prints usage and fails when called with an invalid subcommand", async () => {
+		const originalExitCode = process.exitCode;
+		try {
+			await plugin.commands.cluster(["invalid"]);
+			assert.equal(process.exitCode, 1);
+			assert.ok(captured.join("\n").includes("Usage"));
+		} finally {
+			process.exitCode = originalExitCode;
+		}
 	});
 
 	test("usage mentions version option", async () => {
