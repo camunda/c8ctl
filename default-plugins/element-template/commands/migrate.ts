@@ -607,7 +607,7 @@ async function runMigrateInternal(
 							from: { id: templateId, version: o.from },
 							to: { id: target.id, version: o.to },
 						};
-					case "failed":
+					default:
 						return {
 							status: o.status,
 							elementId: redactMigrationDiagnostic(o.id, redaction),

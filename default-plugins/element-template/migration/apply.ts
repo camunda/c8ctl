@@ -118,7 +118,9 @@ function availableNames(template: MigrationTemplate): string {
 		...new Set(
 			template.properties
 				.filter((p) => p.type !== "Hidden" && p.binding)
-				.map((p) => bindingPath(p.binding?.type, bindingTargetKey(p.binding) ?? "")),
+				.map((p) =>
+					bindingPath(p.binding?.type, bindingTargetKey(p.binding) ?? ""),
+				),
 		),
 	].join(", ");
 }
