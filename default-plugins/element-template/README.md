@@ -140,8 +140,8 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   selected element, after the recipe steps. A moved value does not count as
   dropped. Prefixes such as `input:` work as in `apply --set`.
 - All selected elements migrate in memory and the file is written once, only if
-  every element succeeds. A dry run exits 1 when the write would fail or need
-  `--allow-lossy`. JSON output is one document:
+  every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
+  need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:
   `{dryRun, command, results, summary, deprecation}`.
 - Each JSON result carries `elementId` and, when the element has a name,
   `elementName`. An updated result carries `recipe` (with `path` for a

@@ -162,7 +162,7 @@ export const metadata = {
 				"recipe (metadata.migratesFrom) or one is passed with --recipe <file>; --map <from>=<to> moves a value " +
 				"per element when no recipe covers it; the rest carry over by key. " +
 				"A report lists what was dropped, added, moved and changed. --dry-run previews the migration and writes " +
-				"nothing; it exits 1 when the write would fail or need --allow-lossy. The file is written once, " +
+				"nothing; it exits 1 when an element would fail to migrate or the write would need --allow-lossy. The file is written once, " +
 				"and only if every element migrates.\n\n" +
 				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
 				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
