@@ -102,10 +102,7 @@ test("selects every element on the template and writes the file once", async () 
 	}
 	assert.strictEqual(versionOf(xml, "Task_X"), undefined);
 	assert.strictEqual(result.stdout.match(/Updated /g)?.length, 1);
-	assert.match(
-		result.stdout,
-		/Summary: 3 updated, 0 skipped, 0 unchanged, 0 failed/,
-	);
+	assert.match(result.stdout, /3 elements updated\./);
 	assert.ok(!existsSync(`${copy}.migration.lock`));
 });
 
@@ -149,10 +146,7 @@ test("a failing element leaves the file byte-identical and exits 1 with the repo
 	);
 	assert.strictEqual(text.status, 1, text.stderr);
 	assert.match(text.stderr, /Cannot migrate .*version 2 is not available/);
-	assert.match(
-		text.stdout,
-		/Summary: 1 updated, 0 skipped, 0 unchanged, 1 failed/,
-	);
+	assert.match(text.stdout, /1 element updated, 1 failed\./);
 	assert.match(text.stderr, /Nothing was written/);
 	assert.strictEqual(readFileSync(copy, "utf-8"), before);
 	assert.ok(!existsSync(`${copy}.migration.lock`));

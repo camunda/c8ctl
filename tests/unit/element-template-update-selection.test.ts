@@ -94,7 +94,7 @@ test("moves to the newest version and applies its recipe", async () => {
 	assert.strictEqual(result.status, 0, result.stderr);
 	assert.match(result.stdout, /modelerTemplateVersion="2"/);
 	assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
-	assert.match(result.stderr, /Model › Endpoint → URL/);
+	assert.match(result.stderr, /> URL +https:\/\/v1 +was Endpoint/);
 });
 
 test("--to <id>@<n> pins a version and refuses a missing one", async () => {
@@ -171,7 +171,7 @@ test("an element id restricts the update to that element", async () => {
 	assert.strictEqual(versionOf(xml, "Task_B"), "2");
 	assert.strictEqual(versionOf(xml, TASK), "1");
 	assert.strictEqual(versionOf(xml, "Task_C"), "1");
-	assert.match(result.stdout, /Summary: 1 updated/);
+	assert.match(result.stdout, /1 element updated/);
 });
 
 test("fails with the template id when no element uses it", async () => {

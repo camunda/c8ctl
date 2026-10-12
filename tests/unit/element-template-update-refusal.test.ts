@@ -273,7 +273,7 @@ for (const action of ["change", "update"] as const) {
 							assert.match(authorized.recipe.refusal, scenario.diagnostic);
 						} else {
 							assert.match(result.stderr, scenario.diagnostic);
-							assert.match(result.stderr, /authorized with --allow-lossy/);
+							assert.match(result.stderr, /Authorized with --allow-lossy/);
 							fixture.assertUnchanged();
 						}
 					}

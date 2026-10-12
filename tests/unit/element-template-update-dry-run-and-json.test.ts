@@ -56,11 +56,11 @@ test("migrates to a template file, printing the BPMN and a report on stderr", as
 	assert.match(result.stdout, /modelerTemplate="io.example.new"/);
 	assert.match(result.stdout, /source="https:\/\/x" target="backend.endpoint"/);
 	assert.match(result.stdout, /source="foundry" target="backend.type"/);
-	assert.match(result.stderr, /Dropped \(1\)/);
+	assert.match(result.stderr, /\n {2}Dropped\n/);
 	assert.match(result.stderr, /Model › Maximum tokens {2}2000/);
-	assert.match(result.stderr, /Moved \(2\)/);
+	assert.match(result.stderr, /> API endpoint +https:\/\/x +was Endpoint/);
 	assert.match(result.stderr, /Backend chosen for you/);
-	assert.match(result.stderr, /Summary: 1 updated, 0 skipped/);
+	assert.match(result.stderr, /1 element updated\. BPMN written to stdout\./);
 	assert.doesNotMatch(result.stdout, /Dropped/);
 });
 
@@ -82,7 +82,7 @@ test("writes the file with --in-place and reports on stdout", async () => {
 	);
 	assert.strictEqual(result.status, 0, result.stderr);
 	assert.match(readFileSync(copy, "utf-8"), /modelerTemplate="io.example.new"/);
-	assert.match(result.stdout, /Dropped \(1\)/);
+	assert.match(result.stdout, /\n {2}Dropped\n/);
 	assert.match(result.stdout, /Updated /);
 });
 
@@ -122,7 +122,7 @@ test("a lossy --dry-run without --allow-lossy exits 1 and still prints the repor
 		"--dry-run",
 	);
 	assert.strictEqual(result.status, 1, result.stderr);
-	assert.match(result.stdout, /Dropped \(1\)/);
+	assert.match(result.stdout, /\n {2}Dropped\n/);
 	assert.match(result.stdout, /A write would be blocked/);
 	assert.strictEqual(readFileSync(ws.oldBpmn, "utf-8"), before);
 });

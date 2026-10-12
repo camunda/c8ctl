@@ -6,7 +6,11 @@
 import { isRecord } from "../../src/core/index.ts";
 import { bindingTargetKey, sameTarget } from "./migration/binding.ts";
 import type { ElementValue } from "./migration/element-values.ts";
-import type { Field, MigrationReport } from "./migration/report.ts";
+import type {
+	Field,
+	MigrationReport,
+	ValueSource,
+} from "./migration/report.ts";
 import type { MigrationTemplate } from "./migration/types.ts";
 
 /** Uses existing property/group identity metadata, not a custom sensitivity flag. */
@@ -19,8 +23,17 @@ export interface MigrationRedactionContext {
 
 export interface RenderOptions {
 	elementId: string;
+	elementName?: string;
 	color: boolean;
-	dryRun: boolean;
+	recipe: RecipeOrigin;
+	/** The `--recipe` argument, as given; shown when `recipe` is `file`. */
+	recipePath?: string;
+	/** Orders rows like the Modeler properties panel. */
+	targetTemplate?: MigrationTemplate;
+	/** Set when the element is lossy: whether `--allow-lossy` was passed. */
+	authorization?: "required" | "authorized";
+	/** Stream width when it is a TTY. */
+	columns?: number;
 	redaction?: MigrationRedactionContext;
 }
 
@@ -189,22 +202,10 @@ function styles(color: boolean) {
 	};
 }
 
+/** `name vN`, with `(deprecated)` once, in lower case. */
 function templateName(ref: MigrationReport["from"]): string {
-	const name = ref.name ?? ref.id;
-	const tag =
-		ref.deprecated && !/deprecated/i.test(name) ? " (deprecated)" : "";
-	return `${name} v${ref.version}${tag}`;
-}
-
-/** The group label, unless it repeats the field label. */
-function shownGroup(field: Field): string | undefined {
-	return field.groupLabel !== field.label ? field.groupLabel : undefined;
-}
-
-function fieldName(field: Field): string {
-	const label = field.label ?? field.key;
-	const group = shownGroup(field);
-	return group ? `${group} › ${label}` : label;
+	const name = (ref.name ?? ref.id).replace(/\s*\(deprecated\)/i, "");
+	return `${name}${ref.deprecated ? " (deprecated)" : ""} v${ref.version}`;
 }
 
 function valueText(value: string, name: string | undefined): string {
@@ -225,137 +226,385 @@ export function shouldUseColor(stream: { isTTY?: boolean }): boolean {
 	return stream.isTTY === true;
 }
 
+const MAX_LABEL_WIDTH = 28;
+const MAX_VALUE_WIDTH = 40;
+const NARROW_COLUMNS = 100;
+
+type Marker = "+" | "~" | ">" | "-";
+type Segment = [text: string, paint?: Style];
+
+interface Row {
+	marker: Marker;
+	group: string | undefined;
+	groupLabel: string | undefined;
+	label: string;
+	/** Group and label as the reader sees them, for collision checks. */
+	identity: string;
+	/** Binding key shown when two rows share an identity. */
+	key: string;
+	value: Segment[];
+	source: string;
+	/** Key rename of a `>` row without a source. */
+	rename?: { from: string; to: string };
+	rank: [number, number];
+}
+
+function truncate(text: string): string {
+	return text.length > MAX_VALUE_WIDTH
+		? `${text.slice(0, MAX_VALUE_WIDTH - 1)}…`
+		: text;
+}
+
+function plain(segments: Segment[]): string {
+	return segments.map(([text]) => text).join("");
+}
+
+function pad(text: string, width: number): string {
+	return text.length >= width ? text : text + " ".repeat(width - text.length);
+}
+
+function fieldLabel(field: Field): string {
+	return field.label ?? field.key;
+}
+
+function groupName(field: Field): string | undefined {
+	return field.groupLabel ?? field.group;
+}
+
+function sourceText(source: ValueSource): string {
+	switch (source) {
+		case "recipe":
+			return "set by recipe";
+		case "map":
+			return "--map";
+		case "default":
+			return "template default";
+		case "fixed":
+			return "fixed by template";
+	}
+}
+
+/** Where a moved field came from: its label, or its group and label. */
+function wasText(from: Field, to: Field): string {
+	const label = fieldLabel(from);
+	if (groupName(from) !== groupName(to)) {
+		const group = groupName(from);
+		return `was ${group ? `${group} › ` : ""}${label}`;
+	}
+	return label !== fieldLabel(to) ? `was ${label}` : "";
+}
+
+/** Position of `field` in the property panel of `template`. */
+function rankOf(
+	template: MigrationTemplate | undefined,
+	field: Field,
+): [number, number] {
+	const groups = template?.groups ?? [];
+	const properties = template?.properties ?? [];
+	const property = properties.findIndex(
+		(p) =>
+			(field.propertyId !== undefined && p.id === field.propertyId) ||
+			sameTarget(
+				{ key: bindingTargetKey(p.binding), bindingType: p.binding?.type },
+				field,
+			),
+	);
+	const declared = groups.findIndex((g) => g.id === field.group);
+	// Groups the template does not declare follow its order of first use.
+	const group =
+		field.group === undefined
+			? groups.length + properties.length + 1
+			: declared !== -1
+				? declared
+				: groups.length +
+					Math.max(
+						0,
+						properties.findIndex((p) => p.group === field.group),
+					);
+	return [group, property === -1 ? properties.length : property];
+}
+
+/** `from.* → to.* (n)` for renames that share prefixes, one per rename otherwise. */
+function renameLines(renames: { from: string; to: string }[]): string[] {
+	const dir = (key: string) => key.slice(0, key.lastIndexOf(".") + 1);
+	const base = (key: string) => key.slice(key.lastIndexOf(".") + 1);
+	const buckets = new Map<string, { from: string; to: string }[]>();
+	for (const rename of renames) {
+		const same = base(rename.from) === base(rename.to);
+		const bucket = same ? `${dir(rename.from)}\u0000${dir(rename.to)}` : "";
+		const list = buckets.get(bucket || `\u0001${rename.from}`) ?? [];
+		list.push(rename);
+		buckets.set(bucket || `\u0001${rename.from}`, list);
+	}
+	const lines: string[] = [];
+	for (const [bucket, list] of buckets) {
+		if (list.length > 1 && !bucket.startsWith("\u0001")) {
+			const [from, to] = bucket.split("\u0000");
+			lines.push(`${from}* → ${to}* (${list.length})`);
+		} else {
+			for (const r of list) lines.push(`${r.from} → ${r.to}`);
+		}
+	}
+	return lines;
+}
+
+function rowsOf(
+	report: MigrationReport,
+	targetTemplate: MigrationTemplate | undefined,
+	s: ReturnType<typeof styles>,
+): { rows: Row[]; dropped: Row[] } {
+	const shown = (value: string, name: string | undefined, stored: boolean) => {
+		const text = valueText(value, name);
+		return truncate(stored && text !== value ? `${text} [${value}]` : text);
+	};
+	const base = (field: Field) => ({
+		group: field.group,
+		groupLabel: groupName(field),
+		label: fieldLabel(field),
+		identity: `${groupName(field) ?? ""}\u0000${fieldLabel(field)}`,
+		key: field.key,
+		rank: rankOf(targetTemplate, field),
+	});
+	const change = (c: {
+		from: string;
+		to: string;
+		fromName?: string;
+		toName?: string;
+	}): Segment[] => [
+		[shown(c.from, c.fromName, false), s.red],
+		[" → ", s.dim],
+		[shown(c.to, c.toName, true), s.green],
+	];
+
+	const rows: Row[] = [];
+	for (const a of report.added) {
+		rows.push({
+			...base(a),
+			marker: "+",
+			value: [[shown(a.value, a.valueName, true), s.green]],
+			source: sourceText(a.source),
+		});
+	}
+	for (const c of report.changed) {
+		rows.push({
+			...base(c),
+			marker: "~",
+			value: change(c.valueChange),
+			source: sourceText(c.source),
+		});
+	}
+	for (const m of report.moved) {
+		const common = base(m.to);
+		if (m.valueChange) {
+			rows.push({
+				...common,
+				marker: "~",
+				value: change(m.valueChange),
+				source: sourceText(m.source),
+			});
+			continue;
+		}
+		const was = wasText(m.from, m.to);
+		rows.push({
+			...common,
+			marker: ">",
+			value: [[shown(m.value, m.valueName, false)]],
+			source: was,
+			...(!was && m.from.key !== m.to.key
+				? { rename: { from: m.from.key, to: m.to.key } }
+				: {}),
+		});
+	}
+	rows.sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1]);
+
+	const dropped: Row[] = report.dropped.map((d) => {
+		const group = groupName(d);
+		return {
+			...base(d),
+			marker: "-",
+			label: `${group ? `${group} › ` : ""}${fieldLabel(d)}`,
+			value: [[shown(d.value, d.valueName, false), s.red]],
+			source: "",
+		};
+	});
+	return { rows, dropped };
+}
+
 export function renderReportText(
 	report: MigrationReport,
-	{ elementId, color, dryRun, redaction }: RenderOptions,
+	{
+		elementId,
+		elementName,
+		color,
+		recipe,
+		recipePath,
+		targetTemplate,
+		authorization,
+		columns,
+		redaction,
+	}: RenderOptions,
 ): string {
 	const redactor = migrationRedactor({ ...redaction, report });
 	elementId = redactor.text(elementId);
+	elementName = elementName ? redactor.text(elementName) : undefined;
 	report = redactReport(report, redactor);
 	const s = styles(color);
 	const lines: string[] = [];
-	const section = (
-		marker: string,
-		title: string,
-		count: number,
-		paint: Style,
-	) => {
-		lines.push("", paint(s.bold(`${marker} ${title} (${count})`)));
-	};
-	const item = (text: string) => lines.push(`   ${text}`);
 
 	lines.push(
-		`${s.bold(`🔄 ${elementId}`)}  ${s.dim(templateName(report.from))} → ${s.bold(templateName(report.to))}`,
+		s.bold(elementName ? `${elementName} (${elementId})` : elementId),
+		`  ${s.dim(templateName(report.from))}  ${s.dim("→")}  ${s.bold(templateName(report.to))}`,
+		s.dim(
+			`  ${report.from.id}@${report.from.version} → ${report.to.id}@${report.to.version}`,
+		),
 	);
 	if (report.refusal) {
-		lines.push(s.yellow(`   ⚠️  Recipe not used: ${report.refusal}`));
-	} else if (report.usedRecipe) {
-		lines.push(s.dim("   📜 Applied the migration recipe"));
+		lines.push(s.yellow(`  recipe not used: ${redactor.text(report.refusal)}`));
+	} else if (recipe === "file") {
+		lines.push(
+			s.dim(`  recipe: ${recipePath ? redactor.text(recipePath) : "file"}`),
+		);
+	} else if (recipe === "embedded") {
+		lines.push(s.dim(`  recipe: embedded in ${report.to.id}`));
 	} else {
-		lines.push(s.dim("   ℹ️  No recipe: values carried over by key"));
+		lines.push(s.dim("  no recipe: values carried over by key"));
 	}
 
-	if (report.dropped.length > 0) {
-		section("➖", "Dropped", report.dropped.length, s.yellow);
-		for (const d of report.dropped) {
-			item(`${fieldName(d)}  ${s.bold(valueText(d.value, d.valueName))}`);
-		}
+	const { rows, dropped } = rowsOf(report, targetTemplate, s);
+	const all = [...rows, ...dropped];
+	const labelWidth = Math.min(
+		MAX_LABEL_WIDTH,
+		Math.max(0, ...all.map((r) => r.label.length)),
+	);
+	const valueWidth = Math.max(0, ...all.map((r) => plain(r.value).length));
+	const narrow = columns !== undefined && columns < NARROW_COLUMNS;
+	const valueColumn = 2 + 2 + labelWidth + 2;
+
+	const colorOf = (marker: Marker): Style =>
+		marker === "+"
+			? s.green
+			: marker === "-"
+				? s.red
+				: marker === "~"
+					? s.yellow
+					: s.cyan;
+	const collides = new Set<string>();
+	const seen = new Map<string, string>();
+	for (const r of all) {
+		const first = seen.get(r.identity);
+		if (first === undefined) seen.set(r.identity, r.key);
+		else if (first !== r.key) collides.add(r.identity);
 	}
 
-	if (report.added.length > 0) {
-		section("➕", "Added", report.added.length, s.green);
-		for (const a of report.added) {
-			item(`${fieldName(a)}  ${s.bold(valueText(a.value, a.valueName))}`);
-		}
-	}
-
-	if (report.moved.length > 0) {
-		section("↪️ ", "Moved", report.moved.length, s.green);
-		for (const m of report.moved) {
-			const from = fieldName(m.from);
-			const fullTo = fieldName(m.to);
-			const sameGroup =
-				shownGroup(m.from) !== undefined &&
-				shownGroup(m.from) === shownGroup(m.to);
-			const to =
-				sameGroup && from !== fullTo ? (m.to.label ?? m.to.key) : fullTo;
-			const change = m.valueChange;
-			const keys =
-				from === to && m.from.key !== m.to.key
-					? s.dim(` (${m.from.key} → ${m.to.key})`)
-					: "";
-			const via = m.source === "map" ? s.dim(" [--map]") : "";
-			if (change) {
-				const values = `${valueText(change.from, change.fromName)} → ${s.bold(valueText(change.to, change.toName))}`;
-				item(
-					from === to
-						? `${from}${keys}  ${values}${via}`
-						: `${from} → ${s.bold(to)}  ${values}${via}`,
-				);
-			} else {
-				item(`${s.dim(from)} → ${s.bold(to)}${keys}${via}`);
-			}
-		}
-	}
-
-	if (report.changed.length > 0) {
-		section("✏️ ", "Changed", report.changed.length, s.cyan);
-		for (const c of report.changed) {
-			const { from, to, fromName, toName } = c.valueChange;
-			item(
-				`${fieldName(c)}  ${valueText(from, fromName)} → ${s.bold(valueText(to, toName))}`,
+	const emit = (r: Row) => {
+		const paint =
+			r.marker === "+" || r.marker === "-" ? colorOf(r.marker) : undefined;
+		const label = pad(r.label, labelWidth);
+		const value = r.value
+			.map(([text, style]) => (style ? style(text) : text))
+			.join("");
+		const gap = " ".repeat(Math.max(0, valueWidth - plain(r.value).length));
+		const markerText = s.bold(colorOf(r.marker)(r.marker));
+		const labelText = paint ? paint(label) : label;
+		if (r.source && !narrow) {
+			lines.push(
+				`  ${markerText} ${labelText}  ${value}${gap}  ${s.dim(r.source)}`,
 			);
+		} else {
+			lines.push(`  ${markerText} ${labelText}  ${value}`.trimEnd());
+			if (r.source) lines.push(`${" ".repeat(valueColumn)}${s.dim(r.source)}`);
 		}
+		if (collides.has(r.identity)) {
+			lines.push(`${" ".repeat(valueColumn)}${s.dim(r.key)}`);
+		}
+	};
+
+	let current: string | undefined | null = null;
+	let groupRenames: { from: string; to: string }[] = [];
+	const flushRenames = () => {
+		const out = renameLines(groupRenames);
+		out.forEach((text, i) => {
+			const lead =
+				i === 0 ? "keys renamed: " : " ".repeat("keys renamed: ".length);
+			lines.push(s.dim(`    ${lead}${text}`));
+		});
+		groupRenames = [];
+	};
+	for (const r of rows) {
+		if (current !== r.group) {
+			if (current !== null) flushRenames();
+			current = r.group;
+			lines.push("", `  ${s.bold(r.groupLabel ?? "(no group)")}`);
+		}
+		emit(r);
+		if (r.rename) groupRenames.push(r.rename);
+	}
+	if (current !== null) flushRenames();
+
+	if (dropped.length > 0) {
+		lines.push("", `  ${s.bold("Dropped")}`);
+		for (const r of dropped) emit(r);
 	}
 
 	if (report.notes.length > 0) {
-		section("💬", "Notes", report.notes.length, s.blue);
+		lines.push("", `  ${s.bold("Notes")}`);
 		for (const note of report.notes) {
-			item(
+			lines.push(
 				note.level === "warning"
-					? s.yellow(`⚠️  ${note.message}`)
-					: s.blue(`ℹ️  ${note.message}`),
+					? s.yellow(`  ⚠️  ${note.message}`)
+					: s.blue(`  ℹ️  ${note.message}`),
 			);
 		}
 	}
 
 	const { guard, template, noMatch, feel } = report.skipped;
-	const skipped = guard.length + template.length + noMatch.length + feel.length;
-	if (skipped > 0) {
-		section("⏭️ ", "Needs attention", skipped, s.yellow);
+	if (guard.length + template.length + noMatch.length + feel.length > 0) {
+		lines.push("", `  ${s.bold("Needs attention")}`);
 		for (const g of guard) {
-			item(`Condition not met, not moved: ${g.from} → ${g.to}`);
+			lines.push(`  Condition not met, not moved: ${g.from} → ${g.to}`);
 		}
 		for (const t of template) {
-			item(`Not composed, missing ${t.missing.join(", ")}: ${t.to}`);
+			lines.push(`  Not composed, missing ${t.missing.join(", ")}: ${t.to}`);
 		}
 		for (const n of noMatch) {
-			item(`No value rule matched, target default kept: ${n.from} → ${n.to}`);
+			lines.push(
+				`  No value rule matched, target default kept: ${n.from} → ${n.to}`,
+			);
 		}
 		for (const f of feel) {
-			item(
-				`FEEL expression moved as-is, value rules not applied: ${f.from} → ${f.to}`,
+			lines.push(
+				`  FEEL expression moved as-is, value rules not applied: ${f.from} → ${f.to}`,
 			);
 		}
 	}
 
-	lines.push("");
-	if (report.lossless) {
-		lines.push(s.green("✅ No values lost"));
-	} else {
-		const count = report.dropped.length;
-		lines.push(
-			s.yellow(
-				count > 0
-					? `⚠️  ${count} value${count === 1 ? "" : "s"} dropped, review above`
-					: "⚠️  Some values were not migrated, review above",
-			),
-		);
-	}
-	if (dryRun) {
-		lines.push(s.dim("🔍 Dry run: nothing was written"));
-	}
+	const updated =
+		report.added.length + report.changed.length + report.moved.length;
+	const lost =
+		report.dropped.length + guard.length + template.length + noMatch.length;
+	const tail =
+		authorization === "required"
+			? ". Requires --allow-lossy before writing."
+			: authorization === "authorized"
+				? ". Authorized with --allow-lossy."
+				: "";
+	const counts = `${updated} updated, ${report.kept.length} kept unchanged, ${lost} lost${tail}`;
+	lines.push(
+		"",
+		report.lossless ? s.green(`  ✅ ${counts}`) : s.yellow(`  ⚠️  ${counts}`),
+	);
 	return `${lines.join("\n")}\n`;
+}
+
+/** The marker legend, printed once at the end of a run. */
+export function renderLegend(color: boolean): string {
+	const s = styles(color);
+	return [
+		s.green("+ new"),
+		s.yellow("~ changed"),
+		s.cyan("> moved"),
+		s.red("- dropped"),
+	].join("  ");
 }
 
 export type RecipeOrigin = "file" | "embedded" | "none";

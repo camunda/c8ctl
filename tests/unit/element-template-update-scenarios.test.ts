@@ -605,10 +605,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		);
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(result.stdout.match(/Updated /g)?.length, 1, result.stdout);
-		assert.match(
-			result.stdout,
-			/Summary: 3 updated, 0 skipped, 1 unchanged, 0 failed, 3 values dropped\./,
-		);
+		assert.match(result.stdout, /3 elements updated, 1 unchanged\./);
 		const xml = readFileSync(bpmn, "utf-8");
 		for (const [id, url] of [
 			["Task_Http10", "https://api.example.com/customers"],

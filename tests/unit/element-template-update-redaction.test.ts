@@ -146,8 +146,8 @@ for (const flags of [
 			for (const collection of ["dropped", "added", "changed", "moved"])
 				assert.ok(diff[collection].length > 0, reporting);
 		} else {
-			for (const section of ["Dropped", "Added", "Changed", "Moved"])
-				assert.ok(reporting.includes(section), reporting);
+			for (const marker of ["-", "+", "~"])
+				assert.match(reporting, new RegExp(`^ {2}\\${marker} `, "m"));
 		}
 		assert.equal(readFileSync(bpmn, "utf8"), original);
 		if (flags.includes("--dry-run"))

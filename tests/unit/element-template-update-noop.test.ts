@@ -624,7 +624,7 @@ for (const mode of modes) {
 		writeFileSync(file, seed.stdout);
 		const migrated = await run({ dir, args: argsFor({ mode, path, file }) });
 		assert.equal(migrated.status, 0, migrated.stderr);
-		assert.match(migrated.stderr, /No values lost/);
+		assert.match(migrated.stderr, /0 lost/);
 		assert.notEqual(migrated.stdout, seed.stdout);
 		const repeated = await run({
 			dir,
@@ -742,7 +742,7 @@ describe("update CLI: no-op contract (shared update fixtures)", () => {
 			["update", V1.id, file, "--in-place"],
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /Summary: 0 updated, 0 skipped, 2 unchanged/);
+		assert.match(result.stdout, /2 elements unchanged/);
 		assert.doesNotMatch(result.stdout, /Updated /);
 		assert.strictEqual(readFileSync(file, "utf-8"), before);
 		assert.strictEqual(statSync(file).mtimeMs, mtime);

@@ -6,12 +6,15 @@
 import assert from "node:assert";
 import { afterEach, describe, test } from "node:test";
 import type {
+	Field,
 	MigrationReport,
 	MovedItem,
 	ValueSource,
 } from "../../default-plugins/element-template/migration/report.ts";
+import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import {
 	redactMigrationDiagnostic,
+	renderLegend,
 	renderReportText,
 	reportToJson,
 	shouldUseColor,
@@ -126,7 +129,7 @@ describe("redaction", () => {
 				const text = renderReportText(raw, {
 					elementId: "Task",
 					color: false,
-					dryRun,
+					recipe: "embedded",
 					redaction,
 				});
 				const json = JSON.stringify(
@@ -169,7 +172,7 @@ describe("redaction", () => {
 		});
 		const original = structuredClone(raw);
 		assert.doesNotMatch(
-			renderReportText(raw, { elementId: "Task", color: true, dryRun: true }),
+			renderReportText(raw, { elementId: "Task", color: true, recipe: "none" }),
 			/LONG-PRIVATE/,
 		);
 		assert.doesNotMatch(
@@ -219,7 +222,7 @@ describe("redaction", () => {
 			renderReportText(raw, {
 				elementId: "Task",
 				color: false,
-				dryRun: true,
+				recipe: "none",
 				redaction,
 			}),
 			/PRIVATE-/,
@@ -273,7 +276,11 @@ describe("redaction", () => {
 			"ordinary diagnostic",
 		);
 		assert.match(
-			renderReportText(raw, { elementId: "Task", color: false, dryRun: false }),
+			renderReportText(raw, {
+				elementId: "Task",
+				color: false,
+				recipe: "none",
+			}),
 			/2000/,
 		);
 	});
@@ -337,7 +344,7 @@ describe("redaction", () => {
 		const text = renderReportText(raw, {
 			elementId: "Task",
 			color: false,
-			dryRun: true,
+			recipe: "none",
 		});
 		assert.doesNotMatch(text, /SECRET/);
 		assert.strictEqual(text.match(/\[REDACTED\]/g)?.length, 6);
@@ -408,34 +415,39 @@ describe("redaction", () => {
 });
 
 describe("renderReportText", () => {
-	test("renders the header, sections and a lossless footer", () => {
-		const text = renderReportText(
+	const render = (
+		input: MigrationReport,
+		options: Partial<Parameters<typeof renderReportText>[1]> = {},
+	) =>
+		renderReportText(input, {
+			elementId: "Agent_1",
+			color: false,
+			recipe: "file",
+			recipePath: "r.json",
+			...options,
+		});
+	const input = (key: string, label?: string, group?: string) => ({
+		key,
+		bindingType: "zeebe:input",
+		...(label ? { label } : {}),
+		...(group ? { group: group.toLowerCase(), groupLabel: group } : {}),
+	});
+
+	test("renders the element block, rows and a lossless footer", () => {
+		const text = render(
 			report({
-				dropped: [],
 				added: [
 					{
-						key: "backend",
-						bindingType: "zeebe:input",
-						groupLabel: "Model provider",
-						label: "Backend",
+						...input("backend", "Backend", "Model provider"),
 						value: "foundry",
 						valueName: "Microsoft Foundry (Azure)",
+						source: "recipe",
 					},
 				],
 				moved: [
 					{
-						from: {
-							key: "provider",
-							bindingType: null,
-							label: "Provider",
-							groupLabel: "Model provider",
-						},
-						to: {
-							key: "provider",
-							bindingType: null,
-							label: "Provider",
-							groupLabel: "Model provider",
-						},
+						from: input("provider", "Provider", "Model provider"),
+						to: input("provider", "Provider", "Model provider"),
 						valueChange: {
 							from: "azure",
 							to: "openai",
@@ -443,36 +455,35 @@ describe("renderReportText", () => {
 							toName: "OpenAI",
 						},
 					},
-					{
-						from: { key: "endpoint", bindingType: null, label: "Endpoint" },
-						to: {
-							key: "apiEndpoint",
-							bindingType: null,
-							label: "API endpoint",
-						},
-					},
 				],
+				kept: [input("a"), input("b")],
 			}),
-			{ elementId: "Agent_1", color: false, dryRun: false },
+			{ elementName: "Agent" },
 		);
-		assert.match(
+		assert.strictEqual(
 			text,
-			/🔄 Agent_1 {2}AI Agent \(job worker\) v13 \(deprecated\) → AI Agent Sub-process v1/,
+			[
+				"Agent (Agent_1)",
+				"  AI Agent (job worker) (deprecated) v13  →  AI Agent Sub-process v1",
+				"  old@13 → new@1",
+				"  recipe: r.json",
+				"",
+				"  Model provider",
+				"  + Backend   Microsoft Foundry (Azure) [foundry]  set by recipe",
+				"  ~ Provider  Azure OpenAI → OpenAI [openai]       set by recipe",
+				"",
+				"  ✅ 2 updated, 2 kept unchanged, 0 lost",
+				"",
+			].join("\n"),
 		);
-		assert.match(text, /➕ Added \(1\)/);
-		assert.match(
-			text,
-			/Model provider › Backend {2}Microsoft Foundry \(Azure\)/,
-		);
-		assert.match(text, /↪️ {2}Moved \(2\)/);
-		assert.match(text, /Model provider › Provider {2}Azure OpenAI → OpenAI/);
-		assert.match(text, /Endpoint → API endpoint/);
-		assert.match(text, /✅ No values lost/);
-		assert.doesNotMatch(text, /Dropped/);
+	});
+
+	test("shows the element ID alone for an unnamed element", () => {
+		assert.match(render(report()), /^Agent_1\n/);
 	});
 
 	test("does not repeat a deprecated marker the template name already has", () => {
-		const text = renderReportText(
+		const text = render(
 			report({
 				from: {
 					id: "o",
@@ -481,62 +492,292 @@ describe("renderReportText", () => {
 					deprecated: true,
 				},
 			}),
-			{ elementId: "A", color: false, dryRun: false },
 		);
-		assert.match(text, /Agent \(Deprecated\) v2 →/);
-		assert.doesNotMatch(text, /\(deprecated\)/);
+		assert.match(text, /Agent \(deprecated\) v2 {2}→/);
+		assert.doesNotMatch(text, /\(Deprecated\)/);
 	});
 
-	test("names the group once when a value moves within it", () => {
-		const text = renderReportText(
+	test("names the source of added, changed and moved values", () => {
+		const text = render(
 			report({
+				added: [
+					{ ...input("a", "A"), value: "1", source: "recipe" },
+					{ ...input("b", "B"), value: "2", source: "default" },
+					{ ...input("c", "C"), value: "3", source: "fixed" },
+				],
+				changed: [
+					{
+						...input("d", "D"),
+						valueChange: { from: "x", to: "y" },
+						source: "default",
+					},
+				],
 				moved: [
 					{
-						from: {
-							key: "a",
-							bindingType: null,
-							label: "Endpoint",
-							groupLabel: "Model",
-						},
-						to: {
-							key: "b",
-							bindingType: null,
-							label: "URL",
-							groupLabel: "Model",
+						from: input("e", "E"),
+						to: input("f", "F"),
+						value: "5",
+						valueChange: { from: "4", to: "5" },
+						source: "map",
+					},
+				],
+			}),
+		);
+		assert.match(text, /\+ A +1 +set by recipe/);
+		assert.match(text, /\+ B +2 +template default/);
+		assert.match(text, /\+ C +3 +fixed by template/);
+		assert.match(text, /~ D +x → y +template default/);
+		assert.match(text, /~ F +4 → 5 +--map/);
+	});
+
+	test("a moved value says where it came from, and nothing when label and group are unchanged", () => {
+		const moved = (from: Field, to: Field) => ({ from, to, value: "v" });
+		const text = render(
+			report({
+				moved: [
+					moved(input("a", "Endpoint", "Model"), input("b", "URL", "Model")),
+					moved(input("c", "Temp", "Model"), input("d", "Temp", "Options")),
+					moved(
+						input("e", "Max", "Model"),
+						input("f", "Max completion", "Options"),
+					),
+					moved(input("g", "Same", "Model"), input("h", "Same", "Model")),
+				],
+			}),
+		);
+		assert.match(text, /> URL +v +was Endpoint/);
+		assert.match(text, /> Temp +v +was Model › Temp/);
+		assert.match(text, /> Max completion +v +was Model › Max/);
+		assert.match(text, /> Same +v\n/);
+		assert.doesNotMatch(text, /Same.*was/);
+	});
+
+	test("shows the stored value of a choice when it differs, on added and changed rows", () => {
+		const text = render(
+			report({
+				added: [
+					{
+						...input("e", "Effort"),
+						value: "modelDefault",
+						valueName: "default",
+					},
+				],
+				changed: [
+					{
+						...input("m", "Mode"),
+						valueChange: {
+							from: "a",
+							to: "b",
+							fromName: "Old",
+							toName: "New",
 						},
 					},
 				],
 			}),
-			{ elementId: "A", color: false, dryRun: false },
 		);
-		assert.match(text, /Model › Endpoint → URL/);
+		assert.match(text, /\+ Effort +default \[modelDefault\]/);
+		assert.match(text, /~ Mode +Old → New \[b\]/);
 	});
 
-	test("lists dropped values and warns in the footer", () => {
-		const text = renderReportText(
+	test("collapses key renames that share a prefix into one dim line per group", () => {
+		const rename = (from: string, to: string, label: string) => ({
+			from: input(from, label, "Provider"),
+			to: input(to, label, "Provider"),
+			value: "v",
+		});
+		const text = render(
+			report({
+				moved: [
+					rename("p.old.auth.type", "p.new.auth.type", "Type"),
+					rename("p.old.auth.id", "p.new.auth.id", "ID"),
+					rename("p.old.auth.secret", "p.new.auth.secret", "Secret"),
+					rename("p.old.timeout", "p.new.timeout", "Timeout"),
+				],
+			}),
+		);
+		assert.match(
+			text,
+			/keys renamed: p\.old\.auth\.\* → p\.new\.auth\.\* \(3\)/,
+		);
+		assert.match(text, /\n {18}p\.old\.timeout → p\.new\.timeout\n/);
+	});
+
+	test("shows the binding key of rows that share a group and label", () => {
+		const text = render(
+			report({
+				lossless: false,
+				added: [
+					{
+						...input("data.new.method", "Method", "Operation"),
+						value: "=m",
+					},
+				],
+				dropped: [
+					{
+						...input("data.old.method", "Method", "Operation"),
+						value: "tools/call",
+					},
+				],
+			}),
+		);
+		assert.match(
+			text,
+			/\+ Method +=m +template default\n +data\.new\.method\n/,
+		);
+		assert.match(
+			text,
+			/- Operation › Method +tools\/call\n +data\.old\.method\n/,
+		);
+		assert.doesNotMatch(text, /keys renamed/);
+	});
+
+	test("lists ungrouped fields under (no group) and keeps a field named like its group in that group", () => {
+		const text = render(
+			report({
+				added: [
+					{ ...input("a", "Loose"), value: "1" },
+					{ ...input("b", "Model", "Model"), value: "2" },
+				],
+			}),
+		);
+		assert.match(text, /\n {2}\(no group\)\n {2}\+ Loose/);
+		assert.match(text, /\n {2}Model\n {2}\+ Model/);
+	});
+
+	test("orders rows and groups like the target template", () => {
+		const template = {
+			id: "new",
+			version: 1,
+			groups: [
+				{ id: "first", label: "First" },
+				{ id: "second", label: "Second" },
+			],
+			properties: [
+				{
+					id: "p1",
+					group: "first",
+					binding: { type: "zeebe:input", name: "one" },
+				},
+				{
+					id: "p2",
+					group: "first",
+					binding: { type: "zeebe:input", name: "two" },
+				},
+				{
+					id: "p3",
+					group: "second",
+					binding: { type: "zeebe:input", name: "three" },
+				},
+			],
+		} satisfies MigrationTemplate;
+		const field = (key: string, group: string) => ({
+			...input(key, key, group),
+			group,
+		});
+		const text = render(
+			report({
+				added: [
+					{ ...field("two", "first"), value: "2" },
+					{ ...field("three", "second"), value: "3" },
+				],
+				moved: [
+					{
+						from: field("old", "first"),
+						to: field("one", "first"),
+						value: "1",
+					},
+				],
+			}),
+			{ targetTemplate: template },
+		);
+		const order = ["> one", "+ two", "+ three"].map((row) => text.indexOf(row));
+		assert.deepStrictEqual(
+			order,
+			[...order].sort((a, b) => a - b),
+		);
+		assert.ok(order.every((i) => i >= 0));
+	});
+
+	test("prints one (no group) heading when the template declares no groups", () => {
+		const template = {
+			id: "new",
+			version: 1,
+			properties: [
+				{ id: "p1", binding: { type: "zeebe:input", name: "loose" } },
+				{
+					id: "p2",
+					group: "creds",
+					binding: { type: "zeebe:input", name: "key" },
+				},
+				{ id: "p3", binding: { type: "zeebe:input", name: "other" } },
+			],
+		} satisfies MigrationTemplate;
+		const text = render(
+			report({
+				added: [
+					{ ...input("loose", "Loose"), value: "1" },
+					{ ...input("key", "Key", "creds"), value: "2" },
+					{ ...input("other", "Other"), value: "3" },
+				],
+			}),
+			{ targetTemplate: template },
+		);
+		assert.strictEqual(text.match(/\(no group\)/g)?.length, 1, text);
+		assert.ok(text.indexOf("creds") < text.indexOf("(no group)"));
+	});
+
+	test("truncates long values and keeps short ones", () => {
+		const long = "x".repeat(60);
+		const text = render(
+			report({ added: [{ ...input("a", "A"), value: long }] }),
+		);
+		assert.match(text, new RegExp(`\\+ A +${"x".repeat(39)}…`));
+		assert.doesNotMatch(text, /x{40}/);
+	});
+
+	test("moves the source below its row on a narrow terminal", () => {
+		const added = report({ added: [{ ...input("a", "A"), value: "1" }] });
+		assert.match(
+			render(added, { columns: 99 }),
+			/\+ A {2}1\n {7}template default\n/,
+		);
+		assert.match(
+			render(added, { columns: 100 }),
+			/\+ A {2}1 {2}template default\n/,
+		);
+	});
+
+	test("lists dropped values under a Dropped heading and warns in the footer", () => {
+		const text = render(
 			report({
 				lossless: false,
 				dropped: [
-					{
-						key: "maxTokens",
-						bindingType: "zeebe:input",
-						groupLabel: "Model",
-						label: "Maximum tokens",
-						value: "2000",
-					},
+					{ ...input("max", "Maximum tokens", "Model"), value: "2000" },
 				],
 			}),
-			{ elementId: "A", color: false, dryRun: false },
 		);
-		assert.match(text, /➖ Dropped \(1\)/);
-		assert.match(text, /Model › Maximum tokens {2}2000/);
-		assert.match(text, /⚠️ {2}1 value dropped, review above/);
+		assert.match(text, /\n {2}Dropped\n {2}- Model › Maximum tokens {2}2000\n/);
+		assert.match(text, /⚠️ {2}0 updated, 0 kept unchanged, 1 lost\n$/);
 	});
 
-	test("renders info and warning notes and needs-attention items", () => {
-		const text = renderReportText(
+	test("the footer states the --allow-lossy outcome", () => {
+		const lossy = report({ lossless: false });
+		assert.match(
+			render(lossy, { authorization: "required" }),
+			/lost\. Requires --allow-lossy before writing\.\n$/,
+		);
+		assert.match(
+			render(lossy, { authorization: "authorized" }),
+			/lost\. Authorized with --allow-lossy\.\n$/,
+		);
+		assert.doesNotMatch(render(report()), /allow-lossy/);
+	});
+
+	test("renders info and warning notes and needs-attention items after the rows", () => {
+		const text = render(
 			report({
 				lossless: false,
+				added: [{ ...input("a", "A"), value: "1" }],
 				notes: [
 					{ level: "info", message: "moved for you" },
 					{ level: "warning", message: "check IAM" },
@@ -548,51 +789,76 @@ describe("renderReportText", () => {
 					feel: [{ from: "e", to: "f" }],
 				},
 			}),
-			{ elementId: "A", color: false, dryRun: false },
 		);
 		assert.match(text, /ℹ️ {2}moved for you/);
 		assert.match(text, /⚠️ {2}check IAM/);
-		assert.match(text, /Needs attention \(4\)/);
+		assert.match(text, /Needs attention\n/);
 		assert.match(text, /Not composed, missing host: url/);
+		assert.ok(text.indexOf("+ A") < text.indexOf("Notes"));
+		assert.ok(text.indexOf("Notes") < text.indexOf("Needs attention"));
 	});
 
-	test("explains a missing or refused recipe and marks a dry run", () => {
-		const none = renderReportText(report({ usedRecipe: false }), {
-			elementId: "A",
-			color: false,
-			dryRun: true,
-		});
-		assert.match(none, /No recipe: values carried over by key/);
-		assert.match(none, /Dry run: nothing was written/);
-		const refused = renderReportText(
-			report({ usedRecipe: false, refusal: "log is incomplete" }),
-			{
-				elementId: "A",
-				color: false,
-				dryRun: false,
-			},
+	test("names the recipe origin, its absence or its refusal", () => {
+		assert.match(render(report()), /\n {2}recipe: r\.json\n/);
+		assert.match(
+			render(report(), { recipe: "embedded" }),
+			/\n {2}recipe: embedded in new\n/,
 		);
-		assert.match(refused, /Recipe not used: log is incomplete/);
+		assert.match(
+			render(report({ usedRecipe: false }), { recipe: "none" }),
+			/\n {2}no recipe: values carried over by key\n/,
+		);
+		assert.match(
+			render(report({ usedRecipe: false, refusal: "log is incomplete" })),
+			/\n {2}recipe not used: log is incomplete\n/,
+		);
 	});
 
-	test("emits ANSI colours only when enabled", () => {
-		const input = report({
-			added: [{ key: "k", bindingType: null, value: "v" }],
-		});
+	test("emits no escape sequence without colour", () => {
 		assert.ok(
-			!renderReportText(input, {
-				elementId: "A",
-				color: false,
-				dryRun: false,
-			}).includes(ESC),
+			!render(
+				report({ added: [{ ...input("k"), value: "v" }], lossless: false }),
+			).includes(ESC),
 		);
-		assert.ok(
-			renderReportText(input, {
-				elementId: "A",
-				color: true,
-				dryRun: false,
-			}).includes(ESC),
+	});
+
+	test("colours each row type like git diff, without backgrounds", () => {
+		const text = render(
+			report({
+				added: [{ ...input("a", "A"), value: "1" }],
+				changed: [
+					{ ...input("c", "C"), valueChange: { from: "old", to: "new" } },
+				],
+				moved: [{ from: input("m", "M"), to: input("n", "N"), value: "v" }],
+				dropped: [{ ...input("d", "D"), value: "gone" }],
+				lossless: false,
+			}),
+			{ color: true },
 		);
+		for (const colored of [
+			`${ESC}32m+${ESC}39m`,
+			`${ESC}33m~${ESC}39m`,
+			`${ESC}31mold${ESC}39m`,
+			`${ESC}32mnew${ESC}39m`,
+			`${ESC}36m>${ESC}39m`,
+			`${ESC}31m-${ESC}39m`,
+			`${ESC}31mgone${ESC}39m`,
+			`${ESC}33m  ⚠️`,
+		]) {
+			assert.ok(text.includes(colored), colored);
+		}
+		assert.doesNotMatch(
+			text,
+			new RegExp(`${ESC.replace("[", "\\[")}(?:4\\d|10\\d)m`),
+		);
+	});
+
+	test("prints the marker legend in the marker colours", () => {
+		assert.strictEqual(
+			renderLegend(false),
+			"+ new  ~ changed  > moved  - dropped",
+		);
+		assert.ok(renderLegend(true).includes(`${ESC}36m> moved${ESC}39m`));
 	});
 });
 
@@ -704,78 +970,69 @@ describe("reportToJson", () => {
 });
 
 describe("output boundary cases", () => {
-	const options = { elementId: "Task_1", color: false, dryRun: false };
+	const options = {
+		elementId: "Task_1",
+		color: false,
+		recipe: "none" as const,
+	};
 
-	test("an empty report renders the header, the carry-over note and the lossless footer only", () => {
+	test("an empty report renders the header, the carry-over note and the footer only", () => {
 		const text = renderReportText(report({ usedRecipe: false }), options);
 		assert.strictEqual(
 			text,
 			[
-				"🔄 Task_1  AI Agent (job worker) v13 (deprecated) → AI Agent Sub-process v1",
-				"   ℹ️  No recipe: values carried over by key",
+				"Task_1",
+				"  AI Agent (job worker) (deprecated) v13  →  AI Agent Sub-process v1",
+				"  old@13 → new@1",
+				"  no recipe: values carried over by key",
 				"",
-				"✅ No values lost",
+				"  ✅ 0 updated, 0 kept unchanged, 0 lost",
 				"",
 			].join("\n"),
 		);
 	});
 
-	test("a refusal replaces the recipe line and a dry run adds its footer", () => {
+	test("a refusal replaces the recipe line and the footer warns", () => {
 		const text = renderReportText(
 			report({
 				refusal: "wrong source ID",
 				usedRecipe: false,
 				lossless: false,
 			}),
-			{ ...options, dryRun: true },
+			options,
 		);
-		assert.match(text, /⚠️ {2}Recipe not used: wrong source ID/);
-		assert.match(text, /⚠️ {2}Some values were not migrated, review above/);
-		assert.match(text, /🔍 Dry run: nothing was written\n$/);
+		assert.match(text, /\n {2}recipe not used: wrong source ID\n/);
+		assert.match(text, /⚠️ {2}0 updated, 0 kept unchanged, 0 lost\n$/);
 	});
 
-	test("the footer counts dropped values in singular and plural", () => {
+	test("the footer counts the lost values", () => {
 		const dropped = (key: string) => ({
 			key,
 			bindingType: "zeebe:input",
 			value: "v",
 		});
-		const one = renderReportText(
-			report({ dropped: [dropped("a")], lossless: false }),
-			options,
-		);
-		assert.match(one, /⚠️ {2}1 value dropped, review above/);
 		const two = renderReportText(
 			report({ dropped: [dropped("a"), dropped("b")], lossless: false }),
 			options,
 		);
-		assert.match(two, /⚠️ {2}2 values dropped, review above/);
+		assert.match(two, /⚠️ {2}0 updated, 0 kept unchanged, 2 lost\n$/);
 	});
 
-	test("a --map move carries its source tag, and a renamed key is hinted inside one group", () => {
+	test("a --map move that changes the value carries its source", () => {
 		const text = renderReportText(
 			report({
 				moved: [
 					{
-						from: {
-							key: "maxTokens",
-							bindingType: null,
-							groupLabel: "g",
-							label: "Limit",
-						},
-						to: {
-							key: "limit",
-							bindingType: null,
-							groupLabel: "g",
-							label: "Limit",
-						},
+						from: { key: "maxTokens", bindingType: null, label: "Limit" },
+						to: { key: "limit", bindingType: null, label: "Limit" },
+						valueChange: { from: "1", to: "2" },
 						source: "map",
 					},
 				],
 			}),
 			options,
 		);
-		assert.match(text, /g › Limit \(maxTokens → limit\) \[--map\]/);
+		assert.match(text, /~ Limit +1 → 2 +--map/);
 	});
 
 	test("every needs-attention kind is listed with its own wording", () => {
@@ -791,7 +1048,7 @@ describe("output boundary cases", () => {
 			}),
 			options,
 		);
-		assert.match(text, /⏭️ {2}Needs attention \(4\)/);
+		assert.match(text, /\n {2}Needs attention\n/);
 		assert.match(text, /Condition not met, not moved: a → b/);
 		assert.match(text, /Not composed, missing x, y: c/);
 		assert.match(text, /No value rule matched, target default kept: d → e/);
@@ -819,8 +1076,8 @@ describe("output boundary cases", () => {
 			}),
 			options,
 		);
-		assert.match(text, /mode {2}slow → fast/);
-		assert.match(text, /apiKey {2}\[REDACTED\] → \[REDACTED\]/);
+		assert.match(text, /~ mode {4}slow → fast/);
+		assert.match(text, /~ apiKey {2}\[REDACTED\] → \[REDACTED\]/);
 		assert.doesNotMatch(text, /OLD-SECRET|NEW-SECRET/);
 	});
 
@@ -846,8 +1103,8 @@ describe("output boundary cases", () => {
 				},
 			},
 		);
-		assert.match(text, /🔄 Task_\[REDACTED\] {2}Old v1 → /);
-		assert.match(text, /password {2}\[REDACTED\]/);
+		assert.match(text, /^Task_\[REDACTED\]\n {2}Old v1 {2}→ /);
+		assert.match(text, /- password {2}\[REDACTED\]/);
 	});
 
 	test("JSON output carries the same content as the text, not only its keys", () => {

@@ -49,6 +49,7 @@ import {
 	type MigrationRedactionContext,
 	type RecipeOrigin,
 	redactMigrationDiagnostic,
+	renderLegend,
 	renderReportText,
 	reportToJson,
 	shouldUseColor,
@@ -688,9 +689,81 @@ async function runMigrateInternal(
 	} else {
 		const stream = writesXmlToStdout ? process.stderr : process.stdout;
 		const color = shouldUseColor(stream);
+		const s = {
+			red: (text: string) => (color ? `\u001b[31m${text}\u001b[39m` : text),
+		};
 		const lines: string[] = [];
 		const errorLines: string[] = [];
-		if (deprecation) {
+		const columns = stream.isTTY ? stream.columns : undefined;
+		for (const o of outcomes) {
+			if (o.status === "updated") {
+				lines.push(
+					renderReportText(o.report, {
+						elementId: o.id,
+						elementName: o.name,
+						color,
+						recipe: recipeSource,
+						recipePath: parsed.recipePath,
+						targetTemplate: target,
+						authorization: o.requiresAuthorization
+							? parsed.allowLossy
+								? "authorized"
+								: "required"
+							: undefined,
+						columns,
+						redaction,
+					}),
+				);
+			} else if (o.status === "unchanged") {
+				lines.push(
+					`${o.id} is already on ${target.name ?? target.id} v${o.version}; nothing to do.\n`,
+				);
+			} else if (o.status === "skipped") {
+				lines.push(`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`);
+			} else {
+				const reason = o.error.replace(`Cannot migrate ${o.id}: `, "");
+				errorLines.push(
+					`${s.red(`✗ Cannot migrate ${o.name ? `${o.name} (${o.id})` : o.id}: ${reason}`)}\n`,
+				);
+				if (o.hint) errorLines.push(`${o.hint}\n`);
+			}
+		}
+		const counts = (
+			[
+				[summary.updated, "updated"],
+				[summary.skipped, "skipped"],
+				[summary.unchanged, "unchanged"],
+				[summary.failed, "failed"],
+			] as const
+		)
+			.filter(([n]) => n > 0)
+			.map(([n, label], i) =>
+				i === 0
+					? `${n} element${n === 1 ? "" : "s"} ${label}`
+					: `${n} ${label}`,
+			);
+		const destination = dryRun
+			? "Dry run: nothing was written."
+			: failed.length > 0
+				? ""
+				: saved && parsed.inPlace && bpmnFilePath
+					? `Updated ${bpmnFilePath}.`
+					: writesXmlToStdout
+						? "BPMN written to stdout."
+						: "";
+		lines.push(
+			`${[counts.join(", ") && `${counts.join(", ")}.`, destination]
+				.filter(Boolean)
+				.join(" ")}\n`,
+		);
+		if (failed.length > 0) {
+			errorLines.push("Nothing was written because an element failed.\n");
+		} else if (wouldBlock && dryRun) {
+			lines.push(
+				"A write would be blocked: pass --allow-lossy to authorize it.\n",
+			);
+		}
+		if (deprecation && (!parsed.to || parsed.to === templateId)) {
 			const { successors } = deprecation;
 			lines.push(
 				`Template '${templateId}' is deprecated.${
@@ -700,43 +773,7 @@ async function runMigrateInternal(
 				}\n`,
 			);
 		}
-		for (const o of outcomes) {
-			if (o.status === "updated") {
-				lines.push(
-					renderReportText(o.report, {
-						elementId: o.id,
-						color,
-						dryRun,
-						redaction,
-					}),
-				);
-				if (o.requiresAuthorization)
-					lines.push(
-						parsed.allowLossy
-							? "Lossy migration authorized with --allow-lossy.\n"
-							: "Requires --allow-lossy authorization before writing.\n",
-					);
-			} else if (o.status === "unchanged") {
-				lines.push(
-					`${o.id} is already on ${target.name ?? target.id} v${o.version}; nothing to do.\n`,
-				);
-			} else if (o.status === "skipped") {
-				lines.push(`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`);
-			} else {
-				errorLines.push(`${o.error}\n`);
-				if (o.hint) errorLines.push(`${o.hint}\n`);
-			}
-		}
-		lines.push(
-			`Summary: ${summary.updated} updated, ${summary.skipped} skipped, ${summary.unchanged} unchanged, ${summary.failed} failed, ${summary.dropped} values dropped.\n`,
-		);
-		if (failed.length > 0) {
-			errorLines.push("Nothing was written because an element failed.\n");
-		} else if (wouldBlock && dryRun) {
-			lines.push(
-				"A write would be blocked: pass --allow-lossy to authorize it.\n",
-			);
-		}
+		lines.push(`${renderLegend(color)}\n`);
 		stream.write(redactMigrationDiagnostic(lines.join("\n"), redaction));
 		if (errorLines.length > 0) {
 			process.stderr.write(
@@ -749,11 +786,6 @@ async function runMigrateInternal(
 		process.exitCode = 1;
 	}
 	if (saved && parsed.inPlace && bpmnFilePath) {
-		if (!json) {
-			logger.info(
-				redactMigrationDiagnostic(`Updated ${bpmnFilePath}`, redaction),
-			);
-		}
 		return;
 	}
 	if (writesXmlToStdout && failed.length === 0) {

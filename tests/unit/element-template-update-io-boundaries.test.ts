@@ -81,7 +81,7 @@ describe("update reads BPMN from stdin", () => {
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /modelerTemplateVersion="2"/);
 		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
-		assert.match(result.stderr, /Summary: 1 updated/);
+		assert.match(result.stderr, /1 element updated/);
 	});
 
 	test("an element id alone selects the element when the BPMN is on stdin", async () => {
@@ -236,7 +236,7 @@ describe("update arguments", () => {
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /is on v2, newer than v1; skipped/);
-		assert.match(result.stdout, /Summary: 0 updated, 1 skipped/);
+		assert.match(result.stdout, /1 element skipped/);
 		assert.strictEqual(readFileSync(copy, "utf-8"), before);
 	});
 
@@ -276,7 +276,7 @@ describe("update on elements at different versions", () => {
 			"--allow-lossy",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
-		assert.match(result.stdout, /Summary: 2 updated, 0 skipped/);
+		assert.match(result.stdout, /2 elements updated/);
 		const xml = readFileSync(copy, "utf-8");
 		for (const [id, value] of [
 			[TASK, "https://a"],
