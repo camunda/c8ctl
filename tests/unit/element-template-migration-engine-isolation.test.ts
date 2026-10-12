@@ -1,7 +1,7 @@
 /**
  * The migration engine (default-plugins/element-template/migration/) must stay
- * liftable into a library: it may import only its own files and must not use
- * the c8ctl runtime.
+ * liftable into a library: it may import only its own files and pure Node
+ * built-ins from ALLOWED_BUILTINS, and must not use the c8ctl runtime.
  */
 
 import assert from "node:assert/strict";
@@ -22,6 +22,9 @@ const ENGINE_ROOT = resolve(
 	import.meta.dirname,
 	"../../default-plugins/element-template/migration",
 );
+
+/** Built-ins without I/O; `node:fs` and the like stay forbidden. */
+const ALLOWED_BUILTINS = new Set(["node:util"]);
 
 function sourceFilesOf(dir: string): string[] {
 	return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -72,6 +75,7 @@ function isolationViolations(root: string): string[] {
 				violations.push(`${name}: imports must be statically inspectable`);
 				continue;
 			}
+			if (ALLOWED_BUILTINS.has(specifier.text)) continue;
 			const target = resolve(dirname(file), specifier.text);
 			if (
 				!specifier.text.startsWith(".") ||
@@ -106,6 +110,7 @@ describe("migration engine isolation", () => {
 			[
 				'import { a } from "../../helpers.ts";',
 				'import { b } from "node:fs";',
+				'import { isDeepStrictEqual } from "node:util";',
 				'const c = await import("../../../outside.ts");',
 				"const d = globalThis.c8ctl;",
 				"",

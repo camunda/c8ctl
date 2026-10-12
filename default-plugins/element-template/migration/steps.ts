@@ -8,6 +8,7 @@
  * the hop from the target.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { findPropertiesByTarget, splitBindingPrefix } from "./binding.ts";
 import { TEMPLATE_REF } from "./plan.ts";
 import {
@@ -41,36 +42,6 @@ function versionOf(template: MigrationTemplate): number | undefined {
 	return typeof template.version === "number" ? template.version : undefined;
 }
 
-function sameContent(left: unknown, right: unknown): boolean {
-	if (Object.is(left, right)) return true;
-	if (Array.isArray(left) || Array.isArray(right)) {
-		return (
-			Array.isArray(left) &&
-			Array.isArray(right) &&
-			left.length === right.length &&
-			left.every((value, index) => sameContent(value, right[index]))
-		);
-	}
-	if (
-		typeof left !== "object" ||
-		left === null ||
-		typeof right !== "object" ||
-		right === null
-	)
-		return false;
-	const leftEntries = Object.entries(left);
-	const rightEntries = Object.entries(right);
-	return (
-		leftEntries.length === rightEntries.length &&
-		leftEntries.every(([key, value]) =>
-			rightEntries.some(
-				([otherKey, otherValue]) =>
-					key === otherKey && sameContent(value, otherValue),
-			),
-		)
-	);
-}
-
 /** Explicit definitions replace catalog shadows; all other identities must agree. */
 export function resolveCatalog(
 	templates: MigrationTemplate[],
@@ -85,7 +56,7 @@ export function resolveCatalog(
 		const key = identity(candidate);
 		const template = overrides.get(key) ?? candidate;
 		const existing = catalog.get(key);
-		if (existing && !sameContent(existing, template)) conflicts.add(key);
+		if (existing && !isDeepStrictEqual(existing, template)) conflicts.add(key);
 		else if (!existing) catalog.set(key, template);
 	}
 	const conflict = [...conflicts].sort()[0];

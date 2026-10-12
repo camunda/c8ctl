@@ -409,6 +409,24 @@ describe("catalog identity conflicts", () => {
 		assert.deepStrictEqual(templates, before);
 	});
 
+	for (const [name, left, right, equal] of [
+		["undefined vs missing key", { a: undefined }, {}, false],
+		["array vs object", [1], { 0: 1 }, false],
+		["nested arrays", [[1, [2]]], [[1, [2]]], true],
+		["nested array order", [[1, 2]], [[2, 1]], false],
+		["null vs object", null, {}, false],
+		["null vs null", null, null, true],
+	] as const) {
+		test(`compares content for ${name}`, () => {
+			const templates = [
+				{ ...template("old", 2, []), extra: left },
+				{ ...template("old", 2, []), extra: right },
+			];
+			if (equal) assert.equal(resolveCatalog(templates).length, 1);
+			else assert.throws(() => resolveCatalog(templates), /Conflicting/);
+		});
+	}
+
 	for (const reverse of [false, true]) {
 		for (const difference of [
 			"bindings",
