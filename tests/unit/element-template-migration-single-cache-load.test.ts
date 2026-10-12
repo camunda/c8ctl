@@ -9,11 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
@@ -55,20 +55,10 @@ let readLog: string;
 
 async function run(...args: string[]) {
 	rmSync(readLog, { force: true });
-	const result = await asyncSpawn(
-		"node",
-		[
-			"--experimental-strip-types",
-			"--import",
-			PRELOAD,
-			"src/index.ts",
-			"element-template",
-			...args,
-		],
+	const result = await c8WithOptions(
 		{
+			nodeArgs: ["--import", PRELOAD],
 			env: {
-				...process.env,
-				CAMUNDA_BASE_URL: "http://test-cluster/v2",
 				C8CTL_DATA_DIR: dataDir,
 				C8CTL_OUTPUT_MODE: "text",
 				CACHE_READ_LOG: readLog,
@@ -76,6 +66,8 @@ async function run(...args: string[]) {
 			},
 			timeout: 30_000,
 		},
+		"element-template",
+		...args,
 	);
 	const reads = existsSync(readLog) ? readFileSync(readLog).length : 0;
 	return { ...result, reads };

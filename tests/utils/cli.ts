@@ -7,10 +7,10 @@
 
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { asyncSpawn, type SpawnResult } from "./spawn.ts";
+import { join, resolve } from "node:path";
+import { asyncSpawn, asyncSpawnWithStdin, type SpawnResult } from "./spawn.ts";
 
-const CLI = "src/index.ts";
+const CLI = resolve(import.meta.dirname, "../../src/index.ts");
 
 /**
  * A shared temp data dir with outputMode set to "json" so that tests
@@ -23,16 +23,25 @@ writeFileSync(
 );
 
 /**
- * Options recognised by the test `c8()` / `c8WithOptions()` helpers.
+ * Options recognised by the test `c8WithOptions()` helper.
  *
  * `timeout` is forwarded to `asyncSpawn` and ultimately to Node's `execFile`,
- * which SIGTERMs the child after the deadline. Use it for invocations that
- * could legitimately hang (e.g. long-running verbs on a regression of the
- * --help gate) so the test fails fast instead of stalling the suite.
+ * which SIGTERMs the child after the deadline. It defaults to
+ * {@link DEFAULT_CLI_TIMEOUT} so a regression cannot stall the suite.
+ * `stdin` is written to the child and then closed. `nodeArgs` go to `node`
+ * before the CLI path (e.g. `--import <preload>`), which avoids quoting paths
+ * into `NODE_OPTIONS`. `env` is merged over the deterministic test env; an
+ * `undefined` value removes the variable. `cwd` sets the working directory.
  */
 export interface C8Options {
 	timeout?: number;
+	stdin?: string;
+	nodeArgs?: string[];
+	env?: Record<string, string | undefined>;
+	cwd?: string;
 }
+
+export const DEFAULT_CLI_TIMEOUT = 60_000;
 
 /**
  * Build the env passed to every spawned CLI process.
@@ -63,10 +72,8 @@ function buildChildEnv(): NodeJS.ProcessEnv {
  * needing a real profile or running cluster.
  * Forces JSON output mode via C8CTL_DATA_DIR so tests are deterministic.
  */
-export async function c8(...args: string[]): Promise<SpawnResult> {
-	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
-		env: buildChildEnv(),
-	});
+export function c8(...args: string[]): Promise<SpawnResult> {
+	return c8WithOptions({}, ...args);
 }
 
 /**
@@ -76,29 +83,47 @@ export async function c8(...args: string[]): Promise<SpawnResult> {
  * e.g. an HTTP 413 from the cluster ingress — can be exercised without a
  * live cluster.
  */
-export async function c8WithEnv(
+export function c8WithEnv(
 	extraEnv: Record<string, string>,
 	...args: string[]
 ): Promise<SpawnResult> {
-	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
-		env: { ...buildChildEnv(), ...extraEnv },
-	});
+	return c8WithOptions({ env: extraEnv }, ...args);
 }
 
 /**
- * Like `c8()`, but accepts a `timeout` (and any future options). Use this
- * for invocations that could hang under regression so the test fails fast
- * instead of stalling the suite (e.g. long-running verbs against the --help
- * gate).
+ * Like `c8()`, but accepts {@link C8Options}: a timeout (default
+ * {@link DEFAULT_CLI_TIMEOUT}), stdin, extra node args, extra env and a cwd.
  */
 export async function c8WithOptions(
 	opts: C8Options,
 	...args: string[]
 ): Promise<SpawnResult> {
-	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
-		env: buildChildEnv(),
-		...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
-	});
+	const env: NodeJS.ProcessEnv = { ...buildChildEnv(), ...opts.env };
+	for (const [key, value] of Object.entries(opts.env ?? {})) {
+		if (value === undefined) delete env[key];
+	}
+	const argv = [
+		"--experimental-strip-types",
+		...(opts.nodeArgs ?? []),
+		CLI,
+		...args,
+	];
+	const options = {
+		env,
+		timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
+		...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+	};
+	const { stdin } = opts;
+	return stdin === undefined
+		? asyncSpawn("node", argv, options)
+		: asyncSpawnWithStdin(
+				"node",
+				argv,
+				(stream) => {
+					stream.write(stdin);
+				},
+				options,
+			);
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
@@ -20,7 +21,6 @@ import {
 } from "../utils/element-template.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const CLI = join(ROOT, "src/index.ts");
@@ -258,11 +258,11 @@ for (const scenario of [
 		const dir = mkdtempSync(join(tmpdir(), "c8-migration-filesystem-"));
 		const env = cliEnv(dir);
 		const run = (...args: string[]) =>
-			asyncSpawn("node", [CLI, "element-template", ...args], {
-				cwd: ROOT,
-				env,
-				timeout: CLI_TIMEOUT,
-			});
+			c8WithOptions(
+				{ env: { C8CTL_DATA_DIR: dir }, timeout: CLI_TIMEOUT },
+				"element-template",
+				...args,
+			);
 		let paused: Awaited<ReturnType<typeof pauseMigration>> | undefined;
 		try {
 			const source = template("filesystem-old", 1, [input("a", "preserve")]);
@@ -300,10 +300,11 @@ for (const scenario of [
 					'<custom:payload flag="keep"><custom:value>inside migration</custom:value></custom:payload><zeebe:taskDefinition',
 				);
 			writeFileSync(bpmn, decorated);
-			const canonical = await asyncSpawn(
-				"node",
-				[CLI, "bpmn", "format", bpmn],
-				{ cwd: ROOT, env, timeout: CLI_TIMEOUT },
+			const canonical = await c8WithOptions(
+				{ env: { C8CTL_DATA_DIR: dir }, timeout: CLI_TIMEOUT },
+				"bpmn",
+				"format",
+				bpmn,
 			);
 			assert.equal(canonical.status, 0, canonical.stderr);
 			assert.match(canonical.stdout, /outside migration/);
@@ -397,10 +398,11 @@ for (const scenario of [
 				);
 				assert.equal(existsSync(lock), false);
 				assert.deepEqual(temps(), []);
-				const formatted = await asyncSpawn(
-					"node",
-					[CLI, "bpmn", "format", bpmn],
-					{ cwd: ROOT, env, timeout: CLI_TIMEOUT },
+				const formatted = await c8WithOptions(
+					{ env: { C8CTL_DATA_DIR: dir }, timeout: CLI_TIMEOUT },
+					"bpmn",
+					"format",
+					bpmn,
 				);
 				assert.equal(formatted.status, 0, formatted.stderr);
 				assert.equal(formatted.stdout, readFileSync(bpmn, "utf-8"));

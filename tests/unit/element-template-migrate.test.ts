@@ -15,10 +15,9 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
 import { input, seedTemplateCache } from "../utils/element-template.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
-const CLI = "src/index.ts";
 const FIXTURE_BPMN = join(
 	resolve(import.meta.dirname, "..", "fixtures"),
 	"simple.bpmn",
@@ -145,29 +144,20 @@ function dataDirWithCache(templates: object[]): string {
 	return dataDir;
 }
 
-async function runWithEnv(
-	dataDir: string,
-	extraEnv: Record<string, string>,
-	args: string[],
-) {
-	return asyncSpawn(
-		"node",
-		["--experimental-strip-types", CLI, "element-template", ...args],
-		{
-			env: {
-				...process.env,
-				CAMUNDA_BASE_URL: "http://test-cluster/v2",
-				HOME: "/tmp/c8ctl-test-nonexistent-home",
-				C8CTL_DATA_DIR: dataDir,
-				NO_COLOR: "1",
-				...extraEnv,
-			},
-		},
+function run(dataDir: string, ...args: string[]) {
+	return c8WithOptions(
+		{ env: { C8CTL_DATA_DIR: dataDir } },
+		"element-template",
+		...args,
 	);
 }
 
-function run(dataDir: string, ...args: string[]) {
-	return runWithEnv(dataDir, {}, args);
+function runWithPreload(dataDir: string, preload: string, args: string[]) {
+	return c8WithOptions(
+		{ env: { C8CTL_DATA_DIR: dataDir }, nodeArgs: ["--require", preload] },
+		"element-template",
+		...args,
+	);
 }
 
 function failingSaveXmlPreload(): string {
@@ -186,7 +176,7 @@ function failingSaveXmlPreload(): string {
 v.Modeler.prototype.saveXML = () => Promise.reject(new Error("saveXML must not run"));
 `,
 	);
-	return `--require "${preload}"`;
+	return preload;
 }
 
 async function seedBpmn(
@@ -882,9 +872,9 @@ describe("element-template update to another template", () => {
 	test("--dry-run does not serialize the diagram", async () => {
 		const templatePath = join(workDir, "new.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
-		const result = await runWithEnv(
+		const result = await runWithPreload(
 			dataDirWithCache([OLD]),
-			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			failingSaveXmlPreload(),
 			[
 				"update",
 				OLD.id,
@@ -903,9 +893,9 @@ describe("element-template update to another template", () => {
 	test("serialization failure surfaces without --dry-run", async () => {
 		const templatePath = join(workDir, "new.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
-		const result = await runWithEnv(
+		const result = await runWithPreload(
 			dataDirWithCache([OLD]),
-			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			failingSaveXmlPreload(),
 			["update", OLD.id, TASK, oldBpmn, "--to", templatePath],
 		);
 		assert.strictEqual(result.status, 1);
@@ -1622,9 +1612,9 @@ describe("element-template update selection and write-once", () => {
 		]);
 		const before = readFileSync(file, "utf-8");
 		const mtime = statSync(file).mtimeMs;
-		const result = await runWithEnv(
+		const result = await runWithPreload(
 			dataDirWithCache([V1, V2]),
-			{ NODE_OPTIONS: failingSaveXmlPreload() },
+			failingSaveXmlPreload(),
 			["update", V1.id, file, "--in-place"],
 		);
 		assert.strictEqual(result.status, 0, result.stderr);

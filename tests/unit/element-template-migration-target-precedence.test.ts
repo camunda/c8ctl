@@ -16,11 +16,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
@@ -84,20 +84,19 @@ const documents = new Map<string, object>();
 const requests = new Map<string, number>();
 const servers: ReturnType<typeof createHttpServer>[] = [];
 
-async function run(dataDir: string, ...args: string[]) {
-	const env: NodeJS.ProcessEnv = {
-		...process.env,
-		CAMUNDA_BASE_URL: "http://test-cluster/v2",
-		C8CTL_DATA_DIR: dataDir,
-		C8CTL_OUTPUT_MODE: "text",
-		HOME: dir,
-		NODE_EXTRA_CA_CERTS: certificate,
-	};
-	delete env.NODE_TLS_REJECT_UNAUTHORIZED;
-	return asyncSpawn(
-		"node",
-		["--experimental-strip-types", "src/index.ts", ...args],
-		{ env, timeout: 30_000 },
+function run(dataDir: string, ...args: string[]) {
+	return c8WithOptions(
+		{
+			env: {
+				C8CTL_DATA_DIR: dataDir,
+				C8CTL_OUTPUT_MODE: "text",
+				HOME: dir,
+				NODE_EXTRA_CA_CERTS: certificate,
+				NODE_TLS_REJECT_UNAUTHORIZED: undefined,
+			},
+			timeout: 30_000,
+		},
+		...args,
 	);
 }
 

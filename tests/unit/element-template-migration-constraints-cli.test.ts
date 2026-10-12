@@ -9,11 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
@@ -130,23 +130,16 @@ describe("migration destination constraints through CLI", () => {
 				writeFileSync(oldPath, JSON.stringify(old));
 				writeFileSync(targetPath, JSON.stringify(target));
 				const run = (...args: string[]) =>
-					asyncSpawn(
-						"node",
-						[
-							"--experimental-strip-types",
-							"src/index.ts",
-							"element-template",
-							...args,
-						],
+					c8WithOptions(
 						{
 							env: {
-								...process.env,
-								CAMUNDA_BASE_URL: "http://test-cluster/v2",
 								C8CTL_DATA_DIR: dataDir,
 								HOME: dir,
 								C8CTL_OUTPUT_MODE: "text",
 							},
 						},
+						"element-template",
+						...args,
 					);
 				const seeded = await run("apply", oldPath, TASK, FIXTURE);
 				assert.equal(seeded.status, 0, seeded.stderr);

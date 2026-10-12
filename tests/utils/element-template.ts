@@ -13,8 +13,14 @@ import {
 	getModdleList,
 } from "../../default-plugins/element-template/migration/moddle.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
+import type {
+	ElementTemplatesService,
+	VendorBundle,
+} from "../../default-plugins/element-template/vendor.ts";
 import { resolveVendorBundle } from "../../default-plugins/element-template/vendor.ts";
+
+/** Vendor types, re-exported so engine tests need not import the plugin. */
+export type { ElementTemplatesService, VendorBundle };
 
 const require = createRequire(import.meta.url);
 

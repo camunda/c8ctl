@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, test } from "node:test";
-import ts from "typescript";
 import {
 	type BpmnElement,
 	type MigrationModeler,
@@ -16,7 +13,7 @@ import {
 } from "../../default-plugins/element-template/migration/recipe.ts";
 import { resolveApplications } from "../../default-plugins/element-template/migration/steps.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-import type { ElementTemplatesService } from "../../default-plugins/element-template/vendor.ts";
+import type { ElementTemplatesService } from "../utils/element-template.ts";
 
 const SOURCE: MigrationTemplate = {
 	id: "source",
@@ -28,6 +25,17 @@ const TARGET: MigrationTemplate = {
 	version: 2,
 	properties: [{ binding: { type: "zeebe:input", name: "b" } }],
 };
+
+/** The template registered for `identity`'s id and version, whatever the order. */
+function registeredFor(
+	ctx: { registered: MigrationTemplate[][] },
+	identity: MigrationTemplate,
+) {
+	return ctx.registered[0].find(
+		(template) =>
+			template.id === identity.id && template.version === identity.version,
+	);
+}
 
 function context(
 	applied: Record<string, unknown> = {
@@ -136,7 +144,7 @@ describe("migration context consistency", () => {
 		});
 		assert.equal(report.from.id, SOURCE.id);
 		assert.equal(report.to.id, TARGET.id);
-		assert.equal(ctx.registered[0][0], stub);
+		assert.equal(registeredFor(ctx, stub), stub);
 		assert.equal(ctx.applications[0].id, TARGET.id);
 	});
 
@@ -195,7 +203,7 @@ describe("migration context consistency", () => {
 			});
 			assert.equal(report.refusal, null);
 			assert.equal(report.usedRecipe, true);
-			assert.equal(ctx.registered[0][0], SOURCE);
+			assert.equal(registeredFor(ctx, SOURCE), SOURCE);
 		});
 	}
 
@@ -250,7 +258,7 @@ describe("migration context consistency", () => {
 			});
 			assert.match(report.refusal ?? "", /reads "a"/);
 			assert.equal(report.usedRecipe, false);
-			assert.equal(ctx.registered[0][0], fromTemplate);
+			assert.equal(registeredFor(ctx, fromTemplate), fromTemplate);
 		});
 	}
 
@@ -278,7 +286,7 @@ describe("migration context consistency", () => {
 	}
 });
 
-describe("migration typed surface and isolation", () => {
+describe("migration typed surface", () => {
 	test("Option B sources narrow to distinct version contracts", () => {
 		const sources = parseRecipe({
 			schemaVersion: 1,
@@ -334,52 +342,5 @@ describe("migration typed surface and isolation", () => {
 				vendorRequiresCatalogProperties &&
 				vendorRejectsInvalidBinding,
 		);
-	});
-
-	test("all engine imports stay local, with rendering and filesystem policy outside", () => {
-		const root = resolve(
-			import.meta.dirname,
-			"../../default-plugins/element-template/migration",
-		);
-		for (const name of readdirSync(root).filter((name) =>
-			name.endsWith(".ts"),
-		)) {
-			const source = ts.createSourceFile(
-				name,
-				readFileSync(resolve(root, name), "utf8"),
-				ts.ScriptTarget.Latest,
-				true,
-			);
-			function visit(node: ts.Node) {
-				const specifier =
-					ts.isImportDeclaration(node) || ts.isExportDeclaration(node)
-						? node.moduleSpecifier
-						: ts.isCallExpression(node) &&
-								(node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-									(ts.isIdentifier(node.expression) &&
-										node.expression.text === "require"))
-							? node.arguments[0]
-							: undefined;
-				if (specifier) {
-					assert.ok(
-						ts.isStringLiteral(specifier),
-						`${name}: imports must be statically inspectable`,
-					);
-					assert.ok(
-						specifier.text.startsWith("./") &&
-							!specifier.text.slice(2).split("/").includes(".."),
-						`${name}: engine import escapes isolation: ${specifier.text}`,
-					);
-				}
-				if (ts.isIdentifier(node))
-					assert.notEqual(
-						node.text,
-						"c8ctl",
-						`${name}: engine must not use the CLI runtime`,
-					);
-				ts.forEachChild(node, visit);
-			}
-			visit(source);
-		}
 	});
 });

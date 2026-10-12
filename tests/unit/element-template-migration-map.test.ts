@@ -13,11 +13,11 @@ import {
 } from "../../default-plugins/element-template/migration/element-values.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
 import {
 	input,
 	loadVendorBundle,
 	setupAppliedModeler,
+	type VendorBundle,
 } from "../utils/element-template.ts";
 
 let vendor: VendorBundle;

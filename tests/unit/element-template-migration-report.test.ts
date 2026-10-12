@@ -152,12 +152,12 @@ describe("buildReport", () => {
 			facts: facts({
 				moved: [
 					{
-						from: { key: "maxTokens", bindingType: null },
-						to: { key: "intermediate", bindingType: null },
+						from: { key: "maxTokens", bindingType: "zeebe:input" },
+						to: { key: "intermediate", bindingType: "zeebe:input" },
 						transformed: false,
 					},
 				],
-				set: [{ key: "temporary", bindingType: null, value: "gone" }],
+				set: [{ key: "temporary", bindingType: "zeebe:input", value: "gone" }],
 			}),
 			usedRecipe: true,
 			refusal: null,
@@ -166,6 +166,28 @@ describe("buildReport", () => {
 		assert.deepStrictEqual(report.added, []);
 		assert.strictEqual(report.dropped.length, 1);
 		assert.strictEqual(report.lossless, false);
+	});
+	test("a fact without a binding type matches the element value under any binding type", () => {
+		// `sameTarget` (binding.ts) treats a null binding type as a wildcard.
+		const report = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("maxTokens", "2000")],
+			after: [value("effort", "2000")],
+			facts: facts({
+				moved: [
+					{
+						from: { key: "maxTokens", bindingType: null },
+						to: { key: "effort", bindingType: null },
+						transformed: false,
+					},
+				],
+			}),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.strictEqual(report.moved.length, 1);
+		assert.deepStrictEqual(report.dropped, []);
 	});
 	test("lists values the new template does not bind as dropped, with labels", () => {
 		const report = buildReport({
@@ -227,8 +249,8 @@ describe("buildReport", () => {
 			facts: facts({
 				moved: [
 					{
-						from: { key: "maxTokens", bindingType: null },
-						to: { key: "effort", bindingType: null },
+						from: { key: "maxTokens", bindingType: "zeebe:input" },
+						to: { key: "effort", bindingType: "zeebe:input" },
 						transformed: false,
 					},
 				],
@@ -253,8 +275,8 @@ describe("buildReport", () => {
 			facts: facts({
 				moved: [
 					{
-						from: { key: "provider", bindingType: null },
-						to: { key: "provider", bindingType: null },
+						from: { key: "provider", bindingType: "zeebe:input" },
+						to: { key: "provider", bindingType: "zeebe:input" },
 						transformed: true,
 					},
 				],
@@ -274,7 +296,7 @@ describe("buildReport", () => {
 			before: [],
 			after: [value("effort", "high")],
 			facts: facts({
-				set: [{ key: "effort", bindingType: null, value: "high" }],
+				set: [{ key: "effort", bindingType: "zeebe:input", value: "high" }],
 				notes: [{ level: "warning", message: "careful" }],
 			}),
 			usedRecipe: true,
@@ -530,8 +552,8 @@ describe("mergeFacts", () => {
 			facts({
 				moved: [
 					{
-						from: { key: "a", bindingType: null },
-						to: { key: "b", bindingType: null },
+						from: { key: "a", bindingType: "zeebe:input" },
+						to: { key: "b", bindingType: "zeebe:input" },
 						transformed: false,
 					},
 				],
@@ -539,8 +561,8 @@ describe("mergeFacts", () => {
 			facts({
 				moved: [
 					{
-						from: { key: "b", bindingType: null },
-						to: { key: "c", bindingType: null },
+						from: { key: "b", bindingType: "zeebe:input" },
+						to: { key: "c", bindingType: "zeebe:input" },
 						transformed: true,
 					},
 				],

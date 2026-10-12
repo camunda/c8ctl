@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { isRecord } from "../../src/core/index.ts";
+import { c8WithOptions } from "../utils/cli.ts";
 import { seedTemplateCache } from "../utils/element-template.ts";
-import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const ID = "io.example.noop-contract";
@@ -44,7 +44,7 @@ type Mode = (typeof modes)[number];
 let root: string;
 let original: string;
 
-async function run({
+function run({
 	dir,
 	args,
 	stdin,
@@ -54,35 +54,22 @@ async function run({
 	dir: string;
 	args: string[];
 	stdin?: string;
-	env?: NodeJS.ProcessEnv;
+	env?: Record<string, string | undefined>;
 	globals?: string[];
 }) {
-	const argv = [
-		"--experimental-strip-types",
-		"src/index.ts",
+	return c8WithOptions(
+		{
+			stdin,
+			env: {
+				C8CTL_DATA_DIR: join(dir, "data"),
+				C8CTL_OUTPUT_MODE: "text",
+				...env,
+			},
+		},
 		...globals,
 		"element-template",
 		...args,
-	];
-	const options = {
-		env: {
-			...process.env,
-			C8CTL_DATA_DIR: join(dir, "data"),
-			C8CTL_OUTPUT_MODE: "text",
-			CAMUNDA_BASE_URL: "http://test-cluster/v2",
-			...env,
-		},
-	};
-	return stdin === undefined
-		? asyncSpawn("node", argv, options)
-		: asyncSpawnWithStdin(
-				"node",
-				argv,
-				(stream) => {
-					stream.write(stdin);
-				},
-				options,
-			);
+	);
 }
 
 before(async () => {
@@ -322,16 +309,15 @@ describe("no-op global output settings and error channels", () => {
 			test(`${mode}: ${setting} output settings preserve the no-op contract and filesystem`, async () => {
 				const { dir, path, file } = await initializedFixture();
 				if (setting === "session" || setting === "text-override") {
-					const configured = await asyncSpawn(
-						"node",
-						["--experimental-strip-types", "src/index.ts", "output", "json"],
+					const configured = await c8WithOptions(
 						{
 							env: {
-								...process.env,
 								C8CTL_DATA_DIR: join(dir, "data"),
 								C8CTL_OUTPUT_MODE: "text",
 							},
 						},
+						"output",
+						"json",
 					);
 					assert.equal(configured.status, 0, configured.stderr);
 				}

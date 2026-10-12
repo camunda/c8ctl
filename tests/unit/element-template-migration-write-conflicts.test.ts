@@ -16,13 +16,13 @@ import {
 import { buildStepPlan } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	createTestModeler,
 	elementValue,
 	loadVendorBundle,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
 
 const bindings = [
 	{ prefix: "input", binding: { type: "zeebe:input", name: "b" } },
@@ -508,21 +508,10 @@ for (const reversed of [false, true]) {
 		writeFileSync(oldPath, JSON.stringify(old));
 		writeFileSync(targetPath, JSON.stringify(target));
 		const run = (...args: string[]) =>
-			asyncSpawn(
-				"node",
-				[
-					"--experimental-strip-types",
-					"src/index.ts",
-					"element-template",
-					...args,
-				],
-				{
-					env: {
-						...process.env,
-						C8CTL_DATA_DIR: dir,
-						CAMUNDA_BASE_URL: "http://test-cluster/v2",
-					},
-				},
+			c8WithOptions(
+				{ env: { C8CTL_DATA_DIR: dir } },
+				"element-template",
+				...args,
 			);
 		const seeded = await run(
 			"apply",
@@ -586,21 +575,10 @@ test("CLI persists independent qualified input/header writes with the same key",
 	const bpmn = join(dir, "process.bpmn");
 	writeFileSync(oldPath, JSON.stringify(old));
 	const run = (...args: string[]) =>
-		asyncSpawn(
-			"node",
-			[
-				"--experimental-strip-types",
-				"src/index.ts",
-				"element-template",
-				...args,
-			],
-			{
-				env: {
-					...process.env,
-					C8CTL_DATA_DIR: dir,
-					CAMUNDA_BASE_URL: "http://test-cluster/v2",
-				},
-			},
+		c8WithOptions(
+			{ env: { C8CTL_DATA_DIR: dir } },
+			"element-template",
+			...args,
 		);
 	const seeded = await run(
 		"apply",

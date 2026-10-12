@@ -9,12 +9,12 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
 	template,
 } from "../utils/element-template.ts";
-import { makeTestEnv } from "../utils/mocks.ts";
 import {
 	AGENT_V1,
 	AGENT_V2,
@@ -23,25 +23,17 @@ import {
 	writeTemplateCache,
 	writeTemplatedDiagram,
 } from "../utils/realistic-diagram.ts";
-import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const ROOT = resolve(import.meta.dirname, "../..");
-const CLI = join(ROOT, "src/index.ts");
 const FIXTURES = join(ROOT, "tests/fixtures");
 const CLI_TIMEOUT = 30_000;
 const TASK = "Activity_17s7axj";
 const FIXTURE = join(FIXTURES, "simple.bpmn");
-const cliEnv = (dir: string) =>
-	makeTestEnv({
-		C8CTL_DATA_DIR: dir,
-		CAMUNDA_BASE_URL: "http://test-cluster/v2",
-	});
 const spawnCli = (dir: string, args: string[]) =>
-	asyncSpawn("node", [CLI, ...args], {
-		cwd: ROOT,
-		env: cliEnv(dir),
-		timeout: CLI_TIMEOUT,
-	});
+	c8WithOptions(
+		{ env: { C8CTL_DATA_DIR: dir }, timeout: CLI_TIMEOUT },
+		...args,
+	);
 test("simple recipe CLI integration: serialization, reports, authorization and repeated no-op", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8-migration-simple-"));
 	const run = (...args: string[]) =>
@@ -121,13 +113,18 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 		assert.match(migrated, /source="carried" target="keep"/);
 		assert.match(migrated, /source="" target="empty"/);
 		assert.doesNotMatch(migrated, /target="drop"/);
-		const piped = await asyncSpawnWithStdin(
-			"node",
-			[CLI, "element-template", "update", old.id, TASK, "--to", targetPath],
-			(stdin) => {
-				stdin.write(seeded.stdout);
+		const piped = await c8WithOptions(
+			{
+				stdin: seeded.stdout,
+				env: { C8CTL_DATA_DIR: dir },
+				timeout: CLI_TIMEOUT,
 			},
-			{ cwd: ROOT, env: cliEnv(dir), timeout: CLI_TIMEOUT },
+			"element-template",
+			"update",
+			old.id,
+			TASK,
+			"--to",
+			targetPath,
 		);
 		assert.equal(piped.status, 0, piped.stderr);
 		assert.equal(piped.stdout, migrated);

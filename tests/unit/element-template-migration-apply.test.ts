@@ -15,11 +15,11 @@ import { getModdleList } from "../../default-plugins/element-template/migration/
 import { normalizeDestinationValue } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
 import {
 	input,
 	loadVendorBundle,
 	setupAppliedModeler,
+	type VendorBundle,
 } from "../utils/element-template.ts";
 
 const OLD: MigrationTemplate = {
