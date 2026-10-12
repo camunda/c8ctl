@@ -380,6 +380,46 @@ describe("redaction", () => {
 		assert.strictEqual(json.report.dropped[0].value, "[REDACTED]");
 	});
 
+	test("redacts a field the template marks secret, whatever its name", () => {
+		const redaction = {
+			templates: [
+				{
+					id: "new",
+					properties: [
+						{
+							id: "accountValue",
+							secret: true,
+							binding: { type: "zeebe:input", name: "accountValue" },
+						},
+					],
+				},
+			],
+		};
+		const raw = report({
+			added: [
+				{
+					key: "accountValue",
+					bindingType: "zeebe:input",
+					value: "PRIVATE-MARKED",
+				},
+			],
+		});
+		const options = {
+			elementId: "Task",
+			recipe: "none",
+			dryRun: true,
+			redaction,
+		} as const;
+		assert.doesNotMatch(
+			JSON.stringify(reportToJson(raw, options)),
+			/PRIVATE-MARKED/,
+		);
+		assert.doesNotMatch(
+			renderReportText(raw, { ...options, color: false }),
+			/PRIVATE-MARKED/,
+		);
+	});
+
 	test("checks every duplicate metadata property and conservatively handles unknown binding types", () => {
 		const redaction = {
 			templates: [

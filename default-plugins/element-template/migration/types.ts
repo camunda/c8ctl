@@ -19,6 +19,7 @@ export interface TemplateProperty {
 	value?: unknown;
 	feel?: string;
 	optional?: boolean;
+	secret?: boolean;
 	constraints?: {
 		notEmpty?: boolean;
 		pattern?: { value: string; message?: string };

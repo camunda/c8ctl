@@ -66,7 +66,7 @@ function migrationRedactor(context: MigrationRedactionContext) {
 						},
 						field,
 					) &&
-					(("secret" in property && property.secret === true) ||
+					(property.secret === true ||
 						sensitiveName(
 							`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
 						)),
