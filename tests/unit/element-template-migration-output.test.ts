@@ -5,7 +5,11 @@
 
 import assert from "node:assert";
 import { afterEach, describe, test } from "node:test";
-import type { MigrationReport } from "../../default-plugins/element-template/migration/report.ts";
+import type {
+	MigrationReport,
+	MovedItem,
+	ValueSource,
+} from "../../default-plugins/element-template/migration/report.ts";
 import {
 	redactMigrationDiagnostic,
 	renderReportText,
@@ -13,7 +17,25 @@ import {
 	shouldUseColor,
 } from "../../default-plugins/element-template/migration-output.ts";
 
-function report(partial: Partial<MigrationReport> = {}): MigrationReport {
+type WithSource<T> = Omit<T, "source"> & { source?: ValueSource };
+
+/** Report fixtures; `source` and the moved `value` default when left out. */
+type ReportFixture = Omit<
+	Partial<MigrationReport>,
+	"added" | "changed" | "moved"
+> & {
+	added?: WithSource<MigrationReport["added"][number]>[];
+	changed?: WithSource<MigrationReport["changed"][number]>[];
+	moved?: (Omit<MovedItem, "source" | "value"> &
+		Partial<Pick<MovedItem, "source" | "value">>)[];
+};
+
+function report({
+	added = [],
+	changed = [],
+	moved = [],
+	...partial
+}: ReportFixture = {}): MigrationReport {
 	return {
 		from: {
 			id: "old",
@@ -30,13 +52,14 @@ function report(partial: Partial<MigrationReport> = {}): MigrationReport {
 		usedRecipe: true,
 		refusal: null,
 		dropped: [],
-		added: [],
-		changed: [],
-		moved: [],
+		kept: [],
 		notes: [],
 		skipped: { guard: [], template: [], noMatch: [], feel: [] },
 		lossless: true,
 		...partial,
+		added: added.map((item) => ({ source: "default", ...item })),
+		changed: changed.map((item) => ({ source: "default", ...item })),
+		moved: moved.map((item) => ({ value: "", source: "recipe", ...item })),
 	};
 }
 
@@ -255,6 +278,45 @@ describe("redaction", () => {
 		);
 	});
 
+	test("keeps token limits visible and redacts token credentials", () => {
+		const limits = [
+			[
+				"provider.openai.api.completions.maxCompletionTokens",
+				"Max completion tokens",
+			],
+			[
+				"provider.bedrock.model.parameters.maxOutputTokens",
+				"Max output tokens",
+			],
+			["provider.anthropic.thinking.budgetTokens", "Budget tokens"],
+		];
+		const credentials = ["token", "accessToken", "apiToken", "refreshToken"];
+		const raw = report({
+			added: [
+				...limits.map(([key, label], index) => ({
+					key,
+					label,
+					bindingType: "zeebe:input",
+					value: `=${1000 + index}`,
+				})),
+				...credentials.map((key) => ({
+					key,
+					bindingType: "zeebe:input",
+					value: `secret-${key}`,
+				})),
+			],
+		});
+		const json = reportToJson(raw, {
+			elementId: "Task",
+			recipe: "none",
+			dryRun: true,
+		});
+		assert.deepStrictEqual(
+			json.report.added.map((item) => item.value),
+			["=1000", "=1001", "=1002", ...credentials.map(() => "[REDACTED]")],
+		);
+	});
+
 	test("redacts sensitive values in every report collection without changing the source", () => {
 		const field = { key: "authentication.token", bindingType: "zeebe:input" };
 		const raw = report({
@@ -354,7 +416,7 @@ describe("renderReportText", () => {
 					{
 						key: "backend",
 						bindingType: "zeebe:input",
-						group: "Model provider",
+						groupLabel: "Model provider",
 						label: "Backend",
 						value: "foundry",
 						valueName: "Microsoft Foundry (Azure)",
@@ -366,13 +428,13 @@ describe("renderReportText", () => {
 							key: "provider",
 							bindingType: null,
 							label: "Provider",
-							group: "Model provider",
+							groupLabel: "Model provider",
 						},
 						to: {
 							key: "provider",
 							bindingType: null,
 							label: "Provider",
-							group: "Model provider",
+							groupLabel: "Model provider",
 						},
 						valueChange: {
 							from: "azure",
@@ -434,9 +496,14 @@ describe("renderReportText", () => {
 							key: "a",
 							bindingType: null,
 							label: "Endpoint",
-							group: "Model",
+							groupLabel: "Model",
 						},
-						to: { key: "b", bindingType: null, label: "URL", group: "Model" },
+						to: {
+							key: "b",
+							bindingType: null,
+							label: "URL",
+							groupLabel: "Model",
+						},
 					},
 				],
 			}),
@@ -453,7 +520,7 @@ describe("renderReportText", () => {
 					{
 						key: "maxTokens",
 						bindingType: "zeebe:input",
-						group: "Model",
+						groupLabel: "Model",
 						label: "Maximum tokens",
 						value: "2000",
 					},
@@ -574,13 +641,65 @@ describe("reportToJson", () => {
 		});
 		assert.strictEqual(json.lossless, true);
 		assert.deepStrictEqual(Object.keys(json.report), [
-			"dropped",
+			"moved",
 			"added",
 			"changed",
-			"moved",
+			"dropped",
+			"kept",
 			"notes",
 			"skipped",
 		]);
+		assert.strictEqual("elementName" in json, false);
+	});
+
+	test("carries the element name, the recipe path and counts that match the arrays", () => {
+		const field = { key: "k", bindingType: "zeebe:input" };
+		const json = reportToJson(
+			report({
+				moved: [{ from: field, to: field, value: "v" }],
+				added: [{ ...field, value: "a" }],
+				kept: [field, field],
+			}),
+			{
+				elementId: "A",
+				elementName: "Recipe assistant",
+				recipe: "file",
+				recipePath: "recipes/x.recipe.json",
+				dryRun: true,
+			},
+		);
+		assert.strictEqual(json.elementName, "Recipe assistant");
+		assert.deepStrictEqual(json.recipe, {
+			source: "file",
+			path: "recipes/x.recipe.json",
+			used: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(json.counts, {
+			moved: 1,
+			added: 1,
+			changed: 0,
+			dropped: 0,
+			kept: 2,
+		});
+	});
+
+	test("redacts the value of a moved credential that kept its value", () => {
+		const secret = { key: "auth.clientSecret", bindingType: "zeebe:input" };
+		const json = reportToJson(
+			report({
+				moved: [
+					{
+						from: secret,
+						to: { ...secret, key: "x.clientSecret" },
+						value: "S3CRET",
+					},
+				],
+			}),
+			{ elementId: "A", recipe: "none", dryRun: true },
+		);
+		assert.strictEqual(json.report.moved[0].value, "[REDACTED]");
+		assert.doesNotMatch(JSON.stringify(json), /S3CRET/);
 	});
 });
 
@@ -633,7 +752,7 @@ describe("output boundary cases", () => {
 		assert.match(two, /⚠️ {2}2 values dropped, review above/);
 	});
 
-	test("a --map move carries its via tag, and a renamed key is hinted inside one group", () => {
+	test("a --map move carries its source tag, and a renamed key is hinted inside one group", () => {
 		const text = renderReportText(
 			report({
 				moved: [
@@ -641,11 +760,16 @@ describe("output boundary cases", () => {
 						from: {
 							key: "maxTokens",
 							bindingType: null,
-							group: "g",
+							groupLabel: "g",
 							label: "Limit",
 						},
-						to: { key: "limit", bindingType: null, group: "g", label: "Limit" },
-						via: "--map",
+						to: {
+							key: "limit",
+							bindingType: null,
+							groupLabel: "g",
+							label: "Limit",
+						},
+						source: "map",
 					},
 				],
 			}),

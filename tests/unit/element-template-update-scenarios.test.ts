@@ -494,7 +494,9 @@ describe("element-template update on real templates and a realistic diagram", ()
 				key: "storeResponse",
 				bindingType: "zeebe:input",
 				label: "Store response",
-				group: "HTTP endpoint",
+				group: "endpoint",
+				groupLabel: "HTTP endpoint",
+				propertyId: "storeResponse",
 				value: "=true",
 			},
 		]);
@@ -653,10 +655,10 @@ describe("element-template update on real templates and a realistic diagram", ()
 					(move: {
 						from: { key: string };
 						to: { key: string };
-						via?: string;
-					}) => [move.from.key, move.to.key, move.via],
+						source: string;
+					}) => [move.from.key, move.to.key, move.source],
 				),
-				[["storeResponse", "followRedirects", "--map"]],
+				[["storeResponse", "followRedirects", "map"]],
 			);
 		}
 		const xml = readFileSync(bpmn, "utf-8");
@@ -738,6 +740,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 			{
 				status: "skipped",
 				elementId: "Task_Http17",
+				elementName: "Notify partner",
 				from: { id: HTTP, version: 17 },
 				to: { id: HTTP, version: 12 },
 			},

@@ -29,8 +29,17 @@ export interface Field {
 	key: string;
 	bindingType: string | null;
 	label?: string;
+	/** Group ID of the template property. */
 	group?: string;
+	groupLabel?: string;
+	propertyId?: string;
 }
+
+/**
+ * Where a value on the target came from. `fixed` (a Hidden property) is not
+ * reported yet, because Hidden values are left out of the report.
+ */
+export type ValueSource = "recipe" | "map" | "default" | "fixed";
 
 export interface TemplateRef {
 	id: string;
@@ -49,10 +58,12 @@ export interface ValueChange {
 export interface MovedItem {
 	from: Field;
 	to: Field;
+	/** The stored value on the target. */
+	value: string;
+	valueName?: string;
 	/** Set when the value was rewritten on the way, or differs after the move. */
 	valueChange?: ValueChange;
-	/** Set when the move did not come from a recipe entry, such as `--map`. */
-	via?: string;
+	source: "recipe" | "map";
 }
 
 export interface MigrationReport {
@@ -63,9 +74,15 @@ export interface MigrationReport {
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
 	dropped: (Field & { value: string; valueName?: string })[];
-	added: (Field & { value: string; valueName?: string })[];
-	changed: (Field & { valueChange: ValueChange })[];
+	added: (Field & {
+		value: string;
+		valueName?: string;
+		source: ValueSource;
+	})[];
+	changed: (Field & { valueChange: ValueChange; source: ValueSource })[];
 	moved: MovedItem[];
+	/** Values whose key and value did not change. */
+	kept: Field[];
 	notes: Note[];
 	skipped: {
 		guard: PlanFacts["guardSkipped"];
@@ -181,13 +198,47 @@ function fieldOf(
 	if (property?.label) {
 		field.label = property.label;
 	}
-	const groupLabel = template?.groups?.find(
-		(g) => g.id === property?.group,
-	)?.label;
-	if (groupLabel && groupLabel !== property?.label) {
-		field.group = groupLabel;
+	if (property?.group) {
+		field.group = property.group;
+		const groupLabel = template?.groups?.find(
+			(g) => g.id === property.group,
+		)?.label;
+		if (groupLabel) {
+			field.groupLabel = groupLabel;
+		}
+	}
+	if (property?.id) {
+		field.propertyId = property.id;
 	}
 	return field;
+}
+
+/**
+ * Sort `items` like the Modeler properties panel: by group order, then by
+ * property order of `template`. Ungrouped and unknown fields go last.
+ */
+function inTemplateOrder<T>(
+	template: MigrationTemplate | undefined,
+	items: T[],
+	fieldKey: (item: T) => FieldKey,
+): T[] {
+	const groups = template?.groups ?? [];
+	const properties = template?.properties ?? [];
+	const position = (item: T) => {
+		const { key, bindingType } = fieldKey(item);
+		const property = propertyFor(template, key, bindingType);
+		const group = groups.findIndex((g) => g.id === property?.group);
+		return [
+			group === -1 ? groups.length : group,
+			property ? properties.indexOf(property) : properties.length,
+		];
+	};
+	return items
+		.map((item) => ({ item, position: position(item) }))
+		.sort(
+			(a, b) => a.position[0] - b.position[0] || a.position[1] - b.position[1],
+		)
+		.map(({ item }) => item);
 }
 
 function choiceName(
@@ -264,16 +315,16 @@ export function buildReport({
 		const from = fieldOf(fromTemplate, m.from.key, m.from.bindingType);
 		const to = fieldOf(toTemplate, m.to.key, m.to.bindingType);
 		const fromValue = find(before, m.from.key, m.from.bindingType)?.value;
-		const toValue = find(after, m.to.key, m.to.bindingType)?.value;
-		const item: MovedItem = { from, to };
-		if (m.via) {
-			item.via = m.via;
-		}
-		if (
-			(m.transformed || fromValue !== toValue) &&
-			fromValue !== undefined &&
-			toValue !== undefined
-		) {
+		// Surviving moves always have a target value.
+		const toValue = find(after, m.to.key, m.to.bindingType)?.value ?? "";
+		const item: MovedItem = {
+			from,
+			to,
+			value: toValue,
+			...withNames(toTemplate, to, toValue),
+			source: m.map ? "map" : "recipe",
+		};
+		if ((m.transformed || fromValue !== toValue) && fromValue !== undefined) {
 			item.valueChange = {
 				from: fromValue,
 				to: toValue,
@@ -309,7 +360,7 @@ export function buildReport({
 			};
 		});
 
-	const added = after
+	const added: MigrationReport["added"] = after
 		.filter(
 			(v) =>
 				v.value !== "" &&
@@ -323,6 +374,7 @@ export function buildReport({
 				...field,
 				value: v.value,
 				...withNames(toTemplate, field, v.value),
+				source: "default",
 			};
 		});
 
@@ -333,10 +385,11 @@ export function buildReport({
 			...field,
 			value: actual,
 			...withNames(toTemplate, field, actual),
+			source: "recipe",
 		});
 	}
 
-	const changed = after
+	const changed: MigrationReport["changed"] = after
 		.filter((v) => {
 			const prior = find(before, v.key, v.bindingType);
 			return (
@@ -358,8 +411,19 @@ export function buildReport({
 					...nameOf("fromName", choiceName(fromTemplate, field, fromValue)),
 					...nameOf("toName", choiceName(toTemplate, field, v.value)),
 				},
+				source: "default",
 			};
 		});
+
+	const kept = after
+		.filter(
+			(v) =>
+				v.value !== "" &&
+				find(before, v.key, v.bindingType)?.value === v.value &&
+				!claimedTo(v) &&
+				!isHidden(toTemplate, v.key, v.bindingType),
+		)
+		.map((v) => fieldOf(toTemplate, v.key, v.bindingType));
 
 	const skipped = {
 		guard: facts.guardSkipped,
@@ -373,10 +437,11 @@ export function buildReport({
 		to: templateRef(toTemplate),
 		usedRecipe,
 		refusal,
-		dropped,
-		added,
-		changed,
-		moved,
+		dropped: inTemplateOrder(fromTemplate, dropped, (item) => item),
+		added: inTemplateOrder(toTemplate, added, (item) => item),
+		changed: inTemplateOrder(toTemplate, changed, (item) => item),
+		moved: inTemplateOrder(toTemplate, moved, (item) => item.to),
+		kept: inTemplateOrder(toTemplate, kept, (item) => item),
 		notes: facts.notes,
 		skipped,
 		lossless:

@@ -209,6 +209,7 @@ function assertNoopJson({
 		added: [],
 		changed: [],
 		moved: [],
+		kept: [],
 		notes: [],
 		skipped: { guard: [], template: [], noMatch: [], feel: [] },
 	});

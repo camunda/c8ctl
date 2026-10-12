@@ -33,7 +33,8 @@ import {
 	enumerateElementValues,
 	getExtensionElements,
 } from "../migration/element-values.ts";
-import { emptyFacts } from "../migration/plan.ts";
+import { getModdleString } from "../migration/moddle.ts";
+import { DestinationError, emptyFacts } from "../migration/plan.ts";
 import {
 	parseRecipe,
 	type Recipe,
@@ -296,12 +297,24 @@ async function resolveTarget({
 	return target;
 }
 
+interface SelectedElement {
+	element: BpmnElement;
+	id: string;
+	name: string | undefined;
+}
+
+const selected = (element: BpmnElement, id: string): SelectedElement => ({
+	element,
+	id,
+	name: getModdleString(element.businessObject, "name") || undefined,
+});
+
 /** Elements of the diagram that use `templateId`, once each, in diagram order. */
 function selectElements(
 	modeler: ModelerInstance,
 	templateId: string,
 	elementId: string | undefined,
-): { element: BpmnElement; id: string }[] {
+): SelectedElement[] {
 	const registry = modeler.get("elementRegistry");
 	if (elementId !== undefined) {
 		const element = registry.get(elementId);
@@ -319,10 +332,10 @@ function selectElements(
 				`Element "${elementId}" uses template '${applied.id}', not '${templateId}'.`,
 			);
 		}
-		return [{ element, id: elementId }];
+		return [selected(element, elementId)];
 	}
 	const seen = new Set<string>();
-	const selected: { element: BpmnElement; id: string }[] = [];
+	const result: SelectedElement[] = [];
 	for (const candidate of registry.getAll()) {
 		const id = candidate.businessObject.id;
 		if (typeof id !== "string" || seen.has(id)) continue;
@@ -332,32 +345,63 @@ function selectElements(
 			readAppliedTemplate(element.businessObject)?.id === templateId
 		) {
 			seen.add(id);
-			selected.push({ element, id });
+			result.push(selected(element, id));
 		}
 	}
-	if (selected.length === 0) {
+	if (result.length === 0) {
 		throw new Error(
 			`No element in the BPMN diagram uses template '${templateId}'.`,
 		);
 	}
-	return selected;
+	return result;
 }
 
-type Outcome =
+type Outcome = { id: string; name: string | undefined } & (
 	| {
 			status: "updated";
-			id: string;
 			report: MigrationReport;
 			requiresAuthorization: boolean;
 	  }
-	| { status: "unchanged"; id: string; version: number }
+	| { status: "unchanged"; version: number }
 	| {
 			status: "skipped";
-			id: string;
 			from: number;
 			to: number;
 	  }
-	| { status: "failed"; id: string; error: string };
+	| { status: "failed"; error: string; hint?: string }
+);
+
+const CARRY_OVER_HINT =
+	"Pass --recipe <file> to migrate with a recipe, or --map <from>=<to> to move the value to another binding.";
+
+interface Deprecation {
+	templateId: string;
+	successors: string[];
+}
+
+/** The deprecation of `templateId` and the templates that declare a migration from it. */
+function deprecationOf(
+	templateId: string,
+	templates: MigrationTemplate[],
+	cache: MigrationTemplate[],
+): Deprecation | null {
+	const latest = templates
+		.filter((t) => t.id === templateId)
+		.sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
+	if (!latest?.deprecated) return null;
+	let successors: MigrationTemplate[] = [];
+	try {
+		successors = findSuccessors(
+			cache,
+			templateId,
+			latest.version ?? 0,
+			templates,
+		);
+	} catch {
+		// The hint is informational; a catalog conflict must not fail the run.
+	}
+	return { templateId, successors: successors.map((t) => t.id) };
+}
 
 function describeDropped(report: MigrationReport): string {
 	const names = report.dropped.map((d) => d.key);
@@ -457,7 +501,7 @@ async function runMigrateInternal(
 	};
 
 	const outcomes: Outcome[] = [];
-	for (const { element, id } of selected) {
+	for (const { element, id, name } of selected) {
 		const applied = readAppliedTemplate(element.businessObject);
 		if (!applied) continue;
 		if (target.id === applied.id && target.version === applied.version) {
@@ -466,13 +510,19 @@ async function runMigrateInternal(
 					`Warning: ${id} is already on the target template, so --map was not applied.\n`,
 				);
 			}
-			outcomes.push({ status: "unchanged", id, version: applied.version });
+			outcomes.push({
+				status: "unchanged",
+				id,
+				name,
+				version: applied.version,
+			});
 			continue;
 		}
 		if (target.id === applied.id && (target.version ?? 0) < applied.version) {
 			outcomes.push({
 				status: "skipped",
 				id,
+				name,
 				from: applied.version,
 				to: target.version ?? 0,
 			});
@@ -504,6 +554,7 @@ async function runMigrateInternal(
 			outcomes.push({
 				status: "updated",
 				id,
+				name,
 				report,
 				requiresAuthorization:
 					((parsed.inPlace || dryRun) && !report.lossless) ||
@@ -511,10 +562,14 @@ async function runMigrateInternal(
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			const carryOver =
+				error instanceof DestinationError && error.carryOver && !targetRecipe;
 			outcomes.push({
 				status: "failed",
 				id,
+				name,
 				error: `Cannot migrate ${id}: ${message}`,
+				...(carryOver ? { hint: CARRY_OVER_HINT } : {}),
 			});
 		}
 	}
@@ -558,8 +613,14 @@ async function runMigrateInternal(
 		blocked: blocked.length,
 	};
 
+	const deprecation = deprecationOf(templateId, templates, cache);
+
 	if (json) {
 		const file = parsed.inPlace ? bpmnFilePath : undefined;
+		const elementName = (o: Outcome) =>
+			o.name
+				? { elementName: redactMigrationDiagnostic(o.name, redaction) }
+				: {};
 		const emptyReport = (version: number) =>
 			buildReport({
 				fromTemplate: { ...target, version },
@@ -580,7 +641,9 @@ async function runMigrateInternal(
 							status: o.status,
 							...reportToJson(o.report, {
 								elementId: o.id,
+								elementName: o.name,
 								recipe: recipeSource,
+								recipePath: parsed.recipePath,
 								dryRun,
 								file,
 								redaction,
@@ -593,6 +656,7 @@ async function runMigrateInternal(
 							status: o.status,
 							...reportToJson(emptyReport(o.version), {
 								elementId: o.id,
+								elementName: o.name,
 								recipe: "none",
 								dryRun,
 								file,
@@ -604,6 +668,7 @@ async function runMigrateInternal(
 						return {
 							status: o.status,
 							elementId: redactMigrationDiagnostic(o.id, redaction),
+							...elementName(o),
 							from: { id: templateId, version: o.from },
 							to: { id: target.id, version: o.to },
 						};
@@ -611,36 +676,26 @@ async function runMigrateInternal(
 						return {
 							status: o.status,
 							elementId: redactMigrationDiagnostic(o.id, redaction),
+							...elementName(o),
 							error: redactMigrationDiagnostic(o.error, redaction),
+							...(o.hint ? { hint: o.hint } : {}),
 						};
 				}
 			}),
 			summary,
+			deprecation,
 		});
 	} else {
 		const stream = writesXmlToStdout ? process.stderr : process.stdout;
 		const color = shouldUseColor(stream);
 		const lines: string[] = [];
 		const errorLines: string[] = [];
-		const latest = templates
-			.filter((t) => t.id === templateId)
-			.sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
-		if (latest?.deprecated) {
-			let successors: MigrationTemplate[] = [];
-			try {
-				successors = findSuccessors(
-					cache,
-					templateId,
-					latest.version ?? 0,
-					templates,
-				);
-			} catch {
-				// The hint is informational; a catalog conflict must not fail the run.
-			}
+		if (deprecation) {
+			const { successors } = deprecation;
 			lines.push(
 				`Template '${templateId}' is deprecated.${
 					successors.length > 0
-						? ` Templates that declare a migration from it: ${successors.map((t) => t.id).join(", ")}. Use --to <template>.`
+						? ` Templates that declare a migration from it: ${successors.join(", ")}. Use --to <template>.`
 						: ""
 				}\n`,
 			);
@@ -669,6 +724,7 @@ async function runMigrateInternal(
 				lines.push(`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`);
 			} else {
 				errorLines.push(`${o.error}\n`);
+				if (o.hint) errorLines.push(`${o.hint}\n`);
 			}
 		}
 		lines.push(

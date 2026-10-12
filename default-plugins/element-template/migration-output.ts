@@ -30,13 +30,19 @@ type MigrationRedactor = ReturnType<typeof migrationRedactor>;
 
 function migrationRedactor(context: MigrationRedactionContext) {
 	const sensitiveName = (identity: string) => {
-		const name = identity.replace(/max(?:imum)?[ ._-]?tokens/gi, "");
+		// Token limits such as maxCompletionTokens or budgetTokens are no credentials.
+		const name = identity.replace(
+			/(?:max(?:imum)?|budget)[ ._-]?(?:[a-z]+[ ._-]?)?tokens/gi,
+			"",
+		);
 		return /password|passwd|secret|token|credential|api[._ -]?key|private[._ -]?key|authorization/i.test(
 			name,
 		);
 	};
 	const sensitive = (field: Field) =>
-		sensitiveName(`${field.key} ${field.label ?? ""} ${field.group ?? ""}`) ||
+		sensitiveName(
+			`${field.key} ${field.label ?? ""} ${field.group ?? ""} ${field.groupLabel ?? ""}`,
+		) ||
 		(context.templates ?? []).some((template) =>
 			template.properties.some(
 				(property) =>
@@ -89,12 +95,14 @@ function migrationRedactor(context: MigrationRedactionContext) {
 				);
 		}
 		for (const item of context.report.moved) {
-			if (item.valueChange && (sensitive(item.from) || sensitive(item.to)))
+			if (sensitive(item.from) || sensitive(item.to))
 				remember(
-					item.valueChange.from,
-					item.valueChange.to,
-					item.valueChange.fromName,
-					item.valueChange.toName,
+					item.value,
+					item.valueName,
+					item.valueChange?.from,
+					item.valueChange?.to,
+					item.valueChange?.fromName,
+					item.valueChange?.toName,
 				);
 		}
 	}
@@ -153,9 +161,13 @@ function redactReport(
 				: item,
 		),
 		moved: redacted.moved.map((item, index) =>
-			item.valueChange &&
-			(sensitive(report.moved[index].from) || sensitive(report.moved[index].to))
-				? { ...item, valueChange: change }
+			sensitive(report.moved[index].from) || sensitive(report.moved[index].to)
+				? {
+						...item,
+						value: "[REDACTED]",
+						valueName: undefined,
+						...(item.valueChange ? { valueChange: change } : {}),
+					}
 				: item,
 		),
 	};
@@ -184,9 +196,15 @@ function templateName(ref: MigrationReport["from"]): string {
 	return `${name} v${ref.version}${tag}`;
 }
 
+/** The group label, unless it repeats the field label. */
+function shownGroup(field: Field): string | undefined {
+	return field.groupLabel !== field.label ? field.groupLabel : undefined;
+}
+
 function fieldName(field: Field): string {
 	const label = field.label ?? field.key;
-	return field.group ? `${field.group} › ${label}` : label;
+	const group = shownGroup(field);
+	return group ? `${group} › ${label}` : label;
 }
 
 function valueText(value: string, name: string | undefined): string {
@@ -257,7 +275,8 @@ export function renderReportText(
 			const from = fieldName(m.from);
 			const fullTo = fieldName(m.to);
 			const sameGroup =
-				m.from.group !== undefined && m.from.group === m.to.group;
+				shownGroup(m.from) !== undefined &&
+				shownGroup(m.from) === shownGroup(m.to);
 			const to =
 				sameGroup && from !== fullTo ? (m.to.label ?? m.to.key) : fullTo;
 			const change = m.valueChange;
@@ -265,7 +284,7 @@ export function renderReportText(
 				from === to && m.from.key !== m.to.key
 					? s.dim(` (${m.from.key} → ${m.to.key})`)
 					: "";
-			const via = m.via ? s.dim(` [${m.via}]`) : "";
+			const via = m.source === "map" ? s.dim(" [--map]") : "";
 			if (change) {
 				const values = `${valueText(change.from, change.fromName)} → ${s.bold(valueText(change.to, change.toName))}`;
 				item(
@@ -346,13 +365,18 @@ export function reportToJson(
 	report: MigrationReport,
 	{
 		elementId,
+		elementName,
 		recipe,
+		recipePath,
 		dryRun,
 		file,
 		redaction,
 	}: {
 		elementId: string;
+		elementName?: string;
 		recipe: RecipeOrigin;
+		/** The `--recipe` argument, as given; reported when `recipe` is `file`. */
+		recipePath?: string;
 		dryRun: boolean;
 		file?: string;
 		redaction?: MigrationRedactionContext;
@@ -363,21 +387,31 @@ export function reportToJson(
 	report = redactReport(report, redactor);
 	return {
 		elementId: text(elementId),
+		...(elementName ? { elementName: text(elementName) } : {}),
 		dryRun,
 		...(file ? { file: text(file) } : {}),
 		from: report.from,
 		to: report.to,
 		recipe: {
 			source: recipe,
+			...(recipe === "file" && recipePath ? { path: text(recipePath) } : {}),
 			used: report.usedRecipe,
 			refusal: report.refusal,
 		},
 		lossless: report.lossless,
+		counts: {
+			moved: report.moved.length,
+			added: report.added.length,
+			changed: report.changed.length,
+			dropped: report.dropped.length,
+			kept: report.kept.length,
+		},
 		report: {
-			dropped: report.dropped,
+			moved: report.moved,
 			added: report.added,
 			changed: report.changed,
-			moved: report.moved,
+			dropped: report.dropped,
+			kept: report.kept,
 			notes: report.notes,
 			skipped: report.skipped,
 		},

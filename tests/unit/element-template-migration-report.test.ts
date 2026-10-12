@@ -200,7 +200,7 @@ describe("buildReport", () => {
 			refusal: null,
 		});
 		assert.deepStrictEqual(
-			report.dropped.map((d) => [d.label, d.group, d.value]),
+			report.dropped.map((d) => [d.label, d.groupLabel, d.value]),
 			[["Maximum tokens", "Model", "2000"]],
 		);
 		assert.strictEqual(report.lossless, false);
@@ -626,4 +626,205 @@ describe("buildReport lossless rules", () => {
 			assert.strictEqual(losslessWith(partial), lossless);
 		});
 	}
+});
+
+describe("buildReport item identity, values and sources", () => {
+	const source: MigrationTemplate = {
+		id: "source",
+		version: 1,
+		groups: [
+			{ id: "connection", label: "Connection" },
+			{ id: "model", label: "Model" },
+		],
+		properties: [
+			{
+				label: "Max",
+				group: "model",
+				binding: { type: "zeebe:input", name: "max" },
+			},
+			{
+				label: "Url",
+				group: "connection",
+				binding: { type: "zeebe:input", name: "url" },
+			},
+		],
+	};
+	const target: MigrationTemplate = {
+		id: "target",
+		version: 1,
+		groups: [
+			{ id: "model", label: "Model" },
+			{ id: "options", label: "Options" },
+		],
+		properties: [
+			{
+				type: "Hidden",
+				value: "t",
+				binding: { type: "zeebe:input", name: "hidden" },
+			},
+			{
+				id: "limit",
+				label: "Limit",
+				group: "options",
+				binding: { type: "zeebe:input", name: "limit" },
+			},
+			{ label: "Free", binding: { type: "zeebe:input", name: "free" } },
+			{
+				id: "effort",
+				label: "Effort",
+				group: "model",
+				choices: [{ name: "default", value: "modelDefault" }],
+				binding: { type: "zeebe:input", name: "effort" },
+			},
+			{
+				id: "model",
+				label: "Model",
+				group: "model",
+				binding: { type: "zeebe:input", name: "model" },
+			},
+			{
+				label: "Api",
+				group: "model",
+				choices: [{ name: "Chat Completions", value: "completions" }],
+				binding: { type: "zeebe:input", name: "api" },
+			},
+			{
+				label: "Prompt",
+				group: "options",
+				binding: { type: "zeebe:input", name: "prompt" },
+			},
+			{
+				label: "Mode",
+				group: "options",
+				binding: { type: "zeebe:input", name: "mode" },
+			},
+		],
+	};
+	const move = (from: string, to: string, extra = {}) => ({
+		from: { key: from, bindingType: "zeebe:input" },
+		to: { key: to, bindingType: "zeebe:input" },
+		transformed: false,
+		...extra,
+	});
+	const build = () =>
+		buildReport({
+			fromTemplate: source,
+			toTemplate: target,
+			before: [
+				value("url", "https://x"),
+				value("max", "=1024"),
+				value("free", "f"),
+				value("prompt", "hi"),
+				value("mode", "a"),
+				value("gone", "lost"),
+				value("legacy", "kept"),
+				value("hidden", "s"),
+				value("empty", ""),
+			],
+			after: [
+				value("hidden", "t"),
+				value("free", "f"),
+				value("legacy", "kept"),
+				value("empty", ""),
+				value("limit", "=1024"),
+				value("model", "https://x"),
+				value("prompt", "hi"),
+				value("mode", "b"),
+				value("api", "completions"),
+				value("effort", "modelDefault"),
+			],
+			facts: facts({
+				moved: [move("max", "limit"), move("url", "model", { map: true })],
+				set: [{ key: "api", bindingType: "zeebe:input", value: "completions" }],
+			}),
+			usedRecipe: true,
+			refusal: null,
+		});
+
+	test("reports group ID, group label and property ID, also when the label equals the group label", () => {
+		const { moved } = build();
+		assert.deepStrictEqual(
+			moved.map((m) => m.to),
+			[
+				{
+					key: "model",
+					bindingType: "zeebe:input",
+					label: "Model",
+					group: "model",
+					groupLabel: "Model",
+					propertyId: "model",
+				},
+				{
+					key: "limit",
+					bindingType: "zeebe:input",
+					label: "Limit",
+					group: "options",
+					groupLabel: "Options",
+					propertyId: "limit",
+				},
+			],
+		);
+		assert.deepStrictEqual(moved[1].from, {
+			key: "max",
+			bindingType: "zeebe:input",
+			label: "Max",
+			group: "model",
+			groupLabel: "Model",
+		});
+	});
+
+	test("carries the stored value and source on every moved item", () => {
+		assert.deepStrictEqual(
+			build().moved.map((m) => [m.to.key, m.value, m.source, m.valueChange]),
+			[
+				["model", "https://x", "map", undefined],
+				["limit", "=1024", "recipe", undefined],
+			],
+		);
+	});
+
+	test("tells recipe values from template defaults in added and changed", () => {
+		const report = build();
+		assert.deepStrictEqual(
+			report.added.map((a) => [a.key, a.value, a.valueName, a.source]),
+			[
+				["effort", "modelDefault", "default", "default"],
+				["api", "completions", "Chat Completions", "recipe"],
+			],
+		);
+		assert.deepStrictEqual(
+			report.changed.map((c) => [c.key, c.source]),
+			[["mode", "default"]],
+		);
+	});
+
+	test("lists unchanged, non-empty, non-hidden values as kept, without values", () => {
+		assert.deepStrictEqual(build().kept, [
+			{
+				key: "prompt",
+				bindingType: "zeebe:input",
+				label: "Prompt",
+				group: "options",
+				groupLabel: "Options",
+			},
+			{ key: "free", bindingType: "zeebe:input", label: "Free" },
+			{ key: "legacy", bindingType: "zeebe:input" },
+		]);
+	});
+
+	test("orders dropped values by the source template", () => {
+		const report = buildReport({
+			fromTemplate: source,
+			toTemplate: target,
+			before: [value("other", "o"), value("max", "1"), value("url", "u")],
+			after: [],
+			facts: facts(),
+			usedRecipe: false,
+			refusal: null,
+		});
+		assert.deepStrictEqual(
+			report.dropped.map((d) => d.key),
+			["url", "max", "other"],
+		);
+	});
 });

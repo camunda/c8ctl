@@ -380,14 +380,15 @@ describe("migrateElement", () => {
 					values.find((item) => item.key === (swap ? "a" : "c"))?.value,
 					"second",
 				);
+				// Target template order: the destination of the second path comes first.
 				assert.deepStrictEqual(
 					report.moved.map((move) => [move.from.key, move.to.key]),
 					[
-						["a", "b"],
 						["b", swap ? "a" : "c"],
+						["a", "b"],
 					],
 				);
-				assert.strictEqual(report.moved[0]?.to.bindingType, b.binding.type);
+				assert.strictEqual(report.moved[1]?.to.bindingType, b.binding.type);
 				assert.deepStrictEqual(report.dropped, []);
 				assert.strictEqual(report.lossless, true);
 				const { xml } = await modeler.saveXML({ format: true });
@@ -803,7 +804,8 @@ describe("migrateElement", () => {
 				key: "provider",
 				bindingType: "zeebe:input",
 				label: "Provider",
-				group: "Model",
+				group: "model",
+				groupLabel: "Model",
 				value: "secret",
 			},
 		]);

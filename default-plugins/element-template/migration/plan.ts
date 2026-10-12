@@ -32,8 +32,8 @@ export interface MovedFact {
 	from: FieldKey;
 	to: FieldKey;
 	transformed: boolean;
-	/** What produced the move when it is not a recipe entry, such as `--map`. */
-	via?: string;
+	/** Set when a `--map` entry produced the move instead of a recipe entry. */
+	map?: boolean;
 }
 
 export interface PlanFacts {
@@ -168,6 +168,16 @@ export function carryOverWrites(
 		);
 }
 
+/** A resolved write does not satisfy its destination property. */
+export class DestinationError extends Error {
+	/** The value was carried over by key, not written by a recipe or map entry. */
+	readonly carryOver: boolean;
+	constructor(message: string, carryOver: boolean) {
+		super(message);
+		this.carryOver = carryOver;
+	}
+}
+
 class ConditionError extends Error {
 	kind: "cyclic" | "unsupported";
 	constructor(kind: "cyclic" | "unsupported") {
@@ -270,6 +280,11 @@ export function validateDestinationValues(
 	for (const write of candidates) {
 		const path = bindingPath(write.bindingType, write.key);
 		const at = `${write.entry.label}: destination "${path}"`;
+		const fail = (problem: string) =>
+			new DestinationError(
+				`${at} ${problem}`,
+				write.entry.label === CARRY_OVER_LABEL,
+			);
 		for (const property of findPropertiesByTarget(
 			template.properties,
 			write.key,
@@ -282,14 +297,14 @@ export function validateDestinationValues(
 				active = isActive(property);
 			} catch (error) {
 				if (!(error instanceof ConditionError)) throw error;
-				throw new Error(`${at} has ${error.kind} condition`);
+				throw fail(`has ${error.kind} condition`);
 			}
 			if (!active) continue;
 			activeProperties.add(property);
 			const constraints = property.constraints;
 			for (const constraint of Object.keys(constraints ?? {})) {
 				if (constraint !== "notEmpty" && constraint !== "pattern")
-					throw new Error(`${at} has unsupported constraint ${constraint}`);
+					throw fail(`has unsupported constraint ${constraint}`);
 			}
 			// Validate what the Modeler stores, e.g. `=true` for the Boolean "yes".
 			const stored = maybePrependFeel(
@@ -313,22 +328,21 @@ export function validateDestinationValues(
 				constraints?.notEmpty &&
 				(isExpression ? stored.slice(1) : literal).trim() === ""
 			)
-				throw new Error(`${at} violates notEmpty constraint`);
+				throw fail("violates notEmpty constraint");
 			if (isExpression) continue;
 			if (
 				property.choices &&
 				!property.choices.some((choice) => choice.value === literal)
 			)
-				throw new Error(`${at} violates choice constraint`);
+				throw fail("violates choice constraint");
 			if (constraints?.pattern) {
 				let pattern: RegExp;
 				try {
 					pattern = new RegExp(constraints.pattern.value);
 				} catch {
-					throw new Error(`${at} has invalid pattern constraint`);
+					throw fail("has invalid pattern constraint");
 				}
-				if (!pattern.test(literal))
-					throw new Error(`${at} violates pattern constraint`);
+				if (!pattern.test(literal)) throw fail("violates pattern constraint");
 			}
 		}
 	}

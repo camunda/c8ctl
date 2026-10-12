@@ -195,7 +195,7 @@ function resolveMapWrites(
 			from: { key: source.key, bindingType: source.bindingType },
 			to: { key: map.to.key, bindingType },
 			transformed: false,
-			via: "--map",
+			map: true,
 		});
 	}
 	return result;

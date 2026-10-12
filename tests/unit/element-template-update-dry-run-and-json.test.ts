@@ -218,6 +218,7 @@ test("--json prints one document with dryRun, command, results and summary", asy
 	const json = JSON.parse(result.stdout);
 	assert.deepStrictEqual(Object.keys(json).sort(), [
 		"command",
+		"deprecation",
 		"dryRun",
 		"results",
 		"summary",
@@ -243,6 +244,126 @@ test("--json prints one document with dryRun, command, results and summary", asy
 		dropped: 0,
 		blocked: 0,
 	});
+});
+
+test("--json names the element, the recipe file as given and the deprecated selector", async () => {
+	const recipePath = join(ws.workDir, "old-to-new.recipe.json");
+	writeFileSync(recipePath, JSON.stringify(NEW.metadata.migratesFrom));
+	const result = await run(
+		dataDirWithCache([OLD, NEW]),
+		"update",
+		OLD.id,
+		TASK,
+		ws.oldBpmn,
+		"--to",
+		NEW.id,
+		"--recipe",
+		recipePath,
+		"--dry-run",
+		"--allow-lossy",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	const json = JSON.parse(result.stdout);
+	const [entry] = json.results;
+	assert.strictEqual(entry.elementName, "Do Something");
+	assert.deepStrictEqual(entry.recipe, {
+		source: "file",
+		path: recipePath,
+		used: true,
+		refusal: null,
+	});
+	assert.deepStrictEqual(json.deprecation, {
+		templateId: OLD.id,
+		successors: [NEW.id],
+	});
+	assert.deepStrictEqual(
+		entry.report.moved.map((m: { source: string; value: string }) => [
+			m.source,
+			m.value,
+		]),
+		[
+			["recipe", "azure"],
+			["recipe", "https://x"],
+		],
+	);
+	assert.strictEqual(entry.counts.moved, 2);
+});
+
+test("--json names the successors of a deprecated selector without --to", async () => {
+	const result = await run(
+		dataDirWithCache([OLD, NEW]),
+		"update",
+		OLD.id,
+		TASK,
+		ws.oldBpmn,
+		"--dry-run",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	const json = JSON.parse(result.stdout);
+	assert.strictEqual(json.results[0].status, "unchanged");
+	assert.deepStrictEqual(json.deprecation, {
+		templateId: OLD.id,
+		successors: [NEW.id],
+	});
+});
+
+test("--json reports deprecation as null for a current template", async () => {
+	const result = await run(
+		dataDirWithCache([V1, V2]),
+		"update",
+		V1.id,
+		multi,
+		"--dry-run",
+		"--json",
+	);
+	assert.strictEqual(JSON.parse(result.stdout).deprecation, null);
+});
+
+test("a carry-over failure without a recipe names --recipe and --map as next steps", async () => {
+	const strict = {
+		...NEW,
+		id: "io.example.strict",
+		metadata: undefined,
+		properties: [
+			...NEW.properties.slice(0, 1),
+			{
+				type: "Dropdown",
+				value: "openai",
+				label: "Provider",
+				group: "model",
+				choices: [{ name: "OpenAI", value: "openai" }],
+				binding: { type: "zeebe:input", name: "provider" },
+			},
+		],
+	};
+	const templatePath = join(ws.workDir, "strict.json");
+	writeFileSync(templatePath, JSON.stringify(strict));
+	const args = [
+		"update",
+		OLD.id,
+		TASK,
+		ws.oldBpmn,
+		"--to",
+		templatePath,
+		"--dry-run",
+	];
+	const json = await run(dataDirWithCache([OLD]), ...args, "--json");
+	assert.strictEqual(json.status, 1);
+	const [entry] = JSON.parse(json.stdout).results;
+	assert.strictEqual(entry.status, "failed");
+	assert.strictEqual(entry.elementName, "Do Something");
+	assert.match(entry.error, /carry-over: destination "input:provider"/);
+	assert.match(entry.hint, /--recipe <file>/);
+	assert.match(entry.hint, /--map <from>=<to>/);
+	const text = await run(dataDirWithCache([OLD]), ...args);
+	assert.strictEqual(text.status, 1);
+	assert.ok(text.stderr.includes(entry.hint), text.stderr);
+	assert.match(
+		text.stderr,
+		/Nothing was written because an element failed\.\n$/,
+	);
 });
 
 test("removes every temp dir it created", assertCleanedUp);
