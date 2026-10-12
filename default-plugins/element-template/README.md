@@ -141,7 +141,20 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   dropped. Prefixes such as `input:` work as in `apply --set`.
 - All selected elements migrate in memory and the file is written once, only if
   every element succeeds. A dry run exits 1 when the write would fail or need
-  `--allow-lossy`. JSON output is one document: `{dryRun, command, results, summary}`.
+  `--allow-lossy`. JSON output is one document:
+  `{dryRun, command, results, summary, deprecation}`.
+- Each JSON result carries `elementId` and, when the element has a name,
+  `elementName`. An updated result carries `recipe` (with `path` for a
+  `--recipe` file, as given), `counts` and `report` with `moved`, `added`,
+  `changed`, `dropped` and `kept`. Fields use template IDs: `group` is the group
+  ID, `groupLabel` its label, `propertyId` the property `id`. `moved` and
+  `added` items carry the stored `value`; `moved`, `added` and `changed` items
+  carry `source`: `recipe`, `map` or `default` (target template default).
+  `kept` lists unchanged values without their values. Items follow the group
+  and property order of the target template; `dropped` follows the source
+  template. `deprecation` is `{templateId, successors}` for a deprecated
+  selected template, else `null`. A failed result carries `hint` when a next
+  step exists.
 - Without `--in-place` the BPMN goes to stdout and the report to stderr.
 - Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
   Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
