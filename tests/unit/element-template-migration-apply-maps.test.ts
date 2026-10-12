@@ -95,6 +95,15 @@ describe("migrateElement maps", () => {
 		assert.strictEqual(report.moved[0].to.key, "limit");
 	});
 
+	test("reports a mapped destination as moved only", async () => {
+		const { report } = await run([map("maxTokens", "limit")]);
+		assert.deepStrictEqual(
+			report.added.map((a) => a.key),
+			["mode"],
+		);
+		assert.strictEqual(report.moved.length, 1);
+	});
+
 	test("without the map the value is dropped", async () => {
 		const { report } = await run([]);
 		assert.strictEqual(report.dropped.length, 1);

@@ -30,7 +30,6 @@ import {
 import {
 	assertNoAmbiguousWrites,
 	buildStepPlan,
-	CARRY_OVER_LABEL,
 	carryOverWrites,
 	type MovedFact,
 	normalizeDestinationValue,
@@ -303,12 +302,10 @@ function applyApplication(
 				...move,
 				value: resolvedValue(move.to.key, move.to.bindingType),
 			})),
-			set: writes
+			set: recipeWrites
 				.filter(
 					(write) =>
-						(write.entry.kind === "set" &&
-							write.entry.label !== CARRY_OVER_LABEL) ||
-						write.entry.kind === "template",
+						write.entry.kind === "set" || write.entry.kind === "template",
 				)
 				.map((write) => ({
 					key: write.key,
