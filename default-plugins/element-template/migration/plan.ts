@@ -168,6 +168,14 @@ export function carryOverWrites(
 		);
 }
 
+class ConditionError extends Error {
+	kind: "cyclic" | "unsupported";
+	constructor(kind: "cyclic" | "unsupported") {
+		super(`${kind} destination property condition`);
+		this.kind = kind;
+	}
+}
+
 /** Validate recipe writes and the populated, non-Hidden values apply carries over. */
 export function validateDestinationValues(
 	writes: Write[],
@@ -200,16 +208,15 @@ export function validateDestinationValues(
 		visiting = new Set<TemplateProperty>(),
 	): boolean => {
 		if (!("condition" in property) || !property.condition) return true;
-		if (visiting.has(property))
-			throw new Error("Cyclic destination property condition");
+		if (visiting.has(property)) throw new ConditionError("cyclic");
 		const next = new Set(visiting).add(property);
 		const evaluate = (condition: unknown): boolean => {
 			if (typeof condition !== "object" || condition === null)
-				throw new Error("Unsupported destination property condition");
+				throw new ConditionError("unsupported");
 			if ("allMatch" in condition && Array.isArray(condition.allMatch))
 				return condition.allMatch.every(evaluate);
 			if (!("property" in condition) || typeof condition.property !== "string")
-				throw new Error("Unsupported destination property condition");
+				throw new ConditionError("unsupported");
 			const related = template.properties.find(
 				(p) => p.id === condition.property,
 			);
@@ -222,7 +229,7 @@ export function validateDestinationValues(
 				!("oneOf" in condition && Array.isArray(condition.oneOf)) &&
 				!("isEmpty" in condition && typeof condition.isEmpty === "boolean")
 			)
-				throw new Error("Unsupported destination property condition");
+				throw new ConditionError("unsupported");
 			if (!related) return false;
 			const value = resolvedValue(related);
 			if ("isEmpty" in condition)
@@ -273,8 +280,9 @@ export function validateDestinationValues(
 			let active: boolean;
 			try {
 				active = isActive(property);
-			} catch {
-				throw new Error(`${at} has unsupported or cyclic condition`);
+			} catch (error) {
+				if (!(error instanceof ConditionError)) throw error;
+				throw new Error(`${at} has ${error.kind} condition`);
 			}
 			if (!active) continue;
 			activeProperties.add(property);
@@ -283,7 +291,14 @@ export function validateDestinationValues(
 				if (constraint !== "notEmpty" && constraint !== "pattern")
 					throw new Error(`${at} has unsupported constraint ${constraint}`);
 			}
-			const stored = maybePrependFeel(property, write.value);
+			// Validate what the Modeler stores, e.g. `=true` for the Boolean "yes".
+			const stored = maybePrependFeel(
+				property,
+				effectiveFeel(property) === "static" &&
+					["Number", "Boolean"].includes(property.type ?? "")
+					? normalizeDestinationValue(property, write.value)
+					: write.value,
+			);
 			const isExpression =
 				stored.startsWith("=") &&
 				(property.feel === "optional" || property.feel === "required");

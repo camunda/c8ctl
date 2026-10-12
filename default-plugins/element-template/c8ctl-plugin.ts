@@ -115,8 +115,8 @@ async function elementTemplateHandler(
 			? `Unknown subcommand '${subcommand}'.`
 			: "c8ctl element-template requires a subcommand.";
 		const validSubcommands = Object.keys(subcommandHandlers);
-		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-		logger.info("Run 'c8ctl element-template --help' for full usage.");
+		logger.error(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.error("Run 'c8ctl element-template --help' for full usage.");
 		process.exitCode = 1;
 		return;
 	}

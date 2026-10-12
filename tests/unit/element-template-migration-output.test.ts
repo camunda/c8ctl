@@ -261,20 +261,31 @@ test("redacts sensitive values in every report collection without changing the s
 			},
 		],
 	});
-	assert.doesNotMatch(
-		renderReportText(raw, { elementId: "Task", color: false, dryRun: true }),
-		/SECRET/,
-	);
-	assert.doesNotMatch(
-		JSON.stringify(
-			reportToJson(raw, {
-				elementId: "Task",
-				recipe: "embedded",
-				dryRun: true,
-			}),
-		),
-		/SECRET/,
-	);
+	const snapshot = structuredClone(raw);
+	const text = renderReportText(raw, {
+		elementId: "Task",
+		color: false,
+		dryRun: true,
+	});
+	assert.doesNotMatch(text, /SECRET/);
+	assert.strictEqual(text.match(/\[REDACTED\]/g)?.length, 6);
+	const json = reportToJson(raw, {
+		elementId: "Task",
+		recipe: "embedded",
+		dryRun: true,
+	}).report;
+	assert.doesNotMatch(JSON.stringify(json), /SECRET/);
+	assert.strictEqual(json.dropped[0].value, "[REDACTED]");
+	assert.strictEqual(json.added[0].value, "[REDACTED]");
+	assert.deepStrictEqual(json.changed[0].valueChange, {
+		from: "[REDACTED]",
+		to: "[REDACTED]",
+	});
+	assert.deepStrictEqual(json.moved[0].valueChange, {
+		from: "[REDACTED]",
+		to: "[REDACTED]",
+	});
+	assert.deepStrictEqual(raw, snapshot);
 	assert.strictEqual(raw.dropped[0].value, "SECRET-DROP");
 });
 

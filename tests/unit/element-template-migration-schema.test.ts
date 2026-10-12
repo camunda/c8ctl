@@ -157,7 +157,8 @@ function parses(raw: unknown): boolean {
 	try {
 		parseRecipe(raw);
 		return true;
-	} catch {
+	} catch (e) {
+		if (!(e instanceof RecipeError)) throw e;
 		return false;
 	}
 }

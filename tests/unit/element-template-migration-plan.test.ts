@@ -81,29 +81,46 @@ describe("buildStepPlan", () => {
 	});
 	test("matches condition values with upstream Number, Boolean and required FEEL coercion", () => {
 		for (const discriminator of [
-			{ type: "Number", value: 2, equals: "=2" },
-			{ type: "Boolean", value: true, equals: true },
-			{ type: "Boolean", value: false, equals: false },
-			{ type: "String", feel: "required", value: "=on", equals: "on" },
+			{ type: "Number", value: 2, equals: "=2", other: "=3" },
+			{ type: "Boolean", value: true, equals: true, other: false },
+			{ type: "Boolean", value: false, equals: false, other: true },
+			{
+				type: "String",
+				feel: "required",
+				value: "=on",
+				equals: "on",
+				other: "off",
+			},
 		]) {
-			const target = {
+			const { other, ...matching } = discriminator;
+			const targetWith = (equals: unknown) => ({
 				id: "new",
 				properties: [
 					{
-						...discriminator,
+						...matching,
 						id: "mode",
 						binding: { type: "zeebe:input", name: "mode" },
 					},
 					{
-						condition: { property: "mode", equals: discriminator.equals },
+						condition: { property: "mode", equals },
 						constraints: { notEmpty: true },
 						binding: { type: "zeebe:input", name: "b" },
 					},
 				],
-			};
+			});
 			assert.throws(
-				() => buildStepPlan(entriesOf({ to: "b", set: "" }), [], target),
+				() =>
+					buildStepPlan(
+						entriesOf({ to: "b", set: "" }),
+						[],
+						targetWith(discriminator.equals),
+					),
 				/notEmpty/,
+			);
+			assert.doesNotThrow(
+				() =>
+					buildStepPlan(entriesOf({ to: "b", set: "" }), [], targetWith(other)),
+				`${discriminator.type} ${String(discriminator.value)} vs ${String(other)}`,
 			);
 		}
 	});
@@ -414,37 +431,160 @@ describe("buildStepPlan", () => {
 	});
 
 	test("fails closed on unsupported and cyclic destination conditions", () => {
-		for (const condition of [
-			{ property: "b", custom: true },
-			{ property: "b", isActive: true },
-		]) {
-			const target: MigrationTemplate = {
-				id: "new",
-				properties: [
-					{
-						id: "b",
-						...{ condition },
-						binding: { type: "zeebe:input", name: "b" },
-					},
-				],
-			};
-			assert.throws(
-				() => buildStepPlan(entriesOf({ to: "b", set: "SECRET" }), [], target),
-				/condition/,
+		const message = (path: string, kind: "cyclic" | "unsupported") =>
+			new RegExp(
+				`^sources\\[0\\]\\.paths\\[0\\]: destination "input:${path}" has ${kind} condition$`,
 			);
+		const failsClosed = (
+			properties: MigrationTemplate["properties"],
+			to: string,
+			kind: "cyclic" | "unsupported",
+		): void => {
+			const target: MigrationTemplate = { id: "new", properties };
+			assert.throws(
+				() => buildStepPlan(entriesOf({ to, set: "SECRET" }), [], target),
+				(error: unknown) =>
+					error instanceof Error &&
+					!(error instanceof RangeError) &&
+					message(to, kind).test(error.message) &&
+					!error.message.includes("SECRET"),
+			);
+		};
+		const bound = (id: string, condition: unknown) => ({
+			id,
+			condition,
+			binding: { type: "zeebe:input", name: id },
+		});
+		failsClosed(
+			[bound("b", { property: "b", custom: true })],
+			"b",
+			"unsupported",
+		);
+		failsClosed([bound("b", { property: "b", isActive: true })], "b", "cyclic");
+		failsClosed(
+			[
+				bound("a", { property: "b", isActive: true }),
+				bound("b", { property: "a", isActive: true }),
+			],
+			"a",
+			"cyclic",
+		);
+	});
+	test("activates a conditional property only when its condition holds", () => {
+		const conditional = (condition: unknown) => ({ condition });
+		const properties = (
+			condition: unknown,
+			mode = "on",
+		): MigrationTemplate => ({
+			id: "new",
+			properties: [
+				{
+					id: "mode",
+					type: "String",
+					value: mode,
+					binding: { type: "zeebe:input", name: "mode" },
+				},
+				{
+					...conditional({ property: "mode", equals: "never" }),
+					id: "off",
+					type: "String",
+					binding: { type: "zeebe:input", name: "off" },
+				},
+				{
+					...conditional(condition),
+					id: "dep",
+					type: "String",
+					constraints: { notEmpty: true },
+					binding: { type: "zeebe:input", name: "dep" },
+				},
+			],
+		});
+		const isActive = (condition: unknown, mode?: string): boolean => {
+			const target = properties(condition, mode);
+			const plan = buildStepPlan(entriesOf({ to: "dep", set: "" }), [], target);
+			return [...validateDestinationValues(plan.writes, [], target)].some(
+				(p) => p.id === "dep",
+			);
+		};
+		const rejects = (condition: unknown, mode?: string) =>
+			assert.throws(
+				() => isActive(condition, mode),
+				/violates notEmpty constraint/,
+			);
+		const cases: [string, unknown, unknown, string?][] = [
+			[
+				"equals",
+				{ property: "mode", equals: "on" },
+				{ property: "mode", equals: "other" },
+			],
+			[
+				"oneOf",
+				{ property: "mode", oneOf: ["x", "on"] },
+				{ property: "mode", oneOf: ["x", "y"] },
+			],
+			[
+				"allMatch",
+				{
+					allMatch: [
+						{ property: "mode", equals: "on" },
+						{ property: "mode", oneOf: ["on"] },
+					],
+				},
+				{
+					allMatch: [
+						{ property: "mode", equals: "on" },
+						{ property: "mode", equals: "other" },
+					],
+				},
+			],
+			[
+				"isEmpty",
+				{ property: "mode", isEmpty: false },
+				{ property: "mode", isEmpty: true },
+			],
+			[
+				"isActive on an active property",
+				{ property: "mode", isActive: true },
+				{ property: "mode", isActive: false },
+			],
+			[
+				"isActive on an inactive property",
+				{ property: "off", isActive: false },
+				{ property: "off", isActive: true },
+			],
+		];
+		for (const [name, matching, nonMatching] of cases) {
+			rejects(matching);
+			assert.strictEqual(isActive(nonMatching), false, `${name}: not active`);
 		}
+		// An empty mode makes the isEmpty condition hold, so the notEmpty constraint applies.
+		rejects({ property: "mode", isEmpty: true }, "");
+		assert.strictEqual(
+			isActive({ property: "missing", equals: "on" }),
+			false,
+			"a condition on a missing property is not active",
+		);
 	});
 	test("validates required, choice and pattern destination values without echoing them", () => {
 		for (const property of [
-			{ constraints: { notEmpty: true }, value: "" },
-			{ choices: [{ name: "Allowed", value: "allowed" }], value: "SECRET" },
-			{ constraints: { pattern: { value: "^allowed$" } }, value: "SECRET" },
+			{ constraints: { notEmpty: true }, value: "", reason: "notEmpty" },
+			{
+				choices: [{ name: "Allowed", value: "allowed" }],
+				value: "SECRET",
+				reason: "choice",
+			},
+			{
+				constraints: { pattern: { value: "^allowed$" } },
+				value: "SECRET",
+				reason: "pattern",
+			},
 		]) {
+			const { reason, ...templateProperty } = property;
 			const target = {
 				id: "new",
 				properties: [
 					{
-						...property,
+						...templateProperty,
 						type: "String",
 						binding: { type: "zeebe:input", name: "b" },
 					},
@@ -459,8 +599,8 @@ describe("buildStepPlan", () => {
 					),
 				(error) =>
 					error instanceof Error &&
-					/destination|constraint|choice|pattern/.test(error.message) &&
-					!error.message.includes("SECRET"),
+					error.message ===
+						`sources[0].paths[0]: destination "input:b" violates ${reason} constraint`,
 			);
 		}
 	});
@@ -851,6 +991,37 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 		);
 	});
 
+	test("checks choices and patterns against the stored Boolean literal", () => {
+		// The Modeler stores normalizeDestinationValue(...), "=true" for "yes".
+		const boolean = {
+			type: "Boolean",
+			feel: "static",
+			binding: { type: "zeebe:input", name: "b" },
+		};
+		assert.strictEqual(normalizeDestinationValue(boolean, "yes"), "=true");
+		const validate = (constraint: object) => {
+			const target = templateOf({ ...boolean, ...constraint });
+			const plan = buildStepPlan(
+				entriesOf({ to: "b", set: "yes" }),
+				[],
+				target,
+			);
+			return validateDestinationValues(plan.writes, [], target);
+		};
+		assert.doesNotThrow(() => validate({ choices: [{ value: "true" }] }));
+		assert.throws(
+			() => validate({ choices: [{ value: "yes" }] }),
+			/violates choice constraint/,
+		);
+		assert.doesNotThrow(() =>
+			validate({ constraints: { pattern: { value: "^true$" } } }),
+		);
+		assert.throws(
+			() => validate({ constraints: { pattern: { value: "^yes$" } } }),
+			/violates pattern constraint/,
+		);
+	});
+
 	test("matches conditions on the stored literal", () => {
 		const dependent = {
 			id: "dep",
@@ -872,4 +1043,75 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 			/notEmpty/,
 		);
 	});
+});
+
+describe("normalizeDestinationValue", () => {
+	// Expected values follow the vendored bpmn-js-element-templates
+	// dist/core.esm.js:44 (toFeelExpression): a Boolean becomes "=false" for
+	// "false" and "" and "=true" for everything else; other types get an "=".
+	const inputs = [
+		"false",
+		"FALSE",
+		"",
+		"0",
+		"no",
+		" false",
+		"=x",
+		"abc",
+		"1e3",
+		"-1",
+	];
+	const castBoolean = [
+		"=false",
+		"=true",
+		"=false",
+		"=true",
+		"=true",
+		"=true",
+		"=x",
+		"=true",
+		"=true",
+		"=true",
+	];
+	const castText = [
+		"=false",
+		"=FALSE",
+		"=",
+		"=0",
+		"=no",
+		"= false",
+		"=x",
+		"=abc",
+		"=1e3",
+		"=-1",
+	];
+	const plain = inputs;
+	type Row = [string, string | undefined, string[], string[], string[]];
+	// [binding, feel, Boolean, Number, String]
+	const rows: Row[] = [
+		["zeebe:input", undefined, castBoolean, castText, plain],
+		["zeebe:input", "static", castBoolean, castText, plain],
+		["zeebe:input", "optional", castBoolean, castText, plain],
+		["zeebe:input", "required", castBoolean, castText, castText],
+		["zeebe:property", undefined, plain, plain, plain],
+		["zeebe:property", "static", castBoolean, castText, plain],
+		["zeebe:property", "optional", castBoolean, castText, plain],
+		["zeebe:property", "required", castBoolean, castText, castText],
+	];
+	for (const [binding, feel, boolean, number, string] of rows) {
+		test(`converts literals for ${binding} with feel ${feel}`, () => {
+			for (const [type, expected] of [
+				["Boolean", boolean],
+				["Number", number],
+				["String", string],
+			] as const) {
+				const property = { type, feel, binding: { type: binding } };
+				assert.deepStrictEqual(
+					inputs.map((value) => normalizeDestinationValue(property, value)),
+					expected,
+					`${type}`,
+				);
+			}
+		});
+	}
 });

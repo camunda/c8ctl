@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { before, describe, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
@@ -239,11 +239,14 @@ before(async () => {
 	);
 });
 
-process.on("exit", () => {
+function removeCleanups(): void {
 	for (const dir of cleanups) {
 		rmSync(dir, { recursive: true, force: true });
 	}
-});
+}
+
+// Safety net when the last test below does not run.
+after(removeCleanups);
 
 describe("migration catalog selection authority", () => {
 	test("rejects conflicting cached targets before selection on every cache-driven path", async () => {
@@ -601,8 +604,8 @@ describe("migration engine eligibility", () => {
 				"--allow-lossy",
 			);
 			assert.strictEqual(result.status, 1, result.stderr);
-			assert.match(result.stdout + result.stderr, /version 2 is not available/);
-			assert.match(result.stdout, /Nothing was written/);
+			assert.match(result.stderr, /version 2 is not available/);
+			assert.match(result.stderr, /Nothing was written/);
 			assert.strictEqual(readFileSync(file, "utf-8"), xml);
 		});
 	}
@@ -724,7 +727,7 @@ describe("element-template update to another template", () => {
 			templatePath,
 			"--in-place",
 		);
-		assert.notStrictEqual(result.status, 0);
+		assert.strictEqual(result.status, 1);
 		assert.match(result.stderr, /--allow-lossy/);
 		assert.strictEqual(readFileSync(copy, "utf-8"), before);
 	});
@@ -751,7 +754,7 @@ describe("element-template update to another template", () => {
 			recipePath,
 			"--allow-lossy",
 		);
-		assert.notStrictEqual(result.status, 0);
+		assert.strictEqual(result.status, 1);
 		assert.match(result.stderr, /source|applicable/);
 	});
 	test("rejects engine-incompatible explicit targets", async () => {
@@ -768,7 +771,7 @@ describe("element-template update to another template", () => {
 				"--to",
 				to,
 			);
-			assert.notStrictEqual(result.status, 0, result.stdout);
+			assert.strictEqual(result.status, 1, result.stdout);
 			assert.match(result.stderr, /compatible|migration/);
 		}
 	});
@@ -915,7 +918,7 @@ describe("element-template update to another template", () => {
 			{ NODE_OPTIONS: failingSaveXmlPreload() },
 			["update", OLD.id, TASK, oldBpmn, "--to", templatePath],
 		);
-		assert.notStrictEqual(result.status, 0);
+		assert.strictEqual(result.status, 1);
 		assert.match(result.stderr, /saveXML must not run/);
 	});
 
@@ -972,11 +975,8 @@ describe("element-template update to another template", () => {
 			templatePath,
 			"--json",
 		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(
-			result.stderr + result.stdout,
-			/--json needs --in-place or --dry-run/,
-		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /--json needs --in-place or --dry-run/);
 	});
 
 	test("without --to a deprecated template stays put and the report names declared successors", async () => {
@@ -1047,8 +1047,8 @@ describe("element-template update to another template", () => {
 			"--recipe",
 			recipePath,
 		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(result.stderr + result.stdout, /Update c8ctl/);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /Update c8ctl/);
 	});
 
 	test("fails for an element without a template and for unknown elements", async () => {
@@ -1063,11 +1063,8 @@ describe("element-template update to another template", () => {
 			"--to",
 			templatePath,
 		);
-		assert.notStrictEqual(noTemplate.status, 0);
-		assert.match(
-			noTemplate.stderr + noTemplate.stdout,
-			/no element template applied/,
-		);
+		assert.strictEqual(noTemplate.status, 1);
+		assert.match(noTemplate.stderr, /no element template applied/);
 		const unknown = await run(
 			dataDirWithCache([OLD]),
 			"update",
@@ -1077,8 +1074,8 @@ describe("element-template update to another template", () => {
 			"--to",
 			templatePath,
 		);
-		assert.notStrictEqual(unknown.status, 0);
-		assert.match(unknown.stderr + unknown.stdout, /Element "Nope" not found/);
+		assert.strictEqual(unknown.status, 1);
+		assert.match(unknown.stderr, /Element "Nope" not found/);
 	});
 });
 
@@ -1098,7 +1095,7 @@ describe("element-template update", () => {
 			"--recipe",
 			recipePath,
 		);
-		assert.notStrictEqual(result.status, 0);
+		assert.strictEqual(result.status, 1);
 		assert.match(result.stderr, /schemaVersion/);
 	});
 	test("an existing writer lock prevents overwriting and is not removed", async () => {
@@ -1114,7 +1111,7 @@ describe("element-template update", () => {
 			file,
 			"--in-place",
 		);
-		assert.notStrictEqual(result.status, 0);
+		assert.strictEqual(result.status, 1);
 		assert.match(result.stderr, /migration lock/);
 		assert.strictEqual(readFileSync(file, "utf-8"), before);
 		assert.strictEqual(
@@ -1138,7 +1135,7 @@ describe("element-template update", () => {
 			TASK,
 			missingEngine,
 		);
-		assert.notStrictEqual(missing.status, 0);
+		assert.strictEqual(missing.status, 1);
 		assert.match(missing.stderr, /executionPlatformVersion/);
 		const v3 = {
 			...V2,
@@ -1174,8 +1171,8 @@ describe("element-template update", () => {
 			file,
 			"--in-place",
 		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(result.stdout + result.stderr, /version 2 is not available/);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /version 2 is not available/);
 		assert.strictEqual(readFileSync(file, "utf-8"), xml);
 	});
 	test("moves to the newest version and applies its recipe", async () => {
@@ -1240,8 +1237,8 @@ describe("element-template update", () => {
 			"--to",
 			`${V1.id}@7`,
 		);
-		assert.notStrictEqual(missing.status, 0);
-		assert.match(missing.stderr + missing.stdout, /has no version 7/);
+		assert.strictEqual(missing.status, 1);
+		assert.match(missing.stderr, /has no version 7/);
 	});
 
 	test("needs the template in the cache", async () => {
@@ -1252,16 +1249,17 @@ describe("element-template update", () => {
 			TASK,
 			versionedBpmn,
 		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(
-			result.stderr + result.stdout,
-			/Element template .* not found/,
-		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /Element template .* not found/);
 	});
 
 	test("the removed --successor and --to-version flags are not recognized", async () => {
 		// The global parser warns and ignores unknown flags, so the update never changes the template id.
-		for (const removed of [["--successor"], ["--to-version", "2"]]) {
+		// "--to-version 2" leaves "2" behind as a stray positional argument, which fails.
+		for (const [removed, status] of [
+			[["--successor"], 0],
+			[["--to-version", "2"], 1],
+		] as const) {
 			const result = await run(
 				dataDirWithCache([V1, V2]),
 				"update",
@@ -1270,6 +1268,7 @@ describe("element-template update", () => {
 				versionedBpmn,
 				...removed,
 			);
+			assert.strictEqual(result.status, status, result.stderr);
 			assert.match(result.stderr, new RegExp(`Unknown flag ${removed[0]}`));
 			assert.doesNotMatch(result.stdout, /io\.example\.new/);
 		}
@@ -1283,8 +1282,8 @@ describe("element-template update", () => {
 			TASK,
 			versionedBpmn,
 		);
-		assert.notStrictEqual(result.status, 0);
-		assert.match(result.stdout + result.stderr, /Unknown subcommand 'change'/);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /Unknown subcommand 'change'/);
 	});
 });
 
@@ -1589,12 +1588,12 @@ describe("element-template update selection and write-once", () => {
 			"--allow-lossy",
 		);
 		assert.strictEqual(text.status, 1, text.stderr);
-		assert.match(text.stdout, /Cannot migrate .*version 2 is not available/);
+		assert.match(text.stderr, /Cannot migrate .*version 2 is not available/);
 		assert.match(
 			text.stdout,
 			/Summary: 1 updated, 0 skipped, 0 unchanged, 1 failed/,
 		);
-		assert.match(text.stdout, /Nothing was written/);
+		assert.match(text.stderr, /Nothing was written/);
 		assert.strictEqual(readFileSync(copy, "utf-8"), before);
 		assert.ok(!existsSync(`${copy}.migration.lock`));
 
@@ -1643,6 +1642,31 @@ describe("element-template update selection and write-once", () => {
 		assert.doesNotMatch(result.stdout, /Updated /);
 		assert.strictEqual(readFileSync(file, "utf-8"), before);
 		assert.strictEqual(statSync(file).mtimeMs, mtime);
+	});
+
+	test("warns on stderr that --map was not applied to an element already on the target", async () => {
+		const file = await seedMulti("noop-map", [
+			[TASK, V2, ["provider=azure", "url=https://a"]],
+		]);
+		const before = readFileSync(file, "utf-8");
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			V1.id,
+			file,
+			"--map",
+			"provider=url",
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(
+			result.stderr,
+			new RegExp(
+				`Warning: ${TASK} is already on the target template, so --map was not applied`,
+			),
+		);
+		assert.doesNotMatch(result.stdout, /Warning/);
+		assert.strictEqual(readFileSync(file, "utf-8"), before);
 	});
 
 	test("--json prints one document with dryRun, command, results and summary", async () => {
@@ -1790,10 +1814,10 @@ describe("element-template update --map", () => {
 			);
 			assert.strictEqual(result.status, 1, result.stderr);
 			assert.match(
-				result.stdout + result.stderr,
+				result.stderr,
 				/not (a|an?) .*binding|not a settable binding/,
 			);
-			assert.match(result.stdout + result.stderr, /nope/);
+			assert.match(result.stderr, /nope/);
 			assert.strictEqual(readFileSync(copy, "utf-8"), before);
 		}
 	});
@@ -1815,6 +1839,11 @@ describe("element-template update --map", () => {
 	});
 });
 
-test("migrate tests leave no temp data behind", () => {
-	assert.ok(existsSync(workDir));
+// Registered last so a leftover temp dir fails as a test, which also surfaces
+// under --experimental-test-isolation=none.
+test("removes every temp dir it created", () => {
+	removeCleanups();
+	for (const dir of cleanups) {
+		assert.strictEqual(existsSync(dir), false, `temp dir left behind: ${dir}`);
+	}
 });

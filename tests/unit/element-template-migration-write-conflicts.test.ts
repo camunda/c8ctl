@@ -542,11 +542,11 @@ for (const reversed of [false, true]) {
 				...flags,
 			);
 			assert.equal(result.status, 1, result.stderr);
-			// The failure report goes to stdout only when no XML would be printed there.
-			const reportStream = flags.includes("--in-place")
-				? result.stdout
-				: result.stderr;
-			assert.match(reportStream, /Ambiguous migration/);
+			// --json reports the failure inside the JSON document on stdout.
+			assert.match(
+				flags.includes("--json") ? result.stdout : result.stderr,
+				/Ambiguous migration/,
+			);
 			assert.doesNotMatch(result.stdout, /<bpmn:definitions|<\?xml/);
 			if (!flags.includes("--in-place")) assert.equal(result.stdout, "");
 			assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);

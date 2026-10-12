@@ -32,13 +32,13 @@ describe("migration destination constraints through CLI", () => {
 				name: "cyclic destination condition",
 				value: "SECRET",
 				extra: { id: "b", condition: { property: "b", isActive: true } },
-				rule: /unsupported or cyclic condition/,
+				rule: /has cyclic condition/,
 			},
 			{
 				name: "unsupported destination condition",
 				value: "SECRET",
 				extra: { condition: { property: "mode", custom: true } },
-				rule: /unsupported or cyclic condition/,
+				rule: /has unsupported condition/,
 			},
 			{
 				name: "required carry-over",

@@ -83,12 +83,13 @@ describe("resolveSteps (same id)", () => {
 	});
 
 	test("skips steps at or below the applied version", () => {
-		const { steps } = resolveSteps({
+		const { steps, refusal } = resolveSteps({
 			appliedId: "t",
 			appliedVersion: 2,
 			target: v3,
 			templates: catalog,
 		});
+		assert.strictEqual(refusal, null);
 		assert.deepStrictEqual(
 			steps.map((s) => s.version),
 			[3],
@@ -96,12 +97,13 @@ describe("resolveSteps (same id)", () => {
 	});
 
 	test("returns no steps without a recipe", () => {
-		const { steps } = resolveSteps({
+		const { steps, refusal } = resolveSteps({
 			appliedId: "t",
 			appliedVersion: 1,
 			target: v2,
 			templates: catalog,
 		});
+		assert.strictEqual(refusal, null);
 		assert.deepStrictEqual(steps, []);
 	});
 
@@ -175,12 +177,13 @@ describe("resolveSteps (cross id)", () => {
 	});
 
 	test("hops directly from the newest source version", () => {
-		const { steps } = resolveSteps({
+		const { steps, refusal } = resolveSteps({
 			appliedId: "old",
 			appliedVersion: 2,
 			target: fresh,
 			templates: catalog,
 		});
+		assert.strictEqual(refusal, null);
 		assert.deepStrictEqual(
 			steps.map((s) => s.kind),
 			["hop"],
@@ -189,12 +192,13 @@ describe("resolveSteps (cross id)", () => {
 
 	test("does not hop without a declared recipe for the source", () => {
 		const bare = template("new", 1, ["c"]);
-		const { steps } = resolveSteps({
+		const { steps, refusal } = resolveSteps({
 			appliedId: "old",
 			appliedVersion: 2,
 			target: bare,
 			templates: [...catalog.slice(0, 2), bare],
 		});
+		assert.strictEqual(refusal, null);
 		assert.deepStrictEqual(steps, []);
 	});
 });

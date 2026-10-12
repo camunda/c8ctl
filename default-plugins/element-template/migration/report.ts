@@ -284,10 +284,21 @@ export function buildReport({
 		return item;
 	});
 
+	// A move whose destination the Modeler removed (an inactive conditional
+	// binding) lost its value even when another move still claims the source.
+	const lostBySource = (v: ElementValue) =>
+		facts.moved.some(
+			(m) =>
+				!survivingMoves.includes(m) &&
+				sameTarget(v, m.from) &&
+				find(after, m.to.key, m.to.bindingType) === undefined,
+		);
 	const dropped = before
 		.filter(
 			(v) =>
-				v.value !== "" && !claimedFrom(v) && !find(after, v.key, v.bindingType),
+				v.value !== "" &&
+				((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
+					lostBySource(v)),
 		)
 		.map((v) => {
 			const field = fieldOf(fromTemplate, v.key, v.bindingType);

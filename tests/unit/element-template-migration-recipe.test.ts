@@ -235,26 +235,46 @@ describe("parseRecipe", () => {
 		);
 	});
 	test("requires an explicit kind and rejects legacy markers and mixed fields", () => {
-		for (const source of [
-			{ sourceTemplateId: SOURCE_ID },
-			{ kind: "upgrade", sourceTemplateId: SOURCE_ID },
-			{ kind: "change", sourceTemplateId: SOURCE_ID, minVersion: 2 },
-			{ kind: "change", sourceTemplateId: SOURCE_ID, toVersion: 2 },
-			{
-				kind: "upgrade",
-				sourceTemplateId: SOURCE_ID,
-				toVersion: 2,
-				minSourceVersion: 1,
-			},
-			{
-				kind: "upgrade",
-				sourceTemplateId: SOURCE_ID,
-				toVersion: Number.MAX_SAFE_INTEGER + 1,
-			},
-		]) {
+		for (const [source, message] of [
+			[
+				{ sourceTemplateId: SOURCE_ID },
+				'sources[0].kind must be "upgrade" or "change"',
+			],
+			[
+				{ kind: "upgrade", sourceTemplateId: SOURCE_ID },
+				"sources[0].toVersion must be a non-negative safe integer",
+			],
+			[
+				{ kind: "change", sourceTemplateId: SOURCE_ID, minVersion: 2 },
+				"sources[0] has unknown property `minVersion`",
+			],
+			[
+				{ kind: "change", sourceTemplateId: SOURCE_ID, toVersion: 2 },
+				"sources[0] has unknown property `toVersion`",
+			],
+			[
+				{
+					kind: "upgrade",
+					sourceTemplateId: SOURCE_ID,
+					toVersion: 2,
+					minSourceVersion: 1,
+				},
+				"sources[0] has unknown property `minSourceVersion`",
+			],
+			[
+				{
+					kind: "upgrade",
+					sourceTemplateId: SOURCE_ID,
+					toVersion: Number.MAX_SAFE_INTEGER + 1,
+				},
+				"sources[0].toVersion must be a non-negative safe integer",
+			],
+		] as const) {
 			assert.throws(
 				() => parseRecipe({ schemaVersion: 1, sources: [source] }),
-				RecipeError,
+				(error) =>
+					error instanceof RecipeError &&
+					error.message === `Invalid migration recipe: ${message}`,
 			);
 		}
 	});

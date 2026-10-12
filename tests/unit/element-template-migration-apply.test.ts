@@ -16,6 +16,7 @@ import {
 	getModdleElement,
 	getModdleList,
 } from "../../default-plugins/element-template/migration/moddle.ts";
+import { normalizeDestinationValue } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
@@ -183,6 +184,21 @@ describe("migrateElement", () => {
 				).find((v) => v.key === "b")?.value,
 				"=secretVariable",
 			);
+			assert.strictEqual(report.usedRecipe, true);
+			assert.strictEqual(report.refusal, null);
+			assert.deepStrictEqual(report.dropped, []);
+			assert.deepStrictEqual(report.added, []);
+			assert.deepStrictEqual(report.changed, []);
+			assert.deepStrictEqual(
+				report.moved.map((item) => [item.from.key, item.to.key]),
+				[["a", "b"]],
+			);
+			assert.deepStrictEqual(report.skipped, {
+				guard: [],
+				template: [],
+				noMatch: [],
+				feel: [],
+			});
 			assert.strictEqual(report.lossless, true);
 		});
 	}
@@ -394,7 +410,15 @@ describe("migrateElement", () => {
 				assert.strictEqual(report.moved[0]?.to.bindingType, b.binding.type);
 				assert.deepStrictEqual(report.dropped, []);
 				assert.strictEqual(report.lossless, true);
-				assert.match((await modeler.saveXML({ format: true })).xml, /second/);
+				const { xml } = await modeler.saveXML({ format: true });
+				assert.match(
+					xml,
+					new RegExp(
+						`<zeebe:input source="second" target="${swap ? "a" : "c"}" />`,
+					),
+				);
+				assert.strictEqual(xml.match(/second/g)?.length, 1);
+				assert.strictEqual(xml.match(/first/g)?.length, 1);
 			});
 		}
 	}
@@ -667,11 +691,9 @@ describe("migrateElement", () => {
 								? [["b", expected]]
 								: [],
 					);
-					assert.ok(
-						report.dropped.some(
-							(item) => item.key === "a" && item.value === "secret",
-						),
-					);
+					assert.deepStrictEqual(report.dropped, [
+						{ key: "a", bindingType: "zeebe:input", value: "secret" },
+					]);
 					assert.strictEqual(report.lossless, false);
 				}
 				const { xml } = await modeler.saveXML({ format: true });
@@ -842,7 +864,15 @@ describe("migrateElement", () => {
 			}),
 		});
 		assert.deepStrictEqual(report.moved, []);
-		assert.ok(report.dropped.some((item) => item.key === "provider"));
+		assert.deepStrictEqual(report.dropped, [
+			{
+				key: "provider",
+				bindingType: "zeebe:input",
+				label: "Provider",
+				group: "Model",
+				value: "secret",
+			},
+		]);
 		assert.strictEqual(report.lossless, false);
 		assert.doesNotMatch(
 			(await modeler.saveXML({ format: true })).xml,
@@ -973,5 +1003,75 @@ describe("migrateElement", () => {
 		);
 		const { xml } = await modeler.saveXML({ format: true });
 		assert.match(xml, /modelerTemplate="io.example.old"/);
+	});
+
+	test("skips every step when the element already sits on the target, so --map moves are neither reported nor written", async () => {
+		// The final step is skipped and nothing is written, so buildReport finds
+		// no change and reports no moves. The CLI warns on stderr instead.
+		const target = {
+			...NEW,
+			metadata: undefined,
+			properties: [input("a", "keep"), input("b", "")],
+		};
+		const { modeler, migrationModeler, element } = await setup(target, {
+			a: "keep",
+		});
+		const before = (await modeler.saveXML({ format: true })).xml;
+		const { element: migrated, report } = migrateElement({
+			modeler: migrationModeler,
+			element,
+			fromTemplate: target,
+			target,
+			templates: [target],
+			maps: [
+				{
+					from: { key: "a", bindingType: null },
+					to: { key: "b", bindingType: null },
+				},
+			],
+		});
+		assert.deepStrictEqual(report.moved, []);
+		assert.deepStrictEqual(report.dropped, []);
+		assert.strictEqual(
+			enumerateElementValues(
+				getExtensionElements(migrated.businessObject),
+			).find((v) => v.key === "b")?.value,
+			"",
+		);
+		assert.strictEqual((await modeler.saveXML({ format: true })).xml, before);
+	});
+
+	test("stores Boolean and Number defaults exactly as normalizeDestinationValue predicts", async () => {
+		const literals = [
+			"false",
+			"FALSE",
+			"",
+			"0",
+			"no",
+			" false",
+			"=x",
+			"abc",
+			"1e3",
+			"-1",
+		];
+		const properties = ["Boolean", "Number"].flatMap((type) =>
+			["static", "optional"].flatMap((feel) =>
+				literals.map((value, index) =>
+					input(`${type}.${feel}.${index}`, value, { type, feel }),
+				),
+			),
+		);
+		const template = { ...OLD, properties: [...OLD.properties, ...properties] };
+		const { element } = await setup(template, {});
+		const stored = enumerateElementValues(
+			getExtensionElements(element.businessObject),
+		);
+		for (const property of properties) {
+			assert.strictEqual(
+				stored.find((v) => v.key === property.binding.name)?.value,
+				normalizeDestinationValue(property, property.value),
+				property.binding.name,
+			);
+		}
 	});
 });

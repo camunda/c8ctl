@@ -262,7 +262,7 @@ for (const json of [false, true]) {
 				"--verbose",
 				...(json ? ["--json"] : []),
 			);
-			assert.notEqual(result.status, 0, result.stdout);
+			assert.equal(result.status, 1, result.stdout);
 			assertPrivateAbsent(result.stdout);
 			assertPrivateAbsent(result.stderr);
 			assert.equal(readFileSync(bpmn, "utf8"), original);
@@ -329,7 +329,7 @@ for (const json of [false, true]) {
 				"--verbose",
 				...(json ? ["--json"] : []),
 			);
-			assert.notEqual(result.status, 0);
+			assert.equal(result.status, 1);
 			assertPrivateAbsent(result.stdout);
 			assertPrivateAbsent(result.stderr);
 			assert.match(result.stderr, /recipe/i);

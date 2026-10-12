@@ -221,7 +221,7 @@ describe("migration context consistency", () => {
 						target: TARGET,
 						templates: [SOURCE, TARGET],
 					}),
-				/target|applied template|context/i,
+				{ message: "Migration did not apply the target template identity." },
 			);
 		});
 	}
@@ -270,7 +270,10 @@ describe("migration context consistency", () => {
 					templates: [SOURCE, TARGET],
 				});
 			if (matches) assert.equal(migrate().element, replacement);
-			else assert.throws(migrate, /target|applied template|context/i);
+			else
+				assert.throws(migrate, {
+					message: "Migration did not apply the target template identity.",
+				});
 		});
 	}
 });

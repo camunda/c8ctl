@@ -417,7 +417,10 @@ async function runMigrateInternal(
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
 		: undefined;
-	if (recipe && !recipe.sources.some((s) => s.sourceTemplateId === templateId)) {
+	if (
+		recipe &&
+		!recipe.sources.some((s) => s.sourceTemplateId === templateId)
+	) {
 		throw new Error(
 			`Recipe ${parsed.recipePath} has no source entry for template '${templateId}'.`,
 		);
@@ -458,6 +461,11 @@ async function runMigrateInternal(
 		const applied = readAppliedTemplate(element.businessObject);
 		if (!applied) continue;
 		if (target.id === applied.id && target.version === applied.version) {
+			if (maps.length > 0) {
+				process.stderr.write(
+					`Warning: ${id} is already on the target template, so --map was not applied.\n`,
+				);
+			}
 			outcomes.push({ status: "unchanged", id, version: applied.version });
 			continue;
 		}
@@ -483,7 +491,10 @@ async function runMigrateInternal(
 				recipe,
 				maps,
 			});
-			redaction.values = [...(redaction.values ?? []), ...valuesOf(result.element)];
+			redaction.values = [
+				...(redaction.values ?? []),
+				...valuesOf(result.element),
+			];
 			const { report } = result;
 			if (recipe && (!report.usedRecipe || report.refusal)) {
 				throw new Error(
@@ -610,6 +621,7 @@ async function runMigrateInternal(
 		const stream = writesXmlToStdout ? process.stderr : process.stdout;
 		const color = shouldUseColor(stream);
 		const lines: string[] = [];
+		const errorLines: string[] = [];
 		const latest = templates
 			.filter((t) => t.id === templateId)
 			.sort((a, b) => (b.version ?? 0) - (a.version ?? 0))[0];
@@ -654,22 +666,27 @@ async function runMigrateInternal(
 					`${o.id} is already on ${target.name ?? target.id} v${o.version}; nothing to do.\n`,
 				);
 			} else if (o.status === "skipped") {
-				lines.push(
-					`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`,
-				);
+				lines.push(`${o.id} is on v${o.from}, newer than v${o.to}; skipped.\n`);
 			} else {
-				lines.push(`${o.error}\n`);
+				errorLines.push(`${o.error}\n`);
 			}
 		}
 		lines.push(
 			`Summary: ${summary.updated} updated, ${summary.skipped} skipped, ${summary.unchanged} unchanged, ${summary.failed} failed, ${summary.dropped} values dropped.\n`,
 		);
 		if (failed.length > 0) {
-			lines.push("Nothing was written because an element failed.\n");
+			errorLines.push("Nothing was written because an element failed.\n");
 		} else if (wouldBlock && dryRun) {
-			lines.push("A write would be blocked: pass --allow-lossy to authorize it.\n");
+			lines.push(
+				"A write would be blocked: pass --allow-lossy to authorize it.\n",
+			);
 		}
 		stream.write(redactMigrationDiagnostic(lines.join("\n"), redaction));
+		if (errorLines.length > 0) {
+			process.stderr.write(
+				redactMigrationDiagnostic(errorLines.join("\n"), redaction),
+			);
+		}
 	}
 
 	if (failed.length > 0 || (wouldBlock && dryRun)) {

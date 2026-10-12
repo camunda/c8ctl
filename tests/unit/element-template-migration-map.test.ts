@@ -180,6 +180,32 @@ describe("migrateElement maps", () => {
 		assert.strictEqual(valueAt(result.element, "extra"), "on");
 	});
 
+	test("keeps a conditional binding absent when the moved value does not satisfy its condition", async () => {
+		const old = { ...OLD, properties: [hidden(OLD.id), input("flag", "")] };
+		const { migrationModeler, element: el } = await setup(old, { flag: "off" });
+		const result = migrateElement({
+			modeler: migrationModeler,
+			element: el,
+			fromTemplate: old,
+			target: NEW,
+			templates: [old, NEW],
+			maps: [map("flag", "mode"), map("flag", "extra")],
+		});
+		assert.strictEqual(valueAt(result.element, "mode"), "off");
+		assert.strictEqual(valueAt(result.element, "extra"), undefined);
+		// The Modeler removes the inactive binding, so the flag->extra move vanishes
+		// and the lost value is listed as dropped.
+		assert.deepStrictEqual(
+			result.report.dropped.map((d) => [d.key, d.value]),
+			[["flag", "off"]],
+		);
+		assert.deepStrictEqual(
+			result.report.moved.map((m) => [m.from.key, m.to.key]),
+			[["flag", "mode"]],
+		);
+		assert.strictEqual(result.report.lossless, false);
+	});
+
 	test("fails on a destination the target does not bind and lists names", async () => {
 		await assert.rejects(
 			() => run([map("maxTokens", "nope")]),
