@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { c8WithOptions } from "../utils/cli.ts";
 import {
 	labelledInput as input,
@@ -62,7 +63,7 @@ async function run(...args: string[]) {
 	rmSync(readLog, { force: true });
 	const result = await c8WithOptions(
 		{
-			nodeArgs: ["--import", PRELOAD],
+			nodeArgs: ["--import", pathToFileURL(PRELOAD).href],
 			env: {
 				C8CTL_DATA_DIR: dataDir,
 				C8CTL_OUTPUT_MODE: "text",

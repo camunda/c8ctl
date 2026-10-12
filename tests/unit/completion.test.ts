@@ -18,7 +18,7 @@ import {
 import { showCompletion } from "../../src/framework/ui/completion.ts";
 import { c8WithEnv } from "../utils/cli.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
-import { asyncSpawn } from "../utils/spawn.ts";
+import { asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 describe("Loaded plugin flag completions", () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-flags-"));
@@ -90,11 +90,13 @@ describe("Loaded plugin flag completions", () => {
 						shell === "bash"
 							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${command} ${argument}--)\nCOMP_CWORD=${argument ? 3 : 2}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
 							: `${result.stdout}\n_arguments() { printf '%s\\n' "$@"; }\nwords=(c8ctl ${command} ${argument}--)\nCURRENT=${argument ? 4 : 3}\n_c8ctl`;
-					const completed = await asyncSpawn(
+					// Via stdin: Windows truncates long command lines.
+					const completed = await asyncSpawnWithStdin(
 						shell,
-						shell === "bash"
-							? ["--norc", "--noprofile", "-c", script]
-							: ["-f", "-c", script],
+						shell === "bash" ? ["--norc", "--noprofile", "-s"] : ["-f", "-s"],
+						(stdin) => {
+							stdin.write(script);
+						},
 					);
 					assert.strictEqual(completed.status, 0, completed.stderr);
 					assert.ok(
