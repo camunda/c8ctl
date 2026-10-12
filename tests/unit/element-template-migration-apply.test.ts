@@ -1088,4 +1088,38 @@ describe("migrateElement boundary cases", () => {
 			);
 		});
 	}
+
+	test("a versionless applied template reads as version 0", () => {
+		assert.deepStrictEqual(
+			readAppliedTemplate({
+				$type: "bpmn:ServiceTask",
+				get: (name: string) => ({ modelerTemplate: "x" })[name],
+			}),
+			{ id: "x", version: 0 },
+		);
+	});
+
+	for (const [label, from, to] of [
+		["from", { version: undefined }, {}],
+		["to", {}, { version: undefined }],
+	] as const) {
+		test(`migrates ${label} a versionless template`, async () => {
+			const old = { ...OLD, ...from };
+			const target = { ...NEW, ...to };
+			const { migrationModeler, element } = await setup(old, {
+				provider: "azure",
+			});
+			const { element: migrated } = migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: old,
+				target,
+				templates: [old, target],
+			});
+			assert.deepStrictEqual(readAppliedTemplate(migrated.businessObject), {
+				id: NEW.id,
+				version: target.version ?? 0,
+			});
+		});
+	}
 });

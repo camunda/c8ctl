@@ -505,7 +505,7 @@ async function runMigrateInternal(
 	for (const { element, id, name } of selected) {
 		const applied = readAppliedTemplate(element.businessObject);
 		if (!applied) continue;
-		if (target.id === applied.id && target.version === applied.version) {
+		if (target.id === applied.id && (target.version ?? 0) === applied.version) {
 			if (maps.length > 0) {
 				process.stderr.write(
 					`Warning: ${id} is already on the target template, so --map was not applied.\n`,
@@ -530,7 +530,7 @@ async function runMigrateInternal(
 			continue;
 		}
 		const fromTemplate = templates.find(
-			(t) => t.id === applied.id && t.version === applied.version,
+			(t) => t.id === applied.id && (t.version ?? 0) === applied.version,
 		) ?? { id: applied.id, version: applied.version, properties: [] };
 		try {
 			const result = migrateElement({

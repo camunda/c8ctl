@@ -121,7 +121,7 @@ function findCoverageGap(
 	templates: MigrationTemplate[],
 ): string | null {
 	let shape = templates.find(
-		(t) => t.id === appliedId && versionOf(t) === appliedVersion,
+		(t) => t.id === appliedId && (versionOf(t) ?? 0) === appliedVersion,
 	);
 	for (const step of steps) {
 		for (const entry of step.entries) {
@@ -139,7 +139,7 @@ function findCoverageGap(
 			}
 		}
 		shape = templates.find(
-			(t) => t.id === appliedId && versionOf(t) === step.toVersion,
+			(t) => t.id === appliedId && (versionOf(t) ?? 0) === step.toVersion,
 		);
 	}
 	return null;
@@ -318,7 +318,7 @@ function loaded(
 	version: number,
 ): MigrationTemplate {
 	const template = templates.find(
-		(t) => t.id === id && versionOf(t) === version,
+		(t) => t.id === id && (versionOf(t) ?? 0) === version,
 	);
 	if (!template) {
 		throw new Error(`Template "${id}" version ${version} is not available`);

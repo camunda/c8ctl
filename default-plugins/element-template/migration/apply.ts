@@ -81,7 +81,7 @@ export interface AppliedTemplate {
 /**
  * The template an element is bound to, or `undefined` when it has none.
  * A version string is read like the moddle `Integer` type does, so a plain
- * object and a real element agree.
+ * object and a real element agree. An absent version reads as 0.
  */
 export function readAppliedTemplate(
 	businessObject: ModdleElement,
@@ -92,10 +92,10 @@ export function readAppliedTemplate(
 	}
 	const asString = getModdleString(businessObject, "modelerTemplateVersion");
 	const version =
-		asString !== undefined && asString !== ""
+		asString !== undefined
 			? Number.parseInt(asString, 10)
-			: getModdleNumber(businessObject, "modelerTemplateVersion");
-	return version === undefined || !Number.isSafeInteger(version) || version < 0
+			: (getModdleNumber(businessObject, "modelerTemplateVersion") ?? 0);
+	return !Number.isSafeInteger(version) || version < 0
 		? undefined
 		: { id, version };
 }
@@ -214,7 +214,10 @@ function applyApplication(
 ): { element: BpmnElement; facts: ReportFacts } | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
-	if (applied?.id === template.id && applied.version === template.version) {
+	if (
+		applied?.id === template.id &&
+		applied.version === (template.version ?? 0)
+	) {
 		return null;
 	}
 
@@ -348,7 +351,7 @@ export function migrateElement({
 	if (
 		!applied ||
 		applied.id !== fromTemplate.id ||
-		applied.version !== fromTemplate.version
+		applied.version !== (fromTemplate.version ?? 0)
 	) {
 		throw new Error(
 			"Migration context does not match the element's applied template.",
@@ -399,7 +402,7 @@ export function migrateElement({
 	if (
 		!finalApplied ||
 		finalApplied.id !== target.id ||
-		finalApplied.version !== target.version
+		finalApplied.version !== (target.version ?? 0)
 	) {
 		throw new Error("Migration did not apply the target template identity.");
 	}
