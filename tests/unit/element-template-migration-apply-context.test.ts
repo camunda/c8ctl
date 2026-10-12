@@ -1,3 +1,8 @@
+/**
+ * Context guards of migrateElement against a stub modeler
+ * (default-plugins/element-template/migration/apply.ts)
+ */
+
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
@@ -7,13 +12,9 @@ import {
 	readAppliedTemplate,
 } from "../../default-plugins/element-template/migration/apply.ts";
 import type { ModdleElement } from "../../default-plugins/element-template/migration/moddle.ts";
-import {
-	parseRecipe,
-	type RecipeSource,
-} from "../../default-plugins/element-template/migration/recipe.ts";
+import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import { resolveApplications } from "../../default-plugins/element-template/migration/steps.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-import type { ElementTemplatesService } from "../utils/element-template.ts";
 
 const SOURCE: MigrationTemplate = {
 	id: "source",
@@ -284,63 +285,4 @@ describe("migration context consistency", () => {
 				});
 		});
 	}
-});
-
-describe("migration typed surface", () => {
-	test("Option B sources narrow to distinct version contracts", () => {
-		const sources = parseRecipe({
-			schemaVersion: 1,
-			sources: [
-				{ kind: "upgrade", sourceTemplateId: "source", toVersion: 2 },
-				{ kind: "change", sourceTemplateId: "source", minSourceVersion: 1 },
-			],
-		}).sources;
-		for (const source of sources) {
-			if (source.kind === "upgrade") {
-				const version: number = source.toVersion;
-				assert.equal(version, 2);
-			} else {
-				const floor: number | undefined = source.minSourceVersion;
-				assert.equal(floor, 1);
-			}
-		}
-		const upgradeHasNoFloor: "minSourceVersion" extends keyof Extract<
-			RecipeSource,
-			{ kind: "upgrade" }
-		>
-			? false
-			: true = true;
-		const changeHasNoDestination: "toVersion" extends keyof Extract<
-			RecipeSource,
-			{ kind: "change" }
-		>
-			? false
-			: true = true;
-		const vendorRequiresProperties: object extends Parameters<
-			ElementTemplatesService["applyTemplate"]
-		>[1]
-			? false
-			: true = true;
-		const vendorCompatible: ElementTemplatesService extends MigrationModeler["elementTemplates"]
-			? true
-			: false = true;
-		const vendorRequiresCatalogProperties: object extends Parameters<
-			ElementTemplatesService["set"]
-		>[0][number]
-			? false
-			: true = true;
-		const vendorRejectsInvalidBinding: {
-			properties: { binding: { name: number } }[];
-		} extends Parameters<ElementTemplatesService["applyTemplate"]>[1]
-			? false
-			: true = true;
-		assert.ok(
-			upgradeHasNoFloor &&
-				changeHasNoDestination &&
-				vendorRequiresProperties &&
-				vendorCompatible &&
-				vendorRequiresCatalogProperties &&
-				vendorRejectsInvalidBinding,
-		);
-	});
 });

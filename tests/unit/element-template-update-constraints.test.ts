@@ -1,3 +1,8 @@
+/**
+ * MIG-009: resolved destination values are validated before anything is written
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import {
 	mkdtempSync,

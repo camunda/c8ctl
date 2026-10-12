@@ -1,3 +1,8 @@
+/**
+ * UPD-004: filesystem faults and concurrent writers never leave a half-written file
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {

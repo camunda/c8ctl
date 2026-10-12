@@ -1,3 +1,8 @@
+/**
+ * MIG-004: an explicit target wins over the cache
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
@@ -21,6 +26,10 @@ import {
 	labelledInput as input,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
+import {
+	createUpdateWorkspace,
+	updateFixtures,
+} from "../utils/update-workspace.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
@@ -319,4 +328,84 @@ describe("explicit migration targets take precedence over cached identities", ()
 			}
 		}
 	}
+});
+
+describe("update CLI: target precedence over the cache (shared update fixtures)", () => {
+	const w = createUpdateWorkspace();
+	const { TASK, NEW, V1, V2 } = updateFixtures;
+	const { ws } = w;
+	const { run, dataDirWithCache, setup, teardown, assertCleanedUp } = w;
+	before(setup);
+	after(teardown);
+
+	describe("migration catalog selection authority", () => {
+		test("rejects conflicting cached targets before selection on every cache-driven path", async () => {
+			const successor = {
+				...NEW,
+				metadata: {
+					migratesFrom: {
+						schemaVersion: 1,
+						sources: [{ kind: "change", sourceTemplateId: V1.id }],
+					},
+				},
+			};
+			for (const [target, commands] of [
+				[
+					V2,
+					[
+						["update", V1.id, TASK, ws.versionedBpmn],
+						["update", V1.id, TASK, ws.versionedBpmn, "--to", `${V2.id}@2`],
+						["update", V1.id, TASK, ws.versionedBpmn, "--to", V2.id],
+					],
+				],
+				[
+					successor,
+					[["update", V1.id, TASK, ws.versionedBpmn, "--to", successor.id]],
+				],
+			] as const) {
+				const shadow = { ...target, name: "Conflicting cached target" };
+				const diagnostics: string[] = [];
+				for (const duplicates of [
+					[target, shadow],
+					[shadow, target],
+				]) {
+					const dataDir = dataDirWithCache([V1, ...duplicates]);
+					for (const command of commands) {
+						const result = await run(
+							dataDir,
+							...command,
+							"--dry-run",
+							"--json",
+						);
+						assert.strictEqual(result.status, 1, result.stdout);
+						assert.strictEqual(result.stdout, "");
+						assert.match(result.stderr, /Conflicting definitions for template/);
+						diagnostics.push(
+							result.stderr.slice(
+								result.stderr.indexOf("Conflicting definitions"),
+							),
+						);
+					}
+				}
+				assert.ok(diagnostics.every((message) => message === diagnostics[0]));
+				for (const command of commands) {
+					const result = await run(
+						dataDirWithCache([V1, target, structuredClone(target)]),
+						...command,
+						"--dry-run",
+						"--allow-lossy",
+						"--json",
+					);
+					assert.strictEqual(result.status, 0, result.stderr);
+					assert.strictEqual(result.stderr, "");
+					assert.strictEqual(
+						JSON.parse(result.stdout).results[0].to.id,
+						target.id,
+					);
+				}
+			}
+		});
+	});
+
+	test("removes every temp dir it created", assertCleanedUp);
 });

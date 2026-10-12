@@ -339,52 +339,6 @@ describe("buildReport", () => {
 });
 
 describe("mergeFacts", () => {
-	for (const bindingType of ["zeebe:input", "zeebe:taskHeader"]) {
-		for (const reverse of [false, true]) {
-			test(`reads simultaneous moves from the step snapshot (${bindingType}, reverse=${reverse})`, () => {
-				const moves = [
-					{
-						from: { key: "a", bindingType: "zeebe:input" },
-						to: { key: "b", bindingType },
-						transformed: false,
-						value: "first",
-					},
-					{
-						from: { key: "b", bindingType },
-						to: { key: "c", bindingType: "zeebe:input" },
-						transformed: false,
-						value: "second",
-					},
-				];
-				if (reverse) moves.reverse();
-				const report = buildReport({
-					fromTemplate: oldTemplate,
-					toTemplate: newTemplate,
-					before: [
-						value("a", "first"),
-						{ ...value("b", "second"), bindingType },
-					],
-					after: [
-						{ ...value("b", "first"), bindingType },
-						value("c", "second"),
-					],
-					facts: mergeFacts([facts({ moved: moves })]),
-					usedRecipe: true,
-					refusal: null,
-				});
-				assert.deepStrictEqual(
-					report.moved.map((move) => [move.from.key, move.to.key]).sort(),
-					[
-						["a", "b"],
-						["b", "c"],
-					],
-				);
-				assert.deepStrictEqual(report.dropped, []);
-				assert.strictEqual(report.lossless, true);
-			});
-		}
-	}
-
 	test("a rename replaces an older addition at its destination", () => {
 		const merged = mergeFacts([
 			facts({
@@ -405,36 +359,6 @@ describe("mergeFacts", () => {
 		]);
 		assert.deepStrictEqual(merged.set, []);
 		assert.strictEqual(merged.failedWrites, false);
-	});
-
-	test("overwriting a move remains lossy when its original field still exists", () => {
-		const report = buildReport({
-			fromTemplate: oldTemplate,
-			toTemplate: newTemplate,
-			before: [value("a", "secret")],
-			after: [value("a", "default"), value("b", "replacement")],
-			facts: mergeFacts([
-				facts({
-					moved: [
-						{
-							from: { key: "a", bindingType: "zeebe:input" },
-							to: { key: "b", bindingType: "zeebe:input" },
-							transformed: false,
-							value: "secret",
-						},
-					],
-					after: [value("b", "secret")],
-				}),
-				facts({
-					set: [{ key: "b", bindingType: "zeebe:input", value: "replacement" }],
-					after: [value("a", "default"), value("b", "replacement")],
-				}),
-			]),
-			usedRecipe: true,
-			refusal: null,
-		});
-		assert.deepStrictEqual(report.moved, []);
-		assert.strictEqual(report.lossless, false);
 	});
 
 	test("a forwarded addition replaces an older move to the same destination", () => {
@@ -513,6 +437,111 @@ describe("mergeFacts", () => {
 		);
 	});
 
+	test("chains a move across steps into one", () => {
+		const merged = mergeFacts([
+			facts({
+				moved: [
+					{
+						from: { key: "a", bindingType: "zeebe:input" },
+						to: { key: "b", bindingType: "zeebe:input" },
+						transformed: false,
+					},
+				],
+			}),
+			facts({
+				moved: [
+					{
+						from: { key: "b", bindingType: "zeebe:input" },
+						to: { key: "c", bindingType: "zeebe:input" },
+						transformed: true,
+					},
+				],
+			}),
+		]);
+		assert.deepStrictEqual(
+			merged.moved.map((m) => [m.from.key, m.to.key, m.transformed]),
+			[["a", "c", true]],
+		);
+	});
+});
+
+describe("buildReport over merged facts", () => {
+	for (const bindingType of ["zeebe:input", "zeebe:taskHeader"]) {
+		for (const reverse of [false, true]) {
+			test(`reads simultaneous moves from the step snapshot (${bindingType}, reverse=${reverse})`, () => {
+				const moves = [
+					{
+						from: { key: "a", bindingType: "zeebe:input" },
+						to: { key: "b", bindingType },
+						transformed: false,
+						value: "first",
+					},
+					{
+						from: { key: "b", bindingType },
+						to: { key: "c", bindingType: "zeebe:input" },
+						transformed: false,
+						value: "second",
+					},
+				];
+				if (reverse) moves.reverse();
+				const report = buildReport({
+					fromTemplate: oldTemplate,
+					toTemplate: newTemplate,
+					before: [
+						value("a", "first"),
+						{ ...value("b", "second"), bindingType },
+					],
+					after: [
+						{ ...value("b", "first"), bindingType },
+						value("c", "second"),
+					],
+					facts: mergeFacts([facts({ moved: moves })]),
+					usedRecipe: true,
+					refusal: null,
+				});
+				assert.deepStrictEqual(
+					report.moved.map((move) => [move.from.key, move.to.key]).sort(),
+					[
+						["a", "b"],
+						["b", "c"],
+					],
+				);
+				assert.deepStrictEqual(report.dropped, []);
+				assert.strictEqual(report.lossless, true);
+			});
+		}
+	}
+
+	test("overwriting a move remains lossy when its original field still exists", () => {
+		const report = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("a", "secret")],
+			after: [value("a", "default"), value("b", "replacement")],
+			facts: mergeFacts([
+				facts({
+					moved: [
+						{
+							from: { key: "a", bindingType: "zeebe:input" },
+							to: { key: "b", bindingType: "zeebe:input" },
+							transformed: false,
+							value: "secret",
+						},
+					],
+					after: [value("b", "secret")],
+				}),
+				facts({
+					set: [{ key: "b", bindingType: "zeebe:input", value: "replacement" }],
+					after: [value("a", "default"), value("b", "replacement")],
+				}),
+			]),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(report.moved, []);
+		assert.strictEqual(report.lossless, false);
+	});
+
 	test("does not resurrect lineage when a removed destination is recreated later", () => {
 		const merged = mergeFacts([
 			{
@@ -545,32 +574,5 @@ describe("mergeFacts", () => {
 		assert.deepStrictEqual(report.moved, []);
 		assert.strictEqual(report.dropped[0]?.value, "secret");
 		assert.strictEqual(report.lossless, false);
-	});
-
-	test("chains a move across steps into one", () => {
-		const merged = mergeFacts([
-			facts({
-				moved: [
-					{
-						from: { key: "a", bindingType: "zeebe:input" },
-						to: { key: "b", bindingType: "zeebe:input" },
-						transformed: false,
-					},
-				],
-			}),
-			facts({
-				moved: [
-					{
-						from: { key: "b", bindingType: "zeebe:input" },
-						to: { key: "c", bindingType: "zeebe:input" },
-						transformed: true,
-					},
-				],
-			}),
-		]);
-		assert.deepStrictEqual(
-			merged.moved.map((m) => [m.from.key, m.to.key, m.transformed]),
-			[["a", "c", true]],
-		);
 	});
 });

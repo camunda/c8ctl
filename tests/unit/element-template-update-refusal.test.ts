@@ -1,3 +1,8 @@
+/**
+ * MIG-006: unusable explicit recipes and lossy overwrites fail closed
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import {
 	mkdtempSync,
@@ -8,12 +13,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import { c8WithEnv } from "../utils/cli.ts";
 import {
 	labelledInput as input,
 	seedTemplateCache,
 } from "../utils/element-template.ts";
+import {
+	createUpdateWorkspace,
+	updateFixtures,
+} from "../utils/update-workspace.ts";
 
 const TASK = "Activity_17s7axj";
 const dir = mkdtempSync(join(tmpdir(), "c8ctl-migration-refusal-"));
@@ -458,4 +467,73 @@ test("embedded fallback dry-run reports prospective losses without authorization
 		}
 		fixture.assertUnchanged();
 	}
+});
+
+describe("update CLI: unusable recipes and lossy overwrites (shared update fixtures)", () => {
+	const w = createUpdateWorkspace();
+	const { TASK, OLD, NEW } = updateFixtures;
+	const { ws } = w;
+	const { run, dataDirWithCache, setup, teardown, assertCleanedUp } = w;
+	before(setup);
+	after(teardown);
+
+	test("--recipe overrides the embedded recipe", async () => {
+		const templatePath = join(ws.workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const recipePath = join(ws.workDir, "recipe.json");
+		writeFileSync(
+			recipePath,
+			JSON.stringify({
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: "io.example.old",
+						paths: [{ from: "endpoint", to: "backend.provider" }],
+					},
+				],
+			}),
+		);
+		const result = await run(
+			dataDirWithCache([OLD]),
+			"update",
+			OLD.id,
+			TASK,
+			ws.oldBpmn,
+			"--to",
+			templatePath,
+			"--recipe",
+			recipePath,
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(
+			result.stdout,
+			/source="https:\/\/x" target="backend.provider"/,
+		);
+	});
+
+	test("rejects an invalid recipe file before changing anything", async () => {
+		const templatePath = join(ws.workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const recipePath = join(ws.workDir, "bad-recipe.json");
+		writeFileSync(
+			recipePath,
+			JSON.stringify({ schemaVersion: 2, sources: [] }),
+		);
+		const result = await run(
+			dataDirWithCache([OLD]),
+			"update",
+			OLD.id,
+			TASK,
+			ws.oldBpmn,
+			"--to",
+			templatePath,
+			"--recipe",
+			recipePath,
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /Update c8ctl/);
+	});
+
+	test("removes every temp dir it created", assertCleanedUp);
 });

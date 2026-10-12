@@ -8,7 +8,11 @@ import { describe, test } from "node:test";
 import {
 	parseRecipe,
 	RecipeError,
+	readEmbeddedRecipe,
+	validateRecipeOwner,
 } from "../../default-plugins/element-template/migration/recipe.ts";
+
+const source = { kind: "change", sourceTemplateId: "old" };
 
 const SOURCE_ID = "io.example.old.v1";
 
@@ -331,5 +335,105 @@ describe("parseRecipe", () => {
 				);
 			}
 		}
+	});
+});
+
+describe("validateRecipeOwner", () => {
+	for (const variant of [
+		{
+			name: "upgrade equal to owner version",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
+			owner: { id: "old", version: 1 },
+			accepted: true,
+		},
+		{
+			name: "upgrade zero at owner zero",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 0 },
+			owner: { id: "old", version: 0 },
+			accepted: true,
+		},
+		{
+			name: "upgrade below owner version",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
+			owner: { id: "old", version: 2 },
+			accepted: true,
+		},
+		{
+			name: "upgrade above owner version",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 2 },
+			owner: { id: "old", version: 1 },
+			accepted: false,
+		},
+		{
+			name: "upgrade without owner version",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 0 },
+			owner: { id: "old" },
+			accepted: false,
+		},
+		{
+			name: "upgrade with different owner ID",
+			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
+			owner: { id: "new", version: 1 },
+			accepted: false,
+		},
+		{
+			name: "change with different owner ID",
+			entry: source,
+			owner: { id: "new" },
+			accepted: true,
+		},
+		{
+			name: "change with same owner ID",
+			entry: source,
+			owner: { id: "old", version: 1 },
+			accepted: false,
+		},
+		{
+			name: "change floor above owner version",
+			entry: { ...source, minSourceVersion: 3 },
+			owner: { id: "new", version: 1 },
+			accepted: true,
+		},
+	]) {
+		test(variant.name, () => {
+			const parsed = parseRecipe({
+				schemaVersion: 1,
+				sources: [variant.entry],
+			});
+			const check = () => validateRecipeOwner(parsed, variant.owner);
+			if (variant.accepted) assert.doesNotThrow(check);
+			else assert.throws(check, RecipeError);
+		});
+	}
+});
+
+describe("readEmbeddedRecipe", () => {
+	test("returns undefined without metadata or without migratesFrom", () => {
+		assert.strictEqual(readEmbeddedRecipe({}), undefined);
+		assert.strictEqual(readEmbeddedRecipe({ metadata: undefined }), undefined);
+		assert.strictEqual(readEmbeddedRecipe({ metadata: "text" }), undefined);
+		assert.strictEqual(readEmbeddedRecipe({ metadata: null }), undefined);
+		assert.strictEqual(readEmbeddedRecipe({ metadata: {} }), undefined);
+	});
+
+	test("parses the embedded recipe", () => {
+		const recipe = readEmbeddedRecipe({
+			metadata: { migratesFrom: recipeWith({ from: "a", to: "b" }) },
+		});
+		assert.strictEqual(recipe?.sources[0].sourceTemplateId, SOURCE_ID);
+	});
+
+	test("throws RecipeError for an invalid embedded recipe", () => {
+		assert.throws(
+			() =>
+				readEmbeddedRecipe({
+					metadata: { migratesFrom: { schemaVersion: 99 } },
+				}),
+			RecipeError,
+		);
+		assert.throws(
+			() => readEmbeddedRecipe({ metadata: { migratesFrom: null } }),
+			RecipeError,
+		);
 	});
 });

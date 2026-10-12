@@ -1,3 +1,8 @@
+/**
+ * MIG-011: reports and diagnostics redact sensitive values
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

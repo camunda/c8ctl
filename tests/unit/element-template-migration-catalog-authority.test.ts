@@ -1,3 +1,8 @@
+/**
+ * MIG-004, engine half: the supplied source and target beat the catalog
+ * (default-plugins/element-template/migration/apply.ts)
+ */
+
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {

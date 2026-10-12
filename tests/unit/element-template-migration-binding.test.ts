@@ -6,6 +6,7 @@
 import assert from "node:assert";
 import { describe, test } from "node:test";
 import {
+	bindingPath,
 	bindingTargetKey,
 	findExtensionContainers,
 	findPropertiesByTarget,
@@ -13,16 +14,7 @@ import {
 	resolveBindingTarget,
 	splitBindingPrefix,
 } from "../../default-plugins/element-template/migration/binding.ts";
-import { enumerateElementValues } from "../../default-plugins/element-template/migration/element-values.ts";
-import type { ModdleElement } from "../../default-plugins/element-template/migration/moddle.ts";
-
-function moddle($type: string, props: Record<string, unknown>): ModdleElement {
-	return { $type, ...props, get: (name: string) => props[name] };
-}
-
-function extensionElements(...values: ModdleElement[]): ModdleElement {
-	return moddle("bpmn:ExtensionElements", { values });
-}
+import { extensionElements, moddle } from "../utils/moddle.ts";
 
 describe("splitBindingPrefix", () => {
 	test("splits a known prefix and leaves other colons alone", () => {
@@ -83,57 +75,6 @@ describe("maybePrependFeel", () => {
 	});
 });
 
-describe("enumerateElementValues", () => {
-	const ext = extensionElements(
-		moddle("zeebe:IoMapping", {
-			inputParameters: [
-				moddle("zeebe:Input", { target: "url", source: "https://x" }),
-				moddle("zeebe:Input", { target: "body", source: "=payload" }),
-			],
-			outputParameters: [
-				moddle("zeebe:Output", { source: "=response", target: "result" }),
-			],
-		}),
-		moddle("zeebe:TaskHeaders", {
-			values: [moddle("zeebe:Header", { key: "k", value: "v" })],
-		}),
-		moddle("zeebe:TaskDefinition", { type: "io.example", retries: 3 }),
-		moddle("zeebe:AgentDefinition", { agentType: "ai" }),
-		moddle("zeebe:AdHoc", { outputCollection: "results" }),
-	);
-
-	test("reads values keyed by binding and flags FEEL values", () => {
-		const values = enumerateElementValues(ext);
-		const byKey = (type: string, key: string) =>
-			values.find((v) => v.bindingType === type && v.key === key);
-		assert.strictEqual(byKey("zeebe:input", "url")?.value, "https://x");
-		assert.strictEqual(byKey("zeebe:input", "body")?.isFeel, true);
-		assert.strictEqual(byKey("zeebe:output", "=response")?.value, "result");
-		assert.strictEqual(byKey("zeebe:taskHeader", "k")?.value, "v");
-		assert.strictEqual(byKey("zeebe:taskDefinition", "retries")?.value, "3");
-		assert.strictEqual(
-			byKey("zeebe:agentDefinition", "agentType")?.value,
-			"ai",
-		);
-		assert.strictEqual(
-			byKey("zeebe:adHoc", "outputCollection")?.value,
-			"results",
-		);
-	});
-
-	test("never reports the task definition type", () => {
-		assert.ok(
-			!enumerateElementValues(ext).some(
-				(v) => v.bindingType === "zeebe:taskDefinition" && v.key === "type",
-			),
-		);
-	});
-
-	test("returns nothing for an element without extensions", () => {
-		assert.deepStrictEqual(enumerateElementValues(undefined), []);
-	});
-});
-
 describe("resolveBindingTarget", () => {
 	const containers = findExtensionContainers(
 		extensionElements(
@@ -168,4 +109,26 @@ describe("resolveBindingTarget", () => {
 			undefined,
 		);
 	});
+});
+
+describe("bindingPath", () => {
+	for (const [bindingType, expected] of [
+		["zeebe:input", "input:key"],
+		["zeebe:output", "output:key"],
+		["zeebe:taskHeader", "header:key"],
+		["zeebe:property", "property:key"],
+		["zeebe:taskDefinition", "taskDefinition:key"],
+		["custom", "custom:key"],
+	] as const) {
+		test(`qualifies ${bindingType} as ${expected}`, () => {
+			assert.strictEqual(bindingPath(bindingType, "key"), expected);
+		});
+	}
+
+	// Pinned: an unknown binding type yields a path no recipe can address.
+	for (const bindingType of [null, undefined]) {
+		test(`a ${bindingType} binding type yields "undefined:key"`, () => {
+			assert.strictEqual(bindingPath(bindingType, "key"), "undefined:key");
+		});
+	}
 });

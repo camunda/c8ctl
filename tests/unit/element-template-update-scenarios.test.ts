@@ -1,3 +1,8 @@
+/**
+ * MIG-012: real connector journeys through the update command
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import {
 	mkdtempSync,

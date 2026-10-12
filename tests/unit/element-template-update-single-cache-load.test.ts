@@ -1,3 +1,8 @@
+/**
+ * UPD-002: the template cache is loaded once per run
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import {
 	existsSync,

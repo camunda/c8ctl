@@ -12,7 +12,6 @@ import { Ajv } from "ajv";
 import {
 	parseRecipe,
 	RecipeError,
-	validateRecipeOwner,
 } from "../../default-plugins/element-template/migration/recipe.ts";
 
 const schema: object = JSON.parse(
@@ -660,71 +659,15 @@ describe("semantic validation is deliberately outside Draft07", () => {
 		assert.strictEqual(validate(raw), true, JSON.stringify(validate.errors));
 		assert.doesNotThrow(() => parseRecipe(raw));
 	});
-	for (const variant of [
-		{
-			name: "upgrade equal to owner version",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
-			owner: { id: "old", version: 1 },
-			accepted: true,
-		},
-		{
-			name: "upgrade zero at owner zero",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 0 },
-			owner: { id: "old", version: 0 },
-			accepted: true,
-		},
-		{
-			name: "upgrade below owner version",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
-			owner: { id: "old", version: 2 },
-			accepted: true,
-		},
-		{
-			name: "upgrade above owner version",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 2 },
-			owner: { id: "old", version: 1 },
-			accepted: false,
-		},
-		{
-			name: "upgrade without owner version",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 0 },
-			owner: { id: "old" },
-			accepted: false,
-		},
-		{
-			name: "upgrade with different owner ID",
-			entry: { kind: "upgrade", sourceTemplateId: "old", toVersion: 1 },
-			owner: { id: "new", version: 1 },
-			accepted: false,
-		},
-		{
-			name: "change with different owner ID",
-			entry: source,
-			owner: { id: "new" },
-			accepted: true,
-		},
-		{
-			name: "change with same owner ID",
-			entry: source,
-			owner: { id: "old", version: 1 },
-			accepted: false,
-		},
-		{
-			name: "change floor above owner version",
-			entry: { ...source, minSourceVersion: 3 },
-			owner: { id: "new", version: 1 },
-			accepted: true,
-		},
-	]) {
-		test(variant.name, () => {
-			const raw = withSources(variant.entry);
-			assert.strictEqual(validate(raw), true, JSON.stringify(validate.errors));
-			const parsed = parseRecipe(raw);
-			const check = () => validateRecipeOwner(parsed, variant.owner);
-			if (variant.accepted) assert.doesNotThrow(check);
-			else assert.throws(check, RecipeError);
+	test("the schema accepts recipes whose owner relation is invalid", () => {
+		// validateRecipeOwner (recipe.ts) rejects these; see migration-recipe.test.ts.
+		const raw = withSources({
+			kind: "upgrade",
+			sourceTemplateId: "old",
+			toVersion: 2,
 		});
-	}
+		assert.strictEqual(validate(raw), true, JSON.stringify(validate.errors));
+	});
 });
 
 describe("note and scalar validation across all consumers", () => {

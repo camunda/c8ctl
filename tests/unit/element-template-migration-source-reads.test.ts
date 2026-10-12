@@ -1,3 +1,8 @@
+/**
+ * MIG-008, engine half: ambiguous source reads are rejected
+ * (default-plugins/element-template/migration/plan.ts)
+ */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";

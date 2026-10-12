@@ -1,3 +1,8 @@
+/**
+ * MIG-010: a no-op keeps its output contract and leaves the filesystem untouched
+ * (default-plugins/element-template/commands/migrate.ts)
+ */
+
 import assert from "node:assert/strict";
 import {
 	mkdtempSync,
@@ -14,6 +19,10 @@ import { after, before, describe, test } from "node:test";
 import { isRecord } from "../../src/core/index.ts";
 import { c8WithOptions } from "../utils/cli.ts";
 import { seedTemplateCache } from "../utils/element-template.ts";
+import {
+	createUpdateWorkspace,
+	updateFixtures,
+} from "../utils/update-workspace.ts";
 
 const TASK = "Activity_17s7axj";
 const ID = "io.example.noop-contract";
@@ -643,3 +652,100 @@ for (const mode of modes) {
 		assert.match(properties.stdout, /source="retained" target="message"/);
 	});
 }
+
+describe("update CLI: no-op contract (shared update fixtures)", () => {
+	const w = createUpdateWorkspace();
+	const { TASK, V1, V2 } = updateFixtures;
+	const { ws } = w;
+	const {
+		run,
+		runWithPreload,
+		dataDirWithCache,
+		failingSaveXmlPreload,
+		seedMulti,
+		setup,
+		teardown,
+		assertCleanedUp,
+	} = w;
+	before(setup);
+	after(teardown);
+
+	test("no-op still validates a supplied recipe", async () => {
+		const recipePath = join(ws.workDir, "invalid-noop-recipe.json");
+		writeFileSync(
+			recipePath,
+			JSON.stringify({ schemaVersion: 2, sources: [] }),
+		);
+		const result = await run(
+			dataDirWithCache([V1]),
+			"update",
+			V1.id,
+			TASK,
+			ws.versionedBpmn,
+			"--recipe",
+			recipePath,
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /schemaVersion/);
+	});
+
+	test("reports when the element is already up to date", async () => {
+		const result = await run(
+			dataDirWithCache([V1]),
+			"update",
+			V1.id,
+			TASK,
+			ws.versionedBpmn,
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.stdout, readFileSync(ws.versionedBpmn, "utf-8"));
+		assert.match(result.stderr, /already on/);
+	});
+
+	test("JSON no-ops preserve the report envelope with and without --to", async () => {
+		const templatePath = join(ws.workDir, "same.json");
+		writeFileSync(templatePath, JSON.stringify(V1));
+		for (const extra of [[], ["--to", templatePath]]) {
+			const result = await run(
+				dataDirWithCache([V1]),
+				"update",
+				V1.id,
+				TASK,
+				ws.versionedBpmn,
+				...extra,
+				"--dry-run",
+				"--json",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const json = JSON.parse(result.stdout);
+			assert.strictEqual(json.results.length, 1);
+			const [entry] = json.results;
+			assert.strictEqual(entry.status, "unchanged");
+			assert.strictEqual(entry.noop, true);
+			assert.strictEqual(entry.lossless, true);
+			assert.deepStrictEqual(entry.report.moved, []);
+			assert.strictEqual(result.stderr, "");
+		}
+	});
+
+	test("a run where every element is already on the target does not rewrite the file", async () => {
+		const file = await seedMulti("allnoop", [
+			[TASK, V2, ["provider=azure", "url=https://a"]],
+			["Task_B", V2, ["provider=azure", "url=https://b"]],
+		]);
+		const before = readFileSync(file, "utf-8");
+		const mtime = statSync(file).mtimeMs;
+		const result = await runWithPreload(
+			dataDirWithCache([V1, V2]),
+			failingSaveXmlPreload(),
+			["update", V1.id, file, "--in-place"],
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Summary: 0 updated, 0 skipped, 2 unchanged/);
+		assert.doesNotMatch(result.stdout, /Updated /);
+		assert.strictEqual(readFileSync(file, "utf-8"), before);
+		assert.strictEqual(statSync(file).mtimeMs, mtime);
+	});
+
+	test("removes every temp dir it created", assertCleanedUp);
+});
