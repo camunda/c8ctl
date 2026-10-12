@@ -1,18 +1,15 @@
 import assert from "node:assert/strict";
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import {
-	type ElementValue,
 	enumerateElementValues,
 	getExtensionElements,
 } from "../../default-plugins/element-template/migration/element-values.ts";
@@ -20,9 +17,11 @@ import { buildStepPlan } from "../../default-plugins/element-template/migration/
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import {
-	resolveVendorBundle,
-	type VendorBundle,
-} from "../../default-plugins/element-template/vendor.ts";
+	createTestModeler,
+	elementValue,
+	loadVendorBundle,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const bindings = [
@@ -40,10 +39,6 @@ const bindings = [
 	},
 	{ prefix: "adHoc", binding: { type: "zeebe:adHoc", property: "b" } },
 ];
-
-function input(key: string, value: string): ElementValue {
-	return { key, value, bindingType: "zeebe:input", isFeel: false };
-}
 
 function entriesOf(...paths: unknown[]) {
 	return parseRecipe({
@@ -71,7 +66,8 @@ describe("resolved destination write conflicts", () => {
 					for (const ordered of [paths, [...paths].reverse()]) {
 						const entries = entriesOf(...ordered);
 						assert.throws(
-							() => buildStepPlan(entries, [input("a", "VALUE")], target),
+							() =>
+								buildStepPlan(entries, [elementValue("a", "VALUE")], target),
 							(error) =>
 								error instanceof Error &&
 								/Ambiguous migration/.test(error.message) &&
@@ -122,10 +118,14 @@ describe("resolved destination write conflicts", () => {
 				for (const ordered of [paths, [...paths].reverse()])
 					assert.throws(
 						() =>
-							buildStepPlan(entriesOf(...ordered), [input("a", "VALUE")], {
-								id: "new",
-								properties: [{ binding: resolvedBinding }],
-							}),
+							buildStepPlan(
+								entriesOf(...ordered),
+								[elementValue("a", "VALUE")],
+								{
+									id: "new",
+									properties: [{ binding: resolvedBinding }],
+								},
+							),
 						/Ambiguous migration/,
 					);
 			}
@@ -181,7 +181,12 @@ describe("resolved destination write conflicts", () => {
 						() =>
 							buildStepPlan(
 								entriesOf(...ordered),
-								[{ ...input("a", value), isFeel: value.startsWith("=") }],
+								[
+									{
+										...elementValue("a", value),
+										isFeel: value.startsWith("="),
+									},
+								],
 								{ id: "new", properties: [{ binding: bindings[0].binding }] },
 							),
 						/Ambiguous migration/,
@@ -211,7 +216,7 @@ describe("resolved destination write conflicts", () => {
 				() =>
 					buildStepPlan(
 						entriesOf(...ordered),
-						[input("a", "VALUE"), input("mode", "on")],
+						[elementValue("a", "VALUE"), elementValue("mode", "on")],
 						target,
 					),
 				/Ambiguous migration/,
@@ -232,7 +237,7 @@ describe("resolved destination write conflicts", () => {
 					() =>
 						buildStepPlan(
 							entriesOf(...ordered),
-							[input("a", "VALUE"), input("mode", "on")],
+							[elementValue("a", "VALUE"), elementValue("mode", "on")],
 							{ id: "new", properties: [{ binding: bindings[0].binding }] },
 						),
 					/Ambiguous migration/,
@@ -256,7 +261,7 @@ describe("resolved destination write conflicts", () => {
 				for (const mode of ["on", "off", "neither"]) {
 					const plan = buildStepPlan(
 						entriesOf(...ordered),
-						[input("a", "VALUE"), input("mode", mode)],
+						[elementValue("a", "VALUE"), elementValue("mode", mode)],
 						{ id: "new", properties: [{ binding }] },
 					);
 					assert.deepEqual(
@@ -292,7 +297,7 @@ describe("resolved destination write conflicts", () => {
 			for (const ordered of [paths, [...paths].reverse()]) {
 				const plan = buildStepPlan(
 					entriesOf(...ordered),
-					[input("a", "VALUE")],
+					[elementValue("a", "VALUE")],
 					{
 						id: "new",
 						properties: [{ binding: bindings[0].binding }],
@@ -314,7 +319,7 @@ describe("resolved destination write conflicts", () => {
 		for (const ordered of [paths, [...paths].reverse()])
 			assert.throws(
 				() =>
-					buildStepPlan(entriesOf(...ordered), [input("a", "")], {
+					buildStepPlan(entriesOf(...ordered), [elementValue("a", "")], {
 						id: "new",
 						properties: [{ binding: bindings[0].binding }],
 					}),
@@ -364,10 +369,10 @@ describe("resolved destination write conflicts", () => {
 			},
 		];
 		const values = [
-			input("a", "INPUT"),
-			{ ...input("a", "HEADER"), bindingType: "zeebe:taskHeader" },
-			input("mode", "on"),
-			{ ...input("mode", "ready"), bindingType: "zeebe:taskHeader" },
+			elementValue("a", "INPUT"),
+			{ ...elementValue("a", "HEADER"), bindingType: "zeebe:taskHeader" },
+			elementValue("mode", "on"),
+			{ ...elementValue("mode", "ready"), bindingType: "zeebe:taskHeader" },
 		];
 		const target = {
 			id: "new",
@@ -430,7 +435,11 @@ describe("resolved destination write conflicts", () => {
 		for (const ordered of [paths, [...paths].reverse()])
 			assert.throws(
 				() =>
-					buildStepPlan(entriesOf(...ordered), [input("a", "VALUE")], target),
+					buildStepPlan(
+						entriesOf(...ordered),
+						[elementValue("a", "VALUE")],
+						target,
+					),
 				/Ambiguous migration/,
 			);
 	});
@@ -492,11 +501,7 @@ for (const reversed of [false, true]) {
 			[property("b", "")],
 			reversed ? paths.reverse() : paths,
 		);
-		mkdirSync(join(dir, "element-templates"));
-		writeFileSync(
-			join(dir, "element-templates/templates.json"),
-			JSON.stringify([old, target]),
-		);
+		seedTemplateCache(dir, [old, target]);
 		const oldPath = join(dir, "old.json");
 		const targetPath = join(dir, "new.json");
 		const bpmn = join(dir, "process.bpmn");
@@ -575,11 +580,7 @@ test("CLI persists independent qualified input/header writes with the same key",
 		{ from: "input:a", to: "input:b" },
 		{ from: "input:c", to: "header:b" },
 	];
-	mkdirSync(join(dir, "element-templates"));
-	writeFileSync(
-		join(dir, "element-templates/templates.json"),
-		JSON.stringify([old]),
-	);
+	seedTemplateCache(dir, [old]);
 	const oldPath = join(dir, "old.json");
 	const targetPath = join(dir, "new.json");
 	const bpmn = join(dir, "process.bpmn");
@@ -608,9 +609,7 @@ test("CLI persists independent qualified input/header writes with the same key",
 		resolve("tests/fixtures/simple.bpmn"),
 	);
 	assert.equal(seeded.status, 0, seeded.stderr);
-	const vendor: VendorBundle = createRequire(import.meta.url)(
-		resolveVendorBundle(),
-	);
+	const vendor = loadVendorBundle();
 	for (const ordered of [paths, [...paths].reverse()]) {
 		const target: MigrationTemplate = template(
 			"new",
@@ -645,14 +644,10 @@ test("CLI persists independent qualified input/header writes with the same key",
 				["zeebe:taskHeader", "b"],
 			],
 		);
-		const modeler = new vendor.Modeler({
-			additionalModules: [
-				vendor.HeadlessTextRendererModule,
-				vendor.CloudElementTemplatesCoreModule,
-			],
-			moddleExtensions: { zeebe: vendor.ZeebeModdleExtension },
-		});
-		await modeler.importXML(readFileSync(bpmn, "utf-8"));
+		const modeler = await createTestModeler(
+			vendor,
+			readFileSync(bpmn, "utf-8"),
+		);
 		const element = modeler.get("elementRegistry").get(TASK);
 		assert.ok(element);
 		assert.deepEqual(

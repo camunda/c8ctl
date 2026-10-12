@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -10,20 +9,14 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
-
-function input(name: string, value: string, extra: object = {}) {
-	return {
-		type: "String",
-		label: name,
-		value,
-		binding: { type: "zeebe:input", name },
-		...extra,
-	};
-}
 
 describe("migration destination constraints through CLI", () => {
 	for (const action of ["change", "update"] as const) {
@@ -94,7 +87,6 @@ describe("migration destination constraints through CLI", () => {
 				const dir = mkdtempSync(join(tmpdir(), "c8ctl-constraints-"));
 				t.after(() => rmSync(dir, { recursive: true, force: true }));
 				const dataDir = join(dir, "data");
-				mkdirSync(join(dataDir, "element-templates"), { recursive: true });
 				const old = {
 					id: "io.example.constraints",
 					version: 1,
@@ -132,14 +124,7 @@ describe("migration destination constraints through CLI", () => {
 							}
 						: {}),
 				};
-				writeFileSync(
-					join(dataDir, "element-templates/templates.json"),
-					JSON.stringify([old, target]),
-				);
-				writeFileSync(
-					join(dataDir, "element-templates/fetched-at"),
-					String(Date.now()),
-				);
+				seedTemplateCache(dataDir, [old, target]);
 				const oldPath = join(dir, "old.json");
 				const targetPath = join(dir, "target.json");
 				writeFileSync(oldPath, JSON.stringify(old));

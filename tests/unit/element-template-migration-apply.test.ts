@@ -4,7 +4,6 @@
  */
 
 import assert from "node:assert";
-import { createRequire } from "node:module";
 import { before, describe, test } from "node:test";
 import type { MigrationModeler } from "../../default-plugins/element-template/migration/apply.ts";
 import { migrateElement } from "../../default-plugins/element-template/migration/apply.ts";
@@ -12,40 +11,16 @@ import {
 	enumerateElementValues,
 	getExtensionElements,
 } from "../../default-plugins/element-template/migration/element-values.ts";
-import {
-	getModdleElement,
-	getModdleList,
-} from "../../default-plugins/element-template/migration/moddle.ts";
+import { getModdleList } from "../../default-plugins/element-template/migration/moddle.ts";
 import { normalizeDestinationValue } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import type { VendorBundle } from "../../default-plugins/element-template/vendor.ts";
-import { resolveVendorBundle } from "../../default-plugins/element-template/vendor.ts";
-
-const require = createRequire(import.meta.url);
-
-const DIAGRAM = `<?xml version="1.0" encoding="UTF-8"?>
-<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
-  <bpmn:process id="Process_1" isExecutable="true">
-    <bpmn:serviceTask id="Task_1" />
-  </bpmn:process>
-  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
-    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
-      <bpmndi:BPMNShape id="Task_1_di" bpmnElement="Task_1">
-        <dc:Bounds x="100" y="100" width="100" height="80" />
-      </bpmndi:BPMNShape>
-    </bpmndi:BPMNPlane>
-  </bpmndi:BPMNDiagram>
-</bpmn:definitions>`;
-
-function input(name: string, value: string, extra = {}) {
-	return {
-		type: "String",
-		value,
-		binding: { type: "zeebe:input", name },
-		...extra,
-	};
-}
+import {
+	input,
+	loadVendorBundle,
+	setupAppliedModeler,
+} from "../utils/element-template.ts";
 
 const OLD: MigrationTemplate = {
 	id: "io.example.old",
@@ -109,40 +84,37 @@ const NEW: MigrationTemplate = {
 let vendor: VendorBundle;
 
 before(() => {
-	vendor = require(resolveVendorBundle());
+	vendor = loadVendorBundle();
 });
 
-async function setup(
-	applied: MigrationTemplate,
-	values: Record<string, string>,
+function setup(applied: MigrationTemplate, values: Record<string, string>) {
+	return setupAppliedModeler(vendor, applied, values);
+}
+
+/** After every `applyTemplate`, overwrite the `target` input as a stale write would. */
+function overwriteInputAfterApply(
+	migrationModeler: MigrationModeler,
+	target: string,
+	source: string,
 ) {
-	const modeler = new vendor.Modeler({
-		additionalModules: [
-			vendor.HeadlessTextRendererModule,
-			vendor.CloudElementTemplatesCoreModule,
-		],
-		moddleExtensions: { zeebe: vendor.ZeebeModdleExtension },
-	});
-	await modeler.importXML(DIAGRAM);
-	const elementTemplates = modeler.get("elementTemplates");
-	const modeling = modeler.get("modeling");
-	elementTemplates.set([applied]);
-	const element = modeler.get("elementRegistry").get("Task_1");
-	assert.ok(element);
-	const seeded = elementTemplates.applyTemplate(element, applied) ?? element;
-	for (const [name, value] of Object.entries(values)) {
-		const ext = getModdleElement(seeded.businessObject, "extensionElements");
-		const io = getModdleList(ext, "values").find(
-			(v) => v.$type === "zeebe:IoMapping",
-		);
-		const param = getModdleList(io, "inputParameters").find(
-			(p) => p.target === name,
-		);
-		assert.ok(param);
-		modeling.updateModdleProperties(seeded, param, { source: value });
-	}
-	const migrationModeler: MigrationModeler = { elementTemplates, modeling };
-	return { modeler, migrationModeler, element: seeded };
+	const { elementTemplates, modeling } = migrationModeler;
+	const applyTemplate = elementTemplates.applyTemplate.bind(elementTemplates);
+	migrationModeler.elementTemplates = {
+		set: elementTemplates.set.bind(elementTemplates),
+		applyTemplate(current, template) {
+			const applied = applyTemplate(current, template) ?? current;
+			const io = getModdleList(
+				getExtensionElements(applied.businessObject),
+				"values",
+			).find((item) => item.$type === "zeebe:IoMapping");
+			const param = getModdleList(io, "inputParameters").find(
+				(item) => item.target === target,
+			);
+			assert.ok(param);
+			modeling.updateModdleProperties(applied, param, { source });
+			return applied;
+		},
+	};
 }
 
 describe("migrateElement", () => {
@@ -432,30 +404,7 @@ describe("migrateElement", () => {
 				properties: [input("a", ""), input("b", "")],
 			};
 			const { migrationModeler, element } = await setup(old, {});
-			const applyTemplate =
-				migrationModeler.elementTemplates.applyTemplate.bind(
-					migrationModeler.elementTemplates,
-				);
-			migrationModeler.elementTemplates = {
-				set: migrationModeler.elementTemplates.set.bind(
-					migrationModeler.elementTemplates,
-				),
-				applyTemplate(current, template) {
-					const applied = applyTemplate(current, template) ?? current;
-					const io = getModdleList(
-						getExtensionElements(applied.businessObject),
-						"values",
-					).find((item) => item.$type === "zeebe:IoMapping");
-					const param = getModdleList(io, "inputParameters").find(
-						(item) => item.target === "b",
-					);
-					assert.ok(param);
-					migrationModeler.modeling.updateModdleProperties(applied, param, {
-						source: "unrelated",
-					});
-					return applied;
-				},
-			};
+			overwriteInputAfterApply(migrationModeler, "b", "unrelated");
 			const { report } = migrateElement({
 				modeler: migrationModeler,
 				element,
@@ -711,30 +660,7 @@ describe("migrateElement", () => {
 				properties: [input("b", "")],
 			};
 			const { migrationModeler, element } = await setup(old, {});
-			const applyTemplate =
-				migrationModeler.elementTemplates.applyTemplate.bind(
-					migrationModeler.elementTemplates,
-				);
-			migrationModeler.elementTemplates = {
-				set: migrationModeler.elementTemplates.set.bind(
-					migrationModeler.elementTemplates,
-				),
-				applyTemplate(current, template) {
-					const applied = applyTemplate(current, template) ?? current;
-					const io = getModdleList(
-						getExtensionElements(applied.businessObject),
-						"values",
-					).find((item) => item.$type === "zeebe:IoMapping");
-					const param = getModdleList(io, "inputParameters").find(
-						(item) => item.target === "b",
-					);
-					assert.ok(param);
-					migrationModeler.modeling.updateModdleProperties(applied, param, {
-						source: "unrelated",
-					});
-					return applied;
-				},
-			};
+			overwriteInputAfterApply(migrationModeler, "b", "unrelated");
 			const { report } = migrateElement({
 				modeler: migrationModeler,
 				element,

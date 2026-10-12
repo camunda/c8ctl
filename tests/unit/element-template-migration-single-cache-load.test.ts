@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -10,6 +9,10 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
@@ -18,12 +21,6 @@ const PRELOAD = resolve(
 	import.meta.dirname,
 	"../fixtures/count-cache-reads.mjs",
 );
-const input = (name: string, value: string) => ({
-	type: "String",
-	label: name,
-	value,
-	binding: { type: "zeebe:input", name },
-});
 const SOURCE = {
 	id: "io.example.single-load.source",
 	name: "Source",
@@ -88,13 +85,7 @@ before(async () => {
 	dir = mkdtempSync(join(tmpdir(), "c8ctl-single-cache-load-"));
 	dataDir = join(dir, "data");
 	readLog = join(dir, "reads.log");
-	const cache = join(dataDir, "element-templates");
-	mkdirSync(cache, { recursive: true });
-	writeFileSync(
-		join(cache, "templates.json"),
-		JSON.stringify([SOURCE, UPGRADE, NEXT]),
-	);
-	writeFileSync(join(cache, "fetched-at"), String(Date.now()));
+	seedTemplateCache(dataDir, [SOURCE, UPGRADE, NEXT]);
 	const sourcePath = join(dir, "source.json");
 	writeFileSync(sourcePath, JSON.stringify(SOURCE));
 	const seeded = await run("apply", sourcePath, TASK, FIXTURE);

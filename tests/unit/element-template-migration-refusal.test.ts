@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -11,15 +10,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { c8WithEnv } from "../utils/cli.ts";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 
 const TASK = "Activity_17s7axj";
 const dir = mkdtempSync(join(tmpdir(), "c8ctl-migration-refusal-"));
-const input = (name: string, value = "") => ({
-	type: "String",
-	label: name,
-	value,
-	binding: { type: "zeebe:input", name },
-});
 const source = {
 	id: "refusal.source",
 	name: "Source",
@@ -101,8 +98,6 @@ function setup({
 	lossy?: boolean;
 } = {}) {
 	const work = mkdtempSync(join(dir, "case-"));
-	const cache = join(work, "element-templates");
-	mkdirSync(cache);
 	const target = {
 		...source,
 		id: action === "change" ? "refusal.target" : source.id,
@@ -111,11 +106,7 @@ function setup({
 		properties: lossy ? [input("kept")] : source.properties,
 		...(embedded ? { metadata: { migratesFrom: recipe } } : {}),
 	};
-	writeFileSync(
-		join(cache, "templates.json"),
-		JSON.stringify([source, ...lineage, target]),
-	);
-	writeFileSync(join(cache, "fetched-at"), String(Date.now()));
+	seedTemplateCache(work, [source, ...lineage, target]);
 	const targetPath = join(work, "target.json");
 	writeFileSync(targetPath, JSON.stringify(target));
 	const recipePath = join(work, "recipe.json");

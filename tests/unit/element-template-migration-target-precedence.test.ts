@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import {
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -17,17 +16,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
 const FIXTURE = resolve(import.meta.dirname, "../fixtures/simple.bpmn");
-const input = (name: string, value: string, extra: object = {}) => ({
-	type: "String",
-	label: name,
-	value,
-	binding: { type: "zeebe:input", name },
-	...extra,
-});
 const SOURCE = {
 	id: "io.example.precedence.source",
 	name: "Source",
@@ -194,16 +190,10 @@ describe("explicit migration targets take precedence over cached identities", ()
 				const name = `${transport}-${sameId ? "upgrade" : "change"}-${invalid ? "invalid" : "valid"}`;
 				test(`${name}: ${transport === "http" ? "insecure URL is rejected before cache fallback" : "explicit bindings, defaults, conditions and metadata are authoritative"}`, async () => {
 					const work = join(dir, name);
-					const cache = join(work, "element-templates");
-					mkdirSync(cache, { recursive: true });
 					const explicit = target(sameId, false);
 					const stale = target(sameId, true);
 					if (invalid) explicit.metadata.migratesFrom.schemaVersion = 99;
-					writeFileSync(
-						join(cache, "templates.json"),
-						JSON.stringify([SOURCE, stale]),
-					);
-					writeFileSync(join(cache, "fetched-at"), String(Date.now()));
+					seedTemplateCache(work, [SOURCE, stale]);
 					const templatePath = join(work, "target.json");
 					writeFileSync(templatePath, JSON.stringify(explicit));
 					documents.set(`/${name}.json`, explicit);

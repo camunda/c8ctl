@@ -6,7 +6,6 @@
 import assert from "node:assert";
 import {
 	existsSync,
-	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -16,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { input, seedTemplateCache } from "../utils/element-template.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
@@ -24,16 +24,6 @@ const FIXTURE_BPMN = join(
 	"simple.bpmn",
 );
 const TASK = "Activity_17s7axj";
-
-function input(name: string, value: string, label: string) {
-	return {
-		type: "String",
-		value,
-		label,
-		group: "model",
-		binding: { type: "zeebe:input", name },
-	};
-}
 
 const OLD = {
 	id: "io.example.old",
@@ -49,9 +39,9 @@ const OLD = {
 			value: "io.example.old",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("provider", "azure", "Provider"),
-		input("endpoint", "", "Endpoint"),
-		input("maxTokens", "", "Maximum tokens"),
+		input("provider", "azure", { label: "Provider", group: "model" }),
+		input("endpoint", "", { label: "Endpoint", group: "model" }),
+		input("maxTokens", "", { label: "Maximum tokens", group: "model" }),
 	],
 };
 
@@ -88,10 +78,10 @@ const NEW = {
 			value: "io.example.new",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("backend.provider", "", "Provider"),
-		input("backend.endpoint", "", "API endpoint"),
-		input("backend.type", "", "Backend"),
-		input("effort", "default", "Effort"),
+		input("backend.provider", "", { label: "Provider", group: "model" }),
+		input("backend.endpoint", "", { label: "API endpoint", group: "model" }),
+		input("backend.type", "", { label: "Backend", group: "model" }),
+		input("effort", "default", { label: "Effort", group: "model" }),
 	],
 };
 
@@ -121,8 +111,8 @@ const V2 = {
 			value: "io.example.versioned",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("provider", "azure", "Provider"),
-		input("url", "", "URL"),
+		input("provider", "azure", { label: "Provider", group: "model" }),
+		input("url", "", { label: "URL", group: "model" }),
 	],
 };
 const V1 = {
@@ -138,8 +128,8 @@ const V1 = {
 			value: "io.example.versioned",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("provider", "azure", "Provider"),
-		input("endpoint", "", "Endpoint"),
+		input("provider", "azure", { label: "Provider", group: "model" }),
+		input("endpoint", "", { label: "Endpoint", group: "model" }),
 	],
 };
 
@@ -151,10 +141,7 @@ const cleanups: string[] = [];
 function dataDirWithCache(templates: object[]): string {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-migrate-data-"));
 	cleanups.push(dataDir);
-	const cacheDir = join(dataDir, "element-templates");
-	mkdirSync(cacheDir, { recursive: true });
-	writeFileSync(join(cacheDir, "templates.json"), JSON.stringify(templates));
-	writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	seedTemplateCache(dataDir, templates);
 	return dataDir;
 }
 
@@ -778,7 +765,10 @@ describe("element-template update to another template", () => {
 	test("explicit target content wins over a conflicting cached identity", async () => {
 		const templatePath = join(workDir, "authoritative.json");
 		writeFileSync(templatePath, JSON.stringify(NEW));
-		const stale = { ...NEW, properties: [input("stale", "STALE", "Stale")] };
+		const stale = {
+			...NEW,
+			properties: [input("stale", "STALE", { label: "Stale", group: "model" })],
+		};
 		// Not deprecated: a deprecated source also scans cached successors, which conflict with the file.
 		const result = await run(
 			dataDirWithCache([{ ...OLD, deprecated: undefined }, stale]),
@@ -1299,8 +1289,8 @@ const SRC = {
 			value: "io.example.mapsrc",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("provider", "azure", "Provider"),
-		input("endpoint", "", "Endpoint"),
+		input("provider", "azure", { label: "Provider", group: "model" }),
+		input("endpoint", "", { label: "Endpoint", group: "model" }),
 	],
 };
 const DST = {
@@ -1314,8 +1304,8 @@ const DST = {
 			value: "io.example.mapdst",
 			binding: { type: "zeebe:taskDefinition", property: "type" },
 		},
-		input("provider", "azure", "Provider"),
-		input("url", "", "URL"),
+		input("provider", "azure", { label: "Provider", group: "model" }),
+		input("url", "", { label: "URL", group: "model" }),
 	],
 };
 

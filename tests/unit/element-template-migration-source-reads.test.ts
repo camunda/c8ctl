@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { describe, test } from "node:test";
 import { migrateElement } from "../../default-plugins/element-template/migration/apply.ts";
 import {
@@ -15,9 +14,9 @@ import type {
 	TemplateProperty,
 } from "../../default-plugins/element-template/migration/types.ts";
 import {
-	resolveVendorBundle,
-	type VendorBundle,
-} from "../../default-plugins/element-template/vendor.ts";
+	createTestModeler,
+	loadVendorBundle,
+} from "../utils/element-template.ts";
 
 function value(bindingType: string, key: string, text: string): ElementValue {
 	return { bindingType, key, value: text, isFeel: text.startsWith("=") };
@@ -344,16 +343,7 @@ async function setup(
 	values: ElementValue[],
 	separateContainers: boolean | string = false,
 ) {
-	const vendor: VendorBundle = createRequire(import.meta.url)(
-		resolveVendorBundle(),
-	);
-	const modeler = new vendor.Modeler({
-		additionalModules: [
-			vendor.HeadlessTextRendererModule,
-			vendor.CloudElementTemplatesCoreModule,
-		],
-		moddleExtensions: { zeebe: vendor.ZeebeModdleExtension },
-	});
+	const vendor = loadVendorBundle();
 	const inputs = values
 		.filter((item) => item.bindingType === INPUT)
 		.map(
@@ -388,7 +378,7 @@ async function setup(
 			'<bpmn:task id="Activity_17s7axj" name="Do Something">',
 			`<bpmn:task id="Activity_17s7axj" name="Do Something" zeebe:modelerTemplate="${applied.id}" zeebe:modelerTemplateVersion="${applied.version}"><bpmn:extensionElements>${extensions}</bpmn:extensionElements>`,
 		);
-	await modeler.importXML(xml);
+	const modeler = await createTestModeler(vendor, xml);
 	const element = modeler.get("elementRegistry").get("Activity_17s7axj");
 	assert.ok(element);
 	return {

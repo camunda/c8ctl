@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -10,6 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+	template,
+} from "../utils/element-template.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import {
 	AGENT_V1,
@@ -38,37 +42,6 @@ const spawnCli = (dir: string, args: string[]) =>
 		env: cliEnv(dir),
 		timeout: CLI_TIMEOUT,
 	});
-const input = (name: string, value = "", extra: object = {}) => ({
-	type: "String",
-	label: name,
-	value,
-	binding: { type: "zeebe:input", name },
-	...extra,
-});
-const template = (
-	id: string,
-	version: number,
-	properties: object[],
-	sources?: object[],
-) => ({
-	id,
-	name: id,
-	version,
-	appliesTo: ["bpmn:Task"],
-	engines: { camunda: "^8.8" },
-	properties: [
-		{
-			type: "Hidden",
-			value: id,
-			binding: { type: "zeebe:taskDefinition", property: "type" },
-		},
-		...properties,
-	],
-	...(sources
-		? { metadata: { migratesFrom: { schemaVersion: 1, sources } } }
-		: {}),
-});
-
 test("simple recipe CLI integration: serialization, reports, authorization and repeated no-op", async () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8-migration-simple-"));
 	const run = (...args: string[]) =>
@@ -92,11 +65,7 @@ test("simple recipe CLI integration: serialization, reports, authorization and r
 				},
 			],
 		);
-		mkdirSync(join(dir, "element-templates"));
-		writeFileSync(
-			join(dir, "element-templates/templates.json"),
-			JSON.stringify([old, target]),
-		);
+		seedTemplateCache(dir, [old, target]);
 		const oldPath = join(dir, "old.json");
 		const targetPath = join(dir, "target.json");
 		const bpmn = join(dir, "process.bpmn");
@@ -309,11 +278,7 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 				},
 			],
 		);
-		mkdirSync(join(dir, "element-templates"));
-		writeFileSync(
-			join(dir, "element-templates/templates.json"),
-			JSON.stringify([source1, source2, source3, target]),
-		);
+		seedTemplateCache(dir, [source1, source2, source3, target]);
 		const oldPath = join(dir, "old.json");
 		const targetPath = join(dir, "target.json");
 		const recipePath = join(dir, "recipe.json");

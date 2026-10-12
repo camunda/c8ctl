@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
@@ -13,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { isRecord } from "../../src/core/index.ts";
+import { seedTemplateCache } from "../utils/element-template.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const TASK = "Activity_17s7axj";
@@ -111,15 +111,7 @@ after(() => {
 
 function fixture(target: object = template) {
 	const dir = mkdtempSync(join(root, "case-"));
-	mkdirSync(join(dir, "data", "element-templates"), { recursive: true });
-	writeFileSync(
-		join(dir, "data", "element-templates", "templates.json"),
-		JSON.stringify([target]),
-	);
-	writeFileSync(
-		join(dir, "data", "element-templates", "fetched-at"),
-		`${Date.now()}`,
-	);
+	seedTemplateCache(join(dir, "data"), [target]);
 	const path = join(dir, "target.json");
 	writeFileSync(path, JSON.stringify(target));
 	const file = join(dir, "process.bpmn");
@@ -620,10 +612,7 @@ for (const mode of modes) {
 		const oldPath = join(dir, "old.json");
 		const old = { ...template, version: 1 };
 		writeFileSync(oldPath, JSON.stringify(old));
-		writeFileSync(
-			join(dir, "data", "element-templates", "templates.json"),
-			JSON.stringify([old, template]),
-		);
+		seedTemplateCache(join(dir, "data"), [old, template]);
 		const seed = await run({
 			dir,
 			args: [

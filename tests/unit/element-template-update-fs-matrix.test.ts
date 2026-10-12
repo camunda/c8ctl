@@ -13,6 +13,11 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import {
+	labelledInput as input,
+	seedTemplateCache,
+	template,
+} from "../utils/element-template.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
@@ -27,37 +32,6 @@ const cliEnv = (dir: string) =>
 		C8CTL_DATA_DIR: dir,
 		CAMUNDA_BASE_URL: "http://test-cluster/v2",
 	});
-const input = (name: string, value = "", extra: object = {}) => ({
-	type: "String",
-	label: name,
-	value,
-	binding: { type: "zeebe:input", name },
-	...extra,
-});
-const template = (
-	id: string,
-	version: number,
-	properties: object[],
-	sources?: object[],
-) => ({
-	id,
-	name: id,
-	version,
-	appliesTo: ["bpmn:Task"],
-	engines: { camunda: "^8.8" },
-	properties: [
-		{
-			type: "Hidden",
-			value: id,
-			binding: { type: "zeebe:taskDefinition", property: "type" },
-		},
-		...properties,
-	],
-	...(sources
-		? { metadata: { migratesFrom: { schemaVersion: 1, sources } } }
-		: {}),
-});
-
 type PausePoint = "compare" | "temp-write" | "rename";
 
 // The injected script wraps one fs function so its first matching call runs
@@ -305,11 +279,7 @@ for (const scenario of [
 					},
 				],
 			);
-			mkdirSync(join(dir, "element-templates"));
-			writeFileSync(
-				join(dir, "element-templates/templates.json"),
-				JSON.stringify([source, target]),
-			);
+			seedTemplateCache(dir, [source, target]);
 			const sourcePath = join(dir, "source.json");
 			const bpmn = join(dir, "process.bpmn");
 			const lock = `${bpmn}.migration.lock`;

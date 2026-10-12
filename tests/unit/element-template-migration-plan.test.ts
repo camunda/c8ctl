@@ -16,15 +16,7 @@ import {
 } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
-
-function input(key: string, value: string): ElementValue {
-	return {
-		bindingType: "zeebe:input",
-		key,
-		value,
-		isFeel: value.startsWith("="),
-	};
-}
+import { elementValue } from "../utils/element-template.ts";
 
 function entriesOf(...paths: unknown[]) {
 	const [source] = parseRecipe({
@@ -229,7 +221,7 @@ describe("buildStepPlan", () => {
 				],
 			};
 			assert.throws(
-				() => buildStepPlan([], [input("b", property.value)], target),
+				() => buildStepPlan([], [elementValue("b", property.value)], target),
 				(error) =>
 					error instanceof Error &&
 					/carry-over.*input:b.*constraint/.test(error.message) &&
@@ -238,18 +230,18 @@ describe("buildStepPlan", () => {
 			assert.doesNotThrow(() =>
 				buildStepPlan(
 					entriesOf({ to: "b", set: "allowed" }),
-					[input("b", property.value)],
+					[elementValue("b", property.value)],
 					target,
 				),
 			);
 			assert.doesNotThrow(() =>
-				buildStepPlan([], [input("b", property.value)], {
+				buildStepPlan([], [elementValue("b", property.value)], {
 					...target,
 					properties: target.properties.map((p) => ({ ...p, type: "Hidden" })),
 				}),
 			);
 		}
-		const plan = buildStepPlan([], [input("b", "allowed")], {
+		const plan = buildStepPlan([], [elementValue("b", "allowed")], {
 			id: "new",
 			properties: [{ binding: { type: "zeebe:input", name: "b" } }],
 		});
@@ -291,8 +283,8 @@ describe("buildStepPlan", () => {
 			buildStepPlan(
 				entriesOf({ to: "b", set: "" }),
 				[
-					input("mode", "off"),
-					{ ...input("mode", "on"), bindingType: "zeebe:taskHeader" },
+					elementValue("mode", "off"),
+					{ ...elementValue("mode", "on"), bindingType: "zeebe:taskHeader" },
 				],
 				target,
 			),
@@ -389,7 +381,7 @@ describe("buildStepPlan", () => {
 				/unsupported constraint/,
 			);
 			assert.throws(
-				() => buildStepPlan([], [input("b", "SECRET")], target),
+				() => buildStepPlan([], [elementValue("b", "SECRET")], target),
 				/unsupported constraint/,
 			);
 			assert.doesNotThrow(() =>
@@ -425,7 +417,8 @@ describe("buildStepPlan", () => {
 			{ to: "b", template: `\${a}` },
 		])
 			assert.throws(
-				() => buildStepPlan(entriesOf(path), [input("a", "SECRET")], target),
+				() =>
+					buildStepPlan(entriesOf(path), [elementValue("a", "SECRET")], target),
 				/choice/,
 			);
 	});
@@ -606,8 +599,8 @@ describe("buildStepPlan", () => {
 	});
 	test("rejects ambiguous rename, guard and interpolation reads and duplicate backing values", () => {
 		const values = [
-			input("key", "INPUT"),
-			{ ...input("key", "HEADER"), bindingType: "zeebe:taskHeader" },
+			elementValue("key", "INPUT"),
+			{ ...elementValue("key", "HEADER"), bindingType: "zeebe:taskHeader" },
 		];
 		for (const path of [
 			{ from: "key", to: "b" },
@@ -622,15 +615,15 @@ describe("buildStepPlan", () => {
 		assert.throws(
 			() =>
 				buildStepPlan(entriesOf({ from: "input:key", to: "b" }), [
-					input("key", "one"),
-					input("key", "two"),
+					elementValue("key", "one"),
+					elementValue("key", "two"),
 				]),
 			/Duplicate source/,
 		);
 	});
 	test("renames a value and reports the move", () => {
 		const plan = buildStepPlan(entriesOf({ from: "a", to: "b" }), [
-			input("a", "1"),
+			elementValue("a", "1"),
 		]);
 		assert.deepStrictEqual(
 			plan.writes.map((w) => [w.key, w.value]),
@@ -659,10 +652,10 @@ describe("buildStepPlan", () => {
 			},
 		});
 		assert.strictEqual(
-			buildStepPlan(entries, [input("flag", "true")]).writes[0].value,
+			buildStepPlan(entries, [elementValue("flag", "true")]).writes[0].value,
 			"DOCUMENT",
 		);
-		const other = buildStepPlan(entries, [input("flag", "false")]);
+		const other = buildStepPlan(entries, [elementValue("flag", "false")]);
 		assert.strictEqual(other.writes[0].value, "JSON");
 		assert.strictEqual(other.facts.moved[0].transformed, true);
 	});
@@ -674,7 +667,7 @@ describe("buildStepPlan", () => {
 				to: "b",
 				valueMap: { rules: [{ match: "x", value: "y" }] },
 			}),
-			[input("a", "other")],
+			[elementValue("a", "other")],
 		);
 		assert.deepStrictEqual(plan.writes, []);
 		assert.deepStrictEqual(plan.facts.noMatch, [{ from: "a", to: "b" }]);
@@ -687,7 +680,7 @@ describe("buildStepPlan", () => {
 				to: "b",
 				valueMap: { rules: [{ match: "x", value: "y" }] },
 			}),
-			[input("a", "=expr")],
+			[elementValue("a", "=expr")],
 		);
 		assert.strictEqual(plan.writes[0].value, "=expr");
 		assert.deepStrictEqual(plan.facts.feelSkipped, [{ from: "a", to: "b" }]);
@@ -700,7 +693,7 @@ describe("buildStepPlan", () => {
 				to: "n",
 				valueMap: { rules: [{ match: "claude-*", value: "anthropic" }] },
 			}),
-			[input("m", "claude-3")],
+			[elementValue("m", "claude-3")],
 		);
 		assert.strictEqual(plan.writes[0].value, "anthropic");
 	});
@@ -712,11 +705,11 @@ describe("buildStepPlan", () => {
 			when: { path: "type", equals: "azure" },
 		});
 		assert.strictEqual(
-			buildStepPlan(entries, [input("type", "azure")]).writes.length,
+			buildStepPlan(entries, [elementValue("type", "azure")]).writes.length,
 			1,
 		);
 		assert.strictEqual(
-			buildStepPlan(entries, [input("type", "other")]).writes.length,
+			buildStepPlan(entries, [elementValue("type", "other")]).writes.length,
 			0,
 		);
 	});
@@ -724,11 +717,13 @@ describe("buildStepPlan", () => {
 	test("composes a template value and skips it when a reference is missing", () => {
 		const entries = entriesOf({ to: "url", template: `\${host}/\${path}` });
 		assert.strictEqual(
-			buildStepPlan(entries, [input("host", "h"), input("path", "p")]).writes[0]
-				.value,
+			buildStepPlan(entries, [
+				elementValue("host", "h"),
+				elementValue("path", "p"),
+			]).writes[0].value,
 			"h/p",
 		);
-		const plan = buildStepPlan(entries, [input("host", "h")]);
+		const plan = buildStepPlan(entries, [elementValue("host", "h")]);
 		assert.deepStrictEqual(plan.writes, []);
 		assert.deepStrictEqual(plan.facts.templateSkipped, [
 			{ to: "url", missing: ["path"] },
@@ -741,13 +736,15 @@ describe("buildStepPlan", () => {
 			rules: [{ from: "region", to: "aws.region" }],
 		});
 		assert.strictEqual(
-			buildStepPlan(entries, [input("type", "bedrock"), input("region", "eu")])
-				.writes.length,
+			buildStepPlan(entries, [
+				elementValue("type", "bedrock"),
+				elementValue("region", "eu"),
+			]).writes.length,
 			1,
 		);
 		const skipped = buildStepPlan(entries, [
-			input("type", "azure"),
-			input("region", "eu"),
+			elementValue("type", "azure"),
+			elementValue("region", "eu"),
 		]);
 		assert.strictEqual(skipped.writes.length, 0);
 		assert.deepStrictEqual(skipped.facts.guardSkipped, [
@@ -760,15 +757,15 @@ describe("buildStepPlan", () => {
 			buildStepPlan(entriesOf({ to: "x", set: "1", when }), values).writes
 				.length;
 		assert.strictEqual(
-			run({ path: "p", in: ["a", "b"] }, [input("p", "b")]),
+			run({ path: "p", in: ["a", "b"] }, [elementValue("p", "b")]),
 			1,
 		);
 		assert.strictEqual(
-			run({ path: "p", in: ["a"], not: true }, [input("p", "b")]),
+			run({ path: "p", in: ["a"], not: true }, [elementValue("p", "b")]),
 			1,
 		);
 		assert.strictEqual(
-			run({ path: "p", matches: "pre*" }, [input("p", "prefix")]),
+			run({ path: "p", matches: "pre*" }, [elementValue("p", "prefix")]),
 			1,
 		);
 		assert.strictEqual(run({ path: "p", exists: false }, []), 1);
@@ -784,7 +781,7 @@ describe("buildStepPlan", () => {
 		};
 		const plan = buildStepPlan(entriesOf({ from: "input:k", to: "z" }), [
 			header,
-			input("k", "i"),
+			elementValue("k", "i"),
 		]);
 		assert.strictEqual(plan.writes[0].value, "i");
 	});
@@ -795,7 +792,7 @@ describe("buildStepPlan", () => {
 			{ from: "missing", to: "c", note: "never shown" },
 			{ to: "d", set: "1", note: { level: "warning", message: "set d" } },
 		);
-		const plan = buildStepPlan(entries, [input("a", "1")]);
+		const plan = buildStepPlan(entries, [elementValue("a", "1")]);
 		assert.deepStrictEqual(plan.facts.notes, [
 			{ level: "info", message: "moved a" },
 			{ level: "warning", message: "set d" },
@@ -807,7 +804,7 @@ describe("buildStepPlan", () => {
 			() =>
 				buildStepPlan(
 					entriesOf({ from: "a", to: "t" }, { to: "t", set: "1" }),
-					[input("a", "1")],
+					[elementValue("a", "1")],
 				),
 			/Ambiguous migration/,
 		);
@@ -824,7 +821,11 @@ describe("buildStepPlan", () => {
 		for (const ordered of [paths, [...paths].reverse()]) {
 			assert.throws(
 				() =>
-					buildStepPlan(entriesOf(...ordered), [input("a", "secret")], target),
+					buildStepPlan(
+						entriesOf(...ordered),
+						[elementValue("a", "secret")],
+						target,
+					),
 				/Ambiguous migration/,
 			);
 		}
@@ -874,7 +875,11 @@ describe("carryOverWrites", () => {
 	test("returns one write per populated duplicate, checked against recipe writes only", () => {
 		const writes = carryOverWrites(
 			[],
-			[input("b", "first"), input("b", "second"), input("c", "x")],
+			[
+				elementValue("b", "first"),
+				elementValue("b", "second"),
+				elementValue("c", "x"),
+			],
 			target,
 		);
 		assert.deepStrictEqual(
@@ -894,12 +899,19 @@ describe("carryOverWrites", () => {
 		assert.deepStrictEqual(
 			carryOverWrites(
 				recipe,
-				[input("b", "first"), input("b", "second"), input("h", "x")],
+				[
+					elementValue("b", "first"),
+					elementValue("b", "second"),
+					elementValue("h", "x"),
+				],
 				target,
 			),
 			[],
 		);
-		assert.deepStrictEqual(carryOverWrites([], [input("b", "")], target), []);
+		assert.deepStrictEqual(
+			carryOverWrites([], [elementValue("b", "")], target),
+			[],
+		);
 	});
 });
 
@@ -923,7 +935,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 
 	test("validates the literal of a carried-over FEEL-stored value", () => {
 		const target = templateOf(numberPattern);
-		const sources = [input("b", "=20")];
+		const sources = [elementValue("b", "=20")];
 		assert.doesNotThrow(() => validateDestinationValues([], sources, target));
 		assert.deepStrictEqual(
 			carryOverWrites([], sources, target).map((w) => w.value),
@@ -934,7 +946,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 	test("treats a missing feel on an input binding as static", () => {
 		const target = templateOf({ ...numberPattern, feel: undefined });
 		assert.doesNotThrow(() =>
-			validateDestinationValues([], [input("b", "=20")], target),
+			validateDestinationValues([], [elementValue("b", "=20")], target),
 		);
 	});
 
@@ -943,7 +955,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 			() =>
 				validateDestinationValues(
 					[],
-					[input("b", "=abc")],
+					[elementValue("b", "=abc")],
 					templateOf(numberPattern),
 				),
 			/violates pattern constraint/,
@@ -954,7 +966,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 		assert.doesNotThrow(() =>
 			validateDestinationValues(
 				[],
-				[input("b", "=someVar")],
+				[elementValue("b", "=someVar")],
 				templateOf({ ...numberPattern, feel: "optional" }),
 			),
 		);
@@ -965,7 +977,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 			() =>
 				validateDestinationValues(
 					[],
-					[input("b", "=")],
+					[elementValue("b", "=")],
 					templateOf({
 						type: "Number",
 						feel: "static",
@@ -983,10 +995,11 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 			choices: [{ value: "true" }],
 		});
 		assert.doesNotThrow(() =>
-			validateDestinationValues([], [input("b", "=true")], target),
+			validateDestinationValues([], [elementValue("b", "=true")], target),
 		);
 		assert.throws(
-			() => validateDestinationValues([], [input("b", "=false")], target),
+			() =>
+				validateDestinationValues([], [elementValue("b", "=false")], target),
 			/choice/,
 		);
 	});
@@ -1037,7 +1050,7 @@ describe("validateDestinationValues static Number and Boolean values", () => {
 			() =>
 				validateDestinationValues(
 					[],
-					[input("b", "=20"), input("d", " ")],
+					[elementValue("b", "=20"), elementValue("d", " ")],
 					target,
 				),
 			/notEmpty/,

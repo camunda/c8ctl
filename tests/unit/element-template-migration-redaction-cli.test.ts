@@ -1,15 +1,10 @@
 import assert from "node:assert/strict";
-import {
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { c8WithEnv } from "../utils/cli.ts";
+import { input, seedTemplateCache } from "../utils/element-template.ts";
 
 const TASK = "Activity_17s7axj";
 const PRIVATE = "PRIVATE-UNCHANGED-4839";
@@ -28,12 +23,6 @@ const bpmn = join(dir, "input.bpmn");
 const targetPath = join(dir, "target.json");
 const recipePath = join(dir, "recipe.json");
 const env = { C8CTL_DATA_DIR: dir, C8CTL_OUTPUT_MODE: "text" };
-const input = (name: string, value: string, metadata: object = {}) => ({
-	type: "String",
-	value,
-	...metadata,
-	binding: { type: "zeebe:input", name },
-});
 const source = {
 	id: "redaction.source",
 	name: "Source",
@@ -91,20 +80,14 @@ function assertPrivateAbsent(output: string) {
 }
 
 before(async () => {
-	const cacheDir = join(dir, "element-templates");
-	mkdirSync(cacheDir);
 	// The explicit target's metadata must win over the same cached identity.
-	writeFileSync(
-		join(cacheDir, "templates.json"),
-		JSON.stringify([
-			source,
-			{
-				...target,
-				properties: target.properties.map((p) => input(p.binding.name, "")),
-			},
-		]),
-	);
-	writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	seedTemplateCache(dir, [
+		source,
+		{
+			...target,
+			properties: target.properties.map((p) => input(p.binding.name, "")),
+		},
+	]);
 	const sourcePath = join(dir, "source.json");
 	writeFileSync(sourcePath, JSON.stringify(source));
 	const seeded = await c8WithEnv(
@@ -182,8 +165,6 @@ for (const flags of [
 for (const json of [false, true]) {
 	test(`redacts update reports and no-ops in ${json ? "JSON" : "text"}`, async () => {
 		const data = join(dir, `update-${json}`);
-		const cacheDir = join(data, "element-templates");
-		mkdirSync(cacheDir, { recursive: true });
 		const upgraded = {
 			...source,
 			version: 2,
@@ -202,11 +183,7 @@ for (const json of [false, true]) {
 				},
 			},
 		};
-		writeFileSync(
-			join(cacheDir, "templates.json"),
-			JSON.stringify([source, upgraded]),
-		);
-		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+		seedTemplateCache(data, [source, upgraded]);
 		const file = join(data, "update.bpmn");
 		writeFileSync(file, readFileSync(bpmn));
 		for (const dryRun of [true, false, false]) {
