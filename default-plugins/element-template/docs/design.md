@@ -279,8 +279,8 @@ that moved.
   CLI guards inject ENOSPC/EIO before bytes and after 64 actual sibling bytes.
   SIGINT/SIGTERM guards pause a split write after actual bytes, preserving originals
   and proving the manual stale-lock/temp recovery contract. They do not prove
-  physical disk exhaustion or interruption of a blocked kernel syscall. Windows
-  was not run; POSIX signal cases skip Windows. Confirm no writer is active before
+  physical disk exhaustion or interruption of a blocked kernel syscall. The unit
+  suite runs on Windows; POSIX signal, permission and EPIPE cases skip it. Confirm no writer is active before
   manually inspecting/removing leftovers.
 - **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
   into a library once the recipe format is settled.

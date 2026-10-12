@@ -171,7 +171,7 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   injected ENOSPC/EIO before and after actual partial bytes and real SIGINT/SIGTERM
   termination during paused split writes, preserving original bytes. Physical
   disk exhaustion and interruption of an executing kernel syscall are not proven.
-  Windows was not run; POSIX signal tests skip Windows. Cleanup attempts preserve
+  The unit suite runs on Windows; POSIX signal, permission and EPIPE cases skip it. Cleanup attempts preserve
   the primary operation error; failed cleanup can leave artifacts for manual recovery.
 - Migration requires `executionPlatform="Camunda Cloud"` and
   `executionPlatformVersion` in the Modeler namespace
