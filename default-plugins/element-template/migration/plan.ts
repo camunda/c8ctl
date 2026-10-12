@@ -60,10 +60,10 @@ export interface StepPlan {
 
 export const TEMPLATE_REF = /\$\{([^}]+)\}/g;
 
-/** Compile a `*`-only glob to an anchored regex. */
+/** Compile a `*`-only glob to an anchored regex; `*` also spans newlines. */
 export function globToRegex(pattern: string): RegExp {
 	const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
+	return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`, "s");
 }
 
 function lookup(
@@ -466,6 +466,14 @@ export function buildStepPlan(
 			transformed,
 		});
 	}
+
+	// A source that an active entry moved is not lost to a guarded alternative.
+	facts.guardSkipped = facts.guardSkipped.filter(
+		(skip) =>
+			!facts.moved.some((move) =>
+				sameTarget(move.from, splitBindingPrefix(skip.from)),
+			),
+	);
 
 	assertNoAmbiguousWrites(writes);
 	const activeProperties = template

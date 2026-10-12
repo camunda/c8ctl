@@ -752,6 +752,25 @@ describe("buildStepPlan", () => {
 		]);
 	});
 
+	test("does not report a guard skip for a source another entry moved", () => {
+		const entries = entriesOf(
+			{
+				when: { path: "type", equals: "bedrock" },
+				rules: [{ from: "region", to: "aws.region" }],
+			},
+			{
+				when: { path: "type", equals: "azure" },
+				rules: [{ from: "region", to: "azure.region" }],
+			},
+		);
+		const plan = buildStepPlan(entries, [
+			elementValue("type", "azure"),
+			elementValue("region", "eu"),
+		]);
+		assert.strictEqual(plan.writes.length, 1);
+		assert.deepStrictEqual(plan.facts.guardSkipped, []);
+	});
+
 	test("evaluates in, matches, not and exists guards", () => {
 		const run = (when: unknown, values: ElementValue[]) =>
 			buildStepPlan(entriesOf({ to: "x", set: "1", when }), values).writes
@@ -766,6 +785,12 @@ describe("buildStepPlan", () => {
 		);
 		assert.strictEqual(
 			run({ path: "p", matches: "pre*" }, [elementValue("p", "prefix")]),
+			1,
+		);
+		assert.strictEqual(
+			run({ path: "p", matches: "*key*" }, [
+				elementValue("p", "={\n  key: 1\n}"),
+			]),
 			1,
 		);
 		assert.strictEqual(run({ path: "p", exists: false }, []), 1);

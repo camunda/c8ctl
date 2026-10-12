@@ -244,7 +244,8 @@ Unqualified rename sources, guards and interpolation references reject ambiguous
 binding types. Duplicate backing entries/containers also fail rather than choosing
 an arbitrary value. Simultaneously active writes to the same resolved destination
 fail even when one uses a qualified alias; mutually exclusive guarded writes and
-qualified writes to distinct binding types remain valid.
+qualified writes to distinct binding types remain valid. A rename whose guard
+fails is reported as not moved only when no active entry moved the same source.
 
 Migration validates resolved writes and populated non-Hidden carry-over against
 active destination properties, including conditional duplicates. Supported checks
@@ -271,6 +272,45 @@ and match patterns require a non-whitespace character; surrounding whitespace is
 Scalar values accept strings (including blank strings), finite numbers, and booleans. An omitted
 note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
 but sources, groups, guard lists, and value-map rules must be non-empty.
+
+#### Bundled recipes
+
+[`recipes/`](./recipes/) holds recipes for the AI Agent v1 (version 10 or
+later) to v2 migration. An installed package ships them under
+`dist/default-plugins/element-template/recipes/`.
+
+| Recipe | From | To |
+|--------|------|----|
+| `ai-agent-task.v2.recipe.json` | `io.camunda.connectors.agenticai.aiagent.v1` | `io.camunda.connectors.agenticai.ai-agent-task.v2` |
+| `ai-agent-subprocess.v2.recipe.json` | `io.camunda.connectors.agenticai.aiagent.jobworker.v1` | `io.camunda.connectors.agenticai.ai-agent-subprocess.v2` |
+| `ai-agent-task.v2-hybrid.recipe.json` | `io.camunda.connectors.agenticai.aiagent.v1-hybrid` | `io.camunda.connectors.agenticai.ai-agent-task.v2-hybrid` |
+| `ai-agent-subprocess.v2-hybrid.recipe.json` | `io.camunda.connectors.agenticai.aiagent.jobworker.v1-hybrid` | `io.camunda.connectors.agenticai.ai-agent-subprocess.v2-hybrid` |
+
+```bash
+c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
+  --to io.camunda.connectors.agenticai.ai-agent-task.v2 \
+  --recipe default-plugins/element-template/recipes/ai-agent-task.v2.recipe.json --dry-run
+```
+
+Providers map as follows. OpenAI, Azure OpenAI and OpenAI compatible use the
+Chat Completions API.
+
+| v1 provider | v2 provider and backend |
+|-------------|-------------------------|
+| OpenAI | OpenAI on the OpenAI API |
+| Azure OpenAI | OpenAI on Microsoft Foundry |
+| OpenAI compatible | OpenAI on a custom backend |
+| Anthropic | Anthropic on the Anthropic API. A custom endpoint moves to Microsoft Foundry (Azure hosts) or to a custom backend. |
+| AWS Bedrock | AWS Bedrock Converse |
+| Google Vertex AI | Google Gemini on the Vertex AI backend |
+
+Prompt caching, reasoning effort and thinking get the v2 template defaults. The
+report flags the migrated values that need review: copied Anthropic endpoints
+(remove the `/v1` suffix), Vertex AI endpoints (now hidden in Modeler) and an
+OpenAI-compatible `Authorization` header (kept in place of the API key). In the
+hybrid recipes, template application replaces the default v1 job type with the
+v2 default and keeps a custom job type unchanged, without a report note. The
+worker for a custom job type MUST accept the v2 request format.
 
 ## Inspecting a template
 
