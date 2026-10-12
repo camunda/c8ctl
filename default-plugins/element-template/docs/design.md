@@ -240,8 +240,7 @@ that moved.
 - **Context authority.** The supplied source must match the element's applied
   identity and overrides its catalog shadow. The final returned element must carry
   the target identity. Explicit target content is authoritative for its identity.
-  Shared `resolveCatalog` resolves catalog authority; MIG-004's catalog-order
-  counterexample and cache-target bypass have reported passing verification.
+  Shared `resolveCatalog` resolves catalog authority.
 - **Output.** The BPMN goes to stdout (or the file with `--in-place`); the report
   goes to stderr in that case so pipes stay clean. No-op XML output preserves the
   original bytes, with its message on stderr; JSON emits a report envelope with
@@ -252,7 +251,6 @@ that moved.
   require `--allow-lossy`. Explicit unusable recipes cannot be authorized. Diagnostics
   distinguish syntax, coverage, source-ID and reached-floor refusal; empty recipe
   flags fail. Preview/authorized reports retain refusal and authorization status.
-  MIG-006's shell-completion fixes have reported passing scoped verification.
 - **Sensitivity.** Rendering uses credential-like field identity and template
   property/group metadata to redact report values. Known sensitive before/after,
   default and report values are also scrubbed from notes and CLI diagnostics.
@@ -286,20 +284,6 @@ that moved.
   manually inspecting/removing leftovers.
 - **Extraction.** `migration/` has no c8ctl dependencies, so it can be moved
   into a library once the recipe format is settled.
-
-Current implementation and independent-review evidence, MIG-012's completed
-48-case matrix and explicit limits, and MIG-014's PR-scoped Node 22 verification are tracked
-in [Migration Review PRD](migration-review-prd.md) and
-[Migration Test Coverage](migration-test-coverage.md). All 48 migration cases
-passed, including CLI `bpmn format` canonical preservation checks for unrelated
-elements, custom extensions, sequence flows and geometry. MIG-012 implementation
-and testing are complete, awaiting engineer acceptance of the documented limits.
-The final Node 22 pipeline passed 3,896 unit and 191 integration tests, with two
-integration skips and zero failures; MIG-014 current PR verification acceptance
-is closed. Historical failures are not shown attributable to this PR and impose
-no diagnosis obligation here. The unsuppressed external `typed-env` warning is
-recorded separately under general repository policy, without reopening MIG-014
-or adding upstream remediation to this PR. No warning-free release claim is made.
 
 ## Plugin dependencies
 

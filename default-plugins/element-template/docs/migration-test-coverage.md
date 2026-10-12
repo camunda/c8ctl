@@ -6,8 +6,7 @@ not every guard uses the real modeler. Integration suites invoke CLI commands
 and reparse serialized XML. The table maps inspected guards; the final complete
 pipeline passed all non-skipped tests. The visible external build warning is
 recorded separately under general repository policy. Implementation and independent adversarial
-review were performed for every MIG-001 through MIG-014; scoped run evidence and
-open gates are recorded in [Migration Review PRD](migration-review-prd.md).
+review were performed for every MIG-001 through MIG-014.
 
 | Feature | Guard |
 | --- | --- |

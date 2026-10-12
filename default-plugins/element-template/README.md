@@ -259,26 +259,6 @@ Scalar values accept strings (including blank strings), finite numbers, and bool
 note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
 but sources, groups, guard lists, and value-map rules must be non-empty.
 
-### Review status
-
-Implementation and independent adversarial review have been performed for
-MIG-001 through MIG-014. MIG-004's catalog-authority and MIG-006's shell-completion
-fixes have reported passing verification. MIG-012 implementation/testing is
-complete: 48 passing CLI cases (two recipe suites plus 46 filesystem cases),
-expanded from 18 to 32 during implementation and to 48 during independent review.
-Engineer acceptance of the documented environment and atomic-CAS limits remains
-pending. The final Node 22 build/typecheck/test invocation exited 0 according to
-the coordinator: 3,896 unit passes, 191 integration passes, two integration skips
-and zero failures. MIG-014 current PR verification acceptance is closed.
-Historical failures are not shown attributable to this PR and impose no diagnosis
-obligation here. Two occurrences of the external `typed-env` build warning are
-recorded separately in `.github/SDK_GAPS.md` under general repository policy,
-without reopening MIG-014 or adding an upstream root-cause gate to this PR.
-No warning-free repository release baseline is claimed. See
-[Migration Review PRD](docs/migration-review-prd.md)
-and [Migration Test Coverage](docs/migration-test-coverage.md) for scoped evidence
-and remaining gates.
-
 ## Inspecting a template
 
 `info` and `get-properties` separate the two questions an agent or human
