@@ -37,6 +37,11 @@ function pluginFlagList(
 	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
 }
 
+/** Plugin commands that dispatch; a built-in verb shadows a same-named plugin. */
+function reachablePluginCmds(cmds: PluginCommandInfo[]): PluginCommandInfo[] {
+	return cmds.filter((cmd) => !(cmd.commandName in COMMAND_REGISTRY));
+}
+
 // ─── Derived completion data ─────────────────────────────────────────────────
 
 /** Reverse map: canonical resource → all names that resolve to it (including itself). */
@@ -402,7 +407,12 @@ ${resourceVars.join("\n")}
 
   if [[ \${cur} == -* ]]; then
     case "\${words[1]}" in
-${pluginCmds.map((cmd) => `      ${cmd.commandName})\n        COMPREPLY=( $(compgen -W "${[...globalFlags, ...Object.keys(cmd.flags ?? {}).map((name) => `--${name}`)].join(" ")}" -- "\${cur}") )\n        return ;;`).join("\n")}
+${reachablePluginCmds(pluginCmds)
+	.map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        COMPREPLY=( $(compgen -W "${[...globalFlags, ...Object.keys(cmd.flags ?? {}).map((name) => `--${name}`)].join(" ")}" -- "\${cur}") )\n        return ;;`,
+	)
+	.join("\n")}
     esac
   fi
 
@@ -477,7 +487,7 @@ function generateZshCompletion(): string {
 	};
 	const flagEntryLines = allFlags.map(toZshFlagEntry);
 	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
-	const pluginCaseLines = pluginCmds.map(
+	const pluginCaseLines = reachablePluginCmds(pluginCmds).map(
 		(cmd) =>
 			`      ${cmd.commandName})\n        flags=(\n${pluginFlagList(cmd)
 				.map(toZshFlagEntry)
@@ -601,7 +611,9 @@ function generateFishCompletion(): string {
 		passthroughTokens.length > 0
 			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
 			: "";
-	const flagAwarePluginCmds = pluginCmds.filter((cmd) => !cmd.passthrough);
+	const flagAwarePluginCmds = reachablePluginCmds(pluginCmds).filter(
+		(cmd) => !cmd.passthrough,
+	);
 	const flagAwareTokens = flagAwarePluginCmds.map((cmd) => cmd.commandName);
 	const builtinGuard =
 		nonGlobalGuard +

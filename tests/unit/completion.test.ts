@@ -4,7 +4,7 @@
 
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +19,40 @@ import { showCompletion } from "../../src/framework/ui/completion.ts";
 import { c8WithEnv } from "../utils/cli.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 import { asyncSpawnWithStdin } from "../utils/spawn.ts";
+
+describe("Plugin commands shadowed by a built-in verb", () => {
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-shadow-"));
+	before(() => {
+		const destination = join(dir, "plugins", "node_modules", "shadow-list");
+		mkdirSync(destination, { recursive: true });
+		writeFileSync(
+			join(destination, "package.json"),
+			JSON.stringify({
+				name: "shadow-list",
+				version: "1.0.0",
+				type: "module",
+				keywords: ["c8ctl", "c8ctl-plugin"],
+			}),
+		);
+		writeFileSync(
+			join(destination, "c8ctl-plugin.js"),
+			"export const commands = { list: { flags: { shadowed: { type: 'string', description: 'Shadowed flag' } }, handler: async () => {} } };\n",
+		);
+	});
+	after(() => rmSync(dir, { recursive: true, force: true }));
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		test(`${shell} offers no flags of a plugin command a built-in shadows`, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(!result.stdout.includes("shadowed"), result.stdout);
+		});
+	}
+});
 
 describe("Loaded plugin flag completions", () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-flags-"));
