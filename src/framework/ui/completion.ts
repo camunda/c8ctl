@@ -606,7 +606,7 @@ function generateFishCompletion(): string {
 	const builtinGuard =
 		nonGlobalGuard +
 		(flagAwareTokens.length > 0
-			? ` -n 'not __fish_seen_subcommand_from ${flagAwareTokens.join(" ")}'`
+			? ` -n 'not __c8ctl_verb_in ${flagAwareTokens.join(" ")}'`
 			: "");
 	const globalNames = new Set(globalFlags.map((f) => f.name));
 
@@ -616,6 +616,12 @@ function generateFishCompletion(): string {
 		"# Remove all existing completions for c8ctl and c8",
 		"complete -c c8ctl -e",
 		"complete -c c8 -e",
+		"",
+		"# Plugin flags match the verb position only, like bash and zsh",
+		"function __c8ctl_verb_in",
+		"    set -l tokens (commandline -opc)",
+		"    test (count $tokens) -ge 2; and contains -- $tokens[2] $argv",
+		"end",
 		"",
 	];
 
@@ -648,7 +654,7 @@ function generateFishCompletion(): string {
 		{ flags: allFlags, guard: builtinGuard },
 		...flagAwarePluginCmds.map((cmd) => ({
 			flags: pluginFlagList(cmd),
-			guard: ` -n '__fish_seen_subcommand_from ${cmd.commandName}'`,
+			guard: ` -n '__c8ctl_verb_in ${cmd.commandName}'`,
 		})),
 	]) {
 		for (const f of flags) {

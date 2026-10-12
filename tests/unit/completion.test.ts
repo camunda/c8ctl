@@ -64,10 +64,7 @@ describe("Loaded plugin flag completions", () => {
 						);
 					assert.strictEqual(lines.length, 2);
 					for (const line of lines) {
-						assert.ok(
-							line.includes(`-n '__fish_seen_subcommand_from ${command}'`),
-							line,
-						);
+						assert.ok(line.includes(`-n '__c8ctl_verb_in ${command}'`), line);
 						assert.ok(line.endsWith(" -r"), line);
 					}
 				}
