@@ -20,7 +20,7 @@ import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { isRecord } from "../../src/core/logger.ts";
-import { c8 } from "../utils/cli.ts";
+import { c8, c8WithOptions } from "../utils/cli.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const FIXTURES_DIR = resolve(import.meta.dirname, "..", "fixtures");
@@ -187,6 +187,41 @@ describe("CLI behavioural: element-template apply", () => {
 				"io.camunda:http-json:1",
 			);
 			assert.strictEqual(getInputValue(modified, "method"), "GET");
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("apply --in-place falls back to a direct write on EXDEV", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const tempBpmn = join(tempDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		const exdev = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const rename = fs.renameSync; fs.renameSync = (from, to) => { if (String(to).endsWith(".bpmn")) throw Object.assign(new Error("cross-device"), { code: "EXDEV" }); return rename(from, to); }; syncBuiltinESMExports();`;
+		try {
+			const result = await c8WithOptions(
+				{
+					nodeArgs: [
+						"--import",
+						`data:text/javascript,${encodeURIComponent(exdev)}`,
+					],
+					env: { C8CTL_OUTPUT_MODE: "text" },
+				},
+				"element-template",
+				"apply",
+				"--in-place",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+				tempBpmn,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(
+				getTaskDefinitionType(readFileSync(tempBpmn, "utf-8")),
+				"io.camunda:http-json:1",
+			);
+			assert.deepStrictEqual(
+				readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
+				[],
+			);
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}

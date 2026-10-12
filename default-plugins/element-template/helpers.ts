@@ -67,7 +67,11 @@ export const CONCURRENT_EDIT_MESSAGE =
  * the same directory, then `renameSync` over the target. POSIX
  * `rename` is atomic on the same filesystem, so a kill mid-write
  * never destroys the user's BPMN file.
- * Replacement failures must leave the original untouched, including EXDEV.
+ *
+ * With `expectedContents` (update), replacement failures MUST leave the
+ * original untouched, including EXDEV. Without it (apply, edit), EXDEV
+ * falls back to a direct `writeFileSync`, which covers exotic setups like
+ * FUSE mounts.
  */
 export function atomicOverwriteFile(
 	targetPath: string,
@@ -90,6 +94,14 @@ export function atomicOverwriteFile(
 			unlinkSync(tmp);
 		} catch {
 			// Best-effort cleanup — the original error is what matters.
+		}
+		if (
+			expectedContents === undefined &&
+			isRecord(error) &&
+			error.code === "EXDEV"
+		) {
+			writeFileSync(target, contents, "utf-8");
+			return;
 		}
 		throw error;
 	}
