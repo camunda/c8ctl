@@ -48,7 +48,7 @@ export function resolveCatalog(
 	authoritative: MigrationTemplate[] = [],
 ): MigrationTemplate[] {
 	const identity = (template: MigrationTemplate) =>
-		JSON.stringify([template.id, template.version]);
+		JSON.stringify([template.id, versionOf(template) ?? 0]);
 	const overrides = new Map(authoritative.map((t) => [identity(t), t]));
 	const catalog = new Map<string, MigrationTemplate>();
 	const conflicts = new Set<string>();
@@ -75,12 +75,8 @@ export function latestOf(
 ): MigrationTemplate | undefined {
 	let best: MigrationTemplate | undefined;
 	for (const t of resolveCatalog(templates)) {
-		const v = versionOf(t);
-		if (
-			t.id === id &&
-			v !== undefined &&
-			(!best || v > (versionOf(best) ?? -1))
-		) {
+		const v = versionOf(t) ?? 0;
+		if (t.id === id && (!best || v > (versionOf(best) ?? 0))) {
 			best = t;
 		}
 	}

@@ -396,6 +396,19 @@ describe("catalog identity conflicts", () => {
 		assert.ok(errors.every((error) => error === errors[0]));
 	});
 
+	test("treats a versionless definition and version 0 as one identity", () => {
+		const versionless = { ...template("old", 0, []), version: undefined };
+		assert.throws(
+			() =>
+				resolveCatalog([
+					versionless,
+					{ ...template("old", 0, []), name: "v0" },
+				]),
+			/Conflicting.*"old"/,
+		);
+		assert.strictEqual(latestOf([versionless], "old"), versionless);
+	});
+
 	test("accepts identical content with different object key order without mutating inputs", () => {
 		const original = template("old", 2, ["b"]);
 		const duplicate = {
