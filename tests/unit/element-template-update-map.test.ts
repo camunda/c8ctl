@@ -54,6 +54,25 @@ test("warns on stderr that --map was not applied to an element already on the ta
 	assert.strictEqual(readFileSync(file, "utf-8"), before);
 });
 
+test("keeps stderr empty in JSON mode when --map was not applied", async () => {
+	const file = await seedMulti("noop-map-json", [
+		[TASK, V2, ["provider=azure", "url=https://a"]],
+	]);
+	const result = await run(
+		dataDirWithCache([V1, V2]),
+		"update",
+		V1.id,
+		file,
+		"--map",
+		"provider=url",
+		"--in-place",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	assert.strictEqual(result.stderr, "");
+	JSON.parse(result.stdout);
+});
+
 describe("element-template update --map", () => {
 	let multi: string;
 	before(async () => {

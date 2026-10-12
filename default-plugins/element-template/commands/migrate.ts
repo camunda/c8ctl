@@ -506,7 +506,8 @@ async function runMigrateInternal(
 		const applied = readAppliedTemplate(element.businessObject);
 		if (!applied) continue;
 		if (target.id === applied.id && (target.version ?? 0) === applied.version) {
-			if (maps.length > 0) {
+			// The unchanged result records it in JSON mode.
+			if (maps.length > 0 && !json) {
 				process.stderr.write(
 					`Warning: ${id} is already on the target template, so --map was not applied.\n`,
 				);
