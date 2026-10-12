@@ -66,9 +66,10 @@ function migrationRedactor(context: MigrationRedactionContext) {
 						},
 						field,
 					) &&
-					sensitiveName(
-						`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
-					),
+					(("secret" in property && property.secret === true) ||
+						sensitiveName(
+							`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
+						)),
 			),
 		);
 	const secrets = new Set<string>();
