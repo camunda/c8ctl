@@ -305,11 +305,15 @@ export function buildReport({
 	const survivingSets = facts.set.filter(
 		(s) => find(after, s.key, s.bindingType)?.value === s.value,
 	);
+	// A set over a prior value is reported as changed or kept, not added.
+	const addedSets = survivingSets.filter(
+		(s) => !find(before, s.key, s.bindingType),
+	);
 	const claimedFrom = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.from));
 	const claimedTo = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.to)) ||
-		survivingSets.some((s) => sameTarget(v, s));
+		addedSets.some((s) => sameTarget(v, s));
 
 	const moved: MovedItem[] = survivingMoves.map((m) => {
 		const from = fieldOf(fromTemplate, m.from.key, m.from.bindingType);
@@ -378,7 +382,7 @@ export function buildReport({
 			};
 		});
 
-	for (const s of survivingSets) {
+	for (const s of addedSets) {
 		const field = fieldOf(toTemplate, s.key, s.bindingType);
 		const actual = find(after, s.key, s.bindingType)?.value ?? "";
 		added.push({
@@ -411,7 +415,9 @@ export function buildReport({
 					...nameOf("fromName", choiceName(fromTemplate, field, fromValue)),
 					...nameOf("toName", choiceName(toTemplate, field, v.value)),
 				},
-				source: "default",
+				source: survivingSets.some((s) => sameTarget(v, s))
+					? "recipe"
+					: "default",
 			};
 		});
 

@@ -289,6 +289,33 @@ describe("buildReport", () => {
 		assert.deepStrictEqual(report.changed, []);
 	});
 
+	test("reports a recipe set over a prior value as a recipe change", () => {
+		const report = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("provider", "azure"), value("effort", "high")],
+			after: [value("provider", "openai"), value("effort", "high")],
+			facts: facts({
+				set: [
+					{ key: "provider", bindingType: "zeebe:input", value: "openai" },
+					{ key: "effort", bindingType: "zeebe:input", value: "high" },
+				],
+			}),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(report.added, []);
+		assert.deepStrictEqual(
+			report.changed.map((c) => [c.key, c.valueChange.from, c.source]),
+			[["provider", "azure", "recipe"]],
+		);
+		assert.deepStrictEqual(
+			report.kept.map((k) => k.key),
+			["effort"],
+		);
+		assert.strictEqual(report.lossless, true);
+	});
+
 	test("lists set values as added and carries notes", () => {
 		const report = buildReport({
 			fromTemplate: oldTemplate,
