@@ -190,7 +190,7 @@ Management commands select an explicit leading `--c8-version`, otherwise the run
 
 `C8RUN_TENANTS_FILE` selects the saved physical tenants file; `C8RUN_SECRETS_DIR` selects the default secrets directory. Relative values and secret import filenames are resolved against the caller's working directory, including on startup. Without overrides, c8run's per-OS-user defaults apply. Each physical tenant's secret directory is a sibling under `tenant-secrets/<id>`. Both `--physical-tenant <id>` and `--physical-tenant=<id>` are supported. c8ctl adds no physical tenant or secret store of its own.
 
-Physical tenant IDs contain lowercase letters and digits. With the bundled H2 or other RDBMS storage, IDs are limited to eight characters. Removing and re-adding an ID restores its data, including its existing users. Each enabled physical tenant's Connectors runtime uses another JVM and port. See the [physical-tenant documentation](https://docs.camunda.io/docs/next/self-managed/concepts/physical-tenants/) for prerequisites and limitations.
+Physical tenant IDs contain lowercase letters and digits. With the bundled H2 or other RDBMS storage, IDs are limited to eight characters. Removing and re-adding an ID restores its data, including its existing users. Each enabled physical tenant's Connectors runtime uses another JVM and port. See the [physical-tenant documentation](/self-managed/concepts/physical-tenants/index.md) for prerequisites and limitations.
 
 #### Inspect a physical tenant with a profile
 
