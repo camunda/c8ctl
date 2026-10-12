@@ -437,3 +437,79 @@ describe("readEmbeddedRecipe", () => {
 		);
 	});
 });
+
+describe("parseRecipe boundary cases", () => {
+	const entriesOf = (path: object) =>
+		parseRecipe(recipeWith(path)).sources[0].entries;
+
+	test("surrounding whitespace in paths, values, templates and notes is preserved", () => {
+		const [set, template, rename] = entriesOf2(
+			{ to: " b ", set: "  x  ", note: " hi " },
+			{ to: "b", template: `  \${a}  ` },
+			{ from: " a ", to: "b" },
+		);
+		assert.partialDeepStrictEqual(set, {
+			kind: "set",
+			to: " b ",
+			value: "  x  ",
+			note: { level: "info", message: " hi " },
+		});
+		assert.partialDeepStrictEqual(template, { template: `  \${a}  ` });
+		assert.partialDeepStrictEqual(rename, { from: " a ", to: "b" });
+	});
+
+	function entriesOf2(...paths: object[]) {
+		return parseRecipe(recipeWith(...paths)).sources[0].entries;
+	}
+
+	for (const [key, where] of [
+		["__proto__", "source"],
+		["constructor", "entry"],
+		["__proto__", "value map"],
+	] as const) {
+		test(`${key} as a property name in a ${where} is an unknown property`, () => {
+			const raw = JSON.parse(
+				{
+					source: `{"schemaVersion":1,"sources":[{"kind":"change","sourceTemplateId":"old","${key}":{"x":1}}]}`,
+					entry: `{"schemaVersion":1,"sources":[{"kind":"change","sourceTemplateId":"old","paths":[{"to":"b","set":"x","${key}":"y"}]}]}`,
+					"value map": `{"schemaVersion":1,"sources":[{"kind":"change","sourceTemplateId":"old","paths":[{"from":"a","to":"b","valueMap":{"rules":[{"match":"x","value":"y"}],"${key}":{"default":"z"}}}]}]}`,
+				}[where],
+			);
+			rejects(raw, new RegExp(`unknown property \`${key}\``));
+		});
+	}
+
+	test("__proto__ as a binding key is plain data and pollutes nothing", () => {
+		const [entry] = entriesOf({ to: "__proto__", set: "x" });
+		assert.partialDeepStrictEqual(entry, { to: "__proto__", value: "x" });
+		assert.strictEqual(Reflect.get({}, "value"), undefined);
+	});
+
+	for (const [number, text] of [
+		[1e21, "1e+21"],
+		[1e-7, "1e-7"],
+		[1e300, "1e+300"],
+		[0.1 + 0.2, "0.30000000000000004"],
+		[-0, "0"],
+		[Number.MAX_SAFE_INTEGER + 2, "9007199254740992"],
+	] as const) {
+		test(`a set value of ${text} is written as ${JSON.stringify(text)}`, () => {
+			// Pinned: numbers are stringified with String(), not preserved as written.
+			const [entry] = entriesOf({ to: "b", set: number });
+			assert.partialDeepStrictEqual(entry, { value: text });
+		});
+	}
+
+	for (const version of [1.5, 0, -1, "1", 1.0000001]) {
+		test(`schemaVersion ${JSON.stringify(version)} is invalid, not "newer"`, () => {
+			rejects(
+				{ schemaVersion: version, sources: [] },
+				/schemaVersion must be 1/,
+			);
+		});
+	}
+
+	test("an integer schemaVersion above 1 asks the user to update c8ctl", () => {
+		rejects({ schemaVersion: 2, sources: [] }, /Update c8ctl/);
+	});
+});

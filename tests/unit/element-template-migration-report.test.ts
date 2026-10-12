@@ -576,3 +576,54 @@ describe("buildReport over merged facts", () => {
 		assert.strictEqual(report.lossless, false);
 	});
 });
+
+describe("buildReport lossless rules", () => {
+	const losslessWith = (partial: Partial<ReportFacts>) =>
+		buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("maxTokens", "2000")],
+			after: [value("maxTokens", "2000")],
+			facts: facts(partial),
+			usedRecipe: true,
+			refusal: null,
+		}).lossless;
+
+	test("is lossless when nothing was skipped or failed", () => {
+		assert.strictEqual(losslessWith({}), true);
+	});
+
+	const cases: [
+		name: string,
+		partial: Partial<ReportFacts>,
+		lossless: boolean,
+	][] = [
+		[
+			"a guard-skipped entry",
+			{ guardSkipped: [{ from: "a", to: "b" }] },
+			false,
+		],
+		[
+			"a template entry with missing sources",
+			{ templateSkipped: [{ to: "b", missing: ["a"] }] },
+			false,
+		],
+		[
+			"a value map without a matching rule",
+			{ noMatch: [{ from: "a", to: "b" }] },
+			false,
+		],
+		["a failed write", { failedWrites: true }, false],
+		// Pinned: a FEEL expression moved as-is keeps its value, so it is not a loss.
+		[
+			"a FEEL expression moved as-is",
+			{ feelSkipped: [{ from: "a", to: "b" }] },
+			true,
+		],
+	];
+	for (const [name, partial, lossless] of cases) {
+		test(`${name} makes the report ${lossless ? "still lossless" : "lossy"}`, () => {
+			assert.strictEqual(losslessWith(partial), lossless);
+		});
+	}
+});

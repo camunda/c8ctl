@@ -583,3 +583,199 @@ describe("reportToJson", () => {
 		]);
 	});
 });
+
+describe("output boundary cases", () => {
+	const options = { elementId: "Task_1", color: false, dryRun: false };
+
+	test("an empty report renders the header, the carry-over note and the lossless footer only", () => {
+		const text = renderReportText(report({ usedRecipe: false }), options);
+		assert.strictEqual(
+			text,
+			[
+				"🔄 Task_1  AI Agent (job worker) v13 (deprecated) → AI Agent Sub-process v1",
+				"   ℹ️  No recipe: values carried over by key",
+				"",
+				"✅ No values lost",
+				"",
+			].join("\n"),
+		);
+	});
+
+	test("a refusal replaces the recipe line and a dry run adds its footer", () => {
+		const text = renderReportText(
+			report({
+				refusal: "wrong source ID",
+				usedRecipe: false,
+				lossless: false,
+			}),
+			{ ...options, dryRun: true },
+		);
+		assert.match(text, /⚠️ {2}Recipe not used: wrong source ID/);
+		assert.match(text, /⚠️ {2}Some values were not migrated, review above/);
+		assert.match(text, /🔍 Dry run: nothing was written\n$/);
+	});
+
+	test("the footer counts dropped values in singular and plural", () => {
+		const dropped = (key: string) => ({
+			key,
+			bindingType: "zeebe:input",
+			value: "v",
+		});
+		const one = renderReportText(
+			report({ dropped: [dropped("a")], lossless: false }),
+			options,
+		);
+		assert.match(one, /⚠️ {2}1 value dropped, review above/);
+		const two = renderReportText(
+			report({ dropped: [dropped("a"), dropped("b")], lossless: false }),
+			options,
+		);
+		assert.match(two, /⚠️ {2}2 values dropped, review above/);
+	});
+
+	test("a --map move carries its via tag, and a renamed key is hinted inside one group", () => {
+		const text = renderReportText(
+			report({
+				moved: [
+					{
+						from: {
+							key: "maxTokens",
+							bindingType: null,
+							group: "g",
+							label: "Limit",
+						},
+						to: { key: "limit", bindingType: null, group: "g", label: "Limit" },
+						via: "--map",
+					},
+				],
+			}),
+			options,
+		);
+		assert.match(text, /g › Limit \(maxTokens → limit\) \[--map\]/);
+	});
+
+	test("every needs-attention kind is listed with its own wording", () => {
+		const text = renderReportText(
+			report({
+				lossless: false,
+				skipped: {
+					guard: [{ from: "a", to: "b" }],
+					template: [{ to: "c", missing: ["x", "y"] }],
+					noMatch: [{ from: "d", to: "e" }],
+					feel: [{ from: "f", to: "g" }],
+				},
+			}),
+			options,
+		);
+		assert.match(text, /⏭️ {2}Needs attention \(4\)/);
+		assert.match(text, /Condition not met, not moved: a → b/);
+		assert.match(text, /Not composed, missing x, y: c/);
+		assert.match(text, /No value rule matched, target default kept: d → e/);
+		assert.match(
+			text,
+			/FEEL expression moved as-is, value rules not applied: f → g/,
+		);
+	});
+
+	test("the changed section shows unredacted values for ordinary fields and redacts sensitive ones", () => {
+		const text = renderReportText(
+			report({
+				changed: [
+					{
+						key: "mode",
+						bindingType: "zeebe:input",
+						valueChange: { from: "slow", to: "fast" },
+					},
+					{
+						key: "apiKey",
+						bindingType: "zeebe:input",
+						valueChange: { from: "OLD-SECRET", to: "NEW-SECRET" },
+					},
+				],
+			}),
+			options,
+		);
+		assert.match(text, /mode {2}slow → fast/);
+		assert.match(text, /apiKey {2}\[REDACTED\] → \[REDACTED\]/);
+		assert.doesNotMatch(text, /OLD-SECRET|NEW-SECRET/);
+	});
+
+	test("a short secret redacts the element id and values but leaves the version header intact", () => {
+		const text = renderReportText(
+			report({
+				from: { id: "old", version: 1, name: "Old", deprecated: false },
+				dropped: [{ key: "password", bindingType: "zeebe:input", value: "1" }],
+				lossless: false,
+			}),
+			{
+				...options,
+				elementId: "Task_1",
+				redaction: {
+					values: [
+						{
+							bindingType: "zeebe:input",
+							key: "password",
+							value: "1",
+							isFeel: false,
+						},
+					],
+				},
+			},
+		);
+		assert.match(text, /🔄 Task_\[REDACTED\] {2}Old v1 → /);
+		assert.match(text, /password {2}\[REDACTED\]/);
+	});
+
+	test("JSON output carries the same content as the text, not only its keys", () => {
+		const raw = report({
+			dropped: [
+				{
+					key: "provider",
+					bindingType: "zeebe:input",
+					label: "Provider",
+					group: "model",
+					value: "azure",
+					valueName: "Azure OpenAI",
+				},
+			],
+			notes: [{ level: "warning", message: "Provider changed" }],
+			lossless: false,
+		});
+		const json = reportToJson(raw, {
+			elementId: "Task_1",
+			recipe: "embedded",
+			dryRun: true,
+			file: "process.bpmn",
+		});
+		assert.deepStrictEqual(json.report.dropped, raw.dropped);
+		assert.deepStrictEqual(json.report.notes, raw.notes);
+		assert.deepStrictEqual(json.recipe, {
+			source: "embedded",
+			used: true,
+			refusal: null,
+		});
+		assert.strictEqual(json.lossless, false);
+		assert.strictEqual(json.file, "process.bpmn");
+		const text = renderReportText(raw, options);
+		assert.match(text, /Azure OpenAI/);
+		assert.match(text, /Provider changed/);
+	});
+
+	test("the element id and the file are redacted in JSON output", () => {
+		const secret = {
+			bindingType: "zeebe:input",
+			key: "token",
+			value: "TOK-1",
+			isFeel: false,
+		};
+		const json = reportToJson(report(), {
+			elementId: "Task_TOK-1",
+			recipe: "none",
+			dryRun: false,
+			file: "/work/TOK-1/process.bpmn",
+			redaction: { values: [secret] },
+		});
+		assert.strictEqual(json.elementId, "Task_[REDACTED]");
+		assert.strictEqual(json.file, "/work/[REDACTED]/process.bpmn");
+	});
+});

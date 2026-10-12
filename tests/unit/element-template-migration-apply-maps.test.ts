@@ -185,4 +185,89 @@ describe("migrateElement maps", () => {
 			/Ambiguous migration/,
 		);
 	});
+
+	test("rejects a destination the target binds only as Hidden", async () => {
+		const target = {
+			...NEW,
+			properties: [
+				...NEW.properties,
+				{
+					type: "Hidden",
+					value: "fixed",
+					binding: { type: "zeebe:input", name: "locked" },
+				},
+			],
+		};
+		await assert.rejects(
+			() => run([map("maxTokens", "locked")], undefined, undefined, target),
+			/destination "locked" is not a settable binding/,
+		);
+	});
+
+	test("stores a moved value as a FEEL expression when the destination requires FEEL", async () => {
+		const target = {
+			...NEW,
+			properties: [hidden(NEW.id), input("limit", "", { feel: "required" })],
+		};
+		const { element, report } = await run(
+			[map("maxTokens", "limit")],
+			undefined,
+			undefined,
+			target,
+		);
+		assert.strictEqual(valueAt(element, "limit"), "=512");
+		assert.strictEqual(report.lossless, true);
+		assert.deepStrictEqual(report.dropped, []);
+	});
+
+	test("a map reads the original value after a multi-step chain removed its field", async () => {
+		const id = "io.example.chain";
+		const v1 = {
+			id,
+			version: 1,
+			appliesTo: ["bpmn:Task"],
+			properties: [hidden(id), input("a", "")],
+		};
+		const v2 = { ...v1, version: 2, properties: [hidden(id), input("b", "")] };
+		const v3 = {
+			...v1,
+			version: 3,
+			properties: [hidden(id), input("c", ""), input("d", "")],
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "upgrade",
+							sourceTemplateId: id,
+							toVersion: 2,
+							paths: [{ from: "a", to: "b" }],
+						},
+						{
+							kind: "upgrade",
+							sourceTemplateId: id,
+							toVersion: 3,
+							paths: [{ from: "b", to: "c" }],
+						},
+					],
+				},
+			},
+		};
+		const { migrationModeler, element } = await setupAppliedModeler(
+			vendor,
+			v1,
+			{ a: "original" },
+		);
+		const result = migrateElement({
+			modeler: migrationModeler,
+			element,
+			fromTemplate: v1,
+			target: v3,
+			templates: [v1, v2, v3],
+			maps: [map("a", "d")],
+		});
+		assert.strictEqual(valueAt(result.element, "c"), "original");
+		assert.strictEqual(valueAt(result.element, "d"), "original");
+		assert.deepStrictEqual(result.report.dropped, []);
+	});
 });

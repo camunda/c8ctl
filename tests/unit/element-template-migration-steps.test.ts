@@ -964,3 +964,111 @@ describe("Option B selection boundaries", () => {
 		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
 	});
 });
+
+describe("resolveSteps and findSuccessors boundary cases", () => {
+	const upgradeTo2 = {
+		kind: "upgrade",
+		sourceTemplateId: "t",
+		toVersion: 2,
+		paths: [{ from: "a", to: "b" }],
+	};
+
+	test("an applied version above the target without a recipe resolves to nothing", () => {
+		const target = template("t", 2, ["b"]);
+		const result = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 3,
+			target,
+			templates: [target],
+		});
+		assert.deepStrictEqual(result, { steps: [], refusal: null });
+	});
+
+	test("an applied version above the target with a recipe is refused with the version gap", () => {
+		const target = withRecipe(template("t", 2, ["b"]), upgradeTo2);
+		const result = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 3,
+			target,
+			templates: [target],
+		});
+		assert.deepStrictEqual(result.steps, []);
+		assert.match(
+			result.refusal ?? "",
+			/no applicable upgrade: .*above applied version 3 through target version 2/,
+		);
+	});
+
+	test("a target without a version is treated as version 0 and never throws", () => {
+		const { version: _version, ...target } = template("t", 0, ["b"]);
+		const result = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 1,
+			target,
+			templates: [target],
+		});
+		assert.deepStrictEqual(result, { steps: [], refusal: null });
+	});
+
+	test("only the newest non-deprecated successor version is offered", () => {
+		const applied = template("old", 1, ["a"]);
+		const change = {
+			kind: "change",
+			sourceTemplateId: "old",
+			paths: [{ from: "a", to: "a" }],
+		};
+		const v1 = withRecipe(template("new", 1, ["a"]), change);
+		const v2 = withRecipe(
+			template("new", 2, ["a"], { deprecated: true }),
+			change,
+		);
+		const found = findSuccessors([v1, v2], "old", 1, [applied]);
+		assert.deepStrictEqual(
+			found.map((t) => [t.id, t.version]),
+			[["new", 1]],
+		);
+	});
+
+	test("a successor candidate with the applied id is not a successor", () => {
+		const applied = template("old", 1, ["a"]);
+		const newer = withRecipe(template("old", 2, ["a"]), {
+			kind: "upgrade",
+			sourceTemplateId: "old",
+			toVersion: 2,
+			paths: [{ from: "a", to: "a" }],
+		});
+		assert.deepStrictEqual(findSuccessors([newer], "old", 1, [applied]), []);
+	});
+
+	test("qualified recipe paths are checked against the binding type of the applied shape", () => {
+		const applied = template("t", 1, ["a"]);
+		const upgrade = (from: string) =>
+			withRecipe(template("t", 2, ["b"]), {
+				kind: "upgrade",
+				sourceTemplateId: "t",
+				toVersion: 2,
+				paths: [{ from, to: "b" }],
+			});
+		for (const [from, covered] of [
+			["input:a", true],
+			["a", true],
+			["header:a", false],
+			["output:a", false],
+		] as const) {
+			const target = upgrade(from);
+			const result = resolveSteps({
+				appliedId: "t",
+				appliedVersion: 1,
+				target,
+				templates: [applied, target],
+			});
+			if (covered) {
+				assert.strictEqual(result.refusal, null, from);
+				assert.strictEqual(result.steps.length, 1, from);
+			} else {
+				assert.match(result.refusal ?? "", /is incomplete: .*reads/, from);
+				assert.deepStrictEqual(result.steps, [], from);
+			}
+		}
+	});
+});

@@ -79,7 +79,11 @@ export interface AppliedTemplate {
 	version: number;
 }
 
-/** The template an element is bound to, or `undefined` when it has none. */
+/**
+ * The template an element is bound to, or `undefined` when it has none.
+ * A version string is read like the moddle `Integer` type does, so a plain
+ * object and a real element agree.
+ */
 export function readAppliedTemplate(
 	businessObject: ModdleElement,
 ): AppliedTemplate | undefined {
@@ -90,7 +94,7 @@ export function readAppliedTemplate(
 	const asString = getModdleString(businessObject, "modelerTemplateVersion");
 	const version =
 		asString !== undefined && asString !== ""
-			? Number(asString)
+			? Number.parseInt(asString, 10)
 			: getModdleNumber(businessObject, "modelerTemplateVersion");
 	return version === undefined || !Number.isSafeInteger(version) || version < 0
 		? undefined

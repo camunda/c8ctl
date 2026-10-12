@@ -364,7 +364,10 @@ export function parseRecipe(raw: unknown): Recipe {
 	}
 
 	if (obj.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
-		if (typeof obj.schemaVersion === "number" && obj.schemaVersion > 1) {
+		if (
+			Number.isInteger(obj.schemaVersion) &&
+			Number(obj.schemaVersion) > SUPPORTED_SCHEMA_VERSION
+		) {
 			throw new RecipeError(
 				`schemaVersion ${obj.schemaVersion} is newer than this c8ctl supports (${SUPPORTED_SCHEMA_VERSION}). Update c8ctl to use this recipe`,
 			);

@@ -6,16 +6,24 @@
 import assert from "node:assert";
 import { before, describe, test } from "node:test";
 import type { MigrationModeler } from "../../default-plugins/element-template/migration/apply.ts";
-import { migrateElement } from "../../default-plugins/element-template/migration/apply.ts";
+import {
+	migrateElement,
+	readAppliedTemplate,
+} from "../../default-plugins/element-template/migration/apply.ts";
 import {
 	enumerateElementValues,
 	getExtensionElements,
 } from "../../default-plugins/element-template/migration/element-values.ts";
-import { getModdleList } from "../../default-plugins/element-template/migration/moddle.ts";
+import {
+	getModdleList,
+	type ModdleElement,
+} from "../../default-plugins/element-template/migration/moddle.ts";
 import { normalizeDestinationValue } from "../../default-plugins/element-template/migration/plan.ts";
 import { parseRecipe } from "../../default-plugins/element-template/migration/recipe.ts";
 import type { MigrationTemplate } from "../../default-plugins/element-template/migration/types.ts";
 import {
+	createTestModeler,
+	DIAGRAM,
 	input,
 	loadVendorBundle,
 	setupAppliedModeler,
@@ -1000,4 +1008,82 @@ describe("migrateElement", () => {
 			);
 		}
 	});
+});
+
+describe("migrateElement boundary cases", () => {
+	const rename = parseRecipe({
+		schemaVersion: 1,
+		sources: [
+			{
+				kind: "change",
+				sourceTemplateId: OLD.id,
+				paths: [{ from: "endpoint", to: "backend.endpoint" }],
+			},
+		],
+	});
+
+	for (const [name, value] of [
+		["ampersand, angle brackets and quotes", `a&b <c> "d" 'e' &amp;`],
+		["unicode and an emoji", "h\u00e9llo \u4e16\u754c \u{1F680}"],
+		["newlines and tabs", "line1\nline2\r\n\tindented"],
+		["leading and trailing spaces", "  padded  "],
+		["a very long value", "x".repeat(20_000)],
+	] as const) {
+		test(`a value with ${name} survives the migration and an XML round trip`, async () => {
+			const { modeler, migrationModeler, element } = await setup(OLD, {
+				endpoint: value,
+			});
+			migrateElement({
+				modeler: migrationModeler,
+				element,
+				fromTemplate: OLD,
+				target: NEW,
+				templates: [OLD, NEW],
+				recipe: rename,
+			});
+			const { xml } = await modeler.saveXML({ format: true });
+			const reloaded = await createTestModeler(vendor, xml);
+			const reloadedElement = reloaded.get("elementRegistry").get("Task_1");
+			assert.ok(reloadedElement);
+			const stored = enumerateElementValues(
+				getExtensionElements(reloadedElement.businessObject),
+			).find((v) => v.key === "backend.endpoint");
+			assert.strictEqual(stored?.value, value);
+		});
+	}
+
+	// readAppliedTemplate takes a version string through the same Integer
+	// parsing as a real element, so a plain object and a loaded diagram agree.
+	for (const version of [
+		"1",
+		"0x1",
+		" 1 ",
+		"01",
+		"1e0",
+		"+1",
+		"1.5",
+		"-1",
+		"",
+		"abc",
+		"9007199254740993",
+	]) {
+		test(`an applied version of ${JSON.stringify(version)} reads like the Modeler reads it`, async () => {
+			const xml = DIAGRAM.replace(
+				'<bpmn:serviceTask id="Task_1" />',
+				`<bpmn:serviceTask id="Task_1" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" zeebe:modelerTemplate="x" zeebe:modelerTemplateVersion="${version}" />`,
+			);
+			const modeler = await createTestModeler(vendor, xml);
+			const real = modeler.get("elementRegistry").get("Task_1");
+			assert.ok(real);
+			const plain: ModdleElement = {
+				$type: "bpmn:ServiceTask",
+				get: (name: string) =>
+					({ modelerTemplate: "x", modelerTemplateVersion: version })[name],
+			};
+			assert.deepStrictEqual(
+				readAppliedTemplate(plain),
+				readAppliedTemplate(real.businessObject),
+			);
+		});
+	}
 });

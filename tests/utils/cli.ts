@@ -5,6 +5,7 @@
  * environment and a JSON parser for dry-run output.
  */
 
+import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -124,6 +125,35 @@ export async function c8WithOptions(
 				},
 				options,
 			);
+}
+
+/**
+ * Run the CLI with its stdout reader already closed, as `cmd | head -c 1` does
+ * before the first write. Resolves with the exit status and stderr.
+ */
+export function c8WithClosedStdout(
+	opts: C8Options,
+	...args: string[]
+): Promise<{ status: number | null; stderr: string }> {
+	const env: NodeJS.ProcessEnv = { ...buildChildEnv(), ...opts.env };
+	for (const [key, value] of Object.entries(opts.env ?? {})) {
+		if (value === undefined) delete env[key];
+	}
+	return new Promise((resolvePromise, reject) => {
+		const child = spawn("node", ["--experimental-strip-types", CLI, ...args], {
+			env,
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
+		});
+		let stderr = "";
+		child.stderr.setEncoding("utf-8");
+		child.stderr.on("data", (chunk: string) => {
+			stderr += chunk;
+		});
+		child.stdout.destroy();
+		child.on("error", reject);
+		child.on("close", (status) => resolvePromise({ status, stderr }));
+	});
 }
 
 /**

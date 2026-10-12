@@ -1128,3 +1128,126 @@ describe("normalizeDestinationValue", () => {
 		});
 	}
 });
+
+describe("buildStepPlan boundary cases", () => {
+	const mapped = (rules: object[], values: ElementValue[], extra = {}) =>
+		buildStepPlan(
+			entriesOf({ from: "a", to: "b", valueMap: { rules, ...extra } }),
+			values,
+		);
+
+	test("overlapping value-map rules: the first matching rule wins", () => {
+		const plan = mapped(
+			[
+				{ match: "x*", value: "first" },
+				{ match: "xy", value: "second" },
+			],
+			[elementValue("a", "xy")],
+		);
+		assert.deepStrictEqual(
+			plan.writes.map((w) => w.value),
+			["first"],
+		);
+	});
+
+	for (const [pattern, value, hit] of [
+		["a.b", "a.b", true],
+		["a.b", "axb", false],
+		["a+b", "a+b", true],
+		["a?", "a", false],
+		["(x)", "(x)", true],
+		["[x]", "[x]", true],
+		["^x$", "^x$", true],
+		["*", "", true],
+		["x*", "x", true],
+	] as const) {
+		test(`value-map glob ${JSON.stringify(pattern)} ${hit ? "matches" : "does not match"} ${JSON.stringify(value)}`, () => {
+			const plan = mapped(
+				[{ match: pattern, value: "hit" }],
+				[elementValue("a", value)],
+				{ default: "miss" },
+			);
+			assert.deepStrictEqual(
+				plan.writes.map((w) => w.value),
+				[hit ? "hit" : "miss"],
+				`${pattern} against ${value}`,
+			);
+		});
+	}
+
+	test("the isFeel flag, not the = prefix, decides whether a value map applies", () => {
+		const rules = [{ match: "x", value: "mapped" }];
+		const flagged = mapped(rules, [
+			{ ...elementValue("a", "x"), isFeel: true },
+		]);
+		assert.deepStrictEqual(
+			flagged.writes.map((w) => w.value),
+			["x"],
+		);
+		assert.deepStrictEqual(flagged.facts.feelSkipped, [{ from: "a", to: "b" }]);
+		const prefixed = mapped(
+			[{ match: "=x", value: "mapped" }],
+			[{ ...elementValue("a", "=x"), isFeel: false }],
+		);
+		assert.deepStrictEqual(
+			prefixed.writes.map((w) => w.value),
+			["mapped"],
+		);
+		assert.deepStrictEqual(prefixed.facts.feelSkipped, []);
+	});
+
+	test("an empty referenced value skips a template entry and names the missing path", () => {
+		const plan = buildStepPlan(entriesOf({ to: "b", template: `pre-\${a}` }), [
+			elementValue("a", ""),
+		]);
+		assert.deepStrictEqual(plan.writes, []);
+		assert.deepStrictEqual(plan.facts.templateSkipped, [
+			{ to: "b", missing: ["a"] },
+		]);
+	});
+
+	for (const [name, source, template, expected] of [
+		["$& and $1 are literal", "$&x$1", `pre-\${a}-post`, "pre-$&x$1-post"],
+		["XML characters are not escaped", 'a&b"c', `<\${a}>`, '<a&b"c>'],
+		["an unclosed ${ is plain text", "1", `x \${a`, `x \${a`],
+	] as const) {
+		test(`interpolation: ${name}`, () => {
+			const plan = buildStepPlan(entriesOf({ to: "b", template }), [
+				elementValue("a", source),
+			]);
+			assert.deepStrictEqual(
+				plan.writes.map((w) => w.value),
+				[expected],
+			);
+		});
+	}
+
+	test("an empty in-list never matches", () => {
+		const plan = buildStepPlan(
+			entriesOf({ from: "a", to: "b", when: { path: "mode", in: [] } }),
+			[elementValue("a", "x"), elementValue("mode", "on")],
+		);
+		assert.deepStrictEqual(plan.writes, []);
+	});
+
+	test("mutually exclusive guarded writes to one target are not ambiguous", () => {
+		const entries = (mode: string) =>
+			buildStepPlan(
+				entriesOf(
+					{
+						from: "a",
+						to: "b",
+						when: { path: "mode", equals: "on" },
+					},
+					{
+						to: "b",
+						set: "other",
+						when: { path: "mode", equals: "on", not: true },
+					},
+				),
+				[elementValue("a", "x"), elementValue("mode", mode)],
+			).writes.map((w) => w.value);
+		assert.deepStrictEqual(entries("on"), ["x"]);
+		assert.deepStrictEqual(entries("off"), ["other"]);
+	});
+});
