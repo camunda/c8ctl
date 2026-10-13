@@ -6,6 +6,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Cancel superseded PR runs only; other triggers are never cancelled.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     name: Lint
@@ -90,10 +95,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run build
 
-      # Sharded with node's built-in --test-shard, passed via NODE_OPTIONS because
-      # the flag must precede the file globs in the `test:unit` script: given
-      # after them (e.g. `npm run test:unit -- --test-shard=1/4`) node silently
-      # ignores it and every shard runs the whole suite.
+      # NODE_OPTIONS, not `-- --test-shard=..`: node ignores flags after the globs.
       - name: Run unit tests (shard ${{ matrix.shard }})
         run: npm run test:unit
         env:
@@ -161,10 +163,7 @@ jobs:
           
           echo "Camunda may not be fully ready, but continuing with tests..."
 
-      # Each shard has its own runner and its own Camunda instance. The shard is
-      # passed via NODE_OPTIONS for the same reason as in the unit tests: it
-      # works with --experimental-test-isolation=none, whereas a flag appended
-      # after the file globs is silently ignored.
+      # Each shard has its own Camunda; NODE_OPTIONS as in the unit tests.
       - name: Run integration tests (shard ${{ matrix.shard }})
         run: npm run test:integration
         env:
@@ -181,8 +180,7 @@ jobs:
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose down -v
 
-  # Single stable check for branch protection: the matrix jobs above have
-  # shard-suffixed names, so require this job instead of listing each leg.
+  # Stable name to require in branch protection instead of each shard leg.
   test-gate:
     name: Tests passed
     if: always()
