@@ -813,7 +813,8 @@ async function runLockedMigrate(
 	let descriptor: number;
 	try {
 		descriptor = openSync(lock, "wx");
-	} catch {
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 		throw new Error(
 			`Cannot acquire migration lock ${lock}. Another writer may be active; remove a stale lock only after checking that no migration is running.`,
 		);

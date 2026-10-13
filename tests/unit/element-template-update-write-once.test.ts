@@ -4,7 +4,13 @@
  */
 
 import assert from "node:assert";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import {
@@ -76,6 +82,33 @@ test("an existing writer lock prevents overwriting and is not removed", async ()
 		readFileSync(`${file}.migration.lock`, "utf-8"),
 		"another writer",
 	);
+});
+
+test("a lock that cannot be created keeps its own error", {
+	skip:
+		(process.platform === "win32" || process.getuid?.() === 0) &&
+		"needs POSIX permissions as a non-root user",
+}, async () => {
+	const dir = join(ws.workDir, "read-only");
+	mkdirSync(dir);
+	const file = join(dir, "task.bpmn");
+	writeFileSync(file, readFileSync(ws.versionedBpmn, "utf-8"));
+	chmodSync(dir, 0o555);
+	try {
+		const result = await run(
+			dataDirWithCache([V1, V2]),
+			"update",
+			V1.id,
+			TASK,
+			file,
+			"--in-place",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.match(result.stderr, /EACCES/);
+		assert.doesNotMatch(result.stderr, /Another writer/);
+	} finally {
+		chmodSync(dir, 0o755);
+	}
 });
 
 test("selects every element on the template and writes the file once", async () => {
