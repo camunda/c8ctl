@@ -499,7 +499,8 @@ export function assertNoAmbiguousWrites(writes: Write[]): void {
 
 /**
  * Fails when an entry writes to a path the target template does not bind,
- * or binds under several binding types without a prefix.
+ * binds only as Hidden with a fixed value, or binds under several binding
+ * types without a prefix.
  */
 export function validateTargets(
 	entries: Entry[],
@@ -516,6 +517,11 @@ export function validateTargets(
 		if (matches.length === 0) {
 			throw new Error(
 				`${entry.label}: target path "${entry.to}" is not a binding in template ${label}`,
+			);
+		}
+		if (matches.every((m) => m.type === "Hidden" && m.value !== undefined)) {
+			throw new Error(
+				`${entry.label}: target path "${entry.to}" is a Hidden property with a fixed value in template ${label}`,
 			);
 		}
 		const types = new Set(matches.map((m) => m.binding?.type));

@@ -874,6 +874,12 @@ describe("validateTargets", () => {
 			{ binding: { type: "zeebe:input", name: "b" } },
 			{ binding: { type: "zeebe:input", name: "dup" } },
 			{ binding: { type: "zeebe:taskHeader", key: "dup" } },
+			{
+				type: "Hidden",
+				value: "v",
+				binding: { type: "zeebe:input", name: "fixed" },
+			},
+			{ type: "Hidden", binding: { type: "zeebe:input", name: "unset" } },
 		],
 	};
 
@@ -894,6 +900,14 @@ describe("validateTargets", () => {
 			/several binding types/,
 		);
 		validateTargets(entriesOf({ from: "a", to: "input:dup" }), template);
+	});
+
+	test("rejects a target bound only by a Hidden property with a fixed value", () => {
+		assert.throws(
+			() => validateTargets(entriesOf({ from: "a", to: "fixed" }), template),
+			/"fixed" is a Hidden property with a fixed value in template new@1/,
+		);
+		validateTargets(entriesOf({ from: "a", to: "unset" }), template);
 	});
 });
 

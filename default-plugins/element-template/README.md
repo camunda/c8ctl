@@ -246,7 +246,8 @@ Unqualified rename sources, guards and interpolation references reject ambiguous
 binding types. Duplicate backing entries/containers also fail rather than choosing
 an arbitrary value. Simultaneously active writes to the same resolved destination
 fail even when one uses a qualified alias; mutually exclusive guarded writes and
-qualified writes to distinct binding types remain valid. A rename whose guard
+qualified writes to distinct binding types remain valid. A destination bound only by
+Hidden properties with a fixed `value` is rejected. A rename whose guard
 fails is reported as not moved only when no active entry moved the same source.
 
 Migration validates resolved writes and populated non-Hidden carry-over against
