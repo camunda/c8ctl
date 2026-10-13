@@ -407,11 +407,14 @@ function deprecationOf(
 
 function describeDropped(report: MigrationReport): string {
 	const names = report.dropped.map((d) => d.key);
+	const unchecked = report.skipped.unchecked.map((u) => u.key);
 	return names.length > 0
 		? `${names.length} dropped (${names.join(", ")})`
-		: report.refusal
-			? `recipe not used: ${report.refusal}`
-			: "values not migrated";
+		: unchecked.length > 0
+			? `${unchecked.length} unchecked (${unchecked.join(", ")})`
+			: report.refusal
+				? `recipe not used: ${report.refusal}`
+				: "values not migrated";
 }
 
 async function runMigrateInternal(
