@@ -41,37 +41,92 @@ type Style = (text: string) => string;
 
 type MigrationRedactor = ReturnType<typeof migrationRedactor>;
 
+const sensitiveName = (identity: string) => {
+	// Token limits such as maxCompletionTokens or budgetTokens are no credentials.
+	const name = identity.replace(
+		/(?:max(?:imum)?|budget)[ ._-]?(?:[a-z]+[ ._-]?)?tokens/gi,
+		"",
+	);
+	return /password|passwd|secret|token|credential|api[._ -]?key|private[._ -]?key|authorization/i.test(
+		name,
+	);
+};
+
+/** Binding types per key that a template marks sensitive. */
+type SensitiveTargets = Map<string, Set<string | undefined>>;
+
+const isSensitiveTarget = (targets: SensitiveTargets, field: Field) => {
+	const types = targets.get(field.key);
+	return (
+		types !== undefined &&
+		[...types].some((bindingType) =>
+			sameTarget({ key: field.key, bindingType }, field),
+		)
+	);
+};
+
+interface TemplateSecrets {
+	targets: SensitiveTargets;
+	/** Default values of sensitive template properties. */
+	defaults: string[];
+}
+
+// The template cache holds tens of thousands of properties and a run redacts
+// many times, so this is computed once per templates array.
+const templateSecretsOf = new WeakMap<
+	readonly MigrationTemplate[],
+	TemplateSecrets
+>();
+
+function templateSecrets(
+	templates: readonly MigrationTemplate[],
+): TemplateSecrets {
+	const cached = templateSecretsOf.get(templates);
+	if (cached) return cached;
+	const targets: SensitiveTargets = new Map();
+	for (const template of templates) {
+		for (const property of template.properties) {
+			const key = bindingTargetKey(property.binding);
+			if (
+				key !== undefined &&
+				(property.secret === true ||
+					sensitiveName(
+						`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
+					))
+			) {
+				const types = targets.get(key) ?? new Set();
+				types.add(property.binding?.type);
+				targets.set(key, types);
+			}
+		}
+	}
+	const defaults: string[] = [];
+	for (const template of templates) {
+		for (const property of template.properties) {
+			const key = bindingTargetKey(property.binding);
+			if (
+				key !== undefined &&
+				typeof property.value === "string" &&
+				(sensitiveName(key) ||
+					isSensitiveTarget(targets, {
+						key,
+						bindingType: property.binding?.type ?? null,
+					}))
+			)
+				defaults.push(property.value);
+		}
+	}
+	const result = { targets, defaults };
+	templateSecretsOf.set(templates, result);
+	return result;
+}
+
 function migrationRedactor(context: MigrationRedactionContext) {
-	const sensitiveName = (identity: string) => {
-		// Token limits such as maxCompletionTokens or budgetTokens are no credentials.
-		const name = identity.replace(
-			/(?:max(?:imum)?|budget)[ ._-]?(?:[a-z]+[ ._-]?)?tokens/gi,
-			"",
-		);
-		return /password|passwd|secret|token|credential|api[._ -]?key|private[._ -]?key|authorization/i.test(
-			name,
-		);
-	};
+	const { targets, defaults } = templateSecrets(context.templates ?? []);
 	const sensitive = (field: Field) =>
 		sensitiveName(
 			`${field.key} ${field.label ?? ""} ${field.group ?? ""} ${field.groupLabel ?? ""}`,
-		) ||
-		(context.templates ?? []).some((template) =>
-			template.properties.some(
-				(property) =>
-					sameTarget(
-						{
-							key: bindingTargetKey(property.binding),
-							bindingType: property.binding?.type,
-						},
-						field,
-					) &&
-					(property.secret === true ||
-						sensitiveName(
-							`${property.id ?? ""} ${property.label ?? ""} ${property.group ?? ""} ${template.groups?.find((group) => group.id === property.group)?.label ?? ""}`,
-						)),
-			),
-		);
+		) || isSensitiveTarget(targets, field);
 	const secrets = new Set<string>();
 	const remember = (...values: (string | undefined)[]) => {
 		for (const value of values) {
@@ -84,17 +139,7 @@ function migrationRedactor(context: MigrationRedactionContext) {
 	for (const value of context.values ?? []) {
 		if (sensitive(value)) remember(value.value);
 	}
-	for (const template of context.templates ?? []) {
-		for (const property of template.properties) {
-			const key = bindingTargetKey(property.binding);
-			if (
-				key !== undefined &&
-				sensitive({ key, bindingType: property.binding?.type ?? null }) &&
-				typeof property.value === "string"
-			)
-				remember(property.value);
-		}
-	}
+	remember(...defaults);
 	if (context.report) {
 		for (const item of [...context.report.dropped, ...context.report.added]) {
 			if (sensitive(item)) remember(item.value, item.valueName);

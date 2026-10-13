@@ -456,7 +456,11 @@ async function runMigrateInternal(
 	redaction.values = selected.flatMap(({ element }) => valuesOf(element));
 
 	const cachedTemplates = loadCache() ?? [];
-	redaction.templates = migrationTemplates(cachedTemplates);
+	// Every version of the involved lineages, engine-incompatible ones too:
+	// a filtered-out source still marks secrets.
+	const lineages = (ids: (string | undefined)[]) =>
+		migrationTemplates(cachedTemplates).filter((t) => ids.includes(t.id));
+	redaction.templates = lineages([templateId, parsed.to]);
 	const cache = compatibleTemplates(cachedTemplates, engineVersion);
 
 	const recipe = parsed.recipePath
@@ -481,8 +485,7 @@ async function runMigrateInternal(
 		cache.filter((t) => t.id === templateId || t.id === target.id),
 		[target],
 	);
-	// Keep every cached template: a filtered-out source still marks secrets.
-	redaction.templates = [...migrationTemplates(cachedTemplates), target];
+	redaction.templates = [...lineages([templateId, target.id]), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (!isEngineCompatible(target, engineVersion)) {
