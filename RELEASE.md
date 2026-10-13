@@ -6,7 +6,7 @@ This repository uses **semantic-release** + GitHub Actions to build, test, tag, 
 
 The release workflow is [.github/workflows/release.yml](.github/workflows/release.yml).
 
-1. **Tests run first** (unit + integration against Camunda 8 via Docker Compose). This job is copied from the test workflow so release runs are gated on the same checks.
+1. **Tests run first** (lint, typecheck, unit + integration against Camunda 8 via Docker Compose). The job calls the reusable test workflow (`test.yml`, Ubuntu only), so release runs are gated on the same checks.
 2. If tests pass, the workflow runs `npx semantic-release`.
 3. `semantic-release`:
    - determines the next version from commit messages (Conventional Commits)
