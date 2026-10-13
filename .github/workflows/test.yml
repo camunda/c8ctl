@@ -5,6 +5,17 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      os:
+        description: JSON array of runners for the unit tests
+        type: string
+        default: '["ubuntu-latest","macos-latest","windows-latest"]'
+
+# Cancel superseded PR runs only; other triggers are never cancelled.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -50,7 +61,7 @@ jobs:
         run: npm run typecheck
 
   unit-test:
-    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
+    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
     needs: [lint, typecheck]
     runs-on: ${{ matrix.os }}
     permissions:
@@ -59,7 +70,8 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24, 26]
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.os || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        shard: ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
 
     steps:
       - name: Checkout code
@@ -89,11 +101,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run build
 
-      - name: Run unit tests
+      # NODE_OPTIONS, not `-- --test-shard=..`: node ignores flags after the globs.
+      - name: Run unit tests (shard ${{ matrix.shard }})
         run: npm run test:unit
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
   integration-test:
-    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
+    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -103,6 +118,7 @@ jobs:
         node: [22, 24, 26]
         camunda: ['8.8', '8.9', '8.10']
         os: [ubuntu-latest]
+        shard: ['1/3', '2/3', '3/3']
 
     steps:
       - name: Checkout code
@@ -153,10 +169,12 @@ jobs:
           
           echo "Camunda may not be fully ready, but continuing with tests..."
 
-      - name: Run integration tests
+      # Each shard has its own Camunda; NODE_OPTIONS as in the unit tests.
+      - name: Run integration tests (shard ${{ matrix.shard }})
         run: npm run test:integration
         env:
           CAMUNDA_VERSION: ${{ matrix.camunda }}
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
       - name: Show Camunda logs on failure
         if: failure()
@@ -167,3 +185,15 @@ jobs:
         if: always()
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose down -v
+
+  # Stable name to require in branch protection instead of each shard leg.
+  test-gate:
+    name: Tests passed
+    if: always()
+    needs: [lint, typecheck, unit-test, integration-test]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Fail if any required job did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
