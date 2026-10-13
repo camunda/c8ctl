@@ -603,8 +603,15 @@ export function renderReportText(
 		}
 	}
 
-	const { guard, template, noMatch, feel } = report.skipped;
-	if (guard.length + template.length + noMatch.length + feel.length > 0) {
+	const { guard, template, noMatch, feel, unchecked } = report.skipped;
+	if (
+		guard.length +
+			template.length +
+			noMatch.length +
+			feel.length +
+			unchecked.length >
+		0
+	) {
 		lines.push("", `  ${s.bold("Needs attention")}`);
 		for (const g of guard) {
 			lines.push(`  Condition not met, not moved: ${g.from} → ${g.to}`);
@@ -622,12 +629,21 @@ export function renderReportText(
 				`  FEEL expression moved as-is, value rules not applied: ${f.from} → ${f.to}`,
 			);
 		}
+		for (const u of unchecked) {
+			lines.push(
+				`  Not checked, ${u.bindingType} binding not kept by the target: ${u.label ?? u.key}`,
+			);
+		}
 	}
 
 	const updated =
 		report.added.length + report.changed.length + report.moved.length;
 	const lost =
-		report.dropped.length + guard.length + template.length + noMatch.length;
+		report.dropped.length +
+		guard.length +
+		template.length +
+		noMatch.length +
+		unchecked.length;
 	const tail =
 		authorization === "required"
 			? ". Requires --allow-lossy before writing."

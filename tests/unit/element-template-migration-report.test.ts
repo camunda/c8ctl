@@ -655,6 +655,61 @@ describe("buildReport lossless rules", () => {
 	}
 });
 
+describe("buildReport unchecked bindings", () => {
+	const correlationKey = {
+		type: "bpmn:Message#zeebe:subscription#property",
+		name: "correlationKey",
+	};
+	const withBinding = (
+		id: string,
+		properties: MigrationTemplate["properties"],
+	): MigrationTemplate => ({ id, version: 1, properties });
+	const reportFor = (target: MigrationTemplate["properties"]) =>
+		buildReport({
+			fromTemplate: withBinding("old", [
+				{ id: "key", label: "Correlation key", binding: correlationKey },
+				{
+					type: "Hidden",
+					value: "x",
+					binding: { type: "zeebe:calledElement", property: "processId" },
+				},
+			]),
+			toTemplate: withBinding("new", target),
+			before: [],
+			after: [],
+			facts: facts(),
+			usedRecipe: false,
+			refusal: null,
+		});
+
+	test("an identical editable binding on the target keeps the value", () => {
+		const report = reportFor([{ binding: { ...correlationKey } }]);
+		assert.deepStrictEqual(report.skipped.unchecked, []);
+		assert.strictEqual(report.lossless, true);
+	});
+
+	for (const [name, target] of [
+		["a target without the binding", []],
+		[
+			"a target that binds it as Hidden",
+			[{ type: "Hidden", binding: correlationKey }],
+		],
+	] as const) {
+		test(`${name} makes the report lossy`, () => {
+			const report = reportFor([...target]);
+			assert.deepStrictEqual(report.skipped.unchecked, [
+				{
+					key: "correlationKey",
+					bindingType: correlationKey.type,
+					label: "Correlation key",
+					propertyId: "key",
+				},
+			]);
+			assert.strictEqual(report.lossless, false);
+		});
+	}
+});
+
 describe("buildReport item identity, values and sources", () => {
 	const source: MigrationTemplate = {
 		id: "source",

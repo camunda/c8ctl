@@ -225,7 +225,10 @@ that moved.
   and static/composed writes are reconciled against resolved stored values and
   per-step snapshots. Removed lineage cannot be revived by a later default.
   Simultaneous moves read the same pre-step snapshot; they are not collapsed into
-  a sequential chain. Binding type remains part of field identity.
+  a sequential chain. Binding type remains part of field identity. Binding types
+  the engine cannot read are not diffed; an editable source field under one is
+  reported as unchecked, and the report is lossy, unless the target binds it
+  identically and not as Hidden, which is the case where the Modeler keeps it.
 - **Read/write identity.** Unqualified rename, guard and interpolation reads fail
   when several binding types match. Qualification selects a binding type; duplicate
   backing identities or extension containers are rejected rather than selecting an

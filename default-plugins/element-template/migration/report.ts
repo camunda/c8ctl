@@ -8,6 +8,7 @@
  */
 
 import {
+	bindingTargetKey,
 	type FieldKey,
 	findPropertiesByTarget,
 	sameTarget,
@@ -15,7 +16,11 @@ import {
 import type { ElementValue } from "./element-values.ts";
 import type { MovedFact, PlanFacts } from "./plan.ts";
 import type { Note } from "./recipe.ts";
-import type { MigrationTemplate, TemplateProperty } from "./types.ts";
+import type {
+	MigrationTemplate,
+	TemplateBinding,
+	TemplateProperty,
+} from "./types.ts";
 
 export interface ReportFacts extends PlanFacts {
 	/** Expected stored values, including FEEL normalization. */
@@ -89,6 +94,8 @@ export interface MigrationReport {
 		template: PlanFacts["templateSkipped"];
 		noMatch: PlanFacts["noMatch"];
 		feel: PlanFacts["feelSkipped"];
+		/** Fields the engine cannot read whose binding the target does not keep. */
+		unchecked: Field[];
 	};
 	/** Nothing was dropped or skipped. */
 	lossless: boolean;
@@ -436,6 +443,7 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
+		unchecked: uncheckedFields(fromTemplate, toTemplate),
 	};
 
 	return {
@@ -460,8 +468,53 @@ export function buildReport({
 			dropped.length === 0 &&
 			skipped.guard.length === 0 &&
 			skipped.template.length === 0 &&
-			skipped.noMatch.length === 0,
+			skipped.noMatch.length === 0 &&
+			skipped.unchecked.length === 0,
 	};
+}
+
+/**
+ * Editable source fields under a binding type the engine does not read. The
+ * Modeler keeps such a value only when the target binds it identically and
+ * not as Hidden, so any other case may lose a value the report cannot see.
+ */
+function uncheckedFields(
+	fromTemplate: MigrationTemplate,
+	toTemplate: MigrationTemplate,
+): Field[] {
+	return fromTemplate.properties
+		.filter(
+			(p) =>
+				p.binding &&
+				p.type !== "Hidden" &&
+				bindingTargetKey(p.binding) === undefined &&
+				!toTemplate.properties.some(
+					(t) => t.type !== "Hidden" && sameBinding(t.binding, p.binding),
+				),
+		)
+		.map((p) => {
+			const binding: Record<string, unknown> = { ...p.binding };
+			const field: Field = {
+				key: String(binding.name ?? binding.property ?? p.id ?? ""),
+				bindingType: p.binding?.type ?? null,
+			};
+			if (p.label) field.label = p.label;
+			if (p.id) field.propertyId = p.id;
+			return field;
+		});
+}
+
+function sameBinding(
+	a: TemplateBinding | undefined,
+	b: TemplateBinding | undefined,
+): boolean {
+	if (!a || !b) return false;
+	const x: Record<string, unknown> = { ...a };
+	const y: Record<string, unknown> = { ...b };
+	const keys = Object.keys(x);
+	return (
+		keys.length === Object.keys(y).length && keys.every((k) => x[k] === y[k])
+	);
 }
 
 function nameOf(

@@ -139,6 +139,10 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
 - `--map <from>=<to>` moves the original value of one binding to another on every
   selected element, after the recipe steps. A moved value does not count as
   dropped. Prefixes such as `input:` work as in `apply --set`.
+- Values the engine cannot read, such as message, called-element or form
+  bindings, are not diffed. Unless the target binds such an editable field
+  identically and not as Hidden, `report.skipped.unchecked` lists it and the
+  migration counts as lossy.
 - All selected elements migrate in memory and the file is written once, only if
   every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
   need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:

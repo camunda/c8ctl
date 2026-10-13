@@ -178,6 +178,7 @@ describe("migrateElement", () => {
 				template: [],
 				noMatch: [],
 				feel: [],
+				unchecked: [],
 			});
 			assert.strictEqual(report.lossless, true);
 		});

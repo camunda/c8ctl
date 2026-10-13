@@ -57,7 +57,7 @@ function report({
 		dropped: [],
 		kept: [],
 		notes: [],
-		skipped: { guard: [], template: [], noMatch: [], feel: [] },
+		skipped: { guard: [], template: [], noMatch: [], feel: [], unchecked: [] },
 		lossless: true,
 		...partial,
 		added: added.map((item) => ({ source: "default", ...item })),
@@ -168,6 +168,7 @@ describe("redaction", () => {
 				template: [{ to: "c", missing: [secret] }],
 				noMatch: [{ from: "d", to: secret }],
 				feel: [{ from: secret, to: "e" }],
+				unchecked: [],
 			},
 		});
 		const original = structuredClone(raw);
@@ -827,8 +828,19 @@ describe("renderReportText", () => {
 					template: [{ to: "url", missing: ["host"] }],
 					noMatch: [{ from: "c", to: "d" }],
 					feel: [{ from: "e", to: "f" }],
+					unchecked: [
+						{
+							key: "correlationKey",
+							bindingType: "bpmn:Message#zeebe:subscription#property",
+							label: "Correlation key",
+						},
+					],
 				},
 			}),
+		);
+		assert.match(
+			text,
+			/Not checked, bpmn:Message#zeebe:subscription#property binding not kept by the target: Correlation key/,
 		);
 		assert.match(text, /ℹ️ {2}moved for you/);
 		assert.match(text, /⚠️ {2}check IAM/);
@@ -1084,6 +1096,7 @@ describe("output boundary cases", () => {
 					template: [{ to: "c", missing: ["x", "y"] }],
 					noMatch: [{ from: "d", to: "e" }],
 					feel: [{ from: "f", to: "g" }],
+					unchecked: [],
 				},
 			}),
 			options,

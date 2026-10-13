@@ -211,7 +211,7 @@ function assertNoopJson({
 		moved: [],
 		kept: [],
 		notes: [],
-		skipped: { guard: [], template: [], noMatch: [], feel: [] },
+		skipped: { guard: [], template: [], noMatch: [], feel: [], unchecked: [] },
 	});
 }
 
