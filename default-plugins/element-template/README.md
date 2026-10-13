@@ -119,7 +119,7 @@ c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.b
 
 # Move all elements to another template (its embedded recipe moves renamed values)
 c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
-  --to io.camunda.connectors.agenticai.aiagent.v2 --in-place
+  --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place
 
 # Same, with a recipe from a file, or a single value moved by hand
 c8ctl element-template update old.id process.bpmn --to new.json --recipe recipe.json -i
@@ -277,44 +277,12 @@ Scalar values accept strings (including blank strings), finite numbers, and bool
 note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
 but sources, groups, guard lists, and value-map rules must be non-empty.
 
-#### Bundled recipes
+#### AI Agent v1 to v2
 
-[`recipes/`](./recipes/) holds recipes for the AI Agent v1 (version 10 or
-later) to v2 migration. An installed package ships them under
-`dist/default-plugins/element-template/recipes/`.
-
-| Recipe | From | To |
-|--------|------|----|
-| `ai-agent-task.v2.recipe.json` | `io.camunda.connectors.agenticai.aiagent.v1` | `io.camunda.connectors.agenticai.ai-agent-task.v2` |
-| `ai-agent-subprocess.v2.recipe.json` | `io.camunda.connectors.agenticai.aiagent.jobworker.v1` | `io.camunda.connectors.agenticai.ai-agent-subprocess.v2` |
-| `ai-agent-task.v2-hybrid.recipe.json` | `io.camunda.connectors.agenticai.aiagent.v1-hybrid` | `io.camunda.connectors.agenticai.ai-agent-task.v2-hybrid` |
-| `ai-agent-subprocess.v2-hybrid.recipe.json` | `io.camunda.connectors.agenticai.aiagent.jobworker.v1-hybrid` | `io.camunda.connectors.agenticai.ai-agent-subprocess.v2-hybrid` |
-
-```bash
-c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
-  --to io.camunda.connectors.agenticai.ai-agent-task.v2 \
-  --recipe default-plugins/element-template/recipes/ai-agent-task.v2.recipe.json --dry-run
-```
-
-Providers map as follows. OpenAI, Azure OpenAI and OpenAI compatible use the
-Chat Completions API.
-
-| v1 provider | v2 provider and backend |
-|-------------|-------------------------|
-| OpenAI | OpenAI on the OpenAI API |
-| Azure OpenAI | OpenAI on Microsoft Foundry |
-| OpenAI compatible | OpenAI on a custom backend |
-| Anthropic | Anthropic on the Anthropic API. A custom endpoint moves to Microsoft Foundry (Azure hosts) or to a custom backend. |
-| AWS Bedrock | AWS Bedrock Converse |
-| Google Vertex AI | Google Gemini on the Vertex AI backend |
-
-Prompt caching, reasoning effort and thinking get the v2 template defaults. The
-report flags the migrated values that need review: copied Anthropic endpoints
-(remove the `/v1` suffix), Vertex AI endpoints (now hidden in Modeler) and an
-OpenAI-compatible `Authorization` header (kept in place of the API key). In the
-hybrid recipes, template application replaces the default v1 job type with the
-v2 default and keeps a custom job type unchanged, without a report note. The
-worker for a custom job type MUST accept the v2 request format.
+c8ctl ships no connector recipes. The AI Agent v2 templates in
+`camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`
+([camunda/connectors#9430](https://github.com/camunda/connectors/pull/9430)),
+so `update` picks them up from the cache once a release carries them.
 
 ## Inspecting a template
 

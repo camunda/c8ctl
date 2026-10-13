@@ -1123,3 +1123,55 @@ describe("migrateElement boundary cases", () => {
 		});
 	}
 });
+
+describe("migrateElement with an editable job type", () => {
+	const worker = (id: string, jobType: string): MigrationTemplate => ({
+		id,
+		version: 1,
+		name: id,
+		appliesTo: ["bpmn:Task"],
+		properties: [
+			{
+				type: "String",
+				value: jobType,
+				binding: { type: "zeebe:taskDefinition", property: "type" },
+			},
+			input("a"),
+		],
+	});
+	const OLD_WORKER = worker("io.example.worker.v1", "io.example:worker:1");
+	const NEW_WORKER = worker("io.example.worker.v2", "io.example:worker:2");
+
+	// Template application, not a recipe, decides the job type.
+	for (const [label, seeded, expected] of [
+		[
+			"replaces the default job type",
+			"io.example:worker:1",
+			"io.example:worker:2",
+		],
+		["keeps a custom job type", "my-team:worker", "my-team:worker"],
+	]) {
+		test(label, async () => {
+			const applied = structuredClone(OLD_WORKER);
+			applied.properties[0].value = seeded;
+			const modeler = await createTestModeler(vendor);
+			const elementTemplates = modeler.get("elementTemplates");
+			elementTemplates.set([applied]);
+			const task = modeler.get("elementRegistry").get("Task_1");
+			assert.ok(task);
+			const element = elementTemplates.applyTemplate(task, applied) ?? task;
+			const { element: migrated } = migrateElement({
+				modeler: { elementTemplates, modeling: modeler.get("modeling") },
+				element,
+				fromTemplate: OLD_WORKER,
+				target: NEW_WORKER,
+				templates: [OLD_WORKER, NEW_WORKER],
+			});
+			const taskDefinition = getModdleList(
+				getExtensionElements(migrated.businessObject),
+				"values",
+			).find((v) => v.$type === "zeebe:TaskDefinition");
+			assert.strictEqual(taskDefinition?.get("type"), expected);
+		});
+	}
+});

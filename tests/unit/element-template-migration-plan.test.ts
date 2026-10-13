@@ -787,6 +787,15 @@ describe("buildStepPlan", () => {
 			run({ path: "p", matches: "pre*" }, [elementValue("p", "prefix")]),
 			1,
 		);
+		// A pattern is anchored at both ends.
+		assert.strictEqual(
+			run({ path: "p", matches: "pre*" }, [elementValue("p", "x-prefix")]),
+			0,
+		);
+		assert.strictEqual(
+			run({ path: "p", matches: "*fix" }, [elementValue("p", "prefixes")]),
+			0,
+		);
 		assert.strictEqual(
 			run({ path: "p", matches: "*key*" }, [
 				elementValue("p", "={\n  key: 1\n}"),

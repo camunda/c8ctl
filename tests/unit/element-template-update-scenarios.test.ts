@@ -23,7 +23,7 @@ import {
 import {
 	AGENT_V1,
 	AGENT_V2,
-	HTTP,
+	REST,
 	TEMPLATE_FIXTURES,
 	writeTemplateCache,
 	writeTemplatedDiagram,
@@ -425,7 +425,7 @@ function assertUntouched(before: string, after: string, ids: string[]) {
 	}
 }
 
-describe("element-template update on real templates and a realistic diagram", () => {
+describe("element-template update on synthetic templates and a realistic diagram", () => {
 	const dirs: string[] = [];
 	let templated: string;
 
@@ -460,11 +460,11 @@ describe("element-template update on real templates and a realistic diagram", ()
 		for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
 	});
 
-	test("REST connector v10 moves to the latest version on one element and refuses to lose a value unauthorized", async () => {
+	test("REST v10 moves to the latest version on one element and refuses to lose a value unauthorized", async () => {
 		const { bpmn, run, leftovers } = workspace();
 		const refused = await run(
 			"update",
-			HTTP,
+			REST,
 			"Task_Http10",
 			bpmn,
 			"--in-place",
@@ -474,7 +474,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		assert.equal(readFileSync(bpmn, "utf-8"), templated);
 		const result = await run(
 			"update",
-			HTTP,
+			REST,
 			"Task_Http10",
 			bpmn,
 			"--in-place",
@@ -496,18 +496,18 @@ describe("element-template update on real templates and a realistic diagram", ()
 		assert.equal(element.to.version, 17);
 		assert.deepEqual(element.report.dropped, [
 			{
-				key: "storeResponse",
+				key: "keepBody",
 				bindingType: "zeebe:input",
-				label: "Store response",
-				group: "endpoint",
-				groupLabel: "HTTP endpoint",
-				propertyId: "storeResponse",
+				label: "Keep body",
+				group: "request",
+				groupLabel: "Request",
+				propertyId: "keepBody",
 				value: "=true",
 			},
 		]);
 		const xml = readFileSync(bpmn, "utf-8");
 		assert.deepEqual(templateOf(xml, "Task_Http10"), {
-			id: HTTP,
+			id: REST,
 			version: "17",
 		});
 		assert.equal(inputOf(xml, "Task_Http10", "method"), "GET");
@@ -516,8 +516,8 @@ describe("element-template update on real templates and a realistic diagram", ()
 			"https://api.example.com/customers",
 		);
 		assert.equal(inputOf(xml, "Task_Http10", "authentication.type"), "noAuth");
-		assert.equal(inputOf(xml, "Task_Http10", "storeResponse"), undefined);
-		assert.equal(inputOf(xml, "Task_Http10", "followRedirects"), "=false");
+		assert.equal(inputOf(xml, "Task_Http10", "keepBody"), undefined);
+		assert.equal(inputOf(xml, "Task_Http10", "retryOnFailure"), "=false");
 		assertUntouched(templated, xml, [
 			"Task_Http12",
 			"Task_Http17",
@@ -527,7 +527,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		assert.deepEqual(leftovers(), []);
 	});
 
-	test("AI Agent v1 moves from version 10 to 11 and keeps its values", async () => {
+	test("Agent v1 moves from version 10 to 11 and keeps its values", async () => {
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run("update", AGENT_V1, bpmn, "--in-place", "--json");
 		assert.equal(result.status, 0, result.stderr);
@@ -541,8 +541,8 @@ describe("element-template update on real templates and a realistic diagram", ()
 			id: AGENT_V1,
 			version: "11",
 		});
-		assert.equal(inputOf(xml, "Task_Agent", "provider.type"), "openai");
-		assert.equal(inputOf(xml, "Task_Agent", "data.limits.maxModelCalls"), "=7");
+		assert.equal(inputOf(xml, "Task_Agent", "provider.type"), "alpha");
+		assert.equal(inputOf(xml, "Task_Agent", "limits.maxRounds"), "=7");
 		assertUntouched(templated, xml, [
 			"Task_Http10",
 			"Task_Http12",
@@ -552,7 +552,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		assert.deepEqual(leftovers(), []);
 	});
 
-	test("AI Agent v1 moves to the v2 template through the recipe it embeds", async () => {
+	test("Agent v1 moves to the v2 template through the recipe it embeds", async () => {
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run(
 			"update",
@@ -577,19 +577,16 @@ describe("element-template update on real templates and a realistic diagram", ()
 					item.to.key,
 				],
 			),
-			[["data.limits.maxModelCalls", "data.limits.maxCalls"]],
+			[["limits.maxRounds", "limits.maxSteps"]],
 		);
 		const xml = readFileSync(bpmn, "utf-8");
 		assert.deepEqual(templateOf(xml, "Task_Agent"), {
 			id: AGENT_V2,
 			version: "1",
 		});
-		assert.equal(inputOf(xml, "Task_Agent", "data.limits.maxCalls"), "=7");
-		assert.equal(
-			inputOf(xml, "Task_Agent", "data.limits.maxModelCalls"),
-			undefined,
-		);
-		assert.equal(inputOf(xml, "Task_Agent", "provider.type"), "openai");
+		assert.equal(inputOf(xml, "Task_Agent", "limits.maxSteps"), "=7");
+		assert.equal(inputOf(xml, "Task_Agent", "limits.maxRounds"), undefined);
+		assert.equal(inputOf(xml, "Task_Agent", "provider.type"), "alpha");
 		assertUntouched(templated, xml, [
 			"Task_Http10",
 			"Task_Http12",
@@ -603,7 +600,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run(
 			"update",
-			HTTP,
+			REST,
 			bpmn,
 			"--in-place",
 			"--allow-lossy",
@@ -618,7 +615,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 			["Task_Http17", "https://partner.example.com/notify"],
 			["Task_Http10b", "https://partner.example.com/data"],
 		]) {
-			assert.deepEqual(templateOf(xml, id), { id: HTTP, version: "17" }, id);
+			assert.deepEqual(templateOf(xml, id), { id: REST, version: "17" }, id);
 			assert.equal(inputOf(xml, id, "url"), url, id);
 		}
 		assert.equal(
@@ -637,10 +634,10 @@ describe("element-template update on real templates and a realistic diagram", ()
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run(
 			"update",
-			HTTP,
+			REST,
 			bpmn,
 			"--map",
-			"storeResponse=followRedirects",
+			"keepBody=retryOnFailure",
 			"--in-place",
 			"--json",
 		);
@@ -660,14 +657,14 @@ describe("element-template update on real templates and a realistic diagram", ()
 						source: string;
 					}) => [move.from.key, move.to.key, move.source],
 				),
-				[["storeResponse", "followRedirects", "map"]],
+				[["keepBody", "retryOnFailure", "map"]],
 			);
 		}
 		const xml = readFileSync(bpmn, "utf-8");
-		assert.equal(inputOf(xml, "Task_Http10", "followRedirects"), "=true");
-		assert.equal(inputOf(xml, "Task_Http10b", "followRedirects"), "=false");
+		assert.equal(inputOf(xml, "Task_Http10", "retryOnFailure"), "=true");
+		assert.equal(inputOf(xml, "Task_Http10b", "retryOnFailure"), "=false");
 		for (const id of ["Task_Http10", "Task_Http12", "Task_Http10b"])
-			assert.equal(inputOf(xml, id, "storeResponse"), undefined, id);
+			assert.equal(inputOf(xml, id, "keepBody"), undefined, id);
 		assertUntouched(templated, xml, ["Task_Http17", "Task_Agent"]);
 		assert.deepEqual(leftovers(), []);
 	});
@@ -676,11 +673,11 @@ describe("element-template update on real templates and a realistic diagram", ()
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run(
 			"update",
-			HTTP,
+			REST,
 			"Task_Http10b",
 			bpmn,
 			"--to",
-			`${HTTP}@12`,
+			`${REST}@12`,
 			"--in-place",
 			"--json",
 		);
@@ -691,7 +688,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		assert.equal(element.lossless, true);
 		const xml = readFileSync(bpmn, "utf-8");
 		assert.deepEqual(templateOf(xml, "Task_Http10b"), {
-			id: HTTP,
+			id: REST,
 			version: "12",
 		});
 		assert.equal(
@@ -712,10 +709,10 @@ describe("element-template update on real templates and a realistic diagram", ()
 		const { bpmn, run, leftovers } = workspace();
 		const result = await run(
 			"update",
-			HTTP,
+			REST,
 			bpmn,
 			"--to",
-			`${HTTP}@12`,
+			`${REST}@12`,
 			"--in-place",
 			"--json",
 		);
@@ -743,8 +740,8 @@ describe("element-template update on real templates and a realistic diagram", ()
 				status: "skipped",
 				elementId: "Task_Http17",
 				elementName: "Notify partner",
-				from: { id: HTTP, version: 17 },
-				to: { id: HTTP, version: 12 },
+				from: { id: REST, version: 17 },
+				to: { id: REST, version: 12 },
 			},
 		);
 		assert.deepEqual(document.summary, {
@@ -770,13 +767,13 @@ describe("element-template update on real templates and a realistic diagram", ()
 
 	test("one element that cannot migrate leaves the whole file byte-identical", async () => {
 		const { bpmn, run, leftovers } = workspace();
-		// ignoreNullValues exists from version 12, so only the two v10 elements fail.
+		// skipEmpty exists from version 12, so only the two v10 elements fail.
 		const args = [
 			"update",
-			HTTP,
+			REST,
 			bpmn,
 			"--map",
-			"ignoreNullValues=followRedirects",
+			"skipEmpty=retryOnFailure",
 			"--in-place",
 			"--allow-lossy",
 		];
@@ -802,7 +799,7 @@ describe("element-template update on real templates and a realistic diagram", ()
 		))
 			assert.match(
 				entry.error,
-				/ignoreNullValues.*is not a binding in template .*HttpJson\.v2@10/,
+				/skipEmpty.*is not a binding in template .*io\.example\.rest@10/,
 			);
 		assert.equal(document.summary.failed, 2);
 		assert.equal(readFileSync(bpmn, "utf-8"), templated);

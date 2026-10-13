@@ -98,6 +98,15 @@ version resolution.
 npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
 ```
 
+Test fixtures in `tests/fixtures/element-templates/` are synthetic. Never
+commit upstream connector templates (see its `SOURCES.md`). To check the AI
+Agent v1 to v2 migration against the real templates, fetched at a pinned
+`camunda/connectors` commit:
+
+```bash
+C8CTL_FIDELITY=1 node --experimental-strip-types --test tests/unit/element-template-migration-upstream-fidelity.test.ts
+```
+
 Smoke-test against the live connectors releases (writes to a throwaway
 dir):
 

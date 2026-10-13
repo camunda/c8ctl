@@ -1,6 +1,6 @@
 /**
- * Shared setup for element-template tests that run on real released templates
- * and tests/fixtures/realistic-collaboration.bpmn.
+ * Shared setup for element-template tests that run on the synthetic templates in
+ * tests/fixtures/element-templates/ and tests/fixtures/realistic-collaboration.bpmn.
  */
 
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -14,18 +14,18 @@ const FIXTURES = join(ROOT, "tests/fixtures");
 const TEMPLATES = join(FIXTURES, "element-templates");
 
 export const REALISTIC_DIAGRAM = join(FIXTURES, "realistic-collaboration.bpmn");
-export const HTTP = "io.camunda.connectors.HttpJson.v2";
-export const AGENT_V1 = "io.camunda.connectors.agenticai.aiagent.v1";
-export const AGENT_V2 = "io.camunda.connectors.agenticai.aiagent.v2";
+export const REST = "io.example.rest";
+export const AGENT_V1 = "io.example.agent.v1";
+export const AGENT_V2 = "io.example.agent.v2";
 
 /** Every template fixture, as the cache would hold it. */
 export const TEMPLATE_FIXTURES = [
-	"http-json-connector-v10.json",
-	"http-json-connector-v12.json",
-	"http-json-connector-v17.json",
-	"aiagent-v1-v10.json",
-	"aiagent-v1-v11.json",
-	"aiagent-v2-derived.json",
+	"rest-v10.json",
+	"rest-v12.json",
+	"rest-v17.json",
+	"agent-v1-v10.json",
+	"agent-v1-v11.json",
+	"agent-v2-v1.json",
 ];
 
 export const readTemplate = (name: string) =>
@@ -41,8 +41,8 @@ export function writeTemplateCache(dir: string, names = TEMPLATE_FIXTURES) {
 
 /**
  * Copy the realistic diagram to `<dir>/process.bpmn` and turn five of its
- * plain tasks into templated elements: HttpJson at versions 10, 12, 17 and 10
- * again, and AI Agent v1 at version 10. Returns the file path.
+ * plain tasks into templated elements: REST at versions 10, 12, 17 and 10
+ * again, and agent v1 at version 10. Returns the file path.
  */
 export async function writeTemplatedDiagram(dir: string): Promise<string> {
 	const bpmn = join(dir, "process.bpmn");
@@ -50,17 +50,17 @@ export async function writeTemplatedDiagram(dir: string): Promise<string> {
 	// Each apply prints the whole diagram, so feed it back as the next input.
 	for (const [file, id, sets] of [
 		[
-			"http-json-connector-v10.json",
+			"rest-v10.json",
 			"Task_Http10",
 			[
 				"method=GET",
 				"url=https://api.example.com/customers",
 				"authentication.type=noAuth",
-				"storeResponse=true",
+				"keepBody=true",
 			],
 		],
 		[
-			"http-json-connector-v12.json",
+			"rest-v12.json",
 			"Task_Http12",
 			[
 				"method=POST",
@@ -70,7 +70,7 @@ export async function writeTemplatedDiagram(dir: string): Promise<string> {
 			],
 		],
 		[
-			"http-json-connector-v17.json",
+			"rest-v17.json",
 			"Task_Http17",
 			[
 				"method=PUT",
@@ -79,7 +79,7 @@ export async function writeTemplatedDiagram(dir: string): Promise<string> {
 			],
 		],
 		[
-			"http-json-connector-v10.json",
+			"rest-v10.json",
 			"Task_Http10b",
 			[
 				"method=DELETE",
@@ -88,9 +88,9 @@ export async function writeTemplatedDiagram(dir: string): Promise<string> {
 			],
 		],
 		[
-			"aiagent-v1-v10.json",
+			"agent-v1-v10.json",
 			"Task_Agent",
-			["provider.type=openai", "data.limits.maxModelCalls=7"],
+			["provider.type=alpha", "limits.maxRounds=7"],
 		],
 	] as const) {
 		const applied = await asyncSpawn(

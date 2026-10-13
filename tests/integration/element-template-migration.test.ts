@@ -22,7 +22,7 @@ import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import {
 	AGENT_V1,
-	HTTP,
+	REST,
 	TEMPLATE_FIXTURES,
 	writeTemplateCache,
 	writeTemplatedDiagram,
@@ -64,7 +64,7 @@ describe("element-template migration deploys to a cluster (requires Camunda 8 at
 			readFileSync(bpmn, "utf-8").replaceAll("realistic-main", unique),
 		);
 
-		for (const templateId of [HTTP, AGENT_V1]) {
+		for (const templateId of [REST, AGENT_V1]) {
 			const migrated = await cli(
 				"element-template",
 				"update",
