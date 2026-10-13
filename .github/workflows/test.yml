@@ -161,15 +161,13 @@ jobs:
           
           echo "Camunda may not be fully ready, but continuing with tests..."
 
-      # Each shard has its own runner and its own Camunda instance. The shard is
-      # passed via NODE_OPTIONS for the same reason as in the unit tests: it
-      # works with --experimental-test-isolation=none, whereas a flag appended
-      # after the file globs is silently ignored.
+      # Each shard has its own runner and its own Camunda instance. Files are
+      # split by approximate duration (scripts/shard-test-files.ts) because
+      # `--test-shard`'s round-robin leaves one shard with ~60% of the work.
       - name: Run integration tests (shard ${{ matrix.shard }})
-        run: npm run test:integration
+        run: npm run test:integration:files -- $(node --experimental-strip-types scripts/shard-test-files.ts tests/integration ${{ matrix.shard }})
         env:
           CAMUNDA_VERSION: ${{ matrix.camunda }}
-          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
       - name: Show Camunda logs on failure
         if: failure()
