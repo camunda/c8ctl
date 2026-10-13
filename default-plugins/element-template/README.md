@@ -142,7 +142,8 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
 - Values the engine cannot read, such as message, called-element or form
   bindings, are not diffed. Unless the target binds such an editable field
   identically and not as Hidden, `report.skipped.unchecked` lists it and the
-  migration counts as lossy.
+  migration counts as lossy. Without the source template's definition, every such
+  value set on the element counts.
 - All selected elements migrate in memory and the file is written once, only if
   every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
   need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:

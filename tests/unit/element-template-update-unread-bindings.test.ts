@@ -120,3 +120,45 @@ test("a target with the identical binding keeps the value", async () => {
 	assert.deepEqual(element.report.skipped.unchecked, []);
 	assert.match(readFileSync(copy, "utf-8"), /processId="user-process"/);
 });
+
+for (const [name, cache, unchecked] of [
+	// Without a definition, every unread value set on the element counts.
+	[
+		"a source missing from the cache",
+		[],
+		["processId", "propagateAllChildVariables", "propagateAllParentVariables"],
+	],
+	[
+		"an engine-incompatible cached source",
+		[{ ...SOURCE, engines: { camunda: "^9.0" } }],
+		["processId"],
+	],
+] as const) {
+	test(`${name} still needs --allow-lossy for a dropped unread binding`, async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-unread-source-"));
+		try {
+			seedTemplateCache(dataDir, [...cache]);
+			const result = await c8WithOptions(
+				{ env: { C8CTL_DATA_DIR: dataDir } },
+				"element-template",
+				"update",
+				SOURCE.id,
+				"Task_1",
+				bpmn,
+				"--to",
+				join(dir, "drops.json"),
+				"--dry-run",
+				"--json",
+			);
+			assert.equal(result.status, 1, result.stderr);
+			const [element] = JSON.parse(result.stdout).results;
+			assert.equal(element.lossless, false);
+			assert.deepEqual(
+				element.report.skipped.unchecked.map((u: { key: string }) => u.key),
+				[...unchecked],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+}

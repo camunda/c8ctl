@@ -8,8 +8,10 @@ import {
 	getModdleList,
 	getModdleNumber,
 	getModdleString,
+	isModdleElement,
 	type ModdleElement,
 } from "./moddle.ts";
+import type { TemplateBinding } from "./types.ts";
 
 export interface ElementValue {
 	bindingType: string;
@@ -93,6 +95,87 @@ export function enumerateElementValues(
 	}
 
 	return out;
+}
+
+/** Extension elements whose values `enumerateElementValues` does not read. */
+const UNREAD_EXTENSIONS: Record<string, string> = {
+	"zeebe:CalledElement": "zeebe:calledElement",
+	"zeebe:CalledDecision": "zeebe:calledDecision",
+	"zeebe:FormDefinition": "zeebe:formDefinition",
+	"zeebe:Script": "zeebe:script",
+};
+
+const LINKED_RESOURCE_PROPERTIES = [
+	"resourceId",
+	"resourceType",
+	"bindingType",
+	"versionTag",
+];
+
+/** Set, non-internal attributes of a moddle element. */
+function setAttributes(element: ModdleElement): string[] {
+	return Object.keys(element).filter(
+		(name) =>
+			!name.startsWith("$") &&
+			["string", "boolean", "number"].includes(typeof element[name]),
+	);
+}
+
+/**
+ * Bindings of populated values the engine does not read, derived from the
+ * element alone. For a source template whose definition is unavailable.
+ */
+export function unreadBindings(
+	businessObject: ModdleElement,
+): TemplateBinding[] {
+	const bindings: Record<string, unknown>[] = [];
+	for (const extension of getModdleList(
+		getExtensionElements(businessObject),
+		"values",
+	)) {
+		const type = UNREAD_EXTENSIONS[extension.$type];
+		if (type) {
+			for (const property of setAttributes(extension)) {
+				bindings.push({ type, property });
+			}
+		}
+		if (extension.$type === "zeebe:LinkedResources") {
+			for (const resource of getModdleList(extension, "values")) {
+				const linkedResourceId = getModdleString(resource, "linkedResourceId");
+				for (const property of LINKED_RESOURCE_PROPERTIES) {
+					if (getModdleString(resource, property) !== undefined) {
+						bindings.push({
+							type: "zeebe:linkedResource",
+							linkedResourceId,
+							property,
+						});
+					}
+				}
+			}
+		}
+	}
+	const definition = getModdleList(businessObject, "eventDefinitions")[0];
+	const reference =
+		businessObject.get("messageRef") ?? definition?.get("messageRef");
+	if (isModdleElement(reference)) {
+		if (getModdleString(reference, "name") !== undefined) {
+			bindings.push({ type: "bpmn:Message#property", name: "name" });
+		}
+		const subscription = getModdleList(
+			getExtensionElements(reference),
+			"values",
+		).find((v) => v.$type === "zeebe:Subscription");
+		if (
+			subscription &&
+			getModdleString(subscription, "correlationKey") !== undefined
+		) {
+			bindings.push({
+				type: "bpmn:Message#zeebe:subscription#property",
+				name: "correlationKey",
+			});
+		}
+	}
+	return bindings;
 }
 
 function stringifyNumber(value: number | undefined): string | undefined {

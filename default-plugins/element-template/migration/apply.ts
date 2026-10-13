@@ -21,6 +21,7 @@ import {
 	type ElementValue,
 	enumerateElementValues,
 	getExtensionElements,
+	unreadBindings,
 } from "./element-values.ts";
 import {
 	getModdleNumber,
@@ -378,6 +379,16 @@ export function migrateElement({
 	);
 
 	const before = valuesOf(element);
+	// Without the source definition, unread values come from the element.
+	const reportSource: MigrationTemplate =
+		fromTemplate.properties.length > 0
+			? fromTemplate
+			: {
+					...fromTemplate,
+					properties: unreadBindings(element.businessObject).map((binding) => ({
+						binding,
+					})),
+				};
 	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
 	let current = element;
@@ -430,7 +441,7 @@ export function migrateElement({
 	}
 
 	const report = buildReport({
-		fromTemplate,
+		fromTemplate: reportSource,
 		toTemplate: target,
 		before,
 		after: allFacts.at(-1)?.after ?? before,

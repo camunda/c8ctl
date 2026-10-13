@@ -545,9 +545,15 @@ async function runMigrateInternal(
 			});
 			continue;
 		}
-		const fromTemplate = templates.find(
-			(t) => t.id === applied.id && (t.version ?? 0) === applied.version,
-		) ?? { id: applied.id, version: applied.version, properties: [] };
+		// An applied source need not be engine-compatible to describe its values.
+		const isApplied = (t: MigrationTemplate) =>
+			t.id === applied.id && (t.version ?? 0) === applied.version;
+		const fromTemplate = templates.find(isApplied) ??
+			lineages([applied.id]).find(isApplied) ?? {
+				id: applied.id,
+				version: applied.version,
+				properties: [],
+			};
 		try {
 			const result = migrateElement({
 				modeler: migrationModeler,
