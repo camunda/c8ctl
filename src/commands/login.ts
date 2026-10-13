@@ -14,18 +14,24 @@ import {
 	createState,
 	decodeJwtClaims,
 	deleteOidcTokens,
-	discoverIssuer,
 	discoverOidc,
 	exchangeAuthorizationCode,
 	getLoginSettings,
 	type OidcSettings,
 	resolveClusterConfig,
+	resolveLogin,
 	revokeTokens,
 	saveOidcTokens,
 } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import { openUrl } from "../utils/index.ts";
 
+/**
+ * c8ctl owns its redirect: always http://127.0.0.1:<port>/callback. The IP
+ * literal rather than "localhost" follows RFC 8252 §8.3; the port is
+ * random unless --port is given (IdPs must allow any loopback port, §7.3).
+ */
+const CALLBACK_HOST = "127.0.0.1";
 const CALLBACK_PATH = "/callback";
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
@@ -66,11 +72,10 @@ function parsePort(value: string | undefined): number {
 	return port;
 }
 
-/** Bind to 127.0.0.1 (not "localhost") per RFC 8252 §8.3. */
 function listenOnLoopback(server: Server, port: number): Promise<number> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(port, "127.0.0.1", () => {
+		server.listen(port, CALLBACK_HOST, () => {
 			server.off("error", reject);
 			const address = server.address();
 			if (address && typeof address === "object") {
@@ -84,10 +89,11 @@ function listenOnLoopback(server: Server, port: number): Promise<number> {
 
 /**
  * Resolve with the authorization code from the first valid redirect to
- * `CALLBACK_PATH`. Rejects on an IdP error, a state mismatch, or timeout.
+ * `callbackPath`. Rejects on an IdP error, a state mismatch, or timeout.
  */
 function waitForAuthorizationCode(
 	server: Server,
+	callbackPath: string,
 	expectedState: string,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -102,7 +108,7 @@ function waitForAuthorizationCode(
 
 		server.on("request", (req, res) => {
 			const url = new URL(req.url ?? "/", "http://127.0.0.1");
-			if (url.pathname !== CALLBACK_PATH) {
+			if (url.pathname !== callbackPath) {
 				res.writeHead(404).end();
 				return;
 			}
@@ -156,34 +162,35 @@ function describeUser(tokens: {
 }
 
 export const loginCommand = defineCommand("login", "", async (ctx, flags) => {
-	// Scopes are not discoverable yet, so allow them per login: some IdPs
-	// need more than the default `openid` (e.g. an API scope).
 	const profileSettings = requireOidcSettings(ctx.profile);
 	const settings = {
 		...profileSettings,
 		scope: flags.scope ?? profileSettings.scope,
 	};
 	const port = parsePort(flags.port);
-	const issuer = settings.issuer ?? (await discoverIssuer(settings.baseUrl));
-	if (!settings.issuer) {
-		ctx.logger.info(`Discovered identity provider: ${issuer}`);
+
+	const login = await resolveLogin(settings);
+	if (login.source !== "profile") {
+		ctx.logger.info(
+			`Discovered identity provider: ${login.issuer} (client ${login.clientId}, scopes "${login.scope}")`,
+		);
 	}
-	const endpoints = await discoverOidc(issuer);
+	const endpoints = await discoverOidc(login.issuer);
 	const { verifier, challenge } = createPkcePair();
 	const state = createState();
 
 	const server = createServer();
 	try {
 		const boundPort = await listenOnLoopback(server, port);
-		const redirectUri = `http://127.0.0.1:${boundPort}${CALLBACK_PATH}`;
+		const redirectUri = `http://${CALLBACK_HOST}:${boundPort}${CALLBACK_PATH}`;
 		const authUrl = buildAuthorizationUrl({
 			endpoints,
-			settings,
+			login,
 			redirectUri,
 			challenge,
 			state,
 		});
-		const codePromise = waitForAuthorizationCode(server, state);
+		const codePromise = waitForAuthorizationCode(server, CALLBACK_PATH, state);
 
 		if (flags["no-browser"]) {
 			ctx.logger.info("Open this URL in a browser on this machine to sign in:");
@@ -198,12 +205,12 @@ export const loginCommand = defineCommand("login", "", async (ctx, flags) => {
 		const code = await codePromise;
 		const tokens = await exchangeAuthorizationCode({
 			endpoints,
-			settings,
+			login,
 			code,
 			verifier,
 			redirectUri,
 		});
-		saveOidcTokens(settings, { ...tokens, issuer });
+		saveOidcTokens(settings, tokens);
 
 		const user = describeUser(tokens);
 		const expiry = tokens.expiresAt

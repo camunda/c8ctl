@@ -647,12 +647,12 @@ const PROFILE_CONNECTION_FLAGS = {
 	scope: {
 		type: "string",
 		description:
-			"OAuth scope (space-separated); also requested by 'c8ctl login' (default: openid)",
+			"OAuth scope (space-separated); also used by 'c8ctl login' instead of discovered scopes",
 	},
 	oidcIssuer: {
 		type: "string",
 		description:
-			"OIDC issuer for 'c8ctl login' (default: discovered from the cluster via RFC 9728)",
+			"OIDC issuer for 'c8ctl login' (default: discovered from the cluster)",
 	},
 	defaultTenantId: { type: "string", description: "Default tenant ID" },
 	username: { type: "string", description: "Basic auth username" },
@@ -1981,7 +1981,7 @@ export const COMMAND_REGISTRY = {
 			scope: {
 				type: "string",
 				description:
-					"Scopes to request (space-separated); overrides the profile's scope (default: openid)",
+					"Scopes to request (space-separated); overrides the profile and cluster discovery (default: openid)",
 			},
 		},
 	},

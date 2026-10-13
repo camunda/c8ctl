@@ -35,9 +35,8 @@ export const DEFAULT_OIDC_SCOPE = "openid";
 const EXPIRY_SKEW_MS = 60_000;
 
 /**
- * Public client ID used when the profile sets none. By convention, admins
- * register a public client with this ID (loopback redirects allowed) in the
- * cluster's identity provider.
+ * Public client ID used when neither the profile nor the cluster's
+ * `/.well-known/camunda-auth` discovery names one.
  */
 export const DEFAULT_OIDC_CLIENT_ID = "c8ctl";
 
@@ -46,9 +45,21 @@ export interface OidcSettings {
 	baseUrl: string;
 	/** Explicit issuer override; discovered from the cluster when unset. */
 	issuer?: string;
-	clientId: string;
+	/** Explicit client ID override; discovered from the cluster when unset. */
+	clientId?: string;
 	audience?: string;
+	/** Explicit scope override; discovered from the cluster when unset. */
 	scope?: string;
+}
+
+/** Login parameters after applying discovery and defaults. */
+export interface ResolvedLogin {
+	issuer: string;
+	clientId: string;
+	scope: string;
+	audience?: string;
+	/** Where the values came from, for user feedback. */
+	source: "camunda-auth" | "rfc9728" | "profile";
 }
 
 export interface OidcEndpoints {
@@ -64,6 +75,8 @@ export interface OidcTokenSet {
 	idToken?: string;
 	expiresAt?: number;
 	issuer?: string;
+	/** The client the tokens were issued to; needed for refresh/revocation. */
+	clientId?: string;
 	tokenEndpoint: string;
 	revocationEndpoint?: string;
 }
@@ -82,7 +95,7 @@ export function getLoginSettings(
 	return {
 		baseUrl: config.baseUrl,
 		issuer: config.oidcIssuer,
-		clientId: config.clientId || DEFAULT_OIDC_CLIENT_ID,
+		clientId: config.clientId,
 		audience: config.audience,
 		scope: config.scope,
 	};
@@ -107,13 +120,116 @@ export function getOidcSettings(
 /**
  * Token store key. Keyed by what the token is valid for rather than by
  * profile name, so env-var configs work and renaming a profile is harmless.
- * The issuer is not part of the key: it may be discovered at login.
+ * Built from the *configured* values only — discovered ones (issuer,
+ * client ID) are stored inside the token set — so commands can find the
+ * session without repeating discovery.
  */
 function tokenKey(s: OidcSettings): string {
-	return [s.clientId, s.audience ?? "", s.baseUrl].join("|");
+	return [s.clientId ?? "", s.audience ?? "", s.baseUrl].join("|");
+}
+
+/** The client ID to use for refresh/revocation of a stored token set. */
+function tokenClientId(settings: OidcSettings, tokens: OidcTokenSet): string {
+	return tokens.clientId ?? settings.clientId ?? DEFAULT_OIDC_CLIENT_ID;
 }
 
 // ─── Protocol ────────────────────────────────────────────────────────────────
+
+/** A provider entry from the cluster's `/.well-known/camunda-auth`. */
+interface CamundaAuthProvider {
+	issuer: string;
+	clientId?: string;
+	scopes?: string[];
+}
+
+function stringArray(value: unknown): string[] | undefined {
+	return Array.isArray(value) &&
+		value.every((v): v is string => typeof v === "string")
+		? value
+		: undefined;
+}
+
+/**
+ * Read the Orchestration Cluster's login discovery document
+ * (`<origin>/.well-known/camunda-auth`). Returns `undefined` when the
+ * cluster does not serve it (older versions), so callers can fall back to
+ * RFC 9728. When several providers are listed, the one matching
+ * `preferredIssuer` wins, else the first.
+ *
+ * Format (version 1):
+ * `{"version":1,"method":"oidc","providers":[{"id","issuer","client_id",
+ * "scopes":[…],"audience":[…]}]}`
+ */
+export async function discoverCamundaAuth(
+	baseUrl: string,
+	preferredIssuer?: string,
+): Promise<CamundaAuthProvider | undefined> {
+	const url = `${new URL(baseUrl).origin}/.well-known/camunda-auth`;
+	const res = await fetch(url, { headers: { Accept: "application/json" } });
+	if (!res.ok) return undefined;
+	const doc: unknown = await res.json().catch(() => undefined);
+	if (!isRecord(doc) || doc.version !== 1) return undefined;
+
+	if (doc.method !== "oidc") {
+		throw new Error(
+			`The cluster at ${baseUrl} uses '${String(doc.method)}' authentication; ` +
+				"'c8ctl login' only applies to OIDC. Configure credentials on the " +
+				"profile instead (c8ctl add profile --help).",
+		);
+	}
+	const providers = Array.isArray(doc.providers)
+		? doc.providers.filter(
+				(p): p is Record<string, unknown> =>
+					isRecord(p) && typeof p.issuer === "string",
+			)
+		: [];
+	const provider =
+		providers.find((p) => p.issuer === preferredIssuer) ?? providers[0];
+	if (!provider || typeof provider.issuer !== "string") {
+		throw new Error(`${url} lists no OIDC provider`);
+	}
+	return {
+		issuer: provider.issuer,
+		clientId:
+			typeof provider.client_id === "string" ? provider.client_id : undefined,
+		scopes: stringArray(provider.scopes),
+	};
+}
+
+/**
+ * Work out the login parameters. Explicit values (flag, profile, env) win
+ * over discovery; `/.well-known/camunda-auth` wins over RFC 9728 (which
+ * only yields the issuer); built-in defaults fill the rest.
+ */
+export async function resolveLogin(
+	settings: OidcSettings,
+): Promise<ResolvedLogin> {
+	const discovered = await discoverCamundaAuth(
+		settings.baseUrl,
+		settings.issuer,
+	);
+	if (discovered) {
+		return {
+			issuer: settings.issuer ?? discovered.issuer,
+			clientId:
+				settings.clientId ?? discovered.clientId ?? DEFAULT_OIDC_CLIENT_ID,
+			scope:
+				settings.scope ??
+				(discovered.scopes?.length
+					? discovered.scopes.join(" ")
+					: DEFAULT_OIDC_SCOPE),
+			audience: settings.audience,
+			source: "camunda-auth",
+		};
+	}
+	return {
+		issuer: settings.issuer ?? (await discoverIssuer(settings.baseUrl)),
+		clientId: settings.clientId ?? DEFAULT_OIDC_CLIENT_ID,
+		scope: settings.scope ?? DEFAULT_OIDC_SCOPE,
+		audience: settings.audience,
+		source: settings.issuer ? "profile" : "rfc9728",
+	};
+}
 
 /**
  * RFC 9728 §3.1: the metadata URL is formed by inserting the well-known
@@ -248,23 +364,23 @@ export function createState(): string {
 
 export function buildAuthorizationUrl(opts: {
 	endpoints: OidcEndpoints;
-	settings: OidcSettings;
+	login: ResolvedLogin;
 	redirectUri: string;
 	challenge: string;
 	state: string;
 }): string {
 	const url = new URL(opts.endpoints.authorizationEndpoint);
 	url.searchParams.set("response_type", "code");
-	url.searchParams.set("client_id", opts.settings.clientId);
+	url.searchParams.set("client_id", opts.login.clientId);
 	url.searchParams.set("redirect_uri", opts.redirectUri);
-	url.searchParams.set("scope", opts.settings.scope || DEFAULT_OIDC_SCOPE);
+	url.searchParams.set("scope", opts.login.scope);
 	url.searchParams.set("state", opts.state);
 	url.searchParams.set("code_challenge", opts.challenge);
 	url.searchParams.set("code_challenge_method", "S256");
 	// Some IdPs (Auth0, Okta custom servers) select the API by an `audience`
 	// parameter; others (Keycloak, Entra) ignore it.
-	if (opts.settings.audience) {
-		url.searchParams.set("audience", opts.settings.audience);
+	if (opts.login.audience) {
+		url.searchParams.set("audience", opts.login.audience);
 	}
 	return url.toString();
 }
@@ -308,20 +424,25 @@ async function requestTokens(
 	};
 }
 
-export function exchangeAuthorizationCode(opts: {
+export async function exchangeAuthorizationCode(opts: {
 	endpoints: OidcEndpoints;
-	settings: OidcSettings;
+	login: ResolvedLogin;
 	code: string;
 	verifier: string;
 	redirectUri: string;
 }): Promise<OidcTokenSet> {
-	return requestTokens(opts.endpoints, {
+	const tokens = await requestTokens(opts.endpoints, {
 		grant_type: "authorization_code",
 		code: opts.code,
 		code_verifier: opts.verifier,
 		redirect_uri: opts.redirectUri,
-		client_id: opts.settings.clientId,
+		client_id: opts.login.clientId,
 	});
+	return {
+		...tokens,
+		issuer: opts.login.issuer,
+		clientId: opts.login.clientId,
+	};
 }
 
 function refreshTokenSet(
@@ -331,15 +452,16 @@ function refreshTokenSet(
 	if (!tokens.refreshToken) {
 		throw new Error("no refresh token");
 	}
+	const clientId = tokenClientId(settings, tokens);
 	return requestTokens(
 		tokens,
 		{
 			grant_type: "refresh_token",
 			refresh_token: tokens.refreshToken,
-			client_id: settings.clientId,
+			client_id: clientId,
 		},
 		tokens.refreshToken,
-	);
+	).then((next) => ({ ...next, issuer: tokens.issuer, clientId }));
 }
 
 /** Best-effort RFC 7009 revocation of the refresh token (or access token). */
@@ -356,7 +478,7 @@ export async function revokeTokens(
 			body: new URLSearchParams({
 				token,
 				token_type_hint: tokens.refreshToken ? "refresh_token" : "access_token",
-				client_id: settings.clientId,
+				client_id: tokenClientId(settings, tokens),
 			}),
 		});
 		return res.ok;
@@ -419,6 +541,8 @@ function loadTokensFile(): TokensFile {
 						idToken:
 							typeof value.idToken === "string" ? value.idToken : undefined,
 						issuer: typeof value.issuer === "string" ? value.issuer : undefined,
+						clientId:
+							typeof value.clientId === "string" ? value.clientId : undefined,
 						expiresAt:
 							typeof value.expiresAt === "number" ? value.expiresAt : undefined,
 						revocationEndpoint:
