@@ -206,7 +206,7 @@ export const GLOBAL_FLAGS = {
 		type: "boolean",
 		description: "Preview the API request without executing",
 		agentDescription:
-			"Preview the API request that would be sent, without executing it.\nEmits JSON: { dryRun, command, method, url, body }\nAlways exits 0.",
+			"Preview the API request that would be sent, without executing it.\nEmits JSON: { dryRun, command, method, url, body }\nAlways exits 0.\nException: element-template update previews a migration (with --json it emits { dryRun, command, results, summary }; otherwise a text report) and exits 1 when an element would fail to migrate or the write would need --allow-lossy.",
 		agentAppliesTo: "all commands",
 	},
 	verbose: { type: "boolean", description: "Show verbose output" },

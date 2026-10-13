@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_realistic" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.43.1" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.10.0">
+  <bpmn:collaboration id="Collaboration_1">
+    <bpmn:participant id="Participant_Main" name="Order handling" processRef="realistic-main" />
+    <bpmn:participant id="Participant_Partner" name="Partner" processRef="realistic-partner" />
+  </bpmn:collaboration>
+  <bpmn:message id="Message_Order" name="orderReceived" />
+  <bpmn:process id="realistic-main" name="Order handling" isExecutable="true">
+    <bpmn:startEvent id="Start_Order" name="Order received">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageEventDefinition_1" messageRef="Message_Order" />
+    </bpmn:startEvent>
+    <bpmn:task id="Task_Http10" name="Fetch customer">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:boundaryEvent id="Boundary_Timeout" name="Too slow" attachedToRef="Task_Http10">
+      <bpmn:outgoing>Flow_Timeout</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDefinition_1">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">PT30S</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:subProcess id="SubProcess_Enrich" name="Enrich order">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:startEvent id="Sub_Start" name="Enrich">
+        <bpmn:outgoing>Sub_Flow_1</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:task id="Task_Http12" name="Fetch prices">
+        <bpmn:incoming>Sub_Flow_1</bpmn:incoming>
+        <bpmn:outgoing>Sub_Flow_2</bpmn:outgoing>
+      </bpmn:task>
+      <bpmn:endEvent id="Sub_End" name="Enriched">
+        <bpmn:incoming>Sub_Flow_2</bpmn:incoming>
+      </bpmn:endEvent>
+      <bpmn:sequenceFlow id="Sub_Flow_1" sourceRef="Sub_Start" targetRef="Task_Http12" />
+      <bpmn:sequenceFlow id="Sub_Flow_2" sourceRef="Task_Http12" targetRef="Sub_End" />
+    </bpmn:subProcess>
+    <bpmn:task id="Task_Agent" name="Answer customer">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Plain" name="Archive order">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="End_Order" name="Done">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_Timeout" name="Timed out">
+      <bpmn:incoming>Flow_Timeout</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_Order" targetRef="Task_Http10" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_Http10" targetRef="SubProcess_Enrich" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="SubProcess_Enrich" targetRef="Task_Agent" />
+    <bpmn:sequenceFlow id="Flow_4" sourceRef="Task_Agent" targetRef="Task_Plain" />
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_Plain" targetRef="End_Order" />
+    <bpmn:sequenceFlow id="Flow_Timeout" sourceRef="Boundary_Timeout" targetRef="End_Timeout" />
+  </bpmn:process>
+  <bpmn:process id="realistic-partner" name="Partner" isExecutable="false">
+    <bpmn:startEvent id="Partner_Start" name="Partner asked">
+      <bpmn:outgoing>Partner_Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:task id="Task_Http17" name="Notify partner">
+      <bpmn:incoming>Partner_Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Partner_Flow_2</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:task id="Task_Http10b" name="Fetch partner data">
+      <bpmn:incoming>Partner_Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Partner_Flow_3</bpmn:outgoing>
+    </bpmn:task>
+    <bpmn:endEvent id="Partner_End" name="Partner informed">
+      <bpmn:incoming>Partner_Flow_3</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Partner_Flow_1" sourceRef="Partner_Start" targetRef="Task_Http17" />
+    <bpmn:sequenceFlow id="Partner_Flow_2" sourceRef="Task_Http17" targetRef="Task_Http10b" />
+    <bpmn:sequenceFlow id="Partner_Flow_3" sourceRef="Task_Http10b" targetRef="Partner_End" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_1">
+      <bpmndi:BPMNShape id="Participant_Main_di" bpmnElement="Participant_Main" isHorizontal="true">
+        <dc:Bounds x="150" y="80" width="1010" height="340" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Order_di" bpmnElement="Start_Order">
+        <dc:Bounds x="212" y="192" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Http10_di" bpmnElement="Task_Http10">
+        <dc:Bounds x="300" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="SubProcess_Enrich_di" bpmnElement="SubProcess_Enrich" isExpanded="true">
+        <dc:Bounds x="460" y="110" width="350" height="200" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sub_Start_di" bpmnElement="Sub_Start">
+        <dc:Bounds x="500" y="192" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Http12_di" bpmnElement="Task_Http12">
+        <dc:Bounds x="590" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Sub_End_di" bpmnElement="Sub_End">
+        <dc:Bounds x="742" y="192" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Agent_di" bpmnElement="Task_Agent">
+        <dc:Bounds x="860" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Plain_di" bpmnElement="Task_Plain">
+        <dc:Bounds x="1000" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Order_di" bpmnElement="End_Order">
+        <dc:Bounds x="1112" y="332" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Timeout_di" bpmnElement="End_Timeout">
+        <dc:Bounds x="342" y="332" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Boundary_Timeout_di" bpmnElement="Boundary_Timeout">
+        <dc:Bounds x="342" y="232" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="248" y="210" />
+        <di:waypoint x="300" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="400" y="210" />
+        <di:waypoint x="460" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="810" y="210" />
+        <di:waypoint x="860" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="960" y="210" />
+        <di:waypoint x="1000" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="1050" y="250" />
+        <di:waypoint x="1050" y="350" />
+        <di:waypoint x="1112" y="350" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Timeout_di" bpmnElement="Flow_Timeout">
+        <di:waypoint x="360" y="268" />
+        <di:waypoint x="360" y="332" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Sub_Flow_1_di" bpmnElement="Sub_Flow_1">
+        <di:waypoint x="536" y="210" />
+        <di:waypoint x="590" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Sub_Flow_2_di" bpmnElement="Sub_Flow_2">
+        <di:waypoint x="690" y="210" />
+        <di:waypoint x="742" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="Participant_Partner_di" bpmnElement="Participant_Partner" isHorizontal="true">
+        <dc:Bounds x="150" y="460" width="610" height="200" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Partner_Start_di" bpmnElement="Partner_Start">
+        <dc:Bounds x="212" y="542" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Http17_di" bpmnElement="Task_Http17">
+        <dc:Bounds x="300" y="520" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Http10b_di" bpmnElement="Task_Http10b">
+        <dc:Bounds x="460" y="520" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Partner_End_di" bpmnElement="Partner_End">
+        <dc:Bounds x="622" y="542" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Partner_Flow_1_di" bpmnElement="Partner_Flow_1">
+        <di:waypoint x="248" y="560" />
+        <di:waypoint x="300" y="560" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Partner_Flow_2_di" bpmnElement="Partner_Flow_2">
+        <di:waypoint x="400" y="560" />
+        <di:waypoint x="460" y="560" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Partner_Flow_3_di" bpmnElement="Partner_Flow_3">
+        <di:waypoint x="560" y="560" />
+        <di:waypoint x="622" y="560" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
