@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import {
 	createUpdateWorkspace,
+	DST,
 	NEW,
 	OLD,
 	TASK,
@@ -363,6 +364,31 @@ test("a carry-over failure without a recipe names --recipe and --map as next ste
 	assert.match(
 		text.stderr,
 		/Nothing was written because an element failed\.\n$/,
+	);
+});
+
+test("reports an embedded recipe when only the source lineage's recipe ran", async () => {
+	const file = await seedMulti("lineage", [
+		[TASK, V1, ["provider=azure", "endpoint=https://a"]],
+	]);
+	const result = await run(
+		dataDirWithCache([V1, V2, DST]),
+		"update",
+		V1.id,
+		TASK,
+		file,
+		"--to",
+		DST.id,
+		"--dry-run",
+		"--allow-lossy",
+		"--json",
+	);
+	assert.strictEqual(result.status, 0, result.stderr);
+	const [entry] = JSON.parse(result.stdout).results;
+	assert.strictEqual(entry.to.id, DST.id);
+	assert.deepStrictEqual(
+		[entry.recipe.source, entry.recipe.used],
+		["embedded", true],
 	);
 });
 

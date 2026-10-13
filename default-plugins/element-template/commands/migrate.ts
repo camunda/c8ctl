@@ -495,6 +495,9 @@ async function runMigrateInternal(
 		: targetRecipe
 			? "embedded"
 			: "none";
+	// Upgrade rungs can use the source lineage's embedded recipe.
+	const originOf = (report: MigrationReport): RecipeOrigin =>
+		recipeSource === "none" && report.usedRecipe ? "embedded" : recipeSource;
 
 	const service = modeler.get("elementTemplates");
 	const migrationModeler: MigrationModeler = {
@@ -645,7 +648,7 @@ async function runMigrateInternal(
 							...reportToJson(o.report, {
 								elementId: o.id,
 								elementName: o.name,
-								recipe: recipeSource,
+								recipe: originOf(o.report),
 								recipePath: parsed.recipePath,
 								dryRun,
 								file,
@@ -704,7 +707,7 @@ async function runMigrateInternal(
 						elementId: o.id,
 						elementName: o.name,
 						color,
-						recipe: recipeSource,
+						recipe: originOf(o.report),
 						recipePath: parsed.recipePath,
 						targetTemplate: target,
 						authorization: o.requiresAuthorization
