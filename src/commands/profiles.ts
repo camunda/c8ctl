@@ -96,8 +96,7 @@ interface AddProfileOptions {
 function describeAuth(profile: Profile): string {
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
-	if (profile.oidcIssuer && profile.clientId)
-		return "OIDC login (run 'c8ctl login')";
+	if (profile.oidcIssuer) return "OIDC login (run 'c8ctl login')";
 	if (profile.username && profile.password) return "Basic auth";
 	return "None";
 }
@@ -179,8 +178,15 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		};
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added`);
-		if (profile.oidcIssuer && profile.clientId && !profile.clientSecret) {
+		if (profile.oidcIssuer && !profile.clientSecret) {
 			logger.info(`  Sign in with: c8ctl login --profile ${name}`);
+		} else if (
+			!profile.clientSecret &&
+			!(profile.username && profile.password)
+		) {
+			logger.info(
+				`  If the cluster uses OIDC, sign in with: c8ctl login --profile ${name}`,
+			);
 		}
 	}
 

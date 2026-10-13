@@ -1024,7 +1024,7 @@ Add a profile
 | `--audience` | string |  | OAuth audience |
 | `--oAuthUrl` | string |  | OAuth token URL |
 | `--scope` | string |  | OAuth scope (space-separated) |
-| `--oidcIssuer` | string |  | OIDC issuer URL for interactive 'c8ctl login' (use with --clientId, no secret) |
+| `--oidcIssuer` | string |  | OIDC issuer for 'c8ctl login' (default: discovered from the cluster via RFC 9728) |
 | `--defaultTenantId` | string |  | Default tenant ID |
 | `--username` | string |  | Basic auth username |
 | `--password` | string |  | Basic auth password |
@@ -1270,7 +1270,7 @@ Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
 ### `login`
 
-Sign in to the cluster's identity provider in the browser (OIDC profiles)
+Sign in to the cluster's identity provider in the browser
 
 **Flags:**
 

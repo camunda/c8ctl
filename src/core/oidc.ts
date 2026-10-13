@@ -23,16 +23,29 @@ import { join } from "node:path";
 import { type ClusterConfig, ensureUserDataDir } from "./config.ts";
 import { isRecord } from "./logger.ts";
 
-/** Default scopes requested at login: OIDC identity plus a refresh token. */
-export const DEFAULT_OIDC_SCOPE = "openid offline_access";
+/**
+ * Default scope requested at login. `offline_access` is deliberately not
+ * included: IdPs like Keycloak reject it unless the user and client are
+ * granted offline tokens, and most still issue a session-bound refresh
+ * token without it. Profiles can opt in via `--scope`.
+ */
+export const DEFAULT_OIDC_SCOPE = "openid";
 
 /** Refresh the access token when it has less than this long left. */
 const EXPIRY_SKEW_MS = 60_000;
 
+/**
+ * Public client ID used when the profile sets none. By convention, admins
+ * register a public client with this ID (loopback redirects allowed) in the
+ * cluster's identity provider.
+ */
+export const DEFAULT_OIDC_CLIENT_ID = "c8ctl";
+
 /** The subset of a cluster config that identifies an OIDC login. */
 export interface OidcSettings {
 	baseUrl: string;
-	issuer: string;
+	/** Explicit issuer override; discovered from the cluster when unset. */
+	issuer?: string;
 	clientId: string;
 	audience?: string;
 	scope?: string;
@@ -50,63 +63,176 @@ export interface OidcTokenSet {
 	refreshToken?: string;
 	idToken?: string;
 	expiresAt?: number;
+	issuer?: string;
 	tokenEndpoint: string;
 	revocationEndpoint?: string;
 }
 
 /**
- * The OIDC settings for a cluster config, or `undefined` when the config is
- * not login-based. A `clientSecret` means client credentials, which wins.
+ * The OIDC settings `c8ctl login` would use for a cluster config, or
+ * `undefined` when the config carries other credentials (client
+ * credentials or Basic auth), which always win.
  */
-export function getOidcSettings(
+export function getLoginSettings(
 	config: ClusterConfig,
 ): OidcSettings | undefined {
-	if (!config.oidcIssuer || !config.clientId || config.clientSecret) {
+	if (config.clientSecret || (config.username && config.password)) {
 		return undefined;
 	}
 	return {
 		baseUrl: config.baseUrl,
 		issuer: config.oidcIssuer,
-		clientId: config.clientId,
+		clientId: config.clientId || DEFAULT_OIDC_CLIENT_ID,
 		audience: config.audience,
 		scope: config.scope,
 	};
 }
 
 /**
+ * The OIDC settings to authenticate requests with, or `undefined` when the
+ * config is not using a login session. A config is login-based when it
+ * names an issuer explicitly or when `c8ctl login` stored tokens for it — so
+ * a profile holding just a base URL keeps working unauthenticated until the
+ * user logs in.
+ */
+export function getOidcSettings(
+	config: ClusterConfig,
+): OidcSettings | undefined {
+	const settings = getLoginSettings(config);
+	if (!settings) return undefined;
+	if (settings.issuer || loadOidcTokens(settings)) return settings;
+	return undefined;
+}
+
+/**
  * Token store key. Keyed by what the token is valid for rather than by
  * profile name, so env-var configs work and renaming a profile is harmless.
+ * The issuer is not part of the key: it may be discovered at login.
  */
 function tokenKey(s: OidcSettings): string {
-	return [s.issuer, s.clientId, s.audience ?? "", s.baseUrl].join("|");
+	return [s.clientId, s.audience ?? "", s.baseUrl].join("|");
 }
 
 // ─── Protocol ────────────────────────────────────────────────────────────────
 
-export async function discoverOidc(issuer: string): Promise<OidcEndpoints> {
-	const url = `${issuer.replace(/\/+$/, "")}/.well-known/openid-configuration`;
-	const res = await fetch(url);
-	if (!res.ok) {
+/**
+ * RFC 9728 §3.1: the metadata URL is formed by inserting the well-known
+ * suffix between the host and the path of the resource identifier.
+ */
+function protectedResourceMetadataUrls(baseUrl: string): string[] {
+	const url = new URL(baseUrl);
+	const path = url.pathname.replace(/\/+$/, "");
+	const urls = [`${url.origin}/.well-known/oauth-protected-resource${path}`];
+	if (path) urls.push(`${url.origin}/.well-known/oauth-protected-resource`);
+	return urls;
+}
+
+/** Parse `resource_metadata` from a `WWW-Authenticate: Bearer` challenge. */
+function resourceMetadataFromChallenge(header: string | null): string | null {
+	return header?.match(/resource_metadata="([^"]+)"/i)?.[1] ?? null;
+}
+
+async function fetchProtectedResourceMetadata(
+	url: string,
+): Promise<Record<string, unknown> | undefined> {
+	const res = await fetch(url, { headers: { Accept: "application/json" } });
+	if (!res.ok) return undefined;
+	const body: unknown = await res.json().catch(() => undefined);
+	return isRecord(body) ? body : undefined;
+}
+
+/**
+ * Discover the cluster's authorization server (issuer) via RFC 9728
+ * protected resource metadata. Tries the well-known URL derived from the
+ * base URL, then the `resource_metadata` hint in the 401 challenge of an
+ * unauthenticated API call.
+ *
+ * The metadata's `resource` must be on the same origin as the base URL
+ * (RFC 9728 §3.3), so a misbehaving proxy cannot point c8ctl at an
+ * unrelated authorization server.
+ */
+export async function discoverIssuer(baseUrl: string): Promise<string> {
+	const origin = new URL(baseUrl).origin;
+	const candidates = protectedResourceMetadataUrls(baseUrl);
+
+	let metadata: Record<string, unknown> | undefined;
+	for (const url of candidates) {
+		metadata = await fetchProtectedResourceMetadata(url);
+		if (metadata) break;
+	}
+	if (!metadata) {
+		const probe = await fetch(`${baseUrl.replace(/\/+$/, "")}/topology`).catch(
+			() => undefined,
+		);
+		const hinted = resourceMetadataFromChallenge(
+			probe?.headers.get("www-authenticate") ?? null,
+		);
+		if (hinted && new URL(hinted).origin === origin) {
+			metadata = await fetchProtectedResourceMetadata(hinted);
+		}
+	}
+	if (!metadata) {
 		throw new Error(
-			`OIDC discovery failed: ${res.status} ${res.statusText} (${url})`,
+			`Could not discover the identity provider for ${baseUrl}: the cluster ` +
+				"does not publish OAuth protected resource metadata (RFC 9728). " +
+				"Set the issuer explicitly with --oidcIssuer on the profile.",
 		);
 	}
-	const doc: unknown = await res.json();
+
 	if (
-		!isRecord(doc) ||
-		typeof doc.authorization_endpoint !== "string" ||
-		typeof doc.token_endpoint !== "string"
+		typeof metadata.resource !== "string" ||
+		!URL.canParse(metadata.resource) ||
+		new URL(metadata.resource).origin !== origin
 	) {
-		throw new Error(`OIDC discovery document at ${url} is incomplete`);
+		throw new Error(
+			`Protected resource metadata for ${baseUrl} names a different resource (${String(metadata.resource)})`,
+		);
 	}
-	return {
-		authorizationEndpoint: doc.authorization_endpoint,
-		tokenEndpoint: doc.token_endpoint,
-		revocationEndpoint:
-			typeof doc.revocation_endpoint === "string"
-				? doc.revocation_endpoint
-				: undefined,
-	};
+	const servers = metadata.authorization_servers;
+	const issuer = Array.isArray(servers)
+		? servers.find((s): s is string => typeof s === "string")
+		: undefined;
+	if (!issuer) {
+		throw new Error(
+			`Protected resource metadata for ${baseUrl} lists no authorization server`,
+		);
+	}
+	return issuer;
+}
+
+/**
+ * Authorization server metadata: OIDC discovery first, then RFC 8414
+ * (`oauth-authorization-server`, with the issuer path appended).
+ */
+export async function discoverOidc(issuer: string): Promise<OidcEndpoints> {
+	const trimmed = issuer.replace(/\/+$/, "");
+	const { origin, pathname } = new URL(trimmed);
+	const urls = [
+		`${trimmed}/.well-known/openid-configuration`,
+		`${origin}/.well-known/oauth-authorization-server${pathname.replace(/\/+$/, "")}`,
+	];
+	for (const url of urls) {
+		const res = await fetch(url, { headers: { Accept: "application/json" } });
+		if (!res.ok) continue;
+		const doc: unknown = await res.json().catch(() => undefined);
+		if (
+			isRecord(doc) &&
+			typeof doc.authorization_endpoint === "string" &&
+			typeof doc.token_endpoint === "string"
+		) {
+			return {
+				authorizationEndpoint: doc.authorization_endpoint,
+				tokenEndpoint: doc.token_endpoint,
+				revocationEndpoint:
+					typeof doc.revocation_endpoint === "string"
+						? doc.revocation_endpoint
+						: undefined,
+			};
+		}
+	}
+	throw new Error(
+		`Could not load authorization server metadata for issuer ${issuer}`,
+	);
 }
 
 /** RFC 7636 code verifier and its S256 challenge. */
@@ -292,6 +418,7 @@ function loadTokensFile(): TokensFile {
 								: undefined,
 						idToken:
 							typeof value.idToken === "string" ? value.idToken : undefined,
+						issuer: typeof value.issuer === "string" ? value.issuer : undefined,
 						expiresAt:
 							typeof value.expiresAt === "number" ? value.expiresAt : undefined,
 						revocationEndpoint:

@@ -14,9 +14,10 @@ import {
 	createState,
 	decodeJwtClaims,
 	deleteOidcTokens,
+	discoverIssuer,
 	discoverOidc,
 	exchangeAuthorizationCode,
-	getOidcSettings,
+	getLoginSettings,
 	type OidcSettings,
 	resolveClusterConfig,
 	revokeTokens,
@@ -45,12 +46,12 @@ function escapeHtml(value: string): string {
 
 function requireOidcSettings(profile: string | undefined): OidcSettings {
 	const config = resolveClusterConfig(profile);
-	const settings = getOidcSettings(config);
+	const settings = getLoginSettings(config);
 	if (!settings) {
 		throw new Error(
-			"The selected profile is not configured for interactive login. " +
-				"Add one with: c8ctl add profile <name> --baseUrl <url> " +
-				"--oidcIssuer <issuer-url> --clientId <public-client-id>",
+			"The selected profile authenticates with client credentials or " +
+				"Basic auth, so interactive login does not apply. Use a profile " +
+				"with just a base URL: c8ctl add profile <name> --baseUrl <url>",
 		);
 	}
 	return settings;
@@ -157,7 +158,11 @@ function describeUser(tokens: {
 export const loginCommand = defineCommand("login", "", async (ctx, flags) => {
 	const settings = requireOidcSettings(ctx.profile);
 	const port = parsePort(flags.port);
-	const endpoints = await discoverOidc(settings.issuer);
+	const issuer = settings.issuer ?? (await discoverIssuer(settings.baseUrl));
+	if (!settings.issuer) {
+		ctx.logger.info(`Discovered identity provider: ${issuer}`);
+	}
+	const endpoints = await discoverOidc(issuer);
 	const { verifier, challenge } = createPkcePair();
 	const state = createState();
 
@@ -192,7 +197,7 @@ export const loginCommand = defineCommand("login", "", async (ctx, flags) => {
 			verifier,
 			redirectUri,
 		});
-		saveOidcTokens(settings, tokens);
+		saveOidcTokens(settings, { ...tokens, issuer });
 
 		const user = describeUser(tokens);
 		const expiry = tokens.expiresAt

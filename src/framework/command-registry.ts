@@ -648,7 +648,7 @@ const PROFILE_CONNECTION_FLAGS = {
 	oidcIssuer: {
 		type: "string",
 		description:
-			"OIDC issuer URL for interactive 'c8ctl login' (use with --clientId, no secret)",
+			"OIDC issuer for 'c8ctl login' (default: discovered from the cluster via RFC 9728)",
 	},
 	defaultTenantId: { type: "string", description: "Default tenant ID" },
 	username: { type: "string", description: "Basic auth username" },
@@ -1960,8 +1960,7 @@ export const COMMAND_REGISTRY = {
 	},
 
 	login: {
-		description:
-			"Sign in to the cluster's identity provider in the browser (OIDC profiles)",
+		description: "Sign in to the cluster's identity provider in the browser",
 		mutating: false,
 		requiresResource: false,
 		resources: [],
