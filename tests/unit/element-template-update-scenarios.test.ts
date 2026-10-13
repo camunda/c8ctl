@@ -182,7 +182,7 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 				input("c"),
 				input("host"),
 				input("expr", "", { feel: "optional" }),
-				input("unset"),
+				input("unset", "", { optional: true }),
 			],
 			[
 				{
@@ -235,7 +235,7 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 								{ path: "c", equals: "azure" },
 								{ path: "c", matches: "a*" },
 								{ path: "c", in: ["azure"] },
-								{ path: "absent", exists: false },
+								{ path: "unset", exists: false },
 							],
 							rules: [
 								{

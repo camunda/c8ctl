@@ -87,7 +87,7 @@ function recipeSourcesFor(recipe: Recipe | undefined, sourceId: string) {
 	return (recipe?.sources ?? []).filter((s) => s.sourceTemplateId === sourceId);
 }
 
-/** Paths an entry reads from the element, excluding guards that may be absent. */
+/** Paths an entry reads from the element, including every guard path. */
 function readPaths(entry: Entry): string[] {
 	const paths: string[] = [];
 	if (entry.kind === "rename") {
@@ -97,9 +97,7 @@ function readPaths(entry: Entry): string[] {
 		paths.push(...[...entry.template.matchAll(TEMPLATE_REF)].map((m) => m[1]));
 	}
 	for (const guard of entry.when) {
-		if (guard.kind !== "exists" && !guard.not) {
-			paths.push(guard.path);
-		}
+		paths.push(guard.path);
 	}
 	return paths;
 }

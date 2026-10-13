@@ -1133,6 +1133,31 @@ describe("hop coverage", () => {
 		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
 	});
 
+	test("refuses a guard on a path the reached source does not define, whatever its shape", () => {
+		for (const when of [
+			{ path: "misspelled", equals: "x" },
+			{ path: "misspelled", equals: "x", not: true },
+			{ path: "misspelled", exists: true },
+			{ path: "misspelled", exists: false },
+		]) {
+			const result = resolveSteps({
+				appliedId: "old",
+				appliedVersion: 1,
+				target: withRecipe(template("new", 1, ["x"]), {
+					kind: "change",
+					sourceTemplateId: "old",
+					paths: [{ to: "x", set: "y", when }],
+				}),
+				templates: [template("old", 1, ["a"])],
+			});
+			assert.match(
+				result.refusal ?? "",
+				/reads "misspelled"/,
+				JSON.stringify(when),
+			);
+		}
+	});
+
 	test("checks the hop against the shape the last rung reached", () => {
 		const latest = withRecipe(template("old", 2, ["b"]), {
 			kind: "upgrade",

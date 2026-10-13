@@ -211,7 +211,8 @@ explicit recipes fail even with `--allow-lossy`; refused embedded recipes requir
 authorization except when previewing. Diagnostics distinguish malformed recipes,
 coverage refusal, wrong source IDs and unmet reached-version floors. Coverage
 covers every step, including the change to another template: an entry that reads
-a path the reached source version does not define refuses the recipe. An empty
+a path the reached source version does not define refuses the recipe. Guard
+paths count as reads, including `exists` and negated guards. An empty
 `--recipe` value is an error, not a request for ordinary carry-over.
 
 ```json
