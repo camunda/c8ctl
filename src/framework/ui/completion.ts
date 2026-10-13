@@ -192,7 +192,6 @@ function deriveGlobalFlagNames(): string[] {
 	return Object.keys(GLOBAL_FLAGS).map((n) => `--${n}`);
 }
 
-/** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
 /**
  * Global options that take the next word as their value before the verb, e.g.
  * `--profile p`. Like `splitGlobals`, `--version` is boolean there.
@@ -214,6 +213,7 @@ function globalFlagTokens(): string[] {
 	];
 }
 
+/** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
 function deriveGlobalFlags(): {
 	name: string;
 	description: string;
