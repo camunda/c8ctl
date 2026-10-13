@@ -1,9 +1,9 @@
 name: Test
 
 on:
-  # TEMPORARY: pull_request trigger disabled while tmp-win22-fs-matrix.yml soaks. Restore before merging.
-  # pull_request:
-  #   branches: [ main ]
+
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
