@@ -11,6 +11,7 @@ import {
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
+	getCommandDef,
 	RESOURCE_ALIASES,
 } from "../command-registry.ts";
 import {
@@ -37,9 +38,9 @@ function pluginFlagList(
 	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
 }
 
-/** Plugin commands that dispatch; a built-in verb shadows a same-named plugin. */
+/** Plugin commands that dispatch; a built-in verb or alias shadows a same-named plugin. */
 function reachablePluginCmds(cmds: PluginCommandInfo[]): PluginCommandInfo[] {
-	return cmds.filter((cmd) => !(cmd.commandName in COMMAND_REGISTRY));
+	return cmds.filter((cmd) => !getCommandDef(cmd.commandName));
 }
 
 // ─── Derived completion data ─────────────────────────────────────────────────
@@ -130,10 +131,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 	}
 
 	// Plugin-provided verbs (e.g. cluster)
-	for (const cmd of pluginCommandsInfo) {
-		// Skip if already in registry
-		if (cmd.commandName in COMMAND_REGISTRY) continue;
-
+	for (const cmd of reachablePluginCmds(pluginCommandsInfo)) {
 		infos.push({
 			verb: cmd.commandName,
 			description: cmd.description ?? "",
@@ -295,7 +293,7 @@ function deriveHelpResources(): { name: string; description: string }[] {
 	for (const cmd of pluginCmds) {
 		if (
 			!items.some((i) => i.name === cmd.commandName) &&
-			!(cmd.commandName in COMMAND_REGISTRY)
+			!getCommandDef(cmd.commandName)
 		) {
 			items.push({
 				name: cmd.commandName,

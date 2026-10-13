@@ -20,7 +20,7 @@ import { c8WithEnv } from "../utils/cli.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
 import { asyncSpawnWithStdin } from "../utils/spawn.ts";
 
-describe("Plugin commands shadowed by a built-in verb", () => {
+describe("Plugin commands shadowed by a built-in verb or alias", () => {
 	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-shadow-"));
 	before(() => {
 		const destination = join(dir, "plugins", "node_modules", "shadow-list");
@@ -36,7 +36,7 @@ describe("Plugin commands shadowed by a built-in verb", () => {
 		);
 		writeFileSync(
 			join(destination, "c8ctl-plugin.js"),
-			"export const commands = { list: { flags: { shadowed: { type: 'string', description: 'Shadowed flag' } }, handler: async () => {} } };\n",
+			"export const commands = { list: { flags: { shadowed: { type: 'string', description: 'Shadowed flag' } }, handler: async () => {} }, w: { flags: { aliasshadowed: { type: 'string', description: 'Alias-shadowed flag' } }, handler: async () => {} } };\n",
 		);
 	});
 	after(() => rmSync(dir, { recursive: true, force: true }));
@@ -50,6 +50,7 @@ describe("Plugin commands shadowed by a built-in verb", () => {
 			);
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.ok(!result.stdout.includes("shadowed"), result.stdout);
+			assert.ok(!result.stdout.includes("aliasshadowed"), result.stdout);
 		});
 	}
 });
