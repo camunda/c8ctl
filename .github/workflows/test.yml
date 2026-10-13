@@ -50,7 +50,7 @@ jobs:
         run: npm run typecheck
 
   unit-test:
-    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }})
+    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
     needs: [lint, typecheck]
     runs-on: ${{ matrix.os }}
     permissions:
@@ -60,6 +60,7 @@ jobs:
       matrix:
         node: [22, 24, 26]
         os: [ubuntu-latest, macos-latest, windows-latest]
+        shard: ['1/4', '2/4', '3/4', '4/4']
 
     steps:
       - name: Checkout code
@@ -89,11 +90,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run build
 
-      - name: Run unit tests
+      # Sharded with node's built-in --test-shard, passed via NODE_OPTIONS because
+      # the flag must precede the file globs in the `test:unit` script: given
+      # after them (e.g. `npm run test:unit -- --test-shard=1/4`) node silently
+      # ignores it and every shard runs the whole suite.
+      - name: Run unit tests (shard ${{ matrix.shard }})
         run: npm run test:unit
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
   integration-test:
-    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }})
+    name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -103,6 +110,7 @@ jobs:
         node: [22, 24, 26]
         camunda: ['8.8', '8.9', '8.10']
         os: [ubuntu-latest]
+        shard: ['1/3', '2/3', '3/3']
 
     steps:
       - name: Checkout code
@@ -153,10 +161,15 @@ jobs:
           
           echo "Camunda may not be fully ready, but continuing with tests..."
 
-      - name: Run integration tests
+      # Each shard has its own runner and its own Camunda instance. The shard is
+      # passed via NODE_OPTIONS for the same reason as in the unit tests: it
+      # works with --experimental-test-isolation=none, whereas a flag appended
+      # after the file globs is silently ignored.
+      - name: Run integration tests (shard ${{ matrix.shard }})
         run: npm run test:integration
         env:
           CAMUNDA_VERSION: ${{ matrix.camunda }}
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
       - name: Show Camunda logs on failure
         if: failure()
@@ -167,3 +180,15 @@ jobs:
         if: always()
         working-directory: assets/c8/${{ matrix.camunda }}
         run: docker compose down -v
+
+  # Single stable check for branch protection: the matrix jobs above have
+  # shard-suffixed names, so require this job instead of listing each leg.
+  test-gate:
+    name: Tests passed
+    if: always()
+    needs: [lint, typecheck, unit-test, integration-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
