@@ -306,7 +306,7 @@ export const metadata = {
 				},
 				{
 					command:
-						"c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn --to io.camunda.connectors.agenticai.aiagent.v2 --in-place",
+						"c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place",
 					description:
 						"Move all elements to another template; its embedded recipe moves renamed values",
 				},
