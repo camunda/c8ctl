@@ -86,6 +86,11 @@ describe("Loaded plugin flag completions", () => {
 			);
 			assert.strictEqual(result.status, 0, result.stderr);
 			if (shell === "fish") {
+				// The verb lookup skips leading globals and their values.
+				assert.match(
+					result.stdout,
+					/\n {12}case [^\n]*--profile[^\n]*\n {16}set i \(math \$i \+ 2\)/,
+				);
 				for (const [command, name, description] of [
 					["test-flags", "source", "Source element ID"],
 					["test-required", "required-name", "A required string flag"],
@@ -114,14 +119,20 @@ describe("Loaded plugin flag completions", () => {
 				["cluster", "--profile", "--source"],
 				["missing-command", "--profile", "--source"],
 			]) {
-				for (const argument of command.startsWith("test-") ||
+				for (const [argument, globals] of (command.startsWith("test-") ||
 				command === "verb-scoped-demo"
 					? ["argument ", ""]
-					: ["argument "]) {
+					: ["argument "]
+				).flatMap((argument) => [
+					[argument, ""],
+					// A leading global and its value precede the verb.
+					[argument, "--profile dev "],
+				])) {
+					const offset = (argument ? 1 : 0) + (globals ? 2 : 0);
 					const script =
 						shell === "bash"
-							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${command} ${argument}--)\nCOMP_CWORD=${argument ? 3 : 2}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
-							: `${result.stdout}\n_arguments() { printf '%s\\n' "$@"; }\nwords=(c8ctl ${command} ${argument}--)\nCURRENT=${argument ? 4 : 3}\n_c8ctl`;
+							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${globals}${command} ${argument}--)\nCOMP_CWORD=${2 + offset}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
+							: `${result.stdout}\n_arguments() { printf '%s\\n' "$@"; }\nwords=(c8ctl ${globals}${command} ${argument}--)\nCURRENT=${3 + offset}\n_c8ctl`;
 					// Via stdin: Windows truncates long command lines.
 					const completed = await asyncSpawnWithStdin(
 						shell,
@@ -133,11 +144,11 @@ describe("Loaded plugin flag completions", () => {
 					assert.strictEqual(completed.status, 0, completed.stderr);
 					assert.ok(
 						completed.stdout.includes(expected),
-						`${command}: missing ${expected}`,
+						`${globals}${command}: missing ${expected}`,
 					);
 					assert.ok(
 						!completed.stdout.includes(excluded),
-						`${command}: leaked ${excluded}`,
+						`${globals}${command}: leaked ${excluded}`,
 					);
 					if (command === "verb-scoped-demo" && shell === "zsh") {
 						assert.ok(completed.stdout.includes("Plugin"), completed.stdout);
