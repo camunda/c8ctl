@@ -193,10 +193,13 @@ function deriveGlobalFlagNames(): string[] {
 }
 
 /** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
-/** Global options that take the next word as their value, e.g. `--profile p`. */
+/**
+ * Global options that take the next word as their value before the verb, e.g.
+ * `--profile p`. Like `splitGlobals`, `--version` is boolean there.
+ */
 function globalValueOptions(): string[] {
 	return deriveGlobalFlags()
-		.filter((f) => f.type === "string")
+		.filter((f) => f.type === "string" && f.name !== "version")
 		.flatMap((f) => [`--${f.name}`, ...(f.short ? [`-${f.short}`] : [])]);
 }
 

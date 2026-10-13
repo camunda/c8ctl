@@ -91,6 +91,7 @@ describe("Loaded plugin flag completions", () => {
 					result.stdout,
 					/\n {12}case [^\n]*--profile[^\n]*\n {16}set i \(math \$i \+ 2\)/,
 				);
+				assert.doesNotMatch(result.stdout, /\n {12}case [^\n]*--version/);
 				for (const [command, name, description] of [
 					["test-flags", "source", "Source element ID"],
 					["test-required", "required-name", "A required string flag"],
@@ -127,8 +128,12 @@ describe("Loaded plugin flag completions", () => {
 					[argument, ""],
 					// A leading global and its value precede the verb.
 					[argument, "--profile dev "],
+					// Before the verb, --version is boolean and takes no value.
+					[argument, "--version "],
+					[argument, "-v "],
 				])) {
-					const offset = (argument ? 1 : 0) + (globals ? 2 : 0);
+					const offset =
+						(argument ? 1 : 0) + globals.split(" ").filter(Boolean).length;
 					const script =
 						shell === "bash"
 							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${globals}${command} ${argument}--)\nCOMP_CWORD=${2 + offset}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
