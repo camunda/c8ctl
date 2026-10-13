@@ -97,7 +97,7 @@ jobs:
       - name: Run unit tests (shard ${{ matrix.shard }})
         run: npm run test:unit
         env:
-          NODE_OPTIONS: --test-shard=${{ matrix.shard }} --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./.github/dbg-reporter.mjs --test-reporter-destination=stdout
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
 
   integration-test:
     name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
