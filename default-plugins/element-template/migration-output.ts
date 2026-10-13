@@ -28,6 +28,8 @@ export interface RenderOptions {
 	recipe: RecipeOrigin;
 	/** The `--recipe` argument, as given; shown when `recipe` is `file`. */
 	recipePath?: string;
+	/** The template carrying an `embedded` recipe; defaults to the target. */
+	recipeOwner?: string;
 	/** Orders rows like the Modeler properties panel. */
 	targetTemplate?: MigrationTemplate;
 	/** Set when the element is lossy: whether `--allow-lossy` was passed. */
@@ -484,6 +486,7 @@ export function renderReportText(
 		color,
 		recipe,
 		recipePath,
+		recipeOwner,
 		targetTemplate,
 		authorization,
 		columns,
@@ -511,7 +514,7 @@ export function renderReportText(
 			s.dim(`  recipe: ${recipePath ? redactor.text(recipePath) : "file"}`),
 		);
 	} else if (recipe === "embedded") {
-		lines.push(s.dim(`  recipe: embedded in ${report.to.id}`));
+		lines.push(s.dim(`  recipe: embedded in ${recipeOwner ?? report.to.id}`));
 	} else {
 		lines.push(s.dim("  no recipe: values carried over by key"));
 	}
@@ -679,6 +682,7 @@ export function reportToJson(
 		elementName,
 		recipe,
 		recipePath,
+		recipeOwner,
 		dryRun,
 		file,
 		redaction,
@@ -688,6 +692,8 @@ export function reportToJson(
 		recipe: RecipeOrigin;
 		/** The `--recipe` argument, as given; reported when `recipe` is `file`. */
 		recipePath?: string;
+		/** The template carrying an `embedded` recipe; defaults to the target. */
+		recipeOwner?: string;
 		dryRun: boolean;
 		file?: string;
 		redaction?: MigrationRedactionContext;
@@ -706,6 +712,7 @@ export function reportToJson(
 		recipe: {
 			source: recipe,
 			...(recipe === "file" && recipePath ? { path: text(recipePath) } : {}),
+			...(recipe === "embedded" ? { owner: recipeOwner ?? report.to.id } : {}),
 			used: report.usedRecipe,
 			refusal: report.refusal,
 		},

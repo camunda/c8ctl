@@ -273,6 +273,7 @@ describe("explicit migration targets take precedence over cached identities", ()
 						});
 						assert.deepEqual(report.recipe, {
 							source: "embedded",
+							owner: explicit.id,
 							used: true,
 							refusal: null,
 						});

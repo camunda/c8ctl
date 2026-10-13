@@ -387,8 +387,25 @@ test("reports an embedded recipe when only the source lineage's recipe ran", asy
 	const [entry] = JSON.parse(result.stdout).results;
 	assert.strictEqual(entry.to.id, DST.id);
 	assert.deepStrictEqual(
-		[entry.recipe.source, entry.recipe.used],
-		["embedded", true],
+		[entry.recipe.source, entry.recipe.used, entry.recipe.owner],
+		["embedded", true, V1.id],
+	);
+
+	const text = await run(
+		dataDirWithCache([V1, V2, DST]),
+		"update",
+		V1.id,
+		TASK,
+		file,
+		"--to",
+		DST.id,
+		"--dry-run",
+		"--allow-lossy",
+	);
+	assert.strictEqual(text.status, 0, text.stderr);
+	assert.match(
+		text.stdout + text.stderr,
+		new RegExp(`recipe: embedded in ${V1.id.replaceAll(".", "\\.")}\\n`),
 	);
 });
 

@@ -954,6 +954,7 @@ describe("reportToJson", () => {
 		assert.strictEqual(json.file, "p.bpmn");
 		assert.deepStrictEqual(json.recipe, {
 			source: "embedded",
+			owner: "new",
 			used: true,
 			refusal: null,
 		});
@@ -1185,6 +1186,7 @@ describe("output boundary cases", () => {
 		assert.deepStrictEqual(json.report.notes, raw.notes);
 		assert.deepStrictEqual(json.recipe, {
 			source: "embedded",
+			owner: "new",
 			used: true,
 			refusal: null,
 		});
