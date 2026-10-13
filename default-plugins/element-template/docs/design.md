@@ -224,6 +224,11 @@ the same key. `update` registers the applied template as well, so
 the library's own update semantics apply, and add a recipe on top for values
 that moved.
 
+- **Template resolution.** The target id resolves like every other id, local
+  templates first (see above), with `isEngineCompatible` as the eligibility
+  rule; the cache is required only on the fallback. Steps, the applied source
+  and redaction read template versions from the cache, with the local versions
+  of the involved ids shadowing cached ones of the same id and version.
 - **Recipe location.** A recipe is carried by the template it migrates *to*, in
   `metadata.migratesFrom`, so it travels with the template through the
   marketplace and the cache. `metadata` is the schema's free-form area; it

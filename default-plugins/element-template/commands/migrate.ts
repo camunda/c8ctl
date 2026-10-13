@@ -12,9 +12,9 @@ import {
 	unlinkSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve as resolvePath } from "node:path";
+import { dirname, resolve as resolvePath } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
-import { loadCache, requireCachePresent } from "../cache.ts";
+import { loadCache } from "../cache.ts";
 import {
 	atomicOverwriteFile,
 	BINDING_TYPE_SHORTHANDS,
@@ -56,12 +56,13 @@ import {
 	shouldUseColor,
 } from "../migration-output.ts";
 import {
+	findLocalTemplates,
 	getExecutionPlatformVersion,
 	isEngineCompatible,
 	parseTemplateRef,
 	readBpmnInput,
 	readTemplateFromPathOrUrl,
-	resolveOotbTemplate,
+	resolveTemplateId,
 } from "../template-ref.ts";
 import {
 	type BpmnElement,
@@ -265,29 +266,71 @@ function createModeler(): ModelerInstance {
 	});
 }
 
-/** The target template: `--to`, else the latest compatible version of `templateId`. */
+interface TemplatePool {
+	/** `findLocalTemplates` for `id`, read once per run. */
+	localOf(id: string): Template[];
+	/** The cache, with the local templates of `ids` shadowing same id+version entries. */
+	pool(ids: (string | undefined)[]): Template[];
+}
+
+/** Local templates (see `resolveTemplateId`) take part in update like cached ones. */
+function templatePool(
+	cachedTemplates: Template[],
+	searchDir: string,
+): TemplatePool {
+	const local = new Map<string, Template[]>();
+	const localOf = (id: string) => {
+		const templates = local.get(id) ?? findLocalTemplates(searchDir, id);
+		local.set(id, templates);
+		return templates;
+	};
+	const identity = (t: Template) => JSON.stringify([t.id, t.version ?? 0]);
+	return {
+		localOf,
+		pool(ids) {
+			const shadowing = [...new Set(ids)]
+				.filter((id) => id !== undefined)
+				.flatMap(localOf);
+			const shadowed = new Set(shadowing.map(identity));
+			return [
+				...shadowing,
+				...cachedTemplates.filter((t) => !shadowed.has(identity(t))),
+			];
+		},
+	};
+}
+
+/**
+ * The target template: `--to`, else the latest compatible version of
+ * `templateId`. An id resolves like every other subcommand's, local templates
+ * first; only the OOTB fallback requires the cache.
+ */
 async function resolveTarget({
 	templateId,
 	to,
 	executionPlatformVersion,
 	cachedTemplates,
+	templatePool,
 }: {
 	templateId: string;
 	to: string | undefined;
 	executionPlatformVersion: string;
 	cachedTemplates: Template[];
+	templatePool: TemplatePool;
 }): Promise<MigrationTemplate> {
 	const arg = to ?? templateId;
 	const ref = parseTemplateRef(arg);
 	if (ref?.kind === "id") {
-		requireCachePresent();
 		resolveCatalog(
-			migrationTemplates(cachedTemplates.filter((t) => t.id === ref.id)),
+			migrationTemplates(
+				templatePool.pool([ref.id]).filter((t) => t.id === ref.id),
+			),
 		);
 	}
 	const target =
 		ref?.kind === "id"
-			? await resolveOotbTemplate(ref, {
+			? await resolveTemplateId(ref, {
+					localTemplates: templatePool.localOf(ref.id),
 					executionPlatformVersion,
 					requireEngineCompatibility: true,
 					templates: cachedTemplates,
@@ -460,12 +503,15 @@ async function runMigrateInternal(
 	redaction.values = selected.flatMap(({ element }) => valuesOf(element));
 
 	const cachedTemplates = loadCache() ?? [];
+	const pool = templatePool(
+		cachedTemplates,
+		bpmnFilePath ? dirname(input.source) : process.cwd(),
+	);
 	// Every version of the involved lineages, engine-incompatible ones too:
 	// a filtered-out source still marks secrets.
 	const lineages = (ids: (string | undefined)[]) =>
-		migrationTemplates(cachedTemplates).filter((t) => ids.includes(t.id));
+		migrationTemplates(pool.pool(ids)).filter((t) => ids.includes(t.id));
 	redaction.templates = lineages([templateId, parsed.to]);
-	const cache = compatibleTemplates(cachedTemplates, engineVersion);
 
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
@@ -484,7 +530,12 @@ async function runMigrateInternal(
 		to: parsed.to,
 		executionPlatformVersion: engineVersion,
 		cachedTemplates,
+		templatePool: pool,
 	});
+	const cache = compatibleTemplates(
+		pool.pool([templateId, target.id]),
+		engineVersion,
+	);
 	const templates = resolveCatalog(
 		cache.filter((t) => t.id === templateId || t.id === target.id),
 		[target],

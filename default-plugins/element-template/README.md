@@ -136,6 +136,9 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   compatible with the BPMN's `modeler:executionPlatformVersion`. The command
   never changes the template ID unless `--to` names another template
   (`<id>[@<n>]`, path or URL). Elements already on a newer version are skipped.
+  An id resolves like everywhere else: local templates (`.camunda/element-templates/`
+  from the BPMN file's directory up, then Desktop Modeler's user-data dir) first,
+  the cache only when no local version fits.
 - `--map <from>=<to>` moves the original value of one binding to another on every
   selected element, after the recipe steps. A moved value does not count as
   dropped. Prefixes such as `input:` work as in `apply --set`.

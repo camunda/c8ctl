@@ -18,7 +18,6 @@ import type {} from "../../src/core/runtime.ts";
 import {
 	findById,
 	nudgeIfStale,
-	type PickVersionOptions,
 	pickVersion,
 	requireCachePresent,
 } from "./cache.ts";
@@ -357,45 +356,81 @@ function validateLocalTemplates(
 }
 
 /**
- * Find a local template by id: every template with that id from the
- * directories in `localTemplateDirs` is merged into one pool (no
- * nearest-directory-wins fallback), validated, and the version picked once
- * over the pool with the cache's `pickVersion` rules, so local and OOTB
- * resolution agree: a pinned version must match exactly; otherwise the
- * highest version whose `engines.camunda` admits `executionPlatformVersion`
- * wins. Only templates with the requested id are validated, so an unrelated
- * invalid template doesn't produce noise.
+ * Every local template with `id`, from the directories in `localTemplateDirs`
+ * merged into one pool (no nearest-directory-wins fallback) and validated.
+ * Only templates with the requested id are validated, so an unrelated invalid
+ * template doesn't produce noise.
  */
-export function findLocalTemplate(
-	startDir: string,
-	id: string,
-	options: PickVersionOptions = {},
-): Template | undefined {
+export function findLocalTemplates(startDir: string, id: string): Template[] {
 	const entries = readLocalTemplates(localTemplateDirs(startDir)).filter(
 		(e) => isRecord(e.template) && e.template.id === id,
 	);
-	if (entries.length === 0) return undefined;
-	return pickVersion(validateLocalTemplates(id, entries), options) ?? undefined;
+	return entries.length === 0 ? [] : validateLocalTemplates(id, entries);
+}
+
+type TemplatePickOptions = {
+	executionPlatformVersion?: string | null;
+	/**
+	 * Unpinned picks consider only `isEngineCompatible` versions (strict:
+	 * a malformed `engines.camunda` is incompatible), as `update` requires.
+	 */
+	requireEngineCompatibility?: boolean;
+};
+
+/**
+ * Pick `ref`'s version from `candidates`: a pinned version must match
+ * exactly; otherwise the highest engine-compatible version wins.
+ */
+function pickTemplate(
+	candidates: Template[],
+	ref: TemplateRefId,
+	{
+		executionPlatformVersion,
+		requireEngineCompatibility = false,
+	}: TemplatePickOptions,
+): Template | null {
+	const eligible =
+		requireEngineCompatibility && ref.version === undefined
+			? candidates.filter((template) =>
+					isEngineCompatible(template, executionPlatformVersion ?? ""),
+				)
+			: candidates;
+	return pickVersion(eligible, {
+		version: ref.version,
+		executionPlatformVersion: requireEngineCompatibility
+			? undefined
+			: executionPlatformVersion,
+	});
 }
 
 /**
  * Resolve an `<id>[@<v>]` reference: a project-local template (searched from
- * `searchDir` upward, see `findLocalTemplate`) wins, otherwise the OOTB
- * cache. Only the fallback touches the cache, so a local hit works with a
- * cold cache. Every subcommand that takes an id goes through here.
+ * `searchDir` upward, see `findLocalTemplates`) wins, otherwise the OOTB
+ * cache. The version is picked once over the merged local pool with the same
+ * rules as for the cache, so local and OOTB resolution agree. Only the
+ * fallback touches the cache, so a local hit works with a cold cache. Every
+ * subcommand that takes an id goes through here.
  */
 export async function resolveTemplateId(
 	ref: TemplateRefId,
 	{
 		searchDir = process.cwd(),
-		executionPlatformVersion,
-	}: { searchDir?: string; executionPlatformVersion?: string | null } = {},
+		localTemplates,
+		...options
+	}: TemplatePickOptions & {
+		searchDir?: string;
+		/** Preloaded `findLocalTemplates(searchDir, ref.id)`. */
+		localTemplates?: Template[];
+		/** Preloaded cache contents; skips re-reading `templates.json`. */
+		templates?: Template[];
+	} = {},
 ): Promise<Template> {
 	return (
-		findLocalTemplate(searchDir, ref.id, {
-			version: ref.version,
-			executionPlatformVersion,
-		}) ?? resolveOotbTemplate(ref, { executionPlatformVersion })
+		pickTemplate(
+			localTemplates ?? findLocalTemplates(searchDir, ref.id),
+			ref,
+			options,
+		) ?? resolveOotbTemplate(ref, options)
 	);
 }
 
@@ -431,17 +466,9 @@ export async function resolveOotbTemplate(
 		);
 	}
 
-	const eligible =
-		requireEngineCompatibility && ref.version === undefined
-			? candidates.filter((template) =>
-					isEngineCompatible(template, executionPlatformVersion ?? ""),
-				)
-			: candidates;
-	const picked = pickVersion(eligible, {
-		version: ref.version,
-		executionPlatformVersion: requireEngineCompatibility
-			? undefined
-			: executionPlatformVersion,
+	const picked = pickTemplate(candidates, ref, {
+		executionPlatformVersion,
+		requireEngineCompatibility,
 	});
 	if (!picked) {
 		if (ref.version !== undefined) {

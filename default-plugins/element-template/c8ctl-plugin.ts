@@ -164,7 +164,8 @@ export const metadata = {
 				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
 				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
 				"update <template-id> moves every element that uses that template to its latest compatible version, " +
-				"or to the template given with --to <template>[@<n>] (an id, path or URL); pass an element id to update " +
+				"or to the template given with --to <template>[@<n>] (an id, path or URL; an id resolves as above, " +
+				"local templates first); pass an element id to update " +
 				"only that element. Values the target binds under another key are moved when it carries a migration " +
 				"recipe (metadata.migratesFrom) or one is passed with --recipe <file>; --map <from>=<to> moves a value " +
 				"per element when no recipe covers it; the rest carry over by key. " +
