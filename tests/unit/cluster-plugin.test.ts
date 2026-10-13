@@ -280,14 +280,15 @@ describe("Cluster Plugin – command usage output", () => {
 		assert.ok(output.includes("stop"), 'Usage should mention "stop"');
 	});
 
-	test("prints usage when called with an invalid subcommand", async () => {
-		await plugin.commands.cluster(["invalid"]);
-
-		const output = captured.join("\n");
-		assert.ok(
-			output.includes("Usage"),
-			"Should print usage for unrecognised subcommand",
-		);
+	test("prints usage and fails when called with an invalid subcommand", async () => {
+		const originalExitCode = process.exitCode;
+		try {
+			await plugin.commands.cluster(["invalid"]);
+			assert.equal(process.exitCode, 1);
+			assert.ok(captured.join("\n").includes("Usage"));
+		} finally {
+			process.exitCode = originalExitCode;
+		}
 	});
 
 	test("usage mentions version option", async () => {
@@ -813,6 +814,35 @@ describe("Cluster Plugin – hasNewerVersionAvailable", () => {
 
 		const result = await plugin.hasNewerVersionAvailable(config);
 		assert.strictEqual(result, false, "same ETag means no new version");
+	});
+
+	test("asks for the identity encoding, like the download whose ETag was stored", async () => {
+		const config = { cacheDir: tempDir, version: "8.8" };
+		plugin.storeETag(config, '"etag-abc"');
+
+		// A server with Vary: Accept-Encoding gives the gzip variant another ETag.
+		stubFetch(async (_url, init) => {
+			const identity =
+				new Headers(init?.headers).get("accept-encoding") === "identity";
+			return {
+				ok: true,
+				headers: {
+					get: (h: string) =>
+						h === "etag"
+							? identity
+								? '"etag-abc"'
+								: 'W/"etag-abc-gzip"'
+							: null,
+				},
+			};
+		});
+
+		const result = await plugin.hasNewerVersionAvailable(config);
+		assert.strictEqual(
+			result,
+			false,
+			"the unchanged archive must not be re-downloaded",
+		);
 	});
 
 	test("returns true when stored ETag differs from remote ETag", async () => {

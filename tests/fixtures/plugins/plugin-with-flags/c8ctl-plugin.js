@@ -98,6 +98,11 @@ export const metadata = {
 	commands: {
 		'test-flags': {
 			description: 'Test command with custom flags',
+			subcommands: [
+				{ name: 'list', description: 'List entries' },
+				{ name: 'physical-tenants', description: 'Manage physical tenants' },
+				{ name: 'a-much-longer-subcommand-name', description: 'Manage extended entries' },
+			],
 			examples: [
 				{ command: 'c8ctl test-flags --source Gateway_1 --target Task_2', description: 'Test with flags' },
 			],

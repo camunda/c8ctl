@@ -2,6 +2,7 @@
  * SDK client factory using resolved configuration
  */
 
+import { format } from "node:util";
 import {
 	type CamundaClient,
 	type CamundaOptions,
@@ -10,6 +11,25 @@ import {
 import { resolveClusterConfig, setHeaderCaseInsensitive } from "./config.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
+
+type SdkLogTransport = NonNullable<
+	NonNullable<CamundaOptions["log"]>["transport"]
+>;
+
+/**
+ * Route all SDK log events to stderr. The SDK's default transport uses
+ * `console.log` for info/debug/trace, which writes to stdout and corrupts
+ * machine-readable output (e.g. `--json`). stdout is reserved for command
+ * results; diagnostics always go to stderr.
+ */
+export const sdkStderrLogTransport: SdkLogTransport = (evt) => {
+	const tag = `[camunda-sdk][${evt.level}]${evt.scope ? `[${evt.scope}]` : ""}`;
+	const parts =
+		evt.code === undefined
+			? evt.args
+			: [`${evt.code}:`, ...evt.args, evt.data ?? ""];
+	process.stderr.write(`${format(tag, ...parts)}\n`);
+};
 
 /** The fetch-compatible function type the SDK accepts via `CamundaOptions.fetch`. */
 type FetchFn = NonNullable<CamundaOptions["fetch"]>;
@@ -166,14 +186,20 @@ export function createClient(
 		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
 	}
 
-	// Add verbose/trace logging when --verbose flag is set
+	// SDK logging: trace with --verbose, debug when c8ctl debug logging is
+	// enabled, otherwise silent unless the user set CAMUNDA_SDK_LOG_LEVEL.
 	if (c8ctl.verbose) {
 		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "trace";
+	} else if (getLogger().debugEnabled) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "debug";
+	} else if (!process.env.CAMUNDA_SDK_LOG_LEVEL) {
+		sdkConfig.CAMUNDA_SDK_LOG_LEVEL = "silent";
 	}
 
 	const options: Partial<CamundaOptions> = {
 		config: sdkConfig,
 		...additionalSdkConfig,
+		log: { transport: sdkStderrLogTransport, ...additionalSdkConfig.log },
 	};
 
 	// Only wrap fetch when the profile actually needs it — profiles that

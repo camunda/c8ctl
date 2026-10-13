@@ -70,6 +70,9 @@ c8ctl cluster start
 # Store a secret for local development (values are never shown or stored by c8ctl)
 c8ctl cluster secrets set OPENAI_API_KEY
 
+# Manage isolated local physical tenants (requires a supporting c8run 8.10+ build)
+c8ctl cluster physical-tenants add sales
+
 # Deploy a process and start an instance
 c8ctl deploy ./my-process.bpmn
 c8ctl run my-process
@@ -159,7 +162,8 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 - `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`.
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
-- `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr.
+- `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr (also sets Camunda SDK logging to `debug`).
+- `CAMUNDA_SDK_LOG_LEVEL`: Camunda SDK log level (logs go to stderr). Defaults to `silent`; `--verbose` uses `trace`.
 
 ## Configuration Files
 

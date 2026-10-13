@@ -18,10 +18,13 @@ import {
   rmSync,
   readdirSync,
   readFileSync,
+  statSync,
 } from 'node:fs';
+import { once } from 'node:events';
 import { chmod } from 'node:fs/promises';
 import { homedir, platform as osPlatform, arch as osArch } from 'node:os';
 import { join, dirname, isAbsolute, resolve } from 'node:path';
+import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -328,11 +331,13 @@ export const metadata = {
       // so the subcommand flags are documented via `flagsHint` instead.
       passthrough: true,
       passthroughHint:
-        '--purge, --debug and --c8-version are read by the plugin; everything after `secrets` is forwarded to c8run',
+        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. For local management, physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.',
       flagsHint: [
         '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
         '--debug                 (start, stop) Stream raw c8run output',
         '--purge                 (stop only) Also delete runtime data after stopping',
+        '--physical-tenants <ids> (start only) Comma-separated physical tenants for this run (repeatable; Camunda 8.10+)',
+        '--physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)',
       ],
       subcommands: [
         { name: 'start', description: 'Start local Camunda 8 cluster' },
@@ -346,6 +351,7 @@ export const metadata = {
         { name: 'logs', description: 'Stream cluster logs' },
         { name: 'purge', description: 'Delete runtime data (keeps binary) so the next start is fresh' },
         { name: 'secrets', description: 'Manage local development secrets (passed through to c8run)' },
+        { name: 'physical-tenants', description: 'Manage local physical tenants (passed through to c8run; Camunda 8.10+)' },
       ],
       examples: [
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
@@ -364,6 +370,9 @@ export const metadata = {
         { command: 'c8ctl cluster secrets list', description: 'List secret names (values are never shown)' },
         { command: 'c8ctl cluster secrets import .env.secrets', description: 'Import secrets from a dotenv file' },
         { command: 'c8ctl cluster secrets delete OPENAI_API_KEY --yes', description: 'Delete a secret without prompting' },
+        { command: 'c8ctl cluster physical-tenants --c8-version 8.10 add sales', description: 'Save a physical tenant using an installed 8.10 build' },
+        { command: 'c8ctl cluster start 8.10 --physical-tenants sales,hr', description: 'Start physical tenants for one run only' },
+        { command: 'c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY', description: 'Store a secret for one physical tenant' },
       ],
     },
   },
@@ -486,9 +495,681 @@ function formatLocalVersionsHint(cacheDir) {
   return `Locally available versions:\n${versions.map(v => `  ${v}`).join('\n')}`;
 }
 
-function getDownloadUrl(version) {
+function getArchiveName(version) {
   const platformInfo = getPlatformIdentifier();
-  return `${DOWNLOAD_BASE_URL}${version}/camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+  return `camunda8-run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`;
+}
+
+function getDownloadUrl(version) {
+  return `${DOWNLOAD_BASE_URL}${version}/${getArchiveName(version)}`;
+}
+
+// A c8run archive is several hundred MB, so a single dropped connection (a
+// proxy or load balancer closing the socket, a Wi-Fi hiccup) must not fail
+// the whole `cluster start`. downloadWithRetry() makes one initial attempt
+// plus up to DOWNLOAD_MAX_RETRIES retries, resuming with an HTTP Range request
+// where the server allows it, and aborts an attempt that receives no data for
+// DOWNLOAD_STALL_TIMEOUT_MS (undici's own body timeout is 300s).
+const DOWNLOAD_MAX_RETRIES = 3;
+const DOWNLOAD_RETRY_BASE_DELAY_MS = 2_000;
+const DOWNLOAD_STALL_TIMEOUT_MS = 60_000;
+const MB = 1024 * 1024;
+const PROGRESS_STEP_PERCENT = 5;
+const PROGRESS_INTERVAL_MS = 5_000;
+
+// TLS certificate errors, which a retry cannot fix (Node's X509 verification
+// codes, see https://nodejs.org/api/tls.html#x509-certificate-error-codes,
+// except OUT_OF_MEM). File-system failures are tagged by fileSystemError().
+const TLS_ERROR_CODES = new Set([
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_CRL',
+  'UNABLE_TO_DECRYPT_CERT_SIGNATURE',
+  'UNABLE_TO_DECRYPT_CRL_SIGNATURE',
+  'UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY',
+  'CERT_SIGNATURE_FAILURE',
+  'CRL_SIGNATURE_FAILURE',
+  'CERT_NOT_YET_VALID',
+  'CERT_HAS_EXPIRED',
+  'CRL_NOT_YET_VALID',
+  'CRL_HAS_EXPIRED',
+  'ERROR_IN_CERT_NOT_BEFORE_FIELD',
+  'ERROR_IN_CERT_NOT_AFTER_FIELD',
+  'ERROR_IN_CRL_LAST_UPDATE_FIELD',
+  'ERROR_IN_CRL_NEXT_UPDATE_FIELD',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_CHAIN_TOO_LONG',
+  'CERT_REVOKED',
+  'INVALID_CA',
+  'PATH_LENGTH_EXCEEDED',
+  'INVALID_PURPOSE',
+  'CERT_UNTRUSTED',
+  'CERT_REJECTED',
+  'HOSTNAME_MISMATCH',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+]);
+
+/**
+ * Read a millisecond override from the environment. These are internal knobs
+ * (like C8CTL_STOP_WAIT_TIMEOUT_MS) so tests can keep backoff and stall
+ * detection fast; unset, empty or invalid values fall back to the default.
+ */
+function msFromEnv(name, fallback, { allowZero = true } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || (!allowZero && value === 0)) return fallback;
+  return value;
+}
+
+function formatMB(bytes) {
+  return `${Math.floor(bytes / MB)} MB`;
+}
+
+/** Like formatMB, but shows KB below 1 MB so small amounts don't read as "0 MB". */
+function formatSize(bytes) {
+  return bytes > 0 && bytes < MB ? `${Math.max(1, Math.floor(bytes / 1024))} KB` : formatMB(bytes);
+}
+
+function formatMBPrecise(bytes) {
+  return `${(bytes / MB).toFixed(1)} MB`;
+}
+
+function formatDuration(ms) {
+  return ms >= 1000 ? `${Math.round(ms / 100) / 10}s` : `${Math.round(ms)}ms`;
+}
+
+function formatThroughput(bytes, ms) {
+  return ms > 0 ? `${((bytes / MB) / (ms / 1000)).toFixed(1)} MB/s` : 'n/a';
+}
+
+function formatEta(ms) {
+  const s = Math.ceil(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+function downloadError(message, props = {}) {
+  const { cause, ...rest } = props;
+  return Object.assign(new Error(message, cause === undefined ? undefined : { cause }), rest);
+}
+
+/**
+ * Flatten an error and its `cause` chain into `{ name, code, message }`
+ * entries, outermost first. Undici reports a dropped download as
+ * `TypeError: terminated` whose cause carries the useful part (e.g.
+ * `UND_ERR_SOCKET: other side closed`).
+ */
+export function errorChain(error) {
+  const chain = [];
+  const seen = new Set();
+  let current = error;
+  while (current !== undefined && current !== null && !seen.has(current) && chain.length < 10) {
+    seen.add(current);
+    if (typeof current === 'object') {
+      chain.push({
+        name: typeof current.name === 'string' ? current.name : 'Error',
+        code: typeof current.code === 'string' ? current.code : undefined,
+        message: typeof current.message === 'string' ? current.message : String(current),
+      });
+      current = current.cause;
+    } else {
+      chain.push({ name: typeof current, code: undefined, message: String(current) });
+      break;
+    }
+  }
+  return chain;
+}
+
+function formatChainEntry({ name, code, message }) {
+  return `${name}${code ? ` [${code}]` : ''}: ${message}`;
+}
+
+/** Root cause as "CODE: message" (or just the message when there is no code). */
+function rootCauseDetail(error) {
+  const root = errorChain(error).at(-1);
+  if (!root) return String(error);
+  return root.code ? `${root.code}: ${root.message}` : root.message;
+}
+
+/** Map a network failure to plain words a user can act on. */
+export function describeDownloadFailure(error) {
+  if (typeof error?.reason === 'string') return error.reason;
+  const chain = errorChain(error);
+  const codes = new Set(chain.map((entry) => entry.code).filter(Boolean));
+  const has = (...candidates) => candidates.some((code) => codes.has(code));
+  if (has('UND_ERR_SOCKET', 'ECONNRESET', 'EPIPE', 'UND_ERR_CLOSED', 'ECONNABORTED')) {
+    return 'the connection was closed by the server or a proxy';
+  }
+  if (has('UND_ERR_BODY_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT')) {
+    return 'the connection timed out';
+  }
+  if (has('ENETUNREACH', 'EHOSTUNREACH', 'ENETDOWN', 'EHOSTDOWN')) return 'the network is unreachable';
+  if (has('ENOTFOUND', 'EAI_AGAIN')) return 'the server name could not be resolved (DNS lookup failed)';
+  if (has('ECONNREFUSED')) return 'the connection was refused';
+  if ([...codes].some((code) => TLS_ERROR_CODES.has(code))) {
+    return 'the server certificate could not be verified';
+  }
+  if (chain.some((entry) => entry.message === 'terminated')) return 'the connection was closed unexpectedly';
+  return chain.at(-1)?.message ?? String(error);
+}
+
+/** Wrap a failure of fetch() or of reading the body as a classified download error. */
+function networkError(error) {
+  const codes = errorChain(error).map((entry) => entry.code);
+  return downloadError(describeDownloadFailure(error), {
+    cause: error,
+    reason: describeDownloadFailure(error),
+    retryable: !codes.some((code) => code && TLS_ERROR_CODES.has(code)),
+  });
+}
+
+/** Wrap a failure of the file stream: local, so neither retried nor a network problem. */
+function fileSystemError(error) {
+  return downloadError(error.message, { cause: error, reason: error.message, retryable: false, fileSystem: true });
+}
+
+function isRetryableDownloadError(error) {
+  return error?.retryable === true;
+}
+
+function parseContentRange(header) {
+  const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i.exec((header || '').trim());
+  if (!match) return null;
+  return {
+    start: Number(match[1]),
+    end: Number(match[2]),
+    total: match[3] === '*' ? 0 : Number(match[3]),
+  };
+}
+
+function fileSizeOrZero(file) {
+  try {
+    return statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Show a URL without credentials: userinfo becomes `***`, and the query
+ * (e.g. a signed CDN redirect) and fragment are replaced by `?<redacted>`.
+ */
+function redactUrl(value, fallback = '(invalid URL)') {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) {
+      url.username = '***';
+      url.password = '';
+    }
+    const query = url.search || url.hash ? '?<redacted>' : '';
+    url.search = '';
+    url.hash = '';
+    return `${url.toString()}${query}`;
+  } catch {
+    return fallback;
+  }
+}
+
+const PROXY_ENV_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy'];
+
+function isHttpsProxyConfigured() {
+  return Boolean(process.env.HTTPS_PROXY || process.env.https_proxy);
+}
+
+function isEnvProxyEnabled() {
+  return process.env.NODE_USE_ENV_PROXY === '1';
+}
+
+function proxyHint() {
+  if (isHttpsProxyConfigured() && !isEnvProxyEnabled()) {
+    return (
+      'HTTPS_PROXY is set, but Node.js only uses it when NODE_USE_ENV_PROXY=1 is set as well ' +
+      '(Node.js 22.21+ or 24.5+). Set NODE_USE_ENV_PROXY=1 and try again.'
+    );
+  }
+  return 'Behind a proxy? Set HTTPS_PROXY together with NODE_USE_ENV_PROXY=1 (Node.js 22.21+ or 24.5+).';
+}
+
+function mirrorHint() {
+  const override = process.env.C8CTL_C8RUN_DOWNLOAD_URL;
+  if (override) {
+    return (
+      `C8CTL_C8RUN_DOWNLOAD_URL points the download at ${redactUrl(override)}. ` +
+      'Make sure that server is reachable, or unset it to use the Camunda Download Center.'
+    );
+  }
+  return 'Use a mirror: set C8CTL_C8RUN_DOWNLOAD_URL to a base URL with the same layout as the Camunda Download Center.';
+}
+
+function buildDownloadFailureMessage({
+  error,
+  url,
+  attempts,
+  connected,
+  maxBytesReceived,
+  total,
+  targetFile,
+  keptFileNote,
+  extraHints,
+}) {
+  const codes = errorChain(error).map((entry) => entry.code).filter(Boolean);
+
+  // A local file-system failure has nothing to do with the network.
+  if (error?.fileSystem === true) {
+    return (
+      `Could not save the download to ${targetFile}: ${rootCauseDetail(error)}\n` +
+      (keptFileNote ? `${keptFileNote}\n` : '') +
+      `URL: ${redactUrl(url)}\n` +
+      'What you can try:\n' +
+      '  - Check that there is enough free disk space and that you can write to that directory.\n' +
+      '  - Set C8RUN_CACHE_DIR to a different directory to download there instead.'
+    );
+  }
+
+  const reason = describeDownloadFailure(error);
+  const detail = rootCauseDetail(error);
+  const attemptsText = `${attempts} attempt${attempts === 1 ? '' : 's'}`;
+  const lines = [
+    connected
+      ? `Download failed after ${attemptsText}: ${reason}.`
+      : `Cannot reach the Camunda Download Center (${attemptsText}): ${reason}.`,
+  ];
+  // Our own errors (stall, HTTP status, size mismatch) are fully described by `reason`.
+  if (errorChain(error).length > 1 && detail !== reason) lines.push(`Cause: ${detail}`);
+  lines.push(`URL: ${redactUrl(url)}`);
+  if (maxBytesReceived > 0) {
+    lines.push(
+      `Received ${formatSize(maxBytesReceived)}${total > 0 ? ` of ${formatSize(total)}` : ''} before giving up` +
+        (keptFileNote ? '.' : '; the incomplete download was removed.'),
+    );
+  }
+  if (keptFileNote) lines.push(keptFileNote);
+  const hints = [
+    'Please check your network connection and VPN, then try again.',
+    proxyHint(),
+    ...(codes.some((code) => TLS_ERROR_CODES.has(code))
+      ? ['If your network inspects HTTPS traffic, point NODE_EXTRA_CA_CERTS at your organization\'s CA certificate file.']
+      : []),
+    mirrorHint(),
+    ...extraHints,
+  ];
+  lines.push('What you can try:', ...hints.map((hint) => `  - ${hint}`));
+  return lines.join('\n');
+}
+
+/**
+ * Download `url` to `targetFile`, surviving dropped connections.
+ *
+ * - One initial attempt plus up to `maxRetries` retries, with exponential
+ *   backoff (`retryDelayMs`, doubled per retry), for transient failures only:
+ *   network errors, dropped or stalled connections, HTTP 5xx and 429, and an
+ *   archive whose final size does not match what the server announced.
+ * - Resumes with `Range: bytes=<written>-` and `If-Range: <validator>` when
+ *   the first response carried a strong ETag or a Last-Modified date. A 206
+ *   answer is appended to the partial file; a 200 answer restarts from zero.
+ * - An attempt fails when no bytes arrive for `stallTimeoutMs`.
+ * - Other HTTP errors (e.g. 404) are not retried: the thrown error carries
+ *   `status` so the caller can explain it.
+ * - The partial file is kept between retries and deleted when giving up.
+ * - With `verbose`, logs request/response details, per-attempt timing,
+ *   and full error cause chains.
+ *
+ * Resolves to `{ bytes, etag }`, where `etag` is the ETag (or Last-Modified)
+ * of the downloaded content, or null.
+ */
+export async function downloadWithRetry({
+  url,
+  targetFile,
+  logger = getLogger(),
+  verbose = false,
+  maxRetries = DOWNLOAD_MAX_RETRIES,
+  retryDelayMs = DOWNLOAD_RETRY_BASE_DELAY_MS,
+  stallTimeoutMs = DOWNLOAD_STALL_TIMEOUT_MS,
+  progressIntervalMs = PROGRESS_INTERVAL_MS,
+  extraHints = [],
+}) {
+  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr' }) : () => {};
+  const invalid = invalidDownloadUrlReason(url);
+  if (invalid) {
+    throw downloadError(
+      `Cannot download from ${redactUrl(url)}: ${invalid}.` +
+        (process.env.C8CTL_C8RUN_DOWNLOAD_URL ? ' Check C8CTL_C8RUN_DOWNLOAD_URL.' : ''),
+      { reason: invalid, retryable: false },
+    );
+  }
+  const totalAttempts = maxRetries + 1;
+  const state = {
+    written: 0,
+    total: 0,
+    validator: null,
+    etag: null,
+    reportedPercent: 0,
+    reportedBytes: 0,
+    reportedAt: Date.now(),
+    connected: false,
+    maxBytesReceived: 0,
+    attemptBytes: 0,
+  };
+
+  if (verbose) {
+    const proxyVars = PROXY_ENV_VARS.filter((name) => process.env[name]).map((name) =>
+      name.toLowerCase() === 'no_proxy' ? `${name}=${process.env[name]}` : `${name}=${redactUrl(process.env[name], '(set)')}`,
+    );
+    vlog(`Download URL: ${redactUrl(url)}`);
+    vlog(`Target file: ${targetFile}`);
+    vlog(`Node.js ${process.version}; NODE_USE_ENV_PROXY=${process.env.NODE_USE_ENV_PROXY ?? '(not set)'}`);
+    vlog(`Proxy environment: ${proxyVars.length > 0 ? proxyVars.join(', ') : '(none set)'}`);
+    vlog(
+      `Retry policy: up to ${maxRetries} retries (backoff starting at ${formatDuration(retryDelayMs)}), ` +
+        `stall timeout ${formatDuration(stallTimeoutMs)}`,
+    );
+  }
+
+  let lastError;
+  let attempt = 0;
+  while (attempt < totalAttempts) {
+    attempt += 1;
+    const startedAt = Date.now();
+    state.attemptBytes = 0;
+    vlog(`Attempt ${attempt}/${totalAttempts} started`);
+    try {
+      await downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt });
+      const elapsed = Date.now() - startedAt;
+      vlog(
+        `Attempt ${attempt}/${totalAttempts} completed after ${formatDuration(elapsed)}: ` +
+          `${formatMBPrecise(state.attemptBytes)} received (${formatThroughput(state.attemptBytes, elapsed)}), ` +
+          `${formatMBPrecise(state.written)} total`,
+      );
+      return { bytes: state.written, etag: state.etag };
+    } catch (error) {
+      lastError = error;
+      const elapsed = Date.now() - startedAt;
+      vlog(
+        `Attempt ${attempt}/${totalAttempts} failed after ${formatDuration(elapsed)}: ` +
+          `${formatMBPrecise(state.attemptBytes)} received in this attempt, ${formatMBPrecise(state.written)} on disk`,
+      );
+      const chain = errorChain(error);
+      chain.forEach((entry, index) => vlog(`${index === 0 ? 'Error details' : '  caused by'}: ${formatChainEntry(entry)}`));
+
+      if (!isRetryableDownloadError(error) || attempt >= totalAttempts) break;
+
+      const retry = attempt;
+      const delay = retryDelayMs * 2 ** (retry - 1);
+      const reason = describeDownloadFailure(error);
+      const resumable = state.written > 0 && state.validator !== null;
+      const next = resumable
+        ? `, resuming from ${formatSize(state.written)}...`
+        : state.written > 0
+          ? ', restarting from the beginning (the server did not send an ETag or Last-Modified header, so the download cannot be resumed safely)...'
+          : '...';
+      logger.warn(
+        state.written > 0
+          ? `Download interrupted at ${formatSize(state.written)}${state.total > 0 ? ` / ${formatSize(state.total)}` : ''} (${reason}). ` +
+              `Retrying (${retry}/${maxRetries}) in ${formatDuration(delay)}${next}`
+          : `Download failed (${reason}). Retrying (${retry}/${maxRetries}) in ${formatDuration(delay)}...`,
+      );
+      if (!resumable) state.written = 0;
+      await sleep(delay);
+    }
+  }
+
+  // An unremovable file must not hide why the download failed; the message says
+  // it was kept (only if it is really there, e.g. not for ENAMETOOLONG).
+  let cleanupError;
+  try {
+    rmSync(targetFile, { force: true });
+  } catch (error) {
+    if (existsSync(targetFile)) cleanupError = error;
+  }
+  const keptFileNote = cleanupError
+    ? `The incomplete download could not be removed (${cleanupError.code ?? cleanupError.message}); delete it yourself: ${targetFile}`
+    : undefined;
+
+  if (lastError?.status !== undefined && !isRetryableDownloadError(lastError)) {
+    throw Object.assign(lastError, { keptFileNote });
+  }
+
+  throw downloadError(
+    buildDownloadFailureMessage({
+      error: lastError,
+      url,
+      attempts: attempt,
+      connected: state.connected,
+      maxBytesReceived: state.maxBytesReceived,
+      total: state.total,
+      targetFile,
+      keptFileNote,
+      extraHints,
+    }),
+    { cause: lastError, attempts: attempt },
+  );
+}
+
+/** Why fetch() would reject `url` before sending anything, or null if it would not. */
+function invalidDownloadUrlReason(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'not a valid URL';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `unsupported protocol ${parsed.protocol} (use http or https)`;
+  }
+  if (parsed.username || parsed.password) return 'the URL contains credentials, which fetch() does not send';
+  return null;
+}
+
+/** One HTTP request; updates `state` and throws a classified error on failure. */
+async function downloadAttempt({ url, targetFile, state, stallTimeoutMs, progressIntervalMs, logger, vlog, startedAt }) {
+  const controller = new AbortController();
+  let stallTimer;
+  let stalled = false;
+  const armStallTimer = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => {
+      stalled = true;
+      controller.abort();
+    }, stallTimeoutMs);
+  };
+  const disarmStallTimer = () => clearTimeout(stallTimer);
+  const classify = (error) => {
+    if (stalled) {
+      const reason = `no data received for ${formatDuration(stallTimeoutMs)}`;
+      return downloadError(reason, { reason, retryable: true });
+    }
+    return networkError(error);
+  };
+
+  const resume = state.written > 0 && state.validator !== null;
+  // fetch() decodes a Content-Encoding transparently, while Content-Length and
+  // byte ranges count encoded bytes; ask for the raw bytes so both match the file.
+  const headers = {
+    'Accept-Encoding': 'identity',
+    ...(resume ? { Range: `bytes=${state.written}-`, 'If-Range': state.validator } : {}),
+  };
+  vlog(`GET ${redactUrl(url)}`);
+  vlog(`Request headers: ${Object.entries(headers).map(([name, value]) => `${name}: ${value}`).join(', ')}`);
+
+  let response;
+  armStallTimer();
+  try {
+    response = await fetch(url, { headers, signal: controller.signal });
+  } catch (error) {
+    throw classify(error);
+  } finally {
+    disarmStallTimer();
+  }
+  state.connected = true;
+
+  const header = (name) => response.headers.get(name);
+  vlog(
+    `Response: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''} from ${redactUrl(response.url || url)}` +
+      `${response.redirected ? ' (after redirect)' : ''}`,
+  );
+  vlog(
+    `Response headers: ${['content-length', 'content-range', 'content-encoding', 'etag', 'last-modified', 'accept-ranges']
+      .map((name) => `${name}: ${header(name) ?? '(none)'}`)
+      .join(', ')}`,
+  );
+
+  const discardBody = () => response.body?.cancel().catch(() => {});
+  let append = false;
+  // Where a 206 body must end; the only size check when the total is `*`.
+  let rangeEnd = 0;
+  // A server may encode the body anyway; its sizes and ranges then don't apply.
+  const encoded = !['', 'identity'].includes((header('content-encoding') ?? '').trim().toLowerCase());
+
+  if (response.status === 206) {
+    const range = parseContentRange(header('content-range'));
+    if (!resume || !range || range.start !== state.written || encoded) {
+      await discardBody();
+      state.written = 0;
+      const reason = `the server sent an unexpected byte range (${header('content-range') ?? 'no Content-Range header'})`;
+      throw downloadError(reason, { reason, retryable: true });
+    }
+    if (range.total > 0) state.total = range.total;
+    rangeEnd = range.end + 1;
+    append = true;
+  } else if (response.ok) {
+    if (resume) {
+      logger.info('The server did not resume the download; restarting from the beginning.');
+    }
+    state.written = 0;
+    state.reportedPercent = 0;
+    state.reportedBytes = 0;
+    state.total = encoded ? 0 : Number.parseInt(header('content-length') || '0', 10) || 0;
+    // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
+    // values are date strings. Both are used as opaque version tokens for equality
+    // comparison — the format difference does not affect correctness.
+    state.etag = header('etag') || header('last-modified') || null;
+    // If-Range needs a strong validator; a weak ETag (W/"...") must not be used.
+    const strongEtag = header('etag') && !header('etag').startsWith('W/') ? header('etag') : null;
+    state.validator = encoded ? null : strongEtag || header('last-modified') || null;
+  } else {
+    await discardBody();
+    if (response.status === 416 && resume) {
+      state.written = 0;
+      const reason = 'the server rejected the request to resume the download (HTTP 416)';
+      throw downloadError(reason, { status: 416, reason, retryable: true });
+    }
+    const reason = `the server responded with HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+    throw downloadError(reason, {
+      status: response.status,
+      reason,
+      retryable: response.status >= 500 || response.status === 429,
+    });
+  }
+
+  if (!response.body) {
+    const reason = 'the server sent an empty response';
+    throw downloadError(reason, { reason, retryable: true });
+  }
+
+  const fileStream = createWriteStream(targetFile, { flags: append ? 'a' : 'w' });
+  let fileError;
+  fileStream.on('error', (error) => {
+    fileError = error;
+  });
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      let chunk;
+      armStallTimer();
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        throw classify(error);
+      } finally {
+        disarmStallTimer();
+      }
+      if (chunk.done) break;
+
+      // The stream may have failed while we awaited the read; writing to it then
+      // returns false and 'drain' never comes.
+      if (fileError) throw fileError;
+      if (!fileStream.write(chunk.value)) {
+        await once(fileStream, 'drain');
+      }
+      if (fileError) throw fileError;
+      state.written += chunk.value.length;
+      state.attemptBytes += chunk.value.length;
+      state.maxBytesReceived = Math.max(state.maxBytesReceived, state.written);
+      reportDownloadProgress({ state, logger, startedAt, progressIntervalMs });
+    }
+    fileStream.end();
+    await finished(fileStream);
+  } catch (error) {
+    disarmStallTimer();
+    await reader.cancel().catch(() => {});
+    if (!fileStream.destroyed) fileStream.end();
+    await finished(fileStream).catch(() => {});
+    // What actually reached the disk is what a resume continues from.
+    state.written = fileSizeOrZero(targetFile);
+    throw fileError ? fileSystemError(fileError) : error;
+  }
+
+  state.written = fileSizeOrZero(targetFile);
+  const expected = state.total > 0 ? state.total : rangeEnd;
+  if (expected > 0 && state.written !== expected) {
+    const reason =
+      state.written < expected
+        ? `the download ended early (received ${formatSize(state.written)} of ${formatSize(expected)})`
+        : `the download is larger than announced (${formatSize(state.written)} instead of ${formatSize(expected)})`;
+    // An oversized file cannot be repaired by resuming; start over.
+    if (state.written > expected) state.written = 0;
+    throw downloadError(reason, { reason, retryable: true });
+  }
+}
+
+function reportDownloadProgress({ state, logger, startedAt, progressIntervalMs }) {
+  const now = Date.now();
+  const percentage = state.total > 0 ? Math.floor((state.written / state.total) * 100) : 0;
+  const stepReached = state.total > 0 && percentage >= state.reportedPercent + PROGRESS_STEP_PERCENT;
+  const intervalPassed = now - state.reportedAt >= progressIntervalMs && state.written > state.reportedBytes;
+  if (!stepReached && !intervalPassed) return;
+
+  const elapsed = now - startedAt;
+  const rate = formatThroughput(state.attemptBytes, elapsed);
+  const remaining = state.total - state.written;
+  const eta =
+    state.total > 0 && remaining > 0 && state.attemptBytes > 0 && elapsed > 0
+      ? `, ETA ${formatEta((remaining * elapsed) / state.attemptBytes)}`
+      : '';
+  logger.info(
+    state.total > 0
+      ? `//> ${percentage}% (${formatMBPrecise(state.written)} / ${formatMBPrecise(state.total)}) at ${rate}${eta}`
+      : `//> ${formatMBPrecise(state.written)} (total size unknown) at ${rate}`,
+  );
+  state.reportedPercent = percentage;
+  state.reportedBytes = state.written;
+  state.reportedAt = now;
+}
+
+/**
+ * Render an error for a "Failed to ...:" line without losing its cause.
+ * `${error}` alone hides `error.cause`, which is where undici puts the useful
+ * part of a network failure (e.g. "TypeError: terminated" is caused by
+ * "UND_ERR_SOCKET: other side closed").
+ */
+export function formatErrorWithCause(error) {
+  const base = `${error}`;
+  if (error?.cause === undefined || error?.cause === null) return base;
+  const detail = rootCauseDetail(error);
+  return base.includes(detail) ? base : `${base} (cause: ${detail})`;
+}
+
+/** Shell-quote a path for display in a hint when it contains spaces. */
+/** Quote a path for a copy-paste command: single quotes for POSIX shells, double quotes on Windows. */
+export function quoteForHint(path, platform = osPlatform()) {
+  if (platform === 'win32') {
+    // Windows paths cannot contain `"`; cmd and PowerShell both accept double quotes.
+    return /^[\w.:\\/-]+$/.test(path) ? path : `"${path}"`;
+  }
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replaceAll("'", "'\\''")}'`;
 }
 
 async function downloadC8Run(config) {
@@ -508,76 +1189,52 @@ async function downloadC8Run(config) {
     `c8run-${version}-${platformInfo.platform}-${platformInfo.arch}.${platformInfo.extension}`,
   );
 
-  const response = await fetch(downloadUrl).catch((error) => {
-    throw new Error(
-      `Cannot reach the Camunda Download Center.\n` +
-        `URL: ${downloadUrl}\n` +
-        `Error: ${error.message}\n` +
-        `Please check your network connection and proxy settings, then try again.\n\n` +
-        formatLocalVersionsHint(cacheDir),
-    );
+  // A manually downloaded and extracted archive in the install dir is picked
+  // up by isC8RunInstalled(), exactly like one c8ctl extracted itself.
+  const installDir = join(cacheDir, `c8run-${version}`);
+  // Not parsed from downloadUrl: a malformed C8CTL_C8RUN_DOWNLOAD_URL must reach
+  // downloadWithRetry()'s validation instead of throwing a bare TypeError here.
+  const archiveName = getArchiveName(version);
+  const extract = resolveExtractCommand({
+    archivePath: archiveName,
+    targetDir: quoteForHint(installDir),
+    platform: osPlatform(),
   });
+  const manualHint =
+    `Or download ${archiveName} yourself (e.g. with a browser or a download manager), create ${quoteForHint(installDir)} ` +
+    `and extract it there: ${extract.command} ${extract.args.join(' ')}`;
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to download c8run ${version}: HTTP ${response.status}\n` +
-        `URL: ${downloadUrl}\n` +
-        `Please check the version exists or try a different version.\n\n` +
-        formatLocalVersionsHint(cacheDir),
-    );
-  }
-
-  const totalSize = parseInt(response.headers.get('content-length') || '0');
-
-  if (!response.body) {
-    throw new Error(
-      `Failed to download c8run ${version}: empty response body\n` +
-        `URL: ${downloadUrl}\n` +
-        `Please try again or use a different version.`,
-    );
-  }
-
-  const etag = response.headers.get('etag') || response.headers.get('last-modified') || null;
-  // Note: 'etag' values are quoted strings (e.g. '"abc123"') while 'last-modified'
-  // values are date strings. Both are used as opaque version tokens for equality
-  // comparison — the format difference does not affect correctness.
-
-  const fileStream = createWriteStream(targetFile);
-
-  let downloadedSize = 0;
-  let lastReportedPercentage = 0;
-
-  const reader = response.body.getReader();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    fileStream.write(value);
-    downloadedSize += value.length;
-
-    if (totalSize > 0) {
-      const percentage = Math.floor((downloadedSize / totalSize) * 100);
-      if (percentage >= lastReportedPercentage + 10) {
-        logger.info(
-          `Progress: ${percentage}% (${Math.floor(downloadedSize / 1024 / 1024)} MB / ${Math.floor(totalSize / 1024 / 1024)} MB)`,
-        );
-        lastReportedPercentage = percentage;
-      }
+  let result;
+  try {
+    result = await downloadWithRetry({
+      url: downloadUrl,
+      targetFile,
+      logger,
+      verbose: config.verbose === true,
+      retryDelayMs: msFromEnv('C8CTL_C8RUN_DOWNLOAD_RETRY_DELAY_MS', DOWNLOAD_RETRY_BASE_DELAY_MS),
+      stallTimeoutMs: msFromEnv('C8CTL_C8RUN_DOWNLOAD_STALL_TIMEOUT_MS', DOWNLOAD_STALL_TIMEOUT_MS, {
+        allowZero: false,
+      }),
+      extraHints: [manualHint],
+    });
+  } catch (error) {
+    if (error.status !== undefined && !isRetryableDownloadError(error)) {
+      throw new Error(
+        `Failed to download c8run ${version}: HTTP ${error.status}\n` +
+          `URL: ${redactUrl(downloadUrl)}\n` +
+          (error.keptFileNote ? `${error.keptFileNote}\n` : '') +
+          `Please check the version exists or try a different version.\n\n` +
+          formatLocalVersionsHint(cacheDir),
+      );
     }
+    throw new Error(`${error.message}\n\n${formatLocalVersionsHint(cacheDir)}`, { cause: error.cause ?? error });
   }
-
-  await new Promise((resolve, reject) => {
-    fileStream.on('finish', resolve);
-    fileStream.on('error', reject);
-    fileStream.end();
-  });
 
   logger.info(
-    `Downloaded and saved to ${targetFile} (${Math.floor(downloadedSize / 1024 / 1024)} MB)`,
+    `Downloaded and saved to ${targetFile} (${formatMB(result.bytes)})`,
   );
 
-  return { archivePath: targetFile, etag };
+  return { archivePath: targetFile, etag: result.etag };
 }
 
 async function extractArchive(archivePath, targetDir) {
@@ -758,7 +1415,13 @@ export async function hasNewerVersionAvailable(config) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
-    const response = await fetch(downloadUrl, { method: 'HEAD', signal: controller.signal });
+    // Same representation as the download, whose ETag was stored: with
+    // Vary: Accept-Encoding a gzip variant can carry a different ETag.
+    const response = await fetch(downloadUrl, {
+      method: 'HEAD',
+      headers: { 'Accept-Encoding': 'identity' },
+      signal: controller.signal,
+    });
     if (!response.ok) {
       // Can't determine — keep the current installation
       return false;
@@ -934,7 +1597,7 @@ function printSummary(rawOutput, version) {
   console.log('');
 }
 
-async function startC8Run(config, debug = false) {
+async function startC8Run(config, debug = false, startArgs = []) {
   const logger = getLogger();
   const binaryPath = getC8RunBinaryPath(config);
   const logDir = join(dirname(binaryPath), 'log');
@@ -982,15 +1645,15 @@ async function startC8Run(config, debug = false) {
     if (record?.version) {
       logger.info(`Detected running version from the durable PID record: ${record.version}`);
     }
-    logger.info('Stop it first with "c8ctl cluster stop".');
-    return;
+    throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
 
   logger.info('Starting Camunda 8 local cluster...');
 
-  const proc = spawn(binaryPath, ['start'], {
+  const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
+    env: { ...resolveLocalStoreEnv(process.env, process.cwd()), C8RUN_CLI_NAME },
   });
 
   if (typeof proc.pid !== 'number') {
@@ -1034,8 +1697,18 @@ async function startC8Run(config, debug = false) {
   });
 
   if (exitCode !== 0) {
+    // A failed tenant probe leaves healthy engines alive; preserve their identity
+    // for stop/status even if the installation directory is subsequently replaced.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     if (startupOutput.trim()) {
       logger.error(`c8run output:\n${startupOutput.trim()}`);
+    }
+    if (startArgs.length > 0 && /flag provided but not defined: -physical-tenants/.test(startupOutput)) {
+      logger.error('This cached c8run build lacks --physical-tenants. Install a Camunda 8.10+ build containing physical-tenant CLI support with "c8ctl cluster install 8.10".');
     }
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
@@ -1074,6 +1747,13 @@ async function startC8Run(config, debug = false) {
     writeFileSync(versionFile, config.version);
     printSummary(startupOutput, config.version);
   } else {
+    // Readiness can fail even after c8run exits successfully. Retain the same
+    // recovery handle as a nonzero launcher exit before reporting failure.
+    try {
+      recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+    } catch (error) {
+      logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
+    }
     logger.error(
       'Cluster failed to start within timeout.',
     );
@@ -1341,11 +2021,11 @@ export function readRunningClusterRecord(cacheDir) {
   } catch {
     return null;
   }
-  return { version, pids, signatures };
+  return { version, pids, signatures, ...(parsed.startupFailed === true ? { startupFailed: true } : {}) };
 }
 
 /** Persist the durable running-cluster PID record. */
-export function writeRunningClusterRecord(cacheDir, { version, pids, signatures }) {
+export function writeRunningClusterRecord(cacheDir, { version, pids, signatures, startupFailed }) {
   mkdirSync(cacheDir, { recursive: true });
   const cleanPids = Array.isArray(pids)
     ? [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))]
@@ -1370,6 +2050,7 @@ export function writeRunningClusterRecord(cacheDir, { version, pids, signatures 
     version: version ?? null,
     pids: cleanPids,
     signatures: cleanSignatures,
+    ...(startupFailed === true ? { startupFailed: true } : {}),
   });
   try {
     writeFileSync(tmpPath, payload);
@@ -1423,7 +2104,7 @@ export function liveRecordedPids(cacheDir) {
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
  */
-export function recordRunningClusterPids(config, { signatureOf = processStartSignature } = {}) {
+export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false, startupFailed = false } = {}) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
@@ -1451,7 +2132,9 @@ export function recordRunningClusterPids(config, { signatureOf = processStartSig
       pids.push(pid);
     }
   }
-  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures });
+  if (skipEmpty && pids.length === 0) return 0;
+  writeRunningClusterRecord(config.cacheDir, { version: config.version, pids, signatures, startupFailed });
+  return pids.length;
 }
 
 /**
@@ -1818,13 +2501,15 @@ export async function stopC8Run(config, debug = false) {
  * `--yes` / `-y` are c8ctl GLOBAL flags, so the host consumes them (it sets
  * `ctx.yes`) and strips them from a passthrough command's args. c8run's own
  * `secrets delete` has a `--yes` flag that skips its confirmation prompt, so
- * restore it when the user asked for it. Scoped to `delete` — the only verb
- * documented to take it — so it is never appended to a c8run verb that may
- * not accept the flag. Never mutates `tail`.
+ * restore it when the user asked for it. Physical tenant removal/reset also
+ * require confirmation. Skip physical tenant selectors when locating a secrets verb, and never
+ * append confirmation to a verb that does not accept it. Never mutates `tail`.
  */
-export function withForwardedYes(tail, ctx) {
-  const verbIndex = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
-  if (ctx?.yes !== true || tail[verbIndex] !== 'delete') return tail;
+export function withForwardedYes(tail, ctx, command = 'secrets') {
+  const versionEnd = tail[0]?.startsWith('--c8-version=') ? 1 : tail[0] === '--c8-version' ? 2 : 0;
+  const positions = forwardedPositionals(tail, versionEnd, command === 'secrets');
+  const verbs = command === 'secrets' ? ['delete'] : ['remove', 'rm', 'reset'];
+  if (ctx?.yes !== true || !verbs.includes(tail[positions[0]])) return tail;
   // Everything after a `--` terminator is literal for c8run, so the flag goes
   // immediately before it, and a `--yes` that only appears after it does not count.
   const terminator = tail.indexOf('--');
@@ -1847,7 +2532,7 @@ export function withForwardedYes(tail, ctx) {
  * unreleased c8run's verb set (including one c8ctl has never heard of) is
  * still forwarded and its own error surfaces as-is.
  */
-export function parseSecretsArgs(tail) {
+export function parseSecretsArgs(tail, command = 'secrets') {
   let version = null;
   let passthrough = tail;
 
@@ -1863,14 +2548,14 @@ export function parseSecretsArgs(tail) {
     }
     if (!version || version.startsWith('-')) {
       throw new Error(
-        'Missing value for --c8-version. Example: c8ctl cluster secrets --c8-version 8.10 list',
+        `Missing value for --c8-version. Example: c8ctl cluster ${command} --c8-version 8.10 list`,
       );
     }
   }
 
   if (passthrough.length === 0) {
     throw new Error(
-      'usage: c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>',
+      `usage: c8ctl cluster ${command} [--c8-version <version>] <${command === 'secrets' ? 'set|list|path|delete|import|...' : 'add|list|remove|reset|path|help|...'}>`,
     );
   }
 
@@ -1884,30 +2569,55 @@ export function parseSecretsArgs(tail) {
  * C8RUN_SECRETS_DIR would otherwise resolve against the wrong directory and
  * silently miss the file the user meant.
  *
- * Only touches an `import` positional and C8RUN_SECRETS_DIR; every other
+ * Only touches an `import` positional and the local store environment paths; every other
  * verb and flag passes through untouched. "-" (stdin) and already-absolute
  * paths are left alone. Never mutates the passthrough array or env object
  * it receives.
  */
 export function resolveSecretsPaths(passthrough, { cwd = process.cwd(), env = process.env } = {}) {
   let resolvedPassthrough = passthrough;
+  const positions = forwardedPositionals(passthrough, 0, true);
+  const [verbIndex, fileIndex] = positions;
   if (
-    passthrough[0] === 'import' &&
-    passthrough[1] &&
-    passthrough[1] !== '-' &&
-    !isAbsolute(passthrough[1])
+    passthrough[verbIndex] === 'import' &&
+    passthrough[fileIndex] &&
+    passthrough[fileIndex] !== '-' &&
+    !isAbsolute(passthrough[fileIndex])
   ) {
     resolvedPassthrough = [...passthrough];
-    resolvedPassthrough[1] = resolve(cwd, passthrough[1]);
+    resolvedPassthrough[fileIndex] = resolve(cwd, passthrough[fileIndex]);
   }
 
+  return { passthrough: resolvedPassthrough, env: resolveLocalStoreEnv(env, cwd) };
+}
+
+function forwardedPositionals(args, start, tenantScoped) {
+  const positions = [];
+  for (let i = start; i < args.length; i++) {
+    if (args[i] === '--') break;
+    if (tenantScoped && args[i] === '--physical-tenant') {
+      i++;
+      continue;
+    }
+    if (tenantScoped && args[i].startsWith('--physical-tenant=')) continue;
+    // Unknown options belong to c8run. Do not guess which tokens they consume.
+    positions.push(i);
+  }
+  return positions;
+}
+
+// Tells c8run which command prefix to print in its hints ("c8ctl cluster physical-tenants list"
+// instead of "c8run physical-tenants list"); c8run builds without support ignore it.
+const C8RUN_CLI_NAME = 'c8ctl cluster';
+
+function resolveLocalStoreEnv(env, cwd) {
   let resolvedEnv = env;
-  const secretsDir = env.C8RUN_SECRETS_DIR;
-  if (secretsDir && !isAbsolute(secretsDir)) {
-    resolvedEnv = { ...env, C8RUN_SECRETS_DIR: resolve(cwd, secretsDir) };
+  for (const name of ['C8RUN_SECRETS_DIR', 'C8RUN_TENANTS_FILE']) {
+    if (env[name] && !isAbsolute(env[name])) {
+      resolvedEnv = { ...resolvedEnv, [name]: resolve(cwd, env[name]) };
+    }
   }
-
-  return { passthrough: resolvedPassthrough, env: resolvedEnv };
+  return resolvedEnv;
 }
 
 /**
@@ -1982,6 +2692,15 @@ export function mapSecretsFailure(exitCode, stderrTail, version) {
 export async function runClusterSecrets(
   cacheDir,
   tail,
+  options = {},
+) {
+  return runClusterLocalCommand('secrets', cacheDir, tail, options);
+}
+
+async function runClusterLocalCommand(
+  command,
+  cacheDir,
+  tail,
   { explicitVersion, spawnFn = spawn, cwd = process.cwd(), env = process.env } = {},
 ) {
   const logger = getLogger();
@@ -1989,7 +2708,7 @@ export async function runClusterSecrets(
   const version = await selectSecretsVersion(cacheDir, { explicit: explicitVersion });
   if (!version) {
     logger.error(
-      'No c8run installed locally. Install one first: c8ctl cluster install alpha',
+      `No c8run installed locally. Install one first: c8ctl cluster install ${command === 'secrets' ? 'alpha' : '8.10'}`,
     );
     process.exit(1);
     return;
@@ -1999,18 +2718,20 @@ export async function runClusterSecrets(
   try {
     binaryPath = getC8RunBinaryPath({ cacheDir, version });
   } catch (error) {
-    logger.error(`Failed to run secrets command: ${error.message}`);
+    logger.error(`Failed to run ${command} command: ${error.message}`);
     process.exit(1);
     return;
   }
 
-  const { passthrough, env: resolvedEnv } = resolveSecretsPaths(tail, { cwd, env });
+  const { passthrough, env: resolvedEnv } = command === 'secrets'
+    ? resolveSecretsPaths(tail, { cwd, env })
+    : { passthrough: tail, env: resolveLocalStoreEnv(env, cwd) };
 
   const exitCode = await new Promise((resolvePromise, reject) => {
-    const proc = spawnFn(binaryPath, ['secrets', ...passthrough], {
+    const proc = spawnFn(binaryPath, [command, ...passthrough], {
       stdio: ['inherit', 'inherit', 'pipe'],
       cwd: dirname(binaryPath),
-      env: resolvedEnv,
+      env: { ...resolvedEnv, C8RUN_CLI_NAME },
     });
 
     let stderrTail = '';
@@ -2024,7 +2745,11 @@ export async function runClusterSecrets(
       reject(new Error(`Failed to spawn c8run: ${err.message}`));
     });
     proc.on('close', (code) => {
-      const hint = mapSecretsFailure(code ?? 1, stderrTail, version);
+      const hint = command === 'secrets'
+        ? mapSecretsFailure(code ?? 1, stderrTail, version)
+        : code !== 0 && /unsupported operation:\s*physical-tenants/i.test(stderrTail)
+          ? `c8run ${version} does not support "physical-tenants" yet. Install a Camunda 8.10+ c8run build containing physical-tenant CLI support with "c8ctl cluster install 8.10"; older cached builds may predate this feature.`
+          : null;
       if (hint) {
         logger.error(hint);
       }
@@ -2083,16 +2808,18 @@ export async function clusterStatus(cacheDir) {
     // Health endpoint not reachable
   }
 
-  // A cluster process is alive but not tracked by a marker — typically an
-  // orphan left after its install dir was replaced/removed (#560).
+  // Only attribute a failure to survivors of that startup, never to unrelated
+  // pidfiles or a shared health endpoint that happens to respond.
+  const startupFailed = record?.startupFailed === true && liveRecordedPids(cacheDir).length > 0;
+  // A missing marker alone does not explain why processes are still running.
   const untracked = !markerExists && processesRunning;
 
-  // `untracked` takes precedence over a healthy probe: an orphaned process can
-  // still serve the health endpoint while holding its ports, and the operator
-  // must be told it is no longer tracked (and how to recover) rather than shown
-  // a plain "running". Healthy connection URLs are still surfaced below.
+  // Startup failure and missing-marker diagnostics take precedence over shared
+  // health: a responding endpoint does not establish readiness of every tenant.
   let status;
-  if (untracked) {
+  if (startupFailed) {
+    status = 'running after failed startup';
+  } else if (untracked) {
     status = 'running (untracked)';
   } else if (isHealthy) {
     status = 'running';
@@ -2102,17 +2829,19 @@ export async function clusterStatus(cacheDir) {
     status = 'stopped';
   }
 
+  const recovery = startupFailed
+    ? 'Cluster processes are still running after a failed startup. Review the startup error or c8run logs; a responding shared health endpoint does not mean all tenants are ready. Run c8ctl cluster stop before retrying.'
+    : untracked
+      ? 'Cluster processes are still running without an active c8ctl marker. The startup outcome is unknown. Stop them with: c8ctl cluster stop'
+      : undefined;
+
   if (globalThis.c8ctl?.getLogger().mode === 'json') {
-    // Machine-readable status must carry the SAME recovery guidance the text
-    // renderer prints below for an orphan, otherwise a `--json` consumer sees
-    // `running (untracked)` with no actionable instruction (#560).
+    // Machine-readable status carries the same recovery guidance as text.
     logger.json({
       status,
       version,
       urls: isHealthy ? CLUSTER_URLS : undefined,
-      recovery: untracked
-        ? 'A cluster process is still running but is no longer tracked by c8ctl (its install directory was likely replaced or removed while running). Stop it with: c8ctl cluster stop'
-        : undefined,
+      recovery,
     });
     return;
   }
@@ -2140,12 +2869,10 @@ export async function clusterStatus(cacheDir) {
     console.log('  Default credentials: demo / demo');
   }
 
-  if (untracked) {
-    // Shown even when the orphan is healthy: it is still not tracked by c8ctl.
+  if (recovery) {
+    // Keep text and JSON diagnostics identical even when shared health is UP.
     console.log('');
-    console.log('  A cluster process is still running but is no longer tracked by c8ctl');
-    console.log('  (its install directory was likely replaced or removed while running).');
-    console.log('  Stop it with: c8ctl cluster stop');
+    console.log(`  ${recovery}`);
   } else if (!isHealthy) {
     console.log('');
     console.log('  The cluster appears to have been started but is not yet responding.');
@@ -2512,6 +3239,16 @@ export function parsePluginArgs(args) {
   while (i < args.length) {
     const arg = args[i];
 
+    if (arg === '--physical-tenants' || arg.startsWith('--physical-tenants=')) {
+      const value = arg === '--physical-tenants' ? args[i + 1] : arg.slice('--physical-tenants='.length);
+      if (!value || value.startsWith('-')) throw new Error('--physical-tenants requires comma-separated physical tenant IDs');
+      result.startArgs ??= [];
+      result.startArgs.push(arg);
+      if (arg === '--physical-tenants') { result.startArgs.push(value); i++; }
+      i++;
+      continue;
+    }
+
     if (arg === '--c8-version') {
       const next = args[i + 1];
       if (!next || next.startsWith('-')) {
@@ -2564,6 +3301,9 @@ export function parsePluginArgs(args) {
     i += 1;
   }
 
+  if (result.startArgs && result.subcommand !== 'start') {
+    throw new Error('--physical-tenants can only be used with the start subcommand');
+  }
   return result;
 }
 
@@ -2580,20 +3320,32 @@ export const commands = {
   'cluster': async (args, _flags, ctx) => {
     const logger = getLogger();
 
-    // Secrets passthrough (#314) is intercepted before parsePluginArgs:
+    // Local management passthrough is intercepted before parsePluginArgs:
     // its arguments (verbs, flags, positionals) belong to c8run, not to
     // c8ctl's own version/--debug/--purge parsing.
-    if (args[0] === 'secrets') {
-      let parsedSecrets;
+    if (args[0] === 'secrets' || args[0] === 'physical-tenants') {
+      const command = args[0] === 'secrets' ? 'secrets' : 'physical-tenants';
+      let parsedLocal;
       try {
-        parsedSecrets = parseSecretsArgs(withForwardedYes(args.slice(1), ctx));
+        parsedLocal = parseSecretsArgs(withForwardedYes(args.slice(1), ctx, command), command);
       } catch (error) {
         logger.error(error.message);
         process.exit(1);
         return;
       }
-      await runClusterSecrets(getCacheDir(), parsedSecrets.passthrough, {
-        explicitVersion: parsedSecrets.version,
+      if (ctx?.dryRun) {
+        // Local-only lookup (no download) so the preview shows the c8run that would run.
+        let version = null;
+        try {
+          version = await selectSecretsVersion(getCacheDir(), { explicit: parsedLocal.version });
+        } catch {
+          version = parsedLocal.version;
+        }
+        console.log(JSON.stringify({ dryRun: true, command: `cluster ${command}`, version, args: parsedLocal.passthrough }));
+        return;
+      }
+      await runClusterLocalCommand(command, getCacheDir(), parsedLocal.passthrough, {
+        explicitVersion: parsedLocal.version,
       });
       return;
     }
@@ -2618,7 +3370,8 @@ export const commands = {
       console.log('  c8ctl cluster install <version>');
       console.log('  c8ctl cluster delete <version>');
       console.log('  c8ctl cluster purge <version>');
-      console.log('  c8ctl cluster secrets [--c8-version <version>] <set|list|path|delete|import|...>');
+      console.log('  c8ctl cluster secrets [--c8-version <version>] [--physical-tenant <id>] <set|list|path|delete|import|...>');
+      console.log('  c8ctl cluster physical-tenants [--c8-version <version>] <add|list|remove|reset|path|help>');
       console.log('');
       console.log('Subcommands:');
       console.log('  start        Download (if needed) and start a local Camunda 8 cluster');
@@ -2630,13 +3383,16 @@ export const commands = {
       console.log('  install      Download a version without starting it');
       console.log('  delete       Remove a locally cached version to reclaim disk space');
       console.log('  purge        Delete runtime data for a version (binary stays intact, next start is fresh)');
-      console.log('  secrets      Manage local development secrets (forwarded verbatim to c8run)');
+      console.log('  secrets      Manage local development secrets (forwarded to c8run)');
+      console.log('  physical-tenants  Manage local physical tenants (Camunda 8.10+; forwarded to c8run)');
       console.log('');
       console.log('Options:');
       console.log('  <version>              Camunda version, alias, or major.minor (default: stable)');
       console.log('  --c8-version <version> Alternative flag form for version');
       console.log('  --debug                Stream raw c8run output during start');
       console.log('  --purge                (stop only) also delete runtime data after stopping');
+      console.log('  --physical-tenants <ids> (start only) Extra physical tenants for this run; repeatable');
+      console.log('  --physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)');
       console.log('');
       console.log('A <version> can be:');
       console.log('  stable / alpha         Named aliases');
@@ -2669,10 +3425,15 @@ export const commands = {
       console.log('  c8ctl cluster secrets list');
       console.log('  c8ctl cluster secrets import .env.secrets');
       console.log('  c8ctl cluster secrets delete OPENAI_API_KEY --yes');
+      console.log('  c8ctl cluster physical-tenants --c8-version 8.10 add sales');
+      console.log('  c8ctl cluster start 8.10 --physical-tenants sales,hr');
+      console.log('  c8ctl cluster secrets --physical-tenant sales set OPENAI_API_KEY');
       console.log('');
-      console.log('secrets forwards everything after it to c8run\'s own "secrets" command —');
+      console.log('secrets delegates to c8run\'s own "secrets" command.');
+      console.log('physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.');
       console.log('c8ctl never sees or stores a secret value. Run "c8ctl cluster secrets help"');
       console.log('for c8run\'s own secrets help (--help here belongs to c8ctl).');
+      if (parsed.subcommand) process.exitCode = 1;
       return;
     }
 
@@ -2770,6 +3531,14 @@ export const commands = {
       preferLocal: isStart,
       cacheDir: theCacheDir,
     });
+
+    // Dry-run start: report the version a real start would select (same
+    // local-preferred resolution), but skip install and launch.
+    if (ctx?.dryRun && isStart) {
+      console.log(JSON.stringify({ dryRun: true, command: 'cluster start', version, requestedVersion: versionSpec, args: ['start', ...(parsed.startArgs || [])] }));
+      return;
+    }
+
     if (isVersionAlias(versionSpec)) {
       logger.info(`Resolved alias "${versionSpec}" → ${version}`);
     }
@@ -2788,14 +3557,16 @@ export const commands = {
       checkForUpdates: parsed.subcommand === 'install' && rolling,
       // start: soft hint about available updates for rolling versions (non-blocking)
       checkForUpdateHint: parsed.subcommand === 'start' && rolling,
+      // --verbose: detailed HTTP diagnostics for the c8run download
+      verbose: ctx?.verbose === true,
     };
 
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
-        await startC8Run(config, parsed.debug);
+        await startC8Run(config, parsed.debug, parsed.startArgs);
       } catch (error) {
-        logger.error(`Failed to start cluster: ${error}`);
+        logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
         process.exit(1);
       }
     } else if (parsed.subcommand === 'stop') {
@@ -2838,7 +3609,7 @@ export const commands = {
         await ensureC8RunInstalled(config);
         logger.info(`Version ${version} is ready. Start it with: c8ctl cluster start ${parsed.version || ''}`);
       } catch (error) {
-        logger.error(`Failed to install version: ${error}`);
+        logger.error(`Failed to install version: ${formatErrorWithCause(error)}`);
         process.exit(1);
       }
     }

@@ -361,6 +361,14 @@ describe("Passthrough plugin contract (#366)", () => {
 		test("`c8 help <passthrough-cmd>` lists flagsHint when present", async () => {
 			const result = await c8("help", "pass-through-cmd");
 			assert.strictEqual(result.status, 0);
+			assert.match(
+				result.stdout,
+				/Plugin\/tool flags \(handled by the plugin or underlying tool\):/,
+			);
+			assert.match(
+				result.stdout,
+				/c8ctl forwards args to the plugin verbatim after stripping its global flags\./,
+			);
 			assert.ok(
 				result.stdout.includes("--from <url>"),
 				`flagsHint entries must appear in help. stdout: ${result.stdout}`,

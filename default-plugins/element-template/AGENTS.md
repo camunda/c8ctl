@@ -10,7 +10,8 @@ version resolution.
 | File | Purpose |
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
-| `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
+| `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync`, `update`. `update` is a thin wrapper over `commands/migrate.ts` |
+| `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplate` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
@@ -97,6 +98,15 @@ version resolution.
 
 ```bash
 npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
+```
+
+Test fixtures in `tests/fixtures/element-templates/` are synthetic. Never
+commit upstream connector templates (see its `SOURCES.md`). To check the AI
+Agent v1 to v2 migration against the real templates, fetched at a pinned
+`camunda/connectors` commit:
+
+```bash
+C8CTL_FIDELITY=1 node --experimental-strip-types --test tests/unit/element-template-migration-upstream-fidelity.test.ts
 ```
 
 Smoke-test against the live connectors releases (writes to a throwaway

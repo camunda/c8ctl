@@ -380,7 +380,7 @@ export async function editSubcommand(args: string[]): Promise<void> {
 	const resultXml = result.xml;
 
 	if (parsed.inPlace && bpmnFilePath) {
-		atomicOverwriteFile(bpmnFilePath, resultXml);
+		atomicOverwriteFile(bpmnFilePath, resultXml, input.xml, true);
 		logger.info(`Updated ${bpmnFilePath}`);
 		return;
 	}

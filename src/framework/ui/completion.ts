@@ -11,6 +11,7 @@ import {
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
+	getCommandDef,
 	RESOURCE_ALIASES,
 } from "../command-registry.ts";
 import {
@@ -28,6 +29,18 @@ function registryEntries(): [string, CommandDef][] {
 /** Typed entries for a flag record — avoids per-loop casts. */
 function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
 	return Object.entries(flags);
+}
+
+/** Flat flag list for a plugin command (name merged into each flag def). */
+function pluginFlagList(
+	cmd: PluginCommandInfo,
+): (FlagDef & { name: string })[] {
+	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
+}
+
+/** Plugin commands that dispatch; a built-in verb or alias shadows a same-named plugin. */
+function reachablePluginCmds(cmds: PluginCommandInfo[]): PluginCommandInfo[] {
+	return cmds.filter((cmd) => !getCommandDef(cmd.commandName));
 }
 
 // ─── Derived completion data ─────────────────────────────────────────────────
@@ -118,10 +131,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 	}
 
 	// Plugin-provided verbs (e.g. cluster)
-	for (const cmd of pluginCommandsInfo) {
-		// Skip if already in registry
-		if (cmd.commandName in COMMAND_REGISTRY) continue;
-
+	for (const cmd of reachablePluginCmds(pluginCommandsInfo)) {
 		infos.push({
 			verb: cmd.commandName,
 			description: cmd.description ?? "",
@@ -145,7 +155,7 @@ function completesFiles(v: VerbInfo): boolean {
 	return v.fileComplete || (v.passthrough && v.resources.length === 0);
 }
 
-/** Collect all unique flag names across all commands + global + search flags. */
+/** Collect all unique built-in flag names. */
 function deriveAllFlagNames(): string[] {
 	const names = new Set<string>();
 
@@ -283,7 +293,7 @@ function deriveHelpResources(): { name: string; description: string }[] {
 	for (const cmd of pluginCmds) {
 		if (
 			!items.some((i) => i.name === cmd.commandName) &&
-			!(cmd.commandName in COMMAND_REGISTRY)
+			!getCommandDef(cmd.commandName)
 		) {
 			items.push({
 				name: cmd.commandName,
@@ -393,6 +403,17 @@ ${resourceVars.join("\n")}
   # everything else is forwarded verbatim to the external tool.
   local passthrough_verbs="${passthroughVerbsStr}"
 
+  if [[ \${cur} == -* ]]; then
+    case "\${words[1]}" in
+${reachablePluginCmds(pluginCmds)
+	.map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        COMPREPLY=( $(compgen -W "${[...globalFlags, ...Object.keys(cmd.flags ?? {}).map((name) => `--${name}`)].join(" ")}" -- "\${cur}") )\n        return ;;`,
+	)
+	.join("\n")}
+    esac
+  fi
+
   case \${cword} in
     1)
       # Complete verbs
@@ -464,6 +485,14 @@ function generateZshCompletion(): string {
 	};
 	const flagEntryLines = allFlags.map(toZshFlagEntry);
 	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
+	const pluginCaseLines = reachablePluginCmds(pluginCmds).map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        flags=(\n${pluginFlagList(cmd)
+				.map(toZshFlagEntry)
+				.join(
+					"\n",
+				)}\n        )\n        _arguments \${global_flags[@]} \${flags[@]}; return ;;`,
+	);
 
 	// Passthrough verbs (#366) for the case branch in the default arm.
 	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
@@ -523,6 +552,12 @@ ${flagEntryLines.join("\n")}
 ${globalFlagEntryLines.join("\n")}
   )
 
+  if (( CURRENT > 3 )) || [[ \${words[CURRENT]} == -* ]]; then
+    case "\${words[2]}" in
+${pluginCaseLines.join("\n")}
+    esac
+  fi
+
   case $CURRENT in
     2)
       _describe 'command' verbs
@@ -574,6 +609,15 @@ function generateFishCompletion(): string {
 		passthroughTokens.length > 0
 			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
 			: "";
+	const flagAwarePluginCmds = reachablePluginCmds(pluginCmds).filter(
+		(cmd) => !cmd.passthrough,
+	);
+	const flagAwareTokens = flagAwarePluginCmds.map((cmd) => cmd.commandName);
+	const builtinGuard =
+		nonGlobalGuard +
+		(flagAwareTokens.length > 0
+			? ` -n 'not __c8ctl_verb_in ${flagAwareTokens.join(" ")}'`
+			: "");
 	const globalNames = new Set(globalFlags.map((f) => f.name));
 
 	const lines: string[] = [
@@ -582,6 +626,12 @@ function generateFishCompletion(): string {
 		"# Remove all existing completions for c8ctl and c8",
 		"complete -c c8ctl -e",
 		"complete -c c8 -e",
+		"",
+		"# Plugin flags match the verb position only, like bash and zsh",
+		"function __c8ctl_verb_in",
+		"    set -l tokens (commandline -opc)",
+		"    test (count $tokens) -ge 2; and contains -- $tokens[2] $argv",
+		"end",
 		"",
 	];
 
@@ -610,24 +660,28 @@ function generateFishCompletion(): string {
 			? `# Non-global flags (suppressed under passthrough verbs: ${passthroughTokens.join(", ")})`
 			: "# Non-global flags",
 	);
-	for (const f of allFlags) {
-		if (globalNames.has(f.name)) continue;
-		const desc = escFish(f.description);
-		const req = f.type === "string" ? " -r" : "";
-		if (f.short) {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-		} else {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
+	for (const { flags, guard } of [
+		{ flags: allFlags, guard: builtinGuard },
+		...flagAwarePluginCmds.map((cmd) => ({
+			flags: pluginFlagList(cmd),
+			guard: ` -n '__c8ctl_verb_in ${cmd.commandName}'`,
+		})),
+	]) {
+		for (const f of flags) {
+			if (globalNames.has(f.name)) continue;
+			const desc = escFish(f.description);
+			const req = f.type === "string" ? " -r" : "";
+			if (f.short) {
+				lines.push(
+					`complete -c c8ctl${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+				lines.push(
+					`complete -c c8${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+			} else {
+				lines.push(`complete -c c8ctl${guard} -l ${f.name} -d '${desc}'${req}`);
+				lines.push(`complete -c c8${guard} -l ${f.name} -d '${desc}'${req}`);
+			}
 		}
 	}
 	lines.push("");

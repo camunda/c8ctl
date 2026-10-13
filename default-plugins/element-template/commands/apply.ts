@@ -293,7 +293,7 @@ export async function applySubcommand(args: string[]): Promise<void> {
 	}
 
 	if (parsed.inPlace && bpmnFilePath) {
-		atomicOverwriteFile(bpmnFilePath, resultXml);
+		atomicOverwriteFile(bpmnFilePath, resultXml, input.xml, true);
 		logger.info(`Updated ${bpmnFilePath}`);
 		return;
 	}
