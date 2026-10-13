@@ -216,8 +216,21 @@ async function pauseMigration({
 			dispose,
 			evaluate,
 			resume: async () => {
-				await send("Debugger.resume");
+				// Detach while still paused instead of resuming first: closing the
+				// inspector socket concurrently with child shutdown crashed Node 22
+				// on Windows (STATUS_ACCESS_VIOLATION), and waiting for exit with a
+				// session attached hangs on "Waiting for the debugger to disconnect".
+				// Node resumes execution once the last session disconnects, so the
+				// CLI only runs to exit after the session is fully torn down.
+				let detached = false;
+				connection.addEventListener("close", () => {
+					detached = true;
+				});
 				connection.close();
+				assert.ok(
+					await pollUntil(async () => detached, 15_000, 20),
+					`Inspector session did not close: ${stderr}`,
+				);
 				return finish();
 			},
 			resumeUntilPaused: async () => {
