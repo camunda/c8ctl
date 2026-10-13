@@ -1,0 +1,96 @@
+name: Dbg
+
+on:
+  push:
+    branches: [claude/shard-ci-dbg]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  unit-test:
+    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
+    needs: [lint, typecheck]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+        os: ${{ fromJSON(inputs.os || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        shard: ['1/8', '2/8', '3/8', '4/8', '5/8', '6/8', '7/8', '8/8']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # AGENTS.md documents `npm run build` before `npm test` locally, because
+      # some tests exercise the *published* dist layout and skip themselves when
+      # it is absent (tests/unit/plugin-host-compat.test.ts needs a dist/ whose
+      # package.json carries a real version). Without a build step CI silently ran
+      # the weaker subset — a skipped test looks identical to a passing one in the
+      # summary.
+      #
+      # One leg only. Those tests assert OS-agnostic logic, and `npm run build`
+      # re-runs `npm run lint` (already its own job) and rewrites the synced
+      # README/docs blocks, so paying for it six times buys nothing. The other
+      # legs keep skipping them, which is what the skip reason is for.
+      - name: Build (for tests that exercise the published dist layout)
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run build
+
+      # NODE_OPTIONS, not `-- --test-shard=..`: node ignores flags after the globs.
+      - name: Run unit tests (shard ${{ matrix.shard }})
+        run: npm run test:unit
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
+# run 8b
