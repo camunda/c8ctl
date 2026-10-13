@@ -143,6 +143,8 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `output` - Show or set output format
 - `completion` - Generate shell completion script
 - `mcp-proxy` - Start a STDIO to remote HTTP MCP proxy server
+- `login` - Sign in to the cluster's identity provider in the browser (OIDC profiles)
+- `logout` - Sign out and delete the stored login tokens
 - `feedback` - Open the feedback page to report issues or request features
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode

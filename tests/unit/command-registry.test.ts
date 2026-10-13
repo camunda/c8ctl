@@ -68,6 +68,8 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"output",
 		"completion",
 		"mcp-proxy",
+		"login",
+		"logout",
 		"feedback",
 		"help",
 		"assign",

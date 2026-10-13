@@ -109,6 +109,12 @@ export interface Profile {
 	password?: string;
 	defaultTenantId?: string;
 	/**
+	 * OIDC issuer URL for interactive `c8ctl login` (authorization code +
+	 * PKCE over a loopback redirect, RFC 8252). Used together with
+	 * `clientId` (a public client, no `clientSecret`).
+	 */
+	oidcIssuer?: string;
+	/**
 	 * Custom HTTP headers attached to every REST request made under this
 	 * profile (e.g. a gateway API key or correlation ID). Keyed by header
 	 * name.
@@ -152,6 +158,8 @@ export interface ClusterConfig {
 	scope?: string;
 	username?: string;
 	password?: string;
+	/** See `Profile.oidcIssuer`. */
+	oidcIssuer?: string;
 	/** See `Profile.headers`. */
 	headers?: Record<string, string>;
 	/** See `Profile.exactBaseUrl`. */
@@ -299,7 +307,7 @@ export function getModelerDataDir(): string {
 	}
 }
 
-function ensureUserDataDir(): string {
+export function ensureUserDataDir(): string {
 	const dir = getUserDataDir();
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
@@ -387,6 +395,7 @@ const OPTIONAL_STRING_PROFILE_FIELDS = [
 	"username",
 	"password",
 	"defaultTenantId",
+	"oidcIssuer",
 ] as const;
 
 /** A `Record<string, string>` — every value is a string. */
@@ -1102,6 +1111,7 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		password: profile.password,
 		headers: profile.headers,
 		exactBaseUrl: profile.exactBaseUrl,
+		...(profile.oidcIssuer && { oidcIssuer: profile.oidcIssuer }),
 	};
 }
 

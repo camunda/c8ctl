@@ -65,6 +65,7 @@ import {
 	listJobsCommand,
 	updateJobCommand,
 } from "./commands/jobs.ts";
+import { loginCommand, logoutCommand } from "./commands/login.ts";
 import { mcpProxyCommand } from "./commands/mcp-proxy.ts";
 import {
 	correlateMessageCommand,
@@ -268,6 +269,8 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["open:tasklist", openAppCommand],
 	["open:modeler", openAppCommand],
 	["open:optimize", openAppCommand],
+	["login:", loginCommand],
+	["logout:", logoutCommand],
 	["feedback:", feedbackCommand],
 	["mcp-proxy:", mcpProxyCommand],
 ]);

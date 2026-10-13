@@ -10,6 +10,11 @@ import {
 } from "@camunda8/orchestration-cluster-api";
 import { resolveClusterConfig, setHeaderCaseInsensitive } from "./config.ts";
 import { getLogger, isRecord } from "./logger.ts";
+import {
+	getOidcAccessToken,
+	getOidcSettings,
+	type OidcSettings,
+} from "./oidc.ts";
 import { c8ctl } from "./runtime.ts";
 
 type SdkLogTransport = NonNullable<
@@ -147,6 +152,48 @@ export function buildGatewayFetch(opts: {
 }
 
 /**
+ * Wrap a fetch implementation so every request carries the bearer token of
+ * an interactive `c8ctl login` session.
+ *
+ * The SDK has no bearer/token-provider auth strategy, and its
+ * `onAuthHeaders` hooks are skipped under strategy NONE, so the token is
+ * injected here instead. The token is refreshed proactively before expiry;
+ * on a 401 it is force-refreshed and the request retried once (the SDK does
+ * not retry 401s itself).
+ */
+export function buildBearerFetch(opts: {
+	settings: OidcSettings;
+	delegate?: FetchFn;
+}): FetchFn {
+	const delegate: FetchFn =
+		opts.delegate ?? ((input, init) => fetch(input, init));
+
+	return async (input, init) => {
+		const request =
+			input instanceof Request && init === undefined
+				? input
+				: new Request(input, init);
+		// Keep an unconsumed copy for the retry.
+		const retry = request.clone();
+
+		request.headers.set(
+			"Authorization",
+			`Bearer ${await getOidcAccessToken(opts.settings)}`,
+		);
+		const response = await delegate(request);
+		if (response.status !== 401) {
+			return response;
+		}
+
+		retry.headers.set(
+			"Authorization",
+			`Bearer ${await getOidcAccessToken(opts.settings, { forceRefresh: true })}`,
+		);
+		return delegate(retry);
+	};
+}
+
+/**
  * Create a Camunda 8 cluster client with resolved configuration
  */
 export function createClient(
@@ -160,8 +207,15 @@ export function createClient(
 		CAMUNDA_REST_ADDRESS: config.baseUrl,
 	};
 
+	const oidcSettings = getOidcSettings(config);
+
+	// Interactive login (`c8ctl login`): the bearer token is injected by
+	// buildBearerFetch below, so the SDK itself does no auth.
+	if (oidcSettings) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
+	}
 	// Add OAuth configuration if present
-	if (config.clientId && config.clientSecret) {
+	else if (config.clientId && config.clientSecret) {
 		sdkConfig.CAMUNDA_AUTH_STRATEGY = "OAUTH";
 		sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
 		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
@@ -215,8 +269,27 @@ export function createClient(
 			delegate: additionalSdkConfig.fetch,
 		});
 	}
+	// Outermost, so profile headers (applied by the gateway fetch) can still
+	// override Authorization, matching the other auth strategies.
+	if (oidcSettings) {
+		options.fetch = buildBearerFetch({
+			settings: oidcSettings,
+			delegate: options.fetch ?? additionalSdkConfig.fetch,
+		});
+	}
 
-	return createCamundaClient(options);
+	const client = createCamundaClient(options);
+
+	// Consumers that build their own requests from `getAuthHeaders()` (e.g.
+	// mcp-proxy) bypass the fetch wrapper; the hook covers them.
+	if (oidcSettings) {
+		client.onAuthHeaders(async (headers) => ({
+			...headers,
+			Authorization: `Bearer ${await getOidcAccessToken(oidcSettings)}`,
+		}));
+	}
+
+	return client;
 }
 
 /**
@@ -354,7 +427,10 @@ export async function resolveAuthHeaders(
 		"Content-Type": "application/json",
 	};
 
-	if (config.clientId && config.clientSecret) {
+	const oidcSettings = getOidcSettings(config);
+	if (oidcSettings) {
+		headers.Authorization = `Bearer ${await getOidcAccessToken(oidcSettings)}`;
+	} else if (config.clientId && config.clientSecret) {
 		const tokenUrl = config.oAuthUrl;
 		if (!tokenUrl) {
 			throw new Error(

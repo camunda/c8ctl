@@ -80,6 +80,7 @@ interface AddProfileOptions {
 	audience?: string;
 	oauthUrl?: string;
 	scope?: string;
+	oidcIssuer?: string;
 	username?: string;
 	password?: string;
 	tenantId?: string;
@@ -95,6 +96,8 @@ interface AddProfileOptions {
 function describeAuth(profile: Profile): string {
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
+	if (profile.oidcIssuer && profile.clientId)
+		return "OIDC login (run 'c8ctl login')";
 	if (profile.username && profile.password) return "Basic auth";
 	return "None";
 }
@@ -169,12 +172,16 @@ function addProfile(name: string, options: AddProfileOptions): void {
 			audience: options.audience,
 			oAuthUrl: options.oauthUrl,
 			scope: options.scope,
+			oidcIssuer: options.oidcIssuer,
 			username: options.username,
 			password: options.password,
 			defaultTenantId: options.tenantId,
 		};
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added`);
+		if (profile.oidcIssuer && profile.clientId && !profile.clientSecret) {
+			logger.info(`  Sign in with: c8ctl login --profile ${name}`);
+		}
 	}
 
 	if (profile.headers && Object.keys(profile.headers).length > 0) {
@@ -302,6 +309,7 @@ export const addProfileCommand = defineCommand(
 			audience: flags.audience,
 			oauthUrl: flags.oAuthUrl,
 			scope: flags.scope,
+			oidcIssuer: flags.oidcIssuer,
 			tenantId: flags.defaultTenantId,
 			username: flags.username,
 			password: flags.password,

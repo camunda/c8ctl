@@ -1024,6 +1024,7 @@ Add a profile
 | `--audience` | string |  | OAuth audience |
 | `--oAuthUrl` | string |  | OAuth token URL |
 | `--scope` | string |  | OAuth scope (space-separated) |
+| `--oidcIssuer` | string |  | OIDC issuer URL for interactive 'c8ctl login' (use with --clientId, no secret) |
 | `--defaultTenantId` | string |  | Default tenant ID |
 | `--username` | string |  | Basic auth username |
 | `--password` | string |  | Basic auth password |
@@ -1264,6 +1265,25 @@ c8ctl completion install --shell zsh                        # Install completion
 Start a STDIO MCP proxy (bridges local MCP clients to remote Camunda 8)
 
 **Usage:** `c8ctl mcp-proxy [mcp-path]`
+
+---
+
+### `login`
+
+Sign in to the cluster's identity provider in the browser (OIDC profiles)
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--port` | string |  | Loopback port for the redirect (default: random free port) |
+| `--no-browser` | boolean |  | Print the sign-in URL instead of opening a browser |
+
+---
+
+### `logout`
+
+Sign out and delete the stored login tokens
 
 ---
 

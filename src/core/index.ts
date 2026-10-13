@@ -8,5 +8,6 @@ export * from "./client.ts";
 export * from "./config.ts";
 export * from "./errors.ts";
 export * from "./logger.ts";
+export * from "./oidc.ts";
 export * from "./runtime.ts";
 export * from "./update-check.ts";

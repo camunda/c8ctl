@@ -645,6 +645,11 @@ const PROFILE_CONNECTION_FLAGS = {
 	audience: { type: "string", description: "OAuth audience" },
 	oAuthUrl: { type: "string", description: "OAuth token URL" },
 	scope: { type: "string", description: "OAuth scope (space-separated)" },
+	oidcIssuer: {
+		type: "string",
+		description:
+			"OIDC issuer URL for interactive 'c8ctl login' (use with --clientId, no secret)",
+	},
 	defaultTenantId: { type: "string", description: "Default tenant ID" },
 	username: { type: "string", description: "Basic auth username" },
 	password: { type: "string", description: "Basic auth password" },
@@ -1948,6 +1953,33 @@ export const COMMAND_REGISTRY = {
 		helpResource: "[mcp-path]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show mcp-proxy setup and usage",
+		mutating: false,
+		requiresResource: false,
+		resources: [],
+		flags: {},
+	},
+
+	login: {
+		description:
+			"Sign in to the cluster's identity provider in the browser (OIDC profiles)",
+		mutating: false,
+		requiresResource: false,
+		resources: [],
+		flags: {
+			port: {
+				type: "string",
+				description:
+					"Loopback port for the redirect (default: random free port)",
+			},
+			"no-browser": {
+				type: "boolean",
+				description: "Print the sign-in URL instead of opening a browser",
+			},
+		},
+	},
+
+	logout: {
+		description: "Sign out and delete the stored login tokens",
 		mutating: false,
 		requiresResource: false,
 		resources: [],
