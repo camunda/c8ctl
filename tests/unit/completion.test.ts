@@ -89,7 +89,7 @@ describe("Loaded plugin flag completions", () => {
 				// The verb lookup skips leading globals and their values.
 				assert.match(
 					result.stdout,
-					/\n {12}case [^\n]*--profile[^\n]*\n {16}set i \(math \$i \+ 2\)/,
+					/\n {12}case [^\n]*--profile[^\n]*\n[^\n]*\n {16}if contains -- "\$next" '--'[^\n]*'--fields'[^\n]*\n {20}set i \(math \$i \+ 1\)\n {16}else\n {20}set i \(math \$i \+ 2\)/,
 				);
 				assert.doesNotMatch(result.stdout, /\n {12}case [^\n]*--version/);
 				for (const [command, name, description] of [
@@ -131,6 +131,8 @@ describe("Loaded plugin flag completions", () => {
 					// Before the verb, --version is boolean and takes no value.
 					[argument, "--version "],
 					[argument, "-v "],
+					// A string global followed by another global takes no value.
+					[argument, "--profile --fields x "],
 				])) {
 					const offset =
 						(argument ? 1 : 0) + globals.split(" ").filter(Boolean).length;

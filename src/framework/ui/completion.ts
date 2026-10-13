@@ -203,6 +203,17 @@ function globalValueOptions(): string[] {
 		.flatMap((f) => [`--${f.name}`, ...(f.short ? [`-${f.short}`] : [])]);
 }
 
+/** Words that end a value-taking global without a value: `--` and global flags. */
+function globalFlagTokens(): string[] {
+	return [
+		"--",
+		...deriveGlobalFlags().flatMap((f) => [
+			`--${f.name}`,
+			...(f.short ? [`-${f.short}`] : []),
+		]),
+	];
+}
+
 function deriveGlobalFlags(): {
 	name: string;
 	description: string;
@@ -417,7 +428,11 @@ ${resourceVars.join("\n")}
   local verb_index=1
   while (( verb_index < cword )); do
     case "\${words[verb_index]}" in
-      ${globalValueOptions().join("|")}) (( verb_index += 2 )) ;;
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
       -*) (( verb_index += 1 )) ;;
       *) break ;;
     esac
@@ -576,7 +591,11 @@ ${globalFlagEntryLines.join("\n")}
   local verb_index=2
   while (( verb_index < CURRENT )); do
     case "\${words[verb_index]}" in
-      ${globalValueOptions().join("|")}) (( verb_index += 2 )) ;;
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
       -*) (( verb_index += 1 )) ;;
       *) break ;;
     esac
@@ -664,7 +683,14 @@ function generateFishCompletion(): string {
 		"    while test $i -le (count $tokens)",
 		"        switch $tokens[$i]",
 		`            case ${globalValueOptions().join(" ")}`,
-		"                set i (math $i + 2)",
+		"                set -l next (string replace -r '=.*' '' -- $tokens[(math $i + 1)])",
+		`                if contains -- "$next" ${globalFlagTokens()
+			.map((t) => `'${t}'`)
+			.join(" ")}`,
+		"                    set i (math $i + 1)",
+		"                else",
+		"                    set i (math $i + 2)",
+		"                end",
 		"            case '-*'",
 		"                set i (math $i + 1)",
 		"            case '*'",
