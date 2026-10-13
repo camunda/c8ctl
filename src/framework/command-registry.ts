@@ -644,7 +644,11 @@ const PROFILE_CONNECTION_FLAGS = {
 	clientSecret: { type: "string", description: "OAuth client secret" },
 	audience: { type: "string", description: "OAuth audience" },
 	oAuthUrl: { type: "string", description: "OAuth token URL" },
-	scope: { type: "string", description: "OAuth scope (space-separated)" },
+	scope: {
+		type: "string",
+		description:
+			"OAuth scope (space-separated); also requested by 'c8ctl login' (default: openid)",
+	},
 	oidcIssuer: {
 		type: "string",
 		description:
@@ -1973,6 +1977,11 @@ export const COMMAND_REGISTRY = {
 			"no-browser": {
 				type: "boolean",
 				description: "Print the sign-in URL instead of opening a browser",
+			},
+			scope: {
+				type: "string",
+				description:
+					"Scopes to request (space-separated); overrides the profile's scope (default: openid)",
 			},
 		},
 	},

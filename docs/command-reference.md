@@ -1023,7 +1023,7 @@ Add a profile
 | `--clientSecret` | string |  | OAuth client secret |
 | `--audience` | string |  | OAuth audience |
 | `--oAuthUrl` | string |  | OAuth token URL |
-| `--scope` | string |  | OAuth scope (space-separated) |
+| `--scope` | string |  | OAuth scope (space-separated); also requested by 'c8ctl login' (default: openid) |
 | `--oidcIssuer` | string |  | OIDC issuer for 'c8ctl login' (default: discovered from the cluster via RFC 9728) |
 | `--defaultTenantId` | string |  | Default tenant ID |
 | `--username` | string |  | Basic auth username |
@@ -1278,6 +1278,7 @@ Sign in to the cluster's identity provider in the browser
 |------|------|----------|-------------|
 | `--port` | string |  | Loopback port for the redirect (default: random free port) |
 | `--no-browser` | boolean |  | Print the sign-in URL instead of opening a browser |
+| `--scope` | string |  | Scopes to request (space-separated); overrides the profile's scope (default: openid) |
 
 ---
 

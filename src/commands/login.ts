@@ -156,7 +156,13 @@ function describeUser(tokens: {
 }
 
 export const loginCommand = defineCommand("login", "", async (ctx, flags) => {
-	const settings = requireOidcSettings(ctx.profile);
+	// Scopes are not discoverable yet, so allow them per login: some IdPs
+	// need more than the default `openid` (e.g. an API scope).
+	const profileSettings = requireOidcSettings(ctx.profile);
+	const settings = {
+		...profileSettings,
+		scope: flags.scope ?? profileSettings.scope,
+	};
 	const port = parsePort(flags.port);
 	const issuer = settings.issuer ?? (await discoverIssuer(settings.baseUrl));
 	if (!settings.issuer) {
