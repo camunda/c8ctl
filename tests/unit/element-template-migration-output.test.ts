@@ -889,7 +889,7 @@ describe("renderReportText", () => {
 		}
 		assert.doesNotMatch(
 			text,
-			new RegExp(`${ESC.replace("[", "\\[")}(?:4\\d|10\\d)m`),
+			new RegExp(`${String.fromCharCode(0x1b)}\\[(?:4\\d|10\\d)m`),
 		);
 	});
 

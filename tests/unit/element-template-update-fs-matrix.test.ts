@@ -39,6 +39,13 @@ const cliEnv = (dir: string) =>
 	});
 type PausePoint = "compare" | "temp-write" | "rename";
 
+// A string literal for a script evaluated in the paused CLI.
+const jsLiteral = (value: string) =>
+	JSON.stringify(value).replace(
+		/[<>/\u2028\u2029]/g,
+		(c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+	);
+
 // The injected script wraps one fs function so its first matching call runs
 // `debugger;`, which stops the real CLI at a syscall boundary without any
 // reference to production source text. The wrapper restores the original
@@ -54,10 +61,10 @@ function pauseScript(point: PausePoint, bpmn: string) {
 	}[point];
 	return `(() => {
 		const fs = process.getBuiltinModule("fs");
-		const bpmn = ${JSON.stringify(bpmn)};
+		const bpmn = ${jsLiteral(bpmn)};
 		const lock = bpmn + ".migration.lock";
-		const point = ${JSON.stringify(point)};
-		const name = ${JSON.stringify(name)};
+		const point = ${jsLiteral(point)};
+		const name = ${jsLiteral(name)};
 		const original = fs[name];
 		let reads = 0;
 		const isTemp = (path) =>
@@ -448,7 +455,7 @@ for (const scenario of [
 				const tempFailure = scenario.includes("temp cleanup");
 				const descriptorFailure = scenario.includes("descriptor cleanup");
 				await paused.evaluate(
-					`(() => { const fs = process.getBuiltinModule("fs"); const unlink = fs.unlinkSync; const write = fs.writeFileSync; fs.writeFileSync = (...args) => { ${tempFailure ? "write(args[0], args[1].slice(0, 64), args[2]);" : ""} throw Object.assign(new Error("primary EIO write failure"), { code: "EIO" }); }; ${descriptorFailure ? 'fs.closeSync = () => { throw new Error("secondary descriptor cleanup failure"); };' : `fs.unlinkSync = (path) => { if (${tempFailure ? 'String(path).endsWith(".tmp")' : `path === ${JSON.stringify(lock)}`}) throw Object.assign(new Error("secondary cleanup failure"), { code: "EACCES" }); return unlink(path); };`} process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
+					`(() => { const fs = process.getBuiltinModule("fs"); const unlink = fs.unlinkSync; const write = fs.writeFileSync; fs.writeFileSync = (...args) => { ${tempFailure ? "write(args[0], args[1].slice(0, 64), args[2]);" : ""} throw Object.assign(new Error("primary EIO write failure"), { code: "EIO" }); }; ${descriptorFailure ? 'fs.closeSync = () => { throw new Error("secondary descriptor cleanup failure"); };' : `fs.unlinkSync = (path) => { if (${tempFailure ? 'String(path).endsWith(".tmp")' : `path === ${jsLiteral(lock)}`}) throw Object.assign(new Error("secondary cleanup failure"), { code: "EACCES" }); return unlink(path); };`} process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
 				);
 				const result = await paused.resume();
 				assert.equal(result.status, 1, result.stderr);
@@ -465,7 +472,7 @@ for (const scenario of [
 			) {
 				const backup = join(dir, "original.bpmn");
 				await paused.evaluate(
-					`(() => { const fs = process.getBuiltinModule("fs"); const write = fs.writeFileSync; fs.writeFileSync = (...args) => { write(...args); fs.renameSync(${JSON.stringify(bpmn)}, ${JSON.stringify(backup)}); ${scenario.startsWith("directory") ? `fs.mkdirSync(${JSON.stringify(bpmn)}); write(${JSON.stringify(join(bpmn, "sentinel"))}, "untouched");` : ""} }; process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
+					`(() => { const fs = process.getBuiltinModule("fs"); const write = fs.writeFileSync; fs.writeFileSync = (...args) => { write(...args); fs.renameSync(${jsLiteral(bpmn)}, ${jsLiteral(backup)}); ${scenario.startsWith("directory") ? `fs.mkdirSync(${jsLiteral(bpmn)}); write(${jsLiteral(join(bpmn, "sentinel"))}, "untouched");` : ""} }; process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
 				);
 				const result = await paused.resume();
 				assert.equal(result.status, 1, result.stderr);
@@ -488,7 +495,7 @@ for (const scenario of [
 				if (scenario.endsWith("temp write")) {
 					// Change the target only after the sibling write, before replacement.
 					await paused.evaluate(
-						`(() => { const fs = process.getBuiltinModule("fs"); const write = fs.writeFileSync; fs.writeFileSync = (...args) => { write(...args); write(${JSON.stringify(bpmn)}, ${JSON.stringify(canonical.stdout.replace("Do Something", "Concurrent edit"))}); }; process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
+						`(() => { const fs = process.getBuiltinModule("fs"); const write = fs.writeFileSync; fs.writeFileSync = (...args) => { write(...args); write(${jsLiteral(bpmn)}, ${jsLiteral(canonical.stdout.replace("Do Something", "Concurrent edit"))}); }; process.getBuiltinModule("module").syncBuiltinESMExports(); })()`,
 					);
 				}
 				const edited = canonical.stdout.replace(
