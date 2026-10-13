@@ -108,13 +108,14 @@ function readPaths(entry: Entry): string[] {
  * Every version step must read the applied shape or the preceding selected
  * application, never an unselected catalog version or a removed write. Checks
  * coverage of the recipe, not contiguity of version numbers, since published
- * lineages skip numbers.
+ * lineages skip numbers. A hop must read the shape the last step reached.
  */
 function findCoverageGap(
 	steps: { toVersion: number; entries: Entry[] }[],
 	appliedId: string,
 	appliedVersion: number,
 	templates: MigrationTemplate[],
+	hop?: { targetId: string; entries: Entry[] },
 ): string | null {
 	let shape = templates.find(
 		(t) => t.id === appliedId && (versionOf(t) ?? 0) === appliedVersion,
@@ -137,6 +138,17 @@ function findCoverageGap(
 		shape = templates.find(
 			(t) => t.id === appliedId && (versionOf(t) ?? 0) === step.toVersion,
 		);
+	}
+	for (const entry of hop?.entries ?? []) {
+		for (const path of readPaths(entry)) {
+			const { bindingType, key } = splitBindingPrefix(path);
+			if (
+				shape &&
+				findPropertiesByTarget(shape.properties, key, bindingType).length === 0
+			) {
+				return `the recipe for ${hop?.targetId} is incomplete: the change from ${appliedId} reads "${path}", which reached version ${shape.version} does not define`;
+			}
+		}
 	}
 	return null;
 }
@@ -220,7 +232,17 @@ export function resolveSteps({
 			loaded(templates, appliedId, rung.toVersion);
 	}
 
-	const refusal = findCoverageGap(rungs, appliedId, appliedVersion, templates);
+	const reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
+	const hop = sameId
+		? undefined
+		: reachableHop(targetRecipe, appliedId, reachedVersion);
+	const refusal = findCoverageGap(
+		rungs,
+		appliedId,
+		appliedVersion,
+		templates,
+		hop && { targetId: target.id, entries: hop.entries },
+	);
 	if (refusal) {
 		return { steps: [], refusal };
 	}
@@ -233,8 +255,6 @@ export function resolveSteps({
 	}));
 
 	if (!sameId) {
-		const reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
-		const hop = reachableHop(targetRecipe, appliedId, reachedVersion);
 		if (hop) {
 			steps.push({
 				kind: "hop",
@@ -246,12 +266,15 @@ export function resolveSteps({
 			const sources = recipeSourcesFor(targetRecipe, appliedId).filter(
 				(source) => source.kind === "change",
 			);
+			const floor = Math.min(
+				...sources.map((source) => source.minSourceVersion ?? 0),
+			);
 			return {
 				steps: [],
 				refusal:
 					sources.length === 0
 						? `wrong source ID: the recipe has no change entry for "${appliedId}"`
-						: `unmet source floor: the recipe requires source version ${Math.min(...sources.map((source) => source.minSourceVersion ?? 0))}, but reached version is ${reachedVersion}`,
+						: `unmet source floor: the recipe requires source version ${floor}, but reached version is ${reachedVersion}; update the element to version ${floor} or later first`,
 			};
 		}
 	} else if (

@@ -741,7 +741,10 @@ describe("Option B selection boundaries", () => {
 		});
 		// An unusable target recipe must not retain partial source applications.
 		assert.deepStrictEqual(refused.steps, []);
-		assert.match(refused.refusal ?? "", /unmet source floor.*5.*reached.*3/);
+		assert.match(
+			refused.refusal ?? "",
+			/unmet source floor.*5.*reached.*3; update the element to version 5 or later first/,
+		);
 		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
 	});
 
@@ -1101,5 +1104,77 @@ describe("resolveSteps and findSuccessors boundary cases", () => {
 				assert.deepStrictEqual(result.steps, [], from);
 			}
 		}
+	});
+});
+
+describe("hop coverage", () => {
+	const hopReading = (from: string, minSourceVersion?: number) =>
+		withRecipe(template("new", 1, ["x"]), {
+			kind: "change",
+			sourceTemplateId: "old",
+			...(minSourceVersion === undefined ? {} : { minSourceVersion }),
+			paths: [{ from, to: "x" }],
+		});
+
+	test("refuses a hop reading a path the reached source does not define", () => {
+		const target = hopReading("misspelled");
+		const templates = [template("old", 1, ["a"])];
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates,
+		});
+		assert.deepStrictEqual(result.steps, []);
+		assert.match(
+			result.refusal ?? "",
+			/recipe for new is incomplete: the change from old reads "misspelled", which reached version 1 does not define/,
+		);
+		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
+	});
+
+	test("checks the hop against the shape the last rung reached", () => {
+		const latest = withRecipe(template("old", 2, ["b"]), {
+			kind: "upgrade",
+			sourceTemplateId: "old",
+			toVersion: 2,
+			paths: [{ from: "a", to: "b" }],
+		});
+		const templates = [template("old", 1, ["a"]), latest];
+		for (const [from, covered] of [
+			["b", true],
+			["a", false],
+		] as const) {
+			const result = resolveSteps({
+				appliedId: "old",
+				appliedVersion: 1,
+				target: hopReading(from, 2),
+				templates,
+			});
+			if (covered) {
+				assert.strictEqual(result.refusal, null, from);
+				assert.deepStrictEqual(
+					result.steps.map((step) => step.kind),
+					["version", "hop"],
+				);
+			} else {
+				assert.match(result.refusal ?? "", /reads "a".*version 2/, from);
+				assert.deepStrictEqual(result.steps, [], from);
+			}
+		}
+	});
+
+	test("skips the check when the reached source is not in the catalog", () => {
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target: hopReading("misspelled"),
+			templates: [],
+		});
+		assert.strictEqual(result.refusal, null);
+		assert.deepStrictEqual(
+			result.steps.map((step) => step.kind),
+			["hop"],
+		);
 	});
 });

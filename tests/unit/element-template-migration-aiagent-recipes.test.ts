@@ -438,14 +438,10 @@ describe("ai-agent-task.v2 recipe", () => {
 		assert.deepStrictEqual(r.report.dropped, []);
 	});
 
-	test("accepts version 10 and refuses versions below it", async () => {
-		const v10 = readTemplate("aiagent-v1-v10.json");
-		const r = await run({ "provider.type": "openai" }, v10);
-		assert.strictEqual(r.report.refusal, null);
-		assert.strictEqual(r.value("provider.openai.api.type"), "completions");
+	test("refuses versions below 12, which lack the Vertex AI paths it reads", async () => {
 		const refused = await run(
 			{ "provider.type": "openai" },
-			{ ...v10, version: 7 },
+			readTemplate("aiagent-v1-v10.json"),
 		);
 		assert.match(refused.report.refusal ?? "", /unmet source floor/);
 	});

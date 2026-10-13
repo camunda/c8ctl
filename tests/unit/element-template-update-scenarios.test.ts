@@ -178,7 +178,12 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 		const source3 = template(
 			"chain",
 			3,
-			[input("c"), input("host"), input("expr", "", { feel: "optional" })],
+			[
+				input("c"),
+				input("host"),
+				input("expr", "", { feel: "optional" }),
+				input("unset"),
+			],
 			[
 				{
 					kind: "upgrade",
@@ -275,7 +280,7 @@ test("complex recipe CLI integration: source upgrades, floors, nested guards and
 							to: "unmatched",
 							valueMap: { rules: [{ match: "no", value: "no" }] },
 						},
-						{ to: "missing", template: `\${absent}` },
+						{ to: "missing", template: `\${unset}` },
 					],
 				},
 			],

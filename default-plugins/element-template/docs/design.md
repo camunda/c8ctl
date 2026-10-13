@@ -251,7 +251,8 @@ that moved.
   precedes a no-op return.
 - **Authorization.** Lossy in-place migrations and refused embedded-recipe fallback
   require `--allow-lossy`. Explicit unusable recipes cannot be authorized. Diagnostics
-  distinguish syntax, coverage, source-ID and reached-floor refusal; empty recipe
+  distinguish syntax, coverage (version steps and the change hop), source-ID and
+  reached-floor refusal; empty recipe
   flags fail. Preview/authorized reports retain refusal and authorization status.
 - **Sensitivity.** Rendering uses credential-like field identity and template
   property/group metadata to redact report values. Known sensitive before/after,

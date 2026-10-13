@@ -206,6 +206,19 @@ for (const action of ["change", "update"] as const) {
 				},
 			],
 		},
+		...(action === "change"
+			? [
+					{
+						name: "hop coverage refusal",
+						sources: [
+							{ ...entry, paths: [{ from: "misspelled", to: "kept" }] },
+						],
+						diagnostic:
+							/incomplete.*change from refusal\.source reads .*misspelled/,
+						lineage: [],
+					},
+				]
+			: []),
 	]) {
 		// A change recipe's upgrades belong to the target, never the source.
 		const sources =
