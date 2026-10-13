@@ -507,7 +507,7 @@ for (const scenario of [
 				const result = await paused.resume();
 				assert.equal(result.status, 1, result.stderr);
 				assert.equal(result.stdout, "");
-				assert.match(result.stderr, /BPMN changed during migration/);
+				assert.match(result.stderr, /BPMN changed while this command ran/);
 				assert.equal(readFileSync(bpmn, "utf-8"), edited);
 				assert.equal(existsSync(lock), false);
 				assert.deepEqual(temps(), []);

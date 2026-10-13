@@ -168,6 +168,9 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   Changes observed during preparation are rejected. Replacement uses a sibling
   temporary file and rename; rename failures, including EXDEV, fail without a
   direct overwrite.
+  `apply --in-place` and `edit --in-place` do not take the lock, but refuse to
+  replace a file whose contents changed since they read it, so they never
+  overwrite a migration that committed in between.
   A killed writer can leave a stale lock and temporary file; confirm no writer is
   active before inspecting and removing them. Recovery is manual. External edits
   between the final comparison and rename and symlink aliases are not covered by

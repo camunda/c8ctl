@@ -60,7 +60,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const CONCURRENT_EDIT_MESSAGE =
-	"BPMN changed during migration; refusing to overwrite concurrent edits.";
+	"BPMN changed while this command ran; refusing to overwrite concurrent edits.";
 
 /**
  * Overwrite `targetPath` atomically: write to a sibling temp file in
@@ -68,15 +68,17 @@ export const CONCURRENT_EDIT_MESSAGE =
  * `rename` is atomic on the same filesystem, so a kill mid-write
  * never destroys the user's BPMN file.
  *
- * With `expectedContents` (update), replacement failures MUST leave the
- * original untouched, including EXDEV. Without it (apply, edit), EXDEV
- * falls back to a direct `writeFileSync`, which covers exotic setups like
- * FUSE mounts.
+ * With `expectedContents`, a target that no longer holds them is not
+ * overwritten. With `directWriteFallback` (apply, edit), EXDEV falls back to
+ * a direct `writeFileSync`, which covers exotic setups like FUSE mounts.
+ * Without it (update), replacement failures MUST leave the original
+ * untouched, including EXDEV.
  */
 export function atomicOverwriteFile(
 	targetPath: string,
 	contents: string,
 	expectedContents?: string,
+	directWriteFallback = false,
 ): void {
 	const target = resolvePath(targetPath);
 	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -95,11 +97,12 @@ export function atomicOverwriteFile(
 		} catch {
 			// Best-effort cleanup — the original error is what matters.
 		}
-		if (
-			expectedContents === undefined &&
-			isRecord(error) &&
-			error.code === "EXDEV"
-		) {
+		if (directWriteFallback && isRecord(error) && error.code === "EXDEV") {
+			if (
+				expectedContents !== undefined &&
+				readFileSync(target, "utf-8") !== expectedContents
+			)
+				throw new Error(CONCURRENT_EDIT_MESSAGE);
 			writeFileSync(target, contents, "utf-8");
 			return;
 		}

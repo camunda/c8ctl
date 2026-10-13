@@ -227,6 +227,86 @@ describe("CLI behavioural: element-template apply", () => {
 		}
 	});
 
+	// Simulates another writer committing between the read and the replace.
+	const concurrentWrite = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const write = fs.writeFileSync; fs.writeFileSync = (path, ...rest) => { if (String(path).endsWith(".tmp")) write(process.env.C8CTL_TEST_RACE_TARGET, "concurrent"); return write(path, ...rest); }; syncBuiltinESMExports();`;
+	const exdev = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const rename = fs.renameSync; fs.renameSync = (from, to) => { if (String(to).endsWith(".bpmn")) throw Object.assign(new Error("cross-device"), { code: "EXDEV" }); return rename(from, to); }; syncBuiltinESMExports();`;
+	for (const [command, preloads] of [
+		["apply", [concurrentWrite]],
+		["apply", [concurrentWrite, exdev]],
+		["edit", [concurrentWrite]],
+	] as const) {
+		test(`${command} --in-place keeps a concurrent write${preloads.length > 1 ? " on EXDEV" : ""}`, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			const dataDir = join(tempDir, "data");
+			mkdirSync(join(dataDir, "element-templates"), { recursive: true });
+			writeFileSync(
+				join(dataDir, "element-templates", "templates.json"),
+				`[${readFileSync(TEMPLATE_FILE, "utf-8")}]`,
+			);
+			writeFileSync(
+				join(dataDir, "element-templates", "fetched-at"),
+				String(Date.now()),
+			);
+			try {
+				if (command === "edit") {
+					const applied = await c8WithOptions(
+						{ env: { C8CTL_DATA_DIR: dataDir, C8CTL_OUTPUT_MODE: "text" } },
+						"element-template",
+						"apply",
+						"--in-place",
+						TEMPLATE_FILE,
+						"Activity_17s7axj",
+						tempBpmn,
+					);
+					assert.strictEqual(applied.status, 0, applied.stderr);
+				}
+				const args =
+					command === "apply"
+						? [
+								"apply",
+								"--in-place",
+								TEMPLATE_FILE,
+								"Activity_17s7axj",
+								tempBpmn,
+							]
+						: [
+								"edit",
+								"--in-place",
+								"Activity_17s7axj",
+								tempBpmn,
+								"--set",
+								"method=PUT",
+							];
+				const result = await c8WithOptions(
+					{
+						nodeArgs: preloads.flatMap((code) => [
+							"--import",
+							`data:text/javascript,${encodeURIComponent(code)}`,
+						]),
+						env: {
+							C8CTL_DATA_DIR: dataDir,
+							C8CTL_OUTPUT_MODE: "text",
+							C8CTL_TEST_RACE_TARGET: tempBpmn,
+						},
+					},
+					"element-template",
+					...args,
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /BPMN changed while this command ran/);
+				assert.strictEqual(readFileSync(tempBpmn, "utf-8"), "concurrent");
+				assert.deepStrictEqual(
+					readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
+					[],
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
+
 	test("missing template file exits 1", async () => {
 		const result = await c8text(
 			"element-template",
