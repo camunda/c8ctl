@@ -235,8 +235,10 @@ that moved.
   carry-over values are checked against active destination properties, including
   conditional duplicates. Supported literal checks are choices, `notEmpty` and
   patterns. FEEL optional/required expressions bypass literal choices/patterns,
-  while empty required expressions fail. Unsupported active constraints or
-  unsupported/cyclic conditions fail closed. This is not FEEL syntax validation.
+  while empty required expressions fail. Unsupported active constraints,
+  cyclic conditions and conditions without a known operator fail closed. Extra
+  keys are ignored: `allMatch` and the first known operator decide. This is not
+  FEEL syntax validation.
 - **Context authority.** The supplied source must match the element's applied
   identity and overrides its catalog shadow. The final returned element must carry
   the target identity. Explicit target content is authoritative for its identity.

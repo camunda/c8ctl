@@ -251,7 +251,9 @@ Migration validates resolved writes and populated non-Hidden carry-over against
 active destination properties, including conditional duplicates. Supported checks
 are choices, `notEmpty` and patterns. Optional/required FEEL expressions bypass
 literal choices/patterns, but empty required expressions fail. Unsupported active
-constraints or unsupported/cyclic conditions fail closed. This does not validate
+constraints, cyclic conditions and conditions without a known operator fail
+closed. A condition is not checked for extra keys: `allMatch` and the first
+known operator (`isActive`, `equals`, `oneOf`, `isEmpty`) decide. This does not validate
 FEEL expression syntax. Reports reconcile surviving writes with actual stored
 values, including FEEL normalization, rather than claiming planner intent as success.
 
