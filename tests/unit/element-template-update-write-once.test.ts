@@ -84,6 +84,21 @@ test("an existing writer lock prevents overwriting and is not removed", async ()
 	);
 });
 
+test("a missing file is reported before a lock is taken", async () => {
+	const file = join(ws.workDir, "missing", "task.bpmn");
+	const result = await run(
+		dataDirWithCache([V1, V2]),
+		"update",
+		V1.id,
+		TASK,
+		file,
+		"--in-place",
+	);
+	assert.strictEqual(result.status, 1);
+	assert.match(result.stderr, /File not found: .*task\.bpmn/);
+	assert.doesNotMatch(result.stderr, /migration\.lock/);
+});
+
 test("a lock that cannot be created keeps its own error", {
 	skip:
 		(process.platform === "win32" || process.getuid?.() === 0) &&

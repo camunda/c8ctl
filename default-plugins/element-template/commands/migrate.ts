@@ -20,6 +20,7 @@ import {
 	BINDING_TYPE_SHORTHANDS,
 	CONCURRENT_EDIT_MESSAGE,
 	installStdoutEpipeHandler,
+	isRecord,
 	type Template,
 } from "../helpers.ts";
 import {
@@ -809,12 +810,14 @@ async function runLockedMigrate(
 	const file = resolved.bpmnFilePath;
 	if (!resolved.parsed.inPlace || !file || c8ctl.dryRun)
 		return runMigrateInternal(resolved, redaction);
+	if (!existsSync(resolvePath(file)))
+		throw new Error(`File not found: ${file}`);
 	const lock = `${resolvePath(file)}.migration.lock`;
 	let descriptor: number;
 	try {
 		descriptor = openSync(lock, "wx");
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		if (!isRecord(error) || error.code !== "EEXIST") throw error;
 		throw new Error(
 			`Cannot acquire migration lock ${lock}. Another writer may be active; remove a stale lock only after checking that no migration is running.`,
 		);
