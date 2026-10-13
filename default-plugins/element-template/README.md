@@ -149,7 +149,7 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   `{dryRun, command, results, summary, deprecation}`.
 - Each JSON result carries `elementId` and, when the element has a name,
   `elementName`. An updated result carries `recipe` (with `path` for a
-  `--recipe` file, as given), `counts` and `report` with `moved`, `added`,
+  `--recipe` file, as given, and `owner`, the template carrying an embedded recipe), `counts` and `report` with `moved`, `added`,
   `changed`, `dropped` and `kept`. Fields use template IDs: `group` is the group
   ID, `groupLabel` its label, `propertyId` the property `id`. `moved` and
   `added` items carry the stored `value`; `moved`, `added` and `changed` items
@@ -289,8 +289,7 @@ but sources, groups, guard lists, and value-map rules must be non-empty.
 #### AI Agent v1 to v2
 
 c8ctl ships no connector recipes. The AI Agent v2 templates in
-`camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`
-([camunda/connectors#9430](https://github.com/camunda/connectors/pull/9430)),
+`camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`,
 so `update` picks them up from the cache once a release carries them.
 
 ## Inspecting a template

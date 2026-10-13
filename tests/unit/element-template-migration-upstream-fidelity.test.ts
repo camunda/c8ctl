@@ -20,7 +20,7 @@ import { after, before, describe, test } from "node:test";
 import { c8WithOptions } from "../utils/cli.ts";
 import { DIAGRAM } from "../utils/element-template.ts";
 
-// Head of camunda/connectors#9430. Re-pin to its merge commit once it lands.
+// Pinned upstream commit. Re-pin to the merge commit once the recipes land.
 const REF = "43fa2216f96dd52493ea05159afed98e11199bbb";
 const BASE = `https://raw.githubusercontent.com/camunda/connectors/${REF}/connectors/agentic-ai/connector-agentic-ai/element-templates`;
 const FILES = [
