@@ -242,8 +242,8 @@ paths count as reads, including `exists` and negated guards. An empty
 | `{ to, template }` | Composes a value from source values with `${path}`. |
 | `{ when, rules: [...] }` | Applies the nested entries only when the guard holds. |
 
-Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally negated with `not`) and
-`note`: a message shown in the report when the entry took effect, either a string or
+Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally negated with `not`).
+Entries other than `rules` groups can also carry `note`: a message shown in the report when the entry took effect, either a string or
 `{ "level": "info" | "warning", "message": "..." }`. Paths are binding keys; prefix one with
 `input:`, `output:`, `header:`, `property:`, `taskDefinition:`, `agentDefinition:` or `adHoc:` when the
 same key is bound by several binding types.
