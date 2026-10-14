@@ -32,6 +32,7 @@
 
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
+import { parseArgs as parseArgv } from "node:util";
 import type {} from "../../../src/core/runtime.ts";
 import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
@@ -81,35 +82,35 @@ type EditPlan = {
 
 /**
  * Strip `--template <ref>` / `--template=<ref>` (edit-only, so it isn't part
- * of the `parseArgs` shared with `apply`). Last flag wins; content after
- * `--` is treated as positional.
+ * of the `parseArgs` shared with `apply`). Tokenised by `node:util`
+ * `parseArgs` in non-strict mode so every other flag passes through to the
+ * shared parser untouched. Last flag wins; content after `--` is positional.
  */
 function extractTemplateFlag(args: string[]): {
 	templateArg: string | undefined;
 	rest: string[];
 } {
+	const { tokens } = parseArgv({
+		args,
+		options: { template: { type: "string" } },
+		strict: false,
+		allowPositionals: true,
+		tokens: true,
+	});
 	let templateArg: string | undefined;
-	const rest: string[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === "--") {
-			rest.push(...args.slice(i));
-			break;
+	const consumed = new Set<number>();
+	for (const token of tokens) {
+		if (token.kind !== "option" || token.name !== "template") continue;
+		if (!token.value) {
+			throw new Error(
+				"--template requires a value (an OOTB id[@version], a local path, or an https:// URL)",
+			);
 		}
-		if (arg === "--template" || arg.startsWith("--template=")) {
-			const value =
-				arg === "--template" ? args[++i] : arg.slice("--template=".length);
-			if (!value) {
-				throw new Error(
-					"--template requires a value (an OOTB id[@version], a local path, or an https:// URL)",
-				);
-			}
-			templateArg = value;
-			continue;
-		}
-		rest.push(arg);
+		templateArg = token.value;
+		consumed.add(token.index);
+		if (!token.inlineValue) consumed.add(token.index + 1);
 	}
-	return { templateArg, rest };
+	return { templateArg, rest: args.filter((_, i) => !consumed.has(i)) };
 }
 
 /**
