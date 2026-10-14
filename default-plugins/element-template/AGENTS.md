@@ -12,7 +12,7 @@ version resolution.
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
 | `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync`, `update`. `update` is a thin wrapper over `commands/migrate.ts` |
 | `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
-| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
+| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplates` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
@@ -39,9 +39,11 @@ version resolution.
   pipelines, and racing cold-cache invocations would both download the
   same bundles. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
-- **Path/URL apply paths must not trigger the cache check.**
+- **Path/URL refs and local id hits must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
-  before any cache call.
+  before any cache call. An id found locally (`.camunda/element-templates/`
+  or the Modeler user-data dir, see `resolveTemplateId`) never reaches
+  `requireCachePresent()`; only the OOTB fallback does.
 - **`saveCache` and `apply --in-place` writes are atomic.** Both
   use a sibling temp file + `renameSync`. Anything else that
   overwrites a user-owned file (cache or BPMN) must follow the same

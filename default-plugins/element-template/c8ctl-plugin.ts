@@ -5,7 +5,7 @@
  *
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
- *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] --set key=value
+ *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] [--template <template>] --set key=value
  *   c8ctl element-template update <template-id> [<element-id>] [<file.bpmn>] [--to <template>[@<n>]] [--recipe <file>] [--map <from>=<to>] [--in-place]
  *   c8ctl element-template info <template> [--engine-version <x.y.z>]
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
@@ -13,8 +13,9 @@
  *   c8ctl element-template search <query> [--engine-version <x.y.z>]
  *   c8ctl element-template sync [--prune]
  *
- * <template> can be a local path, an https:// URL, or an OOTB template id
- * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13).
+ * <template> can be a local path, an https:// URL, or a template id
+ * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13), looked up
+ * in .camunda/element-templates/ first, then in the OOTB cache.
  * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
  */
 
@@ -145,7 +146,10 @@ export const metadata = {
 				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
 				"search the out-of-the-box template catalogue, export raw template JSON, " +
 				"and manage the local template cache.\n\n" +
-				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).\n\n" +
+				"<template> is a local path, an https:// URL, or a template id (optionally @<version>). " +
+				"An id is looked up in .camunda/element-templates/ (next to the BPMN file, or in the current " +
+				"directory, or any parent of either) and in Desktop Modeler's resources/element-templates/ " +
+				"before the OOTB cache.\n\n" +
 				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
@@ -153,11 +157,15 @@ export const metadata = {
 				"edit --set name=value updates a property on an element that already has a template applied, " +
 				"without re-running template application — it never resets other template-owned content " +
 				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
-				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element). " +
+				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element and resolves it from " +
+				".camunda/element-templates/ next to the BPMN file or a parent directory, then the OOTB cache). " +
+				"Pass --template <template> to point at a custom template explicitly; it must match the element's " +
+				"recorded id/version. " +
 				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
 				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
 				"update <template-id> moves every element that uses that template to its latest compatible version, " +
-				"or to the template given with --to <template>[@<n>] (an id, path or URL); pass an element id to update " +
+				"or to the template given with --to <template>[@<n>] (an id, path or URL; an id resolves as above, " +
+				"local templates first); pass an element id to update " +
 				"only that element. Values the target binds under another key are moved when it carries a migration " +
 				"recipe (metadata.migratesFrom) or one is passed with --recipe <file>; --map <from>=<to> moves a value " +
 				"per element when no recipe covers it; the rest carry over by key. " +
@@ -403,6 +411,11 @@ export const commands = {
 			limit: {
 				type: "string",
 				description: "Cap the number of matches (default 20) [search]",
+			},
+			template: {
+				type: "string",
+				description:
+					"Template to resolve the element's recorded id/version against (id[@version], path, or URL) [edit]",
 			},
 			"engine-version": {
 				type: "string",

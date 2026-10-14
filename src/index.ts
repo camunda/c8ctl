@@ -11,6 +11,7 @@ import {
 	c8ctl,
 	createClient,
 	getLogger,
+	getModelerDataDir,
 	getUserDataDir,
 	loadSessionState,
 	printUpdateNotification,
@@ -239,6 +240,7 @@ async function main() {
 		resolveTenantId,
 		getLogger,
 		getUserDataDir,
+		getModelerDataDir,
 		npm,
 	});
 
