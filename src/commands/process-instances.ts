@@ -2,9 +2,14 @@
  * Process instance commands
  */
 
-import type { createProcessInstanceInput } from "@camunda8/orchestration-cluster-api";
+import type {
+	createProcessInstanceInput,
+	migrateProcessInstanceInput,
+	migrateProcessInstancesBatchOperationInput,
+} from "@camunda8/orchestration-cluster-api";
 import {
 	ProcessDefinitionId,
+	ProcessDefinitionKey,
 	TenantId,
 } from "@camunda8/orchestration-cluster-api";
 import { fetchAllPages } from "../core/index.ts";
@@ -12,6 +17,7 @@ import { defineCommand } from "../framework/index.ts";
 import {
 	buildDateFilter,
 	parseBetween,
+	parseMigrationMapping,
 	parseVariablesFlag,
 	processInstancesEmptyMessage,
 } from "../utils/index.ts";
@@ -405,5 +411,101 @@ export const resumeProcessInstanceCommand = defineCommand(
 
 		await client.resumeProcessInstance({ processInstanceKey: key });
 		return { kind: "success", message: `Process instance ${key} resumed` };
+	},
+);
+
+/** Run a flag-value parser, prefixing its error with the flag name. */
+function parseFlagValue<T>(flag: string, parse: () => T): T {
+	try {
+		return parse();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Invalid --${flag}: ${message}`);
+	}
+}
+
+/**
+ * Migrate process instance(s) to another process definition.
+ *
+ * With a positional key, migrates that single instance synchronously. With
+ * `--processDefinitionKey` instead, starts an asynchronous batch operation
+ * that migrates every active instance of that source definition. Exactly one
+ * of the two must be given so a batch is never started by accident.
+ */
+export const migrateProcessInstanceCommand = defineCommand(
+	"migrate",
+	"process-instance",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+		const sourceDefinitionKey = flags.processDefinitionKey;
+		// Branded here rather than via a FlagDef validator: required flags stay
+		// validator-free so the framework's required-flag checks remain uniform.
+		const targetProcessDefinitionKey = parseFlagValue(
+			"targetProcessDefinitionKey",
+			() => ProcessDefinitionKey.assumeExists(flags.targetProcessDefinitionKey),
+		);
+
+		if (key && sourceDefinitionKey) {
+			throw new Error(
+				"Pass either a process instance key (single migration) or --processDefinitionKey (batch migration), not both",
+			);
+		}
+		if (!key && !sourceDefinitionKey) {
+			throw new Error(
+				"Process instance key or --processDefinitionKey required. Usage: c8 migrate pi <key> --targetProcessDefinitionKey <key> --map <sourceElementId>=<targetElementId>, or replace <key> with --processDefinitionKey <sourceKey> to migrate all active instances of a definition",
+			);
+		}
+		if (!flags.map) {
+			throw new Error(
+				"At least one --map <sourceElementId>=<targetElementId> is required: map each active element of the source instance to its counterpart in the target definition",
+			);
+		}
+
+		const mappingInstructions = flags.map.map((value) =>
+			parseFlagValue("map", () => parseMigrationMapping(value)),
+		);
+		const migrationPlan = { targetProcessDefinitionKey, mappingInstructions };
+
+		if (key) {
+			const dr = ctx.dryRun({
+				command: "migrate process-instance",
+				method: "POST",
+				endpoint: `/process-instances/${key}/migration`,
+				profile,
+				body: migrationPlan,
+			});
+			if (dr) return dr;
+
+			await client.migrateProcessInstance({
+				processInstanceKey: key,
+				...migrationPlan,
+			} satisfies migrateProcessInstanceInput);
+			return {
+				kind: "success",
+				message: `Process instance ${key} migrated to process definition ${targetProcessDefinitionKey}`,
+			};
+		}
+
+		const request = {
+			filter: { processDefinitionKey: sourceDefinitionKey },
+			migrationPlan,
+		} satisfies migrateProcessInstancesBatchOperationInput;
+
+		const dr = ctx.dryRun({
+			command: "migrate process-instances",
+			method: "POST",
+			endpoint: "/process-instances/migration",
+			profile,
+			body: request,
+		});
+		if (dr) return dr;
+
+		const result = await client.migrateProcessInstancesBatchOperation(request);
+		return {
+			kind: "success",
+			message: `Batch migration operation created for active instances of process definition ${sourceDefinitionKey}`,
+			key: result.batchOperationKey,
+		};
 	},
 );

@@ -3830,6 +3830,102 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 			}
 		}
 	});
+
+	// A fingerprint query that fails or times out once on a LIVE process (a slow
+	// PowerShell/CIM call on a loaded Windows runner) must not leave the process
+	// out of the stop record: stop only reaps recorded PIDs, so a dropped PID is
+	// orphaned. The signature source is injected so the transient failure is
+	// deterministic.
+	test("recordRunningClusterPids retries a transient signature failure so stop still reaps the process", async () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return; // liveness-only fallback platform: no signature branch to exercise
+		}
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			let calls = 0;
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{
+					signatureOf: (candidate: number) => {
+						calls += 1;
+						return calls === 1 ? null : plugin.processStartSignature(candidate);
+					},
+					signatureRetryDelayMs: 1,
+				},
+			);
+
+			assert.strictEqual(calls, 2, "the failed query must be retried once");
+			const record = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				record.pids.includes(pid),
+				"a live PID whose first signature query failed must still be recorded",
+			);
+			assert.ok(
+				record.signatures?.[pid],
+				"the recorded PID must carry a signature",
+			);
+
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 1);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(pid), 10_000, 50),
+				"the recorded process must be terminated by the stop backstop",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// The retry is only for a process that is still alive: a PID that is gone is
+	// a final answer, and a signature that never materialises is still never
+	// persisted as a bare PID (that would re-open the PID-reuse hazard).
+	test("recordRunningClusterPids does not retry a dead PID and never records an unsigned one", () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return;
+		}
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		const deadPid = 2 ** 22 + 12345;
+		assert.strictEqual(plugin.isPidAlive(deadPid), false);
+		writeFileSync(join(versionDir, "camunda.process"), String(deadPid));
+
+		let calls = 0;
+		plugin.recordRunningClusterPids(
+			{ cacheDir: tempDir, version: "8.9" },
+			{
+				signatureOf: () => {
+					calls += 1;
+					return null;
+				},
+				signatureRetryDelayMs: 1,
+				skipEmpty: true,
+			},
+		);
+
+		assert.strictEqual(calls, 1, "a dead PID must not be retried");
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
 });
 
 describe("Cluster Plugin – withForwardedYes", () => {

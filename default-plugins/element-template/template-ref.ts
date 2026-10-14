@@ -5,12 +5,14 @@
  *   - Classifying a `<template>` argument as URL, local path, or OOTB id.
  *   - Loading a template from any of those sources (cache lookup for ids,
  *     fetch/parse for URLs and paths).
+ *   - Resolving an id against `.camunda/element-templates/`, then the cache.
  *   - Reading BPMN input from a file path or stdin.
  *   - Extracting `modeler:executionPlatformVersion` from BPMN XML.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import semver from "semver";
 import type {} from "../../src/core/runtime.ts";
 import {
@@ -29,9 +31,11 @@ import {
 	type Template,
 	type TemplateProperty,
 } from "./helpers.ts";
+import { resolveVendorBundle, type VendorBundle } from "./vendor.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
+const require = createRequire(import.meta.url);
 
 export type BpmnInput = { xml: string; source: string };
 
@@ -246,6 +250,191 @@ export async function readTemplateFromPathOrUrl(
 }
 
 /**
+ * Directories searched for local templates, nearest first — the walk mirrors
+ * Desktop Modeler's ElementTemplatesProvider
+ * (https://github.com/camunda/camunda-modeler/blob/main/app/lib/config/providers/ElementTemplatesProvider.js):
+ * `.camunda/element-templates` in `startDir` and every ancestor up to and
+ * including the filesystem root, then `resources/element-templates` in the
+ * Modeler's user-data dir.
+ */
+function localTemplateDirs(startDir: string): string[] {
+	const dirs: string[] = [];
+	for (let dir = resolvePath(startDir); ; dir = dirname(dir)) {
+		dirs.push(join(dir, ".camunda", "element-templates"));
+		if (dirname(dir) === dir) break;
+	}
+	dirs.push(join(c8ctl.getModelerDataDir(), "resources", "element-templates"));
+	return dirs;
+}
+
+type LocalTemplateEntry = { template: unknown; file: string };
+
+/** Follows symlinks, like the Modeler's glob; a dangling one is skipped. */
+function isFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Read every `**\/*.json` under `dirs`, in order; a file holds one template or
+ * an array. As in the Modeler, a missing or unreadable directory is skipped
+ * but a malformed file is an error.
+ */
+function readLocalTemplates(dirs: string[]): LocalTemplateEntry[] {
+	const result: LocalTemplateEntry[] = [];
+	for (const dir of dirs) {
+		let files: string[];
+		try {
+			files = readdirSync(dir, { recursive: true, withFileTypes: true })
+				.filter((e) => e.name.toLowerCase().endsWith(".json"))
+				.map((e) => join(e.parentPath, e.name))
+				.filter(isFile)
+				.sort();
+		} catch {
+			continue;
+		}
+		for (const file of files) {
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(readFileSync(file, "utf-8"));
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				throw new Error(`template ${file} parse error: ${message}`);
+			}
+			for (const template of Array.isArray(parsed) ? parsed : [parsed]) {
+				result.push({ template, file });
+			}
+		}
+	}
+	return result;
+}
+
+/**
+ * Validate templates with bpmn-js-element-templates' Cloud validator — the
+ * `elementTemplatesLoader` of `CloudElementTemplatesCoreModule`, the same
+ * path the Modeler loads templates through: schema validation, and a
+ * duplicate id+version keeps the first (nearest) one. Rejected templates are
+ * reported as warnings, as the Modeler reports them without aborting.
+ */
+function validateLocalTemplates(
+	id: string,
+	entries: LocalTemplateEntry[],
+): Template[] {
+	const {
+		Modeler,
+		CloudElementTemplatesCoreModule,
+		ZeebeModdleExtension,
+		HeadlessTextRendererModule,
+	}: VendorBundle = require(resolveVendorBundle());
+	const modeler = new Modeler({
+		additionalModules: [
+			HeadlessTextRendererModule,
+			CloudElementTemplatesCoreModule,
+		],
+		moddleExtensions: { zeebe: ZeebeModdleExtension },
+	});
+	const fileOf = new Map(entries.map((e) => [e.template, e.file]));
+	const logger = c8ctl.getLogger();
+	modeler.get("eventBus").on("elementTemplates.errors", (event) => {
+		const errors =
+			isRecord(event) && Array.isArray(event.errors) ? event.errors : [];
+		for (const error of errors) {
+			const file = isRecord(error) ? fileOf.get(error.template) : undefined;
+			const message = error instanceof Error ? error.message : String(error);
+			logger.warn(
+				`Ignoring element template${file ? ` in ${file}` : ""}: ${message}`,
+			);
+		}
+	});
+	modeler
+		.get("elementTemplatesLoader")
+		.setTemplates(entries.map((e) => e.template));
+	return modeler.get("elementTemplates").getAll(id) ?? [];
+}
+
+/**
+ * Every local template with `id`, from the directories in `localTemplateDirs`
+ * merged into one pool (no nearest-directory-wins fallback) and validated.
+ * Only templates with the requested id are validated, so an unrelated invalid
+ * template doesn't produce noise.
+ */
+export function findLocalTemplates(startDir: string, id: string): Template[] {
+	const entries = readLocalTemplates(localTemplateDirs(startDir)).filter(
+		(e) => isRecord(e.template) && e.template.id === id,
+	);
+	return entries.length === 0 ? [] : validateLocalTemplates(id, entries);
+}
+
+type TemplatePickOptions = {
+	executionPlatformVersion?: string | null;
+	/**
+	 * Unpinned picks consider only `isEngineCompatible` versions (strict:
+	 * a malformed `engines.camunda` is incompatible), as `update` requires.
+	 */
+	requireEngineCompatibility?: boolean;
+};
+
+/**
+ * Pick `ref`'s version from `candidates`: a pinned version must match
+ * exactly; otherwise the highest engine-compatible version wins.
+ */
+function pickTemplate(
+	candidates: Template[],
+	ref: TemplateRefId,
+	{
+		executionPlatformVersion,
+		requireEngineCompatibility = false,
+	}: TemplatePickOptions,
+): Template | null {
+	const eligible =
+		requireEngineCompatibility && ref.version === undefined
+			? candidates.filter((template) =>
+					isEngineCompatible(template, executionPlatformVersion ?? ""),
+				)
+			: candidates;
+	return pickVersion(eligible, {
+		version: ref.version,
+		executionPlatformVersion: requireEngineCompatibility
+			? undefined
+			: executionPlatformVersion,
+	});
+}
+
+/**
+ * Resolve an `<id>[@<v>]` reference: a project-local template (searched from
+ * `searchDir` upward, see `findLocalTemplates`) wins, otherwise the OOTB
+ * cache. The version is picked once over the merged local pool with the same
+ * rules as for the cache, so local and OOTB resolution agree. Only the
+ * fallback touches the cache, so a local hit works with a cold cache. Every
+ * subcommand that takes an id goes through here.
+ */
+export async function resolveTemplateId(
+	ref: TemplateRefId,
+	{
+		searchDir = process.cwd(),
+		localTemplates,
+		...options
+	}: TemplatePickOptions & {
+		searchDir?: string;
+		/** Preloaded `findLocalTemplates(searchDir, ref.id)`. */
+		localTemplates?: Template[];
+		/** Preloaded cache contents; skips re-reading `templates.json`. */
+		templates?: Template[];
+	} = {},
+): Promise<Template> {
+	return (
+		pickTemplate(
+			localTemplates ?? findLocalTemplates(searchDir, ref.id),
+			ref,
+			options,
+		) ?? resolveOotbTemplate(ref, options)
+	);
+}
+
+/**
  * Resolve an `<id>[@<v>]` reference to a single template object using the
  * local cache, bootstrapping if needed. `executionPlatformVersion` (from the
  * BPMN file) drives version selection when no explicit version is pinned.
@@ -277,17 +466,9 @@ export async function resolveOotbTemplate(
 		);
 	}
 
-	const eligible =
-		requireEngineCompatibility && ref.version === undefined
-			? candidates.filter((template) =>
-					isEngineCompatible(template, executionPlatformVersion ?? ""),
-				)
-			: candidates;
-	const picked = pickVersion(eligible, {
-		version: ref.version,
-		executionPlatformVersion: requireEngineCompatibility
-			? undefined
-			: executionPlatformVersion,
+	const picked = pickTemplate(candidates, ref, {
+		executionPlatformVersion,
+		requireEngineCompatibility,
 	});
 	if (!picked) {
 		if (ref.version !== undefined) {
@@ -346,7 +527,7 @@ export async function loadTemplate(
 	if (ref.kind === "id") {
 		engineVersionIgnoredByPinnedVersion =
 			ref.version !== undefined && Boolean(executionPlatformVersion);
-		template = await resolveOotbTemplate(ref, {
+		template = await resolveTemplateId(ref, {
 			executionPlatformVersion:
 				ref.version === undefined ? executionPlatformVersion : undefined,
 		});

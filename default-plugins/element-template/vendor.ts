@@ -1,12 +1,14 @@
 /**
  * Shared bpmn-js vendor-bundle loading + minimal type surface for commands
- * that round-trip BPMN through bpmn-js-headless (`apply`, `edit`).
+ * that round-trip BPMN through bpmn-js-headless (`apply`, `edit`) and for
+ * validating local templates (`template-ref.ts`).
  */
 
 import { existsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModdleElement } from "./binding.ts";
+import type { Template } from "./helpers.ts";
 import type { TemplateProperty } from "./migration/types.ts";
 
 export type { ModdleElement };
@@ -23,11 +25,20 @@ export type ElementTemplatesService = {
 			properties: TemplateProperty[];
 		}[],
 	): void;
+	/** Every valid version of `id`; undefined when there is none. */
+	getAll(id: string): Template[] | undefined;
 	applyTemplate(
 		element: BpmnElement,
 		template: { id?: string; version?: number; properties: TemplateProperty[] },
 	): BpmnElement | undefined;
 	getCompatible(element: BpmnElement): unknown[];
+};
+/** Validates templates (Cloud validator) and `set`s the valid ones. */
+export type ElementTemplatesLoader = {
+	setTemplates(templates: unknown[]): void;
+};
+export type EventBus = {
+	on(event: string, callback: (event: unknown) => void): void;
 };
 export type Modeling = {
 	updateModdleProperties(
@@ -40,6 +51,8 @@ export type ModelerInstance = {
 	importXML(xml: string): Promise<unknown>;
 	get(name: "elementRegistry"): ElementRegistry;
 	get(name: "elementTemplates"): ElementTemplatesService;
+	get(name: "elementTemplatesLoader"): ElementTemplatesLoader;
+	get(name: "eventBus"): EventBus;
 	get(name: "modeling"): Modeling;
 	get(name: string): unknown;
 	saveXML(options: { format?: boolean }): Promise<{ xml: string }>;
