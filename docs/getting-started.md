@@ -212,7 +212,7 @@ The `stable` and `alpha` aliases are resolved dynamically from the [Camunda Down
 
 | Alias    | Resolves to                                              |
 | :------- | :------------------------------------------------------- |
-| `stable` | Highest minor release that is GA (for example, 8.9)      |
+| `stable` | Highest minor release that is GA (for example, 8.10)     |
 | `alpha`  | Highest minor release overall (for example, 8.10-alpha0) |
 
 When no version is specified, `c8 cluster start` defaults to `stable`.
