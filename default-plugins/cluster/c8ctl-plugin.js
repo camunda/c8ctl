@@ -2098,13 +2098,56 @@ export function liveRecordedPids(cacheDir) {
 }
 
 /**
+ * Block the calling thread for `ms` without spinning. `recordRunningClusterPids`
+ * is synchronous (its fingerprint source is `execFileSync` anyway), so its
+ * retry backoff has to be synchronous too.
+ */
+function sleepSync(ms) {
+  if (ms > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  }
+}
+
+/**
+ * Fingerprint a PID, retrying while the PID is still alive. `signatureOf` returns
+ * null both for "the process is gone" and for "the platform query failed or timed
+ * out" (a loaded Windows runner can exceed the PowerShell/CIM budget). Only the
+ * second case is transient, and the two are told apart by liveness: a dead PID is
+ * final, a live PID whose query came back empty is retried with backoff. A
+ * signature is still only ever persisted when it was actually captured, so the
+ * retry cannot widen the PID-reuse exposure — it only stops a started process
+ * from being left out of the stop record because of one slow query.
+ */
+function captureSignature(pid, { signatureOf, attempts, retryDelayMs }) {
+  for (let attempt = 1; ; attempt += 1) {
+    const sig = signatureOf(pid);
+    if (sig || attempt >= attempts || !isPidAlive(pid)) {
+      return sig;
+    }
+    sleepSync(retryDelayMs * 2 ** (attempt - 1));
+  }
+}
+
+/**
  * Snapshot the live c8run PIDs for the just-started version into the durable
  * cache-root record, so the cluster stays trackable (status/stop) even if its
  * install dir is later replaced or removed (#560). Each PID is fingerprinted
  * with a start signature so a later stop/status can tell the recorded process
  * apart from an unrelated one that reused its PID.
+ * A transient fingerprint failure on a live PID is retried
+ * (`signatureAttempts`, exponential backoff from `signatureRetryDelayMs`)
+ * rather than silently dropping the PID.
  */
-export function recordRunningClusterPids(config, { signatureOf = processStartSignature, skipEmpty = false, startupFailed = false } = {}) {
+export function recordRunningClusterPids(
+  config,
+  {
+    signatureOf = processStartSignature,
+    skipEmpty = false,
+    startupFailed = false,
+    signatureAttempts = 3,
+    signatureRetryDelayMs = 250,
+  } = {},
+) {
   const canFingerprint = platformSupportsProcessSignature();
   const pids = [];
   const signatures = {};
@@ -2120,10 +2163,22 @@ export function recordRunningClusterPids(config, { signatureOf = processStartSig
       // process, so it is omitted: persisting it without a signature would let
       // a later reuse of the number fall back to numeric liveness and let the
       // reap path signal an unrelated process.
-      const sig = signatureOf(pid);
+      //
+      // A null can also be a transient query failure/timeout on a live process;
+      // captureSignature() retries those, because a PID dropped here is never
+      // signalled by stop and would be left behind as an orphan.
+      const sig = captureSignature(pid, {
+        signatureOf,
+        attempts: signatureAttempts,
+        retryDelayMs: signatureRetryDelayMs,
+      });
       if (sig) {
         signatures[pid] = sig;
         pids.push(pid);
+      } else if (isPidAlive(pid)) {
+        getLogger().warn(
+          `Could not fingerprint running cluster process ${pid}; it will not be tracked for "c8ctl cluster stop" and may need to be stopped manually.`,
+        );
       }
     } else if (isPidAlive(pid)) {
       // This platform can't fingerprint any process, so no recorded PID can
