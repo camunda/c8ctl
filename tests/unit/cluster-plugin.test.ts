@@ -1159,6 +1159,46 @@ describe("Cluster Plugin – parseVersionsFromHtml", () => {
 		);
 	});
 
+	test("graduated minor without an X.Y.0 directory is not the alpha train", () => {
+		// 8.10 has historical alpha dirs and a published patch release (8.10.4/),
+		// but no 8.10.0/ directory. A shipped patch release proves the minor is GA,
+		// so stable must resolve to 8.10 rather than falling back to 8.9.
+		const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.9.5/">8.9.5</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+      <a href="8.10.0-alpha2/">8.10.0-alpha2</a>
+      <a href="8.10.4/">8.10.4</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(
+			result.stable,
+			"8.10",
+			"stable should be 8.10 since a patch release has shipped",
+		);
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
+	test("alpha-only minor with no release directories stays in the alpha train across two-digit minors", () => {
+		// 8.10 only has alpha dirs: it is still the alpha train, and 8.9 (numerically
+		// lower, lexically higher) must remain stable.
+		const html = `
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(result.stable, "8.9");
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
 	test("graduated alpha with new alpha train above", () => {
 		// 8.9 went GA, and 9.0 alphas have started
 		const html = `

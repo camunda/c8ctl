@@ -119,7 +119,8 @@ export async function discoverLatestVersions() {
  * - Minor version directories (e.g. "8.8/", "8.9/") are rolling releases
  *   updated in-place.
  * - An alpha train exists when there are "X.Y.0-alphaN/" directories
- *   for a given minor that has NOT yet shipped a GA release (X.Y.0/).
+ *   for a given minor that has NOT yet shipped a GA release (any X.Y.Z/
+ *   directory without a prerelease suffix).
  *   The highest such minor is the alpha train.
  * - stable = highest minor that is NOT in the alpha train.
  * - alpha  = highest minor overall (regardless of alpha train membership).
@@ -129,8 +130,10 @@ export function parseVersionsFromHtml(html) {
   const minorMatches = [...html.matchAll(/href="(\d+\.\d+)\/"/g)].map(m => m[1]);
   // Match alpha directories like "8.9.0-alpha5/"
   const alphaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0-alpha\d+\/"/g)].map(m => m[1]);
-  // Match GA release directories like "8.9.0/"
-  const gaMatches = [...html.matchAll(/href="(\d+\.\d+)\.0\/"/g)].map(m => m[1]);
+  // Match GA release directories like "8.9.0/" or "8.10.4/". Any non-prerelease
+  // X.Y.Z directory proves the minor has shipped: a listing can contain a patch
+  // release without the X.Y.0 directory (e.g. "8.6.11/" without "8.6.0/").
+  const gaMatches = [...html.matchAll(/href="(\d+\.\d+)\.\d+\/"/g)].map(m => m[1]);
 
   if (minorMatches.length === 0) return null;
 
