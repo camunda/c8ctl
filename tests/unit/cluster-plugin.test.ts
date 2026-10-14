@@ -1332,6 +1332,19 @@ describe("Cluster Plugin – resolveVersion", () => {
 		);
 	});
 
+	test("offline without a persisted alias uses the package fallback", async () => {
+		mockFetchOffline();
+
+		const resolved = await plugin.resolveVersion("stable", {
+			cacheDir: tempDir,
+		});
+		assert.strictEqual(
+			resolved,
+			"8.10",
+			"should use the package fallback when offline without a cached alias",
+		);
+	});
+
 	test("non-alias version specs pass through unchanged", async () => {
 		const resolved = await plugin.resolveVersion("8.8.5", {
 			cacheDir: tempDir,
