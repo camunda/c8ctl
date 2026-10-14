@@ -192,6 +192,27 @@ function deriveGlobalFlagNames(): string[] {
 	return Object.keys(GLOBAL_FLAGS).map((n) => `--${n}`);
 }
 
+/**
+ * Global options that take the next word as their value before the verb, e.g.
+ * `--profile p`. Like `splitGlobals`, `--version` is boolean there.
+ */
+function globalValueOptions(): string[] {
+	return deriveGlobalFlags()
+		.filter((f) => f.type === "string" && f.name !== "version")
+		.flatMap((f) => [`--${f.name}`, ...(f.short ? [`-${f.short}`] : [])]);
+}
+
+/** Words that end a value-taking global without a value: `--` and global flags. */
+function globalFlagTokens(): string[] {
+	return [
+		"--",
+		...deriveGlobalFlags().flatMap((f) => [
+			`--${f.name}`,
+			...(f.short ? [`-${f.short}`] : []),
+		]),
+	];
+}
+
 /** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
 function deriveGlobalFlags(): {
 	name: string;
@@ -403,8 +424,22 @@ ${resourceVars.join("\n")}
   # everything else is forwarded verbatim to the external tool.
   local passthrough_verbs="${passthroughVerbsStr}"
 
-  if [[ \${cur} == -* ]]; then
-    case "\${words[1]}" in
+  # The verb follows any leading global options and their values.
+  local verb_index=1
+  while (( verb_index < cword )); do
+    case "\${words[verb_index]}" in
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
+      -*) (( verb_index += 1 )) ;;
+      *) break ;;
+    esac
+  done
+
+  if [[ \${cur} == -* ]] && (( verb_index < cword )); then
+    case "\${words[verb_index]}" in
 ${reachablePluginCmds(pluginCmds)
 	.map(
 		(cmd) =>
@@ -552,8 +587,22 @@ ${flagEntryLines.join("\n")}
 ${globalFlagEntryLines.join("\n")}
   )
 
-  if (( CURRENT > 3 )) || [[ \${words[CURRENT]} == -* ]]; then
-    case "\${words[2]}" in
+  # The verb follows any leading global options and their values.
+  local verb_index=2
+  while (( verb_index < CURRENT )); do
+    case "\${words[verb_index]}" in
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
+      -*) (( verb_index += 1 )) ;;
+      *) break ;;
+    esac
+  done
+
+  if (( verb_index < CURRENT )) && { (( CURRENT > verb_index + 1 )) || [[ \${words[CURRENT]} == -* ]]; }; then
+    case "\${words[verb_index]}" in
 ${pluginCaseLines.join("\n")}
     esac
   fi
@@ -627,10 +676,29 @@ function generateFishCompletion(): string {
 		"complete -c c8ctl -e",
 		"complete -c c8 -e",
 		"",
-		"# Plugin flags match the verb position only, like bash and zsh",
+		"# Plugin flags match the verb, which follows any leading global options",
 		"function __c8ctl_verb_in",
 		"    set -l tokens (commandline -opc)",
-		"    test (count $tokens) -ge 2; and contains -- $tokens[2] $argv",
+		"    set -l i 2",
+		"    while test $i -le (count $tokens)",
+		"        switch $tokens[$i]",
+		`            case ${globalValueOptions().join(" ")}`,
+		"                set -l next (string replace -r '=.*' '' -- $tokens[(math $i + 1)])",
+		`                if contains -- "$next" ${globalFlagTokens()
+			.map((t) => `'${t}'`)
+			.join(" ")}`,
+		"                    set i (math $i + 1)",
+		"                else",
+		"                    set i (math $i + 2)",
+		"                end",
+		"            case '-*'",
+		"                set i (math $i + 1)",
+		"            case '*'",
+		"                contains -- $tokens[$i] $argv",
+		"                return",
+		"        end",
+		"    end",
+		"    return 1",
 		"end",
 		"",
 	];
