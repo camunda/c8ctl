@@ -144,9 +144,37 @@ describe("parseRecipe", () => {
 		rejects({ schemaVersion: 2, sources: [] }, /Update c8ctl/);
 	});
 
+	test("checks a newer schemaVersion before any other property", () => {
+		const newer = /newer than this c8ctl supports \(1\)\. Update c8ctl/;
+		rejects({ schemaVersion: 2, future: {}, sources: [] }, newer);
+		rejects({ schemaVersion: 2, sources: "x" }, newer);
+		rejects({ schemaVersion: 2, $schema: 5 }, newer);
+	});
+
 	test("refuses a missing schemaVersion and a bare array", () => {
 		rejects({ sources: [] }, /schemaVersion must be 1/);
 		rejects([], /recipe must be an object/);
+	});
+
+	test("refuses a missing or non-integer schemaVersion before unknown keys", () => {
+		for (const schemaVersion of [undefined, 1.5, "1", "2", 0, -1, null]) {
+			rejects({ schemaVersion, sources: [] }, /schemaVersion must be 1/);
+			rejects(
+				{ schemaVersion, future: {}, sources: [] },
+				/schemaVersion must be 1/,
+			);
+		}
+	});
+
+	test("still validates $schema and unknown keys for version 1", () => {
+		rejects(
+			{ $schema: 5, schemaVersion: 1, sources: [source] },
+			/\$schema must be a string/,
+		);
+		rejects(
+			{ schemaVersion: 1, future: {}, sources: [source] },
+			/recipe has unknown property `future`/,
+		);
 	});
 
 	test("refuses empty sources", () => {
@@ -434,6 +462,17 @@ describe("readEmbeddedRecipe", () => {
 		assert.throws(
 			() => readEmbeddedRecipe({ metadata: { migratesFrom: null } }),
 			RecipeError,
+		);
+	});
+
+	test("asks to update c8ctl for a newer embedded recipe with new keys", () => {
+		assert.throws(
+			() =>
+				readEmbeddedRecipe({
+					metadata: { migratesFrom: { schemaVersion: 2, future: {} } },
+				}),
+			(error) =>
+				error instanceof RecipeError && /Update c8ctl/.test(error.message),
 		);
 	});
 });

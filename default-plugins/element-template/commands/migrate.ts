@@ -44,7 +44,11 @@ import {
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport, type MigrationReport } from "../migration/report.ts";
-import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
+import {
+	findSuccessors,
+	latestOf,
+	resolveCatalog,
+} from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
 	type MigrationRedactionContext,
@@ -543,6 +547,12 @@ async function runMigrateInternal(
 	redaction.templates = [...lineages([templateId, target.id]), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
+	// Every element climbs the source lineage's recipe, so a bad one fails the run.
+	const sourceLatest =
+		templateId === target.id ? undefined : latestOf(templates, templateId);
+	const sourceRecipe = sourceLatest && embeddedRecipe(sourceLatest);
+	if (sourceLatest && sourceRecipe)
+		validateRecipeOwner(sourceRecipe, sourceLatest);
 	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
 			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,

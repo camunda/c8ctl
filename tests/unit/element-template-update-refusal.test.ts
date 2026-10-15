@@ -548,5 +548,71 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 		assert.match(result.stderr, /Update c8ctl/);
 	});
 
+	const NEWER_RECIPE = { schemaVersion: 2, future: true, sources: [] };
+
+	test("fails the run when the target carries a newer recipe", async () => {
+		const templatePath = join(ws.workDir, "newer-target.json");
+		writeFileSync(
+			templatePath,
+			JSON.stringify({ ...NEW, metadata: { migratesFrom: NEWER_RECIPE } }),
+		);
+		for (const flags of [
+			["--in-place", "--allow-lossy"],
+			["--dry-run", "--json"],
+		]) {
+			const before = readFileSync(ws.oldBpmn, "utf-8");
+			const result = await run(
+				dataDirWithCache([OLD]),
+				"update",
+				OLD.id,
+				TASK,
+				ws.oldBpmn,
+				"--to",
+				templatePath,
+				...flags,
+			);
+			assert.strictEqual(result.status, 1, result.stderr);
+			assert.strictEqual(result.stdout, "");
+			assert.match(
+				result.stderr,
+				/Template io\.example\.new@1 carries an unusable recipe\..*Update c8ctl/,
+			);
+			assert.strictEqual(readFileSync(ws.oldBpmn, "utf-8"), before);
+		}
+	});
+
+	test("fails the run when the source lineage carries a newer recipe", async () => {
+		const templatePath = join(ws.workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		const newerSource = {
+			...OLD,
+			version: 2,
+			metadata: { migratesFrom: NEWER_RECIPE },
+		};
+		for (const flags of [
+			["--in-place", "--allow-lossy"],
+			["--dry-run", "--json"],
+		]) {
+			const before = readFileSync(ws.oldBpmn, "utf-8");
+			const result = await run(
+				dataDirWithCache([OLD, newerSource]),
+				"update",
+				OLD.id,
+				TASK,
+				ws.oldBpmn,
+				"--to",
+				templatePath,
+				...flags,
+			);
+			assert.strictEqual(result.status, 1, result.stderr);
+			assert.strictEqual(result.stdout, "");
+			assert.match(
+				result.stderr,
+				/Template io\.example\.old@2 carries an unusable recipe\..*Update c8ctl/,
+			);
+			assert.strictEqual(readFileSync(ws.oldBpmn, "utf-8"), before);
+		}
+	});
+
 	test("removes every temp dir it created", assertCleanedUp);
 });
