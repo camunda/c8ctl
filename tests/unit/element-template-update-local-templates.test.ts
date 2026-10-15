@@ -219,6 +219,104 @@ describe("element-template update resolves local templates first", () => {
 		}
 	});
 
+	/** A V3-shaped version whose recipe climbs to version 2, then to itself. */
+	const climbingTo = (version: number) => ({
+		...V3,
+		version,
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "upgrade",
+						sourceTemplateId: V1.id,
+						toVersion: 2,
+						paths: [{ from: "endpoint", to: "url" }],
+					},
+					{
+						kind: "upgrade",
+						sourceTemplateId: V1.id,
+						toVersion: version,
+						paths: [],
+					},
+				],
+			},
+		},
+	});
+	const otherTarget = {
+		...V3,
+		id: "io.example.other",
+		version: 1,
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: V1.id,
+						paths: [{ from: "url", to: "url" }],
+					},
+				],
+			},
+		},
+	};
+
+	test("a template change climbs the compatible source lineage through a cache-only version", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [
+			local(V1),
+			local(climbingTo(4)),
+			local({ ...V3, version: 5, engines: { camunda: "^9.0" } }),
+		]);
+		const target = join(root, "other.json");
+		writeFileSync(target, JSON.stringify(local(otherTarget)));
+		const result = await run(
+			workspace.dataDirWithCache([V1, V2]),
+			bpmn,
+			"--to",
+			target,
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
+		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
+	});
+
+	test("conflicting definitions of an unrelated cached id do not stop a template change", async () => {
+		const { root, bpmn } = project();
+		const unrelated = { ...V1, id: "io.example.unrelated", name: "Unrelated" };
+		const target = join(root, "other.json");
+		writeFileSync(target, JSON.stringify(local(otherTarget)));
+		const result = await run(
+			workspace.dataDirWithCache([
+				V1,
+				V2,
+				climbingTo(3),
+				unrelated,
+				{ ...unrelated, name: "Conflicting unrelated" },
+			]),
+			bpmn,
+			"--to",
+			target,
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
+	});
+
+	test("a corrupt cache does not stop a run whose recipe lists a version below the applied one", async () => {
+		const { root, processes } = project();
+		const applied = await workspace.seedBpmn(
+			V3,
+			["provider=azure", "url=https://v3"],
+			"v3",
+		);
+		const bpmn = join(processes, "v3.bpmn");
+		writeFileSync(bpmn, readFileSync(applied, "utf-8"));
+		writeLocal(root, [local(V3), local(climbingTo(4))]);
+		const result = await run(corruptCache(), bpmn);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(versionOf(result.stdout, TASK), "4");
+	});
+
 	test("a local miss still reports a corrupt cache", async () => {
 		const { bpmn } = project();
 		const result = await run(corruptCache(), bpmn);

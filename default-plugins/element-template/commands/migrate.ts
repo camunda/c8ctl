@@ -565,12 +565,19 @@ async function runMigrateInternal(
 		executionPlatformVersion: engineVersion,
 		templatePool: pool,
 	});
+	// Recipe diagnostics can quote values that only the target knows.
+	redaction.templates = [...(redaction.templates ?? []), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	// A recipe step to a version without a local template needs the cache.
 	const sourceLatest =
 		target.id === templateId
 			? undefined
-			: latestOf(migrationTemplates(pool.pool([templateId])), templateId);
+			: latestOf(
+					compatibleTemplates(pool.pool([templateId]), engineVersion).filter(
+						(t) => t.id === templateId,
+					),
+					templateId,
+				);
 	let sourceRecipe: Recipe | undefined;
 	try {
 		sourceRecipe = sourceLatest && readEmbeddedRecipe(sourceLatest);
@@ -584,9 +591,16 @@ async function runMigrateInternal(
 				? [s.toVersion]
 				: [],
 		);
+	const lowestApplied = Math.min(
+		...selected.map(
+			({ element }) =>
+				readAppliedTemplate(element.businessObject)?.version ?? 0,
+		),
+	);
 	if (
 		stepVersions.some(
 			(v) =>
+				v > lowestApplied &&
 				!localVersions.includes(v) &&
 				!(target.id === templateId && (target.version ?? 0) === v),
 		)

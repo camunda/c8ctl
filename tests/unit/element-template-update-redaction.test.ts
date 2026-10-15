@@ -219,6 +219,11 @@ for (const json of [false, true]) {
 	test(`redacts embedded recipe and target validation diagnostics in ${json ? "JSON" : "text"}`, async () => {
 		for (const invalid of [
 			{ ...target, metadata: { migratesFrom: { ...recipe, [PRIVATE]: true } } },
+			// Only the target knows this value.
+			{
+				...target,
+				metadata: { migratesFrom: { ...recipe, [secrets[6]]: true } },
+			},
 			{
 				...target,
 				properties: target.properties.map((p) =>
