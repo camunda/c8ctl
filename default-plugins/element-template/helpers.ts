@@ -115,6 +115,15 @@ export function atomicOverwriteFile(
 	}
 }
 
+/**
+ * Real path of an existing file. Callers pin it before they read, so a
+ * retargeted link cannot redirect the later write. A missing path stays as
+ * given, so the read reports it as not found.
+ */
+export function pinFilePath(path: string): string {
+	return existsSync(path) ? realpathSync(path) : path;
+}
+
 // ---------------------------------------------------------------------------
 // Shared element-template schema types
 //

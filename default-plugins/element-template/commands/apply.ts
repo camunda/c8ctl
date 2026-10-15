@@ -15,6 +15,7 @@ import {
 	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
+	pinFilePath,
 	type Template,
 	type TemplateProperty,
 	warnUnmetConditions,
@@ -194,6 +195,9 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		throw new Error("--in-place cannot be used with stdin input");
 	}
 
+	// Pin the file before the read, so a retargeted link cannot redirect the write.
+	const writePath =
+		parsed.inPlace && bpmnFilePath ? pinFilePath(bpmnFilePath) : undefined;
 	const input = await readBpmnInput(bpmnFilePath);
 	if (!input) {
 		throw new Error(
@@ -292,8 +296,8 @@ export async function applySubcommand(args: string[]): Promise<void> {
 		warnUnmetConditions(logger, resultXml, setProperties);
 	}
 
-	if (parsed.inPlace && bpmnFilePath) {
-		atomicOverwriteFile(bpmnFilePath, resultXml, input.xml, true);
+	if (writePath) {
+		atomicOverwriteFile(writePath, resultXml, input.xml, true);
 		logger.info(`Updated ${bpmnFilePath}`);
 		return;
 	}

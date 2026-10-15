@@ -350,7 +350,7 @@ describe("CLI behavioural: element-template apply", () => {
 						name.endsWith(".tmp"),
 					),
 				);
-			return { tempDir, target, link, run, tmpFiles };
+			return { tempDir, dataDir, target, link, run, tmpFiles };
 		}
 
 		const exdevPreload = [
@@ -417,6 +417,72 @@ describe("CLI behavioural: element-template apply", () => {
 				rmSync(tempDir, { recursive: true, force: true });
 			}
 		});
+
+		// Retargets the link right after the command reads it. Both files hold
+		// the same XML, so only a path pinned before the read keeps the write
+		// on the file that was read.
+		const retargetAfterRead = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const read = fs.readFileSync; let done = false; fs.readFileSync = (path, ...rest) => { const out = read(path, ...rest); if (!done && String(path) === process.env.C8CTL_TEST_LINK) { done = true; fs.unlinkSync(process.env.C8CTL_TEST_LINK); fs.symlinkSync(process.env.C8CTL_TEST_LINK_TO, process.env.C8CTL_TEST_LINK); } return out; }; syncBuiltinESMExports();`;
+		for (const command of ["apply", "edit"] as const) {
+			test(`${command} writes the file it read when the link is retargeted`, async () => {
+				const { tempDir, dataDir, target, link, run, tmpFiles } =
+					linkedWorkspace();
+				try {
+					if (command === "edit") {
+						const applied = await run(
+							[],
+							"apply",
+							"--in-place",
+							TEMPLATE_FILE,
+							"Activity_17s7axj",
+							target,
+						);
+						assert.strictEqual(applied.status, 0, applied.stderr);
+					}
+					const other = join(tempDir, "shared", "other.bpmn");
+					writeFileSync(other, readFileSync(target));
+					const before = readFileSync(other, "utf-8");
+					const args =
+						command === "apply"
+							? ["apply", "--in-place", TEMPLATE_FILE, "Activity_17s7axj", link]
+							: [
+									"edit",
+									"--in-place",
+									"Activity_17s7axj",
+									link,
+									"--set",
+									"method=PUT",
+								];
+					const result = await c8WithOptions(
+						{
+							nodeArgs: [
+								"--import",
+								`data:text/javascript,${encodeURIComponent(retargetAfterRead)}`,
+							],
+							env: {
+								C8CTL_DATA_DIR: dataDir,
+								C8CTL_OUTPUT_MODE: "text",
+								C8CTL_TEST_LINK: link,
+								C8CTL_TEST_LINK_TO: join("..", "shared", "other.bpmn"),
+							},
+						},
+						"element-template",
+						...args,
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(readFileSync(other, "utf-8"), before);
+					const written = readFileSync(target, "utf-8");
+					if (command === "apply")
+						assert.strictEqual(
+							getTaskDefinitionType(written),
+							"io.camunda:http-json:1",
+						);
+					else assert.strictEqual(getInputValue(written, "method"), "PUT");
+					assert.deepStrictEqual(tmpFiles(), []);
+				} finally {
+					rmSync(tempDir, { recursive: true, force: true });
+				}
+			});
+		}
 
 		test("apply reports a dangling link by path", async () => {
 			const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
