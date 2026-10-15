@@ -426,16 +426,14 @@ export function migrateElement({
 						(a) => a.key === v.key && a.bindingType === v.bindingType,
 					);
 					if (!kept) return true;
-					// Carry-over skips Hidden properties, so the template default replaces the value.
-					const properties = findPropertiesByTarget(
-						application.template.properties,
-						v.key,
-						v.bindingType,
-					);
+					// The value survives when carry-over would write it as is.
 					return (
 						kept.value !== v.value &&
-						properties.length > 0 &&
-						properties.every((p) => p.type === "Hidden")
+						!findPropertiesByTarget(
+							application.template.properties,
+							v.key,
+							v.bindingType,
+						).some((p) => normalizeDestinationValue(p, v.value) === kept.value)
 					);
 				}),
 			);

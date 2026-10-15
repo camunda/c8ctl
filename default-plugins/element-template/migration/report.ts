@@ -335,6 +335,9 @@ export function buildReport({
 	const addedSets = survivingSets.filter(
 		(s) => !find(before, s.key, s.bindingType),
 	);
+	// Maps read the original values; recipe moves read the post-step snapshot.
+	const claimedByMap = (v: ElementValue) =>
+		survivingMoves.some((m) => m.map && sameTarget(v, m.from));
 	const claimedFrom = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.from));
 	const claimedTo = (v: ElementValue) =>
@@ -387,7 +390,7 @@ export function buildReport({
 				!find(droppedValues, v.key, v.bindingType) &&
 				// A surviving map that carries the original value on is not a loss.
 				!(
-					claimedFrom(v) &&
+					claimedByMap(v) &&
 					find(before, v.key, v.bindingType)?.value === v.value
 				),
 		),

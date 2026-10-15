@@ -548,6 +548,87 @@ describe("change floor above the reached version", () => {
 			fixture.assertUnchanged();
 		});
 
+		test(`${kind}: a conditional hidden replacement at the floor is reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("mode", "a", { id: "mode", type: "Hidden" }),
+							input("removed", "floor-default", {
+								type: "Hidden",
+								condition: { property: "mode", equals: "a" },
+							}),
+							input("removed", "", {
+								condition: { property: "mode", equals: "b" },
+							}),
+						],
+					},
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a recipe rename after a floor overwrite does not hide the loss`, async () => {
+			const rename = {
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: source.id,
+						minSourceVersion: 2,
+						paths: [{ from: "removed", to: "moved" }],
+					},
+				],
+			};
+			const fixture = setup({
+				recipe: rename,
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "floor-default", { type: "Hidden" }),
+						],
+					},
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
 		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {
 			const fixture = setup({
 				recipe: floor(2),
