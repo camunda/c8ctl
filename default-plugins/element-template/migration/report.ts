@@ -42,7 +42,8 @@ export interface Field {
 
 /**
  * Where a value on the target came from. `fixed` (a Hidden property) is not
- * reported yet, because Hidden values are left out of the report.
+ * reported yet, because Hidden values are left out of the report. A source
+ * value that a Hidden property replaced is reported as dropped instead.
  */
 export type ValueSource = "recipe" | "map" | "default" | "fixed";
 
@@ -78,7 +79,15 @@ export interface MigrationReport {
 	usedRecipe: boolean;
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
-	dropped: (Field & { value: string; valueName?: string })[];
+	dropped: (Field & {
+		value: string;
+		valueName?: string;
+		/**
+		 * Why a value whose field still exists was lost: a Hidden target
+		 * property reset it, or a move or set overwrote it.
+		 */
+		cause?: "hidden" | "displaced";
+	})[];
 	added: (Field & {
 		value: string;
 		valueName?: string;
@@ -97,7 +106,7 @@ export interface MigrationReport {
 		/** Fields the engine cannot read whose binding the target does not keep. */
 		unchecked: Field[];
 	};
-	/** Nothing was dropped or skipped. */
+	/** Nothing was dropped, overwritten, reset by a Hidden property or skipped. */
 	lossless: boolean;
 }
 
@@ -355,20 +364,41 @@ export function buildReport({
 				sameTarget(v, m.from) &&
 				find(after, m.to.key, m.to.bindingType) === undefined,
 		);
-	const dropped = before
-		.filter(
-			(v) =>
-				v.value !== "" &&
-				((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
-					lostBySource(v)),
+	// A populated value still bound after the migration can be lost too: a
+	// Hidden target property resets it, or a move or set writes over it.
+	const causeOf = (v: ElementValue): "hidden" | "displaced" | undefined => {
+		const actual = find(after, v.key, v.bindingType);
+		if (!actual || actual.value === v.value || claimedFrom(v)) return;
+		if (
+			survivingMoves.some((m) => sameTarget(v, m.to)) ||
+			survivingSets.some((s) => sameTarget(v, s))
 		)
-		.map((v) => {
+			return "displaced";
+		if (
+			isHidden(toTemplate, v.key, v.bindingType) &&
+			!isHidden(fromTemplate, v.key, v.bindingType)
+		)
+			return "hidden";
+	};
+	const dropped: MigrationReport["dropped"] = before
+		.filter((v) => v.value !== "")
+		.flatMap((v) => {
+			const cause = causeOf(v);
+			if (
+				!cause &&
+				(claimedFrom(v) || find(after, v.key, v.bindingType)) &&
+				!lostBySource(v)
+			)
+				return [];
 			const field = fieldOf(fromTemplate, v.key, v.bindingType);
-			return {
-				...field,
-				value: v.value,
-				...withNames(fromTemplate, field, v.value),
-			};
+			return [
+				{
+					...field,
+					value: v.value,
+					...withNames(fromTemplate, field, v.value),
+					...(cause ? { cause } : {}),
+				},
+			];
 		});
 
 	const added: MigrationReport["added"] = after

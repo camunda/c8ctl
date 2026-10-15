@@ -267,6 +267,10 @@ that moved.
   the engine cannot read are not diffed; an editable source field under one is
   reported as unchecked, and the report is lossy, unless the target binds it
   identically and not as Hidden, which is the case where the Modeler keeps it.
+  A field that survives can still lose its value: a Hidden target property
+  resetting an editable source value, or a move or set overwriting a different
+  populated value, is reported as dropped with a `cause`, and the report is lossy.
+  A destination that is itself moved away (a swap or chain) is not displaced.
 - **Read/write identity.** Unqualified rename, guard and interpolation reads fail
   when several binding types match. Qualification selects a binding type; duplicate
   backing identities or extension containers are rejected rather than selecting an

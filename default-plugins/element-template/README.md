@@ -147,6 +147,10 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   identically and not as Hidden, `report.skipped.unchecked` lists it and the
   migration counts as lossy. Without the source template's definition, every such
   value set on the element counts.
+- A value whose field survives can still be lost. A Hidden target property that
+  resets an editable source value, and a move or set that overwrites a different
+  populated value, both list the old value in `dropped` with `cause` `hidden` or
+  `displaced`, and the migration counts as lossy.
 - All selected elements migrate in memory and the file is written once, only if
   every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
   need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:

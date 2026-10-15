@@ -313,7 +313,11 @@ describe("buildReport", () => {
 			report.kept.map((k) => k.key),
 			["effort"],
 		);
-		assert.strictEqual(report.lossless, true);
+		assert.deepStrictEqual(
+			report.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["provider", "azure", "displaced"]],
+		);
+		assert.strictEqual(report.lossless, false);
 	});
 
 	test("lists set values as added and carries notes", () => {
@@ -908,5 +912,126 @@ describe("buildReport item identity, values and sources", () => {
 			report.dropped.map((d) => d.key),
 			["url", "max", "other"],
 		);
+	});
+});
+
+describe("buildReport: values lost to Hidden resets and displaced destinations", () => {
+	const hidden = (template: MigrationTemplate, key: string) => ({
+		...template,
+		properties: [
+			...template.properties.filter((p) => p.binding?.name !== key),
+			{ type: "Hidden", binding: { type: "zeebe:input", name: key } },
+		],
+	});
+	const move = (from: string, to: string) => ({
+		from: { key: from, bindingType: "zeebe:input" },
+		to: { key: to, bindingType: "zeebe:input" },
+		transformed: false,
+	});
+	const report = ({
+		fromTemplate = oldTemplate,
+		toTemplate = newTemplate,
+		before,
+		after,
+		moved = [],
+	}: {
+		fromTemplate?: MigrationTemplate;
+		toTemplate?: MigrationTemplate;
+		before: ElementValue[];
+		after: ElementValue[];
+		moved?: ReturnType<typeof move>[];
+	}) =>
+		buildReport({
+			fromTemplate,
+			toTemplate,
+			before,
+			after,
+			facts: facts({ moved }),
+			usedRecipe: moved.length > 0,
+			refusal: null,
+		});
+
+	test("an editable value reset by a Hidden target property is lost", () => {
+		const r = report({
+			toTemplate: hidden(newTemplate, "provider"),
+			before: [value("provider", "azure")],
+			after: [value("provider", "fixed")],
+		});
+		assert.deepStrictEqual(
+			r.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["provider", "azure", "hidden"]],
+		);
+		assert.strictEqual(r.lossless, false);
+	});
+
+	test("an editable value equal to the Hidden default is kept", () => {
+		const r = report({
+			toTemplate: hidden(newTemplate, "provider"),
+			before: [value("provider", "fixed")],
+			after: [value("provider", "fixed")],
+		});
+		assert.deepStrictEqual(r.dropped, []);
+		assert.strictEqual(r.lossless, true);
+	});
+
+	test("a Hidden source value replaced by a new Hidden default is not lost", () => {
+		const r = report({
+			fromTemplate: hidden(oldTemplate, "provider"),
+			toTemplate: hidden(newTemplate, "provider"),
+			before: [value("provider", "v1-constant")],
+			after: [value("provider", "v2-constant")],
+		});
+		assert.deepStrictEqual(r.dropped, []);
+		assert.strictEqual(r.lossless, true);
+	});
+
+	test("an editable value moved away from a field that becomes Hidden is not lost", () => {
+		const r = report({
+			toTemplate: hidden(newTemplate, "provider"),
+			before: [value("provider", "azure")],
+			after: [value("provider", "fixed"), value("effort", "azure")],
+			moved: [move("provider", "effort")],
+		});
+		assert.deepStrictEqual(r.dropped, []);
+		assert.strictEqual(r.lossless, true);
+	});
+
+	test("a move over a populated destination loses the old value", () => {
+		const r = report({
+			before: [value("maxTokens", "2000"), value("effort", "high")],
+			after: [value("effort", "2000")],
+			moved: [move("maxTokens", "effort")],
+		});
+		assert.strictEqual(r.moved.length, 1);
+		assert.deepStrictEqual(
+			r.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["effort", "high", "displaced"]],
+		);
+		assert.strictEqual(r.lossless, false);
+	});
+
+	for (const [name, prior] of [
+		["an empty", ""],
+		["an equal", "2000"],
+	] as const) {
+		test(`a move over ${name} destination is lossless`, () => {
+			const r = report({
+				before: [value("maxTokens", "2000"), value("effort", prior)],
+				after: [value("effort", "2000")],
+				moved: [move("maxTokens", "effort")],
+			});
+			assert.deepStrictEqual(r.dropped, []);
+			assert.strictEqual(r.lossless, true);
+		});
+	}
+
+	test("a swap keeps both values", () => {
+		const r = report({
+			before: [value("provider", "azure"), value("effort", "high")],
+			after: [value("provider", "high"), value("effort", "azure")],
+			moved: [move("provider", "effort"), move("effort", "provider")],
+		});
+		assert.deepStrictEqual(r.dropped, []);
+		assert.strictEqual(r.lossless, true);
 	});
 });
