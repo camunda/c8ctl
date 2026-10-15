@@ -169,6 +169,56 @@ describe("element-template update resolves local templates first", () => {
 		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
 	});
 
+	test("a recipe climbs through a version only the cache holds", async () => {
+		const { root, bpmn } = project();
+		const climbing = {
+			...V3,
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 2,
+							paths: [{ from: "endpoint", to: "url" }],
+						},
+						{
+							kind: "upgrade",
+							sourceTemplateId: V1.id,
+							toVersion: 3,
+							paths: [],
+						},
+					],
+				},
+			},
+		};
+		writeLocal(root, [local(V1), local(climbing)]);
+		const result = await run(workspace.dataDirWithCache([V1, V2]), bpmn);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(versionOf(result.stdout, TASK), "3");
+		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
+	});
+
+	test("a pinned target only the cache holds is checked for conflicts", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [local(V1)]);
+		const shadow = { ...V2, name: "Conflicting cached target" };
+		for (const duplicates of [
+			[V2, shadow],
+			[shadow, V2],
+		]) {
+			const result = await run(
+				workspace.dataDirWithCache([V1, ...duplicates]),
+				bpmn,
+				"--to",
+				`${V2.id}@2`,
+			);
+			assert.equal(result.status, 1, result.stdout);
+			assert.match(result.stderr, /Conflicting definitions for template/);
+		}
+	});
+
 	test("a local miss still reports a corrupt cache", async () => {
 		const { bpmn } = project();
 		const result = await run(corruptCache(), bpmn);

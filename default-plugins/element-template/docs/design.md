@@ -231,8 +231,8 @@ that moved.
   of the involved ids shadowing cached ones of the same id and version. The
   cache is read only on a local gap: the target falls back to it, an involved
   id has neither a local template nor a `--to` file or URL, or an applied
-  version has no local template. A fully local update never reads the cache,
-  so a corrupt cache does not stop it.
+  version or a recipe step version has no local template. A fully local
+  update never reads the cache, so a corrupt cache does not stop it.
 - **Unavailable source.** When the applied version is found nowhere, the
   engine gets a stub with the applied id and version and no properties. Recipe
   reads against the stub are not checked for coverage. Values it cannot read,

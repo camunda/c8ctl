@@ -44,7 +44,11 @@ import {
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport, type MigrationReport } from "../migration/report.ts";
-import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
+import {
+	findSuccessors,
+	latestOf,
+	resolveCatalog,
+} from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
 	type MigrationRedactionContext,
@@ -332,20 +336,23 @@ async function resolveTarget({
 }): Promise<MigrationTemplate> {
 	const arg = to ?? templateId;
 	const ref = parseTemplateRef(arg);
-	if (ref?.kind === "id") {
+	const checkConflicts = (id: string) =>
 		resolveCatalog(
-			migrationTemplates(
-				templatePool.pool([ref.id]).filter((t) => t.id === ref.id),
-			),
+			migrationTemplates(templatePool.pool([id]).filter((t) => t.id === id)),
 		);
-	}
+	if (ref?.kind === "id") checkConflicts(ref.id);
 	const target =
 		ref?.kind === "id"
 			? await resolveTemplateId(ref, {
 					localTemplates: templatePool.localOf(ref.id),
 					executionPlatformVersion,
 					requireEngineCompatibility: true,
-					loadTemplates: templatePool.cache,
+					loadTemplates: () => {
+						const cached = templatePool.cache();
+						// The cached versions join the pool, so check it again.
+						checkConflicts(ref.id);
+						return cached;
+					},
 				})
 			: await readTemplateFromPathOrUrl(arg);
 	if (!isMigrationTemplate(target)) {
@@ -558,6 +565,34 @@ async function runMigrateInternal(
 		executionPlatformVersion: engineVersion,
 		templatePool: pool,
 	});
+	const targetRecipe = recipe ?? embeddedRecipe(target);
+	// A recipe step to a version without a local template needs the cache.
+	const sourceLatest =
+		target.id === templateId
+			? undefined
+			: latestOf(migrationTemplates(pool.pool([templateId])), templateId);
+	let sourceRecipe: Recipe | undefined;
+	try {
+		sourceRecipe = sourceLatest && readEmbeddedRecipe(sourceLatest);
+	} catch {
+		// Step resolution reports an unusable recipe for each element.
+	}
+	const stepVersions = [targetRecipe, sourceRecipe]
+		.flatMap((r) => r?.sources ?? [])
+		.flatMap((s) =>
+			s.kind === "upgrade" && s.sourceTemplateId === templateId
+				? [s.toVersion]
+				: [],
+		);
+	if (
+		stepVersions.some(
+			(v) =>
+				!localVersions.includes(v) &&
+				!(target.id === templateId && (target.version ?? 0) === v),
+		)
+	) {
+		pool.cache();
+	}
 	const cache = compatibleTemplates(
 		pool.pool([templateId, target.id]),
 		engineVersion,
@@ -567,7 +602,6 @@ async function runMigrateInternal(
 		[target],
 	);
 	redaction.templates = [...lineages([templateId, target.id]), target];
-	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
