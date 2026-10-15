@@ -9,6 +9,7 @@ import {
 	existsSync,
 	openSync,
 	readFileSync,
+	realpathSync,
 	unlinkSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -878,7 +879,8 @@ async function runLockedMigrate(
 		return runMigrateInternal(resolved, redaction);
 	if (!existsSync(resolvePath(file)))
 		throw new Error(`File not found: ${file}`);
-	const lock = `${resolvePath(file)}.migration.lock`;
+	// Links to one file MUST share a lock, so it sits beside the real file.
+	const lock = `${realpathSync(file)}.migration.lock`;
 	let descriptor: number;
 	try {
 		descriptor = openSync(lock, "wx");

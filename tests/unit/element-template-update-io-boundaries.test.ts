@@ -10,8 +10,12 @@ import assert from "node:assert";
 import {
 	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
+	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -184,6 +188,63 @@ describe("update file input errors", () => {
 		assert.strictEqual(result.status, 1, result.stderr);
 		assert.strictEqual(result.stdout, "");
 		assert.match(result.stderr, /EISDIR|directory/i);
+	});
+});
+
+describe("update --in-place through a symlink", {
+	skip:
+		process.platform === "win32"
+			? "creating symlinks needs elevated rights on Windows"
+			: false,
+}, () => {
+	// The link and its target sit in sibling directories.
+	function linkedCopy(name: string) {
+		const dir = join(ws.workDir, name);
+		mkdirSync(join(dir, "shared"), { recursive: true });
+		mkdirSync(join(dir, "models"));
+		const target = join(dir, "shared", "model.bpmn");
+		const link = join(dir, "models", "model.bpmn");
+		writeFileSync(target, readFileSync(ws.versionedBpmn));
+		symlinkSync(join("..", "shared", "model.bpmn"), link);
+		return { dir, target, link };
+	}
+
+	const leftovers = (dir: string) =>
+		["shared", "models"].flatMap((sub) =>
+			readdirSync(join(dir, sub)).filter(
+				(name) => name.endsWith(".tmp") || name.endsWith(".lock"),
+			),
+		);
+
+	test("writes the target and keeps the link", async () => {
+		const { dir, target, link } = linkedCopy("symlink-write");
+		const result = await run(cache(), "update", V1.id, TASK, link, "-i");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+		assert.match(readFileSync(target, "utf-8"), /modelerTemplateVersion="2"/);
+		assert.deepStrictEqual(leftovers(dir), []);
+	});
+
+	test("a dangling link is reported by path", async () => {
+		const { dir, target, link } = linkedCopy("symlink-dangling");
+		rmSync(target);
+		const result = await run(cache(), "update", V1.id, TASK, link, "-i");
+		assertRejected(result, /File not found: .*model\.bpmn/, "dangling");
+		assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+		assert.strictEqual(existsSync(target), false);
+		assert.deepStrictEqual(leftovers(dir), []);
+	});
+
+	test("two links to one file share the migration lock", async () => {
+		const { target, link } = linkedCopy("symlink-lock");
+		const lock = `${target}.migration.lock`;
+		writeFileSync(lock, "");
+		const before = readFileSync(target, "utf-8");
+		const result = await run(cache(), "update", V1.id, TASK, link, "-i");
+		assertRejected(result, /Cannot acquire migration lock/, "lock");
+		assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+		assert.strictEqual(readFileSync(target, "utf-8"), before);
+		assert.ok(existsSync(lock), "the other writer's lock must stay");
 	});
 });
 
