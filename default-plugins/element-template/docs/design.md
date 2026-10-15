@@ -228,7 +228,17 @@ that moved.
   templates first (see above), with `isEngineCompatible` as the eligibility
   rule; the cache is required only on the fallback. Steps, the applied source
   and redaction read template versions from the cache, with the local versions
-  of the involved ids shadowing cached ones of the same id and version.
+  of the involved ids shadowing cached ones of the same id and version. The
+  cache is read only on a local gap: the target falls back to it, an involved
+  id has neither a local template nor a `--to` file or URL, or an applied
+  version has no local template. A fully local update never reads the cache,
+  so a corrupt cache does not stop it.
+- **Unavailable source.** When the applied version is found nowhere, the
+  engine gets a stub with the applied id and version and no properties. Recipe
+  reads against the stub are not checked for coverage. Values it cannot read,
+  such as `zeebe:calledElement`, are taken from the element and count as
+  unchecked unless the target binds them identically, so a write still needs
+  `--allow-lossy`.
 - **Recipe location.** A recipe is carried by the template it migrates *to*, in
   `metadata.migratesFrom`, so it travels with the template through the
   marketplace and the cache. `metadata` is the schema's free-form area; it

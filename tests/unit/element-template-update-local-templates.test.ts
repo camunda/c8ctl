@@ -39,7 +39,7 @@ function writeLocal(dir: string, templates: object[]): void {
 	writeFileSync(join(localDir, "custom.json"), JSON.stringify(templates));
 }
 
-function run(dataDir: string, bpmn: string) {
+function run(dataDir: string, bpmn: string, ...extra: string[]) {
 	const modelerDir = mkdtempSync(join(ws.workDir, "modeler-"));
 	return c8WithOptions(
 		{
@@ -53,7 +53,15 @@ function run(dataDir: string, bpmn: string) {
 		"update",
 		V1.id,
 		bpmn,
+		...extra,
 	);
+}
+
+/** A data dir whose `templates.json` is not valid JSON. */
+function corruptCache(): string {
+	const dataDir = workspace.dataDirWithCache([]);
+	writeFileSync(join(dataDir, "element-templates", "templates.json"), "{");
+	return dataDir;
 }
 
 describe("element-template update resolves local templates first", () => {
@@ -96,5 +104,75 @@ describe("element-template update resolves local templates first", () => {
 		const result = await run(coldDataDir, bpmn);
 		assert.equal(result.status, 1);
 		assert.match(result.stderr, /element-template sync/);
+	});
+
+	test("a corrupt cache does not stop a run on local templates", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [local(V1), local(V2)]);
+		const result = await run(corruptCache(), bpmn);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(versionOf(result.stdout, TASK), "2");
+	});
+
+	test("a corrupt cache does not stop a run with a target file and a recipe file", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [local(V1)]);
+		const target = join(root, "v2.json");
+		writeFileSync(
+			target,
+			JSON.stringify(local({ ...V2, metadata: undefined })),
+		);
+		const recipe = join(root, "recipe.json");
+		writeFileSync(recipe, JSON.stringify(V2.metadata.migratesFrom));
+		const result = await run(
+			corruptCache(),
+			bpmn,
+			"--to",
+			target,
+			"--recipe",
+			recipe,
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.equal(versionOf(result.stdout, TASK), "2");
+		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
+	});
+
+	test("a corrupt cache does not stop a run to a target file of another id", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [local(V1)]);
+		const target = join(root, "other.json");
+		writeFileSync(
+			target,
+			JSON.stringify(
+				local({
+					...V2,
+					id: "io.example.other",
+					version: 1,
+					metadata: {
+						migratesFrom: {
+							schemaVersion: 1,
+							sources: [
+								{
+									kind: "change",
+									sourceTemplateId: V1.id,
+									paths: [{ from: "endpoint", to: "url" }],
+								},
+							],
+						},
+					},
+				}),
+			),
+		);
+		const result = await run(corruptCache(), bpmn, "--to", target);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
+		assert.match(result.stdout, /source="https:\/\/v1" target="url"/);
+	});
+
+	test("a local miss still reports a corrupt cache", async () => {
+		const { bpmn } = project();
+		const result = await run(corruptCache(), bpmn);
+		assert.equal(result.status, 1);
+		assert.match(result.stderr, /cache is corrupt/);
 	});
 });

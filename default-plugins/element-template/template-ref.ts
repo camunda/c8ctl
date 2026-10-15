@@ -421,8 +421,8 @@ export async function resolveTemplateId(
 		searchDir?: string;
 		/** Preloaded `findLocalTemplates(searchDir, ref.id)`. */
 		localTemplates?: Template[];
-		/** Preloaded cache contents; skips re-reading `templates.json`. */
-		templates?: Template[];
+		/** Reads the cache contents in place of `templates.json`, on a local miss only. */
+		loadTemplates?: () => Template[];
 	} = {},
 ): Promise<Template> {
 	return (
@@ -444,20 +444,20 @@ export async function resolveOotbTemplate(
 	{
 		executionPlatformVersion,
 		requireEngineCompatibility = false,
-		templates,
+		loadTemplates,
 	}: {
 		executionPlatformVersion?: string | null;
 		requireEngineCompatibility?: boolean;
-		/** Preloaded cache contents; skips re-reading `templates.json`. */
-		templates?: Template[];
+		/** Reads the cache contents in place of `templates.json`. */
+		loadTemplates?: () => Template[];
 	} = {},
 ): Promise<Template> {
 	const logger = c8ctl.getLogger();
 	requireCachePresent();
 	nudgeIfStale(logger);
 
-	const candidates = templates
-		? templates.filter((t) => t.id === ref.id)
+	const candidates = loadTemplates
+		? loadTemplates().filter((t) => t.id === ref.id)
 		: findById(ref.id);
 	if (candidates.length === 0) {
 		throw new Error(

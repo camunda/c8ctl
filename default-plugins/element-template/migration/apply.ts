@@ -326,7 +326,8 @@ function applyApplication(
  * `templates` must hold every template the change may need: the applied one
  * (for a precise carry-over), the intermediate versions a recipe climbs and
  * the target. `fromTemplate` is a stub with no properties when the applied
- * template is not available. Throws when a required step template is missing
+ * template is not available; pass `sourceKnown: false` then, so the recipe is
+ * not checked against the stub. Throws when a required step template is missing
  * or the recipe writes to a path the target does not bind; nothing is
  * modified in that case.
  */
@@ -334,6 +335,7 @@ export function migrateElement({
 	modeler,
 	element,
 	fromTemplate,
+	sourceKnown = true,
 	target,
 	templates,
 	recipe,
@@ -342,6 +344,8 @@ export function migrateElement({
 	modeler: MigrationModeler;
 	element: BpmnElement;
 	fromTemplate: MigrationTemplate;
+	/** False when `fromTemplate` is a stub for an unavailable template. */
+	sourceKnown?: boolean;
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
@@ -362,6 +366,7 @@ export function migrateElement({
 	const { steps, refusal } = resolveSteps({
 		appliedId: fromTemplate.id,
 		appliedVersion: fromTemplate.version ?? 0,
+		appliedShapeKnown: sourceKnown,
 		target,
 		templates,
 		recipe,

@@ -235,33 +235,56 @@ describe("migration context consistency", () => {
 		});
 	}
 
-	for (const catalogSource of [undefined, SOURCE]) {
-		test(`does not borrow source coverage from the catalog (${catalogSource ? "conflicting catalog" : "absent catalog"})`, () => {
+	const upgradeReadingA = () =>
+		parseRecipe({
+			schemaVersion: 1,
+			sources: [
+				{
+					kind: "upgrade",
+					sourceTemplateId: SOURCE.id,
+					toVersion: 2,
+					paths: [{ from: "a", to: "b" }],
+				},
+			],
+		});
+
+	// The catalog shape lacks "a": borrowing it would refuse the recipe.
+	const catalogWithoutA: MigrationTemplate = {
+		...SOURCE,
+		properties: [{ binding: { type: "zeebe:input", name: "b" } }],
+	};
+	for (const catalogSource of [undefined, catalogWithoutA]) {
+		test(`an unknown source skips coverage without borrowing it from the catalog (${catalogSource ? "conflicting catalog" : "absent catalog"})`, () => {
 			const ctx = context();
 			const fromTemplate = { ...SOURCE, properties: [] };
 			const target = { ...TARGET, id: SOURCE.id };
 			const { report } = migrateElement({
 				...ctx,
 				fromTemplate,
+				sourceKnown: false,
 				target,
 				templates: catalogSource ? [catalogSource, target] : [target],
-				recipe: parseRecipe({
-					schemaVersion: 1,
-					sources: [
-						{
-							kind: "upgrade",
-							sourceTemplateId: SOURCE.id,
-							toVersion: 2,
-							paths: [{ from: "a", to: "b" }],
-						},
-					],
-				}),
+				recipe: upgradeReadingA(),
 			});
-			assert.match(report.refusal ?? "", /reads "a"/);
-			assert.equal(report.usedRecipe, false);
+			assert.equal(report.refusal, null);
+			assert.equal(report.usedRecipe, true);
 			assert.equal(registeredFor(ctx, fromTemplate), fromTemplate);
 		});
 	}
+
+	test("a known source without the read binding still refuses the recipe", () => {
+		const ctx = context();
+		const fromTemplate = { ...SOURCE, properties: [] };
+		const { report } = migrateElement({
+			...ctx,
+			fromTemplate,
+			target: { ...TARGET, id: SOURCE.id },
+			templates: [],
+			recipe: upgradeReadingA(),
+		});
+		assert.match(report.refusal ?? "", /reads "a"/);
+		assert.equal(report.usedRecipe, false);
+	});
 
 	for (const matches of [false, true]) {
 		test(`checks the returned replacement element identity (matches=${matches})`, () => {
