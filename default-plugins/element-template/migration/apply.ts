@@ -214,7 +214,11 @@ function applyApplication(
 	element: BpmnElement,
 	application: Application,
 	mapWrites: Write[] = [],
-): { element: BpmnElement; facts: ReportFacts } | null {
+): {
+	element: BpmnElement;
+	facts: ReportFacts;
+	written: { key: string; bindingType: string | null; value: string }[];
+} | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
 	if (
@@ -299,8 +303,19 @@ function applyApplication(
 			? normalizeDestinationValue(property, write.value)
 			: undefined;
 	};
+	// What the writes put on each active property, after normalization.
+	const written = writes.flatMap((w) =>
+		findPropertiesByTarget(clone.properties, w.key, w.bindingType)
+			.filter((property) => active.has(property))
+			.map((property) => ({
+				key: w.key,
+				bindingType: w.bindingType,
+				value: normalizeDestinationValue(property, w.value),
+			})),
+	);
 	return {
 		element: current,
+		written,
 		facts: {
 			...facts,
 			after: valuesOf(current),
@@ -426,14 +441,15 @@ export function migrateElement({
 						(a) => a.key === v.key && a.bindingType === v.bindingType,
 					);
 					if (!kept) return true;
-					// The value survives when carry-over would write it as is.
+					// The value survives when an active write put it there unchanged.
 					return (
 						kept.value !== v.value &&
-						!findPropertiesByTarget(
-							application.template.properties,
-							v.key,
-							v.bindingType,
-						).some((p) => normalizeDestinationValue(p, v.value) === kept.value)
+						!result.written.some(
+							(w) =>
+								w.key === v.key &&
+								w.bindingType === v.bindingType &&
+								w.value === kept.value,
+						)
 					);
 				}),
 			);
