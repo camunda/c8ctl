@@ -194,7 +194,8 @@ function implicitFloor({
 	recipe: Recipe | undefined;
 	sourceId: string;
 	reachedVersion: number;
-	newest: number;
+	/** Newest compatible source version; undefined when none is compatible. */
+	newest: number | undefined;
 	engineVersion?: string;
 }): number | undefined {
 	const changes = recipeSourcesFor(recipe, sourceId).filter(
@@ -205,7 +206,7 @@ function implicitFloor({
 			? [s.minSourceVersion]
 			: [],
 	);
-	const reachable = floors.filter((f) => f <= newest);
+	const reachable = floors.filter((f) => newest !== undefined && f <= newest);
 	if (reachable.length === 0) {
 		const hasFallback = changes.length > floors.length;
 		if (
@@ -217,7 +218,11 @@ function implicitFloor({
 				? `Camunda ${engineVersion} (from the BPMN executionPlatformVersion)`
 				: "the BPMN Camunda version";
 			throw new Error(
-				`Template '${sourceId}' v${Math.min(...floors)} or later is required, but the newest version compatible with ${camunda} is v${newest}.`,
+				`Template '${sourceId}' v${Math.min(...floors)} or later is required, but ${
+					newest === undefined
+						? `no version compatible with ${camunda} is available`
+						: `the newest version compatible with ${camunda} is v${newest}`
+				}.`,
 			);
 		}
 		return undefined;
@@ -298,7 +303,7 @@ export function resolveSteps({
 				recipe: targetRecipe,
 				sourceId: appliedId,
 				reachedVersion,
-				newest: compatibleVersions.at(-1) ?? appliedVersion,
+				newest: compatibleVersions.at(-1),
 				engineVersion,
 			});
 	if (floor !== undefined) {

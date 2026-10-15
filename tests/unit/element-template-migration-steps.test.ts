@@ -1357,6 +1357,22 @@ describe("implicit update to the recipe floor", () => {
 		);
 	});
 
+	test("reports that no compatible source version exists when the catalog is empty", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(2));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1), target],
+					engineVersion: "8.8",
+					isCompatible: (t) => t.id !== "old",
+				}),
+			/Template 'old' v2 or later is required, but no version compatible with Camunda 8\.8 \(from the BPMN executionPlatformVersion\) is available\./,
+		);
+	});
+
 	test("an applied version above an unreachable floor does not throw", () => {
 		const target = withRecipe(template("new", 1, ["x"]), change(5));
 		const result = resolveSteps({
