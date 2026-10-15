@@ -420,13 +420,24 @@ export function migrateElement({
 				implicitTemplates.push(application.template);
 			const valuesAfter = valuesOf(current);
 			lostInImplicitSteps.push(
-				...valuesBefore.filter(
-					(v) =>
-						v.value !== "" &&
-						!valuesAfter.some(
-							(a) => a.key === v.key && a.bindingType === v.bindingType,
-						),
-				),
+				...valuesBefore.filter((v) => {
+					if (v.value === "") return false;
+					const kept = valuesAfter.find(
+						(a) => a.key === v.key && a.bindingType === v.bindingType,
+					);
+					if (!kept) return true;
+					// Carry-over skips Hidden properties, so the template default replaces the value.
+					const properties = findPropertiesByTarget(
+						application.template.properties,
+						v.key,
+						v.bindingType,
+					);
+					return (
+						kept.value !== v.value &&
+						properties.length > 0 &&
+						properties.every((p) => p.type === "Hidden")
+					);
+				}),
 			);
 			mapsApplied ||= isFinal;
 		}

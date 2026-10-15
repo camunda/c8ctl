@@ -516,6 +516,38 @@ describe("change floor above the reached version", () => {
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
 		});
 
+		test(`${kind}: a value the floor version overwrites at a hidden binding is reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "floor-default", { type: "Hidden" }),
+						],
+					},
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.equal(envelope.requiresAuthorization, true);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
 		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {
 			const fixture = setup({
 				recipe: floor(2),
