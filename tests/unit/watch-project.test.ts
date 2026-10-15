@@ -110,8 +110,14 @@ describe("watch --project", () => {
 				ready,
 				`Watch should reach readiness, got:\n${watch.getOutput()}`,
 			);
+			// The project-mode line is logged after the readiness banner.
+			const projectMode = await pollUntil(
+				async () => watch.getOutput().includes("Project mode"),
+				10000,
+				100,
+			);
 			assert.ok(
-				watch.getOutput().includes("Project mode"),
+				projectMode,
 				`Watch should indicate project mode in output, got:\n${watch.getOutput()}`,
 			);
 		} finally {
