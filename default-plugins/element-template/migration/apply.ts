@@ -218,6 +218,8 @@ function applyApplication(
 	element: BpmnElement;
 	facts: ReportFacts;
 	written: { key: string; bindingType: string | null; value: string }[];
+	/** The template with only the properties that were active when it was applied. */
+	activeTemplate: MigrationTemplate;
 } | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
@@ -316,6 +318,10 @@ function applyApplication(
 	return {
 		element: current,
 		written,
+		activeTemplate: {
+			...clone,
+			properties: clone.properties.filter((property) => active.has(property)),
+		},
 		facts: {
 			...facts,
 			after: valuesOf(current),
@@ -432,7 +438,7 @@ export function migrateElement({
 			current = result.element;
 			allFacts.push(result.facts);
 			if (application.step?.implicit)
-				implicitTemplates.push(application.template);
+				implicitTemplates.push(result.activeTemplate);
 			const valuesAfter = valuesOf(current);
 			lostInImplicitSteps.push(
 				...valuesBefore.filter((v) => {
