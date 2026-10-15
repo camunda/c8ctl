@@ -1323,6 +1323,56 @@ describe("implicit update to the recipe floor", () => {
 		);
 	});
 
+	test("an engine-incompatible applied version is not named as compatible", () => {
+		const incompatible = (t: MigrationTemplate) => t.version !== 5;
+		const target = withRecipe(template("new", 1, ["x"]), change(6));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 5,
+					target,
+					templates: [...lineage(4, 5), target],
+					engineVersion: "8.8",
+					isCompatible: incompatible,
+				}),
+			/is required, but the newest version compatible with Camunda 8\.8.*is v4\./,
+		);
+	});
+
+	test("the missing-floor error lists only compatible versions", () => {
+		const incompatible = (t: MigrationTemplate) => t.version !== 1;
+		const target = withRecipe(template("new", 1, ["x"]), change(2));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1, 3, 4), target],
+					engineVersion: "8.8",
+					isCompatible: incompatible,
+				}),
+			/v2 is not available.*compatible versions: 3, 4\./,
+		);
+	});
+
+	test("an applied version above an unreachable floor does not throw", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(5));
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 5,
+			target,
+			templates: [...lineage(4, 5), target],
+			engineVersion: "8.8",
+			isCompatible: (t) => t.version !== 5,
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => s.kind),
+			["hop"],
+		);
+	});
+
 	test("findSuccessors advertises a successor reachable through an implicit step", () => {
 		const target = withRecipe(template("new", 1, ["x"]), change(3));
 		assert.deepStrictEqual(findSuccessors([target], "old", 1, lineage(1, 3)), [

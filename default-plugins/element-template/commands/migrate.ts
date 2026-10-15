@@ -614,6 +614,7 @@ async function runMigrateInternal(
 				templates,
 				recipe,
 				engineVersion,
+				isCompatible: (template) => isEngineCompatible(template, engineVersion),
 				maps,
 			});
 			redaction.values = [

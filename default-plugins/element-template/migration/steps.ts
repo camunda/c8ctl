@@ -181,7 +181,8 @@ function reachableHop(
 /**
  * The version an implicit step must reach so the best change entry applies:
  * the highest floor at most `newest`. Undefined when no floor needs a bump.
- * Throws when every floor is above `newest` and no entry applies without one.
+ * Throws when the element is below every floor, all floors are above `newest`
+ * and no entry applies without one.
  */
 function implicitFloor({
 	recipe,
@@ -207,7 +208,11 @@ function implicitFloor({
 	const reachable = floors.filter((f) => f <= newest);
 	if (reachable.length === 0) {
 		const hasFallback = changes.length > floors.length;
-		if (floors.length > 0 && !hasFallback) {
+		if (
+			floors.length > 0 &&
+			!hasFallback &&
+			reachedVersion < Math.min(...floors)
+		) {
 			const camunda = engineVersion
 				? `Camunda ${engineVersion} (from the BPMN executionPlatformVersion)`
 				: "the BPMN Camunda version";
@@ -235,6 +240,7 @@ export function resolveSteps({
 	templates,
 	recipe,
 	engineVersion,
+	isCompatible = () => true,
 }: {
 	appliedId: string;
 	appliedVersion: number;
@@ -243,6 +249,8 @@ export function resolveSteps({
 	recipe?: Recipe;
 	/** Camunda version of the BPMN, used to explain an unreachable floor. */
 	engineVersion?: string;
+	/** Whether a template fits the BPMN's Camunda version; the applied one may not. */
+	isCompatible?: (template: MigrationTemplate) => boolean;
 }): ResolvedSteps {
 	templates = resolveCatalog(templates, [target]);
 	const sameId = target.id === appliedId;
@@ -280,23 +288,23 @@ export function resolveSteps({
 	}
 
 	let reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
+	const compatibleVersions = templates
+		.filter((t) => t.id === appliedId && isCompatible(t))
+		.map((t) => versionOf(t) ?? 0)
+		.sort((a, b) => a - b);
 	const floor = sameId
 		? undefined
 		: implicitFloor({
 				recipe: targetRecipe,
 				sourceId: appliedId,
 				reachedVersion,
-				newest: limit,
+				newest: compatibleVersions.at(-1) ?? appliedVersion,
 				engineVersion,
 			});
 	if (floor !== undefined) {
-		if (!templates.some((t) => t.id === appliedId && versionOf(t) === floor)) {
-			const available = templates
-				.filter((t) => t.id === appliedId)
-				.map((t) => versionOf(t) ?? 0)
-				.sort((a, b) => a - b);
+		if (!compatibleVersions.includes(floor)) {
 			throw new Error(
-				`Template '${appliedId}' v${floor} is not available${engineVersion ? ` for Camunda ${engineVersion}` : ""}; compatible versions: ${available.join(", ") || "none"}.`,
+				`Template '${appliedId}' v${floor} is not available${engineVersion ? ` for Camunda ${engineVersion}` : ""}; compatible versions: ${compatibleVersions.join(", ") || "none"}.`,
 			);
 		}
 		rungs.push({ toVersion: floor, entries: [], implicit: true });

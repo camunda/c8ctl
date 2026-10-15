@@ -367,6 +367,7 @@ export function migrateElement({
 	templates,
 	recipe,
 	engineVersion,
+	isCompatible,
 	maps = [],
 }: {
 	modeler: MigrationModeler;
@@ -377,6 +378,8 @@ export function migrateElement({
 	recipe?: Recipe;
 	/** Camunda version of the BPMN, used to explain an unreachable source floor. */
 	engineVersion?: string;
+	/** Whether a template fits the BPMN's Camunda version. */
+	isCompatible?: (template: MigrationTemplate) => boolean;
 	/** Moves of original values to the final target, applied after all steps. */
 	maps?: ValueMap[];
 }): MigrationResult {
@@ -398,6 +401,7 @@ export function migrateElement({
 		templates,
 		recipe,
 		engineVersion,
+		isCompatible,
 	});
 	const applications = resolveApplications(templates, steps, target);
 	for (const { step, template } of applications) {
