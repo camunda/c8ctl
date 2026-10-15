@@ -597,23 +597,51 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 		});
 	}
 
+	test("fails the run when an engine-incompatible applied source carries a newer recipe", async () => {
+		const templatePath = join(ws.workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		// The element is on old@2, which the engine filter drops from the catalog.
+		const applied = {
+			...OLD,
+			version: 2,
+			engines: { camunda: "^99.0" },
+			metadata: { migratesFrom: NEWER_RECIPE },
+		};
+		const bpmn = join(ws.workDir, "old-v2.bpmn");
+		const xml = readFileSync(ws.oldBpmn, "utf-8");
+		const appliedV2 = xml.replace(
+			'modelerTemplateVersion="1"',
+			'modelerTemplateVersion="2"',
+		);
+		assert.notStrictEqual(appliedV2, xml);
+		writeFileSync(bpmn, appliedV2);
+		await assertRunFails(
+			dataDirWithCache([OLD, applied]),
+			templatePath,
+			"io.example.old@2",
+			/Update c8ctl/,
+			bpmn,
+		);
+	});
+
 	async function assertRunFails(
 		dataDir: string,
 		templatePath: string,
 		owner: string,
 		error: RegExp,
+		bpmn = ws.oldBpmn,
 	) {
 		for (const flags of [
 			["--in-place", "--allow-lossy"],
 			["--dry-run", "--json"],
 		]) {
-			const before = readFileSync(ws.oldBpmn, "utf-8");
+			const before = readFileSync(bpmn, "utf-8");
 			const result = await run(
 				dataDir,
 				"update",
 				OLD.id,
 				TASK,
-				ws.oldBpmn,
+				bpmn,
 				"--to",
 				templatePath,
 				...flags,
@@ -627,7 +655,7 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 				),
 			);
 			assert.match(result.stderr, error);
-			assert.strictEqual(readFileSync(ws.oldBpmn, "utf-8"), before);
+			assert.strictEqual(readFileSync(bpmn, "utf-8"), before);
 		}
 	}
 
