@@ -284,6 +284,19 @@ function applyApplication(
 	}
 
 	current = modeler.elementTemplates.applyTemplate(current, clone) ?? current;
+	const after = valuesOf(current);
+	// Hidden properties of this step's template reset values no write claims.
+	const reset = values
+		.filter(
+			(v) =>
+				v.value !== "" &&
+				!stepWrites.some((w) => sameTarget(v, w)) &&
+				findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
+					(property) => property.type === "Hidden",
+				) &&
+				after.some((a) => sameTarget(a, v) && a.value !== v.value),
+		)
+		.map(({ key, bindingType, value }) => ({ key, bindingType, from: value }));
 	const resolvedValue = (key: string, bindingType: string | null) => {
 		const write = writes.find(
 			(w) => w.key === key && w.bindingType === bindingType,
@@ -301,7 +314,8 @@ function applyApplication(
 		element: current,
 		facts: {
 			...facts,
-			after: valuesOf(current),
+			after,
+			reset,
 			moved: facts.moved.map((move) => ({
 				...move,
 				value: resolvedValue(move.to.key, move.to.bindingType),

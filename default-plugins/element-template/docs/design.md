@@ -274,6 +274,9 @@ that moved.
   A field written in any recipe step counts, also when a later step moves the
   value on. Conditions are not evaluated here: a target counts as Hidden when any
   duplicate for the binding is Hidden, a source only when every duplicate is.
+  Each step records the values its Hidden properties reset, so a reset in an
+  intermediate version counts, even when the final template binds the field as
+  editable again or a later step moves the reset value on.
 - **Read/write identity.** Unqualified rename, guard and interpolation reads fail
   when several binding types match. Qualification selects a binding type; duplicate
   backing identities or extension containers are rejected rather than selecting an

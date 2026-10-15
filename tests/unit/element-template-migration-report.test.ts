@@ -1144,4 +1144,32 @@ describe("buildReport: values lost to Hidden resets and displaced destinations",
 		);
 		assert.strictEqual(r.lossless, false);
 	});
+
+	for (const sourceHidden of [false, true]) {
+		test(`an intermediate Hidden reset is ${sourceHidden ? "not " : ""}lost when the source is ${sourceHidden ? "" : "not "}Hidden`, () => {
+			const r = buildReport({
+				fromTemplate: sourceHidden
+					? hidden(oldTemplate, "provider")
+					: oldTemplate,
+				toTemplate: newTemplate,
+				before: [value("provider", "azure")],
+				after: [value("provider", "fixed")],
+				facts: mergeFacts([
+					facts({
+						after: [value("provider", "fixed")],
+						reset: [
+							{ key: "provider", bindingType: "zeebe:input", from: "azure" },
+						],
+					}),
+				]),
+				usedRecipe: true,
+				refusal: null,
+			});
+			assert.deepStrictEqual(
+				r.dropped.map((d) => [d.key, d.cause]),
+				sourceHidden ? [] : [["provider", "hidden"]],
+			);
+			assert.strictEqual(r.lossless, sourceHidden);
+		});
+	}
 });

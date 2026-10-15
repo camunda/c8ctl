@@ -33,6 +33,8 @@ export interface ReportFacts extends PlanFacts {
 	failedWrites?: boolean;
 	/** Every field a move or set wrote in any step, kept after lineage merges. */
 	written?: FieldKey[];
+	/** Fields a Hidden property reset in a step, with the value they had before. */
+	reset?: (FieldKey & { from: string })[];
 }
 
 export interface Field {
@@ -198,6 +200,7 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 			...f.moved.map((move) => move.to),
 			...f.set.map(({ key, bindingType }) => ({ key, bindingType })),
 		]),
+		reset: all.flatMap((f) => f.reset ?? []),
 		notes: all.flatMap((f) => f.notes),
 		guardSkipped: all.flatMap((f) => f.guardSkipped),
 		templateSkipped: all.flatMap((f) => f.templateSkipped),
@@ -418,8 +421,12 @@ export function buildReport({
 		const actual = find(after, v.key, v.bindingType);
 		if (!actual || actual.value === v.value || claimedFrom(v)) return;
 		if (written.some((w) => sameTarget(v, w))) return "displaced";
-		if (hiddenIn(toTemplate, v, "some") && !hiddenIn(fromTemplate, v, "every"))
-			return "hidden";
+		// An intermediate step may reset the value even when the final
+		// template binds it as editable again.
+		const reset =
+			hiddenIn(toTemplate, v, "some") ||
+			(facts.reset ?? []).some((r) => sameTarget(v, r) && r.from === v.value);
+		if (reset && !hiddenIn(fromTemplate, v, "every")) return "hidden";
 	};
 	const dropped: MigrationReport["dropped"] = before
 		.filter((v) => v.value !== "")
