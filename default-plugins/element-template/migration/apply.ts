@@ -44,12 +44,14 @@ import {
 	type MigrationReport,
 	mergeFacts,
 	type ReportFacts,
+	type ReportStep,
 } from "./report.ts";
 import {
 	type Application,
 	resolveApplications,
 	resolveCatalog,
 	resolveSteps,
+	type Step,
 } from "./steps.ts";
 import type { MigrationTemplate } from "./types.ts";
 
@@ -337,6 +339,7 @@ export function migrateElement({
 	target,
 	templates,
 	recipe,
+	engineVersion,
 	maps = [],
 }: {
 	modeler: MigrationModeler;
@@ -345,6 +348,8 @@ export function migrateElement({
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
+	/** Camunda version of the BPMN, used to explain an unreachable source floor. */
+	engineVersion?: string;
 	/** Moves of original values to the final target, applied after all steps. */
 	maps?: ValueMap[];
 }): MigrationResult {
@@ -365,6 +370,7 @@ export function migrateElement({
 		target,
 		templates,
 		recipe,
+		engineVersion,
 	});
 	const applications = resolveApplications(templates, steps, target);
 	for (const { step, template } of applications) {
@@ -448,6 +454,22 @@ export function migrateElement({
 		facts,
 		usedRecipe: steps.length > 0,
 		refusal,
+		steps: reportSteps(steps, fromTemplate.version ?? 0),
 	});
 	return { element: current, report };
+}
+
+function reportSteps(steps: Step[], appliedVersion: number): ReportStep[] {
+	let reached = appliedVersion;
+	return steps.map((step) => {
+		const reportStep: ReportStep = {
+			kind: step.kind,
+			templateId: step.templateId,
+			fromVersion: reached,
+			toVersion: step.version,
+			...(step.implicit ? { implicit: true } : {}),
+		};
+		if (step.kind === "version") reached = step.version;
+		return reportStep;
+	});
 }

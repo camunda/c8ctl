@@ -205,6 +205,7 @@ function assertNoopJson({
 		refusal: null,
 	});
 	assert.deepEqual(envelope.report, {
+		steps: [],
 		dropped: [],
 		added: [],
 		changed: [],

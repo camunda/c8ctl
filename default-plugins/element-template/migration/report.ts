@@ -71,6 +71,16 @@ export interface MovedItem {
 	source: "recipe" | "map";
 }
 
+/** A step of the migration plan, in application order. */
+export interface ReportStep {
+	kind: "version" | "hop";
+	templateId: string;
+	fromVersion: number;
+	toVersion: number;
+	/** Added by the plan to reach a change floor; the recipe has no entries for it. */
+	implicit?: true;
+}
+
 export interface MigrationReport {
 	from: TemplateRef;
 	to: TemplateRef;
@@ -78,6 +88,7 @@ export interface MigrationReport {
 	usedRecipe: boolean;
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
+	steps: ReportStep[];
 	dropped: (Field & { value: string; valueName?: string })[];
 	added: (Field & {
 		value: string;
@@ -286,6 +297,7 @@ export function buildReport({
 	facts,
 	usedRecipe,
 	refusal,
+	steps = [],
 }: {
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
@@ -295,6 +307,7 @@ export function buildReport({
 	facts: ReportFacts;
 	usedRecipe: boolean;
 	refusal: string | null;
+	steps?: ReportStep[];
 }): MigrationReport {
 	const survivingMoves = facts.moved.filter((m) => {
 		const source = find(before, m.from.key, m.from.bindingType);
@@ -451,6 +464,7 @@ export function buildReport({
 		to: templateRef(toTemplate),
 		usedRecipe,
 		refusal,
+		steps,
 		dropped: inTemplateOrder(fromTemplate, dropped, (item) => item),
 		added: inTemplateOrder(toTemplate, added, (item) => item),
 		changed: inTemplateOrder(toTemplate, changed, (item) => item),

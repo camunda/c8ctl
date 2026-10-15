@@ -613,6 +613,7 @@ async function runMigrateInternal(
 				target,
 				templates,
 				recipe,
+				engineVersion,
 				maps,
 			});
 			redaction.values = [

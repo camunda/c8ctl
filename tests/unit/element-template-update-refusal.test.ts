@@ -162,20 +162,16 @@ for (const action of ["change", "update"] as const) {
 			explicitDiagnostic: /no source entry for template 'refusal\.source'/,
 			lineage: [upgrade],
 		},
-		{
-			name:
-				action === "change" ? "unmet source floor" : "no applicable upgrade",
-			sources: [
-				action === "change"
-					? { ...entry, minSourceVersion: 3 }
-					: { ...entry, toVersion: 1 },
-			],
-			diagnostic:
-				action === "change"
-					? /unmet source floor.*3.*reached.*2/i
-					: /no applicable upgrade.*1.*3/i,
-			lineage: [upgrade],
-		},
+		...(action === "update"
+			? [
+					{
+						name: "no applicable upgrade",
+						sources: [{ ...entry, toVersion: 1 }],
+						diagnostic: /no applicable upgrade.*1.*3/i,
+						lineage: [upgrade],
+					},
+				]
+			: []),
 		{
 			name: "coverage refusal",
 			sources: [
@@ -436,21 +432,95 @@ test("ordinary carry-over previews losses and requires authorization only for ov
 	assert.doesNotMatch(readFileSync(fixture.file, "utf8"), /lost-value/);
 });
 
-test("loaded source versions without upgrades do not satisfy an explicit floor", async () => {
-	const fixture = setup({
-		recipe: {
-			schemaVersion: 1,
-			sources: [
-				{ kind: "change", sourceTemplateId: source.id, minSourceVersion: 2 },
-			],
-		},
-		lineage: [{ ...source, version: 2 }],
+describe("change floor above the reached version", () => {
+	const floor = (minSourceVersion: number) => ({
+		schemaVersion: 1,
+		sources: [
+			{ kind: "change", sourceTemplateId: source.id, minSourceVersion },
+		],
 	});
-	const flags = ["--in-place", "--allow-lossy", "--json"];
-	const result = await fixture.run(...flags);
-	assertRefused(result, flags);
-	assert.match(out(result), /unmet source floor.*2.*reached.*1/i);
-	fixture.assertUnchanged();
+
+	for (const embedded of [false, true]) {
+		const kind = embedded ? "embedded" : "explicit";
+
+		test(`${kind}: a loaded floor version is reached by an implicit step`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [{ ...source, version: 2 }],
+			});
+			const json = await fixture.run("--dry-run", "--json");
+			assert.equal(json.status, 0, json.stderr);
+			const envelope = JSON.parse(json.stdout).results[0];
+			assert.equal(envelope.status, "updated");
+			assert.equal(envelope.recipe.used, true);
+			assert.equal(envelope.recipe.refusal, null);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(
+				envelope.report.steps.map(
+					(step: { kind: string; toVersion: number; implicit?: true }) => [
+						step.kind,
+						step.toVersion,
+						step.implicit,
+					],
+				),
+				[
+					["version", 2, true],
+					["hop", 3, undefined],
+				],
+			);
+			fixture.assertUnchanged();
+			const text = await fixture.run("--dry-run");
+			assert.match(
+				text.stdout,
+				/upgrade v1 -> v2 \(implicit, no recipe entries\)/,
+			);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a floor above the newest compatible version fails and --allow-lossy cannot override it`, async () => {
+			const fixture = setup({
+				recipe: floor(4),
+				embedded,
+				lineage: [{ ...source, version: 2 }],
+			});
+			for (const flags of [
+				[],
+				["--in-place"],
+				["--in-place", "--allow-lossy"],
+				["--dry-run", "--json"],
+				["--dry-run", "--json", "--allow-lossy"],
+			]) {
+				const result = await fixture.run(...flags);
+				assertRefused(result, flags);
+				assert.match(
+					out(result),
+					/Template 'refusal\.source' v4 or later is required, but the newest version compatible with Camunda 8\.8.*\(from the BPMN executionPlatformVersion\) is v2\./,
+				);
+				assert.doesNotMatch(out(result), /Requires --allow-lossy/);
+				fixture.assertUnchanged();
+			}
+		});
+
+		test(`${kind}: a floor missing from the compatible catalog fails and lists the compatible versions`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [{ ...source, version: 3 }],
+			});
+			for (const flags of [["--in-place"], ["--in-place", "--allow-lossy"]]) {
+				const result = await fixture.run(...flags);
+				assertRefused(result, flags);
+				assert.match(
+					out(result),
+					/Template 'refusal\.source' v2 is not available for Camunda 8\.8.*compatible versions: 1, 3/,
+				);
+				fixture.assertUnchanged();
+			}
+		});
+	}
 });
 
 test("embedded fallback dry-run reports prospective losses without authorization or writes", async () => {
