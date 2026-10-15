@@ -23,8 +23,11 @@ import type {
 } from "./types.ts";
 
 export interface ReportFacts extends PlanFacts {
-	/** Expected stored values, including FEEL normalization. */
-	moved: (MovedFact & { value?: string })[];
+	/**
+	 * Expected stored values, including FEEL normalization. `read` is the value
+	 * the first move of a lineage read from the previous step's snapshot.
+	 */
+	moved: (MovedFact & { value?: string; read?: string })[];
 	/** Step snapshots prevent removed lineage from being revived later. */
 	after?: ElementValue[];
 	failedWrites?: boolean;
@@ -128,6 +131,7 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 	let moved: ReportFacts["moved"] = [];
 	let set: PlanFacts["set"] = [];
 	let failedWrites = false;
+	let snapshot: ElementValue[] | undefined;
 	for (const facts of all) {
 		// All moves read the pre-step snapshot, never another move's result.
 		const priorMoved = moved;
@@ -150,10 +154,15 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 				set.push({ ...move.to, value: move.value ?? addition.value });
 			} else {
 				const prior = priorMoved.find((item) => sameField(item.to, move.from));
+				const read = prior
+					? prior.read
+					: snapshot &&
+						find(snapshot, move.from.key, move.from.bindingType)?.value;
 				moved.push({
 					...move,
 					from: prior?.from ?? move.from,
 					transformed: Boolean(prior?.transformed) || move.transformed,
+					...(read === undefined ? {} : { read }),
 				});
 			}
 		}
@@ -176,6 +185,7 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 				set.some((write) => !surviving(write, write.value));
 			moved = moved.filter((move) => surviving(move.to, move.value));
 			set = set.filter((write) => surviving(write, write.value));
+			snapshot = after;
 		}
 		failedWrites ||= Boolean(facts.failedWrites);
 	}
@@ -352,8 +362,13 @@ export function buildReport({
 	const addedSets = survivingSets.filter(
 		(s) => !find(before, s.key, s.bindingType),
 	);
+	// A move claims its source only when it read the original value. An earlier
+	// step may have reset the source, e.g. to a Hidden default.
 	const claimedFrom = (v: ElementValue) =>
-		survivingMoves.some((m) => sameTarget(v, m.from));
+		survivingMoves.some(
+			(m) =>
+				sameTarget(v, m.from) && (m.read === undefined || m.read === v.value),
+		);
 	const claimedTo = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.to)) ||
 		addedSets.some((s) => sameTarget(v, s));

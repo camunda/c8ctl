@@ -877,6 +877,40 @@ describe("element-template update counts Hidden resets and displaced values as l
 			set: ["a=moved", "b=displaced"],
 		},
 	];
+	const hiddenRegion = {
+		type: "Hidden",
+		value: "fixed-region",
+		binding: { type: "zeebe:input", name: "region" },
+	};
+	cases.push({
+		name: "an editable value reset by a Hidden property and then moved",
+		key: "region",
+		cause: "hidden",
+		old: template("lossy-reset-moved", 1, [input("region")]),
+		via: [template("lossy-reset-moved", 2, [hiddenRegion, input("marker")])],
+		target: template(
+			"lossy-reset-moved",
+			3,
+			[hiddenRegion, input("marker"), input("copy")],
+			[
+				// A recipe entry for v2 makes v2 a separate step, so the
+				// v3 move reads the reset value.
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-moved",
+					toVersion: 2,
+					paths: [{ to: "input:marker", set: "x" }],
+				},
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-moved",
+					toVersion: 3,
+					paths: [{ from: "input:region", to: "input:copy" }],
+				},
+			],
+		),
+		set: ["region=eu-custom"],
+	});
 	for (const { name, key, cause, old, via = [], target, set } of cases) {
 		test(`${name} requires --allow-lossy`, async () => {
 			const dir = mkdtempSync(join(tmpdir(), "c8-migration-lossy-"));

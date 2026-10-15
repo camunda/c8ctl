@@ -1111,4 +1111,37 @@ describe("buildReport: values lost to Hidden resets and displaced destinations",
 			assert.strictEqual(r.lossless, false);
 		});
 	}
+
+	test("a later move of a field reset by a Hidden property does not claim the original value", () => {
+		const target = hidden(
+			{
+				...newTemplate,
+				properties: [
+					...newTemplate.properties,
+					{ label: "Copy", binding: { type: "zeebe:input", name: "copy" } },
+				],
+			},
+			"region",
+		);
+		const r = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: target,
+			before: [value("region", "eu-custom")],
+			after: [value("region", "fixed"), value("copy", "fixed")],
+			facts: mergeFacts([
+				facts({ after: [value("region", "fixed")] }),
+				facts({
+					moved: [{ ...move("region", "copy"), value: "fixed" }],
+					after: [value("region", "fixed"), value("copy", "fixed")],
+				}),
+			]),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(
+			r.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["region", "eu-custom", "hidden"]],
+		);
+		assert.strictEqual(r.lossless, false);
+	});
 });
