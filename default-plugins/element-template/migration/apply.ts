@@ -446,6 +446,7 @@ export function migrateElement({
 		);
 		if (result) {
 			current = result.element;
+			const earlierMoves = allFacts.flatMap((facts) => facts.moved);
 			allFacts.push(result.facts);
 			if (application.step?.implicit)
 				implicitTemplates.push(result.activeTemplate);
@@ -453,6 +454,27 @@ export function migrateElement({
 			lostInImplicitSteps.push(
 				...valuesBefore.filter((v) => {
 					if (v.value === "") return false;
+					// An earlier move that holds the value on another binding keeps it.
+					const holds = (
+						values: ElementValue[],
+						m: (typeof earlierMoves)[number],
+					) =>
+						values.some(
+							(e) =>
+								e.key === m.to.key &&
+								e.bindingType === m.to.bindingType &&
+								e.value === v.value,
+						);
+					if (
+						earlierMoves.some(
+							(m) =>
+								m.from.key === v.key &&
+								m.from.bindingType === v.bindingType &&
+								holds(valuesBefore, m) &&
+								holds(valuesAfter, m),
+						)
+					)
+						return false;
 					const kept = valuesAfter.find(
 						(a) => a.key === v.key && a.bindingType === v.bindingType,
 					);

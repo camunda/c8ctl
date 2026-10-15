@@ -669,6 +669,52 @@ describe("change floor above the reached version", () => {
 			fixture.assertUnchanged();
 		});
 
+		test(`${kind}: a pre-floor upgrade move that keeps the value is not reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("moved"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [input("kept", "retained"), input("moved")],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [{ from: "removed", to: "moved" }],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
 		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {
 			const fixture = setup({
 				recipe: floor(2),
