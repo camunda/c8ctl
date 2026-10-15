@@ -248,7 +248,9 @@ function loadRecipeFile(path: string): Recipe {
 
 function embeddedRecipe(template: MigrationTemplate): Recipe | undefined {
 	try {
-		return readEmbeddedRecipe(template);
+		const recipe = readEmbeddedRecipe(template);
+		if (recipe) validateRecipeOwner(recipe, template);
+		return recipe;
 	} catch (error) {
 		if (error instanceof RecipeError) {
 			throw new Error(
@@ -545,14 +547,12 @@ async function runMigrateInternal(
 		[target],
 	);
 	redaction.templates = [...lineages([templateId, target.id]), target];
+	if (recipe) validateRecipeOwner(recipe, target);
 	const targetRecipe = recipe ?? embeddedRecipe(target);
-	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	// Every element climbs the source lineage's recipe, so a bad one fails the run.
 	const sourceLatest =
 		templateId === target.id ? undefined : latestOf(templates, templateId);
-	const sourceRecipe = sourceLatest && embeddedRecipe(sourceLatest);
-	if (sourceLatest && sourceRecipe)
-		validateRecipeOwner(sourceRecipe, sourceLatest);
+	if (sourceLatest) embeddedRecipe(sourceLatest);
 	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
 			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,
