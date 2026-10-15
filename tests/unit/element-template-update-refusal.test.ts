@@ -516,6 +516,30 @@ describe("change floor above the reached version", () => {
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
 		});
 
+		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{ ...source, version: 2, properties: [input("kept", "retained")] },
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run(
+				"--dry-run",
+				"--json",
+				"--map",
+				"removed=moved",
+			);
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			assert.equal(envelope.report.moved.length, 1);
+			fixture.assertUnchanged();
+		});
+
 		test(`${kind}: a floor above the newest compatible version fails and --allow-lossy cannot override it`, async () => {
 			const fixture = setup({
 				recipe: floor(4),

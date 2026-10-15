@@ -299,6 +299,7 @@ export function buildReport({
 	refusal,
 	steps = [],
 	lostInImplicitSteps = [],
+	implicitTemplates = [],
 }: {
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
@@ -311,6 +312,8 @@ export function buildReport({
 	steps?: ReportStep[];
 	/** Values an implicit step removed, whether or not the target later defaults them. */
 	lostInImplicitSteps?: ElementValue[];
+	/** Templates of the implicit steps, checked for unread bindings they do not keep. */
+	implicitTemplates?: MigrationTemplate[];
 }): MigrationReport {
 	const survivingMoves = facts.moved.filter((m) => {
 		const source = find(before, m.from.key, m.from.bindingType);
@@ -380,7 +383,13 @@ export function buildReport({
 	const dropped = [
 		...droppedValues,
 		...lostInImplicitSteps.filter(
-			(v) => !find(droppedValues, v.key, v.bindingType),
+			(v) =>
+				!find(droppedValues, v.key, v.bindingType) &&
+				// A surviving map that carries the original value on is not a loss.
+				!(
+					claimedFrom(v) &&
+					find(before, v.key, v.bindingType)?.value === v.value
+				),
 		),
 	].map((v) => {
 		const field = fieldOf(fromTemplate, v.key, v.bindingType);
@@ -463,7 +472,14 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
-		unchecked: uncheckedFields(fromTemplate, toTemplate),
+		unchecked: [toTemplate, ...implicitTemplates]
+			.flatMap((template) => uncheckedFields(fromTemplate, template))
+			.filter(
+				(f, i, all) =>
+					all.findIndex(
+						(g) => g.key === f.key && g.bindingType === f.bindingType,
+					) === i,
+			),
 	};
 
 	return {

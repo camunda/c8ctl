@@ -400,6 +400,7 @@ export function migrateElement({
 	// An implicit step has no recipe, so a value its template lacks is lost
 	// even when a later template defaults the same binding.
 	const lostInImplicitSteps: ElementValue[] = [];
+	const implicitTemplates: MigrationTemplate[] = [];
 	let current = element;
 	let mapsApplied = false;
 	for (const [index, application] of applications.entries()) {
@@ -415,6 +416,8 @@ export function migrateElement({
 		if (result) {
 			current = result.element;
 			allFacts.push(result.facts);
+			if (application.step?.implicit)
+				implicitTemplates.push(application.template);
 			const valuesAfter = valuesOf(current);
 			lostInImplicitSteps.push(
 				...valuesBefore.filter(
@@ -469,6 +472,7 @@ export function migrateElement({
 		usedRecipe: steps.length > 0,
 		refusal,
 		lostInImplicitSteps,
+		implicitTemplates,
 		steps: reportSteps(steps, fromTemplate.version ?? 0),
 	});
 	return { element: current, report };

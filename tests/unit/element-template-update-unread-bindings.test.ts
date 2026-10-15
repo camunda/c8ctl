@@ -101,6 +101,44 @@ test("a target without the binding needs --allow-lossy", async () => {
 	);
 });
 
+test("an implicit floor step that drops the binding needs --allow-lossy even when the target restores it", async () => {
+	const original = readFileSync(bpmn, "utf-8");
+	const next = {
+		...template(1, [calledElement]),
+		id: "io.example.call.next",
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 1,
+				sources: [
+					{ kind: "change", sourceTemplateId: SOURCE.id, minSourceVersion: 2 },
+				],
+			},
+		},
+	};
+	writeFileSync(join(dir, "next.json"), JSON.stringify(next));
+	seedTemplateCache(dir, [SOURCE, DROPS]);
+	const args = [
+		"update",
+		SOURCE.id,
+		"Task_1",
+		bpmn,
+		"--to",
+		join(dir, "next.json"),
+	];
+	const preview = await run(...args, "--dry-run", "--json");
+	assert.equal(preview.status, 1, preview.stderr);
+	const [result] = JSON.parse(preview.stdout).results;
+	assert.equal(result.lossless, false);
+	assert.deepEqual(
+		result.report.skipped.unchecked.map((u: { key: string }) => u.key),
+		["processId"],
+	);
+	const refused = await run(...args, "--in-place");
+	assert.equal(refused.status, 1);
+	assert.match(refused.stderr, /--allow-lossy/);
+	assert.equal(readFileSync(bpmn, "utf-8"), original);
+});
+
 test("a target with the identical binding keeps the value", async () => {
 	const copy = join(dir, "keeps.bpmn");
 	writeFileSync(copy, readFileSync(bpmn, "utf-8"));
