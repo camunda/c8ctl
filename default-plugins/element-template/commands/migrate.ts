@@ -541,11 +541,12 @@ async function runMigrateInternal(
 	// a filtered-out source still marks secrets.
 	const lineages = (ids: (string | undefined)[]) =>
 		migrationTemplates(pool.pool(ids)).filter((t) => ids.includes(t.id));
+	// Register the source first: a rejected `--to` quotes the argument.
+	redaction.templates = lineages([templateId]);
 	const toRef = parseTemplateRef(parsed.to);
-	redaction.templates = lineages([
-		templateId,
-		toRef?.kind === "id" ? toRef.id : undefined,
-	]);
+	if (toRef?.kind === "id") {
+		redaction.templates = lineages([templateId, toRef.id]);
+	}
 
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
