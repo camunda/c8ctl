@@ -246,6 +246,40 @@ describe("update --in-place through a symlink", {
 		assert.strictEqual(readFileSync(target, "utf-8"), before);
 		assert.ok(existsSync(lock), "the other writer's lock must stay");
 	});
+
+	// Retargets the link right after the lock is taken. Both files hold the
+	// same XML, so only the pinned path keeps the write on the locked file.
+	const retargetAfterLock = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const open = fs.openSync; fs.openSync = (path, ...rest) => { const fd = open(path, ...rest); if (String(path).endsWith(".migration.lock")) { fs.unlinkSync(process.env.C8CTL_TEST_LINK); fs.symlinkSync(process.env.C8CTL_TEST_LINK_TO, process.env.C8CTL_TEST_LINK); } return fd; }; syncBuiltinESMExports();`;
+
+	test("a link retargeted after locking still writes the locked file", async () => {
+		const { dir, target, link } = linkedCopy("symlink-retarget");
+		const other = join(dir, "shared", "other.bpmn");
+		writeFileSync(other, readFileSync(target));
+		const before = readFileSync(other, "utf-8");
+		const result = await c8WithOptions(
+			{
+				nodeArgs: [
+					"--import",
+					`data:text/javascript,${encodeURIComponent(retargetAfterLock)}`,
+				],
+				env: {
+					C8CTL_DATA_DIR: cache(),
+					C8CTL_TEST_LINK: link,
+					C8CTL_TEST_LINK_TO: join("..", "shared", "other.bpmn"),
+				},
+			},
+			"element-template",
+			"update",
+			V1.id,
+			TASK,
+			link,
+			"-i",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(readFileSync(target, "utf-8"), /modelerTemplateVersion="2"/);
+		assert.strictEqual(readFileSync(other, "utf-8"), before);
+		assert.deepStrictEqual(leftovers(dir), []);
+	});
 });
 
 describe("update arguments", () => {

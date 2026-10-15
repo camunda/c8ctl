@@ -464,6 +464,7 @@ function describeDropped(report: MigrationReport): string {
 async function runMigrateInternal(
 	{ parsed, templateId, elementId, bpmnFilePath }: ResolvedMigrateArgs,
 	redaction: MigrationRedactionContext,
+	lockedPath?: string,
 ): Promise<void> {
 	const logger = c8ctl.getLogger();
 	installStdoutEpipeHandler();
@@ -481,7 +482,9 @@ async function runMigrateInternal(
 	}
 	const maps = parsed.maps.map(parseMapArg);
 
-	const input = await readBpmnInput(bpmnFilePath);
+	// Under the lock, every BPMN read and write MUST use the locked real path.
+	const bpmnPath = lockedPath ?? bpmnFilePath;
+	const input = await readBpmnInput(bpmnPath);
 	if (!input) {
 		throw new Error(
 			"No BPMN input provided. Pass a file path or pipe BPMN XML via stdin.",
@@ -506,7 +509,7 @@ async function runMigrateInternal(
 	const cachedTemplates = loadCache() ?? [];
 	const pool = templatePool(
 		cachedTemplates,
-		bpmnFilePath ? dirname(input.source) : process.cwd(),
+		bpmnFilePath ? dirname(resolvePath(bpmnFilePath)) : process.cwd(),
 	);
 	// Every version of the involved lineages, engine-incompatible ones too:
 	// a filtered-out source still marks secrets.
@@ -673,10 +676,10 @@ async function runMigrateInternal(
 		canWrite && updated.length > 0
 			? await modeler.saveXML({ format: true })
 			: undefined;
-	if (saved && parsed.inPlace && bpmnFilePath) {
-		if (readFileSync(bpmnFilePath, "utf-8") !== input.xml)
+	if (saved && parsed.inPlace && bpmnPath) {
+		if (readFileSync(bpmnPath, "utf-8") !== input.xml)
 			throw new Error(CONCURRENT_EDIT_MESSAGE);
-		atomicOverwriteFile(bpmnFilePath, saved.xml, input.xml);
+		atomicOverwriteFile(bpmnPath, saved.xml, input.xml);
 	}
 
 	const summary = {
@@ -880,7 +883,8 @@ async function runLockedMigrate(
 	if (!existsSync(resolvePath(file)))
 		throw new Error(`File not found: ${file}`);
 	// Links to one file MUST share a lock, so it sits beside the real file.
-	const lock = `${realpathSync(file)}.migration.lock`;
+	const lockedPath = realpathSync(file);
+	const lock = `${lockedPath}.migration.lock`;
 	let descriptor: number;
 	try {
 		descriptor = openSync(lock, "wx");
@@ -892,7 +896,7 @@ async function runLockedMigrate(
 	}
 	let cleanupFailure: { error: unknown } | undefined;
 	try {
-		await runMigrateInternal(resolved, redaction);
+		await runMigrateInternal(resolved, redaction, lockedPath);
 	} finally {
 		try {
 			try {
