@@ -195,6 +195,44 @@ for (const embedded of [true, false]) {
 	});
 }
 
+for (const embedded of [true, false]) {
+	test(`${embedded ? "embedded" : "explicit"}: an implicit floor step that keeps the unread binding is lossless`, async () => {
+		const recipe = {
+			schemaVersion: 1,
+			sources: [
+				{ kind: "change", sourceTemplateId: SOURCE.id, minSourceVersion: 2 },
+			],
+		};
+		const next = {
+			...template(1, [calledElement]),
+			id: "io.example.call.next",
+			...(embedded ? { metadata: { migratesFrom: recipe } } : {}),
+		};
+		const copy = join(dir, `keeps-${embedded}.bpmn`);
+		writeFileSync(copy, readFileSync(bpmn, "utf-8"));
+		writeFileSync(join(dir, "next.json"), JSON.stringify(next));
+		writeFileSync(join(dir, "recipe.json"), JSON.stringify(recipe));
+		seedTemplateCache(dir, [SOURCE, KEEPS]);
+		const args = [
+			"update",
+			SOURCE.id,
+			"Task_1",
+			copy,
+			"--to",
+			join(dir, "next.json"),
+			...(embedded ? [] : ["--recipe", join(dir, "recipe.json")]),
+		];
+		const preview = await run(...args, "--dry-run", "--json");
+		assert.equal(preview.status, 0, preview.stderr);
+		const [result] = JSON.parse(preview.stdout).results;
+		assert.equal(result.lossless, true);
+		assert.deepEqual(result.report.skipped.unchecked, []);
+		const written = await run(...args, "--in-place");
+		assert.equal(written.status, 0, written.stderr);
+		assert.match(readFileSync(copy, "utf-8"), /processId="user-process"/);
+	});
+}
+
 test("a target with the identical binding keeps the value", async () => {
 	const copy = join(dir, "keeps.bpmn");
 	writeFileSync(copy, readFileSync(bpmn, "utf-8"));

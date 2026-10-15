@@ -218,7 +218,7 @@ function applyApplication(
 	element: BpmnElement;
 	facts: ReportFacts;
 	written: { key: string; bindingType: string | null; value: string }[];
-	/** The template with only the properties that were active when it was applied. */
+	/** The template with the properties known to be active when it was applied. */
 	activeTemplate: MigrationTemplate;
 } | null {
 	const { template, step } = application;
@@ -320,7 +320,13 @@ function applyApplication(
 		written,
 		activeTemplate: {
 			...clone,
-			properties: clone.properties.filter((property) => active.has(property)),
+			// Unconditional properties are always active. A conditional one counts only
+			// when a write reached it, so an unknown condition never hides a loss.
+			properties: clone.properties.filter(
+				(property) =>
+					active.has(property) ||
+					!("condition" in property && property.condition),
+			),
 		},
 		facts: {
 			...facts,
