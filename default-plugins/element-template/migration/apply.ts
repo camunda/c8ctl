@@ -397,10 +397,14 @@ export function migrateElement({
 				};
 	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
+	// An implicit step has no recipe, so a value its template lacks is lost
+	// even when a later template defaults the same binding.
+	const lostInImplicitSteps: ElementValue[] = [];
 	let current = element;
 	let mapsApplied = false;
 	for (const [index, application] of applications.entries()) {
 		const isFinal = index === applications.length - 1;
+		const valuesBefore = application.step?.implicit ? valuesOf(current) : [];
 		const result = applyApplication(
 			modeler,
 			catalog,
@@ -411,6 +415,16 @@ export function migrateElement({
 		if (result) {
 			current = result.element;
 			allFacts.push(result.facts);
+			const valuesAfter = valuesOf(current);
+			lostInImplicitSteps.push(
+				...valuesBefore.filter(
+					(v) =>
+						v.value !== "" &&
+						!valuesAfter.some(
+							(a) => a.key === v.key && a.bindingType === v.bindingType,
+						),
+				),
+			);
 			mapsApplied ||= isFinal;
 		}
 	}
@@ -454,6 +468,7 @@ export function migrateElement({
 		facts,
 		usedRecipe: steps.length > 0,
 		refusal,
+		lostInImplicitSteps,
 		steps: reportSteps(steps, fromTemplate.version ?? 0),
 	});
 	return { element: current, report };

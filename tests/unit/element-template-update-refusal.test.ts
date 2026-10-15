@@ -99,12 +99,14 @@ function setup({
 	embedded = false,
 	lineage = [],
 	lossy = false,
+	targetProperties,
 }: {
 	action?: "change" | "update";
 	recipe?: unknown;
 	embedded?: boolean;
 	lineage?: object[];
 	lossy?: boolean;
+	targetProperties?: object[];
 } = {}) {
 	const work = mkdtempSync(join(dir, "case-"));
 	const target = {
@@ -112,7 +114,8 @@ function setup({
 		id: action === "change" ? "refusal.target" : source.id,
 		name: "Target",
 		version: 3,
-		properties: lossy ? [input("kept")] : source.properties,
+		properties:
+			targetProperties ?? (lossy ? [input("kept")] : source.properties),
 		...(embedded ? { metadata: { migratesFrom: recipe } } : {}),
 	};
 	seedTemplateCache(work, [source, ...lineage, target]);
@@ -477,6 +480,39 @@ describe("change floor above the reached version", () => {
 			);
 			const written = await fixture.run("--in-place");
 			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a value the floor version lacks is reported as dropped even when the target defaults it`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{ ...source, version: 2, properties: [input("kept", "retained")] },
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("removed", "other-default"),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.equal(envelope.requiresAuthorization, true);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			assert.match(blocked.stderr, /--allow-lossy/);
+			fixture.assertUnchanged();
+			const authorized = await fixture.run("--in-place", "--allow-lossy");
+			assert.equal(authorized.status, 0, authorized.stderr);
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
 		});
 

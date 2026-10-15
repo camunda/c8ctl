@@ -298,6 +298,7 @@ export function buildReport({
 	usedRecipe,
 	refusal,
 	steps = [],
+	lostInImplicitSteps = [],
 }: {
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
@@ -308,6 +309,8 @@ export function buildReport({
 	usedRecipe: boolean;
 	refusal: string | null;
 	steps?: ReportStep[];
+	/** Values an implicit step removed, whether or not the target later defaults them. */
+	lostInImplicitSteps?: ElementValue[];
 }): MigrationReport {
 	const survivingMoves = facts.moved.filter((m) => {
 		const source = find(before, m.from.key, m.from.bindingType);
@@ -368,21 +371,25 @@ export function buildReport({
 				sameTarget(v, m.from) &&
 				find(after, m.to.key, m.to.bindingType) === undefined,
 		);
-	const dropped = before
-		.filter(
-			(v) =>
-				v.value !== "" &&
-				((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
-					lostBySource(v)),
-		)
-		.map((v) => {
-			const field = fieldOf(fromTemplate, v.key, v.bindingType);
-			return {
-				...field,
-				value: v.value,
-				...withNames(fromTemplate, field, v.value),
-			};
-		});
+	const droppedValues = before.filter(
+		(v) =>
+			v.value !== "" &&
+			((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
+				lostBySource(v)),
+	);
+	const dropped = [
+		...droppedValues,
+		...lostInImplicitSteps.filter(
+			(v) => !find(droppedValues, v.key, v.bindingType),
+		),
+	].map((v) => {
+		const field = fieldOf(fromTemplate, v.key, v.bindingType);
+		return {
+			...field,
+			value: v.value,
+			...withNames(fromTemplate, field, v.value),
+		};
+	});
 
 	const added: MigrationReport["added"] = after
 		.filter(
