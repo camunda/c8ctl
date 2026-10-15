@@ -28,6 +28,8 @@ export interface ReportFacts extends PlanFacts {
 	/** Step snapshots prevent removed lineage from being revived later. */
 	after?: ElementValue[];
 	failedWrites?: boolean;
+	/** Every field a move or set wrote in any step, kept after lineage merges. */
+	written?: FieldKey[];
 }
 
 export interface Field {
@@ -181,6 +183,11 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 		moved,
 		set,
 		failedWrites,
+		written: all.flatMap((f) => [
+			...(f.written ?? []),
+			...f.moved.map((move) => move.to),
+			...f.set.map(({ key, bindingType }) => ({ key, bindingType })),
+		]),
 		notes: all.flatMap((f) => f.notes),
 		guardSkipped: all.flatMap((f) => f.guardSkipped),
 		templateSkipped: all.flatMap((f) => f.templateSkipped),
@@ -278,6 +285,26 @@ function isHidden(
 	return propertyFor(template, key, bindingType)?.type === "Hidden";
 }
 
+/**
+ * Hidden status across conditional duplicates, without evaluating their
+ * conditions. `some` and `every` both lean toward reporting a loss.
+ */
+function hiddenIn(
+	template: MigrationTemplate,
+	v: ElementValue,
+	match: "some" | "every",
+): boolean {
+	const properties = findPropertiesByTarget(
+		template.properties,
+		v.key,
+		v.bindingType,
+	);
+	return (
+		properties.length > 0 &&
+		properties[match]((property) => property.type === "Hidden")
+	);
+}
+
 function withNames(
 	template: MigrationTemplate | undefined,
 	field: Field,
@@ -365,19 +392,18 @@ export function buildReport({
 				find(after, m.to.key, m.to.bindingType) === undefined,
 		);
 	// A populated value still bound after the migration can be lost too: a
-	// Hidden target property resets it, or a move or set writes over it.
+	// Hidden target property resets it, or a move or set writes over it in
+	// any step.
+	const written = [
+		...(facts.written ?? []),
+		...facts.moved.map((m) => m.to),
+		...facts.set,
+	];
 	const causeOf = (v: ElementValue): "hidden" | "displaced" | undefined => {
 		const actual = find(after, v.key, v.bindingType);
 		if (!actual || actual.value === v.value || claimedFrom(v)) return;
-		if (
-			survivingMoves.some((m) => sameTarget(v, m.to)) ||
-			survivingSets.some((s) => sameTarget(v, s))
-		)
-			return "displaced";
-		if (
-			isHidden(toTemplate, v.key, v.bindingType) &&
-			!isHidden(fromTemplate, v.key, v.bindingType)
-		)
+		if (written.some((w) => sameTarget(v, w))) return "displaced";
+		if (hiddenIn(toTemplate, v, "some") && !hiddenIn(fromTemplate, v, "every"))
 			return "hidden";
 	};
 	const dropped: MigrationReport["dropped"] = before

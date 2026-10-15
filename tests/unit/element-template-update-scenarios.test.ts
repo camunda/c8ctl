@@ -849,14 +849,41 @@ describe("element-template update counts Hidden resets and displaced values as l
 			target: displacedTarget,
 			set: ["a=moved", "b=displaced"],
 		},
+		{
+			name: "a value displaced in one step and moved on in the next",
+			key: "b",
+			cause: "displaced",
+			old: displacedOld,
+			via: [displacedTarget],
+			target: template(
+				"lossy-displaced",
+				3,
+				[input("b"), input("c")],
+				[
+					{
+						kind: "upgrade",
+						sourceTemplateId: "lossy-displaced",
+						toVersion: 2,
+						paths: [{ from: "input:a", to: "input:b" }],
+					},
+					{
+						kind: "upgrade",
+						sourceTemplateId: "lossy-displaced",
+						toVersion: 3,
+						paths: [{ from: "input:b", to: "input:c" }],
+					},
+				],
+			),
+			set: ["a=moved", "b=displaced"],
+		},
 	];
-	for (const { name, key, cause, old, target, set } of cases) {
+	for (const { name, key, cause, old, via = [], target, set } of cases) {
 		test(`${name} requires --allow-lossy`, async () => {
 			const dir = mkdtempSync(join(tmpdir(), "c8-migration-lossy-"));
 			const run = (...args: string[]) =>
 				spawnCli(dir, ["element-template", ...args]);
 			try {
-				seedTemplateCache(dir, [old, target]);
+				seedTemplateCache(dir, [old, ...via, target]);
 				const oldPath = join(dir, "old.json");
 				const targetPath = join(dir, "target.json");
 				const bpmn = join(dir, "process.bpmn");

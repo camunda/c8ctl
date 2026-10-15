@@ -1034,4 +1034,81 @@ describe("buildReport: values lost to Hidden resets and displaced destinations",
 		assert.deepStrictEqual(r.dropped, []);
 		assert.strictEqual(r.lossless, true);
 	});
+
+	test("a value displaced in an earlier step stays lost when a later step moves it on", () => {
+		const r = buildReport({
+			fromTemplate: oldTemplate,
+			toTemplate: newTemplate,
+			before: [value("a", "A"), value("b", "B")],
+			after: [value("b", "A"), value("c", "A")],
+			facts: mergeFacts([
+				facts({
+					moved: [{ ...move("a", "b"), value: "A" }],
+					after: [value("b", "A")],
+				}),
+				facts({
+					moved: [{ ...move("b", "c"), value: "A" }],
+					after: [value("b", "A"), value("c", "A")],
+				}),
+			]),
+			usedRecipe: true,
+			refusal: null,
+		});
+		assert.deepStrictEqual(
+			r.moved.map((m) => [m.from.key, m.to.key]),
+			[["a", "c"]],
+		);
+		assert.deepStrictEqual(
+			r.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["b", "B", "displaced"]],
+		);
+		assert.strictEqual(r.lossless, false);
+	});
+
+	const conditional = (type: string, value: string) => ({
+		...(type === "Hidden" ? { type, value: "fixed" } : { label: "Provider" }),
+		binding: { type: "zeebe:input", name: "provider" },
+		condition: { property: "mode", equals: value },
+	});
+	for (const hiddenFirst of [true, false]) {
+		const order = (hidden: object, editable: object) =>
+			hiddenFirst ? [hidden, editable] : [editable, hidden];
+		test(`a conditional Hidden target duplicate resets the value (Hidden first=${hiddenFirst})`, () => {
+			const r = report({
+				toTemplate: {
+					...newTemplate,
+					properties: order(
+						conditional("Hidden", "on"),
+						conditional("String", "off"),
+					),
+				},
+				before: [value("provider", "azure")],
+				after: [value("provider", "fixed")],
+			});
+			assert.deepStrictEqual(
+				r.dropped.map((d) => [d.key, d.cause]),
+				[["provider", "hidden"]],
+			);
+			assert.strictEqual(r.lossless, false);
+		});
+		test(`a conditional Hidden source duplicate does not hide an editable value (Hidden first=${hiddenFirst})`, () => {
+			const r = report({
+				fromTemplate: {
+					...oldTemplate,
+					properties: order(
+						conditional("Hidden", "on"),
+						conditional("String", "off"),
+					),
+				},
+				toTemplate: hidden(newTemplate, "provider"),
+				before: [value("provider", "azure")],
+				after: [value("provider", "fixed")],
+			});
+			assert.deepStrictEqual(
+				r.dropped.map((d) => [d.key, d.cause]),
+				[["provider", "hidden"]],
+			);
+			assert.strictEqual(r.lossless, false);
+		});
+	}
 });

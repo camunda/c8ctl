@@ -271,6 +271,9 @@ that moved.
   resetting an editable source value, or a move or set overwriting a different
   populated value, is reported as dropped with a `cause`, and the report is lossy.
   A destination that is itself moved away (a swap or chain) is not displaced.
+  A field written in any recipe step counts, also when a later step moves the
+  value on. Conditions are not evaluated here: a target counts as Hidden when any
+  duplicate for the binding is Hidden, a source only when every duplicate is.
 - **Read/write identity.** Unqualified rename, guard and interpolation reads fail
   when several binding types match. Qualification selects a binding type; duplicate
   backing identities or extension containers are rejected rather than selecting an
