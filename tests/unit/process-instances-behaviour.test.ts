@@ -8,7 +8,7 @@
 
 import assert from "node:assert";
 import { describe, test } from "node:test";
-import { c8, parseJson } from "../utils/cli.ts";
+import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { asRecord, getUrl } from "../utils/guards.ts";
 
 // ─── create process-instance ─────────────────────────────────────────────────
@@ -430,4 +430,199 @@ describe("CLI behavioural: migrate process-instance", () => {
 		assert.strictEqual(result.status, 1);
 		assert.ok(result.stderr.includes("not both"), `stderr: ${result.stderr}`);
 	});
+});
+
+// ─── modify process-instance ─────────────────────────────────────────────────
+
+describe("CLI behavioural: modify process-instance", () => {
+	test("--dry-run emits every shorthand instruction to the single-instance endpoint", async () => {
+		const result = await c8(
+			"modify",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--activate",
+			"Task_A",
+			"--terminate",
+			"Task_B",
+			"--terminate",
+			"2251799813685300",
+			"--move",
+			"Task_C=Task_D",
+			"--move",
+			"2251799813685301=Task_E",
+			"--operationReference",
+			"7",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.dryRun, true);
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).endsWith("/process-instances/12345/modification"));
+		assert.deepStrictEqual(out.body, {
+			activateInstructions: [{ elementId: "Task_A" }],
+			moveInstructions: [
+				{
+					sourceElementInstruction: {
+						sourceType: "byId",
+						sourceElementId: "Task_C",
+					},
+					targetElementId: "Task_D",
+				},
+				{
+					sourceElementInstruction: {
+						sourceType: "byKey",
+						sourceElementInstanceKey: "2251799813685301",
+					},
+					targetElementId: "Task_E",
+				},
+			],
+			terminateInstructions: [
+				{ elementId: "Task_B" },
+				{ elementInstanceKey: "2251799813685300" },
+			],
+			operationReference: 7,
+		});
+	});
+
+	test("--instructions from stdin is merged ahead of shorthand instructions", async () => {
+		const instructions = {
+			activateInstructions: [
+				{
+					elementId: "Task_A",
+					ancestorElementInstanceKey: "2251799813685302",
+					variableInstructions: [{ variables: { retry: true } }],
+				},
+			],
+		};
+		const result = await c8WithOptions(
+			{ stdin: JSON.stringify(instructions) },
+			"modify",
+			"pi",
+			"12345",
+			"--dry-run",
+			"--instructions",
+			"@-",
+			"--activate",
+			"Task_B",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+		assert.deepStrictEqual(out.body, {
+			activateInstructions: [
+				...instructions.activateInstructions,
+				{ elementId: "Task_B" },
+			],
+		});
+	});
+
+	test("--processDefinitionKey without an instance key emits a batch modification", async () => {
+		const result = await c8(
+			"modify",
+			"process-instances",
+			"--dry-run",
+			"--processDefinitionKey",
+			"11111",
+			"--move",
+			"Task_A=Task_B",
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const out = parseJson(result);
+
+		assert.strictEqual(out.method, "POST");
+		assert.ok(getUrl(out).endsWith("/process-instances/modification"));
+		assert.deepStrictEqual(out.body, {
+			filter: { processDefinitionKey: "11111" },
+			moveInstructions: [
+				{ sourceElementId: "Task_A", targetElementId: "Task_B" },
+			],
+		});
+	});
+
+	const rejected: Array<[string, string[], string]> = [
+		[
+			"no instructions",
+			["pi", "12345"],
+			"At least one modification instruction is required",
+		],
+		[
+			"neither an instance key nor --processDefinitionKey",
+			["pi", "--move", "a=b"],
+			"Process instance key or --processDefinitionKey required",
+		],
+		[
+			"both an instance key and --processDefinitionKey",
+			["pi", "12345", "--processDefinitionKey", "11111", "--move", "a=b"],
+			"not both",
+		],
+		[
+			"a malformed --move",
+			["pi", "12345", "--move", "Task_A"],
+			"Invalid --move",
+		],
+		[
+			"an element instance key passed to --activate",
+			["pi", "12345", "--activate", "123"],
+			"Invalid --activate",
+		],
+		[
+			"invalid --instructions JSON",
+			["pi", "12345", "--instructions", "{not json"],
+			"Invalid JSON for --instructions",
+		],
+		[
+			"an unknown field in --instructions",
+			["pi", "12345", "--instructions", '{"activate":[]}'],
+			"unknown field",
+		],
+		[
+			"a non-positive --operationReference",
+			["pi", "12345", "--move", "a=b", "--operationReference", "0"],
+			"Invalid --operationReference",
+		],
+		[
+			"--operationReference given twice",
+			[
+				"pi",
+				"12345",
+				"--instructions",
+				'{"operationReference":1}',
+				"--operationReference",
+				"2",
+			],
+			"not both",
+		],
+		[
+			"--activate in batch mode",
+			["pi", "--processDefinitionKey", "11111", "--activate", "Task_A"],
+			"Batch modification only supports --move",
+		],
+		[
+			"--terminate in batch mode",
+			["pi", "--processDefinitionKey", "11111", "--terminate", "Task_A"],
+			"Batch modification only supports --move",
+		],
+		[
+			"--instructions in batch mode",
+			["pi", "--processDefinitionKey", "11111", "--instructions", "{}"],
+			"Batch modification only supports --move",
+		],
+		[
+			"a by-key --move in batch mode",
+			["pi", "--processDefinitionKey", "11111", "--move", "123=Task_B"],
+			"batch modification only supports moves by source element ID",
+		],
+	];
+	for (const [name, args, message] of rejected) {
+		test(`rejects ${name} even in dry-run`, async () => {
+			const result = await c8("modify", ...args, "--dry-run");
+
+			assert.strictEqual(result.status, 1);
+			assert.ok(result.stderr.includes(message), `stderr: ${result.stderr}`);
+		});
+	}
 });

@@ -477,6 +477,24 @@ describe("Help Module", () => {
 		assert.ok(output.includes("--processDefinitionKey"));
 	});
 
+	test("showCommandHelp shows modify help with its flags", () => {
+		showCommandHelp("modify");
+
+		const output = consoleLogSpy.join("\n");
+		assert.ok(output.includes("c8ctl modify"));
+		assert.ok(output.includes("process-instance (pi)"));
+		for (const flag of [
+			"--activate",
+			"--terminate",
+			"--move",
+			"--instructions",
+			"--processDefinitionKey",
+			"--operationReference",
+		]) {
+			assert.ok(output.includes(flag), `missing ${flag}`);
+		}
+	});
+
 	test("showCommandHelp shows resolve help", () => {
 		showCommandHelp("resolve");
 
@@ -556,6 +574,7 @@ describe("Help Module", () => {
 		assert.ok(output.includes("c8ctl help open"));
 		assert.ok(output.includes("c8ctl help cancel"));
 		assert.ok(output.includes("c8ctl help migrate"));
+		assert.ok(output.includes("c8ctl help modify"));
 		assert.ok(output.includes("c8ctl help resolve"));
 		assert.ok(output.includes("c8ctl help fail"));
 		assert.ok(output.includes("c8ctl help activate"));

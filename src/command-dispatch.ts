@@ -92,6 +92,7 @@ import {
 	getProcessInstanceCommand,
 	listProcessInstancesCommand,
 	migrateProcessInstanceCommand,
+	modifyProcessInstanceCommand,
 	resumeProcessInstanceCommand,
 	suspendProcessInstanceCommand,
 } from "./commands/process-instances.ts";
@@ -162,6 +163,7 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["suspend:process-instance", suspendProcessInstanceCommand],
 	["resume:process-instance", resumeProcessInstanceCommand],
 	["migrate:process-instance", migrateProcessInstanceCommand],
+	["modify:process-instance", modifyProcessInstanceCommand],
 	["await:process-instance", awaitProcessInstanceCommand],
 
 	// ── Process definitions ────────────────────────────────────────────

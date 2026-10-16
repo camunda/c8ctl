@@ -728,7 +728,10 @@ const GET_PI_POSITIONALS = [
 	},
 ] as const satisfies readonly PositionalDef[];
 
-/** Optional: omitting the key selects batch migration by source definition. */
+/**
+ * Optional: omitting the key selects the batch form (by source definition)
+ * of `migrate` and `modify`.
+ */
 const MIGRATE_PI_POSITIONALS = [
 	{
 		name: "key",
@@ -1209,6 +1212,63 @@ export const COMMAND_REGISTRY = {
 				description:
 					"Batch mode: migrate all active instances of this source process definition key (omit the instance key)",
 				validate: ProcessDefinitionKey.assumeExists,
+			},
+		},
+		resourcePositionals: {
+			"process-instance": MIGRATE_PI_POSITIONALS,
+		},
+	},
+
+	modify: {
+		description:
+			"Modify process instances: activate, terminate or move elements",
+		helpDescription:
+			"Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)",
+		helpResource: "<resource> [key]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show modify command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					"c8ctl modify pi 2251799813685249 --move Task_Charge=Task_Review",
+				description: "Move a process instance's token to another element",
+			},
+		],
+		resources: ["pi"],
+		flags: {
+			activate: {
+				type: "string",
+				multiple: true,
+				description: "Element ID to activate (repeatable)",
+			},
+			terminate: {
+				type: "string",
+				multiple: true,
+				description:
+					"Element instance key, or element ID for all its active instances (Camunda 8.9+), to terminate (repeatable)",
+			},
+			move: {
+				type: "string",
+				multiple: true,
+				description:
+					"Move as <sourceElementId|sourceElementInstanceKey>=<targetElementId> (repeatable; Camunda 8.9+ for a single instance)",
+			},
+			instructions: {
+				type: "string",
+				description:
+					"Full modification instructions as JSON (or @file.json / @- to read from file/stdin), for ancestor scopes and variables",
+			},
+			processDefinitionKey: {
+				type: "string",
+				description:
+					"Batch mode: move tokens in all active instances of this process definition key (omit the instance key; --move by element ID only)",
+				validate: ProcessDefinitionKey.assumeExists,
+			},
+			operationReference: {
+				type: "string",
+				description: "Optional operation reference (positive integer)",
 			},
 		},
 		resourcePositionals: {
