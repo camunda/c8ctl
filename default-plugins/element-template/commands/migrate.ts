@@ -44,7 +44,11 @@ import {
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport, type MigrationReport } from "../migration/report.ts";
-import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
+import {
+	findSuccessors,
+	latestOf,
+	resolveCatalog,
+} from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
 	type MigrationRedactionContext,
@@ -244,7 +248,9 @@ function loadRecipeFile(path: string): Recipe {
 
 function embeddedRecipe(template: MigrationTemplate): Recipe | undefined {
 	try {
-		return readEmbeddedRecipe(template);
+		const recipe = readEmbeddedRecipe(template);
+		if (recipe) validateRecipeOwner(recipe, template);
+		return recipe;
 	} catch (error) {
 		if (error instanceof RecipeError) {
 			throw new Error(
@@ -541,8 +547,33 @@ async function runMigrateInternal(
 		[target],
 	);
 	redaction.templates = [...lineages([templateId, target.id]), target];
+	if (recipe) validateRecipeOwner(recipe, target);
 	const targetRecipe = recipe ?? embeddedRecipe(target);
-	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
+	// An applied source need not be engine-compatible to describe its values.
+	const fromTemplateOf = (applied: { id: string; version: number }) => {
+		const isApplied = (t: MigrationTemplate) =>
+			t.id === applied.id && (t.version ?? 0) === applied.version;
+		return (
+			templates.find(isApplied) ??
+			lineages([applied.id]).find(isApplied) ?? {
+				id: applied.id,
+				version: applied.version,
+				properties: [],
+			}
+		);
+	};
+	// Every element climbs its source lineage's recipe, so a bad one fails the
+	// run. The lineage includes the applied source, as in `migrateElement`.
+	for (const { element } of selected) {
+		const applied = readAppliedTemplate(element.businessObject);
+		if (!applied || applied.id === target.id) continue;
+		const catalog = resolveCatalog(templates, [
+			fromTemplateOf(applied),
+			target,
+		]);
+		const sourceLatest = latestOf(catalog, applied.id);
+		if (sourceLatest) embeddedRecipe(sourceLatest);
+	}
 	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
 			`Template '${target.id}' is not compatible with Camunda ${engineVersion}.`,
@@ -596,15 +627,7 @@ async function runMigrateInternal(
 			});
 			continue;
 		}
-		// An applied source need not be engine-compatible to describe its values.
-		const isApplied = (t: MigrationTemplate) =>
-			t.id === applied.id && (t.version ?? 0) === applied.version;
-		const fromTemplate = templates.find(isApplied) ??
-			lineages([applied.id]).find(isApplied) ?? {
-				id: applied.id,
-				version: applied.version,
-				properties: [],
-			};
+		const fromTemplate = fromTemplateOf(applied);
 		try {
 			const result = migrateElement({
 				modeler: migrationModeler,
