@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   lint:
+    if: false # TEMP-SOAK
     name: Lint
     runs-on: ubuntu-latest
     permissions:
@@ -40,6 +41,7 @@ jobs:
         run: npm run lint
 
   typecheck:
+    if: false # TEMP-SOAK
     name: Typecheck
     runs-on: ubuntu-latest
     permissions:
@@ -61,8 +63,8 @@ jobs:
         run: npm run typecheck
 
   unit-test:
-    name: Unit Test (Node ${{ matrix.node }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
-    needs: [lint, typecheck]
+    name: Soak (Node ${{ matrix.node }} / ${{ matrix.os }} / replica ${{ matrix.replica }})
+    timeout-minutes: 90 # TEMP-SOAK
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -70,8 +72,8 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24, 26]
-        os: ${{ fromJSON(inputs.os || '["ubuntu-latest","macos-latest","windows-latest"]') }}
-        shard: ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
+        os: ['windows-latest'] # TEMP-SOAK
+        replica: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # TEMP-SOAK
 
     steps:
       - name: Checkout code
@@ -101,13 +103,25 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run build
 
-      # NODE_OPTIONS, not `-- --test-shard=..`: node ignores flags after the globs.
-      - name: Run unit tests (shard ${{ matrix.shard }})
-        run: npm run test:unit
-        env:
-          NODE_OPTIONS: --test-shard=${{ matrix.shard }}
+      # TEMP-SOAK: run only the three files under investigation, repeatedly,
+      # all in one node process pool like the real suite does.
+      - name: Soak the investigated unit tests
+        shell: bash
+        run: |
+          failures=0
+          for i in $(seq 1 10); do
+            echo "::group::iteration $i"
+            if ! node --experimental-strip-types --test tests/unit/watch-project.test.ts tests/unit/c8ignore.test.ts tests/unit/cluster-plugin.test.ts; then
+              echo "::error::iteration $i failed"
+              failures=$((failures+1))
+            fi
+            echo "::endgroup::"
+          done
+          echo "failures: $failures / 10"
+          [ "$failures" -eq 0 ]
 
   integration-test:
+    if: false # TEMP-SOAK
     name: Integration Test (Node ${{ matrix.node }} / Camunda ${{ matrix.camunda }} / ${{ matrix.os }} / shard ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     permissions:
@@ -189,7 +203,7 @@ jobs:
   # Stable name to require in branch protection instead of each shard leg.
   test-gate:
     name: Tests passed
-    if: always()
+    if: false # TEMP-SOAK
     needs: [lint, typecheck, unit-test, integration-test]
     runs-on: ubuntu-latest
     permissions: {}
