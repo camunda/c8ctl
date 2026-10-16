@@ -48,6 +48,9 @@ version resolution.
   use a sibling temp file + `renameSync`. Anything else that
   overwrites a user-owned file (cache or BPMN) must follow the same
   pattern — a kill mid-write must not leave a truncated file.
+  `atomicOverwriteFile` resolves the target with `realpathSync` first,
+  so a symlinked BPMN keeps its link; locks on a BPMN path must use the
+  resolved path too.
 - **`syncTemplates` is serialised by an advisory lockfile.** The
   helper `withSyncLock` in `cache.ts` holds
   `<cacheDir>/.sync.lock` while the body runs, with stale-lock

@@ -6,6 +6,7 @@
 import {
 	existsSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	unlinkSync,
 	writeFileSync,
@@ -68,6 +69,10 @@ export const CONCURRENT_EDIT_MESSAGE =
  * `rename` is atomic on the same filesystem, so a kill mid-write
  * never destroys the user's BPMN file.
  *
+ * Symlinks are resolved once up front and every later step uses the real
+ * path, so a link survives and its target receives the new contents. Hard
+ * links are not preserved: the target gets a new inode.
+ *
  * With `expectedContents`, a target that no longer holds them is not
  * overwritten. With `directWriteFallback` (apply, edit), EXDEV falls back to
  * a direct `writeFileSync`, which covers exotic setups like FUSE mounts.
@@ -80,7 +85,7 @@ export function atomicOverwriteFile(
 	expectedContents?: string,
 	directWriteFallback = false,
 ): void {
-	const target = resolvePath(targetPath);
+	const target = realpathSync(targetPath);
 	const tmp = `${target}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
 	try {
 		writeFileSync(tmp, contents, "utf-8");
@@ -108,6 +113,15 @@ export function atomicOverwriteFile(
 		}
 		throw error;
 	}
+}
+
+/**
+ * Real path of an existing file. Callers pin it before they read, so a
+ * retargeted link cannot redirect the later write. A missing path stays as
+ * given, so the read reports it as not found.
+ */
+export function pinFilePath(path: string): string {
+	return existsSync(path) ? realpathSync(path) : path;
 }
 
 // ---------------------------------------------------------------------------
