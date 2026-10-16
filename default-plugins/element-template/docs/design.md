@@ -75,6 +75,30 @@ minor line** — 8.8.x, 8.9.x, 8.10.x, ...:
   newest release drifts down the listing until it falls off the page and
   would silently vanish from the selection.
 
+### Rate limit and feed fallback
+
+The REST listing allows 60 unauthenticated requests per hour per IP,
+which users behind a shared or NAT'd IP exhaust quickly. Two mitigations:
+
+- `GITHUB_TOKEN` (or `GH_TOKEN`) is sent as `Authorization: Bearer` —
+  only to `api.github.com` over HTTPS, so a token never leaks to a
+  mirror set via `C8CTL_CONNECTORS_RELEASES_URL`.
+- On 401/403/429 or a network error, `sync` lists
+  `github.com/camunda/connectors/releases.atom` instead (overridable via
+  `C8CTL_CONNECTORS_RELEASES_FEED_URL`). It is not subject to the REST
+  rate limit, but it is a degraded source: it lists only the newest
+  releases and carries no asset or draft data. Bundle URLs are derived
+  from each entry's tag (`releases/download/<tag>/
+  connectors-bundle-templates-<tag>.tar.gz`), the same selection rules
+  apply, and a release whose bundle isn't published yet surfaces as one
+  failed download. Because a minor line can be missing from the feed,
+  such a sync keeps the cached templates of other lines, skips
+  `--prune`, and leaves `fetched-at` untouched.
+
+Other listing errors (404, 5xx) are reported as is: they point at a
+broken listing or mirror, which a silent switch to `github.com` would
+hide.
+
 Bundles contain a superset of the marketplace index: the `-hybrid`
 variants and a few templates the marketplace does not list are cached
 too, and templates without a numeric `version` (pre-versioned legacy
