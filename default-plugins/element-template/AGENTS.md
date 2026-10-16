@@ -43,7 +43,8 @@ version resolution.
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
   before any cache call. An id found locally (`.camunda/element-templates/`
   or the Modeler user-data dir, see `resolveTemplateId`) never reaches
-  `requireCachePresent()`; only the OOTB fallback does.
+  `requireCachePresent()`; only the OOTB fallback does. `update` reads the
+  cache only on a local gap (see `templatePool` in `commands/migrate.ts`).
 - **`saveCache` and `apply --in-place` writes are atomic.** Both
   use a sibling temp file + `renameSync`. Anything else that
   overwrites a user-owned file (cache or BPMN) must follow the same

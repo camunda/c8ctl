@@ -142,6 +142,48 @@ describe("resolveSteps (same id)", () => {
 		assert.deepStrictEqual(steps, []);
 		assert.match(refusal ?? "", /reads "missing"/);
 	});
+
+	test("an unknown applied shape skips the reads of the first step", () => {
+		const stub = template("t", 1, []);
+		const { steps, refusal } = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 1,
+			appliedShapeKnown: false,
+			target: v3,
+			templates: [stub, v2, v3],
+		});
+		assert.strictEqual(refusal, null);
+		assert.deepStrictEqual(
+			steps.map((s) => s.version),
+			[2, 3],
+		);
+	});
+
+	test("an unknown applied shape still checks the reads of later steps", () => {
+		const broken = withRecipe(
+			template("t", 3, ["c"]),
+			{
+				kind: "upgrade",
+				sourceTemplateId: "t",
+				toVersion: 2,
+				paths: [{ from: "a", to: "b" }],
+			},
+			{
+				kind: "upgrade",
+				sourceTemplateId: "t",
+				toVersion: 3,
+				paths: [{ from: "missing", to: "c" }],
+			},
+		);
+		const { refusal } = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 1,
+			appliedShapeKnown: false,
+			target: broken,
+			templates: [v2, broken],
+		});
+		assert.match(refusal ?? "", /reads "missing"/);
+	});
 });
 
 describe("resolveSteps (cross id)", () => {
@@ -182,6 +224,21 @@ describe("resolveSteps (cross id)", () => {
 			appliedVersion: 2,
 			target: fresh,
 			templates: catalog,
+		});
+		assert.strictEqual(refusal, null);
+		assert.deepStrictEqual(
+			steps.map((s) => s.kind),
+			["hop"],
+		);
+	});
+
+	test("an unknown applied shape skips the reads of a direct hop", () => {
+		const { steps, refusal } = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 2,
+			appliedShapeKnown: false,
+			target: fresh,
+			templates: [template("old", 2, []), fresh],
 		});
 		assert.strictEqual(refusal, null);
 		assert.deepStrictEqual(

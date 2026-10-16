@@ -7,9 +7,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, describe, test } from "node:test";
 import { c8WithOptions } from "../utils/cli.ts";
-import { DIAGRAM, seedTemplateCache } from "../utils/element-template.ts";
+import {
+	DIAGRAM,
+	input,
+	seedTemplateCache,
+} from "../utils/element-template.ts";
 
 const CALL_DIAGRAM = DIAGRAM.replace(
 	'<bpmn:serviceTask id="Task_1" />',
@@ -162,3 +166,102 @@ for (const [name, cache, unchecked] of [
 		}
 	});
 }
+
+describe("a source template that is not available", () => {
+	// The applied source is in neither the cache nor a local dir, so update
+	// knows its id and version but not its shape.
+	const id = "io.example.call-recipe";
+	const recipe = {
+		schemaVersion: 1,
+		sources: [
+			{
+				kind: "upgrade",
+				sourceTemplateId: id,
+				toVersion: 2,
+				paths: [{ from: "a", to: "b" }],
+			},
+		],
+	};
+	const source = { ...template(1, [calledElement, input("a")]), id };
+	const target = { ...template(2, [input("b")]), id };
+	let applied = "";
+
+	before(async () => {
+		const sourcePath = join(dir, "recipe-source.json");
+		writeFileSync(sourcePath, JSON.stringify(source));
+		writeFileSync(join(dir, "recipe-target.json"), JSON.stringify(target));
+		writeFileSync(
+			join(dir, "recipe-embedded.json"),
+			JSON.stringify({ ...target, metadata: { migratesFrom: recipe } }),
+		);
+		writeFileSync(join(dir, "recipe.json"), JSON.stringify(recipe));
+		const diagram = join(dir, "recipe-call.bpmn");
+		writeFileSync(diagram, CALL_DIAGRAM);
+		const result = await run(
+			"apply",
+			sourcePath,
+			"Task_1",
+			diagram,
+			"--set",
+			"a=moved-value",
+			"--set",
+			"processId=user-process",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		applied = result.stdout;
+	});
+
+	for (const [name, recipeArgs] of [
+		["an embedded recipe", ["--to", "recipe-embedded.json"]],
+		[
+			"a --recipe file",
+			["--to", "recipe-target.json", "--recipe", "recipe.json"],
+		],
+	] as const) {
+		test(`${name} is used, and a dropped unread binding still needs --allow-lossy`, async () => {
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-stub-source-"));
+			const bpmnCopy = join(dataDir, "call.bpmn");
+			writeFileSync(bpmnCopy, applied);
+			const args = recipeArgs.map((a) =>
+				a.endsWith(".json") ? join(dir, a) : a,
+			);
+			const update = (...extra: string[]) =>
+				c8WithOptions(
+					{ env: { C8CTL_DATA_DIR: dataDir } },
+					"element-template",
+					"update",
+					id,
+					"Task_1",
+					bpmnCopy,
+					...args,
+					...extra,
+				);
+			try {
+				const preview = await update("--dry-run", "--json");
+				assert.equal(preview.status, 1, preview.stderr);
+				const [element] = JSON.parse(preview.stdout).results;
+				assert.equal(element.recipe.used, true);
+				assert.equal(element.recipe.refusal, null);
+				assert.equal(element.lossless, false);
+				assert.ok(
+					element.report.skipped.unchecked.some(
+						(u: { key: string }) => u.key === "processId",
+					),
+				);
+
+				const refused = await update("--in-place");
+				assert.equal(refused.status, 1);
+				assert.match(refused.stderr, /--allow-lossy/);
+				assert.equal(readFileSync(bpmnCopy, "utf-8"), applied);
+
+				const authorized = await update("--in-place", "--allow-lossy");
+				assert.equal(authorized.status, 0, authorized.stderr);
+				const written = readFileSync(bpmnCopy, "utf-8");
+				assert.match(written, /source="moved-value" target="b"/);
+				assert.match(written, /modelerTemplateVersion="2"/);
+			} finally {
+				rmSync(dataDir, { recursive: true, force: true });
+			}
+		});
+	}
+});

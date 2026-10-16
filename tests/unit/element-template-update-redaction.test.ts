@@ -219,6 +219,11 @@ for (const json of [false, true]) {
 	test(`redacts embedded recipe and target validation diagnostics in ${json ? "JSON" : "text"}`, async () => {
 		for (const invalid of [
 			{ ...target, metadata: { migratesFrom: { ...recipe, [PRIVATE]: true } } },
+			// Only the target knows this value.
+			{
+				...target,
+				metadata: { migratesFrom: { ...recipe, [secrets[6]]: true } },
+			},
 			{
 				...target,
 				properties: target.properties.map((p) =>
@@ -374,3 +379,25 @@ test("redacts a secret-marked field of a source template the engine filters out"
 		assert.match(result.stdout + result.stderr, /\[REDACTED\]/);
 	}
 });
+
+for (const json of [false, true]) {
+	test(`redacts a source credential in a rejected --to URL in ${json ? "JSON" : "text"}`, async () => {
+		// Only the source template's Credentials group marks this value.
+		const result = await c8WithEnv(
+			env,
+			"element-template",
+			"update",
+			source.id,
+			TASK,
+			bpmn,
+			"--to",
+			`http://example.invalid/${secrets[4]}.json`,
+			"--dry-run",
+			...(json ? ["--json"] : []),
+		);
+		assert.equal(result.status, 1, result.stdout);
+		assert.match(result.stderr + result.stdout, /Insecure template URL/);
+		assertPrivateAbsent(result.stdout);
+		assertPrivateAbsent(result.stderr);
+	});
+}

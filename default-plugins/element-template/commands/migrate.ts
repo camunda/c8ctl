@@ -44,7 +44,11 @@ import {
 	validateRecipeOwner,
 } from "../migration/recipe.ts";
 import { buildReport, type MigrationReport } from "../migration/report.ts";
-import { findSuccessors, resolveCatalog } from "../migration/steps.ts";
+import {
+	findSuccessors,
+	latestOf,
+	resolveCatalog,
+} from "../migration/steps.ts";
 import type { MigrationTemplate } from "../migration/types.ts";
 import {
 	type MigrationRedactionContext,
@@ -269,32 +273,46 @@ function createModeler(): ModelerInstance {
 interface TemplatePool {
 	/** `findLocalTemplates` for `id`, read once per run. */
 	localOf(id: string): Template[];
-	/** The cache, with the local templates of `ids` shadowing same id+version entries. */
+	/** The cache, read on first use, once per run. */
+	cache(): Template[];
+	/** Marks `id` as defined outside the cache, by a template file or URL. */
+	resolvedWithoutCache(id: string): void;
+	/**
+	 * The local templates of `ids`, shadowing same id+version cache entries.
+	 * The cache takes part once it is loaded, or when an id has no local template.
+	 */
 	pool(ids: (string | undefined)[]): Template[];
 }
 
 /** Local templates (see `resolveTemplateId`) take part in update like cached ones. */
-function templatePool(
-	cachedTemplates: Template[],
-	searchDir: string,
-): TemplatePool {
+function templatePool(searchDir: string): TemplatePool {
 	const local = new Map<string, Template[]>();
 	const localOf = (id: string) => {
 		const templates = local.get(id) ?? findLocalTemplates(searchDir, id);
 		local.set(id, templates);
 		return templates;
 	};
+	const withoutCache = new Set<string>();
+	let cached: Template[] | undefined;
+	const cache = () => {
+		cached ??= loadCache() ?? [];
+		return cached;
+	};
 	const identity = (t: Template) => JSON.stringify([t.id, t.version ?? 0]);
 	return {
 		localOf,
+		cache,
+		resolvedWithoutCache: (id) => withoutCache.add(id),
 		pool(ids) {
-			const shadowing = [...new Set(ids)]
-				.filter((id) => id !== undefined)
-				.flatMap(localOf);
+			const known = [...new Set(ids)].filter((id) => id !== undefined);
+			const shadowing = known.flatMap(localOf);
+			const isLocal = (id: string) =>
+				withoutCache.has(id) || localOf(id).length > 0;
+			if (cached === undefined && known.every(isLocal)) return shadowing;
 			const shadowed = new Set(shadowing.map(identity));
 			return [
 				...shadowing,
-				...cachedTemplates.filter((t) => !shadowed.has(identity(t))),
+				...cache().filter((t) => !shadowed.has(identity(t))),
 			];
 		},
 	};
@@ -309,36 +327,38 @@ async function resolveTarget({
 	templateId,
 	to,
 	executionPlatformVersion,
-	cachedTemplates,
 	templatePool,
 }: {
 	templateId: string;
 	to: string | undefined;
 	executionPlatformVersion: string;
-	cachedTemplates: Template[];
 	templatePool: TemplatePool;
 }): Promise<MigrationTemplate> {
 	const arg = to ?? templateId;
 	const ref = parseTemplateRef(arg);
-	if (ref?.kind === "id") {
+	const checkConflicts = (id: string) =>
 		resolveCatalog(
-			migrationTemplates(
-				templatePool.pool([ref.id]).filter((t) => t.id === ref.id),
-			),
+			migrationTemplates(templatePool.pool([id]).filter((t) => t.id === id)),
 		);
-	}
+	if (ref?.kind === "id") checkConflicts(ref.id);
 	const target =
 		ref?.kind === "id"
 			? await resolveTemplateId(ref, {
 					localTemplates: templatePool.localOf(ref.id),
 					executionPlatformVersion,
 					requireEngineCompatibility: true,
-					templates: cachedTemplates,
+					loadTemplates: () => {
+						const cached = templatePool.cache();
+						// The cached versions join the pool, so check it again.
+						checkConflicts(ref.id);
+						return cached;
+					},
 				})
 			: await readTemplateFromPathOrUrl(arg);
 	if (!isMigrationTemplate(target)) {
 		throw new Error("The target template has no id.");
 	}
+	if (ref?.kind !== "id") templatePool.resolvedWithoutCache(target.id);
 	return target;
 }
 
@@ -502,16 +522,31 @@ async function runMigrateInternal(
 		enumerateElementValues(getExtensionElements(element.businessObject));
 	redaction.values = selected.flatMap(({ element }) => valuesOf(element));
 
-	const cachedTemplates = loadCache() ?? [];
 	const pool = templatePool(
-		cachedTemplates,
 		bpmnFilePath ? dirname(input.source) : process.cwd(),
 	);
+	// An applied version without a local template can only come from the cache.
+	const localVersions = pool.localOf(templateId).map((t) => t.version ?? 0);
+	if (
+		selected.some(
+			({ element }) =>
+				!localVersions.includes(
+					readAppliedTemplate(element.businessObject)?.version ?? 0,
+				),
+		)
+	) {
+		pool.cache();
+	}
 	// Every version of the involved lineages, engine-incompatible ones too:
 	// a filtered-out source still marks secrets.
 	const lineages = (ids: (string | undefined)[]) =>
 		migrationTemplates(pool.pool(ids)).filter((t) => ids.includes(t.id));
-	redaction.templates = lineages([templateId, parsed.to]);
+	// Register the source first: a rejected `--to` quotes the argument.
+	redaction.templates = lineages([templateId]);
+	const toRef = parseTemplateRef(parsed.to);
+	if (toRef?.kind === "id") {
+		redaction.templates = lineages([templateId, toRef.id]);
+	}
 
 	const recipe = parsed.recipePath
 		? loadRecipeFile(parsed.recipePath)
@@ -529,9 +564,50 @@ async function runMigrateInternal(
 		templateId,
 		to: parsed.to,
 		executionPlatformVersion: engineVersion,
-		cachedTemplates,
 		templatePool: pool,
 	});
+	// Recipe diagnostics can quote values that only the target knows.
+	redaction.templates = [...(redaction.templates ?? []), target];
+	const targetRecipe = recipe ?? embeddedRecipe(target);
+	// A recipe step to a version without a local template needs the cache.
+	const sourceLatest =
+		target.id === templateId
+			? undefined
+			: latestOf(
+					compatibleTemplates(pool.pool([templateId]), engineVersion).filter(
+						(t) => t.id === templateId,
+					),
+					templateId,
+				);
+	let sourceRecipe: Recipe | undefined;
+	try {
+		sourceRecipe = sourceLatest && readEmbeddedRecipe(sourceLatest);
+	} catch {
+		// Step resolution reports an unusable recipe for each element.
+	}
+	const stepVersions = [targetRecipe, sourceRecipe]
+		.flatMap((r) => r?.sources ?? [])
+		.flatMap((s) =>
+			s.kind === "upgrade" && s.sourceTemplateId === templateId
+				? [s.toVersion]
+				: [],
+		);
+	const lowestApplied = Math.min(
+		...selected.map(
+			({ element }) =>
+				readAppliedTemplate(element.businessObject)?.version ?? 0,
+		),
+	);
+	if (
+		stepVersions.some(
+			(v) =>
+				v > lowestApplied &&
+				!localVersions.includes(v) &&
+				!(target.id === templateId && (target.version ?? 0) === v),
+		)
+	) {
+		pool.cache();
+	}
 	const cache = compatibleTemplates(
 		pool.pool([templateId, target.id]),
 		engineVersion,
@@ -541,7 +617,6 @@ async function runMigrateInternal(
 		[target],
 	);
 	redaction.templates = [...lineages([templateId, target.id]), target];
-	const targetRecipe = recipe ?? embeddedRecipe(target);
 	if (targetRecipe) validateRecipeOwner(targetRecipe, target);
 	if (!isEngineCompatible(target, engineVersion)) {
 		throw new Error(
@@ -599,17 +674,19 @@ async function runMigrateInternal(
 		// An applied source need not be engine-compatible to describe its values.
 		const isApplied = (t: MigrationTemplate) =>
 			t.id === applied.id && (t.version ?? 0) === applied.version;
-		const fromTemplate = templates.find(isApplied) ??
-			lineages([applied.id]).find(isApplied) ?? {
-				id: applied.id,
-				version: applied.version,
-				properties: [],
-			};
+		const source =
+			templates.find(isApplied) ?? lineages([applied.id]).find(isApplied);
+		const fromTemplate = source ?? {
+			id: applied.id,
+			version: applied.version,
+			properties: [],
+		};
 		try {
 			const result = migrateElement({
 				modeler: migrationModeler,
 				element,
 				fromTemplate,
+				sourceKnown: source !== undefined,
 				target,
 				templates,
 				recipe,
