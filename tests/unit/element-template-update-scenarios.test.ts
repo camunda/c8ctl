@@ -810,3 +810,226 @@ describe("element-template update on synthetic templates and a realistic diagram
 		assert.deepEqual(leftovers(), []);
 	});
 });
+
+describe("element-template update counts Hidden resets and displaced values as lost", () => {
+	const displacedOld = template("lossy-displaced", 1, [input("a"), input("b")]);
+	const displacedTarget = template(
+		"lossy-displaced",
+		2,
+		[input("b")],
+		[
+			{
+				kind: "upgrade",
+				sourceTemplateId: "lossy-displaced",
+				toVersion: 2,
+				paths: [{ from: "input:a", to: "input:b" }],
+			},
+		],
+	);
+	const cases = [
+		{
+			name: "an editable value replaced by a Hidden target property",
+			key: "region",
+			cause: "hidden",
+			old: template("lossy-hidden", 1, [input("region")]),
+			target: template("lossy-hidden", 2, [
+				{
+					type: "Hidden",
+					value: "fixed-region",
+					binding: { type: "zeebe:input", name: "region" },
+				},
+			]),
+			set: ["region=eu-custom"],
+		},
+		{
+			name: "a recipe move over a populated destination",
+			key: "b",
+			cause: "displaced",
+			old: displacedOld,
+			target: displacedTarget,
+			set: ["a=moved", "b=displaced"],
+		},
+		{
+			name: "a value displaced in one step and moved on in the next",
+			key: "b",
+			cause: "displaced",
+			old: displacedOld,
+			via: [displacedTarget],
+			target: template(
+				"lossy-displaced",
+				3,
+				[input("b"), input("c")],
+				[
+					{
+						kind: "upgrade",
+						sourceTemplateId: "lossy-displaced",
+						toVersion: 2,
+						paths: [{ from: "input:a", to: "input:b" }],
+					},
+					{
+						kind: "upgrade",
+						sourceTemplateId: "lossy-displaced",
+						toVersion: 3,
+						paths: [{ from: "input:b", to: "input:c" }],
+					},
+				],
+			),
+			set: ["a=moved", "b=displaced"],
+		},
+	];
+	const hiddenRegion = {
+		type: "Hidden",
+		value: "fixed-region",
+		binding: { type: "zeebe:input", name: "region" },
+	};
+	cases.push({
+		name: "an editable value reset by a Hidden property and then moved",
+		key: "region",
+		cause: "hidden",
+		old: template("lossy-reset-moved", 1, [input("region")]),
+		via: [template("lossy-reset-moved", 2, [hiddenRegion, input("marker")])],
+		target: template(
+			"lossy-reset-moved",
+			3,
+			[hiddenRegion, input("marker"), input("copy")],
+			[
+				// A recipe entry for v2 makes v2 a separate step, so the
+				// v3 move reads the reset value.
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-moved",
+					toVersion: 2,
+					paths: [{ to: "input:marker", set: "x" }],
+				},
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-moved",
+					toVersion: 3,
+					paths: [{ from: "input:region", to: "input:copy" }],
+				},
+			],
+		),
+		set: ["region=eu-custom"],
+	});
+	cases.push({
+		name: "an editable value reset by an intermediate Hidden property",
+		key: "region",
+		cause: "hidden",
+		old: template("lossy-reset-editable", 1, [input("region")]),
+		via: [template("lossy-reset-editable", 2, [hiddenRegion, input("marker")])],
+		target: template(
+			"lossy-reset-editable",
+			3,
+			[input("region"), input("marker")],
+			[
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-editable",
+					toVersion: 2,
+					paths: [{ to: "input:marker", set: "x" }],
+				},
+			],
+		),
+		set: ["region=eu-custom"],
+	});
+	for (const { name, key, cause, old, via = [], target, set } of cases) {
+		test(`${name} requires --allow-lossy`, async () => {
+			const dir = mkdtempSync(join(tmpdir(), "c8-migration-lossy-"));
+			const run = (...args: string[]) =>
+				spawnCli(dir, ["element-template", ...args]);
+			try {
+				seedTemplateCache(dir, [old, ...via, target]);
+				const oldPath = join(dir, "old.json");
+				const targetPath = join(dir, "target.json");
+				const bpmn = join(dir, "process.bpmn");
+				writeFileSync(oldPath, JSON.stringify(old));
+				writeFileSync(targetPath, JSON.stringify(target));
+				const seeded = await run(
+					"apply",
+					oldPath,
+					TASK,
+					FIXTURE,
+					...set.flatMap((s) => ["--set", s]),
+				);
+				assert.equal(seeded.status, 0, seeded.stderr);
+				writeFileSync(bpmn, seeded.stdout);
+				const update = (...flags: string[]) =>
+					run("update", old.id, TASK, bpmn, "--to", targetPath, ...flags);
+
+				const refused = await update("--in-place");
+				assert.notEqual(refused.status, 0);
+				assert.match(refused.stderr, /--allow-lossy/);
+				assert.match(refused.stderr, new RegExp(`dropped \\(${key}\\)`));
+				assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);
+
+				const dry = await update("--in-place", "--dry-run", "--json");
+				assert.equal(dry.status, 1, dry.stderr);
+				const doc = JSON.parse(dry.stdout);
+				assert.equal(doc.summary.blocked, 1);
+				const [result] = doc.results;
+				assert.equal(result.lossless, false);
+				assert.equal(result.requiresAuthorization, true);
+				assert.deepEqual(
+					result.report.dropped.map((d: { key: string; cause?: string }) => [
+						d.key,
+						d.cause,
+					]),
+					[[key, cause]],
+				);
+
+				const text = await update("--dry-run");
+				assert.equal(text.status, 1, text.stderr);
+				assert.match(text.stdout, new RegExp(`Dropped[\\s\\S]*${key}`));
+				assert.match(text.stdout, /Requires --allow-lossy/);
+				assert.equal(readFileSync(bpmn, "utf-8"), seeded.stdout);
+
+				const authorized = await update("--in-place", "--allow-lossy");
+				assert.equal(authorized.status, 0, authorized.stderr);
+				assert.notEqual(readFileSync(bpmn, "utf-8"), seeded.stdout);
+			} finally {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("the same recipe move into an empty destination stays lossless", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "c8-migration-safe-move-"));
+		const run = (...args: string[]) =>
+			spawnCli(dir, ["element-template", ...args]);
+		try {
+			seedTemplateCache(dir, [displacedOld, displacedTarget]);
+			const oldPath = join(dir, "old.json");
+			const targetPath = join(dir, "target.json");
+			const bpmn = join(dir, "process.bpmn");
+			writeFileSync(oldPath, JSON.stringify(displacedOld));
+			writeFileSync(targetPath, JSON.stringify(displacedTarget));
+			const seeded = await run(
+				"apply",
+				oldPath,
+				TASK,
+				FIXTURE,
+				"--set",
+				"a=moved",
+			);
+			assert.equal(seeded.status, 0, seeded.stderr);
+			writeFileSync(bpmn, seeded.stdout);
+			const result = await run(
+				"update",
+				displacedOld.id,
+				TASK,
+				bpmn,
+				"--to",
+				targetPath,
+				"--in-place",
+				"--json",
+			);
+			assert.equal(result.status, 0, result.stderr);
+			const [element] = JSON.parse(result.stdout).results;
+			assert.equal(element.lossless, true);
+			assert.deepEqual(element.report.dropped, []);
+			assert.match(readFileSync(bpmn, "utf-8"), /source="moved" target="b"/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
