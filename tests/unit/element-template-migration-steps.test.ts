@@ -231,7 +231,7 @@ describe("findSuccessors", () => {
 		);
 	});
 
-	test("loaded source versions do not satisfy a change floor", () => {
+	test("a change floor needs a loaded source version at or above it", () => {
 		const gated = withRecipe(template("new", 1, []), {
 			kind: "change",
 			sourceTemplateId: "old",
@@ -240,7 +240,9 @@ describe("findSuccessors", () => {
 		});
 		assert.deepStrictEqual(findSuccessors([gated], "old", 5, []), []);
 		const latestOld = template("old", 13, []);
-		assert.deepStrictEqual(findSuccessors([gated], "old", 5, [latestOld]), []);
+		assert.deepStrictEqual(findSuccessors([gated], "old", 5, [latestOld]), [
+			gated,
+		]);
 	});
 	test("does not advertise a successor with a missing required upgrade", () => {
 		const latestOld = withRecipe(
@@ -733,19 +735,25 @@ describe("Option B selection boundaries", () => {
 			],
 		);
 		assert.deepStrictEqual(result.steps[1].entries, recipe.sources[2].entries);
-		const refused = resolveSteps({
+		const embedded = resolveSteps({
 			appliedId: "old",
 			appliedVersion: 1,
 			target,
 			templates,
 		});
-		// An unusable target recipe must not retain partial source applications.
-		assert.deepStrictEqual(refused.steps, []);
-		assert.match(
-			refused.refusal ?? "",
-			/unmet source floor.*5.*reached.*3; update the element to version 5 or later first/,
+		// The embedded floor of 5 is reached by an implicit step after the upgrade to 3.
+		assert.strictEqual(embedded.refusal, null);
+		assert.deepStrictEqual(
+			embedded.steps.map((step) => [step.kind, step.version, step.implicit]),
+			[
+				["version", 3, undefined],
+				["version", 5, true],
+				["hop", 9, undefined],
+			],
 		);
-		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
+		assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), [
+			target,
+		]);
 	});
 
 	test("latest source recipes without upgrades never borrow older upgrades or catalog reachability", () => {
@@ -760,7 +768,6 @@ describe("Option B selection boundaries", () => {
 			minSourceVersion: 2,
 		});
 		for (const templates of [
-			[],
 			[template("old", 2, [])],
 			[older, template("old", 5, [])],
 			[
@@ -778,71 +785,35 @@ describe("Option B selection boundaries", () => {
 				target,
 				templates,
 			});
-			// Catalog presence cannot turn an unmet floor into silent carry-over.
-			assert.deepStrictEqual(result.steps, []);
-			assert.match(result.refusal ?? "", /unmet source floor.*2.*reached.*1/);
-			assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), []);
-			assert.deepStrictEqual(findSuccessors([target], "old", 2, templates), [
-				target,
-			]);
-		}
-	});
-
-	test("selects one floor from the reached step rather than the latest source or target version", () => {
-		for (const reachedVersion of [1, 2, 4, 5]) {
-			const latest = withRecipe(template("old", 9, []), {
-				kind: "upgrade",
-				sourceTemplateId: "old",
-				toVersion: reachedVersion,
-			});
-			const target = withRecipe(
-				template("new", 99, []),
-				{
-					kind: "change",
-					sourceTemplateId: "old",
-					minSourceVersion: 5,
-					paths: [{ to: "x", set: "five" }],
-				},
-				{
-					kind: "change",
-					sourceTemplateId: "old",
-					paths: [{ to: "x", set: "fallback" }],
-				},
-				{
-					kind: "change",
-					sourceTemplateId: "old",
-					minSourceVersion: 2,
-					paths: [{ to: "x", set: "two" }],
-				},
-			);
-			const templates = [latest, template("old", reachedVersion, [])];
-			const result = resolveSteps({
-				appliedId: "old",
-				appliedVersion: 1,
-				target,
-				templates,
-			});
-			const hops = result.steps.filter((step) => step.kind === "hop");
-			assert.strictEqual(hops.length, 1);
-			const entry = hops[0].entries[0];
-			assert.ok(entry.kind === "set");
-			assert.strictEqual(
-				entry.value,
-				reachedVersion >= 5 ? "five" : reachedVersion >= 2 ? "two" : "fallback",
+			// The floor is met by an implicit step, never by borrowing an older upgrade.
+			assert.strictEqual(result.refusal, null);
+			assert.deepStrictEqual(
+				result.steps.map((step) => [step.kind, step.version, step.implicit]),
+				[
+					["version", 2, true],
+					["hop", 99, undefined],
+				],
 			);
 			assert.deepStrictEqual(findSuccessors([target], "old", 1, templates), [
 				target,
 			]);
-			const gated = withRecipe(template("gated", 99, []), {
-				kind: "change",
-				sourceTemplateId: "old",
-				minSourceVersion: 5,
-			});
-			assert.deepStrictEqual(
-				findSuccessors([gated], "old", 1, templates),
-				reachedVersion >= 5 ? [gated] : [],
-			);
+			assert.deepStrictEqual(findSuccessors([target], "old", 2, templates), [
+				target,
+			]);
 		}
+		// With no source version loaded at or above the floor there is nothing to climb to.
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [],
+				}),
+			/Template 'old' v2 or later is required/,
+		);
+		assert.deepStrictEqual(findSuccessors([target], "old", 1, []), []);
+		assert.deepStrictEqual(findSuccessors([target], "old", 2, []), [target]);
 	});
 
 	test("an omitted floor does not request an upgrade and a zero floor outranks it", () => {
@@ -1200,6 +1171,232 @@ describe("hop coverage", () => {
 		assert.deepStrictEqual(
 			result.steps.map((step) => step.kind),
 			["hop"],
+		);
+	});
+});
+
+describe("implicit update to the recipe floor", () => {
+	const change = (minSourceVersion?: number, to = "x") => ({
+		kind: "change",
+		sourceTemplateId: "old",
+		...(minSourceVersion === undefined ? {} : { minSourceVersion }),
+		paths: [{ to, set: `floor-${minSourceVersion ?? "none"}` }],
+	});
+	const lineage = (...versions: number[]) =>
+		versions.map((v) => template("old", v, ["a"]));
+
+	test("adds one implicit version step to the floor, then the hop", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(3));
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates: [...lineage(1, 2, 3), target],
+			engineVersion: "8.8",
+		});
+		assert.strictEqual(result.refusal, null);
+		assert.deepStrictEqual(
+			result.steps.map((s) => [s.kind, s.templateId, s.version, s.implicit]),
+			[
+				["version", "old", 3, true],
+				["hop", "new", 1, undefined],
+			],
+		);
+		assert.deepStrictEqual(result.steps[0].entries, []);
+	});
+
+	test("uses the highest floor at most the newest compatible version", () => {
+		const target = withRecipe(
+			template("new", 1, ["x"]),
+			change(2),
+			change(4),
+			change(7),
+		);
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates: [...lineage(1, 2, 3, 4, 5), target],
+			engineVersion: "8.8",
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => [s.kind, s.version]),
+			[
+				["version", 4],
+				["hop", 1],
+			],
+		);
+		const entry = result.steps[1].entries[0];
+		assert.ok(entry.kind === "set");
+		assert.strictEqual(entry.value, "floor-4");
+	});
+
+	test("does not bump when the reached version already meets the floor", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(2));
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 2,
+			target,
+			templates: [...lineage(2, 3), target],
+			engineVersion: "8.8",
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => s.kind),
+			["hop"],
+		);
+	});
+
+	test("an omitted-floor entry never triggers a bump", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change());
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates: [...lineage(1, 5), target],
+			engineVersion: "8.8",
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => s.kind),
+			["hop"],
+		);
+	});
+
+	test("throws when the newest compatible version is below the lowest floor", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(5), change(6));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1, 4), target],
+					engineVersion: "8.7",
+				}),
+			/Template 'old' v5 or later is required, but the newest version compatible with Camunda 8\.7 \(from the BPMN executionPlatformVersion\) is v4\./,
+		);
+	});
+
+	test("throws and lists compatible versions when the floor is not in the catalog", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(3));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1, 2, 4), target],
+					engineVersion: "8.8",
+				}),
+			/Template 'old' v3 is not available for Camunda 8\.8.*compatible versions: 1, 2, 4/,
+		);
+	});
+
+	test("an explicit recipe behaves like an embedded one", () => {
+		const target = template("new", 1, ["x"]);
+		const recipe = recipeOf(change(3));
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates: [...lineage(1, 3), target],
+			recipe,
+			engineVersion: "8.8",
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => [s.kind, s.version, s.implicit]),
+			[
+				["version", 3, true],
+				["hop", 1, undefined],
+			],
+		);
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1, 2), target],
+					recipe,
+					engineVersion: "8.8",
+				}),
+			/v3 or later is required/,
+		);
+	});
+
+	test("an engine-incompatible applied version is not named as compatible", () => {
+		const incompatible = (t: MigrationTemplate) => t.version !== 5;
+		const target = withRecipe(template("new", 1, ["x"]), change(6));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 5,
+					target,
+					templates: [...lineage(4, 5), target],
+					engineVersion: "8.8",
+					isCompatible: incompatible,
+				}),
+			/is required, but the newest version compatible with Camunda 8\.8.*is v4\./,
+		);
+	});
+
+	test("the missing-floor error lists only compatible versions", () => {
+		const incompatible = (t: MigrationTemplate) => t.version !== 1;
+		const target = withRecipe(template("new", 1, ["x"]), change(2));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1, 3, 4), target],
+					engineVersion: "8.8",
+					isCompatible: incompatible,
+				}),
+			/v2 is not available.*compatible versions: 3, 4\./,
+		);
+	});
+
+	test("reports that no compatible source version exists when the catalog is empty", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(2));
+		assert.throws(
+			() =>
+				resolveSteps({
+					appliedId: "old",
+					appliedVersion: 1,
+					target,
+					templates: [...lineage(1), target],
+					engineVersion: "8.8",
+					isCompatible: (t) => t.id !== "old",
+				}),
+			/Template 'old' v2 or later is required, but no version compatible with Camunda 8\.8 \(from the BPMN executionPlatformVersion\) is available\./,
+		);
+	});
+
+	test("an applied version above an unreachable floor does not throw", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(5));
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 5,
+			target,
+			templates: [...lineage(4, 5), target],
+			engineVersion: "8.8",
+			isCompatible: (t) => t.version !== 5,
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => s.kind),
+			["hop"],
+		);
+	});
+
+	test("findSuccessors advertises a successor reachable through an implicit step", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(3));
+		assert.deepStrictEqual(findSuccessors([target], "old", 1, lineage(1, 3)), [
+			target,
+		]);
+		assert.deepStrictEqual(
+			findSuccessors([target], "old", 1, lineage(1, 2)),
+			[],
 		);
 	});
 });

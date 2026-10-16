@@ -44,12 +44,14 @@ import {
 	type MigrationReport,
 	mergeFacts,
 	type ReportFacts,
+	type ReportStep,
 } from "./report.ts";
 import {
 	type Application,
 	resolveApplications,
 	resolveCatalog,
 	resolveSteps,
+	type Step,
 } from "./steps.ts";
 import type { MigrationTemplate } from "./types.ts";
 
@@ -212,7 +214,13 @@ function applyApplication(
 	element: BpmnElement,
 	application: Application,
 	mapWrites: Write[] = [],
-): { element: BpmnElement; facts: ReportFacts } | null {
+): {
+	element: BpmnElement;
+	facts: ReportFacts;
+	written: { key: string; bindingType: string | null; value: string }[];
+	/** The template with the properties known to be active when it was applied. */
+	activeTemplate: MigrationTemplate;
+} | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
 	if (
@@ -297,8 +305,29 @@ function applyApplication(
 			? normalizeDestinationValue(property, write.value)
 			: undefined;
 	};
+	// What the writes put on each active property, after normalization.
+	const written = writes.flatMap((w) =>
+		findPropertiesByTarget(clone.properties, w.key, w.bindingType)
+			.filter((property) => active.has(property))
+			.map((property) => ({
+				key: w.key,
+				bindingType: w.bindingType,
+				value: normalizeDestinationValue(property, w.value),
+			})),
+	);
 	return {
 		element: current,
+		written,
+		activeTemplate: {
+			...clone,
+			// Unconditional properties are always active. A conditional one counts only
+			// when a write reached it, so an unknown condition never hides a loss.
+			properties: clone.properties.filter(
+				(property) =>
+					active.has(property) ||
+					!("condition" in property && property.condition),
+			),
+		},
 		facts: {
 			...facts,
 			after: valuesOf(current),
@@ -337,6 +366,8 @@ export function migrateElement({
 	target,
 	templates,
 	recipe,
+	engineVersion,
+	isCompatible,
 	maps = [],
 }: {
 	modeler: MigrationModeler;
@@ -345,6 +376,10 @@ export function migrateElement({
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
+	/** Camunda version of the BPMN, used to explain an unreachable source floor. */
+	engineVersion?: string;
+	/** Whether a template fits the BPMN's Camunda version. */
+	isCompatible?: (template: MigrationTemplate) => boolean;
 	/** Moves of original values to the final target, applied after all steps. */
 	maps?: ValueMap[];
 }): MigrationResult {
@@ -365,6 +400,8 @@ export function migrateElement({
 		target,
 		templates,
 		recipe,
+		engineVersion,
+		isCompatible,
 	});
 	const applications = resolveApplications(templates, steps, target);
 	for (const { step, template } of applications) {
@@ -391,10 +428,15 @@ export function migrateElement({
 				};
 	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
+	// An implicit step has no recipe, so a value its template lacks is lost
+	// even when a later template defaults the same binding.
+	const lostInImplicitSteps: ElementValue[] = [];
+	const implicitTemplates: MigrationTemplate[] = [];
 	let current = element;
 	let mapsApplied = false;
 	for (const [index, application] of applications.entries()) {
 		const isFinal = index === applications.length - 1;
+		const valuesBefore = application.step?.implicit ? valuesOf(current) : [];
 		const result = applyApplication(
 			modeler,
 			catalog,
@@ -404,7 +446,51 @@ export function migrateElement({
 		);
 		if (result) {
 			current = result.element;
+			const earlierMoves = allFacts.flatMap((facts) => facts.moved);
 			allFacts.push(result.facts);
+			if (application.step?.implicit)
+				implicitTemplates.push(result.activeTemplate);
+			const valuesAfter = valuesOf(current);
+			lostInImplicitSteps.push(
+				...valuesBefore.filter((v) => {
+					if (v.value === "") return false;
+					// An earlier move that holds the value on another binding keeps it.
+					const holds = (
+						values: ElementValue[],
+						m: (typeof earlierMoves)[number],
+					) =>
+						values.some(
+							(e) =>
+								e.key === m.to.key &&
+								e.bindingType === m.to.bindingType &&
+								e.value === v.value,
+						);
+					if (
+						earlierMoves.some(
+							(m) =>
+								m.from.key === v.key &&
+								m.from.bindingType === v.bindingType &&
+								holds(valuesBefore, m) &&
+								holds(valuesAfter, m),
+						)
+					)
+						return false;
+					const kept = valuesAfter.find(
+						(a) => a.key === v.key && a.bindingType === v.bindingType,
+					);
+					if (!kept) return true;
+					// The value survives when an active write put it there unchanged.
+					return (
+						kept.value !== v.value &&
+						!result.written.some(
+							(w) =>
+								w.key === v.key &&
+								w.bindingType === v.bindingType &&
+								w.value === kept.value,
+						)
+					);
+				}),
+			);
 			mapsApplied ||= isFinal;
 		}
 	}
@@ -448,6 +534,24 @@ export function migrateElement({
 		facts,
 		usedRecipe: steps.length > 0,
 		refusal,
+		lostInImplicitSteps,
+		implicitTemplates,
+		steps: reportSteps(steps, fromTemplate.version ?? 0),
 	});
 	return { element: current, report };
+}
+
+function reportSteps(steps: Step[], appliedVersion: number): ReportStep[] {
+	let reached = appliedVersion;
+	return steps.map((step) => {
+		const reportStep: ReportStep = {
+			kind: step.kind,
+			templateId: step.templateId,
+			fromVersion: reached,
+			toVersion: step.version,
+			...(step.implicit ? { implicit: true } : {}),
+		};
+		if (step.kind === "version") reached = step.version;
+		return reportStep;
+	});
 }

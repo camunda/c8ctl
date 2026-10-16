@@ -71,6 +71,16 @@ export interface MovedItem {
 	source: "recipe" | "map";
 }
 
+/** A step of the migration plan, in application order. */
+export interface ReportStep {
+	kind: "version" | "hop";
+	templateId: string;
+	fromVersion: number;
+	toVersion: number;
+	/** Added by the plan to reach a change floor; the recipe has no entries for it. */
+	implicit?: true;
+}
+
 export interface MigrationReport {
 	from: TemplateRef;
 	to: TemplateRef;
@@ -78,6 +88,7 @@ export interface MigrationReport {
 	usedRecipe: boolean;
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
+	steps: ReportStep[];
 	dropped: (Field & { value: string; valueName?: string })[];
 	added: (Field & {
 		value: string;
@@ -286,6 +297,9 @@ export function buildReport({
 	facts,
 	usedRecipe,
 	refusal,
+	steps = [],
+	lostInImplicitSteps = [],
+	implicitTemplates = [],
 }: {
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
@@ -295,6 +309,11 @@ export function buildReport({
 	facts: ReportFacts;
 	usedRecipe: boolean;
 	refusal: string | null;
+	steps?: ReportStep[];
+	/** Values an implicit step removed, whether or not the target later defaults them. */
+	lostInImplicitSteps?: ElementValue[];
+	/** Templates of the implicit steps, checked for unread bindings they do not keep. */
+	implicitTemplates?: MigrationTemplate[];
 }): MigrationReport {
 	const survivingMoves = facts.moved.filter((m) => {
 		const source = find(before, m.from.key, m.from.bindingType);
@@ -316,6 +335,9 @@ export function buildReport({
 	const addedSets = survivingSets.filter(
 		(s) => !find(before, s.key, s.bindingType),
 	);
+	// Maps read the original values; recipe moves read the post-step snapshot.
+	const claimedByMap = (v: ElementValue) =>
+		survivingMoves.some((m) => m.map && sameTarget(v, m.from));
 	const claimedFrom = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.from));
 	const claimedTo = (v: ElementValue) =>
@@ -355,21 +377,31 @@ export function buildReport({
 				sameTarget(v, m.from) &&
 				find(after, m.to.key, m.to.bindingType) === undefined,
 		);
-	const dropped = before
-		.filter(
+	const droppedValues = before.filter(
+		(v) =>
+			v.value !== "" &&
+			((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
+				lostBySource(v)),
+	);
+	const dropped = [
+		...droppedValues,
+		...lostInImplicitSteps.filter(
 			(v) =>
-				v.value !== "" &&
-				((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
-					lostBySource(v)),
-		)
-		.map((v) => {
-			const field = fieldOf(fromTemplate, v.key, v.bindingType);
-			return {
-				...field,
-				value: v.value,
-				...withNames(fromTemplate, field, v.value),
-			};
-		});
+				!find(droppedValues, v.key, v.bindingType) &&
+				// A surviving map that carries the original value on is not a loss.
+				!(
+					claimedByMap(v) &&
+					find(before, v.key, v.bindingType)?.value === v.value
+				),
+		),
+	].map((v) => {
+		const field = fieldOf(fromTemplate, v.key, v.bindingType);
+		return {
+			...field,
+			value: v.value,
+			...withNames(fromTemplate, field, v.value),
+		};
+	});
 
 	const added: MigrationReport["added"] = after
 		.filter(
@@ -443,7 +475,14 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
-		unchecked: uncheckedFields(fromTemplate, toTemplate),
+		unchecked: [toTemplate, ...implicitTemplates]
+			.flatMap((template) => uncheckedFields(fromTemplate, template))
+			.filter(
+				(f, i, all) =>
+					all.findIndex(
+						(g) => g.key === f.key && g.bindingType === f.bindingType,
+					) === i,
+			),
 	};
 
 	return {
@@ -451,6 +490,7 @@ export function buildReport({
 		to: templateRef(toTemplate),
 		usedRecipe,
 		refusal,
+		steps,
 		dropped: inTemplateOrder(fromTemplate, dropped, (item) => item),
 		added: inTemplateOrder(toTemplate, added, (item) => item),
 		changed: inTemplateOrder(toTemplate, changed, (item) => item),

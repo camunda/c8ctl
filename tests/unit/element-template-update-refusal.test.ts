@@ -99,12 +99,14 @@ function setup({
 	embedded = false,
 	lineage = [],
 	lossy = false,
+	targetProperties,
 }: {
 	action?: "change" | "update";
 	recipe?: unknown;
 	embedded?: boolean;
 	lineage?: object[];
 	lossy?: boolean;
+	targetProperties?: object[];
 } = {}) {
 	const work = mkdtempSync(join(dir, "case-"));
 	const target = {
@@ -112,7 +114,8 @@ function setup({
 		id: action === "change" ? "refusal.target" : source.id,
 		name: "Target",
 		version: 3,
-		properties: lossy ? [input("kept")] : source.properties,
+		properties:
+			targetProperties ?? (lossy ? [input("kept")] : source.properties),
 		...(embedded ? { metadata: { migratesFrom: recipe } } : {}),
 	};
 	seedTemplateCache(work, [source, ...lineage, target]);
@@ -162,20 +165,16 @@ for (const action of ["change", "update"] as const) {
 			explicitDiagnostic: /no source entry for template 'refusal\.source'/,
 			lineage: [upgrade],
 		},
-		{
-			name:
-				action === "change" ? "unmet source floor" : "no applicable upgrade",
-			sources: [
-				action === "change"
-					? { ...entry, minSourceVersion: 3 }
-					: { ...entry, toVersion: 1 },
-			],
-			diagnostic:
-				action === "change"
-					? /unmet source floor.*3.*reached.*2/i
-					: /no applicable upgrade.*1.*3/i,
-			lineage: [upgrade],
-		},
+		...(action === "update"
+			? [
+					{
+						name: "no applicable upgrade",
+						sources: [{ ...entry, toVersion: 1 }],
+						diagnostic: /no applicable upgrade.*1.*3/i,
+						lineage: [upgrade],
+					},
+				]
+			: []),
 		{
 			name: "coverage refusal",
 			sources: [
@@ -436,21 +435,351 @@ test("ordinary carry-over previews losses and requires authorization only for ov
 	assert.doesNotMatch(readFileSync(fixture.file, "utf8"), /lost-value/);
 });
 
-test("loaded source versions without upgrades do not satisfy an explicit floor", async () => {
-	const fixture = setup({
-		recipe: {
-			schemaVersion: 1,
-			sources: [
-				{ kind: "change", sourceTemplateId: source.id, minSourceVersion: 2 },
-			],
-		},
-		lineage: [{ ...source, version: 2 }],
+describe("change floor above the reached version", () => {
+	const floor = (minSourceVersion: number) => ({
+		schemaVersion: 1,
+		sources: [
+			{ kind: "change", sourceTemplateId: source.id, minSourceVersion },
+		],
 	});
-	const flags = ["--in-place", "--allow-lossy", "--json"];
-	const result = await fixture.run(...flags);
-	assertRefused(result, flags);
-	assert.match(out(result), /unmet source floor.*2.*reached.*1/i);
-	fixture.assertUnchanged();
+
+	for (const embedded of [false, true]) {
+		const kind = embedded ? "embedded" : "explicit";
+
+		test(`${kind}: a loaded floor version is reached by an implicit step`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [{ ...source, version: 2 }],
+			});
+			const json = await fixture.run("--dry-run", "--json");
+			assert.equal(json.status, 0, json.stderr);
+			const envelope = JSON.parse(json.stdout).results[0];
+			assert.equal(envelope.status, "updated");
+			assert.equal(envelope.recipe.used, true);
+			assert.equal(envelope.recipe.refusal, null);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(
+				envelope.report.steps.map(
+					(step: { kind: string; toVersion: number; implicit?: true }) => [
+						step.kind,
+						step.toVersion,
+						step.implicit,
+					],
+				),
+				[
+					["version", 2, true],
+					["hop", 3, undefined],
+				],
+			);
+			fixture.assertUnchanged();
+			const text = await fixture.run("--dry-run");
+			assert.match(
+				text.stdout,
+				/upgrade v1 -> v2 \(implicit, no recipe entries\)/,
+			);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a value the floor version lacks is reported as dropped even when the target defaults it`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{ ...source, version: 2, properties: [input("kept", "retained")] },
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("removed", "other-default"),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.equal(envelope.requiresAuthorization, true);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			assert.match(blocked.stderr, /--allow-lossy/);
+			fixture.assertUnchanged();
+			const authorized = await fixture.run("--in-place", "--allow-lossy");
+			assert.equal(authorized.status, 0, authorized.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a value the floor version overwrites at a hidden binding is reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "floor-default", { type: "Hidden" }),
+						],
+					},
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.equal(envelope.requiresAuthorization, true);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a conditional hidden replacement at the floor is reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("mode", "a", { id: "mode", type: "Hidden" }),
+							input("removed", "floor-default", {
+								type: "Hidden",
+								condition: { property: "mode", equals: "a" },
+							}),
+							input("removed", "", {
+								condition: { property: "mode", equals: "b" },
+							}),
+						],
+					},
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: an inactive property that normalizes to the replacement does not hide the loss`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("mode", "a", { id: "mode", type: "Hidden" }),
+							input("removed", "=true", {
+								type: "Hidden",
+								condition: { property: "mode", equals: "a" },
+							}),
+							input("removed", "", {
+								type: "Boolean",
+								feel: "static",
+								condition: { property: "mode", equals: "b" },
+							}),
+						],
+					},
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a recipe rename after a floor overwrite does not hide the loss`, async () => {
+			const rename = {
+				schemaVersion: 1,
+				sources: [
+					{
+						kind: "change",
+						sourceTemplateId: source.id,
+						minSourceVersion: 2,
+						paths: [{ from: "removed", to: "moved" }],
+					},
+				],
+			};
+			const fixture = setup({
+				recipe: rename,
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "floor-default", { type: "Hidden" }),
+						],
+					},
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a pre-floor upgrade move that keeps the value is not reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("moved"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [input("kept", "retained"), input("moved")],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [{ from: "removed", to: "moved" }],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [
+					{ ...source, version: 2, properties: [input("kept", "retained")] },
+				],
+				targetProperties: [input("kept", "retained"), input("moved")],
+			});
+			const preview = await fixture.run(
+				"--dry-run",
+				"--json",
+				"--map",
+				"removed=moved",
+			);
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			assert.equal(envelope.report.moved.length, 1);
+			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a floor above the newest compatible version fails and --allow-lossy cannot override it`, async () => {
+			const fixture = setup({
+				recipe: floor(4),
+				embedded,
+				lineage: [{ ...source, version: 2 }],
+			});
+			for (const flags of [
+				[],
+				["--in-place"],
+				["--in-place", "--allow-lossy"],
+				["--dry-run", "--json"],
+				["--dry-run", "--json", "--allow-lossy"],
+			]) {
+				const result = await fixture.run(...flags);
+				assertRefused(result, flags);
+				assert.match(
+					out(result),
+					/Template 'refusal\.source' v4 or later is required, but the newest version compatible with Camunda 8\.8.*\(from the BPMN executionPlatformVersion\) is v2\./,
+				);
+				assert.doesNotMatch(out(result), /Requires --allow-lossy/);
+				fixture.assertUnchanged();
+			}
+		});
+
+		test(`${kind}: a floor missing from the compatible catalog fails and lists the compatible versions`, async () => {
+			const fixture = setup({
+				recipe: floor(2),
+				embedded,
+				lineage: [{ ...source, version: 3 }],
+			});
+			for (const flags of [["--in-place"], ["--in-place", "--allow-lossy"]]) {
+				const result = await fixture.run(...flags);
+				assertRefused(result, flags);
+				assert.match(
+					out(result),
+					/Template 'refusal\.source' v2 is not available for Camunda 8\.8.*compatible versions: 1, 3/,
+				);
+				fixture.assertUnchanged();
+			}
+		});
+	}
 });
 
 test("embedded fallback dry-run reports prospective losses without authorization or writes", async () => {

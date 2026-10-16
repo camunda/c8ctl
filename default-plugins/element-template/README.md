@@ -166,7 +166,8 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
 - Without `--in-place` the BPMN goes to stdout and the report to stderr.
 - Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
   Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
-  even with authorization; correct the source entry or source-version floor.
+  even with authorization; correct the source entry. A floor that no compatible
+  source version reaches also fails, and `--allow-lossy` does not override it.
 - In-place migrations take a sibling `.migration.lock` and check original input
   contents before temporary-file preparation and again immediately before rename.
   Changes observed during preparation are rejected. Replacement uses a sibling
@@ -216,7 +217,8 @@ values are carried over by binding identity and the rest is dropped; the report
 lists each drop with its old value, subject to sensitivity redaction. Unusable
 explicit recipes fail even with `--allow-lossy`; refused embedded recipes require
 authorization except when previewing. Diagnostics distinguish malformed recipes,
-coverage refusal, wrong source IDs and unmet reached-version floors. Coverage
+coverage refusal and wrong source IDs. A source-version floor that cannot be reached
+fails the element instead (see below). Coverage
 covers every step, including the change to another template: an entry that reads
 a path the reached source version does not define refuses the recipe. Guard
 paths count as reads, including `exists` and negated guards. An empty
@@ -274,9 +276,16 @@ values, including FEEL normalization, rather than claiming planner intent as suc
 
 A source with `kind: "upgrade"` requires `toVersion` and the recipe owner's ID: an element climbs
 each destination above its applied version in ascending order. A `kind: "change"` source must name
-a different ID and may require `minSourceVersion`, a floor on the version actually reached by
-source upgrades. Merely loading a newer template does not satisfy that floor. The highest reachable
-floor wins; an omitted floor is the fallback. File recipes replace only the target recipe.
+a different ID and may require `minSourceVersion`, a floor on the source version. When the element
+is below the best floor, the plan adds one implicit version step to that floor, with no recipe
+entries; values are carried by binding. The best floor is the highest one at most the newest source
+version compatible with the BPMN's `modeler:executionPlatformVersion`; the plan never goes above
+it. An omitted floor is the fallback and never causes a bump. The element fails (no file is
+written, and `--allow-lossy` does not override it) when the newest compatible version is below
+the lowest floor, or when the floor version is not in the compatible catalog. The report marks
+the step: `upgrade vA -> vF (implicit, no recipe entries)` in text and `implicit: true` on the
+step in `report.steps` of `--json`. File recipes replace only the target recipe and follow the
+same rules.
 This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
 `kind` on every source. Older strict readers reject the new fields. See
 [`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
