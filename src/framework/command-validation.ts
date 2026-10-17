@@ -10,6 +10,7 @@
  */
 
 import { getLogger } from "../core/index.ts";
+import { type ArgToken, flagOccurrences } from "./argv-parser.ts";
 import {
 	type FlagDef,
 	GLOBAL_FLAGS,
@@ -106,7 +107,12 @@ export function requireCsvEnum<T extends string>(
  *      this is the single chokepoint that must catch a bad value before
  *      dispatch, with a clean `Invalid --<flag>` message rather than an
  *      uncaught validator throw surfacing later as "Unexpected error".
- *   2. Every flag with `required: true` must be present as a non-empty string
+ *   2. Every flag with `rejectEmpty: true` that was supplied must have a
+ *      non-empty value in every occurrence (empty or value-less → exit 1
+ *      with `Invalid --<flag>: value must not be empty`). A non-repeatable
+ *      flag keeps only its last value in `values`, so earlier occurrences
+ *      are read from `tokens`.
+ *   3. Every flag with `required: true` must be present as a non-empty string
  *      (missing → exit 1 with `--<flag> is required`).
  *
  * Returns a map of flag name → validated value for flags that had validators.
@@ -121,6 +127,7 @@ export function requireCsvEnum<T extends string>(
 export function validateFlags(
 	values: Record<string, string | boolean | (string | boolean)[] | undefined>,
 	flagDefs: Record<string, FlagDef>,
+	tokens: readonly ArgToken[] = [],
 ): Map<string, unknown> {
 	const validated = new Map<string, unknown>();
 	const logger = getLogger();
@@ -172,6 +179,23 @@ export function validateFlags(
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			logger.error(`Invalid --${flagName}: ${message}`);
+			process.exit(1);
+		}
+	}
+
+	// Empty-value enforcement. Must run on the raw values: everything
+	// downstream (validators above, `deserializeFlags`) drops an empty or
+	// value-less occurrence as "not supplied", so the handler never sees it.
+	for (const [flagName, def] of Object.entries(flagDefs)) {
+		if (def.rejectEmpty !== true) continue;
+		const raw = values[flagName];
+		if (raw === undefined || raw === false) continue;
+		const items = Array.isArray(raw) ? raw : [raw];
+		const occurrences = flagOccurrences({ tokens, name: flagName });
+		if (
+			[...items, ...occurrences].some((v) => typeof v !== "string" || v === "")
+		) {
+			logger.error(`Invalid --${flagName}: value must not be empty`);
 			process.exit(1);
 		}
 	}
