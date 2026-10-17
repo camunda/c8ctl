@@ -783,6 +783,89 @@ describe("validateFlags handles multiple:true + required:true", () => {
 	});
 });
 
+// ─── validateFlags — rejectEmpty ─────────────────────────────────────────────
+
+/**
+ * By default an empty occurrence of a flag means "not supplied" and is
+ * dropped before the handler runs. A flag that opts in with
+ * `rejectEmpty: true` must instead fail, so an empty value (e.g. from an
+ * unset shell variable) cannot silently remove part of a request.
+ */
+describe("validateFlags enforces FlagDef.rejectEmpty", () => {
+	beforeEach(setup);
+	afterEach(teardown);
+
+	const flags: Record<
+		string,
+		import("../../src/framework/command-registry.ts").FlagDef
+	> = {
+		activate: {
+			type: "string",
+			multiple: true,
+			rejectEmpty: true,
+			description: "A repeatable flag that rejects empty values",
+		},
+		single: {
+			type: "string",
+			rejectEmpty: true,
+			description: "A single-value flag that rejects empty values",
+		},
+		header: {
+			type: "string",
+			multiple: true,
+			description: "A repeatable flag with the default empty handling",
+		},
+	};
+
+	const rejected: Array<
+		[string, Record<string, string | boolean | (string | boolean)[]>, string]
+	> = [
+		["a single empty occurrence", { activate: "" }, "activate"],
+		[
+			"an empty occurrence after a valid one",
+			{ activate: ["A", ""] },
+			"activate",
+		],
+		[
+			"an empty occurrence before a valid one",
+			{ activate: ["", "A"] },
+			"activate",
+		],
+		// The argv parser reports a string flag given without a value as `true`.
+		["an occurrence without a value", { activate: true }, "activate"],
+		[
+			"a value-less occurrence among valid ones",
+			{ activate: ["A", true] },
+			"activate",
+		],
+		["an empty single-value flag", { single: "" }, "single"],
+	];
+	for (const [name, values, flag] of rejected) {
+		test(`rejects ${name}`, () => {
+			assert.throws(() => validateFlags(values, flags), /process\.exit\(1\)/);
+			const combined = errorSpy.join("\n");
+			assert.ok(
+				combined.includes(`Invalid --${flag}: value must not be empty`),
+				combined,
+			);
+		});
+	}
+
+	test("accepts non-empty values", () => {
+		assert.doesNotThrow(() =>
+			validateFlags({ activate: ["A", "B"], single: "x" }, flags),
+		);
+	});
+
+	test("accepts a flag that was never supplied", () => {
+		assert.doesNotThrow(() => validateFlags({}, flags));
+	});
+
+	test("keeps dropping empty values of flags that do not opt in", () => {
+		assert.doesNotThrow(() => validateFlags({ header: ["X: 1", ""] }, flags));
+	});
+});
+
 // ─── detectUnknownFlags ─────────────────────────────────────────────────────
 
 describe("detectUnknownFlags — non-search verbs", () => {

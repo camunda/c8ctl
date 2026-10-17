@@ -616,6 +616,51 @@ describe("CLI behavioural: modify process-instance", () => {
 			["pi", "--processDefinitionKey", "11111", "--move", "123=Task_B"],
 			"batch modification only supports moves by source element ID",
 		],
+		// An empty instruction (e.g. from an unset shell variable) must fail
+		// rather than be dropped, which would apply only part of the plan.
+		[
+			"an empty --activate next to a valid --terminate",
+			["pi", "12345", "--activate", "", "--terminate", "Task_A"],
+			"Invalid --activate: value must not be empty",
+		],
+		[
+			"an empty --terminate next to a valid --activate",
+			["pi", "12345", "--terminate", "", "--activate", "Task_B"],
+			"Invalid --terminate: value must not be empty",
+		],
+		[
+			"an empty --move next to a valid --move",
+			["pi", "12345", "--move", "Task_A=Task_B", "--move", ""],
+			"Invalid --move: value must not be empty",
+		],
+		[
+			"an empty --activate among repeated valid ones",
+			["pi", "12345", "--activate", "Task_A", "--activate", ""],
+			"Invalid --activate: value must not be empty",
+		],
+		[
+			"an empty --instructions next to a valid --activate",
+			["pi", "12345", "--instructions", "", "--activate", "Task_B"],
+			"Invalid --instructions: value must not be empty",
+		],
+		[
+			"an --activate with no value before another flag",
+			["pi", "12345", "--activate", "--terminate", "Task_A"],
+			"Invalid --activate: value must not be empty",
+		],
+		[
+			"an empty --activate in batch mode",
+			[
+				"pi",
+				"--processDefinitionKey",
+				"11111",
+				"--activate",
+				"",
+				"--move",
+				"Task_A=Task_B",
+			],
+			"Invalid --activate: value must not be empty",
+		],
 	];
 	for (const [name, args, message] of rejected) {
 		test(`rejects ${name} even in dry-run`, async () => {

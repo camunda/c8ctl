@@ -149,6 +149,8 @@ Repair a running process instance that is stuck on an element or took an uninten
 - `--terminate <elementId|elementInstanceKey>` terminates an element instance. An element ID terminates every active instance of that element, and a key terminates exactly that one.
 - `--move <source>=<targetElementId>` terminates the instances at the source (an element ID or element instance key) and activates the target. This is the recommended way to relocate a token.
 
+An instruction flag without a value, for example `--activate "$TARGET"` with `TARGET` unset, fails the command instead of being ignored. This way a command never applies only part of the instructions you intended.
+
 Camunda 8.8 supports only `--activate` and `--terminate <elementInstanceKey>` on a single instance. Moving and terminating by element ID require Camunda 8.9 or later; on 8.8, use `--activate <target>` together with `--terminate <elementInstanceKey>` instead.
 
 To find the element instance keys of the elements an instance is waiting on, use `c8 search ws --processInstanceKey <key>` (see [Search wait states](#search-wait-states)).

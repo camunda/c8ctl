@@ -40,6 +40,12 @@ export interface FlagDef {
 	 * array. Only valid when type is "string". The handler receives string[].
 	 */
 	multiple?: boolean;
+	/**
+	 * When true, an empty or value-less occurrence of the flag is an error
+	 * instead of being treated as "not supplied". Use it where dropping a
+	 * value would silently change what a mutating request does.
+	 */
+	rejectEmpty?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
@@ -1241,22 +1247,26 @@ export const COMMAND_REGISTRY = {
 			activate: {
 				type: "string",
 				multiple: true,
+				rejectEmpty: true,
 				description: "Element ID to activate (repeatable)",
 			},
 			terminate: {
 				type: "string",
 				multiple: true,
+				rejectEmpty: true,
 				description:
 					"Element instance key, or element ID for all its active instances (Camunda 8.9+), to terminate (repeatable)",
 			},
 			move: {
 				type: "string",
 				multiple: true,
+				rejectEmpty: true,
 				description:
 					"Move as <sourceElementId|sourceElementInstanceKey>=<targetElementId> (repeatable; Camunda 8.9+ for a single instance)",
 			},
 			instructions: {
 				type: "string",
+				rejectEmpty: true,
 				description:
 					"Full modification instructions as JSON (or @file.json / @- to read from file/stdin), for ancestor scopes and variables",
 			},
