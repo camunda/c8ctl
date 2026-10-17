@@ -212,6 +212,30 @@ export function parseFlags({
 	return { values: resolved, positionals, tokens: tokens ?? [] };
 }
 
+/**
+ * Every value a flag was given, in argv order, read from the parse tokens.
+ * Unlike `values`, which keeps only the last value of a non-repeatable flag,
+ * this includes the occurrences a later one overrode. A value-less occurrence
+ * reads as `true`, as it does in `values`.
+ */
+export function flagOccurrences({
+	tokens,
+	name,
+}: {
+	tokens: readonly ArgToken[];
+	name: string;
+}): (string | true)[] {
+	return tokens.flatMap((token) =>
+		token.kind === "option" && token.name === name
+			? [
+					token.value === undefined || token.value === NO_VALUE
+						? true
+						: token.value,
+				]
+			: [],
+	);
+}
+
 // ─── Stage 1 ─────────────────────────────────────────────────────────────────
 
 /** A flag found before the verb that is not a global flag. */
