@@ -989,9 +989,12 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 			"tests/fixtures/modification/modification-batch.bpmn",
 		);
 		// The batch selects instances through the search index, so wait until
-		// the new instance is visible there before starting it.
+		// the new instance is visible there before starting it. User tasks are
+		// indexed separately from process instances, so check both.
 		const indexed = await pollUntil(
-			() => hasOpenUserTask(instanceKey, "Task_A"),
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+					definitionKey && (await hasOpenUserTask(instanceKey, "Task_A")),
 			POLL_TIMEOUT_MS,
 			POLL_INTERVAL_MS,
 		);
