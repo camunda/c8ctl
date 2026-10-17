@@ -1262,7 +1262,7 @@ export const COMMAND_REGISTRY = {
 				multiple: true,
 				rejectEmpty: true,
 				description:
-					"Move as <sourceElementId|sourceElementInstanceKey>=<targetElementId> (repeatable; Camunda 8.9+ for a single instance)",
+					"Move as sourceElementId=targetElementId, or sourceElementInstanceKey=targetElementId (repeatable; Camunda 8.9+ for a single instance)",
 			},
 			instructions: {
 				type: "string",

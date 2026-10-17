@@ -700,7 +700,7 @@ Modify a running process instance by activating elements, terminating element in
 |------|------|----------|-------------|
 | `--activate` | string |  | Element ID to activate (repeatable) |
 | `--terminate` | string |  | Element instance key, or element ID for all its active instances (Camunda 8.9+), to terminate (repeatable) |
-| `--move` | string |  | Move as <sourceElementId|sourceElementInstanceKey>=<targetElementId> (repeatable; Camunda 8.9+ for a single instance) |
+| `--move` | string |  | Move as sourceElementId=targetElementId, or sourceElementInstanceKey=targetElementId (repeatable; Camunda 8.9+ for a single instance) |
 | `--instructions` | string |  | Full modification instructions as JSON (or @file.json / @- to read from file/stdin), for ancestor scopes and variables |
 | `--processDefinitionKey` | string |  | Batch mode: move tokens in all active instances of this process definition key (omit the instance key; --move by element ID only) |
 | `--operationReference` | string |  | Optional operation reference (positive integer) |
