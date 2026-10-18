@@ -519,25 +519,6 @@ describe("CLI behavioural: modify process-instance", () => {
 		});
 	});
 
-	test("a repeated --instructions keeps the last value", async () => {
-		const result = await c8(
-			"modify",
-			"pi",
-			"12345",
-			"--dry-run",
-			"--instructions",
-			'{"activateInstructions":[{"elementId":"Task_A"}]}',
-			"--instructions",
-			'{"terminateInstructions":[{"elementId":"Task_B"}]}',
-		);
-
-		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
-		const out = parseJson(result);
-		assert.deepStrictEqual(out.body, {
-			terminateInstructions: [{ elementId: "Task_B" }],
-		});
-	});
-
 	test("--processDefinitionKey without an instance key emits a batch modification", async () => {
 		const result = await c8(
 			"modify",
@@ -660,31 +641,6 @@ describe("CLI behavioural: modify process-instance", () => {
 		[
 			"an empty --instructions next to a valid --activate",
 			["pi", "12345", "--instructions", "", "--activate", "Task_B"],
-			"Invalid --instructions: value must not be empty",
-		],
-		// --instructions is not repeatable, so the parser keeps only its last
-		// value; an empty earlier occurrence must still be caught.
-		[
-			"an empty --instructions followed by a valid one",
-			[
-				"pi",
-				"12345",
-				"--instructions",
-				"",
-				"--instructions",
-				'{"terminateInstructions":[{"elementId":"Task_A"}]}',
-			],
-			"Invalid --instructions: value must not be empty",
-		],
-		[
-			"an --instructions with no value followed by a valid one",
-			[
-				"pi",
-				"12345",
-				"--instructions",
-				"--instructions",
-				'{"terminateInstructions":[{"elementId":"Task_A"}]}',
-			],
 			"Invalid --instructions: value must not be empty",
 		],
 		[

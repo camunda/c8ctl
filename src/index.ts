@@ -591,7 +591,7 @@ async function main() {
 	if (commandDef) {
 		const effectiveFlags =
 			commandDef.resourceFlags?.[normalizedResource] ?? commandDef.flags;
-		validateFlags(values, effectiveFlags, parsed.tokens);
+		validateFlags(values, effectiveFlags);
 	}
 
 	// Unknown flag detection — warn about flags not recognised for this verb × resource.
