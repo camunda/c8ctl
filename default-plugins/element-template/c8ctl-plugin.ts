@@ -161,8 +161,9 @@ export const metadata = {
 				".camunda/element-templates/ next to the BPMN file or a parent directory, then the OOTB cache). " +
 				"Pass --template <template> to point at a custom template explicitly; it must match the element's " +
 				"recorded id/version. " +
-				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
-				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
+				"A property whose condition is not met is rejected; --set args apply in order, so set the " +
+				"property a condition depends on first (e.g. --set method=POST --set body=...). Values are " +
+				"checked against the property's constraints (notEmpty, pattern, length, dropdown choices).\n\n" +
 				"update <template-id> moves every element that uses that template to its latest compatible version, " +
 				"or to the template given with --to <template>[@<n>] (an id, path or URL; an id resolves as above, " +
 				"local templates first); pass an element id to update " +
@@ -177,6 +178,8 @@ export const metadata = {
 				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
 				"Properties with feel=optional keep the value verbatim; you must supply the `=` prefix yourself " +
 				"when you want to write a FEEL expression for those. " +
+				"Boolean and Number inputs/outputs (and any Boolean/Number property declaring feel) are stored as FEEL, " +
+				"as the Modeler does — `--set timeout=30` writes `=30`. " +
 				"Three forms for feel=required properties:\n" +
 				"  --set key='=value'    canonical: single-quoted FEEL value (explicit =)\n" +
 				"  --set 'key==value'    compact: whole argument single-quoted (explicit =)\n" +

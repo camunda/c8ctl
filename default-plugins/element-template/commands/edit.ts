@@ -4,20 +4,19 @@
  * template application.
  *
  * Unlike `apply --set`, `edit` never calls `elementTemplates.applyTemplate`.
- * It only writes into moddle children that already exist, via the same
- * `modeling.updateModdleProperties` command-stack writes `apply` uses.
- * `applyTemplate` is what unconditionally resets Hidden-typed template
- * properties to their template default on every (re-)application — see
- * ChangeElementTemplateHandler#shouldKeepValue and c8ctl#466 — so skipping
- * it means `edit` never clobbers template-owned extension content a user
- * hand-customized beyond the template's own schema (e.g. a manually-added
- * conditional inside a `zeebe:adHoc` `outputElement`).
+ * It writes only the `--set` properties through the library's own
+ * `elementTemplates.setPropertyValue` (the Modeler properties-panel code
+ * path, FEEL casting included), gated by `isConditionMet` and checked with
+ * `validateProperty`. `applyTemplate` is what unconditionally resets
+ * Hidden-typed template properties to their template default on every
+ * (re-)application — see ChangeElementTemplateHandler#shouldKeepValue — so
+ * skipping it means `edit` never clobbers template-owned extension content a
+ * user hand-customized beyond the template's own schema (e.g. a
+ * manually-added conditional inside a `zeebe:adHoc` `outputElement`).
  *
- * The tradeoff: `edit` can only set bindings whose moddle entry already
- * exists — it can't create one whose gating condition wasn't previously
- * met. Use `apply --set` for that; use `edit` once a template is already
- * applied and you want to change one property without touching anything
- * else the template governs.
+ * A property whose condition is not met is an error; `--set` args are
+ * applied in order, so `--set method=POST --set body=...` materializes
+ * `body` in a single edit.
  *
  * `edit` still round-trips through bpmn-js's `saveXML`, so it inherits
  * that pipeline's unrelated BPMNDI shape/edge reordering — same as `apply`
@@ -34,12 +33,10 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { parseArgs as parseArgv } from "node:util";
 import type {} from "../../../src/core/runtime.ts";
-import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
 	atomicOverwriteFile,
 	findPropertiesByBindingName,
 	installStdoutEpipeHandler,
-	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
 	pinFilePath,
@@ -48,6 +45,7 @@ import {
 } from "../helpers.ts";
 import {
 	getModdleElement,
+	getModdleList,
 	getModdleNumber,
 	getModdleString,
 } from "../moddle.ts";
@@ -60,7 +58,7 @@ import {
 import {
 	type BpmnElement,
 	type ModdleElement,
-	type ModelerInstance,
+	type Modeling,
 	resolveVendorBundle,
 	type VendorBundle,
 } from "../vendor.ts";
@@ -69,17 +67,74 @@ if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
 
-type PlannedWrite = {
-	child: ModdleElement;
-	property: string;
-	value: string;
-};
+/** Ordered collections under `extensionElements` whose entry order we preserve. */
+const ORDERED_LISTS = [
+	["zeebe:IoMapping", "inputParameters"],
+	["zeebe:IoMapping", "outputParameters"],
+	["zeebe:TaskHeaders", "values"],
+	["zeebe:Properties", "properties"],
+] as const;
 
-type EditPlan = {
+function entryIdentity(entry: ModdleElement): string {
+	const id =
+		getModdleString(entry, "target") ??
+		getModdleString(entry, "source") ??
+		getModdleString(entry, "key") ??
+		getModdleString(entry, "name");
+	return `${entry.$type}:${id}`;
+}
+
+function findContainer(
+	element: BpmnElement,
+	type: string,
+): ModdleElement | undefined {
+	return getModdleList(
+		getModdleElement(element.businessObject, "extensionElements"),
+		"values",
+	).find((v) => v.$type === type);
+}
+
+/** Snapshot the current entry order of every ordered list on `element`. */
+function snapshotOrder(element: BpmnElement): Map<string, string[]> {
+	const order = new Map<string, string[]>();
+	for (const [type, prop] of ORDERED_LISTS) {
+		order.set(
+			`${type}/${prop}`,
+			getModdleList(findContainer(element, type), prop).map(entryIdentity),
+		);
+	}
+	return order;
+}
+
+/**
+ * `setPropertyValue` replaces an entry (remove + append), which would move
+ * every edited entry to the end of its list and churn the diff. Put the
+ * surviving entries back in their original order; newly created ones stay
+ * at the end.
+ */
+function restoreOrder({
+	element,
+	order,
+	modeling,
+}: {
 	element: BpmnElement;
-	template: Template;
-	writes: PlannedWrite[];
-};
+	order: Map<string, string[]>;
+	modeling: Modeling;
+}): void {
+	for (const [type, prop] of ORDERED_LISTS) {
+		const container = findContainer(element, type);
+		const before = order.get(`${type}/${prop}`) ?? [];
+		const current = getModdleList(container, prop);
+		const rank = (e: ModdleElement) => {
+			const i = before.indexOf(entryIdentity(e));
+			return i === -1 ? before.length : i;
+		};
+		const sorted = [...current].sort((a, b) => rank(a) - rank(b));
+		if (container && sorted.some((e, i) => e !== current[i])) {
+			modeling.updateModdleProperties(element, container, { [prop]: sorted });
+		}
+	}
+}
 
 /**
  * Strip `--template <ref>` / `--template=<ref>` (edit-only, so it isn't part
@@ -159,111 +214,6 @@ async function resolveEditTemplate(
 	}
 }
 
-/**
- * Resolve the target element, its recorded template, and validate every
- * `--set` arg against the element's *already-materialized* moddle tree.
- * Shared by the real run and `--dry-run` so both use identical validation —
- * a dry run that reports success is guaranteed to actually succeed.
- */
-async function planEdit(
-	modeler: ModelerInstance,
-	elementId: string,
-	setArgs: string[],
-	templateArg: string | undefined,
-	searchDir: string,
-): Promise<EditPlan> {
-	const elementRegistry = modeler.get("elementRegistry");
-	const element = elementRegistry.get(elementId);
-	if (!element) {
-		throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
-	}
-
-	const templateId = getModdleString(element.businessObject, "modelerTemplate");
-	if (!templateId) {
-		throw new Error(
-			`Element "${elementId}" has no element template applied (no zeebe:modelerTemplate attribute). ` +
-				"Use 'apply' to apply one first.",
-		);
-	}
-	const templateVersion = getModdleNumber(
-		element.businessObject,
-		"modelerTemplateVersion",
-	);
-	if (templateVersion === undefined) {
-		throw new Error(
-			`Element "${elementId}" has zeebe:modelerTemplate="${templateId}" but no recorded ` +
-				"zeebe:modelerTemplateVersion. 'edit' requires a pinned version to resolve the exact " +
-				"template that was applied — use 'apply' with an explicit template reference instead.",
-		);
-	}
-
-	const template = await resolveEditTemplate(
-		templateArg,
-		templateId,
-		templateVersion,
-		searchDir,
-	);
-
-	const extensionElements = getModdleElement(
-		element.businessObject,
-		"extensionElements",
-	);
-	const containers = findExtensionContainers(extensionElements);
-
-	// Keyed by (child, property) so conditional duplicate properties (same
-	// binding name+type, different `condition`) collapse into one write per
-	// pair instead of redundant `updateModdleProperties` calls. Keying via a
-	// nested Map also gives "--set wins" last-write semantics — matching
-	// `apply`'s behavior — when two distinct --set args resolve to the same
-	// target, e.g. `--set method=PUT --set method=DELETE`.
-	const writesByChild = new Map<ModdleElement, Map<string, PlannedWrite>>();
-	for (const arg of setArgs) {
-		const { bindingTypeFilter, name, value } = parseSetArg(arg);
-		const matches = findPropertiesByBindingName(
-			template.properties,
-			name,
-			bindingTypeFilter,
-		);
-
-		let materialized = false;
-		for (const prop of matches) {
-			if (!prop.binding) continue;
-			const effectiveValue = maybePrependFeel(prop, value);
-			if (prop.choices) {
-				validateDropdownValue(prop, name, effectiveValue);
-			}
-			const target = resolveBindingTarget(prop.binding, containers);
-			if (target) {
-				materialized = true;
-				let byProperty = writesByChild.get(target.child);
-				if (!byProperty) {
-					byProperty = new Map();
-					writesByChild.set(target.child, byProperty);
-				}
-				byProperty.set(target.property, {
-					child: target.child,
-					property: target.property,
-					value: effectiveValue,
-				});
-			}
-		}
-		if (!materialized) {
-			throw new Error(
-				`Property "${name}" has no existing value on this element to edit (its condition may not ` +
-					"be met, its binding type isn't supported by 'edit', or the template was never fully " +
-					`applied). Use 'apply --set ${name}=...' to materialize it first.`,
-			);
-		}
-	}
-
-	const writes: PlannedWrite[] = [];
-	for (const byProperty of writesByChild.values()) {
-		writes.push(...byProperty.values());
-	}
-
-	return { element, template, writes };
-}
-
 export async function editSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
 	// editSubcommand writes BPMN XML to stdout in the non-in-place path;
@@ -317,27 +267,115 @@ export async function editSubcommand(args: string[]): Promise<void> {
 
 	const vendorPath = resolveVendorBundle();
 	const vendor: VendorBundle = require(vendorPath);
-	const { Modeler, ZeebeModdleExtension, HeadlessTextRendererModule } = vendor;
+	const {
+		Modeler,
+		CloudElementTemplatesCoreModule,
+		ZeebeModdleExtension,
+		HeadlessTextRendererModule,
+	} = vendor;
 
 	// HeadlessTextRendererModule overrides bpmn-js's default textRenderer,
 	// which would otherwise call document.createElementNS during importXML
 	// (to measure external label bounds) and throw "document is not defined"
 	// in Node. The errors are non-fatal but produce noisy stack traces.
 	const modeler = new Modeler({
-		additionalModules: [HeadlessTextRendererModule],
+		additionalModules: [
+			HeadlessTextRendererModule,
+			CloudElementTemplatesCoreModule,
+		],
 		moddleExtensions: { zeebe: ZeebeModdleExtension },
 	});
 
-	let plan: EditPlan;
+	// Resolve the target element and its recorded template, then validate and
+	// write every `--set` arg into the in-memory modeler. Nothing is persisted
+	// until `saveXML`, so `--dry-run` runs this identical path and returns
+	// before the write.
+	const searchDir = bpmnFilePath ? dirname(input.source) : process.cwd();
+	let template: Template;
 	try {
 		await modeler.importXML(input.xml);
-		plan = await planEdit(
-			modeler,
-			elementId,
-			parsed.setArgs,
-			templateArg,
-			bpmnFilePath ? dirname(input.source) : process.cwd(),
+		const elementRegistry = modeler.get("elementRegistry");
+		const element = elementRegistry.get(elementId);
+		if (!element) {
+			throw new Error(`Element "${elementId}" not found in the BPMN diagram`);
+		}
+
+		const templateId = getModdleString(
+			element.businessObject,
+			"modelerTemplate",
 		);
+		if (!templateId) {
+			throw new Error(
+				`Element "${elementId}" has no element template applied (no zeebe:modelerTemplate attribute). ` +
+					"Use 'apply' to apply one first.",
+			);
+		}
+		const templateVersion = getModdleNumber(
+			element.businessObject,
+			"modelerTemplateVersion",
+		);
+		if (templateVersion === undefined) {
+			throw new Error(
+				`Element "${elementId}" has zeebe:modelerTemplate="${templateId}" but no recorded ` +
+					"zeebe:modelerTemplateVersion. 'edit' requires a pinned version to resolve the exact " +
+					"template that was applied — use 'apply' with an explicit template reference instead.",
+			);
+		}
+
+		template = await resolveEditTemplate(
+			templateArg,
+			templateId,
+			templateVersion,
+			searchDir,
+		);
+
+		// Writes go through the library's `setPropertyValue` — the same code path
+		// as the Modeler properties panel — against the in-memory modeler. Nothing
+		// is persisted until `saveXML`, so a dry run executes the identical
+		// validation + writes and simply discards the result. Properties are
+		// written in `--set` order, so later args win and see the effects of
+		// earlier ones on conditions (e.g. `--set method=POST --set body=...`).
+		//
+		// The template is deliberately never registered via `elementTemplates.set`:
+		// the library's behaviors (ConditionalBehavior et al.) look the element's
+		// template up there, and once found, a write that changes which properties
+		// are active re-runs template application — resetting Hidden properties,
+		// exactly what `edit` exists to avoid.
+		const elementTemplates = modeler.get("elementTemplates");
+		const order = snapshotOrder(element);
+		for (const arg of parsed.setArgs) {
+			const { bindingTypeFilter, name, value } = parseSetArg(arg);
+			const matches = findPropertiesByBindingName(
+				template.properties,
+				name,
+				bindingTypeFilter,
+			);
+
+			// Conditional duplicates share a binding; only the active ones apply.
+			const active = matches.filter(
+				(prop) =>
+					prop.binding &&
+					elementTemplates.isConditionMet(element, template.properties, prop),
+			);
+			if (active.length === 0) {
+				throw new Error(
+					`Property "${name}" cannot be edited on this element: its condition is not met ` +
+						"or it has no binding. Set the property its condition depends on first " +
+						"(in the same edit, earlier in the --set order).",
+				);
+			}
+			for (const prop of active) {
+				if (prop.choices) {
+					validateDropdownValue(prop, name, value);
+				}
+				const invalid = elementTemplates.validateProperty(value, prop);
+				if (invalid) {
+					throw new Error(`Invalid value for "${name}": ${invalid}`);
+				}
+				elementTemplates.setPropertyValue(element, prop, value);
+			}
+		}
+		restoreOrder({ element, order, modeling: modeler.get("modeling") });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(`Error editing element: ${message}`);
@@ -348,9 +386,9 @@ export async function editSubcommand(args: string[]): Promise<void> {
 			dryRun: true,
 			command: "element-template edit",
 			template: {
-				id: plan.template.id,
-				name: plan.template.name,
-				version: plan.template.version,
+				id: template.id,
+				name: template.name,
+				version: template.version,
 			},
 			elementId,
 			source: input.source,
@@ -378,12 +416,6 @@ export async function editSubcommand(args: string[]): Promise<void> {
 		return;
 	}
 
-	const modeling = modeler.get("modeling");
-	for (const write of plan.writes) {
-		modeling.updateModdleProperties(plan.element, write.child, {
-			[write.property]: write.value,
-		});
-	}
 	const result = await modeler.saveXML({ format: true });
 	const resultXml = result.xml;
 

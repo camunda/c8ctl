@@ -7,9 +7,9 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ModdleElement } from "./binding.ts";
 import type { Template } from "./helpers.ts";
 import type { TemplateProperty } from "./migration/types.ts";
+import type { ModdleElement } from "./moddle.ts";
 
 export type { ModdleElement };
 export type BpmnElement = { businessObject: ModdleElement };
@@ -32,6 +32,27 @@ export type ElementTemplatesService = {
 		template: { id?: string; version?: number; properties: TemplateProperty[] },
 	): BpmnElement | undefined;
 	getCompatible(element: BpmnElement): unknown[];
+	/**
+	 * Writes a property's backing BPMN value, creating it if absent and
+	 * FEEL-casting it. Replaces an existing entry rather than updating it in
+	 * place, so the entry moves to the end of its container.
+	 */
+	setPropertyValue(
+		element: BpmnElement,
+		property: TemplateProperty,
+		value: unknown,
+	): void;
+	/** The validation error for `value`, or undefined when valid. */
+	validateProperty(
+		value: unknown,
+		property: TemplateProperty,
+	): string | undefined;
+	/** Whether `property`'s `condition` holds for `element` among `properties`. */
+	isConditionMet(
+		element: BpmnElement,
+		properties: TemplateProperty[],
+		property: TemplateProperty,
+	): boolean;
 };
 /** Validates templates (Cloud validator) and `set`s the valid ones. */
 export type ElementTemplatesLoader = {

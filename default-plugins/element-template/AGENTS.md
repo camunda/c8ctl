@@ -16,7 +16,6 @@ version resolution.
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
-| `binding.ts` | Binding-target resolution shared by `apply`/`edit` — which moddle child + property a `zeebe:input`/etc. binding writes to. Hand-rolled stand-in for bpmn-js-element-templates' internal `setPropertyValue`; see the note at the top of the file about replacing it once bpmn-io/bpmn-js-element-templates#236 ships. |
 | `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
 | `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
 
@@ -69,12 +68,14 @@ version resolution.
   call — correct for first-time application or a version upgrade, but
   it silently clobbers any hand-authored customization layered into a
   Hidden-owned extension attribute (see c8ctl#466). `edit` never calls
-  `applyTemplate()` — it only writes into moddle children that already
-  exist via `modeling.updateModdleProperties`, so it can't create a
-  property whose gating condition wasn't previously met, but it also
-  can't reset anything the template doesn't explicitly touch. Don't
-  collapse these back into one code path without re-solving that
-  tension.
+  `applyTemplate()` — it only writes the `--set` properties via the
+  library's `elementTemplates.setPropertyValue` (gated by
+  `isConditionMet`), so it can't reset anything the template doesn't
+  explicitly touch. `edit` must also never register the template via
+  `elementTemplates.set()`: the library's ConditionalBehavior would then
+  re-run template application whenever a write changes the active
+  property set. Don't collapse these back into one code path without
+  re-solving that tension.
 - **JSON output uses element-templates schema field names verbatim.**
   No invented derivations — `binding`, `optional`, `value`, `condition`,
   `group` (id), `elementType: { value }`, `engines: { camunda }`. The

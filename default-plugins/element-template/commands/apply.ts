@@ -6,13 +6,11 @@
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type {} from "../../../src/core/runtime.ts";
-import { findExtensionContainers, resolveBindingTarget } from "../binding.ts";
 import {
 	applySetOverrides,
 	atomicOverwriteFile,
 	findPropertiesByBindingName,
 	installStdoutEpipeHandler,
-	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
 	pinFilePath,
@@ -20,7 +18,6 @@ import {
 	type TemplateProperty,
 	warnUnmetConditions,
 } from "../helpers.ts";
-import { getModdleElement } from "../moddle.ts";
 import {
 	elementExistsInBpmn,
 	getExecutionPlatformVersion,
@@ -31,7 +28,7 @@ import {
 } from "../template-ref.ts";
 import {
 	type BpmnElement,
-	type ModelerInstance,
+	type ElementTemplatesService,
 	resolveVendorBundle,
 	type VendorBundle,
 } from "../vendor.ts";
@@ -41,40 +38,27 @@ const c8ctl = globalThis.c8ctl;
 const require = createRequire(import.meta.url);
 
 /**
- * Force the source/value of each `--set` into the corresponding moddle child.
+ * Force the value of each `--set` into the element.
  *
  * bpmn-js-element-templates' applyTemplate preserves existing input/output/
  * header/property values on a re-apply (and unconditionally on Dropdown
  * properties — see ChangeElementTemplateHandler#shouldKeepValue, ref
  * bpmn-io/bpmn-js-properties-panel#767). For a CLI the user expectation is
- * "--set wins". After the first applyTemplate we walk the --set args, locate
- * the moddle entry that backs each binding, and update its value via
- * `modeling.updateModdleProperties` so the change goes through the same
- * command stack the library uses internally.
+ * "--set wins". After the first applyTemplate we write each --set value via
+ * the library's own `setPropertyValue`, the same code path the Modeler
+ * properties panel uses (FEEL casting included).
  *
- * Bindings whose moddle entry doesn't exist yet (because their condition was
- * not met against the pre-apply element state) are skipped here and picked
- * up by the second applyTemplate, which re-evaluates conditions against the
- * now-updated element and creates the missing entries using our mutated
- * `prop.value` as the default.
+ * Properties whose condition isn't met against the pre-apply element state
+ * are skipped here and picked up by the second applyTemplate, which
+ * re-evaluates conditions against the now-updated element and creates the
+ * missing entries using our mutated `prop.value` as the default.
  */
 function forceSetValues(
-	modeler: ModelerInstance,
 	element: BpmnElement,
+	elementTemplates: ElementTemplatesService,
 	template: Template,
 	setArgs: string[],
 ): void {
-	const modeling = modeler.get("modeling");
-	const extensionElements = getModdleElement(
-		element.businessObject,
-		"extensionElements",
-	);
-	if (!extensionElements) {
-		return;
-	}
-
-	const containers = findExtensionContainers(extensionElements);
-
 	for (const arg of setArgs) {
 		const { bindingTypeFilter, name, value } = parseSetArg(arg);
 		const matches = findPropertiesByBindingName(
@@ -83,13 +67,11 @@ function forceSetValues(
 			bindingTypeFilter,
 		);
 		for (const prop of matches) {
-			if (!prop.binding) continue;
-			const effectiveValue = maybePrependFeel(prop, value);
-			const target = resolveBindingTarget(prop.binding, containers);
-			if (target) {
-				modeling.updateModdleProperties(element, target.child, {
-					[target.property]: effectiveValue,
-				});
+			if (
+				prop.binding &&
+				elementTemplates.isConditionMet(element, template.properties, prop)
+			) {
+				elementTemplates.setPropertyValue(element, prop, value);
 			}
 		}
 	}
@@ -144,13 +126,16 @@ async function applyElementTemplate(
 
 	const elementTemplates = modeler.get("elementTemplates");
 	elementTemplates.set([template]);
-	elementTemplates.applyTemplate(element, template);
+	// `applyTemplate` returns the element to keep working with: it is a new
+	// one when the template changes the element's type (e.g. Task →
+	// ServiceTask), leaving the original stale.
+	let current = elementTemplates.applyTemplate(element, template) ?? element;
 
 	if (setArgs.length > 0) {
-		forceSetValues(modeler, element, template, setArgs);
+		forceSetValues(current, elementTemplates, template, setArgs);
 		// Second pass so dependents whose conditions are newly met get
 		// created with our mutated defaults.
-		elementTemplates.applyTemplate(element, template);
+		current = elementTemplates.applyTemplate(current, template) ?? current;
 	}
 
 	const result = await modeler.saveXML({ format: true });
