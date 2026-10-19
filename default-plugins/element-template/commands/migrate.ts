@@ -570,14 +570,13 @@ async function runMigrateInternal(
 	redaction.templates = [...(redaction.templates ?? []), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	// A hop that needs a newer source version than any local one climbs through the cache.
-	if (
-		targetRecipe?.sources.some(
-			(s) =>
-				s.kind === "change" &&
-				s.sourceTemplateId === templateId &&
-				(s.minSourceVersion ?? 0) > Math.max(0, ...localVersions),
-		)
-	) {
+	const floors = (targetRecipe?.sources ?? []).flatMap((s) =>
+		s.kind === "change" && s.sourceTemplateId === templateId
+			? [s.minSourceVersion ?? 0]
+			: [],
+	);
+	const highestLocal = Math.max(0, ...localVersions);
+	if (floors.length > 0 && floors.every((floor) => floor > highestLocal)) {
 		pool.cache();
 	}
 	// A recipe step to a version without a local template needs the cache.

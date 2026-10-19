@@ -45,11 +45,11 @@ const NEXT = template(
 	],
 );
 
-test("a newer cached source version is climbed although a local one exists", async () => {
+async function update(next: object, seed: (dataDir: string) => void) {
 	const root = mkdtempSync(join(tmpdir(), "c8ctl-cache-hop-"));
 	try {
 		const dataDir = join(root, "data");
-		seedTemplateCache(dataDir, [V1, V2]);
+		seed(dataDir);
 		const localDir = join(root, ".camunda", "element-templates");
 		mkdirSync(localDir, { recursive: true });
 		writeFileSync(
@@ -57,7 +57,7 @@ test("a newer cached source version is climbed although a local one exists", asy
 			JSON.stringify([{ $schema: SCHEMA, ...V1 }]),
 		);
 		const nextPath = join(root, "next.json");
-		writeFileSync(nextPath, JSON.stringify(NEXT));
+		writeFileSync(nextPath, JSON.stringify(next));
 		const v1Path = join(root, "v1.json");
 		writeFileSync(v1Path, JSON.stringify(V1));
 		const diagram = join(root, "task.bpmn");
@@ -86,9 +86,42 @@ test("a newer cached source version is climbed although a local one exists", asy
 			"--dry-run",
 			"--json",
 		);
-		assert.equal(result.status, 0, result.stderr);
-		assert.doesNotMatch(result.stderr, /unmet source floor/);
+		return result;
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+}
+
+test("a newer cached source version is climbed although a local one exists", async () => {
+	const result = await update(NEXT, (dataDir) =>
+		seedTemplateCache(dataDir, [V1, V2]),
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.doesNotMatch(result.stderr, /unmet source floor/);
+});
+
+test("a reachable local hop does not read the cache for an unreachable alternative", async () => {
+	const next = template(
+		"io.example.cache-hop.next",
+		1,
+		[input("a", "kept")],
+		[
+			{
+				kind: "change",
+				sourceTemplateId: SOURCE,
+				paths: [{ from: "a", to: "a" }],
+			},
+			{
+				kind: "change",
+				sourceTemplateId: SOURCE,
+				minSourceVersion: 5,
+				paths: [{ from: "a", to: "a" }],
+			},
+		],
+	);
+	const result = await update(next, (dataDir) => {
+		seedTemplateCache(dataDir, [V1]);
+		writeFileSync(join(dataDir, "element-templates", "templates.json"), "{");
+	});
+	assert.equal(result.status, 0, result.stderr);
 });

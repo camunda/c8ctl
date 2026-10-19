@@ -259,6 +259,54 @@ describe("a source template that is not available", () => {
 		}
 	});
 
+	for (const [name, when] of [
+		["an absent-path guard", { path: "typo", exists: false }],
+		["a present-path guard", { path: "typo", exists: true }],
+	] as const) {
+		test(`${name} on a missing path is reported for a stub source`, async () => {
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-stub-guard-"));
+			try {
+				const guarded = {
+					...target,
+					metadata: {
+						migratesFrom: {
+							...recipe,
+							sources: [
+								{
+									...recipe.sources[0],
+									paths: [{ set: "S", to: "b", when }],
+								},
+							],
+						},
+					},
+				};
+				writeFileSync(join(dataDir, "guard.json"), JSON.stringify(guarded));
+				const bpmnCopy = join(dataDir, "call.bpmn");
+				writeFileSync(bpmnCopy, applied);
+				const preview = await c8WithOptions(
+					{ env: { C8CTL_DATA_DIR: dataDir } },
+					"element-template",
+					"update",
+					id,
+					"Task_1",
+					bpmnCopy,
+					"--to",
+					join(dataDir, "guard.json"),
+					"--dry-run",
+					"--json",
+				);
+				assert.equal(preview.status, 1, preview.stderr);
+				const [element] = JSON.parse(preview.stdout).results;
+				assert.equal(element.lossless, false);
+				assert.deepEqual(element.report.skipped.noMatch, [
+					{ from: "typo", to: "b" },
+				]);
+			} finally {
+				rmSync(dataDir, { recursive: true, force: true });
+			}
+		});
+	}
+
 	for (const [name, recipeArgs] of [
 		["an embedded recipe", ["--to", "recipe-embedded.json"]],
 		[

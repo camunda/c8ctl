@@ -395,6 +395,13 @@ export function buildStepPlan(
 	};
 
 	for (const entry of entries) {
+		if (unverifiedReads) {
+			for (const guard of entry.when) {
+				if (!lookup(sourceValues, guard.path)) {
+					facts.noMatch.push({ from: guard.path, to: entry.to });
+				}
+			}
+		}
 		const active = entry.when.every((g) => evalGuard(g, sourceValues));
 
 		if (entry.kind === "set") {
