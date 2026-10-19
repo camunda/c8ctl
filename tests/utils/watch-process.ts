@@ -32,6 +32,12 @@ export interface StartWatchOptions {
 	/** Extra CLI args inserted between `watch` and `<watchDir>`. */
 	extraArgs?: string[];
 	/**
+	 * Working directory of the watcher. Defaults to the repository root.
+	 * Tests that pass a relative `watchDir` set it so the path resolves
+	 * against it.
+	 */
+	cwd?: string;
+	/**
 	 * Extra environment variables to merge into the spawn env (after
 	 * `makeTestEnv`). Used by tests that need to point the SDK at a mock
 	 * server via `CAMUNDA_BASE_URL`.
@@ -67,13 +73,19 @@ export interface WatchProcess {
  * and return handles for output, exit, and guaranteed cleanup.
  */
 export function startWatchProcess(options: StartWatchOptions): WatchProcess {
-	const { watchDir, dataDir, extraArgs = [], env: extraEnv = {} } = options;
+	const {
+		watchDir,
+		dataDir,
+		extraArgs = [],
+		cwd = PROJECT_ROOT,
+		env: extraEnv = {},
+	} = options;
 
 	const child = spawn(
 		"node",
 		["--experimental-strip-types", CLI, "watch", ...extraArgs, watchDir],
 		{
-			cwd: PROJECT_ROOT,
+			cwd,
 			env: { ...makeTestEnv({ C8CTL_DATA_DIR: dataDir }), ...extraEnv },
 			stdio: ["ignore", "pipe", "pipe"],
 		},
