@@ -281,6 +281,7 @@ function withNames(
 export function buildReport({
 	fromTemplate,
 	toTemplate,
+	via = [toTemplate],
 	before,
 	after,
 	facts,
@@ -290,6 +291,8 @@ export function buildReport({
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
 	toTemplate: MigrationTemplate;
+	/** Every template the element is applied on the way, the target last. */
+	via?: MigrationTemplate[];
 	before: ElementValue[];
 	after: ElementValue[];
 	facts: ReportFacts;
@@ -443,7 +446,7 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
-		unchecked: uncheckedFields(fromTemplate, toTemplate),
+		unchecked: uncheckedFields(fromTemplate, via),
 	};
 
 	return {
@@ -475,12 +478,13 @@ export function buildReport({
 
 /**
  * Editable source fields under a binding type the engine does not read. The
- * Modeler keeps such a value only when the target binds it identically and
- * not as Hidden, so any other case may lose a value the report cannot see.
+ * Modeler keeps such a value only when every applied template binds it
+ * identically and not as Hidden, so any other case may lose a value the
+ * report cannot see.
  */
 function uncheckedFields(
 	fromTemplate: MigrationTemplate,
-	toTemplate: MigrationTemplate,
+	via: MigrationTemplate[],
 ): Field[] {
 	return fromTemplate.properties
 		.filter(
@@ -488,8 +492,11 @@ function uncheckedFields(
 				p.binding &&
 				p.type !== "Hidden" &&
 				bindingTargetKey(p.binding) === undefined &&
-				!toTemplate.properties.some(
-					(t) => t.type !== "Hidden" && sameBinding(t.binding, p.binding),
+				via.some(
+					(template) =>
+						!template.properties.some(
+							(t) => t.type !== "Hidden" && sameBinding(t.binding, p.binding),
+						),
 				),
 		)
 		.map((p) => {

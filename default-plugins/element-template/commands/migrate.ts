@@ -569,6 +569,17 @@ async function runMigrateInternal(
 	// Recipe diagnostics can quote values that only the target knows.
 	redaction.templates = [...(redaction.templates ?? []), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
+	// A hop that needs a newer source version than any local one climbs through the cache.
+	if (
+		targetRecipe?.sources.some(
+			(s) =>
+				s.kind === "change" &&
+				s.sourceTemplateId === templateId &&
+				(s.minSourceVersion ?? 0) > Math.max(0, ...localVersions),
+		)
+	) {
+		pool.cache();
+	}
 	// A recipe step to a version without a local template needs the cache.
 	const sourceLatest =
 		target.id === templateId

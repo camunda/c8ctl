@@ -211,6 +211,54 @@ describe("a source template that is not available", () => {
 		applied = result.stdout;
 	});
 
+	test("a misspelled first-step read is reported, not accepted silently", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-stub-typo-"));
+		try {
+			const typoTarget = {
+				...target,
+				metadata: {
+					migratesFrom: {
+						...recipe,
+						sources: [
+							{
+								...recipe.sources[0],
+								paths: [{ from: "typo", to: "b" }],
+							},
+						],
+					},
+				},
+			};
+			writeFileSync(join(dataDir, "typo.json"), JSON.stringify(typoTarget));
+			const bpmnCopy = join(dataDir, "call.bpmn");
+			writeFileSync(bpmnCopy, applied);
+			const update = (...extra: string[]) =>
+				c8WithOptions(
+					{ env: { C8CTL_DATA_DIR: dataDir } },
+					"element-template",
+					"update",
+					id,
+					"Task_1",
+					bpmnCopy,
+					"--to",
+					join(dataDir, "typo.json"),
+					...extra,
+				);
+			const preview = await update("--dry-run", "--json");
+			assert.equal(preview.status, 1, preview.stderr);
+			const [element] = JSON.parse(preview.stdout).results;
+			assert.equal(element.lossless, false);
+			assert.deepEqual(element.report.skipped.noMatch, [
+				{ from: "typo", to: "b" },
+			]);
+			const refused = await update("--in-place");
+			assert.equal(refused.status, 1);
+			assert.match(refused.stderr, /--allow-lossy/);
+			assert.equal(readFileSync(bpmnCopy, "utf-8"), applied);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	for (const [name, recipeArgs] of [
 		["an embedded recipe", ["--to", "recipe-embedded.json"]],
 		[
@@ -264,4 +312,83 @@ describe("a source template that is not available", () => {
 			}
 		});
 	}
+});
+
+describe("an unread binding across intermediate versions", () => {
+	const id = "io.example.call-chain";
+	const chain = [
+		{ ...template(1, [calledElement, input("a")]), id },
+		{ ...template(2, [input("b")]), id },
+		{
+			...template(3, [calledElement, input("c")]),
+			id,
+			metadata: {
+				migratesFrom: {
+					schemaVersion: 1,
+					sources: [
+						{
+							kind: "upgrade",
+							sourceTemplateId: id,
+							toVersion: 2,
+							paths: [{ from: "a", to: "b" }],
+						},
+						{
+							kind: "upgrade",
+							sourceTemplateId: id,
+							toVersion: 3,
+							paths: [{ from: "b", to: "c" }],
+						},
+					],
+				},
+			},
+		},
+	];
+
+	test("a version that drops it makes the later re-add lossy", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-unread-chain-"));
+		try {
+			seedTemplateCache(dataDir, chain);
+			const sourcePath = join(dataDir, "v1.json");
+			const targetPath = join(dataDir, "v3.json");
+			writeFileSync(sourcePath, JSON.stringify(chain[0]));
+			writeFileSync(targetPath, JSON.stringify(chain[2]));
+			const diagram = join(dataDir, "chain.bpmn");
+			writeFileSync(diagram, CALL_DIAGRAM);
+			const env = { C8CTL_DATA_DIR: dataDir };
+			const applied = await c8WithOptions(
+				{ env },
+				"element-template",
+				"apply",
+				sourcePath,
+				"Task_1",
+				diagram,
+				"--set",
+				"processId=user-process",
+			);
+			assert.equal(applied.status, 0, applied.stderr);
+			writeFileSync(diagram, applied.stdout);
+
+			const preview = await c8WithOptions(
+				{ env },
+				"element-template",
+				"update",
+				id,
+				"Task_1",
+				diagram,
+				"--to",
+				targetPath,
+				"--dry-run",
+				"--json",
+			);
+			assert.equal(preview.status, 1, preview.stderr);
+			const [element] = JSON.parse(preview.stdout).results;
+			assert.equal(element.lossless, false);
+			assert.deepEqual(
+				element.report.skipped.unchecked.map((u: { key: string }) => u.key),
+				["processId"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
 });

@@ -365,6 +365,8 @@ export function buildStepPlan(
 	entries: Entry[],
 	sourceValues: ElementValue[],
 	template?: MigrationTemplate,
+	/** True when absent reads cannot be told apart from a misspelled path. */
+	unverifiedReads = false,
 ): StepPlan {
 	const facts = emptyFacts();
 	const writes: Write[] = [];
@@ -438,6 +440,9 @@ export function buildStepPlan(
 			continue;
 		}
 		if (!source) {
+			if (unverifiedReads) {
+				facts.noMatch.push({ from: entry.from, to: entry.to });
+			}
 			continue;
 		}
 
