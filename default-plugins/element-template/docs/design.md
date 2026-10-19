@@ -246,7 +246,16 @@ that moved.
   `--recipe` supplies the same format from a file for templates that carry none.
 - **Versioned and strict.** The recipe has a `schemaVersion`. A reader refuses a
   version it does not know and any unknown key, rather than applying part of a
-  recipe or silently ignoring a typo.
+  recipe or silently ignoring a typo. The version is checked first and selects
+  the parser from a version-to-parser map, so a newer recipe always asks for a
+  newer c8ctl, whatever keys it adds; a later version can then add fields without
+  older readers reporting them as typos.
+- **Unusable embedded recipes fail the run.** A run moves one source template to
+  one target, so an unusable recipe on the target or on the latest version of the
+  source lineage affects every element in it. The run fails up front and names the
+  template carrying the recipe, instead of migrating without the author's recipe.
+  This also applies when every element is already unchanged or skipped, like any
+  other recipe validation. Successor discovery skips such templates instead.
 - **Validation boundary.** Draft07 and the parser enforce the same JSON structure.
   Schema validation alone is insufficient: keyed source uniqueness is checked by
   the parser and owner-relative ID/version constraints by `validateRecipeOwner`.

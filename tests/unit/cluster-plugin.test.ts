@@ -26,6 +26,17 @@ const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
 /**
+ * Upper bound for obtaining a real process start signature. On Windows each
+ * lookup is a blocking `powershell` + CIM call with a 10 s per-call timeout in
+ * the plugin, and the first call of a run pays the cold-start cost. A 30 s
+ * deadline therefore allowed only three attempts (t=0, 10, 20 s), so a slow
+ * runner failed the test without the lookup ever having a fair chance. The
+ * signature itself is the readiness signal; this is only a safety net sized to
+ * a dozen attempts, so do not tighten it back.
+ */
+const SIGNATURE_DEADLINE_MS = 120_000;
+
+/**
  * Build a durable running-cluster record for a live PID that `recordedPidIsLive`
  * accepts on BOTH fingerprinting and non-fingerprinting platforms. Since #568 a
  * record entry on a fingerprinting platform MUST carry a start signature to be
@@ -38,7 +49,7 @@ async function liveSelfRecord({
 	pid = process.pid,
 	signatureOf = plugin.processStartSignature,
 	canFingerprint = plugin.platformSupportsProcessSignature(),
-	timeoutMs = 30_000,
+	timeoutMs = SIGNATURE_DEADLINE_MS,
 }: {
 	version?: string;
 	pid?: number;

@@ -6,6 +6,9 @@ import type {
 	createProcessInstanceInput,
 	migrateProcessInstanceInput,
 	migrateProcessInstancesBatchOperationInput,
+	modifyProcessInstanceInput,
+	modifyProcessInstancesBatchOperationInput,
+	ProcessInstanceModificationInstruction,
 } from "@camunda8/orchestration-cluster-api";
 import {
 	ProcessDefinitionId,
@@ -16,10 +19,17 @@ import { fetchAllPages } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
 	buildDateFilter,
+	parseActivateFlag,
 	parseBetween,
+	parseJsonObjectFlag,
 	parseMigrationMapping,
+	parseModificationInstructions,
+	parseMoveFlag,
+	parseOperationReference,
+	parseTerminateFlag,
 	parseVariablesFlag,
 	processInstancesEmptyMessage,
+	toBatchMoveInstruction,
 } from "../utils/index.ts";
 
 /**
@@ -506,6 +516,167 @@ export const migrateProcessInstanceCommand = defineCommand(
 			kind: "success",
 			message: `Batch migration operation created for active instances of process definition ${sourceDefinitionKey}`,
 			key: result.batchOperationKey,
+		};
+	},
+);
+
+const INSTRUCTIONS_FLAG = {
+	name: "instructions",
+	exampleFile: "instructions.json",
+};
+
+/**
+ * Modify process instance(s): activate elements, terminate element
+ * instances, or move tokens.
+ *
+ * With a positional key, applies the instructions to that single instance
+ * atomically (all or nothing). With `--processDefinitionKey` instead, starts
+ * an asynchronous batch operation over every active instance of that
+ * definition; the API only supports moves by element ID there. Exactly one of
+ * the two must be given so a batch is never started by accident.
+ */
+export const modifyProcessInstanceCommand = defineCommand(
+	"modify",
+	"process-instance",
+	async (ctx, flags, args) => {
+		const { client, profile } = ctx;
+		const key = args.key;
+		const definitionKey = flags.processDefinitionKey;
+
+		if (key && definitionKey) {
+			throw new Error(
+				"Pass either a process instance key (single modification) or --processDefinitionKey (batch modification), not both",
+			);
+		}
+		if (!key && !definitionKey) {
+			throw new Error(
+				"Process instance key or --processDefinitionKey required. Usage: c8 modify pi <key> --move <source>=<targetElementId> (or --activate / --terminate / --instructions), or replace <key> with --processDefinitionKey <key> to move tokens in all active instances of a definition",
+			);
+		}
+
+		const rawOperationReference = flags.operationReference;
+		const operationReference =
+			rawOperationReference === undefined
+				? undefined
+				: parseFlagValue("operationReference", () =>
+						parseOperationReference(rawOperationReference),
+					);
+		const moves = (flags.move ?? []).map((value) =>
+			parseFlagValue("move", () => parseMoveFlag(value)),
+		);
+
+		if (!key) {
+			if (
+				flags.activate ||
+				flags.terminate ||
+				flags.instructions !== undefined
+			) {
+				throw new Error(
+					"Batch modification only supports --move <sourceElementId>=<targetElementId>: the API cannot activate, terminate or apply --instructions across a batch. Pass a process instance key to modify a single instance instead",
+				);
+			}
+			if (moves.length === 0) {
+				throw new Error(
+					"At least one --move <sourceElementId>=<targetElementId> is required for batch modification",
+				);
+			}
+			const request = {
+				filter: { processDefinitionKey: definitionKey },
+				moveInstructions: moves.map((move) =>
+					parseFlagValue("move", () => toBatchMoveInstruction(move)),
+				),
+				...(operationReference !== undefined && { operationReference }),
+			} satisfies modifyProcessInstancesBatchOperationInput;
+
+			const dr = ctx.dryRun({
+				command: "modify process-instances",
+				method: "POST",
+				endpoint: "/process-instances/modification",
+				profile,
+				body: request,
+			});
+			if (dr) return dr;
+
+			const result = await client.modifyProcessInstancesBatchOperation(request);
+			return {
+				kind: "success",
+				message: `Batch modification operation created for active instances of process definition ${definitionKey}`,
+				key: result.batchOperationKey,
+			};
+		}
+
+		const rawInstructions = flags.instructions;
+		// Outside parseFlagValue: the JSON reader already names the flag.
+		const json =
+			rawInstructions === undefined
+				? undefined
+				: parseJsonObjectFlag({
+						raw: rawInstructions,
+						flag: INSTRUCTIONS_FLAG,
+					});
+		const fromJson: ProcessInstanceModificationInstruction =
+			json === undefined
+				? {}
+				: parseFlagValue("instructions", () =>
+						parseModificationInstructions(json),
+					);
+		if (
+			operationReference !== undefined &&
+			fromJson.operationReference !== undefined
+		) {
+			throw new Error(
+				"Pass operationReference either inside --instructions or as --operationReference, not both",
+			);
+		}
+
+		const activateInstructions = [
+			...(fromJson.activateInstructions ?? []),
+			...(flags.activate ?? []).map((value) =>
+				parseFlagValue("activate", () => parseActivateFlag(value)),
+			),
+		];
+		const moveInstructions = [...(fromJson.moveInstructions ?? []), ...moves];
+		const terminateInstructions = [
+			...(fromJson.terminateInstructions ?? []),
+			...(flags.terminate ?? []).map((value) =>
+				parseFlagValue("terminate", () => parseTerminateFlag(value)),
+			),
+		];
+		if (
+			activateInstructions.length +
+				moveInstructions.length +
+				terminateInstructions.length ===
+			0
+		) {
+			throw new Error(
+				"At least one modification instruction is required: pass --activate <elementId>, --terminate <elementId|elementInstanceKey>, --move <source>=<targetElementId> or --instructions <json>",
+			);
+		}
+
+		const reference = operationReference ?? fromJson.operationReference;
+		const body = {
+			...(activateInstructions.length > 0 && { activateInstructions }),
+			...(moveInstructions.length > 0 && { moveInstructions }),
+			...(terminateInstructions.length > 0 && { terminateInstructions }),
+			...(reference !== undefined && { operationReference: reference }),
+		} satisfies ProcessInstanceModificationInstruction;
+
+		const dr = ctx.dryRun({
+			command: "modify process-instance",
+			method: "POST",
+			endpoint: `/process-instances/${key}/modification`,
+			profile,
+			body,
+		});
+		if (dr) return dr;
+
+		await client.modifyProcessInstance({
+			processInstanceKey: key,
+			...body,
+		} satisfies modifyProcessInstanceInput);
+		return {
+			kind: "success",
+			message: `Process instance ${key} modified`,
 		};
 	},
 );
