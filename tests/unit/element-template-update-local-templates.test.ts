@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import {
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -45,7 +46,7 @@ function writeLocal(dir: string, templates: object[]): void {
 	writeFileSync(join(localDir, "custom.json"), JSON.stringify(templates));
 }
 
-function run(dataDir: string, bpmn: string) {
+function run(dataDir: string, bpmn: string, ...extra: string[]) {
 	const modelerDir = mkdtempSync(join(ws.workDir, "modeler-"));
 	return c8WithOptions(
 		{
@@ -59,6 +60,7 @@ function run(dataDir: string, bpmn: string) {
 		"update",
 		V1.id,
 		bpmn,
+		...extra,
 	);
 }
 
@@ -98,9 +100,10 @@ describe("element-template update resolves local templates first", () => {
 		const link = join(processes, "linked.bpmn");
 		symlinkSync(target, link);
 		const coldDataDir = mkdtempSync(join(ws.workDir, "cold-"));
-		const result = await run(coldDataDir, link);
+		const result = await run(coldDataDir, link, "--in-place");
 		assert.equal(result.status, 0, result.stderr);
-		assert.equal(versionOf(result.stdout, TASK), "2");
+		assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+		assert.match(readFileSync(target, "utf-8"), /modelerTemplateVersion="2"/);
 	});
 
 	test("a local miss falls back to the OOTB cache", async () => {
