@@ -446,7 +446,7 @@ export function migrateElement({
 		);
 		if (result) {
 			current = result.element;
-			const earlierMoves = allFacts.flatMap((facts) => facts.moved);
+			const earlierApplications = [...allFacts];
 			allFacts.push(result.facts);
 			if (application.step?.implicit)
 				implicitTemplates.push(result.activeTemplate);
@@ -454,24 +454,41 @@ export function migrateElement({
 			lostInImplicitSteps.push(
 				...valuesBefore.filter((v) => {
 					if (v.value === "") return false;
-					// An earlier move that holds the value on another binding keeps it.
+					// An earlier move chain that holds the value on another binding keeps it.
 					const holds = (
 						values: ElementValue[],
-						m: (typeof earlierMoves)[number],
+						field: FieldKey,
+						value: string,
 					) =>
 						values.some(
 							(e) =>
-								e.key === m.to.key &&
-								e.bindingType === m.to.bindingType &&
-								e.value === v.value,
+								e.key === field.key &&
+								e.bindingType === field.bindingType &&
+								e.value === value,
 						);
+					let carried: { field: FieldKey; value: string }[] = [
+						{ field: v, value: v.value },
+					];
+					for (const { moved } of earlierApplications) {
+						const next = moved.flatMap((m) =>
+							carried.some(
+								(c) =>
+									c.field.key === m.from.key &&
+									c.field.bindingType === m.from.bindingType,
+							)
+								? [{ field: m.to, value: m.value ?? v.value }]
+								: [],
+						);
+						carried = [...carried, ...next];
+					}
 					if (
-						earlierMoves.some(
-							(m) =>
-								m.from.key === v.key &&
-								m.from.bindingType === v.bindingType &&
-								holds(valuesBefore, m) &&
-								holds(valuesAfter, m),
+						carried.some(
+							(c) =>
+								!(
+									c.field.key === v.key && c.field.bindingType === v.bindingType
+								) &&
+								holds(valuesBefore, c.field, c.value) &&
+								holds(valuesAfter, c.field, c.value),
 						)
 					)
 						return false;
