@@ -1,5 +1,5 @@
 /**
- * Shared parser for `--variables` JSON input (#528).
+ * Shared parser for `--variables` and other JSON-object flag input (#528).
  *
  * Passing inline JSON through a shell is quoting-hostile — PowerShell in
  * particular strips the double quotes of a native command argument before
@@ -17,9 +17,20 @@
 import { readFileSync } from "node:fs";
 import { getLogger, isRecord } from "../../core/index.ts";
 
-const QUOTING_HINT =
+/** The flag being parsed, named in every message the user sees. */
+export interface JsonFlag {
+	name: string;
+	exampleFile: string;
+}
+
+const VARIABLES_FLAG: JsonFlag = {
+	name: "variables",
+	exampleFile: "vars.json",
+};
+
+const quotingHint = ({ name, exampleFile }: JsonFlag): string =>
 	"Hint: read the JSON from a file instead of quoting it inline: " +
-	"--variables @vars.json (or --variables @- to read stdin). " +
+	`--${name} @${exampleFile} (or --${name} @- to read stdin). ` +
 	"Some shells (notably PowerShell) strip or re-split the quotes of inline JSON.";
 
 /**
@@ -92,7 +103,10 @@ function requoteStrippedJson(text: string): string | null {
  * Resolve the raw flag value to JSON text, following an `@file` / `@-`
  * reference when present.
  */
-function readVariablesSource(raw: string): { text: string; origin?: string } {
+function readJsonSource(
+	raw: string,
+	flag: JsonFlag,
+): { text: string; origin?: string } {
 	const value = raw.trim();
 	if (!value.startsWith("@")) return { text: value };
 
@@ -100,24 +114,26 @@ function readVariablesSource(raw: string): { text: string; origin?: string } {
 	if (ref === "-") {
 		if (process.stdin.isTTY) {
 			throw new Error(
-				"--variables @- expects JSON on stdin, but stdin is a terminal",
+				`--${flag.name} @- expects JSON on stdin, but stdin is a terminal`,
 			);
 		}
 		// Blocking read of fd 0 until EOF, the same contract as `cat -`:
 		// the producer of the pipe is expected to close it. Reading stdin
-		// synchronously here is safe because `--variables` is parsed once
+		// synchronously here is safe because a JSON flag is parsed once
 		// per invocation, before any other stdin consumer runs.
 		return { text: readFileSync(0, "utf-8"), origin: "stdin" };
 	}
 	if (!ref) {
-		throw new Error("--variables @ requires a file path (e.g. @vars.json)");
+		throw new Error(
+			`--${flag.name} @ requires a file path (e.g. @${flag.exampleFile})`,
+		);
 	}
 	const normalised = toDisplayPath(ref);
 	try {
 		return { text: readFileSync(ref, "utf-8"), origin: `'${normalised}'` };
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		throw new Error(`Cannot read variables file '${normalised}': ${msg}`);
+		throw new Error(`Cannot read ${flag.name} file '${normalised}': ${msg}`);
 	}
 }
 
@@ -134,7 +150,23 @@ export function parseVariablesFlag({
 	raw: string;
 	label?: string;
 }): Record<string, unknown> {
-	const { text, origin } = readVariablesSource(raw);
+	return parseJsonObjectFlag({ raw, flag: VARIABLES_FLAG, label });
+}
+
+/**
+ * Parse any JSON-object flag with the same input forms and defences as
+ * `--variables`: inline JSON, `@path/to/file.json`, or `@-` for stdin.
+ */
+export function parseJsonObjectFlag({
+	raw,
+	flag,
+	label = `--${flag.name}`,
+}: {
+	raw: string;
+	flag: JsonFlag;
+	label?: string;
+}): Record<string, unknown> {
+	const { text, origin } = readJsonSource(raw, flag);
 	// Name the input source so a bad file or piped payload is not mistaken
 	// for a bad inline argument.
 	const from = origin ? ` (read from ${origin})` : "";
@@ -158,15 +190,15 @@ export function parseVariablesFlag({
 					"restored unambiguously."
 				: "";
 			throw new Error(
-				`Invalid JSON for ${label}: ${msg}.${stripped} ${QUOTING_HINT}`,
+				`Invalid JSON for ${label}: ${msg}.${stripped} ${quotingHint(flag)}`,
 			);
 		}
 		// Announce the repair: re-quoting cannot recover the original
 		// string/number distinction (`{a:1}` could have been `{"a":1}` or
 		// `{"a":"1"}`), so the user gets to see what was sent.
 		getLogger().warn(
-			`--variables: restored quotes stripped by the shell -> ${repair.json}. ` +
-				"Use --variables @file.json or @- to pass JSON verbatim.",
+			`--${flag.name}: restored quotes stripped by the shell -> ${repair.json}. ` +
+				`Use --${flag.name} @file.json or @- to pass JSON verbatim.`,
 		);
 		parsed = repair.value;
 	}
@@ -174,8 +206,8 @@ export function parseVariablesFlag({
 	if (!isRecord(parsed)) {
 		throw new Error(
 			Array.isArray(parsed)
-				? `--variables must be a JSON object (not an array)${from}`
-				: `--variables must be a JSON object${from}`,
+				? `--${flag.name} must be a JSON object (not an array)${from}`
+				: `--${flag.name} must be a JSON object${from}`,
 		);
 	}
 	return parsed;

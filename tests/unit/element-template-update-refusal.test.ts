@@ -548,5 +548,116 @@ describe("update CLI: unusable recipes and lossy overwrites (shared update fixtu
 		assert.match(result.stderr, /Update c8ctl/);
 	});
 
+	const NEWER_RECIPE = { schemaVersion: 2, future: true, sources: [] };
+	const unusableRecipe = (sources: object[]) => ({ schemaVersion: 1, sources });
+
+	for (const { label, recipe, error } of [
+		{ label: "a newer", recipe: NEWER_RECIPE, error: /Update c8ctl/ },
+		{
+			label: "an owner-invalid",
+			recipe: unusableRecipe([{ kind: "change", sourceTemplateId: NEW.id }]),
+			error: /change source must differ from recipe owner/,
+		},
+	]) {
+		test(`fails the run when the target carries ${label} recipe`, async () => {
+			const templatePath = join(ws.workDir, "unusable-target.json");
+			writeFileSync(
+				templatePath,
+				JSON.stringify({ ...NEW, metadata: { migratesFrom: recipe } }),
+			);
+			await assertRunFails(
+				dataDirWithCache([OLD]),
+				templatePath,
+				"io.example.new@1",
+				error,
+			);
+		});
+	}
+
+	for (const { label, recipe, error } of [
+		{ label: "a newer", recipe: NEWER_RECIPE, error: /Update c8ctl/ },
+		{
+			label: "an owner-invalid",
+			recipe: unusableRecipe([
+				{ kind: "upgrade", sourceTemplateId: OLD.id, toVersion: 3 },
+			]),
+			error: /upgrade version 3 exceeds owner version 2/,
+		},
+	]) {
+		test(`fails the run when the source lineage carries ${label} recipe`, async () => {
+			const templatePath = join(ws.workDir, "new.json");
+			writeFileSync(templatePath, JSON.stringify(NEW));
+			const source = { ...OLD, version: 2, metadata: { migratesFrom: recipe } };
+			await assertRunFails(
+				dataDirWithCache([OLD, source]),
+				templatePath,
+				"io.example.old@2",
+				error,
+			);
+		});
+	}
+
+	test("fails the run when an engine-incompatible applied source carries a newer recipe", async () => {
+		const templatePath = join(ws.workDir, "new.json");
+		writeFileSync(templatePath, JSON.stringify(NEW));
+		// The element is on old@2, which the engine filter drops from the catalog.
+		const applied = {
+			...OLD,
+			version: 2,
+			engines: { camunda: "^99.0" },
+			metadata: { migratesFrom: NEWER_RECIPE },
+		};
+		const bpmn = join(ws.workDir, "old-v2.bpmn");
+		const xml = readFileSync(ws.oldBpmn, "utf-8");
+		const appliedV2 = xml.replace(
+			'modelerTemplateVersion="1"',
+			'modelerTemplateVersion="2"',
+		);
+		assert.notStrictEqual(appliedV2, xml);
+		writeFileSync(bpmn, appliedV2);
+		await assertRunFails(
+			dataDirWithCache([OLD, applied]),
+			templatePath,
+			"io.example.old@2",
+			/Update c8ctl/,
+			bpmn,
+		);
+	});
+
+	async function assertRunFails(
+		dataDir: string,
+		templatePath: string,
+		owner: string,
+		error: RegExp,
+		bpmn = ws.oldBpmn,
+	) {
+		for (const flags of [
+			["--in-place", "--allow-lossy"],
+			["--dry-run", "--json"],
+		]) {
+			const before = readFileSync(bpmn, "utf-8");
+			const result = await run(
+				dataDir,
+				"update",
+				OLD.id,
+				TASK,
+				bpmn,
+				"--to",
+				templatePath,
+				...flags,
+			);
+			assert.strictEqual(result.status, 1, result.stderr);
+			assert.strictEqual(result.stdout, "");
+			assert.match(
+				result.stderr,
+				new RegExp(
+					`Template ${owner.replaceAll(".", "\\.")} carries an unusable recipe\\.`,
+				),
+			);
+			assert.match(result.stderr, error);
+			assert.strictEqual(readFileSync(bpmn, "utf-8"), before);
+		}
+	}
+
 	test("removes every temp dir it created", assertCleanedUp);
 });

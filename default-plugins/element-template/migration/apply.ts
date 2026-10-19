@@ -212,6 +212,7 @@ function applyApplication(
 	element: BpmnElement,
 	application: Application,
 	mapWrites: Write[] = [],
+	unverifiedReads = false,
 ): { element: BpmnElement; facts: ReportFacts } | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
@@ -228,7 +229,7 @@ function applyApplication(
 		writes: recipeWrites,
 		facts,
 		activeProperties,
-	} = buildStepPlan(step?.entries ?? [], values, clone);
+	} = buildStepPlan(step?.entries ?? [], values, clone, unverifiedReads);
 	assertNoAmbiguousWrites([...recipeWrites, ...mapWrites]);
 	const stepWrites = [...recipeWrites, ...mapWrites];
 	const writes = [
@@ -284,6 +285,19 @@ function applyApplication(
 	}
 
 	current = modeler.elementTemplates.applyTemplate(current, clone) ?? current;
+	const after = valuesOf(current);
+	// Hidden properties of this step's template reset values no write claims.
+	const reset = values
+		.filter(
+			(v) =>
+				v.value !== "" &&
+				!stepWrites.some((w) => sameTarget(v, w)) &&
+				findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
+					(property) => property.type === "Hidden",
+				) &&
+				!after.some((a) => sameTarget(a, v) && a.value === v.value),
+		)
+		.map(({ key, bindingType, value }) => ({ key, bindingType, from: value }));
 	const resolvedValue = (key: string, bindingType: string | null) => {
 		const write = writes.find(
 			(w) => w.key === key && w.bindingType === bindingType,
@@ -301,7 +315,8 @@ function applyApplication(
 		element: current,
 		facts: {
 			...facts,
-			after: valuesOf(current),
+			after,
+			reset,
 			moved: facts.moved.map((move) => ({
 				...move,
 				value: resolvedValue(move.to.key, move.to.bindingType),
@@ -326,7 +341,8 @@ function applyApplication(
  * `templates` must hold every template the change may need: the applied one
  * (for a precise carry-over), the intermediate versions a recipe climbs and
  * the target. `fromTemplate` is a stub with no properties when the applied
- * template is not available. Throws when a required step template is missing
+ * template is not available; pass `sourceKnown: false` then, so the recipe is
+ * not checked against the stub. Throws when a required step template is missing
  * or the recipe writes to a path the target does not bind; nothing is
  * modified in that case.
  */
@@ -334,6 +350,7 @@ export function migrateElement({
 	modeler,
 	element,
 	fromTemplate,
+	sourceKnown = true,
 	target,
 	templates,
 	recipe,
@@ -342,6 +359,8 @@ export function migrateElement({
 	modeler: MigrationModeler;
 	element: BpmnElement;
 	fromTemplate: MigrationTemplate;
+	/** False when `fromTemplate` is a stub for an unavailable template. */
+	sourceKnown?: boolean;
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
@@ -362,6 +381,7 @@ export function migrateElement({
 	const { steps, refusal } = resolveSteps({
 		appliedId: fromTemplate.id,
 		appliedVersion: fromTemplate.version ?? 0,
+		appliedShapeKnown: sourceKnown,
 		target,
 		templates,
 		recipe,
@@ -401,6 +421,7 @@ export function migrateElement({
 			current,
 			application,
 			isFinal ? mapPlan.writes : [],
+			index === 0 && !sourceKnown,
 		);
 		if (result) {
 			current = result.element;
@@ -443,6 +464,7 @@ export function migrateElement({
 	const report = buildReport({
 		fromTemplate: reportSource,
 		toTemplate: target,
+		via: applications.map((a) => a.template),
 		before,
 		after: allFacts.at(-1)?.after ?? before,
 		facts,

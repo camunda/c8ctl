@@ -4,7 +4,13 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -219,6 +225,11 @@ for (const json of [false, true]) {
 	test(`redacts embedded recipe and target validation diagnostics in ${json ? "JSON" : "text"}`, async () => {
 		for (const invalid of [
 			{ ...target, metadata: { migratesFrom: { ...recipe, [PRIVATE]: true } } },
+			// Only the target knows this value.
+			{
+				...target,
+				metadata: { migratesFrom: { ...recipe, [secrets[6]]: true } },
+			},
 			{
 				...target,
 				properties: target.properties.map((p) =>
@@ -374,3 +385,95 @@ test("redacts a secret-marked field of a source template the engine filters out"
 		assert.match(result.stdout + result.stderr, /\[REDACTED\]/);
 	}
 });
+
+test("redacts a credential marked only by a cache-loaded source version in a target recipe diagnostic", async () => {
+	const data = join(dir, "mixed-source");
+	const marked = "PRIVATE-CACHE-MARKED-4839";
+	const SCHEMA =
+		"https://unpkg.com/@camunda/zeebe-element-templates-json-schema/resources/schema.json";
+	const base = {
+		id: "redaction.mixed",
+		name: "Mixed",
+		appliesTo: ["bpmn:Task"],
+		properties: [input("neutral", marked)],
+	};
+	const cachedV1 = {
+		...base,
+		version: 1,
+		properties: [input("neutral", marked, { secret: true })],
+	};
+	const localV2 = { ...base, version: 2 };
+	const cachedTarget = {
+		id: base.id,
+		name: "Target",
+		version: 3,
+		appliesTo: ["bpmn:Task"],
+		metadata: {
+			migratesFrom: {
+				schemaVersion: 1,
+				sources: [],
+				[marked]: true,
+			},
+		},
+		properties: [input("neutral", "")],
+	};
+	seedTemplateCache(data, [cachedV1, cachedTarget]);
+	const localDir = join(data, ".camunda", "element-templates");
+	mkdirSync(localDir, { recursive: true });
+	writeFileSync(
+		join(localDir, "local.json"),
+		JSON.stringify([{ $schema: SCHEMA, ...localV2 }]),
+	);
+	const localPath = join(data, "local-v2.json");
+	writeFileSync(localPath, JSON.stringify(localV2));
+	const file = join(data, "mixed.bpmn");
+	const seeded = await c8WithEnv(
+		{ ...env, C8CTL_DATA_DIR: data },
+		"element-template",
+		"apply",
+		localPath,
+		TASK,
+		"tests/fixtures/simple.bpmn",
+	);
+	assert.equal(seeded.status, 0, seeded.stderr);
+	writeFileSync(file, seeded.stdout);
+	for (const json of [false, true]) {
+		const result = await c8WithEnv(
+			{ ...env, C8CTL_DATA_DIR: data },
+			"element-template",
+			"update",
+			base.id,
+			TASK,
+			file,
+			"--to",
+			`${base.id}@3`,
+			"--dry-run",
+			...(json ? ["--json"] : []),
+		);
+		assert.equal(result.status, 1, result.stdout + result.stderr);
+		assert.ok(!result.stdout.includes(marked), result.stdout);
+		assert.ok(!result.stderr.includes(marked), result.stderr);
+	}
+});
+
+for (const json of [false, true]) {
+	test(`redacts a source credential in a rejected --to URL in ${json ? "JSON" : "text"}`, async () => {
+		// Only the source template's Credentials group marks this value.
+		const result = await c8WithEnv(
+			env,
+			"element-template",
+			"update",
+			source.id,
+			TASK,
+			bpmn,
+			"--to",
+			`http://example.invalid/${secrets[4]}.json`,
+			"--dry-run",
+			...(json ? ["--json"] : []),
+		);
+		assert.equal(result.status, 1, result.stdout);
+		assert.match(result.stderr + result.stdout, /Insecure template URL/);
+		assertPrivateAbsent(result.stdout);
+		assertPrivateAbsent(result.stderr);
+	});
+}

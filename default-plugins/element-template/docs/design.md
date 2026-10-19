@@ -228,7 +228,17 @@ that moved.
   templates first (see above), with `isEngineCompatible` as the eligibility
   rule; the cache is required only on the fallback. Steps, the applied source
   and redaction read template versions from the cache, with the local versions
-  of the involved ids shadowing cached ones of the same id and version.
+  of the involved ids shadowing cached ones of the same id and version. The
+  cache is read only on a local gap: the target falls back to it, an involved
+  id has neither a local template nor a `--to` file or URL, or an applied
+  version or a recipe step version has no local template. A fully local
+  update never reads the cache, so a corrupt cache does not stop it.
+- **Unavailable source.** When the applied version is found nowhere, the
+  engine gets a stub with the applied id and version and no properties. Recipe
+  reads against the stub are not checked for coverage. Values it cannot read,
+  such as `zeebe:calledElement`, are taken from the element and count as
+  unchecked unless the target binds them identically, so a write still needs
+  `--allow-lossy`.
 - **Recipe location.** A recipe is carried by the template it migrates *to*, in
   `metadata.migratesFrom`, so it travels with the template through the
   marketplace and the cache. `metadata` is the schema's free-form area; it
@@ -236,7 +246,16 @@ that moved.
   `--recipe` supplies the same format from a file for templates that carry none.
 - **Versioned and strict.** The recipe has a `schemaVersion`. A reader refuses a
   version it does not know and any unknown key, rather than applying part of a
-  recipe or silently ignoring a typo.
+  recipe or silently ignoring a typo. The version is checked first and selects
+  the parser from a version-to-parser map, so a newer recipe always asks for a
+  newer c8ctl, whatever keys it adds; a later version can then add fields without
+  older readers reporting them as typos.
+- **Unusable embedded recipes fail the run.** A run moves one source template to
+  one target, so an unusable recipe on the target or on the latest version of the
+  source lineage affects every element in it. The run fails up front and names the
+  template carrying the recipe, instead of migrating without the author's recipe.
+  This also applies when every element is already unchanged or skipped, like any
+  other recipe validation. Successor discovery skips such templates instead.
 - **Validation boundary.** Draft07 and the parser enforce the same JSON structure.
   Schema validation alone is insufficient: keyed source uniqueness is checked by
   the parser and owner-relative ID/version constraints by `validateRecipeOwner`.
@@ -267,6 +286,16 @@ that moved.
   the engine cannot read are not diffed; an editable source field under one is
   reported as unchecked, and the report is lossy, unless the target binds it
   identically and not as Hidden, which is the case where the Modeler keeps it.
+  A field that survives can still lose its value: a Hidden target property
+  resetting an editable source value, or a move or set overwriting a different
+  populated value, is reported as dropped with a `cause`, and the report is lossy.
+  A destination that is itself moved away (a swap or chain) is not displaced.
+  A field written in any recipe step counts, also when a later step moves the
+  value on. Conditions are not evaluated here: a target counts as Hidden when any
+  duplicate for the binding is Hidden, a source only when every duplicate is.
+  Each step records the values its Hidden properties reset, so a reset in an
+  intermediate version counts, even when the final template binds the field as
+  editable again or a later step moves the reset value on.
 - **Read/write identity.** Unqualified rename, guard and interpolation reads fail
   when several binding types match. Qualification selects a binding type; duplicate
   backing identities or extension containers are rejected rather than selecting an

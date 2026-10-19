@@ -355,24 +355,29 @@ function parseSource(raw: unknown, at: string): RecipeSource {
 /**
  * Parse and validate a recipe. Throws `RecipeError` on the first problem;
  * a recipe is never partially accepted.
+ *
+ * The version is checked before anything else, so a recipe written for a
+ * newer schema always asks for a newer c8ctl, whatever keys it adds.
  */
 export function parseRecipe(raw: unknown): Recipe {
 	const obj = requireRecord(raw, "recipe");
+	const version = obj.schemaVersion;
+	const parse = typeof version === "number" ? PARSERS.get(version) : undefined;
+	if (parse) {
+		return parse(obj);
+	}
+	if (Number.isInteger(version) && Number(version) > SUPPORTED_SCHEMA_VERSION) {
+		throw new RecipeError(
+			`schemaVersion ${version} is newer than this c8ctl supports (${SUPPORTED_SCHEMA_VERSION}). Update c8ctl to use this recipe`,
+		);
+	}
+	throw new RecipeError(`schemaVersion must be ${SUPPORTED_SCHEMA_VERSION}`);
+}
+
+function parseRecipeV1(obj: Record<string, unknown>): Recipe {
 	rejectUnknownKeys(obj, ["$schema", "schemaVersion", "sources"], "recipe");
 	if (obj.$schema !== undefined && typeof obj.$schema !== "string") {
 		throw new RecipeError("recipe.$schema must be a string");
-	}
-
-	if (obj.schemaVersion !== SUPPORTED_SCHEMA_VERSION) {
-		if (
-			Number.isInteger(obj.schemaVersion) &&
-			Number(obj.schemaVersion) > SUPPORTED_SCHEMA_VERSION
-		) {
-			throw new RecipeError(
-				`schemaVersion ${obj.schemaVersion} is newer than this c8ctl supports (${SUPPORTED_SCHEMA_VERSION}). Update c8ctl to use this recipe`,
-			);
-		}
-		throw new RecipeError(`schemaVersion must be ${SUPPORTED_SCHEMA_VERSION}`);
 	}
 	if (!Array.isArray(obj.sources) || obj.sources.length === 0) {
 		throw new RecipeError("sources must be a non-empty list");
@@ -399,8 +404,13 @@ export function parseRecipe(raw: unknown): Recipe {
 		seen.add(key);
 	}
 
-	return { schemaVersion: SUPPORTED_SCHEMA_VERSION, sources };
+	return { schemaVersion: 1, sources };
 }
+
+/** One parser per supported schema version. */
+const PARSERS = new Map<number, (obj: Record<string, unknown>) => Recipe>([
+	[1, parseRecipeV1],
+]);
 
 /** Owner-relative rules cannot be expressed by the standalone JSON schema. */
 export function validateRecipeOwner(
