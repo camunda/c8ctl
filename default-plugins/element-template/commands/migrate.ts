@@ -575,7 +575,12 @@ async function runMigrateInternal(
 			? [s.minSourceVersion ?? 0]
 			: [],
 	);
-	const highestLocal = Math.max(0, ...localVersions);
+	const highestLocal = Math.max(
+		0,
+		...compatibleTemplates(pool.localOf(templateId), engineVersion).map(
+			(t) => t.version ?? 0,
+		),
+	);
 	if (floors.length > 0 && floors.every((floor) => floor > highestLocal)) {
 		pool.cache();
 	}

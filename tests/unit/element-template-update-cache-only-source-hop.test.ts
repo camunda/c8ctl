@@ -45,7 +45,11 @@ const NEXT = template(
 	],
 );
 
-async function update(next: object, seed: (dataDir: string) => void) {
+async function update(
+	next: object,
+	seed: (dataDir: string) => void,
+	extraLocal: object[] = [],
+) {
 	const root = mkdtempSync(join(tmpdir(), "c8ctl-cache-hop-"));
 	try {
 		const dataDir = join(root, "data");
@@ -54,7 +58,9 @@ async function update(next: object, seed: (dataDir: string) => void) {
 		mkdirSync(localDir, { recursive: true });
 		writeFileSync(
 			join(localDir, "local.json"),
-			JSON.stringify([{ $schema: SCHEMA, ...V1 }]),
+			JSON.stringify(
+				[V1, ...extraLocal].map((t) => ({ $schema: SCHEMA, ...t })),
+			),
 		);
 		const nextPath = join(root, "next.json");
 		writeFileSync(nextPath, JSON.stringify(next));
@@ -95,6 +101,17 @@ async function update(next: object, seed: (dataDir: string) => void) {
 test("a newer cached source version is climbed although a local one exists", async () => {
 	const result = await update(NEXT, (dataDir) =>
 		seedTemplateCache(dataDir, [V1, V2]),
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.doesNotMatch(result.stderr, /unmet source floor/);
+});
+
+test("an engine-incompatible higher local version does not hide a cached hop", async () => {
+	const incompatible = { ...V2, version: 5, engines: { camunda: "^9.0" } };
+	const result = await update(
+		NEXT,
+		(dataDir) => seedTemplateCache(dataDir, [V1, V2]),
+		[incompatible],
 	);
 	assert.equal(result.status, 0, result.stderr);
 	assert.doesNotMatch(result.stderr, /unmet source floor/);
