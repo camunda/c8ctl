@@ -177,7 +177,8 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   overwrite a migration that committed in between.
   In-place writes follow symlinks: the link stays and its target receives the new
   XML. The lock and temporary file sit beside the real file, so links to one file
-  share a lock. Hard links are not preserved; the file gets a new inode.
+  share a lock. Relative local template lookup starts at the directory of the
+  path you pass, not of the link's target. Hard links are not preserved; the file gets a new inode.
   A killed writer can leave a stale lock and temporary file; confirm no writer is
   active before inspecting and removing them. Recovery is manual. External edits
   between the final comparison and rename are not covered by the cooperative

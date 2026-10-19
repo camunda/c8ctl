@@ -12,6 +12,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -469,6 +470,11 @@ describe("CLI behavioural: element-template apply", () => {
 						...args,
 					);
 					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(
+						realpathSync(link),
+						realpathSync(other),
+						"the hook must have retargeted the link",
+					);
 					assert.strictEqual(readFileSync(other, "utf-8"), before);
 					const written = readFileSync(target, "utf-8");
 					if (command === "apply")

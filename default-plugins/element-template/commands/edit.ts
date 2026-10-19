@@ -303,6 +303,9 @@ export async function editSubcommand(args: string[]): Promise<void> {
 	}
 
 	// Pin the file before the read, so a retargeted link cannot redirect the write.
+	// Unlike migrate, which reads through the pinned path, the read here follows
+	// the link. A retarget between pin and read fails the content check and
+	// never writes the wrong file.
 	const writePath =
 		parsed.inPlace && bpmnFilePath ? pinFilePath(bpmnFilePath) : undefined;
 	const input = await readBpmnInput(bpmnFilePath);

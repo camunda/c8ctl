@@ -14,6 +14,7 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -276,6 +277,11 @@ describe("update --in-place through a symlink", {
 			"-i",
 		);
 		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(
+			realpathSync(link),
+			realpathSync(other),
+			"the hook must have retargeted the link",
+		);
 		assert.match(readFileSync(target, "utf-8"), /modelerTemplateVersion="2"/);
 		assert.strictEqual(readFileSync(other, "utf-8"), before);
 		assert.deepStrictEqual(leftovers(dir), []);
