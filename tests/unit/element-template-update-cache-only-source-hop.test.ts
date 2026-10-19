@@ -48,7 +48,7 @@ const NEXT = template(
 async function update(
 	next: object,
 	seed: (dataDir: string) => void,
-	extraLocal: object[] = [],
+	local: object[] = [V1],
 ) {
 	const root = mkdtempSync(join(tmpdir(), "c8ctl-cache-hop-"));
 	try {
@@ -58,9 +58,7 @@ async function update(
 		mkdirSync(localDir, { recursive: true });
 		writeFileSync(
 			join(localDir, "local.json"),
-			JSON.stringify(
-				[V1, ...extraLocal].map((t) => ({ $schema: SCHEMA, ...t })),
-			),
+			JSON.stringify(local.map((t) => ({ $schema: SCHEMA, ...t }))),
 		);
 		const nextPath = join(root, "next.json");
 		writeFileSync(nextPath, JSON.stringify(next));
@@ -111,7 +109,7 @@ test("an engine-incompatible higher local version does not hide a cached hop", a
 	const result = await update(
 		NEXT,
 		(dataDir) => seedTemplateCache(dataDir, [V1, V2]),
-		[incompatible],
+		[V1, incompatible],
 	);
 	assert.equal(result.status, 0, result.stderr);
 	assert.doesNotMatch(result.stderr, /unmet source floor/);
@@ -140,5 +138,51 @@ test("a reachable local hop does not read the cache for an unreachable alternati
 		seedTemplateCache(dataDir, [V1]);
 		writeFileSync(join(dataDir, "element-templates", "templates.json"), "{");
 	});
+	assert.equal(result.status, 0, result.stderr);
+});
+
+test("a local version above the applied one without a recipe does not hide a cached climb", async () => {
+	const cachedLatest = template(
+		SOURCE,
+		6,
+		[input("a", "kept")],
+		[{ kind: "upgrade", sourceTemplateId: SOURCE, toVersion: 2, paths: [] }],
+	);
+	const result = await update(
+		NEXT,
+		(dataDir) =>
+			seedTemplateCache(dataDir, [
+				V1,
+				template(SOURCE, 2, [input("a", "kept")]),
+				cachedLatest,
+			]),
+		[V1, template(SOURCE, 5, [input("a", "kept")])],
+	);
+	assert.equal(result.status, 0, result.stderr);
+	assert.doesNotMatch(result.stderr, /unmet source floor/);
+});
+
+test("an applied source the engine excludes still reaches its own floor without the cache", async () => {
+	const next = template(
+		"io.example.cache-hop.next",
+		1,
+		[input("a", "kept")],
+		[
+			{
+				kind: "change",
+				sourceTemplateId: SOURCE,
+				minSourceVersion: 1,
+				paths: [{ from: "a", to: "a" }],
+			},
+		],
+	);
+	const result = await update(
+		next,
+		(dataDir) => {
+			seedTemplateCache(dataDir, [V1]);
+			writeFileSync(join(dataDir, "element-templates", "templates.json"), "{");
+		},
+		[{ ...V1, engines: { camunda: "^9.0" } }],
+	);
 	assert.equal(result.status, 0, result.stderr);
 });

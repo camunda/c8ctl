@@ -577,13 +577,38 @@ async function runMigrateInternal(
 			? [s.minSourceVersion ?? 0]
 			: [],
 	);
-	const highestLocal = Math.max(
-		0,
-		...compatibleTemplates(pool.localOf(templateId), engineVersion).map(
-			(t) => t.version ?? 0,
-		),
+	const localLatest = latestOf(
+		compatibleTemplates(pool.localOf(templateId), engineVersion),
+		templateId,
 	);
-	if (floors.length > 0 && floors.every((floor) => floor > highestLocal)) {
+	let localRecipe: Recipe | undefined;
+	try {
+		localRecipe = localLatest && readEmbeddedRecipe(localLatest);
+	} catch {
+		// Step resolution reports an unusable recipe for each element.
+	}
+	// The source version an element reaches through local upgrade rungs alone.
+	const reachedLocally = (appliedVersion: number) =>
+		Math.max(
+			appliedVersion,
+			...(localRecipe?.sources ?? []).flatMap((s) =>
+				s.kind === "upgrade" &&
+				s.sourceTemplateId === templateId &&
+				s.toVersion > appliedVersion &&
+				s.toVersion <= (localLatest?.version ?? 0)
+					? [s.toVersion]
+					: [],
+			),
+		);
+	if (
+		floors.length > 0 &&
+		selected.some(({ element }) => {
+			const reached = reachedLocally(
+				readAppliedTemplate(element.businessObject)?.version ?? 0,
+			);
+			return floors.every((floor) => floor > reached);
+		})
+	) {
 		pool.cache();
 	}
 	// A recipe step to a version without a local template needs the cache.
