@@ -932,6 +932,35 @@ describe("element-template update counts Hidden resets and displaced values as l
 		),
 		set: ["region=eu-custom"],
 	});
+	cases.push({
+		name: "an editable value removed by an intermediate valueless Hidden property",
+		key: "region",
+		cause: "hidden",
+		old: template("lossy-reset-valueless", 1, [input("region")]),
+		via: [
+			template("lossy-reset-valueless", 2, [
+				{
+					type: "Hidden",
+					binding: { type: "zeebe:input", name: "region" },
+				},
+				input("marker"),
+			]),
+		],
+		target: template(
+			"lossy-reset-valueless",
+			3,
+			[input("region"), input("marker")],
+			[
+				{
+					kind: "upgrade",
+					sourceTemplateId: "lossy-reset-valueless",
+					toVersion: 2,
+					paths: [{ to: "input:marker", set: "x" }],
+				},
+			],
+		),
+		set: ["region=eu-custom"],
+	});
 	for (const { name, key, cause, old, via = [], target, set } of cases) {
 		test(`${name} requires --allow-lossy`, async () => {
 			const dir = mkdtempSync(join(tmpdir(), "c8-migration-lossy-"));

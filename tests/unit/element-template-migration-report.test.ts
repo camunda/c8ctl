@@ -1145,6 +1145,20 @@ describe("buildReport: values lost to Hidden resets and displaced destinations",
 		assert.strictEqual(r.lossless, false);
 	});
 
+	test("a stub source cannot prove a Hidden source, so a Hidden target change counts as lost", () => {
+		const r = report({
+			fromTemplate: { ...oldTemplate, properties: [] },
+			toTemplate: hidden(newTemplate, "provider"),
+			before: [value("provider", "azure")],
+			after: [value("provider", "fixed")],
+		});
+		assert.deepStrictEqual(
+			r.dropped.map((d) => [d.key, d.value, d.cause]),
+			[["provider", "azure", "hidden"]],
+		);
+		assert.strictEqual(r.lossless, false);
+	});
+
 	for (const sourceHidden of [false, true]) {
 		test(`an intermediate Hidden reset is ${sourceHidden ? "not " : ""}lost when the source is ${sourceHidden ? "" : "not "}Hidden`, () => {
 			const r = buildReport({

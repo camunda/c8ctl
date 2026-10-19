@@ -294,7 +294,7 @@ function applyApplication(
 				findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
 					(property) => property.type === "Hidden",
 				) &&
-				after.some((a) => sameTarget(a, v) && a.value !== v.value),
+				!after.some((a) => sameTarget(a, v) && a.value === v.value),
 		)
 		.map(({ key, bindingType, value }) => ({ key, bindingType, from: value }));
 	const resolvedValue = (key: string, bindingType: string | null) => {
