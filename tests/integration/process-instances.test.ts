@@ -17,12 +17,15 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { ProcessDefinitionId } from "@camunda8/orchestration-cluster-api";
+import {
+	ProcessDefinitionId,
+	ProcessDefinitionKey,
+} from "@camunda8/orchestration-cluster-api";
 import { createClient } from "../../src/core/client.ts";
 import { parseJson } from "../utils/cli.ts";
 import { todayRange } from "../utils/date-helpers.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
-import { pollUntil } from "../utils/polling.ts";
+import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 // Polling configuration for Elasticsearch consistency
@@ -37,6 +40,11 @@ const suspendResumeSkip =
 	camundaVersion?.startsWith("8.8") === true ||
 	camundaVersion?.startsWith("8.9") === true
 		? `Process instance suspend/resume requires Camunda 8.10+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
+
+const singleModifyMoveSkip =
+	camundaVersion?.startsWith("8.8") === true
+		? `Move instructions on a single process instance require Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
 		: false;
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
@@ -85,6 +93,38 @@ async function getProcessInstanceStateViaCli(
 	if (result.status !== 0) return undefined;
 	const data = parseJson(result);
 	return typeof data.state === "string" ? data.state : undefined;
+}
+
+/**
+ * Deploy a single-process BPMN fixture (JSON output mode) and return the
+ * process definition key the deployment produced.
+ */
+async function deployAndGetDefinitionKey(
+	dataDir: string,
+	path: string,
+): Promise<string> {
+	const result = await deploy(dataDir, path);
+	const rows = parseItems<{ Key: string | number }>(result.stdout);
+	assert.strictEqual(rows.length, 1, `expected one deployed process: ${path}`);
+	return String(rows[0].Key);
+}
+
+/** Read a process instance's `processDefinitionKey` via `get pi <key>`. */
+async function getProcessDefinitionKeyViaCli(
+	testDir: string,
+	key: string,
+): Promise<string | undefined> {
+	const result = await cli(
+		testDir,
+		"get",
+		"pi",
+		key,
+		"--fields",
+		"processDefinitionKey",
+	);
+	if (result.status !== 0) return undefined;
+	const value = parseJson(result).processDefinitionKey;
+	return value === undefined || value === null ? undefined : String(value);
 }
 
 describe("Process Instance Integration Tests (requires Camunda 8 at localhost:8080)", () => {
@@ -614,6 +654,380 @@ describe("Process Instance Integration Tests (requires Camunda 8 at localhost:80
 			items.length,
 			0,
 			"--between with past date range should return no instances",
+		);
+	});
+
+	/**
+	 * Deploy the migration source (v1), start an instance on it, then deploy
+	 * the target (v2). Each call yields fresh definition keys because v1 and
+	 * v2 differ, so a batch by source key only touches this test's instance.
+	 */
+	async function setUpMigration() {
+		const sourceKey = await deployAndGetDefinitionKey(
+			testDir,
+			"tests/fixtures/migration/migration-v1.bpmn",
+		);
+		const created = await client.createProcessInstance({
+			processDefinitionKey: ProcessDefinitionKey.assumeExists(sourceKey),
+		});
+		const targetKey = await deployAndGetDefinitionKey(
+			testDir,
+			"tests/fixtures/migration/migration-v2.bpmn",
+		);
+		return {
+			sourceKey,
+			instanceKey: created.processInstanceKey.toString(),
+			targetKey,
+		};
+	}
+
+	test("migrate pi moves a running instance to a new process definition version", async () => {
+		const { instanceKey, targetKey } = await setUpMigration();
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			instanceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_Review=Task_ReviewV2",
+		);
+		assert.strictEqual(
+			migrateResult.status,
+			0,
+			`migrate should succeed. stderr: ${migrateResult.stderr}`,
+		);
+
+		const migrated = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				targetKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			migrated,
+			`process instance ${instanceKey} should report target definition ${targetKey} after migrate`,
+		);
+	});
+
+	test("migrate pi surfaces the cluster's rejection of an unknown source element", async () => {
+		const { instanceKey, targetKey } = await setUpMigration();
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			instanceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_DoesNotExist=Task_ReviewV2",
+		);
+		assert.strictEqual(migrateResult.status, 1);
+		assert.ok(
+			migrateResult.stderr.includes("Task_DoesNotExist"),
+			`error should name the unknown element. stderr: ${migrateResult.stderr}`,
+		);
+	});
+
+	test("migrate pi --processDefinitionKey migrates active instances in a batch", async () => {
+		const { sourceKey, instanceKey, targetKey } = await setUpMigration();
+
+		// The batch selects instances through the search index, so wait until
+		// the new instance is visible there before starting it.
+		const indexed = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				sourceKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(indexed, "setup: instance should be searchable before batch");
+
+		const migrateResult = await cli(
+			testDir,
+			"migrate",
+			"pi",
+			"--processDefinitionKey",
+			sourceKey,
+			"--targetProcessDefinitionKey",
+			targetKey,
+			"--map",
+			"Task_Review=Task_ReviewV2",
+		);
+		assert.strictEqual(
+			migrateResult.status,
+			0,
+			`batch migrate should succeed. stderr: ${migrateResult.stderr}`,
+		);
+		// JSON mode: the success line carries the batch operation key as `key`.
+		const success = JSON.parse(
+			`${migrateResult.stdout}${migrateResult.stderr}`
+				.split("\n")
+				.find((line) => line.includes('"status":"success"')) ?? "{}",
+		);
+		assert.match(
+			String(success.key),
+			/^\d+$/,
+			`batch migrate should report the batch operation key. stderr: ${migrateResult.stderr}`,
+		);
+
+		const migrated = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+				targetKey,
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(
+			migrated,
+			`process instance ${instanceKey} should report target definition ${targetKey} after batch migrate`,
+		);
+	});
+
+	/** Deploy a modification fixture and start one instance waiting at Task_A. */
+	async function setUpModification(
+		fixture = "tests/fixtures/modification/modification.bpmn",
+	) {
+		const definitionKey = await deployAndGetDefinitionKey(testDir, fixture);
+		const created = await client.createProcessInstance({
+			processDefinitionKey: ProcessDefinitionKey.assumeExists(definitionKey),
+		});
+		return {
+			definitionKey,
+			instanceKey: created.processInstanceKey.toString(),
+		};
+	}
+
+	/** Whether the instance has an open (CREATED) user task at `elementId`. */
+	async function hasOpenUserTask(
+		instanceKey: string,
+		elementId: string,
+	): Promise<boolean> {
+		const result = await cli(
+			testDir,
+			"search",
+			"ut",
+			`--processInstanceKey=${instanceKey}`,
+			`--elementId=${elementId}`,
+			"--state=CREATED",
+		);
+		return result.status === 0 && parseItems(result.stdout).length > 0;
+	}
+
+	/** Poll until Task_B is open and Task_A is not: the token has moved. */
+	async function pollUntilTokenAtTaskB(instanceKey: string): Promise<boolean> {
+		return pollUntil(
+			async () =>
+				(await hasOpenUserTask(instanceKey, "Task_B")) &&
+				!(await hasOpenUserTask(instanceKey, "Task_A")),
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+	}
+
+	/** Read a variable's value via `search variables`, or undefined if unset. */
+	async function getVariableRow(
+		instanceKey: string,
+		name: string,
+	): Promise<{ Value: string; "Scope Key": string | number } | undefined> {
+		const result = await cli(
+			testDir,
+			"search",
+			"variables",
+			`--processInstanceKey=${instanceKey}`,
+			`--name=${name}`,
+		);
+		if (result.status !== 0) return undefined;
+		return parseItems<{ Value: string; "Scope Key": string | number }>(
+			result.stdout,
+		)[0];
+	}
+
+	test("modify pi --move moves the token to another element", {
+		skip: singleModifyMoveSkip,
+	}, async () => {
+		const { instanceKey } = await setUpModification();
+		const atTaskA = await pollUntil(
+			() => hasOpenUserTask(instanceKey, "Task_A"),
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(atTaskA, "setup: instance should wait at Task_A");
+
+		const result = await cli(
+			testDir,
+			"modify",
+			"pi",
+			instanceKey,
+			"--move",
+			"Task_A=Task_B",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`modify should succeed. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			await pollUntilTokenAtTaskB(instanceKey),
+			`process instance ${instanceKey} should wait at Task_B after the move`,
+		);
+	});
+
+	test("modify pi --activate with --terminate by element instance key applies both", async () => {
+		const { instanceKey } = await setUpModification();
+		// Task_A's input mapping creates a local variable, so the variable's
+		// scope key is Task_A's element instance key.
+		const taskAInstanceKey = await pollUntilValue(
+			async () => {
+				const row = await getVariableRow(instanceKey, "taskAMarker");
+				return row ? String(row["Scope Key"]) : undefined;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			"Task_A element instance key",
+		);
+
+		const result = await cli(
+			testDir,
+			"modify",
+			"pi",
+			instanceKey,
+			"--activate",
+			"Task_B",
+			"--terminate",
+			taskAInstanceKey,
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`modify should succeed. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			await pollUntilTokenAtTaskB(instanceKey),
+			`process instance ${instanceKey} should wait only at Task_B`,
+		);
+	});
+
+	test("modify pi --instructions applies variable instructions from a file", {
+		skip: singleModifyMoveSkip,
+	}, async () => {
+		const { instanceKey } = await setUpModification();
+		const atTaskA = await pollUntil(
+			() => hasOpenUserTask(instanceKey, "Task_A"),
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(atTaskA, "setup: instance should wait at Task_A");
+
+		const instructionsFile = join(testDir, "instructions.json");
+		writeFileSync(
+			instructionsFile,
+			JSON.stringify({
+				moveInstructions: [
+					{
+						sourceElementInstruction: {
+							sourceType: "byId",
+							sourceElementId: "Task_A",
+						},
+						targetElementId: "Task_B",
+						variableInstructions: [{ variables: { modifiedBy: "c8ctl" } }],
+					},
+				],
+			}),
+		);
+
+		const result = await cli(
+			testDir,
+			"modify",
+			"pi",
+			instanceKey,
+			"--instructions",
+			`@${instructionsFile}`,
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`modify should succeed. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			await pollUntilTokenAtTaskB(instanceKey),
+			`process instance ${instanceKey} should wait at Task_B after the move`,
+		);
+		const variableSet = await pollUntil(
+			async () =>
+				(await getVariableRow(instanceKey, "modifiedBy"))?.Value === '"c8ctl"',
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(variableSet, "the move's variable instruction should be applied");
+	});
+
+	test("modify pi surfaces the cluster's rejection of an unsupported activation", async () => {
+		const { instanceKey } = await setUpModification();
+
+		const result = await cli(
+			testDir,
+			"modify",
+			"pi",
+			instanceKey,
+			"--activate",
+			"StartEvent_1",
+		);
+		assert.strictEqual(result.status, 1);
+		assert.ok(
+			result.stderr.includes("StartEvent_1"),
+			`error should name the rejected element. stderr: ${result.stderr}`,
+		);
+	});
+
+	test("modify pi --processDefinitionKey moves tokens of active instances in a batch", async () => {
+		const { definitionKey, instanceKey } = await setUpModification(
+			"tests/fixtures/modification/modification-batch.bpmn",
+		);
+		// The batch selects instances through the search index, so wait until
+		// the new instance is visible there before starting it. User tasks are
+		// indexed separately from process instances, so check both.
+		const indexed = await pollUntil(
+			async () =>
+				(await getProcessDefinitionKeyViaCli(testDir, instanceKey)) ===
+					definitionKey && (await hasOpenUserTask(instanceKey, "Task_A")),
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+		);
+		assert.ok(indexed, "setup: instance should be searchable before batch");
+
+		const result = await cli(
+			testDir,
+			"modify",
+			"pi",
+			"--processDefinitionKey",
+			definitionKey,
+			"--move",
+			"Task_A=Task_B",
+		);
+		assert.strictEqual(
+			result.status,
+			0,
+			`batch modify should succeed. stderr: ${result.stderr}`,
+		);
+		// JSON mode: the success line carries the batch operation key as `key`.
+		const success = JSON.parse(
+			`${result.stdout}${result.stderr}`
+				.split("\n")
+				.find((line) => line.includes('"status":"success"')) ?? "{}",
+		);
+		assert.match(
+			String(success.key),
+			/^\d+$/,
+			`batch modify should report the batch operation key. stderr: ${result.stderr}`,
+		);
+		assert.ok(
+			await pollUntilTokenAtTaskB(instanceKey),
+			`process instance ${instanceKey} should wait at Task_B after the batch move`,
 		);
 	});
 });

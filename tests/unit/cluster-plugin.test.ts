@@ -26,6 +26,17 @@ const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 const C8RUN_BINARY = process.platform === "win32" ? "c8run.exe" : "c8run";
 
 /**
+ * Upper bound for obtaining a real process start signature. On Windows each
+ * lookup is a blocking `powershell` + CIM call with a 10 s per-call timeout in
+ * the plugin, and the first call of a run pays the cold-start cost. A 30 s
+ * deadline therefore allowed only three attempts (t=0, 10, 20 s), so a slow
+ * runner failed the test without the lookup ever having a fair chance. The
+ * signature itself is the readiness signal; this is only a safety net sized to
+ * a dozen attempts, so do not tighten it back.
+ */
+const SIGNATURE_DEADLINE_MS = 120_000;
+
+/**
  * Build a durable running-cluster record for a live PID that `recordedPidIsLive`
  * accepts on BOTH fingerprinting and non-fingerprinting platforms. Since #568 a
  * record entry on a fingerprinting platform MUST carry a start signature to be
@@ -38,7 +49,7 @@ async function liveSelfRecord({
 	pid = process.pid,
 	signatureOf = plugin.processStartSignature,
 	canFingerprint = plugin.platformSupportsProcessSignature(),
-	timeoutMs = 30_000,
+	timeoutMs = SIGNATURE_DEADLINE_MS,
 }: {
 	version?: string;
 	pid?: number;
@@ -1159,6 +1170,46 @@ describe("Cluster Plugin – parseVersionsFromHtml", () => {
 		);
 	});
 
+	test("graduated minor without an X.Y.0 directory is not the alpha train", () => {
+		// 8.10 has historical alpha dirs and a published patch release (8.10.4/),
+		// but no 8.10.0/ directory. A shipped patch release proves the minor is GA,
+		// so stable must resolve to 8.10 rather than falling back to 8.9.
+		const html = `
+      <a href="8.8/">8.8</a>
+      <a href="8.8.0/">8.8.0</a>
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.9.5/">8.9.5</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+      <a href="8.10.0-alpha2/">8.10.0-alpha2</a>
+      <a href="8.10.4/">8.10.4</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(
+			result.stable,
+			"8.10",
+			"stable should be 8.10 since a patch release has shipped",
+		);
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
+	test("alpha-only minor with no release directories stays in the alpha train across two-digit minors", () => {
+		// 8.10 only has alpha dirs: it is still the alpha train, and 8.9 (numerically
+		// lower, lexically higher) must remain stable.
+		const html = `
+      <a href="8.9/">8.9</a>
+      <a href="8.9.0/">8.9.0</a>
+      <a href="8.10/">8.10</a>
+      <a href="8.10.0-alpha1/">8.10.0-alpha1</a>
+    `;
+		const result = plugin.parseVersionsFromHtml(html);
+		assert.ok(result, "should return a result");
+		assert.strictEqual(result.stable, "8.9");
+		assert.strictEqual(result.alpha, "8.10");
+	});
+
 	test("graduated alpha with new alpha train above", () => {
 		// 8.9 went GA, and 9.0 alphas have started
 		const html = `
@@ -1289,6 +1340,33 @@ describe("Cluster Plugin – resolveVersion", () => {
 			resolved,
 			"8.8",
 			"should fall back to cached alias when offline",
+		);
+	});
+
+	test("offline without a persisted alias uses the package fallback", async () => {
+		mockFetchOffline();
+
+		const resolved = await plugin.resolveVersion("stable", {
+			cacheDir: tempDir,
+		});
+		assert.strictEqual(
+			resolved,
+			"8.10",
+			"should use the package fallback when offline without a cached alias",
+		);
+	});
+
+	test("offline with preferLocal and no persisted alias uses the package fallback", async () => {
+		mockFetchOffline();
+
+		const resolved = await plugin.resolveVersion("stable", {
+			preferLocal: true,
+			cacheDir: tempDir,
+		});
+		assert.strictEqual(
+			resolved,
+			"8.10",
+			"should use the package fallback when starting offline without a cached alias",
 		);
 	});
 
@@ -3762,6 +3840,102 @@ describe("Cluster Plugin – running-cluster PID record (#560)", () => {
 				}
 			}
 		}
+	});
+
+	// A fingerprint query that fails or times out once on a LIVE process (a slow
+	// PowerShell/CIM call on a loaded Windows runner) must not leave the process
+	// out of the stop record: stop only reaps recorded PIDs, so a dropped PID is
+	// orphaned. The signature source is injected so the transient failure is
+	// deterministic.
+	test("recordRunningClusterPids retries a transient signature failure so stop still reaps the process", async () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return; // liveness-only fallback platform: no signature branch to exercise
+		}
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		try {
+			await new Promise<void>((resolveSpawn, rejectSpawn) => {
+				child.once("spawn", () => resolveSpawn());
+				child.once("error", rejectSpawn);
+			});
+			if (child.pid == null) {
+				throw new Error("spawned child has no PID");
+			}
+			const pid = child.pid;
+			const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+			mkdirSync(versionDir, { recursive: true });
+			writeFileSync(join(versionDir, "camunda.process"), String(pid));
+
+			let calls = 0;
+			plugin.recordRunningClusterPids(
+				{ cacheDir: tempDir, version: "8.9" },
+				{
+					signatureOf: (candidate: number) => {
+						calls += 1;
+						return calls === 1 ? null : plugin.processStartSignature(candidate);
+					},
+					signatureRetryDelayMs: 1,
+				},
+			);
+
+			assert.strictEqual(calls, 2, "the failed query must be retried once");
+			const record = plugin.readRunningClusterRecord(tempDir);
+			assert.ok(
+				record.pids.includes(pid),
+				"a live PID whose first signature query failed must still be recorded",
+			);
+			assert.ok(
+				record.signatures?.[pid],
+				"the recorded PID must carry a signature",
+			);
+
+			assert.strictEqual(await plugin.reapClusterProcesses(tempDir), 1);
+			assert.ok(
+				await pollUntil(async () => !plugin.isPidAlive(pid), 10_000, 50),
+				"the recorded process must be terminated by the stop backstop",
+			);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
+
+	// The retry is only for a process that is still alive: a PID that is gone is
+	// a final answer, and a signature that never materialises is still never
+	// persisted as a bare PID (that would re-open the PID-reuse hazard).
+	test("recordRunningClusterPids does not retry a dead PID and never records an unsigned one", () => {
+		if (!plugin.platformSupportsProcessSignature()) {
+			return;
+		}
+		const versionDir = join(tempDir, "c8run-8.9", "c8run-8.9.5");
+		mkdirSync(versionDir, { recursive: true });
+		const deadPid = 2 ** 22 + 12345;
+		assert.strictEqual(plugin.isPidAlive(deadPid), false);
+		writeFileSync(join(versionDir, "camunda.process"), String(deadPid));
+
+		let calls = 0;
+		plugin.recordRunningClusterPids(
+			{ cacheDir: tempDir, version: "8.9" },
+			{
+				signatureOf: () => {
+					calls += 1;
+					return null;
+				},
+				signatureRetryDelayMs: 1,
+				skipEmpty: true,
+			},
+		);
+
+		assert.strictEqual(calls, 1, "a dead PID must not be retried");
+		assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
 	});
 });
 

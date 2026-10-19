@@ -654,6 +654,65 @@ Resume a suspended process instance (Camunda 8.10+)
 
 ---
 
+### `migrate`
+
+Migrate a process instance, or all active instances of a definition (batch), to another process definition
+
+**Usage:** `c8ctl migrate <resource> [key]`
+
+**Resources:** pi (process-instance)
+
+**Positional arguments:**
+
+- **process-instance:** `<key>` (optional)
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--targetProcessDefinitionKey` | string | Yes | Key of the process definition to migrate to |
+| `--map` | string |  | Element mapping as sourceElementId=targetElementId (repeatable) |
+| `--processDefinitionKey` | string |  | Batch mode: migrate all active instances of this source process definition key (omit the instance key) |
+
+**Examples:**
+
+```bash
+c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 --map Task_A=Task_A2  # Migrate a process instance to a new definition
+```
+
+---
+
+### `modify`
+
+Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)
+
+**Usage:** `c8ctl modify <resource> [key]`
+
+**Resources:** pi (process-instance)
+
+**Positional arguments:**
+
+- **process-instance:** `<key>` (optional)
+
+**Flags:**
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--activate` | string |  | Element ID to activate (repeatable) |
+| `--terminate` | string |  | Element instance key, or element ID for all its active instances (Camunda 8.9+), to terminate (repeatable) |
+| `--move` | string |  | Move as sourceElementId=targetElementId, or sourceElementInstanceKey=targetElementId (repeatable; Camunda 8.9+ for a single instance) |
+| `--instructions` | string |  | Full modification instructions as JSON (or @file.json / @- to read from file/stdin), for ancestor scopes and variables |
+| `--processDefinitionKey` | string |  | Batch mode: move tokens in all active instances of this process definition key (omit the instance key; --move by element ID only) |
+| `--operationReference` | string |  | Optional operation reference (positive integer) |
+
+**Examples:**
+
+```bash
+c8ctl modify pi 2251799813685249 --move Task_Charge=Task_Review  # Move a process instance's token to another element
+```
+
+---
+
 ### `await`
 
 Create and await process instance completion (server-side waiting)

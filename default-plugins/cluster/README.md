@@ -68,7 +68,7 @@ plugin update.
 
 | Alias    | Resolves to |
 |----------|-------------|
-| `stable` | Highest minor release that is GA (e.g. `8.9`) |
+| `stable` | Highest minor release that is GA (e.g. `8.10`) |
 | `alpha`  | Highest minor release overall (e.g. `8.10-alpha1`) |
 
 A `<major>.<minor>` version like `8.8` or `8.9` is also treated as a rolling
