@@ -109,17 +109,21 @@ function readPaths(entry: Entry): string[] {
  * application, never an unselected catalog version or a removed write. Checks
  * coverage of the recipe, not contiguity of version numbers, since published
  * lineages skip numbers. A hop must read the shape the last step reached.
+ * Reads of an unknown applied shape are not checked.
  */
 function findCoverageGap(
 	steps: { toVersion: number; entries: Entry[] }[],
 	appliedId: string,
 	appliedVersion: number,
+	appliedShapeKnown: boolean,
 	templates: MigrationTemplate[],
 	hop?: { targetId: string; entries: Entry[] },
 ): string | null {
-	let shape = templates.find(
-		(t) => t.id === appliedId && (versionOf(t) ?? 0) === appliedVersion,
-	);
+	let shape = appliedShapeKnown
+		? templates.find(
+				(t) => t.id === appliedId && (versionOf(t) ?? 0) === appliedVersion,
+			)
+		: undefined;
 	for (const step of steps) {
 		for (const entry of step.entries) {
 			for (const path of readPaths(entry)) {
@@ -241,6 +245,7 @@ function implicitFloor({
 export function resolveSteps({
 	appliedId,
 	appliedVersion,
+	appliedShapeKnown = true,
 	target,
 	templates,
 	recipe,
@@ -249,6 +254,8 @@ export function resolveSteps({
 }: {
 	appliedId: string;
 	appliedVersion: number;
+	/** False when the catalog's applied template is a stand-in without its definition. */
+	appliedShapeKnown?: boolean;
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
@@ -322,6 +329,7 @@ export function resolveSteps({
 		rungs,
 		appliedId,
 		appliedVersion,
+		appliedShapeKnown,
 		templates,
 		hop && { targetId: target.id, entries: hop.entries },
 	);

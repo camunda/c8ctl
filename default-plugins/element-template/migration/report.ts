@@ -23,11 +23,18 @@ import type {
 } from "./types.ts";
 
 export interface ReportFacts extends PlanFacts {
-	/** Expected stored values, including FEEL normalization. */
-	moved: (MovedFact & { value?: string })[];
+	/**
+	 * Expected stored values, including FEEL normalization. `read` is the value
+	 * the first move of a lineage read from the previous step's snapshot.
+	 */
+	moved: (MovedFact & { value?: string; read?: string })[];
 	/** Step snapshots prevent removed lineage from being revived later. */
 	after?: ElementValue[];
 	failedWrites?: boolean;
+	/** Every field a move or set wrote in any step, kept after lineage merges. */
+	written?: FieldKey[];
+	/** Fields a Hidden property reset in a step, with the value they had before. */
+	reset?: (FieldKey & { from: string })[];
 }
 
 export interface Field {
@@ -42,7 +49,8 @@ export interface Field {
 
 /**
  * Where a value on the target came from. `fixed` (a Hidden property) is not
- * reported yet, because Hidden values are left out of the report.
+ * reported yet, because Hidden values are left out of the report. A source
+ * value that a Hidden property replaced is reported as dropped instead.
  */
 export type ValueSource = "recipe" | "map" | "default" | "fixed";
 
@@ -89,7 +97,15 @@ export interface MigrationReport {
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
 	steps: ReportStep[];
-	dropped: (Field & { value: string; valueName?: string })[];
+	dropped: (Field & {
+		value: string;
+		valueName?: string;
+		/**
+		 * Why a value whose field still exists was lost: a Hidden target
+		 * property reset it, or a move or set overwrote it.
+		 */
+		cause?: "hidden" | "displaced";
+	})[];
 	added: (Field & {
 		value: string;
 		valueName?: string;
@@ -108,7 +124,7 @@ export interface MigrationReport {
 		/** Fields the engine cannot read whose binding the target does not keep. */
 		unchecked: Field[];
 	};
-	/** Nothing was dropped or skipped. */
+	/** Nothing was dropped, overwritten, reset by a Hidden property or skipped. */
 	lossless: boolean;
 }
 
@@ -128,6 +144,7 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 	let moved: ReportFacts["moved"] = [];
 	let set: PlanFacts["set"] = [];
 	let failedWrites = false;
+	let snapshot: ElementValue[] | undefined;
 	for (const facts of all) {
 		// All moves read the pre-step snapshot, never another move's result.
 		const priorMoved = moved;
@@ -150,10 +167,15 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 				set.push({ ...move.to, value: move.value ?? addition.value });
 			} else {
 				const prior = priorMoved.find((item) => sameField(item.to, move.from));
+				const read = prior
+					? prior.read
+					: snapshot &&
+						find(snapshot, move.from.key, move.from.bindingType)?.value;
 				moved.push({
 					...move,
 					from: prior?.from ?? move.from,
 					transformed: Boolean(prior?.transformed) || move.transformed,
+					...(read === undefined ? {} : { read }),
 				});
 			}
 		}
@@ -176,6 +198,7 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 				set.some((write) => !surviving(write, write.value));
 			moved = moved.filter((move) => surviving(move.to, move.value));
 			set = set.filter((write) => surviving(write, write.value));
+			snapshot = after;
 		}
 		failedWrites ||= Boolean(facts.failedWrites);
 	}
@@ -183,6 +206,12 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 		moved,
 		set,
 		failedWrites,
+		written: all.flatMap((f) => [
+			...(f.written ?? []),
+			...f.moved.map((move) => move.to),
+			...f.set.map(({ key, bindingType }) => ({ key, bindingType })),
+		]),
+		reset: all.flatMap((f) => f.reset ?? []),
 		notes: all.flatMap((f) => f.notes),
 		guardSkipped: all.flatMap((f) => f.guardSkipped),
 		templateSkipped: all.flatMap((f) => f.templateSkipped),
@@ -280,6 +309,26 @@ function isHidden(
 	return propertyFor(template, key, bindingType)?.type === "Hidden";
 }
 
+/**
+ * Hidden status across conditional duplicates, without evaluating their
+ * conditions. `some` and `every` both lean toward reporting a loss.
+ */
+function hiddenIn(
+	template: MigrationTemplate,
+	v: ElementValue,
+	match: "some" | "every",
+): boolean {
+	const properties = findPropertiesByTarget(
+		template.properties,
+		v.key,
+		v.bindingType,
+	);
+	return (
+		properties.length > 0 &&
+		properties[match]((property) => property.type === "Hidden")
+	);
+}
+
 function withNames(
 	template: MigrationTemplate | undefined,
 	field: Field,
@@ -292,6 +341,7 @@ function withNames(
 export function buildReport({
 	fromTemplate,
 	toTemplate,
+	via = [toTemplate],
 	before,
 	after,
 	facts,
@@ -304,6 +354,8 @@ export function buildReport({
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
 	toTemplate: MigrationTemplate;
+	/** Every template the element is applied on the way, the target last. */
+	via?: MigrationTemplate[];
 	before: ElementValue[];
 	after: ElementValue[];
 	facts: ReportFacts;
@@ -338,8 +390,13 @@ export function buildReport({
 	// Maps read the original values; recipe moves read the post-step snapshot.
 	const claimedByMap = (v: ElementValue) =>
 		survivingMoves.some((m) => m.map && sameTarget(v, m.from));
+	// A move claims its source only when it read the original value. An earlier
+	// step may have reset the source, e.g. to a Hidden default.
 	const claimedFrom = (v: ElementValue) =>
-		survivingMoves.some((m) => sameTarget(v, m.from));
+		survivingMoves.some(
+			(m) =>
+				sameTarget(v, m.from) && (m.read === undefined || m.read === v.value),
+		);
 	const claimedTo = (v: ElementValue) =>
 		survivingMoves.some((m) => sameTarget(v, m.to)) ||
 		addedSets.some((s) => sameTarget(v, s));
@@ -377,13 +434,33 @@ export function buildReport({
 				sameTarget(v, m.from) &&
 				find(after, m.to.key, m.to.bindingType) === undefined,
 		);
+	// A populated value still bound after the migration can be lost too: a
+	// Hidden target property resets it, or a move or set writes over it in
+	// any step.
+	const written = [
+		...(facts.written ?? []),
+		...facts.moved.map((m) => m.to),
+		...facts.set,
+	];
+	const causeOf = (v: ElementValue): "hidden" | "displaced" | undefined => {
+		const actual = find(after, v.key, v.bindingType);
+		if (!actual || actual.value === v.value || claimedFrom(v)) return;
+		if (written.some((w) => sameTarget(v, w))) return "displaced";
+		// An intermediate step may reset the value even when the final
+		// template binds it as editable again.
+		const reset =
+			hiddenIn(toTemplate, v, "some") ||
+			(facts.reset ?? []).some((r) => sameTarget(v, r) && r.from === v.value);
+		if (reset && !hiddenIn(fromTemplate, v, "every")) return "hidden";
+	};
 	const droppedValues = before.filter(
 		(v) =>
 			v.value !== "" &&
-			((!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
+			(causeOf(v) ||
+				(!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
 				lostBySource(v)),
 	);
-	const dropped = [
+	const dropped: MigrationReport["dropped"] = [
 		...droppedValues,
 		...lostInImplicitSteps.filter(
 			(v) =>
@@ -395,11 +472,13 @@ export function buildReport({
 				),
 		),
 	].map((v) => {
+		const cause = causeOf(v);
 		const field = fieldOf(fromTemplate, v.key, v.bindingType);
 		return {
 			...field,
 			value: v.value,
 			...withNames(fromTemplate, field, v.value),
+			...(cause ? { cause } : {}),
 		};
 	});
 
@@ -475,8 +554,8 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
-		unchecked: [toTemplate, ...implicitTemplates]
-			.flatMap((template) => uncheckedFields(fromTemplate, template))
+		unchecked: [...via, ...implicitTemplates]
+			.flatMap((template) => uncheckedFields(fromTemplate, [template]))
 			.filter(
 				(f, i, all) =>
 					all.findIndex(
@@ -515,12 +594,13 @@ export function buildReport({
 
 /**
  * Editable source fields under a binding type the engine does not read. The
- * Modeler keeps such a value only when the target binds it identically and
- * not as Hidden, so any other case may lose a value the report cannot see.
+ * Modeler keeps such a value only when every applied template binds it
+ * identically and not as Hidden, so any other case may lose a value the
+ * report cannot see.
  */
 function uncheckedFields(
 	fromTemplate: MigrationTemplate,
-	toTemplate: MigrationTemplate,
+	via: MigrationTemplate[],
 ): Field[] {
 	return fromTemplate.properties
 		.filter(
@@ -528,8 +608,11 @@ function uncheckedFields(
 				p.binding &&
 				p.type !== "Hidden" &&
 				bindingTargetKey(p.binding) === undefined &&
-				!toTemplate.properties.some(
-					(t) => t.type !== "Hidden" && sameBinding(t.binding, p.binding),
+				via.some(
+					(template) =>
+						!template.properties.some(
+							(t) => t.type !== "Hidden" && sameBinding(t.binding, p.binding),
+						),
 				),
 		)
 		.map((p) => {

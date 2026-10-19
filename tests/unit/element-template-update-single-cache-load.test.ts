@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -36,6 +37,8 @@ const SOURCE = {
 	properties: [input("a", "kept")],
 };
 const UPGRADE = { ...SOURCE, version: 2, name: "Upgrade" };
+const SCHEMA =
+	"https://unpkg.com/@camunda/zeebe-element-templates-json-schema/resources/schema.json";
 const NEXT = {
 	...SOURCE,
 	id: "io.example.single-load.next",
@@ -58,6 +61,8 @@ let dir: string;
 let dataDir: string;
 let bpmn: string;
 let readLog: string;
+let localBpmn: string;
+let nextPath: string;
 
 async function run(...args: string[]) {
 	rmSync(readLog, { force: true });
@@ -68,6 +73,7 @@ async function run(...args: string[]) {
 				C8CTL_DATA_DIR: dataDir,
 				C8CTL_OUTPUT_MODE: "text",
 				CACHE_READ_LOG: readLog,
+				C8CTL_MODELER_DIR: join(dir, "modeler"),
 				HOME: dir,
 			},
 			timeout: 30_000,
@@ -90,6 +96,18 @@ before(async () => {
 	assert.equal(seeded.status, 0, seeded.stderr);
 	bpmn = join(dir, "diagram.bpmn");
 	writeFileSync(bpmn, seeded.stdout);
+	// A project whose templates are all local; local templates need `$schema`.
+	const project = join(dir, "project");
+	const localDir = join(project, ".camunda", "element-templates");
+	mkdirSync(localDir, { recursive: true });
+	writeFileSync(
+		join(localDir, "local.json"),
+		JSON.stringify([SOURCE, UPGRADE].map((t) => ({ $schema: SCHEMA, ...t }))),
+	);
+	localBpmn = join(project, "diagram.bpmn");
+	writeFileSync(localBpmn, seeded.stdout);
+	nextPath = join(project, "next.json");
+	writeFileSync(nextPath, JSON.stringify({ $schema: SCHEMA, ...NEXT }));
 });
 
 after(() => {
@@ -109,6 +127,28 @@ describe("migrate loads the template cache once per run", () => {
 			const result = await run(...args());
 			assert.equal(result.status, 0, result.stderr);
 			assert.equal(result.reads, 1);
+		});
+	}
+});
+
+describe("a run on local templates does not read templates.json", () => {
+	const cases: [string, () => string[]][] = [
+		["update", () => []],
+		["update --to <file of another id>", () => ["--to", nextPath]],
+	];
+	for (const [name, extra] of cases) {
+		test(name, async () => {
+			const result = await run(
+				"update",
+				SOURCE.id,
+				TASK,
+				localBpmn,
+				"--dry-run",
+				...extra(),
+			);
+			assert.equal(result.status, 0, result.stderr);
+			assert.match(result.stdout, /updated/);
+			assert.equal(result.reads, 0);
 		});
 	}
 });

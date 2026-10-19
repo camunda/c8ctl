@@ -472,7 +472,12 @@ function rowsOf(
 			marker: "-",
 			label: `${group ? `${group} › ` : ""}${fieldLabel(d)}`,
 			value: [[shown(d.value, d.valueName, false), s.red]],
-			source: "",
+			source:
+				d.cause === "hidden"
+					? "replaced by fixed template value"
+					: d.cause === "displaced"
+						? "overwritten"
+						: "",
 		};
 	});
 	return { rows, dropped };

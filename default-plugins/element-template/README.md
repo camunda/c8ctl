@@ -147,6 +147,10 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   identically and not as Hidden, `report.skipped.unchecked` lists it and the
   migration counts as lossy. Without the source template's definition, every such
   value set on the element counts.
+- A value whose field survives can still be lost. A Hidden target property that
+  resets an editable source value, and a move or set that overwrites a different
+  populated value, both list the old value in `dropped` with `cause` `hidden` or
+  `displaced`, and the migration counts as lossy.
 - All selected elements migrate in memory and the file is written once, only if
   every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
   need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:
@@ -290,7 +294,10 @@ This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` re
 `kind` on every source. Older strict readers reject the new fields. See
 [`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
 Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
-instead of being ignored. `metadata.migratesFrom` is not part of the official element template schema.
+instead of being ignored. `schemaVersion` is checked first, so a recipe with a newer version always
+reports that c8ctl must be updated, whatever other keys it has. An unusable recipe embedded in the
+target template, or in the latest version of the source template, fails the whole `update` run and
+names that template. `metadata.migratesFrom` is not part of the official element template schema.
 Draft07 validation alone is insufficient: the parser also rejects duplicate source markers/floors,
 and owner validation checks source IDs and upgrade destinations against the template carrying the recipe.
 An optional `$schema` accepts any string, including blank strings. Paths, IDs, notes, templates,
