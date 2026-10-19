@@ -569,7 +569,7 @@ async function runMigrateInternal(
 		templatePool: pool,
 	});
 	// Recipe diagnostics can quote values that only the target knows.
-	redaction.templates = [...(redaction.templates ?? []), target];
+	redaction.templates = [...lineages([templateId, target.id]), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	// A hop that needs a newer source version than any local one climbs through the cache.
 	const floors = (targetRecipe?.sources ?? []).flatMap((s) =>
