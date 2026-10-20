@@ -341,11 +341,26 @@ function validateLocalTemplates(
 	modeler.get("eventBus").on("elementTemplates.errors", (event) => {
 		const errors =
 			isRecord(event) && Array.isArray(event.errors) ? event.errors : [];
+		const duplicates: unknown[] = [];
 		for (const error of errors) {
 			const file = isRecord(error) ? fileOf.get(error.template) : undefined;
 			const message = error instanceof Error ? error.message : String(error);
+			if (message.includes("already used")) {
+				duplicates.push(isRecord(error) ? error.template : undefined);
+				continue;
+			}
 			logger.warn(
 				`Ignoring element template${file ? ` in ${file}` : ""}: ${message}`,
+			);
+		}
+		// One line per run: a copy of every version is common, e.g. a bundle
+		// beside the versioned files.
+		if (duplicates.length > 0) {
+			const versions = duplicates.flatMap((t) =>
+				isRecord(t) && t.version !== undefined ? [String(t.version)] : [],
+			);
+			logger.warn(
+				`Ignoring ${duplicates.length} element template(s) for ${id} whose id and version are already used (${versions.join(", ")}); the nearest one wins.`,
 			);
 		}
 	});

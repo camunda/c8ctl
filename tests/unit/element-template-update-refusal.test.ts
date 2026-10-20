@@ -100,6 +100,8 @@ function setup({
 	lineage = [],
 	lossy = false,
 	targetProperties,
+	sourceTemplate = source,
+	diagram = original,
 }: {
 	action?: "change" | "update";
 	recipe?: unknown;
@@ -107,6 +109,8 @@ function setup({
 	lineage?: object[];
 	lossy?: boolean;
 	targetProperties?: object[];
+	sourceTemplate?: object;
+	diagram?: string;
 } = {}) {
 	const work = mkdtempSync(join(dir, "case-"));
 	const target = {
@@ -118,7 +122,7 @@ function setup({
 			targetProperties ?? (lossy ? [input("kept")] : source.properties),
 		...(embedded ? { metadata: { migratesFrom: recipe } } : {}),
 	};
-	seedTemplateCache(work, [source, ...lineage, target]);
+	seedTemplateCache(work, [sourceTemplate, ...lineage, target]);
 	const targetPath = join(work, "target.json");
 	writeFileSync(targetPath, JSON.stringify(target));
 	const recipePath = join(work, "recipe.json");
@@ -128,7 +132,7 @@ function setup({
 			typeof recipe === "string" ? recipe : JSON.stringify(recipe),
 		);
 	const file = join(work, "diagram.bpmn");
-	writeFileSync(file, original);
+	writeFileSync(file, diagram);
 	const mtime = statSync(file).mtimeMs;
 	return {
 		file,
@@ -145,7 +149,7 @@ function setup({
 				...flags,
 			),
 		assertUnchanged: () => {
-			assert.equal(readFileSync(file, "utf8"), original);
+			assert.equal(readFileSync(file, "utf8"), diagram);
 			assert.equal(statSync(file).mtimeMs, mtime);
 		},
 	};
@@ -978,6 +982,53 @@ describe("change floor above the reached version", () => {
 			const blocked = await fixture.run("--in-place");
 			assertRefused(blocked, ["--in-place"]);
 			fixture.assertUnchanged();
+		});
+
+		test(`${kind}: a Hidden source value the floor resets is not reported as dropped`, async () => {
+			const managed = (value: string) => ({
+				type: "Hidden",
+				value,
+				binding: { type: "zeebe:taskHeader", key: "managed" },
+			});
+			const hiddenSource = {
+				...source,
+				properties: [input("kept", "retained"), managed("old")],
+			};
+			const seedPath = join(dir, "hidden-source.json");
+			writeFileSync(seedPath, JSON.stringify(hiddenSource));
+			const seeded = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir, C8CTL_OUTPUT_MODE: "text" },
+				"element-template",
+				"apply",
+				seedPath,
+				TASK,
+				"tests/fixtures/simple.bpmn",
+			);
+			assert.equal(seeded.status, 0, seeded.stderr);
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				sourceTemplate: hiddenSource,
+				diagram: seeded.stdout,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [input("kept", "retained"), managed("new")],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [input("kept", "retained"), managed("new")],
+					},
+				],
+				targetProperties: [input("kept", "retained"), managed("new")],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.deepEqual(envelope.report.dropped, []);
 		});
 
 		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {

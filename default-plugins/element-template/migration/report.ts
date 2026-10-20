@@ -327,7 +327,7 @@ function isHidden(
  * Hidden status across conditional duplicates, without evaluating their
  * conditions. `some` and `every` both lean toward reporting a loss.
  */
-function hiddenIn(
+export function hiddenIn(
 	template: MigrationTemplate,
 	v: ElementValue,
 	match: "some" | "every",

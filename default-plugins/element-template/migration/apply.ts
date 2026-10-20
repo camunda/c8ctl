@@ -41,6 +41,7 @@ import {
 import type { Recipe } from "./recipe.ts";
 import {
 	buildReport,
+	hiddenIn,
 	type MigrationReport,
 	mergeFacts,
 	type ReportFacts,
@@ -522,7 +523,8 @@ export function migrateElement({
 	// lost even when a later template defaults the same binding. Each original
 	// value is followed through every step, across moves and normalization.
 	const lineage: Lineage[] = before
-		.filter((v) => v.value !== "")
+		// A Hidden source value is template-managed, so a reset is no loss.
+		.filter((v) => v.value !== "" && !hiddenIn(fromTemplate, v, "every"))
 		.map((v) => ({
 			places: [{ key: v.key, bindingType: v.bindingType, value: v.value }],
 		}));
