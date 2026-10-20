@@ -613,21 +613,19 @@ async function runMigrateInternal(
 					: [],
 			),
 		);
-	// Mirrors the implicit step: the highest floor the local catalog reaches
-	// must be a local version, and a floor above every local version needs the
-	// cache unless a floorless entry applies.
-	const reachableFloors = floors.filter((floor) => floor <= newestLocal);
+	// Mirrors the implicit step: a floor at most the newest local version is met
+	// locally, because the step lands on the lowest compatible version at or
+	// above it. A floor above every local version needs the cache unless a
+	// floorless entry applies.
 	if (
 		floors.length > 0 &&
 		selected.some(({ element }) => {
 			const reached = reachedLocally(
 				readAppliedTemplate(element.businessObject)?.version ?? 0,
 			);
-			const best = Math.max(-1, ...reachableFloors);
 			return (
-				(best > reached && !localCompatibleVersions.includes(best)) ||
-				(!hasFallback &&
-					floors.some((floor) => floor > newestLocal && floor > reached))
+				!hasFallback &&
+				floors.some((floor) => floor > newestLocal && floor > reached)
 			);
 		})
 	) {

@@ -268,8 +268,9 @@ that moved.
   source entry declares `kind: "upgrade"` with a destination `toVersion`, or
   `kind: "change"` with an optional `minSourceVersion` floor. A floor above
   the reached version adds one implicit version step (no entries, values carried
-  by binding) to the highest floor at most the newest source version compatible
-  with the BPMN's `modeler:executionPlatformVersion`. An unreachable floor throws
+  by binding). The best floor is the highest one at most the newest source version
+  compatible with the BPMN's `modeler:executionPlatformVersion`; the step lands on
+  the lowest compatible version at or above it. An unreachable floor throws
   rather than refusing, so it is never authorizable with `--allow-lossy`. The revised
   dialect keeps schema version 1 and rejects legacy `minVersion` fields.
   Owner-relative ID/version rules and duplicate markers are semantic checks.

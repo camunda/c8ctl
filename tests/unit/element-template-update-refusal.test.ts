@@ -1171,21 +1171,16 @@ describe("change floor above the reached version", () => {
 			}
 		});
 
-		test(`${kind}: a floor missing from the compatible catalog fails and lists the compatible versions`, async () => {
+		test(`${kind}: a floor missing from the compatible catalog lands on the lowest compatible version above it`, async () => {
 			const fixture = setup({
 				recipe: floor(2),
 				embedded,
 				lineage: [{ ...source, version: 3 }],
 			});
-			for (const flags of [["--in-place"], ["--in-place", "--allow-lossy"]]) {
-				const result = await fixture.run(...flags);
-				assertRefused(result, flags);
-				assert.match(
-					out(result),
-					/Template 'refusal\.source' v2 is not available for Camunda 8\.8.*compatible versions: 1, 3/,
-				);
-				fixture.assertUnchanged();
-			}
+			const result = await fixture.run("--dry-run", "--json");
+			assert.equal(result.status, 0, out(result));
+			assert.match(out(result), /"implicit": ?true/);
+			assert.match(out(result), /"toVersion": ?3/);
 		});
 	}
 });

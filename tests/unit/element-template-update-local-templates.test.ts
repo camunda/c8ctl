@@ -326,7 +326,7 @@ describe("element-template update resolves local templates first", () => {
 		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
 	});
 
-	test("a change floor only the cache holds is loaded even with a floorless fallback entry", async () => {
+	test("a local version above a change floor satisfies it without reading the cache", async () => {
 		const { root, bpmn } = project();
 		writeLocal(root, [local(V1), local(V3)]);
 		const target = join(root, "other.json");
@@ -359,7 +359,7 @@ describe("element-template update resolves local templates first", () => {
 			),
 		);
 		const result = await run(
-			workspace.dataDirWithCache([V2]),
+			corruptCache(),
 			bpmn,
 			"--to",
 			target,
@@ -367,6 +367,7 @@ describe("element-template update resolves local templates first", () => {
 		);
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
+		assert.match(result.stderr, /which reached version 3 does not define/);
 	});
 
 	test("a corrupt cache does not stop a run whose recipe lists a version below the applied one", async () => {

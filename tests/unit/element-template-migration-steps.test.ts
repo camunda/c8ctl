@@ -1333,18 +1333,51 @@ describe("implicit update to the recipe floor", () => {
 		);
 	});
 
-	test("throws and lists compatible versions when the floor is not in the catalog", () => {
-		const target = withRecipe(template("new", 1, ["x"]), change(3));
+	test("an unavailable applied stand-in is not reported as a compatible version", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(6));
 		assert.throws(
 			() =>
 				resolveSteps({
 					appliedId: "old",
-					appliedVersion: 1,
+					appliedVersion: 5,
+					appliedShapeKnown: false,
 					target,
-					templates: [...lineage(1, 2, 4), target],
+					templates: [...lineage(4, 5), target],
 					engineVersion: "8.8",
 				}),
-			/Template 'old' v3 is not available for Camunda 8\.8.*compatible versions: 1, 2, 4/,
+			/is v4\./,
+		);
+	});
+
+	test("a floor missing from the compatible catalog lands on the lowest compatible version above it", () => {
+		const target = withRecipe(template("new", 1, ["x"]), change(3));
+		const input = {
+			appliedId: "old",
+			appliedVersion: 1,
+			templates: [...lineage(1, 2, 4), target],
+			engineVersion: "8.8",
+		};
+		const embedded = resolveSteps({ ...input, target });
+		assert.deepStrictEqual(
+			embedded.steps.map((s) => [s.kind, s.version, s.implicit]),
+			[
+				["version", 4, true],
+				["hop", 1, undefined],
+			],
+		);
+		const plain = template("new", 1, ["x"]);
+		const explicit = resolveSteps({
+			...input,
+			target: plain,
+			templates: [...lineage(1, 2, 4), plain],
+			recipe: recipeOf(change(3)),
+		});
+		assert.deepStrictEqual(
+			explicit.steps.map((s) => [s.kind, s.version, s.implicit]),
+			[
+				["version", 4, true],
+				["hop", 1, undefined],
+			],
 		);
 	});
 
@@ -1397,20 +1430,23 @@ describe("implicit update to the recipe floor", () => {
 		);
 	});
 
-	test("the missing-floor error lists only compatible versions", () => {
+	test("an incompatible version at or above the floor is not a landing version", () => {
 		const incompatible = (t: MigrationTemplate) => t.version !== 1;
 		const target = withRecipe(template("new", 1, ["x"]), change(2));
-		assert.throws(
-			() =>
-				resolveSteps({
-					appliedId: "old",
-					appliedVersion: 1,
-					target,
-					templates: [...lineage(1, 3, 4), target],
-					engineVersion: "8.8",
-					isCompatible: incompatible,
-				}),
-			/v2 is not available.*compatible versions: 3, 4\./,
+		const result = resolveSteps({
+			appliedId: "old",
+			appliedVersion: 1,
+			target,
+			templates: [...lineage(1, 3, 4), target],
+			engineVersion: "8.8",
+			isCompatible: incompatible,
+		});
+		assert.deepStrictEqual(
+			result.steps.map((s) => [s.kind, s.version]),
+			[
+				["version", 3],
+				["hop", 1],
+			],
 		);
 	});
 

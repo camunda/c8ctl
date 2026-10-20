@@ -183,8 +183,9 @@ function reachableHop(
 }
 
 /**
- * The version an implicit step must reach so the best change entry applies:
- * the highest floor at most `newest`. Undefined when no floor needs a bump.
+ * The floor an implicit step must reach so the best change entry applies:
+ * the highest floor at most `newest`. The step lands on the lowest compatible
+ * version at or above it. Undefined when no floor needs a bump.
  * Throws when the element is below every floor, all floors are above `newest`
  * and no entry applies without one.
  */
@@ -301,7 +302,13 @@ export function resolveSteps({
 
 	let reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
 	const compatibleVersions = templates
-		.filter((t) => t.id === appliedId && isCompatible(t))
+		.filter(
+			(t) =>
+				t.id === appliedId &&
+				isCompatible(t) &&
+				// A stand-in for an unavailable applied template has no real definition.
+				(appliedShapeKnown || (versionOf(t) ?? 0) !== appliedVersion),
+		)
 		.map((t) => versionOf(t) ?? 0)
 		.sort((a, b) => a - b);
 	const floor = sameId
@@ -314,13 +321,10 @@ export function resolveSteps({
 				engineVersion,
 			});
 	if (floor !== undefined) {
-		if (!compatibleVersions.includes(floor)) {
-			throw new Error(
-				`Template '${appliedId}' v${floor} is not available${engineVersion ? ` for Camunda ${engineVersion}` : ""}; compatible versions: ${compatibleVersions.join(", ") || "none"}.`,
-			);
-		}
-		rungs.push({ toVersion: floor, entries: [], implicit: true });
-		reachedVersion = floor;
+		// A floor is a minimum: land on the lowest compatible version at or above it.
+		const landing = compatibleVersions.find((v) => v >= floor) ?? floor;
+		rungs.push({ toVersion: landing, entries: [], implicit: true });
+		reachedVersion = landing;
 	}
 	const hop = sameId
 		? undefined
