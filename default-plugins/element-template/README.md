@@ -16,6 +16,7 @@ The verb is organized as a workflow: discover → inspect → act → export →
 | `info <template>` | Show the template metadata card (id, version, applies-to, engines, docs). `--engine-version` resolves the latest compatible version. |
 | `get-properties <template> [<name>...]` | List settable properties — condensed by default, `--detailed` for full cards. `--engine-version` resolves the latest compatible version. |
 | `apply <template> <element-id> [<file.bpmn>]` | Apply a template to a BPMN element (in place, or to stdout). |
+| `update <template-id> [<element-id>] [<file.bpmn>]` | Move all elements that use a template to its latest version, or to another template with `--to`, migrating their values. |
 | `get <template>` | Print the raw template JSON to stdout (pipe-friendly). |
 | `sync` | Populate / refresh the local OOTB template cache. **Run this once before any other OOTB subcommand.** |
 
@@ -100,6 +101,211 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 c8ctl element-template sync
 c8ctl element-template sync --prune    # also drop entries no longer in a selected release
 ```
+
+## Migrating to a newer template
+
+`update <template-id>` moves every element that uses that template to a newer
+version of it, or to a different template. Values the new template binds under
+another key are moved along instead of being dropped, and a report lists what
+happened.
+
+```bash
+# Preview moving all elements to the latest compatible version of their template
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 process.bpmn --dry-run
+
+# Update one element, pinned to a version
+c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn \
+  --to io.camunda.connectors.HttpJson.v2@15 --in-place
+
+# Move all elements to another template (its embedded recipe moves renamed values)
+c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn \
+  --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place
+
+# Same, with a recipe from a file, or a single value moved by hand
+c8ctl element-template update old.id process.bpmn --to new.json --recipe recipe.json -i
+c8ctl element-template update old.id process.bpmn --to new.json --map maxTokens=limit -i
+
+# The report as data (needs --in-place or --dry-run, because stdout carries the BPMN otherwise)
+c8ctl element-template update old.id process.bpmn --dry-run --json
+```
+
+- The first argument is the applied template ID (never a path or `id@n`).
+  An optional element ID limits the update to one element; a run that selects
+  no element fails. For several files, loop in the shell.
+- Without `--to`, the target is the newest version of the same template ID
+  compatible with the BPMN's `modeler:executionPlatformVersion`. The command
+  never changes the template ID unless `--to` names another template
+  (`<id>[@<n>]`, path or URL). Elements already on a newer version are skipped.
+  An id resolves like everywhere else: local templates (`.camunda/element-templates/`
+  from the BPMN file's directory up, then Desktop Modeler's user-data dir) first,
+  the cache only when no local version fits.
+- `--map <from>=<to>` moves the original value of one binding to another on every
+  selected element, after the recipe steps. A moved value does not count as
+  dropped. Prefixes such as `input:` work as in `apply --set`.
+- Values the engine cannot read, such as message, called-element or form
+  bindings, are not diffed. Unless the target binds such an editable field
+  identically and not as Hidden, `report.skipped.unchecked` lists it and the
+  migration counts as lossy. Without the source template's definition, every such
+  value set on the element counts.
+- A value whose field survives can still be lost. A Hidden target property that
+  resets an editable source value, and a move or set that overwrites a different
+  populated value, both list the old value in `dropped` with `cause` `hidden` or
+  `displaced`, and the migration counts as lossy.
+- All selected elements migrate in memory and the file is written once, only if
+  every element succeeds. A dry run exits 1 when an element would fail to migrate or the write would
+  need `--allow-lossy`. It does not serialize the BPMN. JSON output is one document:
+  `{dryRun, command, results, summary, deprecation}`.
+- Each JSON result carries `elementId` and, when the element has a name,
+  `elementName`. An updated result carries `recipe` (with `path` for a
+  `--recipe` file, as given, and `owner`, the template carrying an embedded recipe), `counts` and `report` with `moved`, `added`,
+  `changed`, `dropped` and `kept`. Fields use template IDs: `group` is the group
+  ID, `groupLabel` its label, `propertyId` the property `id`. `moved` and
+  `added` items carry the stored `value`; `moved`, `added` and `changed` items
+  carry `source`: `recipe`, `map` or `default` (target template default).
+  `kept` lists unchanged values without their values. Items follow the group
+  and property order of the target template; `dropped` follows the source
+  template. `deprecation` is `{templateId, successors}` for a deprecated
+  selected template, else `null`. A failed result carries `hint` when a next
+  step exists.
+- Without `--in-place` the BPMN goes to stdout and the report to stderr.
+- Lossy in-place writes and refused embedded-recipe fallbacks require `--allow-lossy`.
+  Preview with `--dry-run` first. Unusable explicit `--recipe` files always fail,
+  even with authorization; correct the source entry or source-version floor.
+- In-place migrations take a sibling `.migration.lock` and check original input
+  contents before temporary-file preparation and again immediately before rename.
+  Changes observed during preparation are rejected. Replacement uses a sibling
+  temporary file and rename; rename failures, including EXDEV, fail without a
+  direct overwrite.
+  `apply --in-place` and `edit --in-place` do not take the lock, but refuse to
+  replace a file whose contents changed since they read it, so they never
+  overwrite a migration that committed in between.
+  In-place writes follow symlinks: the link stays and its target receives the new
+  XML. The lock and temporary file sit beside the real file, so links to one file
+  share a lock. Relative local template lookup starts at the directory of the
+  path you pass, not of the link's target. Hard links are not preserved; the file gets a new inode.
+  A killed writer can leave a stale lock and temporary file; confirm no writer is
+  active before inspecting and removing them. Recovery is manual. External edits
+  between the final comparison and rename are not covered by the cooperative
+  lock; this design has no atomic compare-and-swap. Tests cover
+  injected ENOSPC/EIO before and after actual partial bytes and real SIGINT/SIGTERM
+  termination during paused split writes, preserving original bytes. Physical
+  disk exhaustion and interruption of an executing kernel syscall are not proven.
+  The unit suite runs on Windows; POSIX signal, permission and EPIPE cases skip it. Cleanup attempts preserve
+  the primary operation error; failed cleanup can leave artifacts for manual recovery.
+- Migration requires `executionPlatform="Camunda Cloud"` and
+  `executionPlatformVersion` in the Modeler namespace
+  `http://camunda.org/schema/modeler/1.0` (the usual prefix is `modeler`; aliases
+  are accepted). Exactly one of each attribute is required. Versions accept strict
+  `major.minor` or full semantic versions, including standard prerelease/build
+  syntax; arbitrary coercible strings are rejected. Standard semver prerelease
+  matching applies. Incompatible explicit targets and malformed declared engine
+  constraints are rejected; automatic selection uses compatible source versions.
+  Missing template engine constraints retain legacy eligibility. Every required
+  intermediate version must also be compatible and available.
+- No-op XML output preserves the original BPMN bytes and sends its message to
+  stderr. JSON emits the migration-report envelope with `noop: true` and empty
+  change collections. In-place no-ops do not rewrite the BPMN, and dry-run emits
+  no XML and writes no BPMN files. Supplied recipes are still validated.
+- Colour and emoji markers are used in text mode. Colour follows the terminal
+  and honours `NO_COLOR` and `FORCE_COLOR`.
+- Report values with credential-like keys, labels or template property/group
+  metadata are redacted in text and JSON, including dry-run. Known sensitive
+  values are also scrubbed from notes and CLI diagnostics. This does not change
+  migration decisions or BPMN values. Custom secrets without recognizable identity,
+  unknown secret text and alternate encodings cannot be identified reliably.
+  **Raw BPMN XML retains secrets**, including no-op stdout; avoid logging it.
+
+### Migration recipes
+
+A recipe describes how values of older templates map onto the template that
+carries it. It lives in the target template as `metadata.migratesFrom`, or in
+a file passed with `--recipe`, which replaces the embedded one. Without a recipe,
+values are carried over by binding identity and the rest is dropped; the report
+lists each drop with its old value, subject to sensitivity redaction. Unusable
+explicit recipes fail even with `--allow-lossy`; refused embedded recipes require
+authorization except when previewing. Diagnostics distinguish malformed recipes,
+coverage refusal, wrong source IDs and unmet reached-version floors. Coverage
+covers every step, including the change to another template: an entry that reads
+a path the reached source version does not define refuses the recipe. Guard
+paths count as reads, including `exists` and negated guards. An empty
+`--recipe` value is an error, not a request for ordinary carry-over.
+
+```json
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "kind": "change",
+      "sourceTemplateId": "io.example.connector.v1",
+      "minSourceVersion": 3,
+      "paths": [
+        { "from": "provider", "to": "backend.provider",
+          "valueMap": { "rules": [{ "match": "azure", "value": "openai" }] } },
+        { "to": "backend.type", "set": "foundry",
+          "when": { "path": "provider", "equals": "azure" },
+          "note": { "level": "warning", "message": "Azure now runs on the Foundry backend." } }
+      ]
+    }
+  ]
+}
+```
+
+| Entry | Effect |
+|-------|--------|
+| `{ from, to, valueMap? }` | Moves a value to another key, optionally translating it (`*` globs, first match wins, optional `default`). |
+| `{ to, set }` | Writes a static value, for example a new discriminator. |
+| `{ to, template }` | Composes a value from source values with `${path}`. |
+| `{ when, rules: [...] }` | Applies the nested entries only when the guard holds. |
+
+Any entry can carry `when` (`equals`, `matches`, `in`, `exists`, optionally negated with `not`).
+Entries other than `rules` groups can also carry `note`: a message shown in the report when the entry took effect, either a string or
+`{ "level": "info" | "warning", "message": "..." }`. Paths are binding keys; prefix one with
+`input:`, `output:`, `header:`, `property:`, `taskDefinition:`, `agentDefinition:` or `adHoc:` when the
+same key is bound by several binding types.
+Unqualified rename sources, guards and interpolation references reject ambiguous
+binding types. Duplicate backing entries/containers also fail rather than choosing
+an arbitrary value. Simultaneously active writes to the same resolved destination
+fail even when one uses a qualified alias; mutually exclusive guarded writes and
+qualified writes to distinct binding types remain valid. A destination bound only by
+Hidden properties with a fixed `value` is rejected. A rename whose guard
+fails is reported as not moved only when no active entry moved the same source.
+
+Migration validates resolved writes and populated non-Hidden carry-over against
+active destination properties, including conditional duplicates. Supported checks
+are choices, `notEmpty` and patterns. Optional/required FEEL expressions bypass
+literal choices/patterns, but empty required expressions fail. Unsupported active
+constraints, cyclic conditions and conditions without a known operator fail
+closed. A condition is not checked for extra keys: `allMatch` and the first
+known operator (`isActive`, `equals`, `oneOf`, `isEmpty`) decide. This does not validate
+FEEL expression syntax. Reports reconcile surviving writes with actual stored
+values, including FEEL normalization, rather than claiming planner intent as success.
+
+A source with `kind: "upgrade"` requires `toVersion` and the recipe owner's ID: an element climbs
+each destination above its applied version in ascending order. A `kind: "change"` source must name
+a different ID and may require `minSourceVersion`, a floor on the version actually reached by
+source upgrades. Merely loading a newer template does not satisfy that floor. The highest reachable
+floor wins; an omitted floor is the fallback. File recipes replace only the target recipe.
+This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
+`kind` on every source. Older strict readers reject the new fields. See
+[`migration/migrates-from.schema.json`](./migration/migrates-from.schema.json) for the full format.
+Recipes are validated strictly: an unknown key or an unsupported `schemaVersion` fails the command
+instead of being ignored. `schemaVersion` is checked first, so a recipe with a newer version always
+reports that c8ctl must be updated, whatever other keys it has. An unusable recipe embedded in the
+target template, or in the latest version of the source template, fails the whole `update` run and
+names that template. `metadata.migratesFrom` is not part of the official element template schema.
+Draft07 validation alone is insufficient: the parser also rejects duplicate source markers/floors,
+and owner validation checks source IDs and upgrade destinations against the template carrying the recipe.
+An optional `$schema` accepts any string, including blank strings. Paths, IDs, notes, templates,
+and match patterns require a non-whitespace character; surrounding whitespace is preserved.
+Scalar values accept strings (including blank strings), finite numbers, and booleans. An omitted
+note level defaults to `info`; explicit `null` is invalid. Empty `paths` and guard `in` lists are valid,
+but sources, groups, guard lists, and value-map rules must be non-empty.
+
+#### AI Agent v1 to v2
+
+c8ctl ships no connector recipes. The AI Agent v2 templates in
+`camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`,
+so `update` picks them up from the cache once a release carries them.
 
 ## Inspecting a template
 

@@ -5,15 +5,17 @@
  *
  * Usage:
  *   c8ctl element-template apply <template> <element-id> [<file.bpmn>] [--in-place] [--set key=value]
- *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] --set key=value
+ *   c8ctl element-template edit <element-id> [<file.bpmn>] [--in-place] [--template <template>] --set key=value
+ *   c8ctl element-template update <template-id> [<element-id>] [<file.bpmn>] [--to <template>[@<n>]] [--recipe <file>] [--map <from>=<to>] [--in-place]
  *   c8ctl element-template info <template> [--engine-version <x.y.z>]
  *   c8ctl element-template get-properties <template> [<name>...] [--group <id>] [--detailed] [--engine-version <x.y.z>]
  *   c8ctl element-template get <template>
  *   c8ctl element-template search <query> [--engine-version <x.y.z>]
  *   c8ctl element-template sync [--prune]
  *
- * <template> can be a local path, an https:// URL, or an OOTB template id
- * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13).
+ * <template> can be a local path, an https:// URL, or a template id
+ * (optionally pinned, e.g. io.camunda.connectors.HttpJson.v2@13), looked up
+ * in .camunda/element-templates/ first, then in the OOTB cache.
  * GitHub blob URLs are auto-rewritten to raw.githubusercontent.com.
  */
 
@@ -29,6 +31,7 @@ import { getPropertiesSubcommand } from "./commands/get-properties.ts";
 import { infoSubcommand } from "./commands/info.ts";
 import { searchSubcommand } from "./commands/search.ts";
 import { syncSubcommand } from "./commands/sync.ts";
+import { updateSubcommand } from "./commands/update.ts";
 
 if (!globalThis.c8ctl) throw new Error("c8ctl runtime not initialised");
 const c8ctl = globalThis.c8ctl;
@@ -90,6 +93,7 @@ const subcommandHandlers: Record<
 	"get-properties": getPropertiesSubcommand,
 	apply: applySubcommand,
 	edit: editSubcommand,
+	update: updateSubcommand,
 	get: getSubcommand,
 	sync: syncSubcommand,
 };
@@ -112,8 +116,8 @@ async function elementTemplateHandler(
 			? `Unknown subcommand '${subcommand}'.`
 			: "c8ctl element-template requires a subcommand.";
 		const validSubcommands = Object.keys(subcommandHandlers);
-		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-		logger.info("Run 'c8ctl element-template --help' for full usage.");
+		logger.error(`${lead} Available: ${validSubcommands.join(", ")}`);
+		logger.error("Run 'c8ctl element-template --help' for full usage.");
 		process.exitCode = 1;
 		return;
 	}
@@ -142,7 +146,10 @@ export const metadata = {
 				"Apply Camunda element templates to BPMN elements, inspect template metadata and properties, " +
 				"search the out-of-the-box template catalogue, export raw template JSON, " +
 				"and manage the local template cache.\n\n" +
-				"<template> is a local path, an https:// URL, or an OOTB template id (optionally @<version>).\n\n" +
+				"<template> is a local path, an https:// URL, or a template id (optionally @<version>). " +
+				"An id is looked up in .camunda/element-templates/ (next to the BPMN file, or in the current " +
+				"directory, or any parent of either) and in Desktop Modeler's resources/element-templates/ " +
+				"before the OOTB cache.\n\n" +
 				"apply --set name=value targets a property by binding name (run `get-properties` to discover names). " +
 				"Pass --set multiple times to set multiple properties. " +
 				"Prefix with a binding type (input | output | header | property | taskDefinition) when the same name " +
@@ -150,9 +157,21 @@ export const metadata = {
 				"edit --set name=value updates a property on an element that already has a template applied, " +
 				"without re-running template application — it never resets other template-owned content " +
 				"(including hand-customized extension values a template doesn't fully control) and doesn't need " +
-				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element). " +
+				"a <template> argument (it reads zeebe:modelerTemplate/-Version off the element and resolves it from " +
+				".camunda/element-templates/ next to the BPMN file or a parent directory, then the OOTB cache). " +
+				"Pass --template <template> to point at a custom template explicitly; it must match the element's " +
+				"recorded id/version. " +
 				"The tradeoff: edit can only change bindings that already have a value; a property whose " +
 				"gating condition was never met has nothing to edit — use apply --set to materialize it first.\n\n" +
+				"update <template-id> moves every element that uses that template to its latest compatible version, " +
+				"or to the template given with --to <template>[@<n>] (an id, path or URL; an id resolves as above, " +
+				"local templates first); pass an element id to update " +
+				"only that element. Values the target binds under another key are moved when it carries a migration " +
+				"recipe (metadata.migratesFrom) or one is passed with --recipe <file>; --map <from>=<to> moves a value " +
+				"per element when no recipe covers it; the rest carry over by key. " +
+				"A report lists what was dropped, added, moved and changed. --dry-run previews the migration and writes " +
+				"nothing; it exits 1 when an element would fail to migrate or the write would need --allow-lossy. The file is written once, " +
+				"and only if every element migrates.\n\n" +
 				"FEEL values: properties with feel=required always store a FEEL expression (prefixed with `=`). " +
 				"For those properties, c8ctl auto-prepends `=` when it is missing, so `--set key=orderId` " +
 				"writes `=orderId` to the BPMN — equivalent to `--set key==orderId`. " +
@@ -188,6 +207,11 @@ export const metadata = {
 					name: "edit",
 					description:
 						"Update a property on an element that already has a template applied, without re-applying it",
+				},
+				{
+					name: "update",
+					description:
+						"Move all elements of a template to its latest version, or to another template, migrating their values",
 				},
 				{
 					name: "get",
@@ -279,6 +303,35 @@ export const metadata = {
 				},
 				{
 					command:
+						"c8ctl element-template update io.camunda.connectors.HttpJson.v2 process.bpmn --dry-run",
+					description:
+						"Preview moving all elements of a template to its latest compatible version, with a report of what changes",
+				},
+				{
+					command:
+						"c8ctl element-template update io.camunda.connectors.HttpJson.v2 Task_1 process.bpmn --to io.camunda.connectors.HttpJson.v2@15 --in-place",
+					description: "Update one element to a pinned version",
+				},
+				{
+					command:
+						"c8ctl element-template update io.camunda.connectors.agenticai.aiagent.v1 process.bpmn --to io.camunda.connectors.agenticai.ai-agent-task.v2 --in-place",
+					description:
+						"Move all elements to another template; its embedded recipe moves renamed values",
+				},
+				{
+					command:
+						"c8ctl element-template update old.id process.bpmn --to new-template.json --recipe recipe.json --in-place",
+					description:
+						"Migrate with a recipe from a file instead of the one embedded in the template",
+				},
+				{
+					command:
+						"c8ctl element-template update old.id process.bpmn --to new-template.json --map maxTokens=limit --in-place",
+					description:
+						"Move a value to a key the target binds differently; each element keeps its own value",
+				},
+				{
+					command:
 						"c8ctl element-template get io.camunda.connectors.HttpJson.v2 > template.json",
 					description:
 						"Print the raw template JSON to stdout (redirect to save a copy)",
@@ -301,10 +354,15 @@ export const metadata = {
 export const commands = {
 	"element-template": {
 		flags: {
+			"allow-lossy": {
+				type: "boolean",
+				description:
+					"Authorize lossy in-place migration or embedded-recipe fallback [update]",
+			},
 			"in-place": {
 				type: "boolean",
 				short: "i",
-				description: "Modify the BPMN file in place [apply|edit]",
+				description: "Modify the BPMN file in place [apply|edit|update]",
 			},
 			set: {
 				type: "string",
@@ -324,6 +382,22 @@ export const commands = {
 				description:
 					"Filter to one or more group ids (repeatable) [get-properties]",
 			},
+			recipe: {
+				type: "string",
+				description:
+					"Migration recipe file, used instead of the one embedded in the target template [update]",
+			},
+			to: {
+				type: "string",
+				description:
+					"Target template: id[@n], path or URL; default is the latest compatible version of the selected template [update]",
+			},
+			map: {
+				type: "string",
+				multiple: true,
+				description:
+					"Move the original value of binding <from> to binding <to> on every selected element: from=to (repeatable) [update]",
+			},
 			prune: {
 				type: "boolean",
 				description:
@@ -337,6 +411,11 @@ export const commands = {
 			limit: {
 				type: "string",
 				description: "Cap the number of matches (default 20) [search]",
+			},
+			template: {
+				type: "string",
+				description:
+					"Template to resolve the element's recorded id/version against (id[@version], path, or URL) [edit]",
 			},
 			"engine-version": {
 				type: "string",

@@ -7,6 +7,12 @@
  * Each `test` is named after the contract statement it encodes so failures
  * point directly to the violated rule.
  *
+ * The parser lives in `src/framework/argv-parser.ts` and is driven from
+ * `src/index.ts`; the regression tests at the end of this file pin the bugs
+ * the old single flat-table parse caused (a flag name had one type for the
+ * whole CLI, so handlers re-read `process.argv`, and a string flag could
+ * swallow the verb or the next flag).
+ *
  * Contract summary (see issue #373 for the full design):
  *
  *   1. Stage 1 parses GLOBAL_FLAGS only, before the verb.
@@ -203,10 +209,9 @@ describe("two-stage parser contract: --help reaches the help renderer", () => {
 
 describe("two-stage parser contract: stage 2 uses effectiveFlags(verb, resource)", () => {
 	test("resource-specific filter flag is accepted on its own resource", async () => {
-		// `--bpmnProcessId` lives in PI_SEARCH_FLAGS (resourceFlags.pi). Today
-		// it is parsed because deriveParseArgsOptions() unions every resource
-		// bucket; the contract says it should still be accepted under the
-		// scoped model when invoked on its own resource.
+		// `--bpmnProcessId` lives in PI_SEARCH_FLAGS (resourceFlags.pi). Stage 2
+		// parses exactly the requested resource's bucket, so it is accepted on
+		// its own resource.
 		const result = await c8(
 			"search",
 			"pi",
@@ -352,5 +357,389 @@ describe("two-stage parser contract: stage 2 rejects unknown verb-flags", () => 
 			result.status !== 0 || stderrMentionsFlag,
 			`expected stage 2 to reject or warn on --xyzzy-not-a-real-flag. got exit ${result.status}, stderr: "${result.stderr.slice(0, 200)}"`,
 		);
+	});
+});
+
+// ─── F. Regressions the flat union table caused ──────────────────────────────
+
+/** Spawn the CLI in JSON mode against a stub base URL and return the dry-run payload. */
+async function dryRun(...args: string[]): Promise<Record<string, unknown>> {
+	const result = await c8(...args);
+	assert.strictEqual(
+		result.status,
+		0,
+		`expected exit 0 for \`c8ctl ${args.join(" ")}\`. stderr: ${result.stderr}`,
+	);
+	const parsed = parseJsonRecord(result.stdout, result.stderr);
+	assert.strictEqual(
+		parsed.dryRun,
+		true,
+		`expected a dry-run payload for \`c8ctl ${args.join(" ")}\`, got: ${result.stdout.slice(0, 200)}`,
+	);
+	return parsed;
+}
+
+function filterOf(payload: Record<string, unknown>): Record<string, unknown> {
+	const body = payload.body;
+	assert.ok(isRecord(body), "expected a request body");
+	const filter = body.filter;
+	assert.ok(isRecord(filter), "expected a body.filter");
+	return filter;
+}
+
+describe("two-stage parser: a flag is typed by the command it is used on", () => {
+	test("`get pi --variables <key>`: --variables is boolean, so <key> is not swallowed", async () => {
+		// `--variables` is a string on `create pi` and a boolean on `get pi`.
+		// Under the flat table "string wins" and `123` became the flag's value,
+		// leaving `get pi` without a key.
+		const before = await dryRun(
+			"--json",
+			"--dry-run",
+			"get",
+			"pi",
+			"--variables",
+			"123",
+		);
+		assert.ok(
+			String(before.url).endsWith("/process-instances/123"),
+			`expected key 123 in ${before.url}`,
+		);
+		const after = await dryRun(
+			"--json",
+			"--dry-run",
+			"get",
+			"pi",
+			"123",
+			"--variables",
+		);
+		assert.strictEqual(after.url, before.url);
+	});
+
+	test("`create pi --variables <json>` still takes a value", async () => {
+		const payload = await dryRun(
+			"--json",
+			"--dry-run",
+			"create",
+			"pi",
+			"--id",
+			"proc",
+			"--variables",
+			'{"a":1}',
+		);
+		const body = payload.body;
+		assert.ok(isRecord(body));
+		assert.deepStrictEqual(body.variables, { a: 1 });
+	});
+
+	test("a flag that belongs to a sibling resource does not consume the next token", async () => {
+		// `--variables` is not a `get pd` flag: it is reported as unknown (warn
+		// only) and must not eat the key that follows it.
+		const result = await c8(
+			"--json",
+			"--dry-run",
+			"get",
+			"pd",
+			"--variables",
+			"123",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const parsed = parseJsonRecord(result.stdout, result.stderr);
+		assert.ok(
+			String(parsed.url).endsWith("/process-definitions/123"),
+			String(parsed.url),
+		);
+		assert.ok(
+			result.stderr.includes("--variables"),
+			"expected an unknown-flag warning",
+		);
+	});
+});
+
+describe("two-stage parser: --version is scoped by position", () => {
+	test("`--version` before the verb is the boolean global and does not swallow the verb", async () => {
+		const result = await c8("--version", "list", "pi");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.ok(
+			!(result.stdout + result.stderr).includes("Unknown command"),
+			`--version must not consume \`list\`: ${result.stdout}${result.stderr}`,
+		);
+		assert.match(result.stdout + result.stderr, /c8ctl v/);
+	});
+
+	test("`-v` before the verb behaves like --version", async () => {
+		const result = await c8("-v", "list", "pi");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout + result.stderr, /c8ctl v/);
+	});
+
+	test("`--version=<x>` before the verb also prints the CLI version and never dispatches", async () => {
+		const result = await c8("--version=3", "list", "pi", "--dry-run");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout + result.stderr, /c8ctl v/);
+		assert.ok(!result.stdout.includes("dryRun"), result.stdout);
+	});
+
+	test("bare `c8ctl --version` still prints the CLI version", async () => {
+		const result = await c8("--version");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout + result.stderr, /c8ctl v/);
+	});
+
+	test("`list pi --version 3` is still the process-definition-version filter", async () => {
+		for (const form of [["--version", "3"], ["--version=3"], ["-v", "3"]]) {
+			const payload = await dryRun(
+				"--json",
+				"--dry-run",
+				"list",
+				"pi",
+				...form,
+			);
+			assert.strictEqual(
+				filterOf(payload).processDefinitionVersion,
+				3,
+				`form ${form.join(" ")}`,
+			);
+		}
+	});
+
+	test("`create pi --version <n>` pins the definition version", async () => {
+		const payload = await dryRun(
+			"--json",
+			"--dry-run",
+			"create",
+			"pi",
+			"--id",
+			"proc",
+			"--version",
+			"2",
+		);
+		const body = payload.body;
+		assert.ok(isRecord(body));
+		assert.strictEqual(body.processDefinitionVersion, 2);
+	});
+});
+
+describe("two-stage parser: a string flag never swallows a following known flag", () => {
+	test("`list pi --fields --dry-run` still dry-runs (would otherwise hit the network)", async () => {
+		// Before: `--fields` took `--dry-run` as its value, so the request was
+		// really sent. Stage 2 treats a known flag as a flag, not a value.
+		const payload = await dryRun(
+			"--json",
+			"list",
+			"pi",
+			"--fields",
+			"--dry-run",
+		);
+		assert.strictEqual(payload.method, "POST");
+	});
+
+	test("the same holds before the verb", async () => {
+		const payload = await dryRun(
+			"--json",
+			"--fields",
+			"--dry-run",
+			"list",
+			"pi",
+		);
+		assert.strictEqual(payload.method, "POST");
+	});
+
+	test("a string flag given no value reads as `true`, never as the next flag's text", async () => {
+		// `--limit` without a value is ignored (as at the end of the line, where
+		// `parseArgs` has always reported `true`) instead of becoming
+		// `limit: "--dry-run"`, which used to fail validation and drop --dry-run.
+		const mid = await dryRun("--json", "list", "pi", "--limit", "--dry-run");
+		assert.strictEqual(mid.method, "POST");
+		const end = await dryRun("--json", "--dry-run", "list", "pi", "--limit");
+		assert.strictEqual(end.method, "POST");
+	});
+
+	test("a value that merely starts with a dash is still a value", async () => {
+		// `-1` is not a known flag; it is consumed as --limit's value and
+		// rejected by the --limit validator rather than being re-read as a flag.
+		const result = await c8(
+			"--json",
+			"--dry-run",
+			"list",
+			"pi",
+			"--limit",
+			"-1",
+		);
+		assert.notStrictEqual(result.status, 0);
+		assert.ok(
+			(result.stdout + result.stderr).includes(
+				"--limit must be a positive integer",
+			),
+		);
+	});
+});
+
+describe("two-stage parser: globals before and after the verb", () => {
+	test("globals in either position give the same request", async () => {
+		const before = await dryRun("--json", "--dry-run", "list", "pi");
+		const after = await dryRun("list", "pi", "--json", "--dry-run");
+		const mixed = await dryRun("--dry-run", "list", "--json", "pi");
+		assert.deepStrictEqual(after, before);
+		assert.deepStrictEqual(mixed, before);
+	});
+
+	test("a global string flag between verb and resource does not hide the resource", async () => {
+		const payload = await dryRun(
+			"--json",
+			"--dry-run",
+			"list",
+			"--profile=__unused__",
+			"pi",
+		);
+		assert.strictEqual(payload.command, "list process-instances");
+	});
+
+	test("a verb name used as the value of a leading global string flag is not the verb", async () => {
+		// `--profile list` consumes `list` as the profile name, so the verb is
+		// the next token (`pi` → unknown command) — not `list pi`.
+		const result = await c8("--profile", "list", "pi", "--dry-run");
+		assert.notStrictEqual(result.status, 0);
+		assert.ok((result.stdout + result.stderr).includes("Unknown command: pi"));
+	});
+});
+
+describe("two-stage parser: `--` terminator", () => {
+	test("a leading `--` is skipped: `c8ctl -- list pi` dispatches list", async () => {
+		const payload = await dryRun("--json", "--dry-run", "--", "list", "pi");
+		assert.strictEqual(payload.command, "list process-instances");
+	});
+
+	test("tokens after `--` after the verb are positionals, never flags", async () => {
+		// `--all` would drop the default ACTIVE state filter.
+		const payload = await dryRun(
+			"--json",
+			"--dry-run",
+			"list",
+			"pi",
+			"--",
+			"--all",
+		);
+		assert.strictEqual(filterOf(payload).state, "ACTIVE");
+	});
+});
+
+describe("two-stage parser: unknown flags stay warn-only", () => {
+	test("an unknown flag on a built-in verb warns and still runs (exit 0)", async () => {
+		const result = await c8(
+			"--json",
+			"--dry-run",
+			"list",
+			"pi",
+			"--xyzzy-not-a-flag",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.ok(result.stderr.includes("xyzzy-not-a-flag"));
+		assert.strictEqual(
+			parseJsonRecord(result.stdout, result.stderr).dryRun,
+			true,
+		);
+	});
+});
+
+describe("two-stage parser: command-specific flags before the command are rejected clearly", () => {
+	// Only globals may precede the command. The flag's value used to be taken
+	// for the verb and reported as "Unknown command: 5".
+	async function rejected(...args: string[]) {
+		const result = await c8(...args);
+		const out = result.stdout + result.stderr;
+		assert.notStrictEqual(
+			result.status,
+			0,
+			`c8ctl ${args.join(" ")} must fail`,
+		);
+		assert.ok(
+			!out.includes("Unknown command"),
+			`must not report the flag's value as a command: ${out}`,
+		);
+		assert.ok(/not (a )?global flags?/.test(out), out);
+		assert.ok(out.includes("go after the command"), out);
+		return out;
+	}
+
+	test("flag with a value: names the flag and suggests the corrected order", async () => {
+		const out = await rejected("--limit", "5", "list", "pi");
+		assert.ok(out.includes("--limit"), out);
+		assert.ok(out.includes("Did you mean: c8ctl list pi --limit 5"), out);
+	});
+
+	test("boolean flag", async () => {
+		const out = await rejected("--all", "list", "pi");
+		assert.ok(out.includes("Did you mean: c8ctl list pi --all"), out);
+	});
+
+	test("`--flag=value` form", async () => {
+		const out = await rejected("--limit=5", "list", "pi");
+		assert.ok(out.includes("Did you mean: c8ctl list pi --limit=5"), out);
+	});
+
+	test("globals that were already in the right place are kept in the suggestion", async () => {
+		const out = await rejected("--json", "--limit", "5", "list", "pi");
+		assert.ok(
+			out.includes("Did you mean: c8ctl --json list pi --limit 5"),
+			out,
+		);
+	});
+
+	test("a flag no command declares gets the general explanation, with the globals listed", async () => {
+		const out = await rejected("--foo", "2", "my-plugin", "local-command");
+		assert.ok(out.includes("--foo"), out);
+		assert.ok(
+			out.includes("Only global flags may come before the command"),
+			out,
+		);
+		assert.ok(out.includes("--profile") && out.includes("--dry-run"), out);
+		assert.ok(!out.includes("Did you mean"), `must not guess: ${out}`);
+	});
+
+	test("an unknown short flag", async () => {
+		const out = await rejected("-z", "list", "pi");
+		assert.ok(out.includes("-z"), out);
+	});
+
+	test("the suggested order keeps the moved flag before a `--` terminator", async () => {
+		const out = await rejected("--limit", "5", "list", "pi", "--", "lit");
+		assert.ok(
+			out.includes("Did you mean: c8ctl list pi --limit 5 -- lit"),
+			out,
+		);
+	});
+
+	test("a one-letter long flag is shown as typed", async () => {
+		const out = await rejected("--z", "list", "pi");
+		assert.ok(out.includes("Flag --z is not"), out);
+	});
+
+	test("several misplaced flags are all named", async () => {
+		const out = await rejected("--all", "--fullValue", "list", "pi");
+		assert.ok(out.includes("--all") && out.includes("--fullValue"), out);
+	});
+
+	test("a misplaced flag with no command at all is still reported", async () => {
+		await rejected("--foo");
+	});
+
+	test("valid global-before-verb forms are unchanged", async () => {
+		const a = await dryRun("--json", "--dry-run", "get", "pi", "1");
+		assert.ok(String(a.url).endsWith("/process-instances/1"));
+		const b = await dryRun(
+			"--json",
+			"--dry-run",
+			"--profile",
+			"x",
+			"list",
+			"pi",
+		);
+		assert.strictEqual(b.command, "list process-instances");
+		const c = await c8("--json", "--dry-run", "--fields", "Key", "list", "pi");
+		assert.strictEqual(c.status, 0, c.stderr);
+		assert.ok(!c.stderr.includes("not a global flag"), c.stderr);
+		const v = await c8("--version");
+		assert.strictEqual(v.status, 0);
+		assert.match(v.stdout + v.stderr, /c8ctl v/);
 	});
 });

@@ -442,18 +442,20 @@ describe("Test workflow immutable automation path", () => {
 		assert.match(job("typecheck"), /name: Typecheck/);
 		assert.match(
 			job("unit-test"),
-			/name: Unit Test \(Node \$\{\{ matrix\.node \}\} \/ \$\{\{ matrix\.os \}\}\)/,
+			/name: Unit Test \(Node \$\{\{ matrix\.node \}\} \/ \$\{\{ matrix\.os \}\} \/ shard \$\{\{ matrix\.shard \}\}\)/,
 		);
 		assert.match(
 			job("integration-test"),
-			/name: Integration Test \(Node \$\{\{ matrix\.node \}\} \/ Camunda \$\{\{ matrix\.camunda \}\} \/ \$\{\{ matrix\.os \}\}\)/,
+			/name: Integration Test \(Node \$\{\{ matrix\.node \}\} \/ Camunda \$\{\{ matrix\.camunda \}\} \/ \$\{\{ matrix\.os \}\} \/ shard \$\{\{ matrix\.shard \}\}\)/,
 		);
 		for (const name of ["unit-test", "integration-test"])
-			assert.match(job(name), /node: \[22, 24\]/);
+			assert.match(job(name), /node: \[22, 24, 26\]/);
 		assert.match(
 			job("unit-test"),
-			/os: \[ubuntu-latest, macos-latest, windows-latest\]/,
+			/os: \$\{\{ fromJSON\(inputs\.os \|\| '\["ubuntu-latest","macos-latest","windows-latest"\]'\) \}\}/,
 		);
+		assert.match(job("unit-test"), /shard: \['1\/6'.*'6\/6'\]/);
+		assert.match(job("integration-test"), /shard: \['1\/3', '2\/3', '3\/3'\]/);
 		assert.match(
 			job("integration-test"),
 			/camunda: \['8\.8', '8\.9', '8\.10'\]/,

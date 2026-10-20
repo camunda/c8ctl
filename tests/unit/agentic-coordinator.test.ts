@@ -877,7 +877,7 @@ test("GitHub's collapsed skipped unit matrix after failed typecheck starts one b
 					job.name === "Typecheck" ? { ...job, conclusion: "failure" } : job,
 				),
 			{
-				name: `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }})`,
+				name: `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }} / shard \${{ matrix.shard }})`,
 				status: "completed",
 				conclusion: "skipped",
 			},
@@ -1213,15 +1213,20 @@ function fixture(subject: "issue" | "pr" = "issue") {
 					"Agentic CI Receipt",
 					"Lint",
 					"Typecheck",
-					...[22, 24].flatMap((node) =>
-						["ubuntu-latest", "macos-latest", "windows-latest"].map(
-							(os) => `Unit Test (Node ${node} / ${os})`,
+					...[22, 24, 26].flatMap((node) =>
+						["ubuntu-latest", "macos-latest", "windows-latest"].flatMap((os) =>
+							[1, 2, 3, 4, 5, 6].map(
+								(shard) =>
+									`Unit Test (Node ${node} / ${os} / shard ${shard}/6)`,
+							),
 						),
 					),
-					...[22, 24].flatMap((node) =>
-						["8.8", "8.9", "8.10"].map(
-							(version) =>
-								`Integration Test (Node ${node} / Camunda ${version} / ubuntu-latest)`,
+					...[22, 24, 26].flatMap((node) =>
+						["8.8", "8.9", "8.10"].flatMap((version) =>
+							[1, 2, 3].map(
+								(shard) =>
+									`Integration Test (Node ${node} / Camunda ${version} / ubuntu-latest / shard ${shard}/3)`,
+							),
 						),
 					),
 				].map((name) => ({ name, status: "completed", conclusion: "success" }));

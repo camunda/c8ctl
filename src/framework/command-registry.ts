@@ -40,6 +40,12 @@ export interface FlagDef {
 	 * array. Only valid when type is "string". The handler receives string[].
 	 */
 	multiple?: boolean;
+	/**
+	 * When true, an empty or value-less occurrence of the flag is an error
+	 * instead of being treated as "not supplied". Use it where dropping a
+	 * value would silently change what a mutating request does.
+	 */
+	rejectEmpty?: boolean;
 	/** SDK enum object for automatic validation (keys are valid values). */
 	enum?: Record<string, string>;
 	/** When true, flag value is comma-separated and each item is validated against enum. */
@@ -97,8 +103,8 @@ export interface CommandDef {
 	 * resource `r` — only `resourceFlags[r]` is. Verb-level `flags` are
 	 * still treated as valid by `detectUnknownFlags`, so
 	 * `detectUnknownFlags`/`warnUnknownFlags` will not emit an
-	 * unknown-flag warning for them, and `deriveParseArgsOptions` still
-	 * includes them so they parse, but they will not flow into the
+	 * unknown-flag warning for them, and stage 2 of the argv parser
+	 * (`parseVerbArgs`) still parses them, but they will not flow into the
 	 * handler's typed parameter for any resource that has its own bucket.
 	 *
 	 * Practical guidance: if a flag must be visible to the handler for a
@@ -116,9 +122,9 @@ export interface CommandDef {
 	 * When a resource has an entry here, the framework resolves the
 	 * effective flag schema as `resourceFlags[resource]` and **ignores**
 	 * the verb-level `flags` for handler typing and `validateFlags`.
-	 * `deriveParseArgsOptions` still includes both buckets so they parse,
-	 * and the scoping lets `warnUnknownFlags` warn when a flag is passed
-	 * against a resource that does not declare it. See the doc on `flags`
+	 * Stage 2 of the argv parser parses `flags` plus only the requested
+	 * resource's bucket, and the scoping lets `warnUnknownFlags` warn when a
+	 * flag is passed against a resource that does not declare it. See the doc on `flags`
 	 * above for the full effective-resolution semantics.
 	 */
 	resourceFlags?: Record<string, Record<string, FlagDef>>;
@@ -206,7 +212,7 @@ export const GLOBAL_FLAGS = {
 		type: "boolean",
 		description: "Preview the API request without executing",
 		agentDescription:
-			"Preview the API request that would be sent, without executing it.\nEmits JSON: { dryRun, command, method, url, body }\nAlways exits 0.",
+			"Preview the API request that would be sent, without executing it.\nEmits JSON: { dryRun, command, method, url, body }\nAlways exits 0.\nException: element-template update previews a migration (with --json it emits { dryRun, command, results, summary }; otherwise a text report) and exits 1 when an element would fail to migrate or the write would need --allow-lossy.",
 		agentAppliesTo: "all commands",
 	},
 	verbose: { type: "boolean", description: "Show verbose output" },
@@ -728,6 +734,17 @@ const GET_PI_POSITIONALS = [
 	},
 ] as const satisfies readonly PositionalDef[];
 
+/**
+ * Optional: omitting the key selects the batch form (by source definition)
+ * of `migrate` and `modify`.
+ */
+const MIGRATE_PI_POSITIONALS = [
+	{
+		name: "key",
+		validate: ProcessInstanceKey.assumeExists,
+	},
+] as const satisfies readonly PositionalDef[];
+
 const GET_INCIDENT_POSITIONALS = [
 	{
 		name: "key",
@@ -815,9 +832,9 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). The flag is still parsed by `parseArgs`
-		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
-		// and the value is ignored — the warning is the user-facing signal.
+		// non-PD resource. Stage 2 of the argv parser only parses the
+		// requested resource's bucket, so the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {
 			all: {
 				type: "boolean",
@@ -924,9 +941,9 @@ export const COMMAND_REGISTRY = {
 		// Verb-level `flags` holds only genuinely shared flags. Per-resource
 		// flags live exclusively in `resourceFlags` so unknown-flag detection
 		// warns when (e.g.) `--processDefinitionId` is passed against a
-		// non-PD resource (#256). The flag is still parsed by `parseArgs`
-		// (see `deriveParseArgsOptions`, which iterates `resourceFlags` too)
-		// and the value is ignored — the warning is the user-facing signal.
+		// non-PD resource. Stage 2 of the argv parser only parses the
+		// requested resource's bucket, so the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {
 			...SEARCH_FLAGS,
 		},
@@ -1134,6 +1151,138 @@ export const COMMAND_REGISTRY = {
 		flags: {},
 		resourcePositionals: {
 			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
+	suspend: {
+		description: "Suspend resource",
+		helpDescription: "Suspend a process instance (Camunda 8.10+)",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show suspend command with all flags",
+		mutating: true,
+		requiresResource: true,
+		resources: ["pi"],
+		flags: {},
+		resourcePositionals: {
+			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
+	resume: {
+		description: "Resume resource",
+		helpDescription: "Resume a suspended process instance (Camunda 8.10+)",
+		helpResource: "<resource> <key>",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show resume command with all flags",
+		mutating: true,
+		requiresResource: true,
+		resources: ["pi"],
+		flags: {},
+		resourcePositionals: {
+			"process-instance": GET_PI_POSITIONALS,
+		},
+	},
+
+	migrate: {
+		description: "Migrate process instances to another process definition",
+		helpDescription:
+			"Migrate a process instance, or all active instances of a definition (batch), to another process definition",
+		helpResource: "<resource> [key]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show migrate command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					"c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 --map Task_A=Task_A2",
+				description: "Migrate a process instance to a new definition",
+			},
+		],
+		resources: ["pi"],
+		flags: {
+			targetProcessDefinitionKey: {
+				type: "string",
+				description: "Key of the process definition to migrate to",
+				required: true,
+			},
+			map: {
+				type: "string",
+				multiple: true,
+				description:
+					"Element mapping as sourceElementId=targetElementId (repeatable)",
+			},
+			processDefinitionKey: {
+				type: "string",
+				description:
+					"Batch mode: migrate all active instances of this source process definition key (omit the instance key)",
+				validate: ProcessDefinitionKey.assumeExists,
+			},
+		},
+		resourcePositionals: {
+			"process-instance": MIGRATE_PI_POSITIONALS,
+		},
+	},
+
+	modify: {
+		description:
+			"Modify process instances: activate, terminate or move elements",
+		helpDescription:
+			"Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)",
+		helpResource: "<resource> [key]",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show modify command with all flags",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command:
+					"c8ctl modify pi 2251799813685249 --move Task_Charge=Task_Review",
+				description: "Move a process instance's token to another element",
+			},
+		],
+		resources: ["pi"],
+		flags: {
+			activate: {
+				type: "string",
+				multiple: true,
+				rejectEmpty: true,
+				description: "Element ID to activate (repeatable)",
+			},
+			terminate: {
+				type: "string",
+				multiple: true,
+				rejectEmpty: true,
+				description:
+					"Element instance key, or element ID for all its active instances (Camunda 8.9+), to terminate (repeatable)",
+			},
+			move: {
+				type: "string",
+				multiple: true,
+				rejectEmpty: true,
+				description:
+					"Move as sourceElementId=targetElementId, or sourceElementInstanceKey=targetElementId (repeatable; Camunda 8.9+ for a single instance)",
+			},
+			instructions: {
+				type: "string",
+				rejectEmpty: true,
+				description:
+					"Full modification instructions as JSON (or @file.json / @- to read from file/stdin), for ancestor scopes and variables",
+			},
+			processDefinitionKey: {
+				type: "string",
+				description:
+					"Batch mode: move tokens in all active instances of this process definition key (omit the instance key; --move by element ID only)",
+				validate: ProcessDefinitionKey.assumeExists,
+			},
+			operationReference: {
+				type: "string",
+				description: "Optional operation reference (positive integer)",
+			},
+		},
+		resourcePositionals: {
+			"process-instance": MIGRATE_PI_POSITIONALS,
 		},
 	},
 
@@ -1458,9 +1607,10 @@ export const COMMAND_REGISTRY = {
 		description: "Deploy resources",
 		helpDescription:
 			"Deploy files to Camunda (auto-discovers deployable files in directories). " +
-			"When deploying a directory that is inside a process application " +
-			"(a parent directory contains a .process-application marker), the entire " +
-			"application root is deployed. Explicit file paths are not expanded.",
+			"When deploying a directory that is inside a Camunda project " +
+			"(a parent directory contains a camunda.json or .process-application " +
+			"marker), the entire project root is deployed. Explicit file paths " +
+			"are not expanded.",
 		helpResource: "[path...]",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show deploy command with all flags",
@@ -1474,7 +1624,7 @@ export const COMMAND_REGISTRY = {
 			{
 				command: "c8ctl deploy",
 				description:
-					"Deploy from current directory (detects process application root)",
+					"Deploy from current directory (detects Camunda project root)",
 			},
 		],
 		resources: [],
@@ -1614,14 +1764,18 @@ export const COMMAND_REGISTRY = {
 				type: "boolean",
 				description: "Watch all server-supported file extensions",
 			},
-			"process-application": {
+			project: {
 				type: "boolean",
 				description:
-					"Watch and deploy the entire process application (requires .process-application marker)",
+					"Watch and deploy the entire Camunda project (requires camunda.json or .process-application marker)",
+			},
+			"process-application": {
+				type: "boolean",
+				description: "Alias for --project (deprecated)",
 			},
 			pa: {
 				type: "boolean",
-				description: "Alias for --process-application",
+				description: "Alias for --project (deprecated)",
 			},
 		},
 		aliases: ["w"],
@@ -1897,10 +2051,9 @@ export const COMMAND_REGISTRY = {
 		// `--shell` only applies to `completion install` — declared once in
 		// `resourceFlags.install` so it triggers an unknown-flag warning when
 		// passed to other resources (e.g. `completion zsh --shell bash`).
-		// This is the original #256 defect class. `parseArgs` still accepts
-		// the flag globally via `deriveParseArgsOptions` iterating
-		// `resourceFlags`, and the value is ignored on non-install branches
-		// of `completionCommand` — the warning is the user-facing signal.
+		// Stage 2 of the argv parser only parses the requested resource's
+		// bucket, so on other resources the flag is reported as unknown and
+		// ignored — the warning is the user-facing signal.
 		flags: {},
 		resourceFlags: {
 			install: {
@@ -2113,9 +2266,15 @@ export function isValidCommand(verb: string, resource: string): boolean {
 }
 
 /**
- * Derive parseArgs options from the registry. This produces the flat
- * options object that node:util parseArgs expects, covering all flags
- * from all commands plus global flags.
+ * Derive a flat parseArgs options table from the registry: every flag of
+ * every command plus the globals.
+ *
+ * **Not used to parse the command line.** `src/index.ts` parses in two
+ * stages (`src/framework/argv-parser.ts`), each against the flag table
+ * of the command actually being run, so a flag name never has to have one
+ * type for the whole CLI. This flat view remains as a registry-wide summary
+ * (used by the structural tests that assert every registered flag is
+ * representable).
  *
  * When the same flag name appears with different types across commands
  * (e.g. `--variables` is boolean for `get pi` but string for `create pi`),

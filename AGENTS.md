@@ -263,6 +263,7 @@ If you find yourself wanting to promote a flag into the top-level Flags section:
 - use modern TypeScript syntax and features
 - **never use `any`** — use `unknown` and narrow with type guards. Enforced by Biome (`noExplicitAny`, `noImplicitAnyLet`, `noEvolvingTypes` — all set to `error`)
 - **never use `as T` type assertions** — use type guards, narrowing, or `satisfies` instead. Enforced by a GritQL plugin (`plugins/no-unsafe-type-assertion.grit`) that applies to both `src/` and `tests/`. Exceptions: `as const` and import renames are allowed. If a cast is genuinely unavoidable, add a `// biome-ignore lint/plugin:` comment with a justification and a tracking issue reference
+- don't reference issue/PR numbers (`#123`) in code, comments, test names or docs — state the reason instead. Only exception: the `biome-ignore` tracking issue above
 - run `npx biome check` to verify — `biome.json` scopes this to `src/` and `tests/`. This runs as part of `npm run build`, CI, and the pre-commit hook (on staged files). Zero diagnostics required
 - run `npx biome check --fix` before committing to auto-fix formatting and lint issues
 - use modern Getter and Setter syntax for class properties. Examples:

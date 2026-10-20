@@ -3,9 +3,224 @@
  */
 
 import assert from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+	after,
+	afterEach,
+	before,
+	beforeEach,
+	describe,
+	test,
+} from "node:test";
 import { showCompletion } from "../../src/framework/ui/completion.ts";
+import { c8WithEnv } from "../utils/cli.ts";
 import { mockProcessExit } from "../utils/mocks.ts";
+import { asyncSpawnWithStdin } from "../utils/spawn.ts";
+
+describe("Plugin commands shadowed by a built-in verb or alias", () => {
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-shadow-"));
+	before(() => {
+		const destination = join(dir, "plugins", "node_modules", "shadow-list");
+		mkdirSync(destination, { recursive: true });
+		writeFileSync(
+			join(destination, "package.json"),
+			JSON.stringify({
+				name: "shadow-list",
+				version: "1.0.0",
+				type: "module",
+				keywords: ["c8ctl", "c8ctl-plugin"],
+			}),
+		);
+		writeFileSync(
+			join(destination, "c8ctl-plugin.js"),
+			"export const commands = { list: { flags: { shadowed: { type: 'string', description: 'Shadowed flag' } }, handler: async () => {} }, w: { flags: { aliasshadowed: { type: 'string', description: 'Alias-shadowed flag' } }, handler: async () => {} } };\n",
+		);
+	});
+	after(() => rmSync(dir, { recursive: true, force: true }));
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		test(`${shell} offers no flags of a plugin command a built-in shadows`, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(!result.stdout.includes("shadowed"), result.stdout);
+			assert.ok(!result.stdout.includes("aliasshadowed"), result.stdout);
+		});
+	}
+});
+
+describe("Loaded plugin flag completions", () => {
+	const dir = mkdtempSync(join(tmpdir(), "c8ctl-completion-flags-"));
+	before(() => {
+		for (const name of ["plugin-with-flags", "plugin-with-verb-scoped-flag"]) {
+			const destination = join(dir, "plugins", "node_modules", name);
+			mkdirSync(destination, { recursive: true });
+			cpSync(
+				new URL(`../fixtures/plugins/${name}/`, import.meta.url),
+				destination,
+				{
+					recursive: true,
+				},
+			);
+		}
+	});
+	after(() => rmSync(dir, { recursive: true, force: true }));
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		test(`${shell} scopes plugin flags and metadata to their owning command`, {
+			skip:
+				shell !== "fish" && spawnSync(shell, ["--version"]).status !== 0
+					? `${shell} is not installed`
+					: false,
+		}, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			if (shell === "fish") {
+				// The verb lookup skips leading globals and their values.
+				assert.match(
+					result.stdout,
+					/\n {12}case [^\n]*--profile[^\n]*\n[^\n]*\n {16}if contains -- "\$next" '--'[^\n]*'--fields'[^\n]*\n {20}set i \(math \$i \+ 1\)\n {16}else\n {20}set i \(math \$i \+ 2\)/,
+				);
+				assert.doesNotMatch(result.stdout, /\n {12}case [^\n]*--version/);
+				for (const [command, name, description] of [
+					["test-flags", "source", "Source element ID"],
+					["test-required", "required-name", "A required string flag"],
+					["verb-scoped-demo", "limit", "Plugin"],
+				]) {
+					const lines = result.stdout
+						.split("\n")
+						.filter(
+							(line) =>
+								line.includes(`-l ${name} `) && line.includes(description),
+						);
+					assert.strictEqual(lines.length, 2);
+					for (const line of lines) {
+						assert.ok(line.includes(`-n '__c8ctl_verb_in ${command}'`), line);
+						assert.ok(line.endsWith(" -r"), line);
+					}
+				}
+				return;
+			}
+			for (const [command, expected, excluded] of [
+				["test-flags", "--source", "--required-name"],
+				["test-required", "--required-name", "--source"],
+				["verb-scoped-demo", "--limit", "--source"],
+				["test-bare", "--profile", "--source"],
+				["list", "--profile", "--source"],
+				["cluster", "--profile", "--source"],
+				["missing-command", "--profile", "--source"],
+			]) {
+				for (const [argument, globals] of (command.startsWith("test-") ||
+				command === "verb-scoped-demo"
+					? ["argument ", ""]
+					: ["argument "]
+				).flatMap((argument) => [
+					[argument, ""],
+					// A leading global and its value precede the verb.
+					[argument, "--profile dev "],
+					// Before the verb, --version is boolean and takes no value.
+					[argument, "--version "],
+					[argument, "-v "],
+					// A string global followed by another global takes no value.
+					[argument, "--profile --fields x "],
+				])) {
+					const offset =
+						(argument ? 1 : 0) + globals.split(" ").filter(Boolean).length;
+					const script =
+						shell === "bash"
+							? `${result.stdout}\nCOMP_WORDS=(c8ctl ${globals}${command} ${argument}--)\nCOMP_CWORD=${2 + offset}\n_c8ctl_completions\nprintf '%s\\n' "\${COMPREPLY[@]}"`
+							: `${result.stdout}\n_arguments() { printf '%s\\n' "$@"; }\nwords=(c8ctl ${globals}${command} ${argument}--)\nCURRENT=${3 + offset}\n_c8ctl`;
+					// Via stdin: Windows truncates long command lines.
+					const completed = await asyncSpawnWithStdin(
+						shell,
+						shell === "bash" ? ["--norc", "--noprofile", "-s"] : ["-f", "-s"],
+						(stdin) => {
+							stdin.write(script);
+						},
+					);
+					assert.strictEqual(completed.status, 0, completed.stderr);
+					assert.ok(
+						completed.stdout.includes(expected),
+						`${globals}${command}: missing ${expected}`,
+					);
+					assert.ok(
+						!completed.stdout.includes(excluded),
+						`${globals}${command}: leaked ${excluded}`,
+					);
+					if (command === "verb-scoped-demo" && shell === "zsh") {
+						assert.ok(completed.stdout.includes("Plugin"), completed.stdout);
+						assert.ok(completed.stdout.includes("]:limit:"), completed.stdout);
+					}
+				}
+			}
+		});
+
+		test(`${shell} includes usable flags from every loaded plugin command`, async () => {
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dir },
+				"completion",
+				shell,
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			for (const name of [
+				"source",
+				"target",
+				"debug",
+				"required-name",
+				"safe",
+				"label-value",
+				"limit",
+				"between",
+			]) {
+				const token = shell === "fish" ? `-l ${name} ` : `--${name}`;
+				assert.ok(
+					result.stdout.includes(token),
+					`Missing plugin flag ${token}`,
+				);
+			}
+			assert.ok(
+				!result.stdout.includes("Collides with built-in --verbose flag"),
+			);
+			assert.ok(!result.stdout.includes("Plugin's own --profile"));
+			if (shell === "bash") {
+				const flags = result.stdout
+					.match(/local flags="([^"]*)"/)?.[1]
+					?.split(" ");
+				assert.ok(flags);
+				assert.strictEqual(flags.length, new Set(flags).size);
+			} else if (shell === "zsh") {
+				assert.ok(
+					result.stdout.includes("--source[Source element ID]:source:"),
+				);
+				assert.ok(result.stdout.includes("--debug[Enable debug output]'"));
+				assert.ok(!result.stdout.includes("-y[Short alias collides"));
+				assert.strictEqual(result.stdout.match(/'--limit\[Plugin/g)?.length, 1);
+			} else {
+				assert.ok(
+					result.stdout.includes("-l source -d 'Source element ID' -r"),
+				);
+				assert.ok(
+					result.stdout.includes("-l debug -d 'Enable debug output'\n"),
+				);
+				assert.ok(!result.stdout.includes("-s y -l label-value"));
+				assert.strictEqual(
+					result.stdout.match(/-l limit -d 'Plugin/g)?.length,
+					2,
+				);
+			}
+		});
+	}
+});
 
 describe("Completion Module", () => {
 	let consoleLogSpy: unknown[];

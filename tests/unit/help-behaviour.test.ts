@@ -7,11 +7,12 @@
  */
 
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import { c8 } from "../utils/cli.ts";
+import packageJson from "../../package.json" with { type: "json" };
+import { c8, c8WithEnv } from "../utils/cli.ts";
 import { asyncSpawn, type SpawnResult } from "../utils/spawn.ts";
 
 const CLI = "src/index.ts";
@@ -29,6 +30,109 @@ function c8text(dataDir: string, ...args: string[]): Promise<SpawnResult> {
 		},
 	});
 }
+
+describe("CLI behavioural: version output streams", () => {
+	const cases = [
+		{
+			name: "persisted text",
+			persistedMode: "text",
+			envMode: "",
+			flags: [],
+			json: false,
+		},
+		{
+			name: "explicit JSON",
+			persistedMode: "text",
+			envMode: "",
+			flags: ["--json"],
+			json: true,
+		},
+		{
+			name: "persisted JSON",
+			persistedMode: "json",
+			envMode: "",
+			flags: [],
+			json: true,
+		},
+		{
+			name: "environment JSON overrides persisted text",
+			persistedMode: "text",
+			envMode: "json",
+			flags: [],
+			json: true,
+		},
+		{
+			name: "environment text overrides persisted JSON",
+			persistedMode: "json",
+			envMode: "text",
+			flags: [],
+			json: false,
+		},
+		{
+			name: "explicit JSON overrides environment text",
+			persistedMode: "text",
+			envMode: "text",
+			flags: ["--json"],
+			json: true,
+		},
+		{
+			name: "fields do not filter the text version",
+			persistedMode: "text",
+			envMode: "",
+			flags: ["--fields", "unrelated"],
+			json: false,
+		},
+		{
+			name: "fields do not filter the JSON version",
+			persistedMode: "json",
+			envMode: "",
+			flags: ["--fields", "unrelated"],
+			json: true,
+		},
+	];
+
+	for (const versionFlag of ["--version", "-v"]) {
+		for (const scenario of cases) {
+			test(`${versionFlag}: ${scenario.name}`, async () => {
+				const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-version-test-"));
+				const env = {
+					C8CTL_DATA_DIR: dataDir,
+					C8CTL_MODELER_DIR: dataDir,
+					C8CTL_OUTPUT_MODE: "",
+					CI: "1",
+				};
+
+				try {
+					const setup = await c8WithEnv(env, "output", scenario.persistedMode);
+					assert.strictEqual(setup.status, 0, setup.stderr);
+					const sessionPath = join(dataDir, "session.json");
+					const sessionBefore = readFileSync(sessionPath, "utf-8");
+
+					const result = await c8WithEnv(
+						{ ...env, C8CTL_OUTPUT_MODE: scenario.envMode },
+						...scenario.flags,
+						versionFlag,
+					);
+					const message = `c8ctl v${packageJson.version}`;
+					const expected = scenario.json
+						? JSON.stringify({ status: "info", message })
+						: message;
+
+					assert.strictEqual(result.status, 0, result.stderr);
+					assert.strictEqual(result.stdout, `${expected}\n`);
+					assert.strictEqual(result.stderr, "");
+					assert.strictEqual(
+						readFileSync(sessionPath, "utf-8"),
+						sessionBefore,
+						"version output must not change persisted preferences",
+					);
+				} finally {
+					rmSync(dataDir, { recursive: true, force: true });
+				}
+			});
+		}
+	}
+});
 
 // ─── JSON mode help (default) ────────────────────────────────────────────────
 

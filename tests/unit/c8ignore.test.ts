@@ -6,8 +6,10 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { pollUntil } from "../utils/polling.ts";
+import { startWatchProcess } from "../utils/watch-process.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
 
@@ -573,60 +575,86 @@ describe(".c8ignore", () => {
 	// ── Watch mode filtering ─────────────────────────────────────────
 
 	describe("watch mode respects .c8ignore", () => {
-		test("ignored file change does not trigger deploy", () => {
-			// Set up directory with .c8ignore and an ignored subfolder
+		/**
+		 * Start `c8 watch`, wait for its readiness banner, touch the ignored
+		 * file and then the visible one, and return the output once the visible
+		 * change has been reported. The visible file is the positive control:
+		 * debounce timers fire in write order, so by the time it is reported a
+		 * change to the ignored file would already have been. The deadlines are
+		 * safety nets, not correctness signals.
+		 *
+		 * `cleanup()` awaits the watcher's exit before returning. On Windows the
+		 * watcher otherwise still holds `testDir` (cwd and directory watch) when
+		 * `afterEach` removes it, which fails with EBUSY.
+		 */
+		async function watchIgnoredThenVisible({
+			cwd,
+			watchArg,
+			ignoredFile,
+			visibleFile,
+		}: {
+			cwd: string;
+			watchArg: string;
+			ignoredFile: string;
+			visibleFile: string;
+		}): Promise<string> {
+			const watch = startWatchProcess({
+				watchDir: watchArg,
+				dataDir: join(testDir, ".c8ctl-data"),
+				cwd,
+			});
+			try {
+				const ready = await pollUntil(
+					async () => watch.getOutput().includes("Watching for changes"),
+					10000,
+					100,
+				);
+				assert.ok(
+					ready,
+					`Watcher never reached readiness:\n${watch.getOutput()}`,
+				);
+
+				writeFileSync(ignoredFile, "<ignored-update/>");
+				writeFileSync(visibleFile, "<visible-update/>");
+
+				const reported = await pollUntil(
+					async () =>
+						watch
+							.getOutput()
+							.includes(`Change detected: ${basename(visibleFile)}`),
+					10000,
+					100,
+				);
+				assert.ok(
+					reported,
+					`Watcher never reported the visible file change:\n${watch.getOutput()}`,
+				);
+				return watch.getOutput();
+			} finally {
+				await watch.cleanup();
+			}
+		}
+
+		test("ignored file change does not trigger deploy", async () => {
 			writeFileSync(join(testDir, ".c8ignore"), "ignored/\n");
 			mkdirSync(join(testDir, "ignored"), { recursive: true });
 			writeFileSync(join(testDir, "ignored", "hidden.bpmn"), "<bpmn/>");
 			writeFileSync(join(testDir, "visible.bpmn"), "<bpmn/>");
 
-			// Use a helper script that starts watch, modifies an ignored file,
-			// then collects output. The helper runs in testDir so .c8ignore is found.
-			const helperScript = `
-        const { spawn, execSync } = require('node:child_process');
-        const { writeFileSync } = require('node:fs');
-        const { join } = require('node:path');
-
-        const proc = spawn('node', [
-          '--experimental-strip-types',
-          ${JSON.stringify(CLI_ENTRY)},
-          'watch', '.',
-        ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
-
-        let output = '';
-        proc.stdout.on('data', d => output += d);
-        proc.stderr.on('data', d => output += d);
-
-        setTimeout(() => {
-          writeFileSync(join(${JSON.stringify(testDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
-          setTimeout(() => {
-            proc.kill('SIGTERM');
-            process.stdout.write(output);
-            process.exit(0);
-          }, 1500);
-        }, 500);
-      `;
-
-			const result = spawnSync("node", ["-e", helperScript], {
-				encoding: "utf-8",
-				timeout: 5000,
+			const output = await watchIgnoredThenVisible({
 				cwd: testDir,
-				env: {
-					...process.env,
-					XDG_DATA_HOME: join(tmpdir(), `c8ctl-watch-ign-${Date.now()}`),
-				},
+				watchArg: ".",
+				ignoredFile: join(testDir, "ignored", "hidden.bpmn"),
+				visibleFile: join(testDir, "visible.bpmn"),
 			});
 
-			const output = (result.stdout ?? "") + (result.stderr ?? "");
-
-			// "Change detected" should NOT appear for the ignored file
 			assert.ok(
-				!output.includes("Change detected"),
+				!output.includes("Change detected: hidden.bpmn"),
 				`Watch should not detect changes in ignored directories, but got:\n${output}`,
 			);
 		});
 
-		test("watch target dir picks up .c8ignore from that dir (#258)", () => {
+		test("watch target dir picks up .c8ignore from that dir", async () => {
 			// Watch from a parent directory, targeting a subdirectory that has .c8ignore
 			const projectDir = join(testDir, "project");
 			mkdirSync(projectDir, { recursive: true });
@@ -635,83 +663,17 @@ describe(".c8ignore", () => {
 			writeFileSync(join(projectDir, "ignored", "hidden.bpmn"), "<bpmn/>");
 			writeFileSync(join(projectDir, "visible.bpmn"), "<bpmn/>");
 
-			// Helper waits for the "Watching for changes" readiness banner
-			// before writing a file, ensuring the watcher is actually live.
-			const helperScript = `
-        const { spawn } = require('node:child_process');
-        const { writeFileSync } = require('node:fs');
-        const { join } = require('node:path');
-
-        const proc = spawn('node', [
-          '--experimental-strip-types',
-          ${JSON.stringify(CLI_ENTRY)},
-          'watch', './project/',
-        ], { stdio: 'pipe', cwd: ${JSON.stringify(testDir)} });
-
-        let output = '';
-        let ready = false;
-        proc.stdout.on('data', d => {
-          output += d;
-          if (!ready && output.includes('Watching for changes')) {
-            ready = true;
-            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
-            setTimeout(() => {
-              proc.kill('SIGTERM');
-              process.stdout.write(output);
-              process.exit(0);
-            }, 1500);
-          }
-        });
-        proc.stderr.on('data', d => {
-          output += d;
-          if (!ready && output.includes('Watching for changes')) {
-            ready = true;
-            writeFileSync(join(${JSON.stringify(projectDir)}, 'ignored', 'hidden.bpmn'), '<updated/>');
-            setTimeout(() => {
-              proc.kill('SIGTERM');
-              process.stdout.write(output);
-              process.exit(0);
-            }, 1500);
-          }
-        });
-
-        // Safety timeout: if watch never starts, fail explicitly
-        setTimeout(() => {
-          if (!ready) {
-            proc.kill('SIGTERM');
-            process.stderr.write('WATCH_NEVER_READY: ' + output);
-            process.exit(1);
-          }
-        }, 4000);
-      `;
-
-			const result = spawnSync("node", ["-e", helperScript], {
-				encoding: "utf-8",
-				timeout: 8000,
+			const output = await watchIgnoredThenVisible({
 				cwd: testDir,
-				env: {
-					...process.env,
-					XDG_DATA_HOME: join(tmpdir(), `c8ctl-watch-ign-${Date.now()}`),
-				},
+				watchArg: "./project/",
+				ignoredFile: join(projectDir, "ignored", "hidden.bpmn"),
+				visibleFile: join(projectDir, "visible.bpmn"),
 			});
-
-			const output = (result.stdout ?? "") + (result.stderr ?? "");
-
-			// Assert the watcher actually started (didn't silently fail)
-			assert.ok(
-				!output.includes("WATCH_NEVER_READY"),
-				`Watcher never reached readiness:\n${output}`,
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`Helper script should exit cleanly, got status ${result.status}:\n${output}`,
-			);
 
 			// .c8ignore from project/ dir should be picked up even though
 			// watch was started from the parent (testDir)
 			assert.ok(
-				!output.includes("Change detected"),
+				!output.includes("Change detected: hidden.bpmn"),
 				`Watch should pick up .c8ignore from target dir, but got:\n${output}`,
 			);
 		});

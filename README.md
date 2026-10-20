@@ -12,7 +12,7 @@ c8ctl (_pronounced: "cocktail"_) — a minimal-dependency CLI for Camunda 8 oper
 - **Local Cluster**: Run a local Camunda 8 instance directly — no Docker required
 - **MCP Proxy**: Bridge local MCP clients to remote Camunda 8 for AI agent integration
 - **Building Block Deployment**: Automatic prioritization of `*_bb-*` folders during deployment, marked with 🧱 in results
-- **Process Application Support**: Resources in folders with `.process-application` file marked with 📦 in results
+- **Camunda Project Support**: Resources in folders with a `camunda.json` (or legacy `.process-application`) marker are marked with 📦 in results
 - **Enhanced Deployment Results**: Table view showing file paths, visual indicators, resource details, and versions
 - **Watch Mode**: Monitors a folder for file changes and auto-redeploys (configurable extensions via `--extensions`)
 - **`.c8ignore` Support**: Filter deploy/watch file scanning with `.gitignore`-style patterns; `node_modules/`, `target/`, `.git/` ignored by default
@@ -74,6 +74,9 @@ c8ctl cluster start
 # Store a secret for local development (values are never shown or stored by c8ctl)
 c8ctl cluster secrets set OPENAI_API_KEY
 
+# Manage isolated local physical tenants (requires a supporting c8run 8.10+ build)
+c8ctl cluster physical-tenants add sales
+
 # Deploy a process and start an instance
 c8ctl deploy ./my-process.bpmn
 c8ctl run my-process
@@ -91,6 +94,8 @@ For everything else, see the [documentation](#documentation) above.
 ## AI agents and scripting
 
 c8ctl ships flags built for AI agents and scripts — `--fields` (filter output columns), `--dry-run` (preview the API request without executing it), and machine-readable JSON help. They appear in their own section in `c8ctl help`.
+
+`c8ctl --version` always writes the version result to stdout, including when JSON mode is selected by `--json`, `C8CTL_OUTPUT_MODE`, or the saved preference. See [Output modes](docs/getting-started.md#output-modes) for the text and JSON formats.
 
 See [Development workflows → AI agents and scripting](docs/development-workflows.md#ai-agents-and-scripting) for details and examples. For a full machine-readable reference intended for agents, see [CONTEXT.md](CONTEXT.md).
 
@@ -112,6 +117,10 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `create` - Create resource
 - `delete` - Delete resource
 - `cancel` - Cancel resource
+- `suspend` - Suspend resource
+- `resume` - Resume resource
+- `migrate` - Migrate process instances to another process definition
+- `modify` - Modify process instances: activate, terminate or move elements
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
 - `fail` - Fail a job
@@ -159,7 +168,8 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 - `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`.
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
-- `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr.
+- `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr (also sets Camunda SDK logging to `debug`).
+- `CAMUNDA_SDK_LOG_LEVEL`: Camunda SDK log level (logs go to stderr). Defaults to `silent`; `--verbose` uses `trace`.
 
 ## Configuration Files
 

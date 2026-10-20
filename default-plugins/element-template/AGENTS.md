@@ -10,8 +10,9 @@ version resolution.
 | File | Purpose |
 | --- | --- |
 | `c8ctl-plugin.ts` | Plugin API (metadata + commands export), subcommand dispatch table |
-| `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync` |
-| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `resolveOotbTemplate`, `loadTemplate` |
+| `commands/<name>.ts` | One file per subcommand: `apply`, `edit`, `get`, `get-properties`, `info`, `search`, `sync`, `update`. `update` is a thin wrapper over `commands/migrate.ts` |
+| `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
+| `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplates` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
 | `releases.ts` | `camunda/connectors` GitHub releases: listing, newest-release-per-minor selection, bundle download, tar.gz reader |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
@@ -38,13 +39,19 @@ version resolution.
   pipelines, and racing cold-cache invocations would both download the
   same bundles. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
-- **Path/URL apply paths must not trigger the cache check.**
+- **Path/URL refs and local id hits must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`
-  before any cache call.
+  before any cache call. An id found locally (`.camunda/element-templates/`
+  or the Modeler user-data dir, see `resolveTemplateId`) never reaches
+  `requireCachePresent()`; only the OOTB fallback does. `update` reads the
+  cache only on a local gap (see `templatePool` in `commands/migrate.ts`).
 - **`saveCache` and `apply --in-place` writes are atomic.** Both
   use a sibling temp file + `renameSync`. Anything else that
   overwrites a user-owned file (cache or BPMN) must follow the same
   pattern — a kill mid-write must not leave a truncated file.
+  `atomicOverwriteFile` resolves the target with `realpathSync` first,
+  so a symlinked BPMN keeps its link; locks on a BPMN path must use the
+  resolved path too.
 - **`syncTemplates` is serialised by an advisory lockfile.** The
   helper `withSyncLock` in `cache.ts` holds
   `<cacheDir>/.sync.lock` while the body runs, with stale-lock
@@ -95,6 +102,15 @@ version resolution.
 
 ```bash
 npm run build:vendor && node --experimental-strip-types --test tests/unit/element-template.test.ts
+```
+
+Test fixtures in `tests/fixtures/element-templates/` are synthetic. Never
+commit upstream connector templates (see its `SOURCES.md`). To check the AI
+Agent v1 to v2 migration against the real templates, fetched at a pinned
+`camunda/connectors` commit:
+
+```bash
+C8CTL_FIDELITY=1 node --experimental-strip-types --test tests/unit/element-template-migration-upstream-fidelity.test.ts
 ```
 
 Smoke-test against the live connectors releases (writes to a throwaway

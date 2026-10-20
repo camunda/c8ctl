@@ -303,15 +303,19 @@ function fixture() {
 		ciJobs: [
 			"Lint",
 			"Typecheck",
-			...[22, 24].flatMap((node) =>
-				["ubuntu-latest", "macos-latest", "windows-latest"].map(
-					(os) => `Unit Test (Node ${node} / ${os})`,
+			...[22, 24, 26].flatMap((node) =>
+				["ubuntu-latest", "macos-latest", "windows-latest"].flatMap((os) =>
+					[1, 2, 3, 4, 5, 6].map(
+						(shard) => `Unit Test (Node ${node} / ${os} / shard ${shard}/6)`,
+					),
 				),
 			),
-			...[22, 24].flatMap((node) =>
-				["8.8", "8.9", "8.10"].map(
-					(version) =>
-						`Integration Test (Node ${node} / Camunda ${version} / ubuntu-latest)`,
+			...[22, 24, 26].flatMap((node) =>
+				["8.8", "8.9", "8.10"].flatMap((version) =>
+					[1, 2, 3].map(
+						(shard) =>
+							`Integration Test (Node ${node} / Camunda ${version} / ubuntu-latest / shard ${shard}/3)`,
+					),
 				),
 			),
 		].map((name, index) => ({
@@ -352,11 +356,23 @@ function fixture() {
 			head_branch: "main",
 		},
 		releaseJobs: [
-			...[22, 24].flatMap((node) =>
-				["8.8", "8.9", "8.10"].map(
-					(version) => `Test (Node ${node} - Camunda ${version})`,
+			"Test / Lint",
+			"Test / Typecheck",
+			...[22, 24, 26].flatMap((node) =>
+				[1, 2, 3, 4, 5, 6].map(
+					(shard) =>
+						`Test / Unit Test (Node ${node} / ubuntu-latest / shard ${shard}/6)`,
 				),
 			),
+			...[22, 24, 26].flatMap((node) =>
+				["8.8", "8.9", "8.10"].flatMap((version) =>
+					[1, 2, 3].map(
+						(shard) =>
+							`Test / Integration Test (Node ${node} / Camunda ${version} / ubuntu-latest / shard ${shard}/3)`,
+					),
+				),
+			),
+			"Test / Tests passed",
 			"Release",
 		].map((name) => ({ name, status: "completed", conclusion: "success" })),
 		config: structuredClone(releaseConfig),

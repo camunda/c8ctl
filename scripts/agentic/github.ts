@@ -379,15 +379,19 @@ export async function observeWorker(input: {
 const CI_JOBS = [
 	"Lint",
 	"Typecheck",
-	...[22, 24].flatMap((node) =>
-		["ubuntu-latest", "macos-latest", "windows-latest"].map(
-			(os) => `Unit Test (Node ${node} / ${os})`,
+	...[22, 24, 26].flatMap((node) =>
+		["ubuntu-latest", "macos-latest", "windows-latest"].flatMap((os) =>
+			[1, 2, 3, 4, 5, 6].map(
+				(shard) => `Unit Test (Node ${node} / ${os} / shard ${shard}/6)`,
+			),
 		),
 	),
-	...[22, 24].flatMap((node) =>
-		["8.8", "8.9", "8.10"].map(
-			(camunda) =>
-				`Integration Test (Node ${node} / Camunda ${camunda} / ubuntu-latest)`,
+	...[22, 24, 26].flatMap((node) =>
+		["8.8", "8.9", "8.10"].flatMap((camunda) =>
+			[1, 2, 3].map(
+				(shard) =>
+					`Integration Test (Node ${node} / Camunda ${camunda} / ubuntu-latest / shard ${shard}/3)`,
+			),
 		),
 	),
 ];
@@ -542,7 +546,7 @@ export async function inspectCI(input: {
 				["failure", "timed_out"].includes(string(job.conclusion)),
 		);
 		// GitHub skips a dependency-blocked job before expanding its matrix.
-		const collapsedUnitName = `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }})`;
+		const collapsedUnitName = `Unit Test (Node \${{ matrix.node }} / \${{ matrix.os }} / shard \${{ matrix.shard }})`;
 		const collapsedUnits = jobs.filter((job) => job.name === collapsedUnitName);
 		const skippedUnitMatrix =
 			failedPrerequisite &&

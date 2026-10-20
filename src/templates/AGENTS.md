@@ -48,6 +48,7 @@ Methods:
 - `c8ctl.resolveTenantId(profileFlag?)`
 - `c8ctl.getLogger(mode?)`
 - `c8ctl.getUserDataDir()`
+- `c8ctl.getModelerDataDir()`
 - `c8ctl.npm({ args, stdout?, stdio? })`
 
 ## Development Loop

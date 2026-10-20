@@ -809,12 +809,25 @@ async function releaseCI(input: MergeOptions): Promise<void> {
 			"jobs",
 		)
 	).map(object);
+	// Release reuses test.yml; its jobs are reported as "<caller job> / <job>".
 	const expected = [
-		...[22, 24].flatMap((node) =>
-			["8.8", "8.9", "8.10"].map(
-				(version) => `Test (Node ${node} - Camunda ${version})`,
+		"Test / Lint",
+		"Test / Typecheck",
+		...[22, 24, 26].flatMap((node) =>
+			[1, 2, 3, 4, 5, 6].map(
+				(shard) =>
+					`Test / Unit Test (Node ${node} / ubuntu-latest / shard ${shard}/6)`,
 			),
 		),
+		...[22, 24, 26].flatMap((node) =>
+			["8.8", "8.9", "8.10"].flatMap((camunda) =>
+				[1, 2, 3].map(
+					(shard) =>
+						`Test / Integration Test (Node ${node} / Camunda ${camunda} / ubuntu-latest / shard ${shard}/3)`,
+				),
+			),
+		),
+		"Test / Tests passed",
 		"Release",
 	];
 	for (const name of expected) {

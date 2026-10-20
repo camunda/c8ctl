@@ -1,17 +1,15 @@
 /**
  * Class-of-defect guard for the CI Camunda version matrix (issue #566).
  *
- * The integration jobs in `.github/workflows/{test,release}.yml` run
+ * The integration jobs in `.github/workflows/test.yml` run
  * `docker compose up` inside `assets/c8/${{ matrix.camunda }}`, so every
  * entry in a `camunda:` matrix needs a matching asset directory with a
  * `docker-compose.yml` and a `.env` pinning `CAMUNDA_VERSION`. A matrix
  * entry without those files only fails once the workflow runs on CI —
  * long after the change merges.
  *
- * The guard also pins the two matrices to each other: `test.yml` gates
- * pull requests and `release.yml` gates publishing, so a version tested
- * on PRs but not on release (or the reverse) means the released artifact
- * was never verified against the version it claims to support.
+ * `release.yml` gates publishing by calling `test.yml`, so a version tested
+ * on PRs is always tested on release too; the guard pins that reuse.
  */
 
 import assert from "node:assert";
@@ -46,14 +44,11 @@ function readCamundaMatrix(workflow: string): string[] {
 
 describe("CI Camunda version matrix (#566)", () => {
 	const testMatrix = readCamundaMatrix("test.yml");
-	const releaseMatrix = readCamundaMatrix("release.yml");
 
-	test("test.yml and release.yml cover the same Camunda versions", () => {
-		assert.deepStrictEqual(
-			[...testMatrix].sort(),
-			[...releaseMatrix].sort(),
-			"the PR test matrix and the release test matrix must not drift apart",
-		);
+	test("release.yml reuses test.yml instead of its own matrix", () => {
+		const release = readFileSync(join(WORKFLOWS_DIR, "release.yml"), "utf8");
+		assert.match(release, /uses:\s*\.\/\.github\/workflows\/test\.yml/);
+		assert.doesNotMatch(release, /^\s*camunda:\s*\[/m);
 	});
 
 	test("every matrix version has docker compose assets", () => {

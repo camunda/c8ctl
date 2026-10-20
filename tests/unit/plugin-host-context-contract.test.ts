@@ -366,3 +366,45 @@ describe("plugin host context: backward compatibility for 2-arg handlers", () =>
 		assert.strictEqual(parsed.sawCtx, false);
 	});
 });
+
+describe("plugin host context: a string global cannot swallow a plugin flag", () => {
+	test("`echo-ctx --profile --flag1 x` keeps --flag1 as the plugin flag and leaves profile unset", async () => {
+		const result = await c8Plugin("echo-ctx", "--profile", "--flag1", "x");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(
+			isRecord(out.flags) && out.flags.flag1 === "x",
+			JSON.stringify(out),
+		);
+		assert.ok(isRecord(out.ctx));
+		assert.notStrictEqual(out.ctx.profile, "--flag1");
+		assert.ok(
+			out.ctx.profile === undefined || out.ctx.profile === null,
+			`profile must not be taken from the plugin flag: ${JSON.stringify(out.ctx)}`,
+		);
+	});
+
+	test("`echo-ctx --fields --flag1 x` does not turn --flag1 into the fields list", async () => {
+		const result = await c8Plugin("echo-ctx", "--fields", "--flag1", "x");
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(out.ctx));
+		assert.ok(
+			!(Array.isArray(out.ctx.fields) && out.ctx.fields.includes("--flag1")),
+		);
+		assert.ok(isRecord(out.flags) && out.flags.flag1 === "x");
+	});
+
+	test("a string global given a real value still reaches ctx", async () => {
+		const result = await c8Plugin(
+			"echo-ctx",
+			"--profile",
+			"dev",
+			"--flag1",
+			"x",
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		const out = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(out.ctx) && out.ctx.profile === "dev");
+	});
+});

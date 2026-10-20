@@ -7,11 +7,14 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -20,7 +23,7 @@ import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { isRecord } from "../../src/core/logger.ts";
-import { c8 } from "../utils/cli.ts";
+import { c8, c8WithOptions } from "../utils/cli.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 const FIXTURES_DIR = resolve(import.meta.dirname, "..", "fixtures");
@@ -190,6 +193,324 @@ describe("CLI behavioural: element-template apply", () => {
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
+	});
+
+	test("apply --in-place falls back to a direct write on EXDEV", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const tempBpmn = join(tempDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		const exdev = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const rename = fs.renameSync; fs.renameSync = (from, to) => { if (String(to).endsWith(".bpmn")) throw Object.assign(new Error("cross-device"), { code: "EXDEV" }); return rename(from, to); }; syncBuiltinESMExports();`;
+		try {
+			const result = await c8WithOptions(
+				{
+					nodeArgs: [
+						"--import",
+						`data:text/javascript,${encodeURIComponent(exdev)}`,
+					],
+					env: { C8CTL_OUTPUT_MODE: "text" },
+				},
+				"element-template",
+				"apply",
+				"--in-place",
+				TEMPLATE_FILE,
+				"Activity_17s7axj",
+				tempBpmn,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(
+				getTaskDefinitionType(readFileSync(tempBpmn, "utf-8")),
+				"io.camunda:http-json:1",
+			);
+			assert.deepStrictEqual(
+				readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
+				[],
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	// Simulates another writer committing between the read and the replace.
+	const concurrentWrite = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const write = fs.writeFileSync; fs.writeFileSync = (path, ...rest) => { if (String(path).endsWith(".tmp")) write(process.env.C8CTL_TEST_RACE_TARGET, "concurrent"); return write(path, ...rest); }; syncBuiltinESMExports();`;
+	const exdev = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const rename = fs.renameSync; fs.renameSync = (from, to) => { if (String(to).endsWith(".bpmn")) throw Object.assign(new Error("cross-device"), { code: "EXDEV" }); return rename(from, to); }; syncBuiltinESMExports();`;
+	for (const [command, preloads] of [
+		["apply", [concurrentWrite]],
+		["apply", [concurrentWrite, exdev]],
+		["edit", [concurrentWrite]],
+	] as const) {
+		test(`${command} --in-place keeps a concurrent write${preloads.length > 1 ? " on EXDEV" : ""}`, async () => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			const dataDir = join(tempDir, "data");
+			mkdirSync(join(dataDir, "element-templates"), { recursive: true });
+			writeFileSync(
+				join(dataDir, "element-templates", "templates.json"),
+				`[${readFileSync(TEMPLATE_FILE, "utf-8")}]`,
+			);
+			writeFileSync(
+				join(dataDir, "element-templates", "fetched-at"),
+				String(Date.now()),
+			);
+			try {
+				if (command === "edit") {
+					const applied = await c8WithOptions(
+						{ env: { C8CTL_DATA_DIR: dataDir, C8CTL_OUTPUT_MODE: "text" } },
+						"element-template",
+						"apply",
+						"--in-place",
+						TEMPLATE_FILE,
+						"Activity_17s7axj",
+						tempBpmn,
+					);
+					assert.strictEqual(applied.status, 0, applied.stderr);
+				}
+				const args =
+					command === "apply"
+						? [
+								"apply",
+								"--in-place",
+								TEMPLATE_FILE,
+								"Activity_17s7axj",
+								tempBpmn,
+							]
+						: [
+								"edit",
+								"--in-place",
+								"Activity_17s7axj",
+								tempBpmn,
+								"--set",
+								"method=PUT",
+							];
+				const result = await c8WithOptions(
+					{
+						nodeArgs: preloads.flatMap((code) => [
+							"--import",
+							`data:text/javascript,${encodeURIComponent(code)}`,
+						]),
+						env: {
+							C8CTL_DATA_DIR: dataDir,
+							C8CTL_OUTPUT_MODE: "text",
+							C8CTL_TEST_RACE_TARGET: tempBpmn,
+						},
+					},
+					"element-template",
+					...args,
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /BPMN changed while this command ran/);
+				assert.strictEqual(readFileSync(tempBpmn, "utf-8"), "concurrent");
+				assert.deepStrictEqual(
+					readdirSync(tempDir).filter((name) => name.endsWith(".tmp")),
+					[],
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	describe("--in-place through a symlink", {
+		skip:
+			process.platform === "win32"
+				? "creating symlinks needs elevated rights on Windows"
+				: false,
+	}, () => {
+		// The link and its target sit in sibling directories. The data dir
+		// caches the template so `edit` can resolve it by id.
+		function linkedWorkspace() {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			mkdirSync(join(tempDir, "shared"));
+			mkdirSync(join(tempDir, "models"));
+			const target = join(tempDir, "shared", "model.bpmn");
+			const link = join(tempDir, "models", "model.bpmn");
+			writeFileSync(target, readFileSync(BPMN_FILE, "utf-8"));
+			symlinkSync(join("..", "shared", "model.bpmn"), link);
+			const dataDir = join(tempDir, "data");
+			mkdirSync(join(dataDir, "element-templates"), { recursive: true });
+			writeFileSync(
+				join(dataDir, "element-templates", "templates.json"),
+				`[${readFileSync(TEMPLATE_FILE, "utf-8")}]`,
+			);
+			writeFileSync(
+				join(dataDir, "element-templates", "fetched-at"),
+				String(Date.now()),
+			);
+			const run = (nodeArgs: string[], ...args: string[]) =>
+				c8WithOptions(
+					{
+						nodeArgs,
+						env: { C8CTL_DATA_DIR: dataDir, C8CTL_OUTPUT_MODE: "text" },
+					},
+					"element-template",
+					...args,
+				);
+			const tmpFiles = () =>
+				["shared", "models"].flatMap((sub) =>
+					readdirSync(join(tempDir, sub)).filter((name) =>
+						name.endsWith(".tmp"),
+					),
+				);
+			return { tempDir, dataDir, target, link, run, tmpFiles };
+		}
+
+		const exdevPreload = [
+			"--import",
+			`data:text/javascript,${encodeURIComponent(exdev)}`,
+		];
+		for (const [label, nodeArgs] of [
+			["", []],
+			[" on EXDEV", exdevPreload],
+		] as const) {
+			test(`apply writes the target and keeps the link${label}`, async () => {
+				const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+				try {
+					const result = await run(
+						[...nodeArgs],
+						"apply",
+						"--in-place",
+						TEMPLATE_FILE,
+						"Activity_17s7axj",
+						link,
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+					assert.strictEqual(
+						getTaskDefinitionType(readFileSync(target, "utf-8")),
+						"io.camunda:http-json:1",
+					);
+					assert.deepStrictEqual(tmpFiles(), []);
+				} finally {
+					rmSync(tempDir, { recursive: true, force: true });
+				}
+			});
+		}
+
+		test("edit writes the target and keeps the link", async () => {
+			const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+			try {
+				const applied = await run(
+					[],
+					"apply",
+					"--in-place",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					target,
+				);
+				assert.strictEqual(applied.status, 0, applied.stderr);
+				const result = await run(
+					[],
+					"edit",
+					"--in-place",
+					"Activity_17s7axj",
+					link,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+				assert.strictEqual(
+					getInputValue(readFileSync(target, "utf-8"), "method"),
+					"PUT",
+				);
+				assert.deepStrictEqual(tmpFiles(), []);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		// Retargets the link right after the command reads it. Both files hold
+		// the same XML, so only a path pinned before the read keeps the write
+		// on the file that was read.
+		const retargetAfterRead = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const read = fs.readFileSync; let done = false; fs.readFileSync = (path, ...rest) => { const out = read(path, ...rest); if (!done && String(path) === process.env.C8CTL_TEST_LINK) { done = true; fs.unlinkSync(process.env.C8CTL_TEST_LINK); fs.symlinkSync(process.env.C8CTL_TEST_LINK_TO, process.env.C8CTL_TEST_LINK); } return out; }; syncBuiltinESMExports();`;
+		for (const command of ["apply", "edit"] as const) {
+			test(`${command} writes the file it read when the link is retargeted`, async () => {
+				const { tempDir, dataDir, target, link, run, tmpFiles } =
+					linkedWorkspace();
+				try {
+					if (command === "edit") {
+						const applied = await run(
+							[],
+							"apply",
+							"--in-place",
+							TEMPLATE_FILE,
+							"Activity_17s7axj",
+							target,
+						);
+						assert.strictEqual(applied.status, 0, applied.stderr);
+					}
+					const other = join(tempDir, "shared", "other.bpmn");
+					writeFileSync(other, readFileSync(target));
+					const before = readFileSync(other, "utf-8");
+					const args =
+						command === "apply"
+							? ["apply", "--in-place", TEMPLATE_FILE, "Activity_17s7axj", link]
+							: [
+									"edit",
+									"--in-place",
+									"Activity_17s7axj",
+									link,
+									"--set",
+									"method=PUT",
+								];
+					const result = await c8WithOptions(
+						{
+							nodeArgs: [
+								"--import",
+								`data:text/javascript,${encodeURIComponent(retargetAfterRead)}`,
+							],
+							env: {
+								C8CTL_DATA_DIR: dataDir,
+								C8CTL_OUTPUT_MODE: "text",
+								C8CTL_TEST_LINK: link,
+								C8CTL_TEST_LINK_TO: join("..", "shared", "other.bpmn"),
+							},
+						},
+						"element-template",
+						...args,
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(
+						realpathSync(link),
+						realpathSync(other),
+						"the hook must have retargeted the link",
+					);
+					assert.strictEqual(readFileSync(other, "utf-8"), before);
+					const written = readFileSync(target, "utf-8");
+					if (command === "apply")
+						assert.strictEqual(
+							getTaskDefinitionType(written),
+							"io.camunda:http-json:1",
+						);
+					else assert.strictEqual(getInputValue(written, "method"), "PUT");
+					assert.deepStrictEqual(tmpFiles(), []);
+				} finally {
+					rmSync(tempDir, { recursive: true, force: true });
+				}
+			});
+		}
+
+		test("apply reports a dangling link by path", async () => {
+			const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+			rmSync(target);
+			try {
+				const result = await run(
+					[],
+					"apply",
+					"--in-place",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					link,
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /File not found: .*model\.bpmn/);
+				assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+				assert.strictEqual(existsSync(target), false);
+				assert.deepStrictEqual(tmpFiles(), []);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
 	});
 
 	test("missing template file exits 1", async () => {
@@ -2651,6 +2972,154 @@ describe("CLI behavioural: element-template edit", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+	/**
+	 * Apply a custom (non-OOTB) copy of the HTTP JSON fixture to a fresh BPMN
+	 * copy, then hand the caller the BPMN path and the custom template path.
+	 * Nothing about the custom template is in the OOTB cache.
+	 */
+	async function withCustomTemplatedBpmn(
+		fn: (ctx: {
+			tempDir: string;
+			tempBpmn: string;
+			customTemplate: Record<string, unknown>;
+			customTemplateFile: string;
+		}) => Promise<void>,
+		{ bpmnSubdir = "" }: { bpmnSubdir?: string } = {},
+	): Promise<void> {
+		const customTemplate = {
+			...JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8")),
+			id: "io.example.custom.Http.v1",
+			version: 3,
+		};
+		const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+		const bpmnDir = join(tempDir, bpmnSubdir);
+		mkdirSync(bpmnDir, { recursive: true });
+		const tempBpmn = join(bpmnDir, "test.bpmn");
+		writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+		const customTemplateFile = join(tempDir, "custom-template.json");
+		writeFileSync(customTemplateFile, JSON.stringify(customTemplate));
+		try {
+			const applied = await spawnAgainstEmptyCache(
+				"apply",
+				"-i",
+				customTemplateFile,
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=POST",
+			);
+			assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+			await fn({ tempDir, tempBpmn, customTemplate, customTemplateFile });
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	}
+
+	test("resolves a custom template from .camunda/element-templates/ in an ancestor of the BPMN file", async () => {
+		await withCustomTemplatedBpmn(
+			async ({ tempDir, tempBpmn, customTemplate }) => {
+				const localDir = join(tempDir, ".camunda", "element-templates");
+				mkdirSync(localDir, { recursive: true });
+				// Template files may hold a single template or an array.
+				writeFileSync(
+					join(localDir, "custom.json"),
+					JSON.stringify([customTemplate]),
+				);
+				await withSeededElementTemplateCache([], async (run) => {
+					const edited = await run(
+						"element-template",
+						"edit",
+						"Activity_17s7axj",
+						tempBpmn,
+						"--set",
+						"method=PUT",
+					);
+					assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+					assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+				});
+			},
+			{ bpmnSubdir: "processes" },
+		);
+	});
+
+	test("cold cache: resolves a local .camunda/element-templates/ template without the OOTB cache", async () => {
+		await withCustomTemplatedBpmn(async ({ tempDir, tempBpmn }) => {
+			const localDir = join(tempDir, ".camunda", "element-templates");
+			mkdirSync(localDir, { recursive: true });
+			writeFileSync(
+				join(localDir, "custom.json"),
+				readFileSync(join(tempDir, "custom-template.json"), "utf-8"),
+			);
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template <path> resolves an explicitly given custom template", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn, customTemplateFile }) => {
+			const edited = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				customTemplateFile,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+			assert.strictEqual(getInputValue(edited.stdout, "method"), "PUT");
+		});
+	});
+
+	test("--template rejects a template that doesn't match the element's recorded id/version", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			const result = await spawnAgainstEmptyCache(
+				"edit",
+				"Activity_17s7axj",
+				tempBpmn,
+				"--template",
+				TEMPLATE_FILE,
+				"--set",
+				"method=PUT",
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.ok(
+				output.includes("does not match") &&
+					output.includes("io.example.custom.Http.v1"),
+				`Should report the id/version mismatch. Got: ${output.slice(0, 400)}`,
+			);
+		});
+	});
+
+	test("unresolvable template: error points at --template and .camunda/element-templates/", async () => {
+		await withCustomTemplatedBpmn(async ({ tempBpmn }) => {
+			await withSeededElementTemplateCache([], async (run) => {
+				const result = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 1);
+				const output = result.stdout + result.stderr;
+				assert.ok(
+					output.includes("--template") &&
+						output.includes(".camunda/element-templates/"),
+					`Should mention the escape hatches. Got: ${output.slice(0, 400)}`,
+				);
+			});
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2727,6 +3196,338 @@ describe("CLI behavioural: element-template cold-cache failures", () => {
 			);
 		});
 	}
+});
+
+// ---------------------------------------------------------------------------
+// element-template — `<id>` resolves .camunda/element-templates/ before the cache
+// ---------------------------------------------------------------------------
+
+const LOCAL_TEMPLATE_ID = "io.example.local.Http.v1";
+
+/**
+ * A copy of the HTTP JSON fixture under a custom id, with a
+ * `marker-v<version>` property so `get-properties` output reveals which
+ * version was resolved.
+ */
+function localTemplateVersion(
+	version: number,
+	engines?: string,
+): Record<string, unknown> {
+	const base = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+	return {
+		...base,
+		id: LOCAL_TEMPLATE_ID,
+		version,
+		engines: engines ? { camunda: engines } : undefined,
+		properties: [
+			...base.properties,
+			{
+				id: `marker-v${version}`,
+				label: "marker",
+				type: "String",
+				value: "x",
+				binding: { type: "zeebe:input", name: `marker-v${version}` },
+			},
+		],
+	};
+}
+
+/**
+ * A project dir whose `.camunda/element-templates/` holds v2 (^8.7) and v3
+ * (^8.9) of a custom template, with the BPMN (executionPlatformVersion
+ * 8.8.0) in a `processes/` subdirectory. `run` spawns the CLI in JSON mode
+ * from `cwd`, against a data dir whose OOTB cache is absent unless `cache`
+ * is given, and an empty Desktop Modeler user-data dir (`modelerDir`).
+ */
+async function withLocalTemplateProject(
+	{ cache }: { cache?: Array<Record<string, unknown>> },
+	fn: (ctx: {
+		projectDir: string;
+		modelerDir: string;
+		bpmn: string;
+		run: (cwd: string, ...args: string[]) => ReturnType<typeof asyncSpawn>;
+	}) => Promise<void>,
+): Promise<void> {
+	const projectDir = mkdtempSync(join(tmpdir(), "c8ctl-et-project-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-cold-"));
+	const modelerDir = mkdtempSync(join(tmpdir(), "c8ctl-et-modeler-"));
+	writeFileSync(
+		join(dataDir, "session.json"),
+		JSON.stringify({ outputMode: "json" }),
+	);
+	if (cache) {
+		const cacheDir = join(dataDir, "element-templates");
+		mkdirSync(cacheDir, { recursive: true });
+		writeFileSync(join(cacheDir, "templates.json"), JSON.stringify(cache));
+		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
+	}
+	const localDir = join(projectDir, ".camunda", "element-templates");
+	mkdirSync(localDir, { recursive: true });
+	writeFileSync(
+		join(localDir, "custom.json"),
+		JSON.stringify([
+			localTemplateVersion(2, "^8.7"),
+			localTemplateVersion(3, "^8.9"),
+		]),
+	);
+	mkdirSync(join(projectDir, "processes"));
+	const bpmn = join(projectDir, "processes", "test.bpmn");
+	writeFileSync(bpmn, readFileSync(BPMN_FILE, "utf-8"));
+	const run = (cwd: string, ...args: string[]) =>
+		asyncSpawn(
+			"node",
+			["--experimental-strip-types", join(REPO_ROOT, CLI), ...args],
+			{
+				cwd,
+				env: {
+					...process.env,
+					CAMUNDA_BASE_URL: "http://test-cluster/v2",
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+					C8CTL_MODELER_DIR: modelerDir,
+				},
+			},
+		);
+	try {
+		await fn({ projectDir, modelerDir, bpmn, run });
+	} finally {
+		rmSync(projectDir, { recursive: true, force: true });
+		rmSync(dataDir, { recursive: true, force: true });
+		rmSync(modelerDir, { recursive: true, force: true });
+	}
+}
+
+describe("CLI behavioural: element-template <id> resolves .camunda/element-templates/ first", () => {
+	type Case = {
+		label: string;
+		args: (ref: string, bpmn: string) => string[];
+		/** `apply` searches from the BPMN's directory; the rest from cwd. */
+		cwd: (projectDir: string) => string;
+		resolvedVersion: (stdout: string) => number | undefined;
+		/** Unpinned: highest local version compatible with the engine. */
+		unpinned: number;
+		pinned: number;
+	};
+	const CASES: Case[] = [
+		{
+			label: "apply",
+			args: (ref, bpmn) => ["apply", ref, "Activity_17s7axj", bpmn],
+			cwd: () => tmpdir(),
+			resolvedVersion: (stdout) =>
+				Number(stdout.match(/zeebe:modelerTemplateVersion="(\d+)"/)?.[1]),
+			// The BPMN targets 8.8.0, so v3 (^8.9) is skipped.
+			unpinned: 2,
+			pinned: 3,
+		},
+		{
+			label: "info",
+			args: (ref) => ["info", ref],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get-properties",
+			args: (ref) => ["get-properties", ref, "marker-*"],
+			cwd: (projectDir) => join(projectDir, "processes"),
+			resolvedVersion: (stdout) =>
+				Number(
+					JSON.parse(stdout).properties[0]?.binding.name.slice(
+						"marker-v".length,
+					),
+				),
+			unpinned: 3,
+			pinned: 2,
+		},
+		{
+			label: "get",
+			args: (ref) => ["get", ref],
+			cwd: (projectDir) => projectDir,
+			resolvedVersion: (stdout) => JSON.parse(stdout).version,
+			unpinned: 3,
+			pinned: 2,
+		},
+	];
+
+	for (const c of CASES) {
+		test(`${c.label}: cold cache resolves the highest compatible local version`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(LOCAL_TEMPLATE_ID, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.unpinned);
+			});
+		});
+
+		test(`${c.label}: cold cache resolves a pinned local version exactly`, async () => {
+			await withLocalTemplateProject({}, async ({ projectDir, bpmn, run }) => {
+				const result = await run(
+					c.cwd(projectDir),
+					"element-template",
+					...c.args(`${LOCAL_TEMPLATE_ID}@${c.pinned}`, bpmn),
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(c.resolvedVersion(result.stdout), c.pinned);
+			});
+		});
+
+		test(`${c.label}: a version missing locally falls back to the OOTB cache`, async () => {
+			await withLocalTemplateProject(
+				{ cache: [localTemplateVersion(5)] },
+				async ({ projectDir, bpmn, run }) => {
+					const result = await run(
+						c.cwd(projectDir),
+						"element-template",
+						...c.args(`${LOCAL_TEMPLATE_ID}@5`, bpmn),
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(c.resolvedVersion(result.stdout), 5);
+				},
+			);
+		});
+	}
+
+	test("info: no engine-compatible local version falls back to the OOTB cache", async () => {
+		await withLocalTemplateProject(
+			{ cache: [localTemplateVersion(5)] },
+			async ({ projectDir, run }) => {
+				const result = await run(
+					projectDir,
+					"element-template",
+					"info",
+					LOCAL_TEMPLATE_ID,
+					"--engine-version",
+					"8.6.0",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(JSON.parse(result.stdout).version, 5);
+			},
+		);
+	});
+});
+
+describe("CLI behavioural: element-template local lookup matches Desktop Modeler", () => {
+	/** Write `templates` to `<dir>/.camunda/element-templates/<name>`. */
+	function writeLocal(dir: string, name: string, templates: unknown): void {
+		const localDir = join(dir, ".camunda", "element-templates");
+		mkdirSync(localDir, { recursive: true });
+		writeFileSync(join(localDir, name), JSON.stringify(templates));
+	}
+
+	test("picks the version over all ancestors, not the nearest directory with a match", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			// The project root holds v2 and v3; the nearer dir only v1.
+			const processes = join(projectDir, "processes");
+			writeLocal(processes, "v1.json", localTemplateVersion(1));
+			const result = await run(
+				processes,
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).version, 3);
+		});
+	});
+
+	test("duplicate id+version: the nearest wins and the duplicate is reported", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			const processes = join(projectDir, "processes");
+			writeLocal(processes, "v3.json", {
+				...localTemplateVersion(3, "^8.9"),
+				name: "nearest",
+			});
+			const result = await run(
+				processes,
+				"element-template",
+				"get",
+				`${LOCAL_TEMPLATE_ID}@3`,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).name, "nearest");
+			assert.ok(
+				result.stderr.includes("already used"),
+				`Should report the shadowed duplicate. Got: ${result.stderr}`,
+			);
+		});
+	});
+
+	test("a malformed template file is an error, not skipped", async () => {
+		await withLocalTemplateProject({}, async ({ projectDir, run }) => {
+			writeFileSync(
+				join(projectDir, ".camunda", "element-templates", "broken.json"),
+				"{ not json",
+			);
+			const result = await run(
+				join(projectDir, "processes"),
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 1);
+			const output = result.stdout + result.stderr;
+			assert.match(
+				output,
+				/template \S*broken\.json parse error/,
+				"Should name the malformed file",
+			);
+		});
+	});
+
+	test("an invalid local template is reported and skipped", async () => {
+		const otherId = `${LOCAL_TEMPLATE_ID}.other`;
+		await withLocalTemplateProject(
+			{ cache: [{ ...localTemplateVersion(5), id: otherId }] },
+			async ({ projectDir, run }) => {
+				// The only local candidate lacks `$schema`, so the cache answers.
+				const { $schema: _, ...invalid } = localTemplateVersion(9);
+				writeLocal(join(projectDir, "processes"), "invalid.json", {
+					...invalid,
+					id: otherId,
+				});
+				const result = await run(
+					join(projectDir, "processes"),
+					"element-template",
+					"get",
+					otherId,
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.strictEqual(JSON.parse(result.stdout).version, 5);
+				assert.ok(
+					result.stderr.includes("missing $schema"),
+					`Should report why the template was skipped. Got: ${result.stderr}`,
+				);
+			},
+		);
+	});
+
+	test("cold cache: resolves a template from the Desktop Modeler user-data dir", async () => {
+		await withLocalTemplateProject({}, async ({ modelerDir, run }) => {
+			const userTemplates = join(
+				modelerDir,
+				"resources",
+				"element-templates",
+				"nested",
+			);
+			mkdirSync(userTemplates, { recursive: true });
+			writeFileSync(
+				join(userTemplates, "custom.json"),
+				JSON.stringify(localTemplateVersion(7)),
+			);
+			const result = await run(
+				tmpdir(),
+				"element-template",
+				"get",
+				LOCAL_TEMPLATE_ID,
+			);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(JSON.parse(result.stdout).version, 7);
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------

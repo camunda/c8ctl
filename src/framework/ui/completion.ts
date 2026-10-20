@@ -11,6 +11,7 @@ import {
 	type CommandDef,
 	type FlagDef,
 	GLOBAL_FLAGS,
+	getCommandDef,
 	RESOURCE_ALIASES,
 } from "../command-registry.ts";
 import {
@@ -28,6 +29,18 @@ function registryEntries(): [string, CommandDef][] {
 /** Typed entries for a flag record — avoids per-loop casts. */
 function flagEntries(flags: Record<string, FlagDef>): [string, FlagDef][] {
 	return Object.entries(flags);
+}
+
+/** Flat flag list for a plugin command (name merged into each flag def). */
+function pluginFlagList(
+	cmd: PluginCommandInfo,
+): (FlagDef & { name: string })[] {
+	return flagEntries(cmd.flags ?? {}).map(([name, def]) => ({ name, ...def }));
+}
+
+/** Plugin commands that dispatch; a built-in verb or alias shadows a same-named plugin. */
+function reachablePluginCmds(cmds: PluginCommandInfo[]): PluginCommandInfo[] {
+	return cmds.filter((cmd) => !getCommandDef(cmd.commandName));
 }
 
 // ─── Derived completion data ─────────────────────────────────────────────────
@@ -118,10 +131,7 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 	}
 
 	// Plugin-provided verbs (e.g. cluster)
-	for (const cmd of pluginCommandsInfo) {
-		// Skip if already in registry
-		if (cmd.commandName in COMMAND_REGISTRY) continue;
-
+	for (const cmd of reachablePluginCmds(pluginCommandsInfo)) {
 		infos.push({
 			verb: cmd.commandName,
 			description: cmd.description ?? "",
@@ -135,7 +145,17 @@ function deriveVerbInfos(pluginCommandsInfo: PluginCommandInfo[]): VerbInfo[] {
 	return infos;
 }
 
-/** Collect all unique flag names across all commands + global + search flags. */
+/**
+ * True when the resource position of `v` completes file paths: deploy/run/
+ * watch, and passthrough verbs — unless the passthrough verb declared
+ * `subcommands` (e.g. the `cluster` plugin), in which case those are what
+ * the user wants offered.
+ */
+function completesFiles(v: VerbInfo): boolean {
+	return v.fileComplete || (v.passthrough && v.resources.length === 0);
+}
+
+/** Collect all unique built-in flag names. */
 function deriveAllFlagNames(): string[] {
 	const names = new Set<string>();
 
@@ -170,6 +190,27 @@ function deriveAllFlagNames(): string[] {
  */
 function deriveGlobalFlagNames(): string[] {
 	return Object.keys(GLOBAL_FLAGS).map((n) => `--${n}`);
+}
+
+/**
+ * Global options that take the next word as their value before the verb, e.g.
+ * `--profile p`. Like `splitGlobals`, `--version` is boolean there.
+ */
+function globalValueOptions(): string[] {
+	return deriveGlobalFlags()
+		.filter((f) => f.type === "string" && f.name !== "version")
+		.flatMap((f) => [`--${f.name}`, ...(f.short ? [`-${f.short}`] : [])]);
+}
+
+/** Words that end a value-taking global without a value: `--` and global flags. */
+function globalFlagTokens(): string[] {
+	return [
+		"--",
+		...deriveGlobalFlags().flatMap((f) => [
+			`--${f.name}`,
+			...(f.short ? [`-${f.short}`] : []),
+		]),
+	];
 }
 
 /** Same as deriveAllFlags() but restricted to GLOBAL_FLAGS only. */
@@ -273,7 +314,7 @@ function deriveHelpResources(): { name: string; description: string }[] {
 	for (const cmd of pluginCmds) {
 		if (
 			!items.some((i) => i.name === cmd.commandName) &&
-			!(cmd.commandName in COMMAND_REGISTRY)
+			!getCommandDef(cmd.commandName)
 		) {
 			items.push({
 				name: cmd.commandName,
@@ -328,7 +369,7 @@ function generateBashCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			// deploy/run/watch and #366 passthrough verbs complete with
 			// files. Include aliases in the case pattern so e.g. `c8ctl
 			// w <TAB>` (alias for `watch`) gets file completion too.
@@ -382,6 +423,31 @@ ${resourceVars.join("\n")}
   # Passthrough verbs (#366): only c8ctl globals are meaningful flags;
   # everything else is forwarded verbatim to the external tool.
   local passthrough_verbs="${passthroughVerbsStr}"
+
+  # The verb follows any leading global options and their values.
+  local verb_index=1
+  while (( verb_index < cword )); do
+    case "\${words[verb_index]}" in
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
+      -*) (( verb_index += 1 )) ;;
+      *) break ;;
+    esac
+  done
+
+  if [[ \${cur} == -* ]] && (( verb_index < cword )); then
+    case "\${words[verb_index]}" in
+${reachablePluginCmds(pluginCmds)
+	.map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        COMPREPLY=( $(compgen -W "${[...globalFlags, ...Object.keys(cmd.flags ?? {}).map((name) => `--${name}`)].join(" ")}" -- "\${cur}") )\n        return ;;`,
+	)
+	.join("\n")}
+    esac
+  fi
 
   case \${cword} in
     1)
@@ -454,6 +520,14 @@ function generateZshCompletion(): string {
 	};
 	const flagEntryLines = allFlags.map(toZshFlagEntry);
 	const globalFlagEntryLines = globalFlagsOnly.map(toZshFlagEntry);
+	const pluginCaseLines = reachablePluginCmds(pluginCmds).map(
+		(cmd) =>
+			`      ${cmd.commandName})\n        flags=(\n${pluginFlagList(cmd)
+				.map(toZshFlagEntry)
+				.join(
+					"\n",
+				)}\n        )\n        _arguments \${global_flags[@]} \${flags[@]}; return ;;`,
+	);
 
 	// Passthrough verbs (#366) for the case branch in the default arm.
 	const passthroughVerbs = verbInfos.filter((v) => v.passthrough);
@@ -471,7 +545,7 @@ function generateZshCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			const casePattern =
 				v.aliases.length > 0 ? `${v.verb}|${v.aliases.join("|")}` : v.verb;
 			resourceCases.push(
@@ -512,6 +586,26 @@ ${flagEntryLines.join("\n")}
   global_flags=(
 ${globalFlagEntryLines.join("\n")}
   )
+
+  # The verb follows any leading global options and their values.
+  local verb_index=2
+  while (( verb_index < CURRENT )); do
+    case "\${words[verb_index]}" in
+      ${globalValueOptions().join("|")})
+        case "\${words[verb_index+1]%%=*}" in
+          ${globalFlagTokens().join("|")}) (( verb_index += 1 )) ;;
+          *) (( verb_index += 2 )) ;;
+        esac ;;
+      -*) (( verb_index += 1 )) ;;
+      *) break ;;
+    esac
+  done
+
+  if (( verb_index < CURRENT )) && { (( CURRENT > verb_index + 1 )) || [[ \${words[CURRENT]} == -* ]]; }; then
+    case "\${words[verb_index]}" in
+${pluginCaseLines.join("\n")}
+    esac
+  fi
 
   case $CURRENT in
     2)
@@ -564,6 +658,15 @@ function generateFishCompletion(): string {
 		passthroughTokens.length > 0
 			? ` -n 'not __fish_seen_subcommand_from ${passthroughTokens.join(" ")}'`
 			: "";
+	const flagAwarePluginCmds = reachablePluginCmds(pluginCmds).filter(
+		(cmd) => !cmd.passthrough,
+	);
+	const flagAwareTokens = flagAwarePluginCmds.map((cmd) => cmd.commandName);
+	const builtinGuard =
+		nonGlobalGuard +
+		(flagAwareTokens.length > 0
+			? ` -n 'not __c8ctl_verb_in ${flagAwareTokens.join(" ")}'`
+			: "");
 	const globalNames = new Set(globalFlags.map((f) => f.name));
 
 	const lines: string[] = [
@@ -572,6 +675,31 @@ function generateFishCompletion(): string {
 		"# Remove all existing completions for c8ctl and c8",
 		"complete -c c8ctl -e",
 		"complete -c c8 -e",
+		"",
+		"# Plugin flags match the verb, which follows any leading global options",
+		"function __c8ctl_verb_in",
+		"    set -l tokens (commandline -opc)",
+		"    set -l i 2",
+		"    while test $i -le (count $tokens)",
+		"        switch $tokens[$i]",
+		`            case ${globalValueOptions().join(" ")}`,
+		"                set -l next (string replace -r '=.*' '' -- $tokens[(math $i + 1)])",
+		`                if contains -- "$next" ${globalFlagTokens()
+			.map((t) => `'${t}'`)
+			.join(" ")}`,
+		"                    set i (math $i + 1)",
+		"                else",
+		"                    set i (math $i + 2)",
+		"                end",
+		"            case '-*'",
+		"                set i (math $i + 1)",
+		"            case '*'",
+		"                contains -- $tokens[$i] $argv",
+		"                return",
+		"        end",
+		"    end",
+		"    return 1",
+		"end",
 		"",
 	];
 
@@ -600,24 +728,28 @@ function generateFishCompletion(): string {
 			? `# Non-global flags (suppressed under passthrough verbs: ${passthroughTokens.join(", ")})`
 			: "# Non-global flags",
 	);
-	for (const f of allFlags) {
-		if (globalNames.has(f.name)) continue;
-		const desc = escFish(f.description);
-		const req = f.type === "string" ? " -r" : "";
-		if (f.short) {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
-			);
-		} else {
-			lines.push(
-				`complete -c c8ctl${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
-			lines.push(
-				`complete -c c8${nonGlobalGuard} -l ${f.name} -d '${desc}'${req}`,
-			);
+	for (const { flags, guard } of [
+		{ flags: allFlags, guard: builtinGuard },
+		...flagAwarePluginCmds.map((cmd) => ({
+			flags: pluginFlagList(cmd),
+			guard: ` -n '__c8ctl_verb_in ${cmd.commandName}'`,
+		})),
+	]) {
+		for (const f of flags) {
+			if (globalNames.has(f.name)) continue;
+			const desc = escFish(f.description);
+			const req = f.type === "string" ? " -r" : "";
+			if (f.short) {
+				lines.push(
+					`complete -c c8ctl${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+				lines.push(
+					`complete -c c8${guard} -s ${f.short} -l ${f.name} -d '${desc}'${req}`,
+				);
+			} else {
+				lines.push(`complete -c c8ctl${guard} -l ${f.name} -d '${desc}'${req}`);
+				lines.push(`complete -c c8${guard} -l ${f.name} -d '${desc}'${req}`);
+			}
 		}
 	}
 	lines.push("");
@@ -660,7 +792,7 @@ function generateFishCompletion(): string {
 			continue;
 		}
 
-		if (v.fileComplete || v.passthrough) {
+		if (completesFiles(v)) {
 			// Both `fileComplete` verbs (deploy/run/watch — they take file
 			// paths as their resource argument) and `passthrough` verbs
 			// (#366 — c8ctl can't know what the wrapped tool accepts, so

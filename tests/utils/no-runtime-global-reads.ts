@@ -43,10 +43,13 @@ export interface RuntimeGlobalRead {
  * Parse a TypeScript file and return every `c8ctl.<field>` property access
  * whose field is in `forbiddenFields`. Comments and string/template literals
  * are ignored (the parser correctly distinguishes them from real code).
+ * `objectName` defaults to the `c8ctl` runtime singleton; pass `"process"`
+ * with `["argv"]` to find `process.argv` reads.
  */
 export function findRuntimeGlobalReads(
 	filePath: string,
 	forbiddenFields: readonly string[],
+	objectName = "c8ctl",
 ): RuntimeGlobalRead[] {
 	const source = readFileSync(filePath, "utf8");
 	const sf = ts.createSourceFile(
@@ -64,7 +67,7 @@ export function findRuntimeGlobalReads(
 		if (
 			ts.isPropertyAccessExpression(node) &&
 			ts.isIdentifier(node.expression) &&
-			node.expression.text === "c8ctl" &&
+			node.expression.text === objectName &&
 			forbidden.has(node.name.text)
 		) {
 			const { line, character } = sf.getLineAndCharacterOfPosition(
