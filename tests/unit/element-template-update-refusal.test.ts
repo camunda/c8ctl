@@ -480,7 +480,7 @@ describe("change floor above the reached version", () => {
 			const text = await fixture.run("--dry-run");
 			assert.match(
 				text.stdout,
-				/upgrade v1 -> v2 \(implicit, no recipe entries\)/,
+				/The element is on v1, which is too old for this recipe\. Updating it to v2 first\./,
 			);
 			const written = await fixture.run("--in-place");
 			assert.equal(written.status, 0, written.stderr);

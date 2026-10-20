@@ -960,7 +960,10 @@ describe("implicit steps", () => {
 			color: false,
 			recipe: "embedded",
 		});
-		assert.match(text, /upgrade v1 -> v3 \(implicit, no recipe entries\)/);
+		assert.match(
+			text,
+			/The element is on v1, which is too old for this recipe\. Updating it to v3 first\./,
+		);
 		assert.doesNotMatch(text, /hop|v3 -> v1/);
 	});
 

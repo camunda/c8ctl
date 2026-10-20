@@ -526,7 +526,7 @@ export function renderReportText(
 	for (const step of report.steps.filter((step) => step.implicit)) {
 		lines.push(
 			s.dim(
-				`  upgrade v${step.fromVersion} -> v${step.toVersion} (implicit, no recipe entries)`,
+				`  The element is on v${step.fromVersion}, which is too old for this recipe. Updating it to v${step.toVersion} first.`,
 			),
 		);
 	}

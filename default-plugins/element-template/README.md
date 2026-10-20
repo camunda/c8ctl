@@ -291,7 +291,7 @@ version compatible with the BPMN's `modeler:executionPlatformVersion`; the plan 
 it. An omitted floor is the fallback entry: it never causes a bump itself and applies only when no declared floor is reachable. When a declared floor is reachable, an element below it is bumped to that floor and the fallback entry is not used. The element fails (no file is
 written, and `--allow-lossy` does not override it) when the newest compatible version is below
 the lowest floor, or when the floor version is not in the compatible catalog. The report marks
-the step: `upgrade vA -> vF (implicit, no recipe entries)` in text and `implicit: true` on the
+the step: `The element is on vA, which is too old for this recipe. Updating it to vF first.` in text and `implicit: true` on the
 step in `report.steps` of `--json`. File recipes replace only the target recipe and follow the
 same rules.
 This revised dialect keeps `schemaVersion: 1` but rejects legacy `minVersion` recipes and requires
