@@ -9,14 +9,7 @@
  * free while collecting stdout/stderr.
  */
 
-import {
-	type ExecFileException,
-	execFile as execFileCb,
-	spawn,
-} from "node:child_process";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCb);
+import { execFile as execFileCb, spawn } from "node:child_process";
 
 // Strict allowlist of binaries this test utility is permitted to invoke.
 // Callers pass a bare command name; the allowlist prevents an unexpected
@@ -144,7 +137,10 @@ function validateSpawnInputs(
  * signal. `timedOut` is true when the helper itself killed the child because
  * it exceeded `timeout`; stderr then ends with an explicit "timed out" note so
  * an assertion that prints stderr names the real cause instead of reading like
- * an ordinary non-zero exit.
+ * an ordinary non-zero exit. `timedOut` is tracked independently of the final
+ * exit code/signal: a child that installs a SIGTERM handler and then exits 0 or
+ * 1 of its own accord is still reported as timed out, with its actual exit
+ * `status`/`signal` preserved.
  */
 export interface SpawnResult {
 	stdout: string;
@@ -166,37 +162,46 @@ export async function asyncSpawn(
 ): Promise<SpawnResult> {
 	const env = resolveSpawnEnv(options);
 	validateSpawnInputs(command, args, { ...options, env });
-	try {
-		const { stdout, stderr } = await execFile(command, args, {
-			cwd: options?.cwd,
-			env,
-			maxBuffer: 10 * 1024 * 1024,
-			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
-		});
-		return {
-			stdout: stdout ?? "",
-			stderr: stderr ?? "",
-			status: 0,
-			signal: null,
-			timedOut: false,
-		};
-	} catch (err) {
-		// biome-ignore lint/plugin: unavoidable narrowing of catch-clause unknown to ExecFileException
-		const e = err as ExecFileException & { stdout?: string; stderr?: string };
-		const signal = e.signal ?? null;
-		// execFile only kills the child itself when the timeout fires, so a
-		// helper-initiated kill is exactly `killed` plus a signal.
-		const timedOut = e.killed === true && signal !== null;
-		return {
-			stdout: e.stdout ?? "",
-			stderr:
-				(e.stderr ?? "") +
-				(timedOut ? timeoutNote(options?.timeout, signal) : ""),
-			status: typeof e.code === "number" ? e.code : signal ? null : 1,
-			signal,
-			timedOut,
-		};
-	}
+	return await new Promise<SpawnResult>((resolve) => {
+		const child = execFileCb(
+			command,
+			args,
+			{
+				cwd: options?.cwd,
+				env,
+				maxBuffer: 10 * 1024 * 1024,
+				...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+			},
+			(err, stdout, stderr) => {
+				// This helper never calls kill() itself, so `child.killed` is true
+				// only when execFile's own `timeout` killed the child. Key the
+				// diagnostic on it rather than on a terminal signal: a child that
+				// handles the timeout's SIGTERM and exits normally closes with a
+				// null signal (and exit code 0 or 1), yet it was still timed out.
+				const timedOut = child.killed === true;
+				const signal = err?.signal ?? null;
+				const status =
+					err === null
+						? 0
+						: typeof err.code === "number"
+							? err.code
+							: signal
+								? null
+								: 1;
+				resolve({
+					stdout: stdout ?? "",
+					stderr:
+						(stderr ?? "") +
+						(timedOut
+							? timeoutNote(options?.timeout, signal ?? "SIGTERM")
+							: ""),
+					status,
+					signal,
+					timedOut,
+				});
+			},
+		);
+	});
 }
 
 /**
@@ -267,10 +272,13 @@ export async function asyncSpawnWithStdin(
 	}
 
 	const { code, signal } = await statusPromise;
-	// spawn()'s `timeout` kills via `child.kill()`, which sets `killed`; a
-	// signal from anywhere else leaves it false.
-	const timedOut = child.killed && signal !== null;
-	if (timedOut) stderr += timeoutNote(options?.timeout, signal);
+	// spawn()'s `timeout` kills via `child.kill()`, which sets `killed`; this
+	// helper never calls kill() for any other reason, so `killed` alone marks a
+	// timeout. A child that handles SIGTERM and exits normally closes with a
+	// null signal (and exit code 0 or 1) but is still a timeout, so do not
+	// require a terminal signal here.
+	const timedOut = child.killed;
+	if (timedOut) stderr += timeoutNote(options?.timeout, signal ?? "SIGTERM");
 
 	return { stdout, stderr, status: code, signal, timedOut };
 }
