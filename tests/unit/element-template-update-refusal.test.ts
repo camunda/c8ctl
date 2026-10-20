@@ -719,6 +719,51 @@ describe("change floor above the reached version", () => {
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
 		});
 
+		test(`${kind}: a Hidden floor replacement that adds "=" does not count as normalization`, async () => {
+			const replaced = input("moved", "=lost-value", { type: "Hidden" });
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("moved"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [input("kept", "retained"), replaced],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [{ from: "removed", to: "moved" }],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [input("kept", "retained"), replaced],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
+		});
+
 		test(`${kind}: a pre-floor move whose value the floor normalizes is not reported as dropped`, async () => {
 			const fixture = setup({
 				recipe: floor(3),

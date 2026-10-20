@@ -226,6 +226,7 @@ function advanceLineage(
 	moved: ReportFacts["moved"],
 	after: ElementValue[],
 	implicit: boolean,
+	reset: ReportFacts["reset"] = [],
 ): ElementValue[] {
 	const lost: ElementValue[] = [];
 	for (const entry of lineage) {
@@ -257,7 +258,14 @@ function advanceLineage(
 				now &&
 				(place.value === "" ||
 					now.value === place.value ||
-					now.value === `=${place.value}`)
+					// A Hidden reset is a replacement, not normalization.
+					(now.value === `=${place.value}` &&
+						!reset.some(
+							(r) =>
+								r.key === place.key &&
+								r.bindingType === place.bindingType &&
+								r.from === place.value,
+						)))
 			) {
 				if (
 					!survivors.some(
@@ -553,6 +561,7 @@ export function migrateElement({
 					result.facts.moved,
 					valuesOf(current),
 					application.step?.implicit === true,
+					result.facts.reset,
 				),
 			);
 			mapsApplied ||= isFinal;

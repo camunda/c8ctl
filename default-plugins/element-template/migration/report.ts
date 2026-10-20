@@ -189,11 +189,15 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 			// A later step may store the value FEEL-wrapped, which keeps it.
 			const surviving = (field: FieldKey, value: string | undefined) => {
 				const actual = find(after, field.key, field.bindingType);
+				// A Hidden reset is a replacement, not FEEL normalization.
+				const replaced = (facts.reset ?? []).some(
+					(r) => sameField(r, field) && r.from === value,
+				);
 				return (
 					actual !== undefined &&
 					(value === undefined ||
 						actual.value === value ||
-						actual.value === `=${value}`)
+						(actual.value === `=${value}` && !replaced))
 				);
 			};
 			const stored = (field: FieldKey, value: string | undefined) =>
