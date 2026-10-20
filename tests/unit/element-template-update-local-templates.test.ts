@@ -4,7 +4,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { c8WithOptions } from "../utils/cli.ts";
@@ -87,6 +94,23 @@ describe("element-template update resolves local templates first", () => {
 		const result = await run(cacheUpToV2, bpmn);
 		assert.equal(result.status, 0, result.stderr);
 		assert.equal(versionOf(result.stdout, TASK), "3");
+	});
+
+	test("a symlinked BPMN looks up local templates from the link's directory", {
+		skip: process.platform === "win32",
+	}, async () => {
+		const { root, processes } = project();
+		writeLocal(root, [local(V1), local(V2)]);
+		const elsewhere = mkdtempSync(join(ws.workDir, "elsewhere-"));
+		const target = join(elsewhere, "v1.bpmn");
+		writeFileSync(target, readFileSync(ws.versionedBpmn, "utf-8"));
+		const link = join(processes, "linked.bpmn");
+		symlinkSync(target, link);
+		const coldDataDir = mkdtempSync(join(ws.workDir, "cold-"));
+		const result = await run(coldDataDir, link, "--in-place");
+		assert.equal(result.status, 0, result.stderr);
+		assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+		assert.match(readFileSync(target, "utf-8"), /modelerTemplateVersion="2"/);
 	});
 
 	test("a local miss falls back to the OOTB cache", async () => {

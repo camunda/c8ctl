@@ -179,10 +179,14 @@ c8ctl element-template update old.id process.bpmn --dry-run --json
   `apply --in-place` and `edit --in-place` do not take the lock, but refuse to
   replace a file whose contents changed since they read it, so they never
   overwrite a migration that committed in between.
+  In-place writes follow symlinks: the link stays and its target receives the new
+  XML. The lock and temporary file sit beside the real file, so links to one file
+  share a lock. Relative local template lookup starts at the directory of the
+  path you pass, not of the link's target. Hard links are not preserved; the file gets a new inode.
   A killed writer can leave a stale lock and temporary file; confirm no writer is
   active before inspecting and removing them. Recovery is manual. External edits
-  between the final comparison and rename and symlink aliases are not covered by
-  the cooperative lock; this design has no atomic compare-and-swap. Tests cover
+  between the final comparison and rename are not covered by the cooperative
+  lock; this design has no atomic compare-and-swap. Tests cover
   injected ENOSPC/EIO before and after actual partial bytes and real SIGINT/SIGTERM
   termination during paused split writes, preserving original bytes. Physical
   disk exhaustion and interruption of an executing kernel syscall are not proven.
