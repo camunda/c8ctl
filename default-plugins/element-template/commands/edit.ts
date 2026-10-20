@@ -42,6 +42,7 @@ import {
 	maybePrependFeel,
 	parseArgs,
 	parseSetArg,
+	pinFilePath,
 	type Template,
 	validateDropdownValue,
 } from "../helpers.ts";
@@ -301,6 +302,12 @@ export async function editSubcommand(args: string[]): Promise<void> {
 		throw new Error("--in-place cannot be used with stdin input");
 	}
 
+	// Pin the file before the read, so a retargeted link cannot redirect the write.
+	// Unlike migrate, which reads through the pinned path, the read here follows
+	// the link. A retarget between pin and read fails the content check and
+	// never writes the wrong file.
+	const writePath =
+		parsed.inPlace && bpmnFilePath ? pinFilePath(bpmnFilePath) : undefined;
 	const input = await readBpmnInput(bpmnFilePath);
 	if (!input) {
 		throw new Error(
@@ -380,8 +387,8 @@ export async function editSubcommand(args: string[]): Promise<void> {
 	const result = await modeler.saveXML({ format: true });
 	const resultXml = result.xml;
 
-	if (parsed.inPlace && bpmnFilePath) {
-		atomicOverwriteFile(bpmnFilePath, resultXml, input.xml, true);
+	if (writePath) {
+		atomicOverwriteFile(writePath, resultXml, input.xml, true);
 		logger.info(`Updated ${bpmnFilePath}`);
 		return;
 	}

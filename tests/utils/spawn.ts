@@ -9,14 +9,7 @@
  * free while collecting stdout/stderr.
  */
 
-import {
-	type ExecFileException,
-	execFile as execFileCb,
-	spawn,
-} from "node:child_process";
-import { promisify } from "node:util";
-
-const execFile = promisify(execFileCb);
+import { execFile as execFileCb, spawn } from "node:child_process";
 
 // Strict allowlist of binaries this test utility is permitted to invoke.
 // Callers pass a bare command name; the allowlist prevents an unexpected
@@ -137,10 +130,38 @@ function validateSpawnInputs(
 	}
 }
 
+/**
+ * Outcome of a spawned child.
+ *
+ * `status` is the exit code, or `null` when the child was terminated by a
+ * signal. `timedOut` is true when the helper itself killed the child because
+ * it exceeded `timeout`; stderr then ends with an explicit "timed out" note so
+ * an assertion that prints stderr names the real cause instead of reading like
+ * an ordinary non-zero exit. `timedOut` is tracked independently of the final
+ * exit code/signal: a child that installs a SIGTERM handler and then exits 0 or
+ * 1 of its own accord is still reported as timed out, with its actual exit
+ * `status`/`signal` preserved.
+ *
+ * `timedOut` is keyed on the helper's own deadline timer, not on
+ * `child.killed`: `execFile` also kills a child that exceeds `maxBuffer`, so a
+ * buffer overflow sets `killed` without any deadline expiring. Keying on the
+ * timer keeps a maxBuffer termination distinct from a timeout — the overflow
+ * surfaces as its own `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` diagnostic instead of
+ * a spurious "timed out" note. The timer is armed only for a positive timeout:
+ * `timeout: 0` disables `execFile`'s kill, so no reporting timer runs either
+ * and a child that simply outlives the zero delay is not misreported.
+ */
 export interface SpawnResult {
 	stdout: string;
 	stderr: string;
 	status: number | null;
+	signal: NodeJS.Signals | null;
+	timedOut: boolean;
+}
+
+/** Note appended to stderr when the helper killed the child on timeout. */
+function timeoutNote(timeout: number | undefined, signal: string): string {
+	return `\n[spawn helper] child timed out after ${timeout} ms and was killed with ${signal}\n`;
 }
 
 export async function asyncSpawn(
@@ -150,23 +171,79 @@ export async function asyncSpawn(
 ): Promise<SpawnResult> {
 	const env = resolveSpawnEnv(options);
 	validateSpawnInputs(command, args, { ...options, env });
-	try {
-		const { stdout, stderr } = await execFile(command, args, {
-			cwd: options?.cwd,
-			env,
-			maxBuffer: 10 * 1024 * 1024,
-			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
-		});
-		return { stdout: stdout ?? "", stderr: stderr ?? "", status: 0 };
-	} catch (err) {
-		// biome-ignore lint/plugin: unavoidable narrowing of catch-clause unknown to ExecFileException
-		const e = err as ExecFileException & { stdout?: string; stderr?: string };
-		return {
-			stdout: e.stdout ?? "",
-			stderr: e.stderr ?? "",
-			status: typeof e.code === "number" ? e.code : 1,
-		};
-	}
+	return await new Promise<SpawnResult>((resolve) => {
+		// Track deadline expiry with the helper's own timer rather than reading
+		// `child.killed` in the callback: `execFile` also kills a child that
+		// exceeds `maxBuffer` (setting `killed` with no deadline elapsed), so
+		// `killed` alone cannot distinguish a timeout from a buffer overflow.
+		// The timer shares the timeout's deadline; when it fires we know the
+		// kill that follows is the timeout's, and we mark it before execFile's
+		// own callback reports the terminated child.
+		let deadlineExpired = false;
+		// Arm the reporting timer only for a positive timeout. `timeout: 0`
+		// disables Node's execFile timeout (the child is never killed), so a
+		// zero-delay timer here would fire on the next tick and misreport a
+		// child that merely outlives it as `timedOut: true` — with a spurious
+		// "killed with SIGTERM" note for a process that was never signalled.
+		const deadline =
+			options?.timeout !== undefined && options.timeout > 0
+				? setTimeout(() => {
+						deadlineExpired = true;
+					}, options.timeout)
+				: undefined;
+		deadline?.unref?.();
+		execFileCb(
+			command,
+			args,
+			{
+				cwd: options?.cwd,
+				env,
+				maxBuffer: 10 * 1024 * 1024,
+				...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+			},
+			(err, stdout, stderr) => {
+				if (deadline !== undefined) clearTimeout(deadline);
+				// A child that handles the timeout's SIGTERM and exits normally
+				// closes with a null signal (and exit code 0 or 1), yet it was
+				// still timed out — so key on the deadline, not a terminal signal.
+				// A maxBuffer overflow kills the child without the deadline
+				// expiring, so it reports timedOut: false and keeps its own
+				// ERR_CHILD_PROCESS_STDIO_MAXBUFFER diagnostic.
+				const timedOut = deadlineExpired;
+				const signal = err?.signal ?? null;
+				const status =
+					err === null
+						? 0
+						: typeof err.code === "number"
+							? err.code
+							: signal
+								? null
+								: 1;
+				// A maxBuffer overflow kills the child and reports only via err —
+				// the child's own stderr is empty, so without this the non-zero
+				// status would be unreadable. Surface that specific diagnostic;
+				// ordinary non-zero exits already carry their own stderr and are
+				// left untouched.
+				const isMaxBuffer = err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+				const failureNote =
+					!timedOut && isMaxBuffer && err?.message
+						? `\n[spawn helper] ${err.message}\n`
+						: "";
+				resolve({
+					stdout: stdout ?? "",
+					stderr:
+						(stderr ?? "") +
+						failureNote +
+						(timedOut
+							? timeoutNote(options?.timeout, signal ?? "SIGTERM")
+							: ""),
+					status,
+					signal,
+					timedOut,
+				});
+			},
+		);
+	});
 }
 
 /**
@@ -219,8 +296,11 @@ export async function asyncSpawnWithStdin(
 	// miss the 'close' event if the child exits early (e.g. rejects input
 	// immediately). Any buffered 'close' emission will be captured by the
 	// already-registered listener rather than being lost between the two awaits.
-	const statusPromise = new Promise<number | null>((resolve, reject) => {
-		child.on("close", (code) => resolve(code));
+	const statusPromise = new Promise<{
+		code: number | null;
+		signal: NodeJS.Signals | null;
+	}>((resolve, reject) => {
+		child.on("close", (code, signal) => resolve({ code, signal }));
 		child.on("error", (err) => {
 			stderr += `${err.message}\n`;
 			reject(err);
@@ -233,7 +313,16 @@ export async function asyncSpawnWithStdin(
 		stdin.end();
 	}
 
-	const status = await statusPromise;
+	const { code, signal } = await statusPromise;
+	// spawn()'s `timeout` kills via `child.kill()`, which sets `killed`; this
+	// helper never calls kill() for any other reason, so `killed` alone marks a
+	// timeout. (Unlike `asyncSpawn` there is no `maxBuffer` here — stdout/stderr
+	// are drained by listeners, not buffered — so no buffer overflow can also
+	// set `killed`.) A child that handles SIGTERM and exits normally closes with
+	// a null signal (and exit code 0 or 1) but is still a timeout, so do not
+	// require a terminal signal here.
+	const timedOut = child.killed;
+	if (timedOut) stderr += timeoutNote(options?.timeout, signal ?? "SIGTERM");
 
-	return { stdout, stderr, status };
+	return { stdout, stderr, status: code, signal, timedOut };
 }

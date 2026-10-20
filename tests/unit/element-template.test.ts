@@ -7,11 +7,14 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -306,6 +309,209 @@ describe("CLI behavioural: element-template apply", () => {
 			}
 		});
 	}
+
+	describe("--in-place through a symlink", {
+		skip:
+			process.platform === "win32"
+				? "creating symlinks needs elevated rights on Windows"
+				: false,
+	}, () => {
+		// The link and its target sit in sibling directories. The data dir
+		// caches the template so `edit` can resolve it by id.
+		function linkedWorkspace() {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			mkdirSync(join(tempDir, "shared"));
+			mkdirSync(join(tempDir, "models"));
+			const target = join(tempDir, "shared", "model.bpmn");
+			const link = join(tempDir, "models", "model.bpmn");
+			writeFileSync(target, readFileSync(BPMN_FILE, "utf-8"));
+			symlinkSync(join("..", "shared", "model.bpmn"), link);
+			const dataDir = join(tempDir, "data");
+			mkdirSync(join(dataDir, "element-templates"), { recursive: true });
+			writeFileSync(
+				join(dataDir, "element-templates", "templates.json"),
+				`[${readFileSync(TEMPLATE_FILE, "utf-8")}]`,
+			);
+			writeFileSync(
+				join(dataDir, "element-templates", "fetched-at"),
+				String(Date.now()),
+			);
+			const run = (nodeArgs: string[], ...args: string[]) =>
+				c8WithOptions(
+					{
+						nodeArgs,
+						env: { C8CTL_DATA_DIR: dataDir, C8CTL_OUTPUT_MODE: "text" },
+					},
+					"element-template",
+					...args,
+				);
+			const tmpFiles = () =>
+				["shared", "models"].flatMap((sub) =>
+					readdirSync(join(tempDir, sub)).filter((name) =>
+						name.endsWith(".tmp"),
+					),
+				);
+			return { tempDir, dataDir, target, link, run, tmpFiles };
+		}
+
+		const exdevPreload = [
+			"--import",
+			`data:text/javascript,${encodeURIComponent(exdev)}`,
+		];
+		for (const [label, nodeArgs] of [
+			["", []],
+			[" on EXDEV", exdevPreload],
+		] as const) {
+			test(`apply writes the target and keeps the link${label}`, async () => {
+				const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+				try {
+					const result = await run(
+						[...nodeArgs],
+						"apply",
+						"--in-place",
+						TEMPLATE_FILE,
+						"Activity_17s7axj",
+						link,
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+					assert.strictEqual(
+						getTaskDefinitionType(readFileSync(target, "utf-8")),
+						"io.camunda:http-json:1",
+					);
+					assert.deepStrictEqual(tmpFiles(), []);
+				} finally {
+					rmSync(tempDir, { recursive: true, force: true });
+				}
+			});
+		}
+
+		test("edit writes the target and keeps the link", async () => {
+			const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+			try {
+				const applied = await run(
+					[],
+					"apply",
+					"--in-place",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					target,
+				);
+				assert.strictEqual(applied.status, 0, applied.stderr);
+				const result = await run(
+					[],
+					"edit",
+					"--in-place",
+					"Activity_17s7axj",
+					link,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+				assert.strictEqual(
+					getInputValue(readFileSync(target, "utf-8"), "method"),
+					"PUT",
+				);
+				assert.deepStrictEqual(tmpFiles(), []);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		// Retargets the link right after the command reads it. Both files hold
+		// the same XML, so only a path pinned before the read keeps the write
+		// on the file that was read.
+		const retargetAfterRead = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; const read = fs.readFileSync; let done = false; fs.readFileSync = (path, ...rest) => { const out = read(path, ...rest); if (!done && String(path) === process.env.C8CTL_TEST_LINK) { done = true; fs.unlinkSync(process.env.C8CTL_TEST_LINK); fs.symlinkSync(process.env.C8CTL_TEST_LINK_TO, process.env.C8CTL_TEST_LINK); } return out; }; syncBuiltinESMExports();`;
+		for (const command of ["apply", "edit"] as const) {
+			test(`${command} writes the file it read when the link is retargeted`, async () => {
+				const { tempDir, dataDir, target, link, run, tmpFiles } =
+					linkedWorkspace();
+				try {
+					if (command === "edit") {
+						const applied = await run(
+							[],
+							"apply",
+							"--in-place",
+							TEMPLATE_FILE,
+							"Activity_17s7axj",
+							target,
+						);
+						assert.strictEqual(applied.status, 0, applied.stderr);
+					}
+					const other = join(tempDir, "shared", "other.bpmn");
+					writeFileSync(other, readFileSync(target));
+					const before = readFileSync(other, "utf-8");
+					const args =
+						command === "apply"
+							? ["apply", "--in-place", TEMPLATE_FILE, "Activity_17s7axj", link]
+							: [
+									"edit",
+									"--in-place",
+									"Activity_17s7axj",
+									link,
+									"--set",
+									"method=PUT",
+								];
+					const result = await c8WithOptions(
+						{
+							nodeArgs: [
+								"--import",
+								`data:text/javascript,${encodeURIComponent(retargetAfterRead)}`,
+							],
+							env: {
+								C8CTL_DATA_DIR: dataDir,
+								C8CTL_OUTPUT_MODE: "text",
+								C8CTL_TEST_LINK: link,
+								C8CTL_TEST_LINK_TO: join("..", "shared", "other.bpmn"),
+							},
+						},
+						"element-template",
+						...args,
+					);
+					assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+					assert.strictEqual(
+						realpathSync(link),
+						realpathSync(other),
+						"the hook must have retargeted the link",
+					);
+					assert.strictEqual(readFileSync(other, "utf-8"), before);
+					const written = readFileSync(target, "utf-8");
+					if (command === "apply")
+						assert.strictEqual(
+							getTaskDefinitionType(written),
+							"io.camunda:http-json:1",
+						);
+					else assert.strictEqual(getInputValue(written, "method"), "PUT");
+					assert.deepStrictEqual(tmpFiles(), []);
+				} finally {
+					rmSync(tempDir, { recursive: true, force: true });
+				}
+			});
+		}
+
+		test("apply reports a dangling link by path", async () => {
+			const { tempDir, target, link, run, tmpFiles } = linkedWorkspace();
+			rmSync(target);
+			try {
+				const result = await run(
+					[],
+					"apply",
+					"--in-place",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					link,
+				);
+				assert.strictEqual(result.status, 1, result.stderr);
+				assert.match(result.stderr, /File not found: .*model\.bpmn/);
+				assert.ok(lstatSync(link).isSymbolicLink(), "link must survive");
+				assert.strictEqual(existsSync(target), false);
+				assert.deepStrictEqual(tmpFiles(), []);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
 
 	test("missing template file exits 1", async () => {
 		const result = await c8text(

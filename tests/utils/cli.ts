@@ -160,7 +160,9 @@ export function c8WithClosedStdout(
  * Parse the JSON dry-run payload from CLI stdout.
  * Throws a descriptive error if stdout is not valid JSON.
  */
-export function parseJson(result: SpawnResult): Record<string, unknown> {
+export function parseJson(
+	result: Pick<SpawnResult, "stdout" | "stderr" | "status">,
+): Record<string, unknown> {
 	try {
 		return JSON.parse(result.stdout);
 	} catch {

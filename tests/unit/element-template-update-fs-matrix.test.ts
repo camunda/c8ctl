@@ -11,6 +11,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	writeFileSync,
@@ -280,7 +281,11 @@ for (const scenario of [
 			);
 			return;
 		}
-		const dir = mkdtempSync(join(tmpdir(), "c8-migration-filesystem-"));
+		// In-place writes resolve symlinks, and the pause script matches exact
+		// paths, so the temp dir MUST be real (macOS tmpdir is under a link).
+		const dir = realpathSync(
+			mkdtempSync(join(tmpdir(), "c8-migration-filesystem-")),
+		);
 		const env = cliEnv(dir);
 		const run = (...args: string[]) =>
 			c8WithOptions(
