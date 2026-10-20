@@ -41,15 +41,18 @@ import {
 import type { Recipe } from "./recipe.ts";
 import {
 	buildReport,
+	hiddenIn,
 	type MigrationReport,
 	mergeFacts,
 	type ReportFacts,
+	type ReportStep,
 } from "./report.ts";
 import {
 	type Application,
 	resolveApplications,
 	resolveCatalog,
 	resolveSteps,
+	type Step,
 } from "./steps.ts";
 import type { MigrationTemplate } from "./types.ts";
 
@@ -202,6 +205,96 @@ function resolveMapWrites(
 	return result;
 }
 
+interface Place {
+	key: string;
+	bindingType: string | null;
+	value: string;
+}
+
+/** Where one original value currently lives. */
+interface Lineage {
+	places: Place[];
+}
+
+/**
+ * Moves each original value's places through one application and returns the
+ * places an implicit step removed along with their last copy. A value
+ * survives normalization only when it is wrapped as `=<value>`.
+ */
+function advanceLineage(
+	lineage: Lineage[],
+	moved: ReportFacts["moved"],
+	after: ElementValue[],
+	implicit: boolean,
+	reset: ReportFacts["reset"] = [],
+): ElementValue[] {
+	const lost: ElementValue[] = [];
+	for (const entry of lineage) {
+		if (entry.places.length === 0) continue;
+		const previous = entry.places;
+		const candidates = [
+			...previous,
+			...moved.flatMap((m) =>
+				previous.some(
+					(p) => p.key === m.from.key && p.bindingType === m.from.bindingType,
+				)
+					? [
+							{
+								key: m.to.key,
+								bindingType: m.to.bindingType,
+								value: m.value ?? "",
+							},
+						]
+					: [],
+			),
+		];
+		const survivors: Place[] = [];
+		const gone: Place[] = [];
+		for (const place of candidates) {
+			const now = after.find(
+				(a) => a.key === place.key && a.bindingType === place.bindingType,
+			);
+			if (
+				now &&
+				(place.value === "" ||
+					now.value === place.value ||
+					// A Hidden reset is a replacement, not normalization.
+					(now.value === `=${place.value}` &&
+						!reset.some(
+							(r) =>
+								r.key === place.key &&
+								r.bindingType === place.bindingType &&
+								r.from === place.value,
+						)))
+			) {
+				if (
+					!survivors.some(
+						(s) => s.key === now.key && s.bindingType === now.bindingType,
+					)
+				)
+					survivors.push({
+						key: now.key,
+						bindingType: now.bindingType,
+						value: now.value,
+					});
+			} else if (previous.includes(place)) {
+				gone.push(place);
+			}
+		}
+		entry.places = survivors;
+		if (implicit && survivors.length === 0) {
+			lost.push(
+				...gone.map((p) => ({
+					...p,
+					bindingType: p.bindingType ?? "",
+					isFeel: false,
+				})),
+			);
+		}
+	}
+	return lost;
+}
+
 function valuesOf(element: BpmnElement): ElementValue[] {
 	return enumerateElementValues(getExtensionElements(element.businessObject));
 }
@@ -213,7 +306,12 @@ function applyApplication(
 	application: Application,
 	mapWrites: Write[] = [],
 	unverifiedReads = false,
-): { element: BpmnElement; facts: ReportFacts } | null {
+): {
+	element: BpmnElement;
+	facts: ReportFacts;
+	/** The template with the properties known to be active when it was applied. */
+	activeTemplate: MigrationTemplate;
+} | null {
 	const { template, step } = application;
 	const applied = readAppliedTemplate(element.businessObject);
 	if (
@@ -292,6 +390,11 @@ function applyApplication(
 			(v) =>
 				v.value !== "" &&
 				!stepWrites.some((w) => sameTarget(v, w)) &&
+				// An active editable property owns the field, so a Hidden duplicate
+				// is a conditional alternative, not a reset.
+				!findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
+					(property) => property.type !== "Hidden" && active.has(property),
+				) &&
 				findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
 					(property) => property.type === "Hidden",
 				) &&
@@ -313,6 +416,16 @@ function applyApplication(
 	};
 	return {
 		element: current,
+		activeTemplate: {
+			...clone,
+			// Unconditional properties are always active. A conditional one counts only
+			// when a write reached it, so an unknown condition never hides a loss.
+			properties: clone.properties.filter(
+				(property) =>
+					active.has(property) ||
+					!("condition" in property && property.condition),
+			),
+		},
 		facts: {
 			...facts,
 			after,
@@ -354,6 +467,8 @@ export function migrateElement({
 	target,
 	templates,
 	recipe,
+	engineVersion,
+	isCompatible,
 	maps = [],
 }: {
 	modeler: MigrationModeler;
@@ -364,6 +479,10 @@ export function migrateElement({
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
+	/** Camunda version of the BPMN, used to explain an unreachable source floor. */
+	engineVersion?: string;
+	/** Whether a template fits the BPMN's Camunda version. */
+	isCompatible?: (template: MigrationTemplate) => boolean;
 	/** Moves of original values to the final target, applied after all steps. */
 	maps?: ValueMap[];
 }): MigrationResult {
@@ -385,6 +504,8 @@ export function migrateElement({
 		target,
 		templates,
 		recipe,
+		engineVersion,
+		isCompatible,
 	});
 	const applications = resolveApplications(templates, steps, target);
 	for (const { step, template } of applications) {
@@ -411,6 +532,17 @@ export function migrateElement({
 				};
 	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
+	// An implicit step has no recipe, so an original value its template lacks is
+	// lost even when a later template defaults the same binding. Each original
+	// value is followed through every step, across moves and normalization.
+	const lineage: Lineage[] = before
+		// A Hidden source value is template-managed, so a reset is no loss.
+		.filter((v) => v.value !== "" && !hiddenIn(fromTemplate, v, "every"))
+		.map((v) => ({
+			places: [{ key: v.key, bindingType: v.bindingType, value: v.value }],
+		}));
+	const lostInImplicitSteps: ElementValue[] = [];
+	const implicitTemplates: MigrationTemplate[] = [];
 	let current = element;
 	let mapsApplied = false;
 	for (const [index, application] of applications.entries()) {
@@ -426,6 +558,17 @@ export function migrateElement({
 		if (result) {
 			current = result.element;
 			allFacts.push(result.facts);
+			if (application.step?.implicit)
+				implicitTemplates.push(result.activeTemplate);
+			lostInImplicitSteps.push(
+				...advanceLineage(
+					lineage,
+					result.facts.moved,
+					valuesOf(current),
+					application.step?.implicit === true,
+					result.facts.reset,
+				),
+			);
 			mapsApplied ||= isFinal;
 		}
 	}
@@ -470,6 +613,24 @@ export function migrateElement({
 		facts,
 		usedRecipe: steps.length > 0,
 		refusal,
+		lostInImplicitSteps,
+		implicitTemplates,
+		steps: reportSteps(steps, fromTemplate.version ?? 0),
 	});
 	return { element: current, report };
+}
+
+function reportSteps(steps: Step[], appliedVersion: number): ReportStep[] {
+	let reached = appliedVersion;
+	return steps.map((step) => {
+		const reportStep: ReportStep = {
+			kind: step.kind,
+			templateId: step.templateId,
+			fromVersion: reached,
+			toVersion: step.version,
+			...(step.implicit ? { implicit: true } : {}),
+		};
+		if (step.kind === "version") reached = step.version;
+		return reportStep;
+	});
 }

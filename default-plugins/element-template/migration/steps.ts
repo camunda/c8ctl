@@ -25,6 +25,8 @@ export interface Step {
 	/** Version the step produces. */
 	version: number;
 	entries: Entry[];
+	/** A version step the plan adds to reach a change floor; the recipe has no entry for it. */
+	implicit?: boolean;
 }
 
 export interface ResolvedSteps {
@@ -181,6 +183,60 @@ function reachableHop(
 }
 
 /**
+ * The floor an implicit step must reach so the best change entry applies:
+ * the highest floor at most `newest`. The step lands on the lowest compatible
+ * version at or above it. Undefined when no floor needs a bump.
+ * Throws when the element is below every floor, all floors are above `newest`
+ * and no entry applies without one.
+ */
+function implicitFloor({
+	recipe,
+	sourceId,
+	reachedVersion,
+	newest,
+	engineVersion,
+}: {
+	recipe: Recipe | undefined;
+	sourceId: string;
+	reachedVersion: number;
+	/** Newest compatible source version; undefined when none is compatible. */
+	newest: number | undefined;
+	engineVersion?: string;
+}): number | undefined {
+	const changes = recipeSourcesFor(recipe, sourceId).filter(
+		(s) => s.kind === "change",
+	);
+	const floors = changes.flatMap((s) =>
+		s.kind === "change" && s.minSourceVersion !== undefined
+			? [s.minSourceVersion]
+			: [],
+	);
+	const reachable = floors.filter((f) => newest !== undefined && f <= newest);
+	if (reachable.length === 0) {
+		const hasFallback = changes.length > floors.length;
+		if (
+			floors.length > 0 &&
+			!hasFallback &&
+			reachedVersion < Math.min(...floors)
+		) {
+			const camunda = engineVersion
+				? `Camunda ${engineVersion} (from the BPMN executionPlatformVersion)`
+				: "the BPMN Camunda version";
+			throw new Error(
+				`Template '${sourceId}' v${Math.min(...floors)} or later is required, but ${
+					newest === undefined
+						? `no version compatible with ${camunda} is available`
+						: `the newest version compatible with ${camunda} is v${newest}`
+				}.`,
+			);
+		}
+		return undefined;
+	}
+	const best = Math.max(...reachable);
+	return best > reachedVersion ? best : undefined;
+}
+
+/**
  * Resolve the steps for moving an element from `appliedId@appliedVersion`
  * to `target`. `recipe` overrides the recipe embedded in the target.
  *
@@ -194,6 +250,8 @@ export function resolveSteps({
 	target,
 	templates,
 	recipe,
+	engineVersion,
+	isCompatible = () => true,
 }: {
 	appliedId: string;
 	appliedVersion: number;
@@ -202,6 +260,10 @@ export function resolveSteps({
 	target: MigrationTemplate;
 	templates: MigrationTemplate[];
 	recipe?: Recipe;
+	/** Camunda version of the BPMN, used to explain an unreachable floor. */
+	engineVersion?: string;
+	/** Whether a template fits the BPMN's Camunda version; the applied one may not. */
+	isCompatible?: (template: MigrationTemplate) => boolean;
 }): ResolvedSteps {
 	templates = resolveCatalog(templates, [target]);
 	const sameId = target.id === appliedId;
@@ -223,21 +285,47 @@ export function resolveSteps({
 			? (versionOf(sourceLatest) ?? appliedVersion)
 			: appliedVersion;
 
-	const rungs = recipeSourcesFor(sourceRecipe, appliedId)
-		.flatMap((s) =>
-			s.kind === "upgrade" &&
-			s.toVersion > appliedVersion &&
-			s.toVersion <= limit
-				? [{ toVersion: s.toVersion, entries: s.entries }]
-				: [],
-		)
-		.sort((a, b) => a.toVersion - b.toVersion);
+	const rungs: { toVersion: number; entries: Entry[]; implicit?: boolean }[] =
+		recipeSourcesFor(sourceRecipe, appliedId)
+			.flatMap((s) =>
+				s.kind === "upgrade" &&
+				s.toVersion > appliedVersion &&
+				s.toVersion <= limit
+					? [{ toVersion: s.toVersion, entries: s.entries }]
+					: [],
+			)
+			.sort((a, b) => a.toVersion - b.toVersion);
 	for (const rung of rungs) {
 		if (!sameId || rung.toVersion !== targetVersion)
 			loaded(templates, appliedId, rung.toVersion);
 	}
 
-	const reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
+	let reachedVersion = rungs.at(-1)?.toVersion ?? appliedVersion;
+	const compatibleVersions = templates
+		.filter(
+			(t) =>
+				t.id === appliedId &&
+				isCompatible(t) &&
+				// A stand-in for an unavailable applied template has no real definition.
+				(appliedShapeKnown || (versionOf(t) ?? 0) !== appliedVersion),
+		)
+		.map((t) => versionOf(t) ?? 0)
+		.sort((a, b) => a - b);
+	const floor = sameId
+		? undefined
+		: implicitFloor({
+				recipe: targetRecipe,
+				sourceId: appliedId,
+				reachedVersion,
+				newest: compatibleVersions.at(-1),
+				engineVersion,
+			});
+	if (floor !== undefined) {
+		// A floor is a minimum: land on the lowest compatible version at or above it.
+		const landing = compatibleVersions.find((v) => v >= floor) ?? floor;
+		rungs.push({ toVersion: landing, entries: [], implicit: true });
+		reachedVersion = landing;
+	}
 	const hop = sameId
 		? undefined
 		: reachableHop(targetRecipe, appliedId, reachedVersion);
@@ -258,6 +346,7 @@ export function resolveSteps({
 		templateId: appliedId,
 		version: rung.toVersion,
 		entries: rung.entries,
+		...(rung.implicit ? { implicit: true } : {}),
 	}));
 
 	if (!sameId) {
@@ -269,18 +358,9 @@ export function resolveSteps({
 				entries: hop.entries,
 			});
 		} else if (targetRecipe) {
-			const sources = recipeSourcesFor(targetRecipe, appliedId).filter(
-				(source) => source.kind === "change",
-			);
-			const floor = Math.min(
-				...sources.map((source) => source.minSourceVersion ?? 0),
-			);
 			return {
 				steps: [],
-				refusal:
-					sources.length === 0
-						? `wrong source ID: the recipe has no change entry for "${appliedId}"`
-						: `unmet source floor: the recipe requires source version ${floor}, but reached version is ${reachedVersion}; update the element to version ${floor} or later first`,
+				refusal: `wrong source ID: the recipe has no change entry for "${appliedId}"`,
 			};
 		}
 	} else if (

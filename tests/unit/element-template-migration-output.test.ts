@@ -54,6 +54,7 @@ function report({
 		},
 		usedRecipe: true,
 		refusal: null,
+		steps: [],
 		dropped: [],
 		kept: [],
 		notes: [],
@@ -941,6 +942,52 @@ describe("shouldUseColor", () => {
 	});
 });
 
+describe("implicit steps", () => {
+	const steps: MigrationReport["steps"] = [
+		{
+			kind: "version",
+			templateId: "old",
+			fromVersion: 1,
+			toVersion: 3,
+			implicit: true,
+		},
+		{ kind: "hop", templateId: "new", fromVersion: 3, toVersion: 1 },
+	];
+
+	test("text marks the implicit step and leaves recipe steps out", () => {
+		const text = renderReportText(report({ steps }), {
+			elementId: "Task",
+			color: false,
+			recipe: "embedded",
+		});
+		assert.match(
+			text,
+			/The element is on v1, which is too old for this recipe\. Updating it to v3 first\./,
+		);
+		assert.doesNotMatch(text, /hop|v3 -> v1/);
+	});
+
+	test("text omits the line when no step is implicit", () => {
+		const text = renderReportText(report({ steps: [steps[1]] }), {
+			elementId: "Task",
+			color: false,
+			recipe: "embedded",
+		});
+		assert.doesNotMatch(text, /implicit/);
+	});
+
+	test("json flags the implicit step", () => {
+		const json = reportToJson(report({ steps }), {
+			elementId: "Task",
+			recipe: "embedded",
+			dryRun: false,
+		});
+		assert.deepStrictEqual(json.report.steps, steps);
+		assert.strictEqual(json.report.steps[0].implicit, true);
+		assert.strictEqual("implicit" in json.report.steps[1], false);
+	});
+});
+
 describe("reportToJson", () => {
 	test("exposes the report as plain data", () => {
 		const json = reportToJson(report(), {
@@ -960,6 +1007,7 @@ describe("reportToJson", () => {
 		});
 		assert.strictEqual(json.lossless, true);
 		assert.deepStrictEqual(Object.keys(json.report), [
+			"steps",
 			"moved",
 			"added",
 			"changed",

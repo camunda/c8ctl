@@ -79,6 +79,16 @@ export interface MovedItem {
 	source: "recipe" | "map";
 }
 
+/** A step of the migration plan, in application order. */
+export interface ReportStep {
+	kind: "version" | "hop";
+	templateId: string;
+	fromVersion: number;
+	toVersion: number;
+	/** Added by the plan to reach a change floor; the recipe has no entries for it. */
+	implicit?: true;
+}
+
 export interface MigrationReport {
 	from: TemplateRef;
 	to: TemplateRef;
@@ -86,6 +96,7 @@ export interface MigrationReport {
 	usedRecipe: boolean;
 	/** Why a declared recipe was not used. */
 	refusal: string | null;
+	steps: ReportStep[];
 	dropped: (Field & {
 		value: string;
 		valueName?: string;
@@ -175,18 +186,36 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 		}
 		if (facts.after) {
 			const after = facts.after;
+			// A later step may store the value FEEL-wrapped, which keeps it.
 			const surviving = (field: FieldKey, value: string | undefined) => {
 				const actual = find(after, field.key, field.bindingType);
+				// A Hidden reset is a replacement, not FEEL normalization.
+				const replaced = (facts.reset ?? []).some(
+					(r) => sameField(r, field) && r.from === value,
+				);
 				return (
 					actual !== undefined &&
-					(value === undefined || actual.value === value)
+					(value === undefined ||
+						actual.value === value ||
+						(actual.value === `=${value}` && !replaced))
 				);
 			};
+			const stored = (field: FieldKey, value: string | undefined) =>
+				value === undefined
+					? value
+					: (find(after, field.key, field.bindingType)?.value ?? value);
 			failedWrites ||=
 				moved.some((move) => !surviving(move.to, move.value)) ||
 				set.some((write) => !surviving(write, write.value));
-			moved = moved.filter((move) => surviving(move.to, move.value));
-			set = set.filter((write) => surviving(write, write.value));
+			moved = moved
+				.filter((move) => surviving(move.to, move.value))
+				.map((move) => ({ ...move, value: stored(move.to, move.value) }));
+			set = set
+				.filter((write) => surviving(write, write.value))
+				.map((write) => ({
+					...write,
+					value: stored(write, write.value) ?? write.value,
+				}));
 			snapshot = after;
 		}
 		failedWrites ||= Boolean(facts.failedWrites);
@@ -302,7 +331,7 @@ function isHidden(
  * Hidden status across conditional duplicates, without evaluating their
  * conditions. `some` and `every` both lean toward reporting a loss.
  */
-function hiddenIn(
+export function hiddenIn(
 	template: MigrationTemplate,
 	v: ElementValue,
 	match: "some" | "every",
@@ -336,6 +365,9 @@ export function buildReport({
 	facts,
 	usedRecipe,
 	refusal,
+	steps = [],
+	lostInImplicitSteps = [],
+	implicitTemplates = [],
 }: {
 	/** The template the element was on; a stub with no properties when it is not available. */
 	fromTemplate: MigrationTemplate;
@@ -347,6 +379,11 @@ export function buildReport({
 	facts: ReportFacts;
 	usedRecipe: boolean;
 	refusal: string | null;
+	steps?: ReportStep[];
+	/** Values an implicit step removed, whether or not the target later defaults them. */
+	lostInImplicitSteps?: ElementValue[];
+	/** Templates of the implicit steps, checked for unread bindings they do not keep. */
+	implicitTemplates?: MigrationTemplate[];
 }): MigrationReport {
 	const survivingMoves = facts.moved.filter((m) => {
 		const source = find(before, m.from.key, m.from.bindingType);
@@ -368,6 +405,9 @@ export function buildReport({
 	const addedSets = survivingSets.filter(
 		(s) => !find(before, s.key, s.bindingType),
 	);
+	// Maps read the original values; recipe moves read the post-step snapshot.
+	const claimedByMap = (v: ElementValue) =>
+		survivingMoves.some((m) => m.map && sameTarget(v, m.from));
 	// A move claims its source only when it read the original value. An earlier
 	// step may have reset the source, e.g. to a Hidden default.
 	const claimedFrom = (v: ElementValue) =>
@@ -431,26 +471,34 @@ export function buildReport({
 			(facts.reset ?? []).some((r) => sameTarget(v, r) && r.from === v.value);
 		if (reset && !hiddenIn(fromTemplate, v, "every")) return "hidden";
 	};
-	const dropped: MigrationReport["dropped"] = before
-		.filter((v) => v.value !== "")
-		.flatMap((v) => {
-			const cause = causeOf(v);
-			if (
-				!cause &&
-				(claimedFrom(v) || find(after, v.key, v.bindingType)) &&
-				!lostBySource(v)
-			)
-				return [];
-			const field = fieldOf(fromTemplate, v.key, v.bindingType);
-			return [
-				{
-					...field,
-					value: v.value,
-					...withNames(fromTemplate, field, v.value),
-					...(cause ? { cause } : {}),
-				},
-			];
-		});
+	const droppedValues = before.filter(
+		(v) =>
+			v.value !== "" &&
+			(causeOf(v) ||
+				(!claimedFrom(v) && !find(after, v.key, v.bindingType)) ||
+				lostBySource(v)),
+	);
+	const dropped: MigrationReport["dropped"] = [
+		...droppedValues,
+		...lostInImplicitSteps.filter(
+			(v) =>
+				!find(droppedValues, v.key, v.bindingType) &&
+				// A surviving map that carries the original value on is not a loss.
+				!(
+					claimedByMap(v) &&
+					find(before, v.key, v.bindingType)?.value === v.value
+				),
+		),
+	].map((v) => {
+		const cause = causeOf(v);
+		const field = fieldOf(fromTemplate, v.key, v.bindingType);
+		return {
+			...field,
+			value: v.value,
+			...withNames(fromTemplate, field, v.value),
+			...(cause ? { cause } : {}),
+		};
+	});
 
 	const added: MigrationReport["added"] = after
 		.filter(
@@ -524,7 +572,14 @@ export function buildReport({
 		template: facts.templateSkipped,
 		noMatch: facts.noMatch,
 		feel: facts.feelSkipped,
-		unchecked: uncheckedFields(fromTemplate, via),
+		unchecked: [...via, ...implicitTemplates]
+			.flatMap((template) => uncheckedFields(fromTemplate, [template]))
+			.filter(
+				(f, i, all) =>
+					all.findIndex(
+						(g) => g.key === f.key && g.bindingType === f.bindingType,
+					) === i,
+			),
 	};
 
 	return {
@@ -532,6 +587,7 @@ export function buildReport({
 		to: templateRef(toTemplate),
 		usedRecipe,
 		refusal,
+		steps,
 		dropped: inTemplateOrder(fromTemplate, dropped, (item) => item),
 		added: inTemplateOrder(toTemplate, added, (item) => item),
 		changed: inTemplateOrder(toTemplate, changed, (item) => item),

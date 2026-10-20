@@ -266,8 +266,12 @@ that moved.
 - **Steps.** An element on an old version climbs the version steps of its own
   template in order, then makes at most one hop onto a different template. A
   source entry declares `kind: "upgrade"` with a destination `toVersion`, or
-  `kind: "change"` with an optional `minSourceVersion` floor. Floors use actual
-  selected source applications, never the latest catalog version. The revised
+  `kind: "change"` with an optional `minSourceVersion` floor. A floor above
+  the reached version adds one implicit version step (no entries, values carried
+  by binding). The best floor is the highest one at most the newest source version
+  compatible with the BPMN's `modeler:executionPlatformVersion`; the step lands on
+  the lowest compatible version at or above it. An unreachable floor throws
+  rather than refusing, so it is never authorizable with `--allow-lossy`. The revised
   dialect keeps schema version 1 and rejects legacy `minVersion` fields.
   Owner-relative ID/version rules and duplicate markers are semantic checks.
   Every selected intermediate template must exist before application; the supplied
@@ -321,8 +325,8 @@ that moved.
   precedes a no-op return.
 - **Authorization.** Lossy in-place migrations and refused embedded-recipe fallback
   require `--allow-lossy`. Explicit unusable recipes cannot be authorized. Diagnostics
-  distinguish syntax, coverage (version steps and the change hop), source-ID and
-  reached-floor refusal; empty recipe
+  distinguish syntax, coverage (version steps, the implicit floor step and the
+  change hop) and source-ID refusal; unreachable floors fail the element; empty recipe
   flags fail. Preview/authorized reports retain refusal and authorization status.
 - **Sensitivity.** Rendering uses credential-like field identity and template
   property/group metadata to redact report values. Known sensitive before/after,

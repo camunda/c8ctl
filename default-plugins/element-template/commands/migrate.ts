@@ -576,11 +576,20 @@ async function runMigrateInternal(
 	redaction.templates = [...lineages([templateId, target.id]), target];
 	const targetRecipe = recipe ?? embeddedRecipe(target);
 	// A hop that needs a newer source version than any local one climbs through the cache.
-	const floors = (targetRecipe?.sources ?? []).flatMap((s) =>
-		s.kind === "change" && s.sourceTemplateId === templateId
-			? [s.minSourceVersion ?? 0]
+	const changes = (targetRecipe?.sources ?? []).filter(
+		(s) => s.kind === "change" && s.sourceTemplateId === templateId,
+	);
+	const floors = changes.flatMap((s) =>
+		s.kind === "change" && s.minSourceVersion !== undefined
+			? [s.minSourceVersion]
 			: [],
 	);
+	const hasFallback = changes.length > floors.length;
+	const localCompatibleVersions = compatibleTemplates(
+		pool.localOf(templateId),
+		engineVersion,
+	).flatMap((t) => (t.id === templateId ? [t.version ?? 0] : []));
+	const newestLocal = Math.max(-1, ...localCompatibleVersions);
 	const localLatest = latestOf(
 		compatibleTemplates(pool.localOf(templateId), engineVersion),
 		templateId,
@@ -604,13 +613,20 @@ async function runMigrateInternal(
 					: [],
 			),
 		);
+	// Mirrors the implicit step: a floor at most the newest local version is met
+	// locally, because the step lands on the lowest compatible version at or
+	// above it. A floor above every local version needs the cache unless a
+	// floorless entry applies.
 	if (
 		floors.length > 0 &&
 		selected.some(({ element }) => {
 			const reached = reachedLocally(
 				readAppliedTemplate(element.businessObject)?.version ?? 0,
 			);
-			return floors.every((floor) => floor > reached);
+			return (
+				!hasFallback &&
+				floors.some((floor) => floor > newestLocal && floor > reached)
+			);
 		})
 	) {
 		pool.cache();
@@ -754,6 +770,8 @@ async function runMigrateInternal(
 				target,
 				templates,
 				recipe,
+				engineVersion,
+				isCompatible: (template) => isEngineCompatible(template, engineVersion),
 				maps,
 			});
 			redaction.values = [

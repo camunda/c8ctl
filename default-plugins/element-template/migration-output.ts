@@ -523,6 +523,13 @@ export function renderReportText(
 	} else {
 		lines.push(s.dim("  no recipe: values carried over by key"));
 	}
+	for (const step of report.steps.filter((step) => step.implicit)) {
+		lines.push(
+			s.dim(
+				`  The element is on v${step.fromVersion}, which is too old for this recipe. Updating it to v${step.toVersion} first.`,
+			),
+		);
+	}
 
 	const { rows, dropped } = rowsOf(report, targetTemplate, s);
 	const all = [...rows, ...dropped];
@@ -730,6 +737,7 @@ export function reportToJson(
 			kept: report.kept.length,
 		},
 		report: {
+			steps: report.steps,
 			moved: report.moved,
 			added: report.added,
 			changed: report.changed,

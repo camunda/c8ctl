@@ -326,6 +326,50 @@ describe("element-template update resolves local templates first", () => {
 		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
 	});
 
+	test("a local version above a change floor satisfies it without reading the cache", async () => {
+		const { root, bpmn } = project();
+		writeLocal(root, [local(V1), local(V3)]);
+		const target = join(root, "other.json");
+		writeFileSync(
+			target,
+			JSON.stringify(
+				local({
+					...V2,
+					id: "io.example.other",
+					version: 1,
+					metadata: {
+						migratesFrom: {
+							schemaVersion: 1,
+							sources: [
+								{
+									kind: "change",
+									sourceTemplateId: V1.id,
+									paths: [{ from: "endpoint", to: "url" }],
+								},
+								{
+									kind: "change",
+									sourceTemplateId: V1.id,
+									minSourceVersion: 2,
+									paths: [{ from: "endpoint", to: "url" }],
+								},
+							],
+						},
+					},
+				}),
+			),
+		);
+		const result = await run(
+			corruptCache(),
+			bpmn,
+			"--to",
+			target,
+			"--allow-lossy",
+		);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /modelerTemplate="io.example.other"/);
+		assert.match(result.stderr, /which reached version 3 does not define/);
+	});
+
 	test("a corrupt cache does not stop a run whose recipe lists a version below the applied one", async () => {
 		const { root, processes } = project();
 		const applied = await workspace.seedBpmn(
