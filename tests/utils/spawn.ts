@@ -147,7 +147,9 @@ function validateSpawnInputs(
  * buffer overflow sets `killed` without any deadline expiring. Keying on the
  * timer keeps a maxBuffer termination distinct from a timeout — the overflow
  * surfaces as its own `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` diagnostic instead of
- * a spurious "timed out" note.
+ * a spurious "timed out" note. The timer is armed only for a positive timeout:
+ * `timeout: 0` disables `execFile`'s kill, so no reporting timer runs either
+ * and a child that simply outlives the zero delay is not misreported.
  */
 export interface SpawnResult {
 	stdout: string;
@@ -178,8 +180,13 @@ export async function asyncSpawn(
 		// kill that follows is the timeout's, and we mark it before execFile's
 		// own callback reports the terminated child.
 		let deadlineExpired = false;
+		// Arm the reporting timer only for a positive timeout. `timeout: 0`
+		// disables Node's execFile timeout (the child is never killed), so a
+		// zero-delay timer here would fire on the next tick and misreport a
+		// child that merely outlives it as `timedOut: true` — with a spurious
+		// "killed with SIGTERM" note for a process that was never signalled.
 		const deadline =
-			options?.timeout !== undefined
+			options?.timeout !== undefined && options.timeout > 0
 				? setTimeout(() => {
 						deadlineExpired = true;
 					}, options.timeout)

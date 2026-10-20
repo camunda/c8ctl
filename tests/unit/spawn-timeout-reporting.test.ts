@@ -19,31 +19,31 @@
  * - a maxBuffer overflow kills the child without the deadline expiring, so it
  *   reports `timedOut: false` and keeps its own
  *   `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` diagnostic rather than a spurious
- *   "timed out" note.
+ *   "timed out" note;
+ * - `timeout: 0` disables the kill entirely, so a child that outlives the next
+ *   tick reports `timedOut: false` — no reporting timer is armed for a
+ *   non-positive timeout.
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { describe, test } from "node:test";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
 
 // Stays alive until killed; the timeout below is the only thing that ends it.
 const HANG = ["-e", "setInterval(() => {}, 1000)"];
 const EXIT_ONE = ["-e", "process.stderr.write('own failure'); process.exit(1)"];
-// Install a SIGTERM handler, signal readiness on stdout, then stay alive until
-// the timeout's SIGTERM lands — at which point the handler fires and the child
-// exits 0/1 on its own terms. The close event then carries that exit code and a
-// null signal (the graceful-shutdown shape, e.g. mcp-proxy) that must still be
-// reported as a timeout. The readiness print lets the helper arm the kill timer
-// only after the handler is installed, so slow CI startup can't turn the kill
-// into an unhandled SIGTERM.
+// Install a SIGTERM handler, then stay alive until the timeout's SIGTERM lands
+// — at which point the handler fires and the child exits 0/1 on its own terms.
+// The close event then carries that exit code and a null signal (the
+// graceful-shutdown shape, e.g. mcp-proxy) that must still be reported as a
+// timeout.
 const HANDLED_SIGTERM_EXIT_ZERO = [
 	"-e",
-	"process.on('SIGTERM', () => process.exit(0)); process.stdout.write('READY\\n'); setInterval(() => {}, 1000)",
+	"process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000)",
 ];
 const HANDLED_SIGTERM_EXIT_ONE = [
 	"-e",
-	"process.on('SIGTERM', () => process.exit(1)); process.stdout.write('READY\\n'); setInterval(() => {}, 1000)",
+	"process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000)",
 ];
 // Emits more than asyncSpawn's 10 MiB maxBuffer, triggering a buffer-overflow
 // kill (ERR_CHILD_PROCESS_STDIO_MAXBUFFER) that sets child.killed without any
@@ -52,16 +52,25 @@ const MAXBUFFER_OVERFLOW = [
 	"-e",
 	"process.stdout.write('x'.repeat(11 * 1024 * 1024))",
 ];
-// Short deadline for the kill timer once a child is known to be alive; keep it
-// small so the hang/handled-SIGTERM cases end quickly.
+// Short deadline for the kill timer on the intentionally hanging child; keep
+// it small so that case ends quickly.
 const TIMEOUT_MS = 300;
 // Generous deadline for children that must start a fresh Node process and run
 // user code before the helper acts: the ordinary-exit control (write stderr,
-// exit 1) and the handled-SIGTERM fixtures (install the handler, print READY).
-// Sharing the short HANG deadline would let CI load kill a correct child before
-// it is ready and corrupt these guards, so they get their own headroom. This is
-// a safety net, not the signal under test — the kill timer is the short one.
+// exit 1) and the handled-SIGTERM fixtures (install the handler). A fresh Node
+// process installs its SIGTERM handler in well under 100 ms; giving these cases
+// a multi-second deadline leaves orders of magnitude of startup headroom, so CI
+// load cannot fire the timeout before the handler exists and turn the kill into
+// an unhandled SIGTERM. The deadline is still the only thing that ends the
+// child — the property under test (a handled SIGTERM is reported as a timeout)
+// is preserved, with no separate readiness probe that would observe a different
+// process than the one the helper manages.
 const GENEROUS_TIMEOUT_MS = 30_000;
+// Deadline for the handled-SIGTERM fixtures: large enough that a slow CI start
+// (handler install ≈ 90 ms) cannot race the kill, small enough to keep the
+// suite fast. Sits between the short HANG deadline and the ordinary-exit
+// safety net.
+const HANDLED_SIGTERM_TIMEOUT_MS = 5_000;
 
 const helpers = {
 	asyncSpawn: (args: string[], timeout: number) =>
@@ -75,62 +84,6 @@ const helpers = {
 // handled-SIGTERM fixtures can never produce the expected graceful exit there.
 // The unhandled-timeout and own-exit cases remain meaningful on Windows.
 const ON_WINDOWS = process.platform === "win32";
-
-/**
- * Wait until a handled-SIGTERM fixture has installed its signal handler.
- *
- * The fixture prints READY on stdout immediately after `process.on('SIGTERM')`.
- * Spawning a throwaway streaming probe lets us observe that line (the buffered
- * `asyncSpawn` cannot), so the kill deadline we then hand the helper is armed
- * only once the handler exists — a slow CI start can't fire the timeout before
- * the handler is installed and turn the kill into an unhandled SIGTERM. The
- * probe is killed once READY arrives; it exists only to synchronise timing.
- */
-function waitForHandlerReady(args: string[]): Promise<void> {
-	return new Promise((resolvePromise, rejectPromise) => {
-		const probe = spawn("node", args, { stdio: ["ignore", "pipe", "pipe"] });
-		let buf = "";
-		const done = () => {
-			probe.kill("SIGKILL");
-			resolvePromise();
-		};
-		probe.stdout?.setEncoding("utf-8");
-		probe.stdout?.on("data", (chunk: string) => {
-			buf += chunk;
-			if (buf.includes("READY")) done();
-		});
-		probe.on("error", rejectPromise);
-		// Safety net: a fixture that never prints READY must fail, not hang.
-		setTimeout(
-			() => rejectPromise(new Error("fixture never signalled READY")),
-			GENEROUS_TIMEOUT_MS,
-		).unref();
-	});
-}
-
-/**
- * Run a handled-SIGTERM fixture through a spawn helper with a readiness
- * handshake: confirm the handler is installed (probe), then run the helper with
- * the short kill deadline. Because readiness precedes the real run, the short
- * deadline is measured against a child whose handler is already in place.
- */
-async function runHandledSigterm(
-	name: string,
-	args: string[],
-): Promise<{
-	timedOut: boolean;
-	signal: string | null;
-	status: number | null;
-	stderr: string;
-}> {
-	await waitForHandlerReady(args);
-	if (name === "asyncSpawnWithStdin") {
-		return await asyncSpawnWithStdin("node", args, () => {}, {
-			timeout: TIMEOUT_MS,
-		});
-	}
-	return await asyncSpawn("node", args, { timeout: TIMEOUT_MS });
-}
 
 describe("spawn helpers: timeout reporting (regression guard)", () => {
 	for (const [name, run] of Object.entries(helpers)) {
@@ -152,14 +105,17 @@ describe("spawn helpers: timeout reporting (regression guard)", () => {
 				);
 				return;
 			}
-			const result = await runHandledSigterm(name, HANDLED_SIGTERM_EXIT_ZERO);
+			const result = await run(
+				HANDLED_SIGTERM_EXIT_ZERO,
+				HANDLED_SIGTERM_TIMEOUT_MS,
+			);
 			assert.equal(result.timedOut, true);
 			assert.equal(result.signal, null);
 			assert.equal(result.status, 0);
 			assert.match(
 				result.stderr,
 				new RegExp(
-					`timed out after ${TIMEOUT_MS} ms and was killed with SIGTERM`,
+					`timed out after ${HANDLED_SIGTERM_TIMEOUT_MS} ms and was killed with SIGTERM`,
 				),
 			);
 		});
@@ -171,14 +127,17 @@ describe("spawn helpers: timeout reporting (regression guard)", () => {
 				);
 				return;
 			}
-			const result = await runHandledSigterm(name, HANDLED_SIGTERM_EXIT_ONE);
+			const result = await run(
+				HANDLED_SIGTERM_EXIT_ONE,
+				HANDLED_SIGTERM_TIMEOUT_MS,
+			);
 			assert.equal(result.timedOut, true);
 			assert.equal(result.signal, null);
 			assert.equal(result.status, 1);
 			assert.match(
 				result.stderr,
 				new RegExp(
-					`timed out after ${TIMEOUT_MS} ms and was killed with SIGTERM`,
+					`timed out after ${HANDLED_SIGTERM_TIMEOUT_MS} ms and was killed with SIGTERM`,
 				),
 			);
 		});
@@ -199,6 +158,23 @@ describe("spawn helpers: timeout reporting (regression guard)", () => {
 		assert.equal(result.timedOut, false);
 		assert.equal(result.status, 1);
 		assert.match(result.stderr, /maxBuffer length exceeded/);
+		assert.doesNotMatch(result.stderr, /timed out/);
+	});
+
+	// `timeout: 0` disables Node's execFile timeout, so the child is never
+	// killed. The helper must therefore not arm its zero-delay reporting timer
+	// either — otherwise a child that merely outlives the next tick would be
+	// misreported as `timedOut: true` with a spurious "killed with SIGTERM"
+	// note for a process that was never signalled.
+	test("asyncSpawn with timeout: 0 reports a normal exit, not a timeout", async () => {
+		const result = await asyncSpawn(
+			"node",
+			["-e", "setTimeout(() => process.exit(0), 300)"],
+			{ timeout: 0 },
+		);
+		assert.equal(result.timedOut, false);
+		assert.equal(result.signal, null);
+		assert.equal(result.status, 0);
 		assert.doesNotMatch(result.stderr, /timed out/);
 	});
 });
