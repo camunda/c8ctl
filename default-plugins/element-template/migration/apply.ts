@@ -390,6 +390,11 @@ function applyApplication(
 			(v) =>
 				v.value !== "" &&
 				!stepWrites.some((w) => sameTarget(v, w)) &&
+				// An active editable property owns the field, so a Hidden duplicate
+				// is a conditional alternative, not a reset.
+				!findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
+					(property) => property.type !== "Hidden" && active.has(property),
+				) &&
 				findPropertiesByTarget(clone.properties, v.key, v.bindingType).some(
 					(property) => property.type === "Hidden",
 				) &&

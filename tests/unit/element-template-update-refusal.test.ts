@@ -764,6 +764,53 @@ describe("change floor above the reached version", () => {
 			fixture.assertUnchanged();
 		});
 
+		test(`${kind}: an inactive Hidden duplicate does not make normalization a reset`, async () => {
+			const editable = input("moved", "", { feel: "required" });
+			const inactive = input("moved", "other", {
+				type: "Hidden",
+				condition: { property: "kept", equals: "never" },
+			});
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("moved"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [input("kept", "retained"), editable, inactive],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [{ from: "removed", to: "moved" }],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [input("kept", "retained"), editable, inactive],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.deepEqual(envelope.report.dropped, []);
+		});
+
 		test(`${kind}: a pre-floor move whose value the floor normalizes is not reported as dropped`, async () => {
 			const fixture = setup({
 				recipe: floor(3),
