@@ -103,7 +103,10 @@ function run(dataDir: string, ...args: string[]) {
 				NODE_EXTRA_CA_CERTS: certificate,
 				NODE_TLS_REJECT_UNAUTHORIZED: undefined,
 			},
-			timeout: 30_000,
+			// Safety net only, not a correctness signal: it must stay above the
+			// CLI's own 30 s template-fetch timeout, so a stalled fetch ends in the
+			// CLI's diagnostic error rather than a kill that hides the cause.
+			timeout: 60_000,
 		},
 		...args,
 	);
@@ -228,7 +231,9 @@ describe("explicit migration targets take precedence over cached identities", ()
 					assert.equal(
 						preview.status,
 						invalid || transport === "http" ? 1 : 0,
-						preview.stderr,
+						// Server-side request count tells a stalled fetch (request
+						// never arrived) apart from a slow or failed response.
+						`${preview.stderr}\nrequests served for /${name}.json: ${requests.get(`/${name}.json`) ?? 0}`,
 					);
 					assert.equal(readFileSync(bpmn, "utf-8"), seededXml);
 					assert.equal(statSync(bpmn).mtimeMs, mtime);
