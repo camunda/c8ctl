@@ -368,12 +368,15 @@ export function resolveSteps({
 		steps.length === 0 &&
 		targetVersion !== appliedVersion
 	) {
+		const known = recipeSourcesFor(targetRecipe, appliedId).length > 0;
+		// A recipe that stops short of a newer target leaves that step to carry-over.
+		if (known && appliedVersion < targetVersion)
+			return { steps, refusal: null };
 		return {
 			steps: [],
-			refusal:
-				recipeSourcesFor(targetRecipe, appliedId).length === 0
-					? `wrong source ID: the recipe has no upgrade entry for "${appliedId}"`
-					: `no applicable upgrade: the recipe has no upgrade above applied version ${appliedVersion} through target version ${targetVersion}`,
+			refusal: known
+				? `no applicable upgrade: the recipe has no upgrade above applied version ${appliedVersion} through target version ${targetVersion}`
+				: `wrong source ID: the recipe has no upgrade entry for "${appliedId}"`,
 		};
 	}
 	return { steps, refusal: null };

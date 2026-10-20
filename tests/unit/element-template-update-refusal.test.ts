@@ -169,16 +169,6 @@ for (const action of ["change", "update"] as const) {
 			explicitDiagnostic: /no source entry for template 'refusal\.source'/,
 			lineage: [upgrade],
 		},
-		...(action === "update"
-			? [
-					{
-						name: "no applicable upgrade",
-						sources: [{ ...entry, toVersion: 1 }],
-						diagnostic: /no applicable upgrade.*1.*3/i,
-						lineage: [upgrade],
-					},
-				]
-			: []),
 		{
 			name: "coverage refusal",
 			sources: [
@@ -294,6 +284,27 @@ for (const action of ["change", "update"] as const) {
 						}
 					}
 				}
+			});
+		}
+	}
+
+	if (action === "update") {
+		for (const embedded of [false, true]) {
+			test(`update: ${embedded ? "embedded" : "explicit"} recipe that stops short of the target carries values over`, async () => {
+				const fixture = setup({
+					action,
+					embedded,
+					recipe: {
+						schemaVersion: 1,
+						sources: [{ ...entry, toVersion: 1 }],
+					},
+				});
+				const result = await fixture.run("--dry-run", "--json");
+				assert.equal(result.status, 0, result.stderr);
+				const envelope = JSON.parse(result.stdout).results[0];
+				assert.equal(envelope.recipe.refusal, null);
+				assert.equal(envelope.requiresAuthorization, false);
+				fixture.assertUnchanged();
 			});
 		}
 	}

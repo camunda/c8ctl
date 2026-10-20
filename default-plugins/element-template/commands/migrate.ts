@@ -779,10 +779,9 @@ async function runMigrateInternal(
 				...valuesOf(result.element),
 			];
 			const { report } = result;
-			if (recipe && (!report.usedRecipe || report.refusal)) {
-				throw new Error(
-					`Explicit recipe cannot be used: ${report.refusal ?? "no applicable source entry"}.`,
-				);
+			// A recipe that stops short of a newer target leaves that step to carry-over.
+			if (recipe && report.refusal) {
+				throw new Error(`Explicit recipe cannot be used: ${report.refusal}.`);
 			}
 			outcomes.push({
 				status: "updated",

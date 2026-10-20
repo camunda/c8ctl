@@ -1061,6 +1061,34 @@ describe("resolveSteps and findSuccessors boundary cases", () => {
 		);
 	});
 
+	test("an applied version below a target the recipe has no upgrade for carries values over", () => {
+		const v2 = template("t", 2, ["b"]);
+		const target = withRecipe(template("t", 3, ["b"]), upgradeTo2);
+		const result = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 2,
+			target,
+			templates: [v2, target],
+		});
+		assert.deepStrictEqual(result, { steps: [], refusal: null });
+	});
+
+	test("a recipe upgrade below the target still applies before the carry-over to the target", () => {
+		const v2 = template("t", 2, ["b"]);
+		const target = withRecipe(template("t", 3, ["b"]), upgradeTo2);
+		const result = resolveSteps({
+			appliedId: "t",
+			appliedVersion: 1,
+			target,
+			templates: [template("t", 1, ["a"]), v2, target],
+		});
+		assert.strictEqual(result.refusal, null);
+		assert.deepStrictEqual(
+			result.steps.map((s) => [s.kind, s.version]),
+			[["version", 2]],
+		);
+	});
+
 	test("a target without a version is treated as version 0 and never throws", () => {
 		const { version: _version, ...target } = template("t", 0, ["b"]);
 		const result = resolveSteps({
