@@ -137,10 +137,26 @@ function validateSpawnInputs(
 	}
 }
 
+/**
+ * Outcome of a spawned child.
+ *
+ * `status` is the exit code, or `null` when the child was terminated by a
+ * signal. `timedOut` is true when the helper itself killed the child because
+ * it exceeded `timeout`; stderr then ends with an explicit "timed out" note so
+ * an assertion that prints stderr names the real cause instead of reading like
+ * an ordinary non-zero exit.
+ */
 export interface SpawnResult {
 	stdout: string;
 	stderr: string;
 	status: number | null;
+	signal: NodeJS.Signals | null;
+	timedOut: boolean;
+}
+
+/** Note appended to stderr when the helper killed the child on timeout. */
+function timeoutNote(timeout: number | undefined, signal: string): string {
+	return `\n[spawn helper] child timed out after ${timeout} ms and was killed with ${signal}\n`;
 }
 
 export async function asyncSpawn(
@@ -157,14 +173,28 @@ export async function asyncSpawn(
 			maxBuffer: 10 * 1024 * 1024,
 			...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
 		});
-		return { stdout: stdout ?? "", stderr: stderr ?? "", status: 0 };
+		return {
+			stdout: stdout ?? "",
+			stderr: stderr ?? "",
+			status: 0,
+			signal: null,
+			timedOut: false,
+		};
 	} catch (err) {
 		// biome-ignore lint/plugin: unavoidable narrowing of catch-clause unknown to ExecFileException
 		const e = err as ExecFileException & { stdout?: string; stderr?: string };
+		const signal = e.signal ?? null;
+		// execFile only kills the child itself when the timeout fires, so a
+		// helper-initiated kill is exactly `killed` plus a signal.
+		const timedOut = e.killed === true && signal !== null;
 		return {
 			stdout: e.stdout ?? "",
-			stderr: e.stderr ?? "",
-			status: typeof e.code === "number" ? e.code : 1,
+			stderr:
+				(e.stderr ?? "") +
+				(timedOut ? timeoutNote(options?.timeout, signal) : ""),
+			status: typeof e.code === "number" ? e.code : signal ? null : 1,
+			signal,
+			timedOut,
 		};
 	}
 }
@@ -219,8 +249,11 @@ export async function asyncSpawnWithStdin(
 	// miss the 'close' event if the child exits early (e.g. rejects input
 	// immediately). Any buffered 'close' emission will be captured by the
 	// already-registered listener rather than being lost between the two awaits.
-	const statusPromise = new Promise<number | null>((resolve, reject) => {
-		child.on("close", (code) => resolve(code));
+	const statusPromise = new Promise<{
+		code: number | null;
+		signal: NodeJS.Signals | null;
+	}>((resolve, reject) => {
+		child.on("close", (code, signal) => resolve({ code, signal }));
 		child.on("error", (err) => {
 			stderr += `${err.message}\n`;
 			reject(err);
@@ -233,7 +266,11 @@ export async function asyncSpawnWithStdin(
 		stdin.end();
 	}
 
-	const status = await statusPromise;
+	const { code, signal } = await statusPromise;
+	// spawn()'s `timeout` kills via `child.kill()`, which sets `killed`; a
+	// signal from anywhere else leaves it false.
+	const timedOut = child.killed && signal !== null;
+	if (timedOut) stderr += timeoutNote(options?.timeout, signal);
 
-	return { stdout, stderr, status };
+	return { stdout, stderr, status: code, signal, timedOut };
 }
