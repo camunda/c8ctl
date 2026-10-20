@@ -284,7 +284,7 @@ a different ID and may require `minSourceVersion`, a floor on the source version
 is below the best floor, the plan adds one implicit version step to that floor, with no recipe
 entries; values are carried by binding. The best floor is the highest one at most the newest source
 version compatible with the BPMN's `modeler:executionPlatformVersion`; the plan never goes above
-it. An omitted floor is the fallback and never causes a bump. The element fails (no file is
+it. An omitted floor is the fallback entry: it never causes a bump itself and applies only when no declared floor is reachable. When a declared floor is reachable, an element below it is bumped to that floor and the fallback entry is not used. The element fails (no file is
 written, and `--allow-lossy` does not override it) when the newest compatible version is below
 the lowest floor, or when the floor version is not in the compatible catalog. The report marks
 the step: `upgrade vA -> vF (implicit, no recipe entries)` in text and `implicit: true` on the

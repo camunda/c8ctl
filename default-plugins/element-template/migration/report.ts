@@ -186,18 +186,32 @@ export function mergeFacts(all: ReportFacts[]): ReportFacts {
 		}
 		if (facts.after) {
 			const after = facts.after;
+			// A later step may store the value FEEL-wrapped, which keeps it.
 			const surviving = (field: FieldKey, value: string | undefined) => {
 				const actual = find(after, field.key, field.bindingType);
 				return (
 					actual !== undefined &&
-					(value === undefined || actual.value === value)
+					(value === undefined ||
+						actual.value === value ||
+						actual.value === `=${value}`)
 				);
 			};
+			const stored = (field: FieldKey, value: string | undefined) =>
+				value === undefined
+					? value
+					: (find(after, field.key, field.bindingType)?.value ?? value);
 			failedWrites ||=
 				moved.some((move) => !surviving(move.to, move.value)) ||
 				set.some((write) => !surviving(write, write.value));
-			moved = moved.filter((move) => surviving(move.to, move.value));
-			set = set.filter((write) => surviving(write, write.value));
+			moved = moved
+				.filter((move) => surviving(move.to, move.value))
+				.map((move) => ({ ...move, value: stored(move.to, move.value) }));
+			set = set
+				.filter((write) => surviving(write, write.value))
+				.map((write) => ({
+					...write,
+					value: stored(write, write.value) ?? write.value,
+				}));
 			snapshot = after;
 		}
 		failedWrites ||= Boolean(facts.failedWrites);

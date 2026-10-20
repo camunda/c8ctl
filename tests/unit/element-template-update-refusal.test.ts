@@ -715,6 +715,58 @@ describe("change floor above the reached version", () => {
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
 		});
 
+		test(`${kind}: a pre-floor move whose value the floor normalizes is not reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("moved"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [
+							input("kept", "retained"),
+							input("moved", "", { feel: "required" }),
+						],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [{ from: "removed", to: "moved" }],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("moved", "", { feel: "required" }),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
 		test(`${kind}: a pre-floor upgrade move that translates the value is not reported as dropped`, async () => {
 			const fixture = setup({
 				recipe: floor(3),
@@ -767,6 +819,165 @@ describe("change floor above the reached version", () => {
 			const written = await fixture.run("--in-place");
 			assert.equal(written.status, 0, written.stderr);
 			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: an intermediate-only default removed by the implicit step is not reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+							input("temporary", "generated-default"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+						],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("removed", "lost-value"),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a value the floor normalizes to a FEEL wrapper is not reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "", { feel: "required" }),
+						],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("removed", "", { feel: "required" }),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assert.equal(preview.status, 0, preview.stderr);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, true);
+			assert.equal(envelope.requiresAuthorization, false);
+			assert.deepEqual(envelope.report.dropped, []);
+			const written = await fixture.run("--in-place");
+			assert.equal(written.status, 0, written.stderr);
+			assert.notEqual(readFileSync(fixture.file, "utf8"), original);
+		});
+
+		test(`${kind}: a floor normalization that changes the value meaning is reported as dropped`, async () => {
+			const fixture = setup({
+				recipe: floor(3),
+				embedded,
+				lineage: [
+					{
+						...source,
+						version: 2,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "lost-value"),
+						],
+					},
+					{
+						...source,
+						version: 3,
+						properties: [
+							input("kept", "retained"),
+							input("removed", "", { type: "Boolean", feel: "static" }),
+						],
+						metadata: {
+							migratesFrom: {
+								schemaVersion: 1,
+								sources: [
+									{
+										kind: "upgrade",
+										sourceTemplateId: source.id,
+										toVersion: 2,
+										paths: [],
+									},
+								],
+							},
+						},
+					},
+				],
+				targetProperties: [
+					input("kept", "retained"),
+					input("removed", "", { type: "Boolean", feel: "static" }),
+				],
+			});
+			const preview = await fixture.run("--dry-run", "--json");
+			assertRefused(preview, ["--dry-run", "--json"]);
+			const envelope = JSON.parse(preview.stdout).results[0];
+			assert.equal(envelope.lossless, false);
+			assert.deepEqual(
+				envelope.report.dropped.map((item: { key: string; value: string }) => [
+					item.key,
+					item.value,
+				]),
+				[["removed", "lost-value"]],
+			);
+			const blocked = await fixture.run("--in-place");
+			assertRefused(blocked, ["--in-place"]);
+			fixture.assertUnchanged();
 		});
 
 		test(`${kind}: a surviving --map recovers a value the floor version lacks`, async () => {

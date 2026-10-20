@@ -204,6 +204,88 @@ function resolveMapWrites(
 	return result;
 }
 
+interface Place {
+	key: string;
+	bindingType: string | null;
+	value: string;
+}
+
+/** Where one original value currently lives. */
+interface Lineage {
+	places: Place[];
+}
+
+/**
+ * Moves each original value's places through one application and returns the
+ * places an implicit step removed along with their last copy. A value
+ * survives normalization only when it is wrapped as `=<value>`.
+ */
+function advanceLineage(
+	lineage: Lineage[],
+	moved: ReportFacts["moved"],
+	after: ElementValue[],
+	implicit: boolean,
+): ElementValue[] {
+	const lost: ElementValue[] = [];
+	for (const entry of lineage) {
+		if (entry.places.length === 0) continue;
+		const previous = entry.places;
+		const candidates = [
+			...previous,
+			...moved.flatMap((m) =>
+				previous.some(
+					(p) => p.key === m.from.key && p.bindingType === m.from.bindingType,
+				)
+					? [
+							{
+								key: m.to.key,
+								bindingType: m.to.bindingType,
+								value: m.value ?? "",
+							},
+						]
+					: [],
+			),
+		];
+		const survivors: Place[] = [];
+		const gone: Place[] = [];
+		for (const place of candidates) {
+			const now = after.find(
+				(a) => a.key === place.key && a.bindingType === place.bindingType,
+			);
+			if (
+				now &&
+				(place.value === "" ||
+					now.value === place.value ||
+					now.value === `=${place.value}`)
+			) {
+				if (
+					!survivors.some(
+						(s) => s.key === now.key && s.bindingType === now.bindingType,
+					)
+				)
+					survivors.push({
+						key: now.key,
+						bindingType: now.bindingType,
+						value: now.value,
+					});
+			} else if (previous.includes(place)) {
+				gone.push(place);
+			}
+		}
+		entry.places = survivors;
+		if (implicit && survivors.length === 0) {
+			lost.push(
+				...gone.map((p) => ({
+					...p,
+					bindingType: p.bindingType ?? "",
+					isFeel: false,
+				})),
+			);
+		}
+	}
+	return lost;
+}
+
 function valuesOf(element: BpmnElement): ElementValue[] {
 	return enumerateElementValues(getExtensionElements(element.businessObject));
 }
@@ -218,7 +300,6 @@ function applyApplication(
 ): {
 	element: BpmnElement;
 	facts: ReportFacts;
-	written: { key: string; bindingType: string | null; value: string }[];
 	/** The template with the properties known to be active when it was applied. */
 	activeTemplate: MigrationTemplate;
 } | null {
@@ -319,19 +400,8 @@ function applyApplication(
 			? normalizeDestinationValue(property, write.value)
 			: undefined;
 	};
-	// What the writes put on each active property, after normalization.
-	const written = writes.flatMap((w) =>
-		findPropertiesByTarget(clone.properties, w.key, w.bindingType)
-			.filter((property) => active.has(property))
-			.map((property) => ({
-				key: w.key,
-				bindingType: w.bindingType,
-				value: normalizeDestinationValue(property, w.value),
-			})),
-	);
 	return {
 		element: current,
-		written,
 		activeTemplate: {
 			...clone,
 			// Unconditional properties are always active. A conditional one counts only
@@ -448,15 +518,20 @@ export function migrateElement({
 				};
 	const mapPlan = resolveMapWrites(maps, before, fromTemplate, target);
 	const allFacts: ReportFacts[] = [];
-	// An implicit step has no recipe, so a value its template lacks is lost
-	// even when a later template defaults the same binding.
+	// An implicit step has no recipe, so an original value its template lacks is
+	// lost even when a later template defaults the same binding. Each original
+	// value is followed through every step, across moves and normalization.
+	const lineage: Lineage[] = before
+		.filter((v) => v.value !== "")
+		.map((v) => ({
+			places: [{ key: v.key, bindingType: v.bindingType, value: v.value }],
+		}));
 	const lostInImplicitSteps: ElementValue[] = [];
 	const implicitTemplates: MigrationTemplate[] = [];
 	let current = element;
 	let mapsApplied = false;
 	for (const [index, application] of applications.entries()) {
 		const isFinal = index === applications.length - 1;
-		const valuesBefore = application.step?.implicit ? valuesOf(current) : [];
 		const result = applyApplication(
 			modeler,
 			catalog,
@@ -467,67 +542,16 @@ export function migrateElement({
 		);
 		if (result) {
 			current = result.element;
-			const earlierApplications = [...allFacts];
 			allFacts.push(result.facts);
 			if (application.step?.implicit)
 				implicitTemplates.push(result.activeTemplate);
-			const valuesAfter = valuesOf(current);
 			lostInImplicitSteps.push(
-				...valuesBefore.filter((v) => {
-					if (v.value === "") return false;
-					// An earlier move chain that holds the value on another binding keeps it.
-					const holds = (
-						values: ElementValue[],
-						field: FieldKey,
-						value: string,
-					) =>
-						values.some(
-							(e) =>
-								e.key === field.key &&
-								e.bindingType === field.bindingType &&
-								e.value === value,
-						);
-					let carried: { field: FieldKey; value: string }[] = [
-						{ field: v, value: v.value },
-					];
-					for (const { moved } of earlierApplications) {
-						const next = moved.flatMap((m) =>
-							carried.some(
-								(c) =>
-									c.field.key === m.from.key &&
-									c.field.bindingType === m.from.bindingType,
-							)
-								? [{ field: m.to, value: m.value ?? v.value }]
-								: [],
-						);
-						carried = [...carried, ...next];
-					}
-					if (
-						carried.some(
-							(c) =>
-								!(
-									c.field.key === v.key && c.field.bindingType === v.bindingType
-								) &&
-								holds(valuesBefore, c.field, c.value) &&
-								holds(valuesAfter, c.field, c.value),
-						)
-					)
-						return false;
-					const kept = valuesAfter.find(
-						(a) => a.key === v.key && a.bindingType === v.bindingType,
-					);
-					if (!kept) return true;
-					// The value survives when an active write put it there unchanged.
-					return (
-						kept.value !== v.value &&
-						!result.written.some(
-							(w) =>
-								w.key === v.key &&
-								w.bindingType === v.bindingType &&
-								w.value === kept.value,
-						)
-					);
-				}),
+				...advanceLineage(
+					lineage,
+					result.facts.moved,
+					valuesOf(current),
+					application.step?.implicit === true,
+				),
 			);
 			mapsApplied ||= isFinal;
 		}
