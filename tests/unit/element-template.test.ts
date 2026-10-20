@@ -2567,18 +2567,22 @@ describe("CLI behavioural: element-template edit", () => {
 				);
 				writeFileSync(tempBpmn, customized);
 
+				// POST -> GET deactivates `body`/`ignoreNullValues`. A write
+				// that changes the active property set is what makes the
+				// library re-run template application once the template is
+				// registered, so this edit would expose that regression.
 				const edited = await run(
 					"element-template",
 					"edit",
 					"Activity_17s7axj",
 					tempBpmn,
 					"--set",
-					"method=PUT",
+					"method=GET",
 				);
 				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
 				assert.strictEqual(
 					getInputValue(edited.stdout, "method"),
-					"PUT",
+					"GET",
 					"the requested property should still be updated",
 				);
 				assert.strictEqual(
@@ -2594,13 +2598,12 @@ describe("CLI behavioural: element-template edit", () => {
 	});
 
 	test("--set updates a zeebe:taskHeader value (and prepends FEEL) without touching other bindings", async () => {
-		// Coverage for the zeebe:taskHeader branch of resolveBindingTarget,
-		// which is asymmetric to zeebe:input (keyed by binding.key, writing
-		// the header's `value` property) and was otherwise exercised by no
-		// --set path — apply or edit. `resultExpression` is a Text/FEEL header
-		// the fixture materializes with a default on apply, so editing it also
-		// proves maybePrependFeel runs on the edit path (feel: "required" =>
-		// a bare value gets an "=" prefix).
+		// zeebe:taskHeader is asymmetric to zeebe:input (keyed by
+		// binding.key, writing the header's `value` property).
+		// `resultExpression` is a Text/FEEL header the fixture materializes
+		// with a default on apply, so editing it also proves FEEL casting
+		// runs on the edit path (feel: "required" => a bare value gets an
+		// "=" prefix).
 		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
 		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
 			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
@@ -2714,7 +2717,7 @@ describe("CLI behavioural: element-template edit", () => {
 		});
 	});
 
-	test("errors clearly when the property's condition was never met (not materialized)", async () => {
+	test("errors clearly when the property's condition is not met", async () => {
 		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
 		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
 			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
@@ -2745,8 +2748,47 @@ describe("CLI behavioural: element-template edit", () => {
 				assert.strictEqual(result.status, 1);
 				const output = result.stdout + result.stderr;
 				assert.ok(
-					output.includes("has no existing value on this element to edit"),
-					`Should report the unmaterialized property. Got: ${output.slice(0, 300)}`,
+					output.includes("its condition is not met"),
+					`Should report the unmet condition. Got: ${output.slice(0, 300)}`,
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("materializes a conditional property when an earlier --set meets its condition", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+					"--set",
+					'body={"hello":"world"}',
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.strictEqual(getInputValue(edited.stdout, "method"), "POST");
+				assert.ok(
+					edited.stdout.includes("hello"),
+					"body input should be created once method=POST meets its condition",
 				);
 			} finally {
 				rmSync(tempDir, { recursive: true, force: true });
@@ -2884,6 +2926,211 @@ describe("CLI behavioural: element-template edit", () => {
 					beforeDryRun,
 					"--dry-run must not modify the BPMN file",
 				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("keeps the order of existing inputs when editing one", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			const targets = () =>
+				[
+					...readFileSync(tempBpmn, "utf-8").matchAll(
+						/<zeebe:input[^>]+target="([^"]*)"/g,
+					),
+				].map((m) => m[1]);
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=POST",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				const before = targets();
+				assert.ok(before.length > 2, "fixture should have several inputs");
+
+				const edited = await run(
+					"element-template",
+					"edit",
+					"-i",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"method=PUT",
+				);
+				assert.strictEqual(edited.status, 0, `stderr: ${edited.stderr}`);
+				assert.deepStrictEqual(
+					targets(),
+					before,
+					"editing one input must not reorder the others",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("rejects constraint violations without touching the file, with and without --dry-run", async () => {
+		const httpJsonTemplate = JSON.parse(readFileSync(TEMPLATE_FILE, "utf-8"));
+		await withSeededElementTemplateCache([httpJsonTemplate], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			try {
+				const applied = await run(
+					"element-template",
+					"apply",
+					"-i",
+					TEMPLATE_FILE,
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"url=https://example.com",
+				);
+				assert.strictEqual(applied.status, 0, `stderr: ${applied.stderr}`);
+				const before = readFileSync(tempBpmn, "utf-8");
+
+				// `url` carries a notEmpty + http(s) pattern constraint: one
+				// pattern failure and one notEmpty failure, each in normal and
+				// dry-run mode.
+				for (const value of ["ftp://example.com", ""]) {
+					for (const dryRun of [[], ["--dry-run"]]) {
+						const result = await run(
+							...dryRun,
+							"element-template",
+							"edit",
+							"-i",
+							"Activity_17s7axj",
+							tempBpmn,
+							"--set",
+							`url=${value}`,
+						);
+						const label = `url=${JSON.stringify(value)} ${dryRun.join(" ")}`;
+						assert.strictEqual(result.status, 1, label);
+						assert.ok(
+							(result.stdout + result.stderr).includes(
+								'Invalid value for "url"',
+							),
+							`${label}: should report the constraint violation. Got: ${(result.stdout + result.stderr).slice(0, 300)}`,
+						);
+						assert.strictEqual(
+							readFileSync(tempBpmn, "utf-8"),
+							before,
+							`${label}: file must be byte-for-byte unchanged`,
+						);
+					}
+				}
+
+				// A valid value is accepted and written.
+				const valid = await run(
+					"element-template",
+					"edit",
+					"-i",
+					"Activity_17s7axj",
+					tempBpmn,
+					"--set",
+					"url=https://example.org/new",
+				);
+				assert.strictEqual(valid.status, 0, `stderr: ${valid.stderr}`);
+				assert.strictEqual(
+					getInputValue(readFileSync(tempBpmn, "utf-8"), "url"),
+					"https://example.org/new",
+				);
+			} finally {
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+	});
+
+	test("writes Boolean values and a plain-property binding through apply, re-apply and edit", async () => {
+		const template = {
+			id: "io.example.writer",
+			name: "Writer coverage",
+			version: 1,
+			appliesTo: ["bpmn:Task"],
+			elementType: { value: "bpmn:ServiceTask" },
+			engines: { camunda: "^8.10" },
+			properties: [
+				{
+					type: "Hidden",
+					value: "writer-job",
+					binding: { type: "zeebe:taskDefinition:type" },
+				},
+				{
+					type: "Boolean",
+					label: "Flag",
+					value: false,
+					binding: { type: "zeebe:input", name: "flag" },
+				},
+				{
+					type: "String",
+					label: "Display name",
+					value: "initial",
+					binding: { type: "property", name: "name" },
+				},
+			],
+		};
+		await withSeededElementTemplateCache([template], async (run) => {
+			const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-et-test-"));
+			const tempBpmn = join(tempDir, "test.bpmn");
+			const templateFile = join(tempDir, "writer.json");
+			writeFileSync(tempBpmn, readFileSync(BPMN_FILE, "utf-8"));
+			writeFileSync(templateFile, JSON.stringify(template));
+			const xml = () => readFileSync(tempBpmn, "utf-8");
+			const nameAttr = () =>
+				xml().match(/<bpmn:serviceTask[^>]*\bname="([^"]*)"/)?.[1];
+			try {
+				const steps: Array<{
+					cmd: "apply" | "edit";
+					set: string[];
+					flag: string;
+					name: string;
+				}> = [
+					{
+						cmd: "apply",
+						set: ["flag=true", "name=First"],
+						flag: "=true",
+						name: "First",
+					},
+					{
+						cmd: "apply",
+						set: ["flag=false", "name=Second"],
+						flag: "=false",
+						name: "Second",
+					},
+					{
+						cmd: "edit",
+						set: ["flag=true", "name=Third"],
+						flag: "=true",
+						name: "Third",
+					},
+					{ cmd: "edit", set: ["flag=false"], flag: "=false", name: "Third" },
+				];
+				for (const step of steps) {
+					const args =
+						step.cmd === "apply"
+							? ["apply", "-i", templateFile, "Activity_17s7axj", tempBpmn]
+							: ["edit", "-i", "Activity_17s7axj", tempBpmn];
+					const result = await run(
+						"element-template",
+						...args,
+						...step.set.flatMap((s) => ["--set", s]),
+					);
+					const label = `${step.cmd} ${step.set.join(" ")}`;
+					assert.strictEqual(result.status, 0, `${label}: ${result.stderr}`);
+					assert.strictEqual(getInputValue(xml(), "flag"), step.flag, label);
+					assert.strictEqual(nameAttr(), step.name, label);
+				}
 			} finally {
 				rmSync(tempDir, { recursive: true, force: true });
 			}
