@@ -1,0 +1,78 @@
+name: Agentic Controller
+
+on:
+  issues:
+    types: [opened, edited, reopened, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft, closed, labeled, unlabeled]
+  workflow_run:
+    workflows: [Test, Release, Agentic Fitness, Agentic Implement, Agentic Review Copilot, Agentic Review Claude, Agentic Reimplement]
+    types: [completed]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Reconcile tracked work or resume one subject as a maintainer
+        type: choice
+        options: [reconcile, resume]
+        default: reconcile
+        required: true
+      number:
+        description: Issue or PR number for resume (empty for reconciliation)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: c8ctl-agentic-controller
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      vars.C8CTL_AUTOMATION_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.login != vars.C8CTL_APP_BOT_LOGIN)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted controller only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/agentic
+            .github/workflows/test.yml
+            .releaserc.json
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Mint repository-scoped controller token
+        id: app
+        env:
+          C8CTL_APP_CLIENT_ID: ${{ vars.C8CTL_APP_CLIENT_ID }}
+          C8CTL_APP_PRIVATE_KEY: ${{ secrets.C8CTL_APP_PRIVATE_KEY }}
+        run: node --experimental-strip-types scripts/agentic/app-token.ts create controller
+      - name: Reconcile current repository state
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          C8CTL_AUTOMATION_ENABLED: ${{ vars.C8CTL_AUTOMATION_ENABLED }}
+          C8CTL_AUTO_MERGE_ENABLED: ${{ vars.C8CTL_AUTO_MERGE_ENABLED }}
+          C8CTL_AUTOMATION_SINCE: ${{ vars.C8CTL_AUTOMATION_SINCE }}
+          C8CTL_APP_BOT_LOGIN: ${{ vars.C8CTL_APP_BOT_LOGIN }}
+        run: node --experimental-strip-types scripts/agentic/coordinator.ts
+      - name: Revoke controller token
+        if: ${{ always() && steps.app.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: node --experimental-strip-types scripts/agentic/app-token.ts revoke

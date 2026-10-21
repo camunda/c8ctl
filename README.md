@@ -29,6 +29,10 @@ _Full transparency_:
 this cli is also a pilot-coding experiment, practicing [Agentic Engineering](https://addyosmani.com/blog/agentic-engineering/).  
 Guided by humans, the codebase is (mostly) built by your friendly neighborhood LLM, fully dogfooding the Human-in-the-Loop pattern.
 
+Repository automation is documented in the
+[agentic workflows operator guide](.github/AGENTIC-WORKFLOWS.md). Issue implementation,
+dual-engine review, and guarded auto-merge are inactive until explicitly enabled.
+
 ## Installation
 
 ### Requirements
