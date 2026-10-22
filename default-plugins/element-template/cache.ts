@@ -544,7 +544,9 @@ async function syncTemplatesLocked({
 	const registrySpec =
 		spec === DEFAULT_PACKAGE ||
 		(Boolean(suffix) &&
-			(Boolean(semver.valid(suffix)) || /^[a-z][\w.-]*$/i.test(suffix)));
+			(Boolean(semver.valid(suffix)) ||
+				(semver.validRange(suffix) === null &&
+					/^[a-z][\w.-]*$/i.test(suffix))));
 	const version = registrySpec ? latestPackageVersion(spec) : undefined;
 	const desiredRef = version ? `npm:${DEFAULT_PACKAGE}@${version}` : undefined;
 
