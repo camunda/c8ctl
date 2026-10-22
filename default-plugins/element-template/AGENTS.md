@@ -113,6 +113,7 @@ Smoke-test against the live npm package (writes to a throwaway
 dir):
 
 ```bash
-C8CTL_DATA_DIR=/tmp/c8ctl-smoke node --experimental-strip-types src/index.ts \
-  element-template sync
+export C8CTL_DATA_DIR=/tmp/c8ctl-smoke
+node --experimental-strip-types src/index.ts element-template sync
+node --experimental-strip-types src/index.ts element-template search "AWS S3"
 ```
