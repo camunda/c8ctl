@@ -3827,6 +3827,95 @@ function upstreamRefOf(template: Record<string, unknown>): string {
 }
 
 describe("CLI behavioural: element-template npm sync", () => {
+	test("syncs a template with a long filename", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-long-name-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Short", 1)]);
+		writeFileSync(
+			join(
+				packageDir,
+				"src",
+				"element-templates",
+				`${"long-".repeat(22)}.json`,
+			),
+			JSON.stringify([ootbTemplate("io.example.Long", 1)]),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Long", "io.example.Short"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("malformed template JSON cannot prune or refresh an existing cache", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-malformed-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Old", 1)]);
+		try {
+			const first = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(first.status, 0, first.stderr);
+			const cacheDir = join(dataDir, "element-templates");
+			const cacheBefore = readFileSync(
+				join(cacheDir, "templates.json"),
+				"utf-8",
+			);
+			const timestampBefore = readFileSync(
+				join(cacheDir, "fetched-at"),
+				"utf-8",
+			);
+			writeTemplatePackage(
+				packageDir,
+				[ootbTemplate("io.example.New", 2)],
+				"1.0.1",
+			);
+			writeFileSync(
+				join(packageDir, "src", "element-templates", "broken.json"),
+				"{broken",
+			);
+			const second = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"--json",
+					"element-template",
+					"sync",
+					"--prune",
+				],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(second.status, 0, second.stderr);
+			const summary: unknown = JSON.parse(second.stdout.trim());
+			assert.ok(isRecord(summary));
+			assert.strictEqual(summary.errors, 1);
+			assert.strictEqual(summary.pruned, 0);
+			assert.strictEqual(
+				readFileSync(join(cacheDir, "templates.json"), "utf-8"),
+				cacheBefore,
+			);
+			assert.strictEqual(
+				readFileSync(join(cacheDir, "fetched-at"), "utf-8"),
+				timestampBefore,
+			);
+			assert.match(second.stderr, /broken\.json/);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("syncs every version and embedded migration recipe from a local npm package", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-npm-"));
 		const packageDir = join(dataDir, "package");

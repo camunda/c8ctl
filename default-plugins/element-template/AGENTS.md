@@ -2,7 +2,7 @@
 
 Read [docs/design.md](./docs/design.md) before changing this plugin. It
 covers the **why**: vendor bundle, npm package source choice, cache
-strategy (`upstreamRef`-keyed dedup), lazy bootstrap, and semver-based
+strategy (`id@version`-keyed dedup), explicit bootstrap, and semver-based
 version resolution.
 
 ## Where things live
@@ -14,7 +14,6 @@ version resolution.
 | `migration/` | The migration engine behind `update`: recipe parser (`recipe.ts`, schema in `migrates-from.schema.json`), step resolution (`steps.ts`), value resolution (`plan.ts`), applying to a headless modeler (`apply.ts`) and the report model (`report.ts`). **Self-contained: nothing in this folder may import from c8ctl or from the rest of the plugin**, so it can be lifted out into a library. `migration-output.ts` (outside it) renders the report. |
 | `template-ref.ts` | `parseTemplateRef`, `readBpmnInput`, `getExecutionPlatformVersion`, `findLocalTemplates` (Modeler-aligned `.camunda/element-templates/` + Modeler user-data lookup), `resolveOotbTemplate`, `resolveTemplateId` (local first, then OOTB — every subcommand's id path), `loadTemplate` |
 | `cache.ts` | Cache I/O, sync, search, version resolution |
-| `archive.ts` | Bounded tar.gz reader for the npm template package |
 | `helpers.ts` | `--set` parsing, file/URL fetch, glob → regex, multi-binding lookup, condition warnings, `atomicOverwriteFile` |
 | `vendor.ts` | `resolveVendorBundle()` + the minimal bpmn-js `Modeler`/`modeling` type surface shared by `apply`/`edit` |
 | `vendor-src/bundle-entry.js` | esbuild entry — re-exports `Modeler`, `CloudElementTemplatesCoreModule`, `ZeebeModdleExtension` |
@@ -89,10 +88,11 @@ version resolution.
   this identity so `get-properties` doesn't collapse them and `--set`
   writes to all matching duplicates.
 - **Templates come from `@camunda/connectors-element-templates` via
-  `c8ctl.npm`**, not `raw.githubusercontent.com` (blocked in many enterprise
-  networks). Sync checks npm's latest published version and only packs a
-  new version; `C8CTL_ELEMENT_TEMPLATES_PACKAGE` allows package specs, URLs,
-  and local paths. Failed packs retain the old cache and skip `--prune`.
+  `c8ctl.npm`**. Sync installs into a temporary directory under the locked
+  cache, then reads `src/element-templates/*.json`;
+  `C8CTL_ELEMENT_TEMPLATES_PACKAGE` allows package specs, URLs, and local
+  paths. Failed installs or malformed template files retain the old cache
+  and skip `--prune`.
 
 ## Testing
 

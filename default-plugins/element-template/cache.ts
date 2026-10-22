@@ -2,8 +2,8 @@
  * OOTB element-template cache.
  *
  * Source: the @camunda/connectors-element-templates npm package.
- * Cache entries retain a versioned upstreamRef so unchanged published
- * packages can be reused without downloading their archive again.
+ * npm installs the configured package in a temporary staging directory;
+ * the validated templates are then atomically written to the cache.
  */
 
 import {
@@ -12,18 +12,16 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	openSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	rmSync,
-	statSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import semver from "semver";
-import { extractJsonEntries } from "./archive.ts";
 import { isRecord, type Logger, type Template } from "./helpers.ts";
 
 const DEFAULT_PACKAGE = "@camunda/connectors-element-templates";
@@ -60,10 +58,6 @@ function getCachePath(): string {
 
 function getFetchedAtPath(): string {
 	return join(getCacheDir(), "fetched-at");
-}
-
-function getPackageStatePath(): string {
-	return join(getCacheDir(), "package-state.json");
 }
 
 function getSyncLockPath(): string {
@@ -279,24 +273,6 @@ function loadFetchedAt(): number | null {
 	return Number.isFinite(ms) ? ms : null;
 }
 
-function loadPackageState(): { ref: string; count: number } | null {
-	try {
-		const parsed: unknown = JSON.parse(
-			readFileSync(getPackageStatePath(), "utf-8"),
-		);
-		if (
-			isRecord(parsed) &&
-			typeof parsed.ref === "string" &&
-			typeof parsed.count === "number"
-		) {
-			return { ref: parsed.ref, count: parsed.count };
-		}
-	} catch {
-		// An absent or incomplete marker means the package must be repacked.
-	}
-	return null;
-}
-
 /**
  * Write `contents` to `target` via a sibling temp file + atomic
  * `renameSync`. Readers either see the old file or the new file —
@@ -362,113 +338,116 @@ function isTemplateLike(value: unknown): value is Template {
 }
 
 /**
- * Published package versions are immutable, so the ref identifies
- * both the package version and its archive entry.
+ * Identify the installed package and the file that supplied each version.
  */
-function buildUpstreamRef(packageRef: string, entryName: string): string {
-	return `${packageRef}#${entryName}`;
+function buildUpstreamRef(packageRef: string, fileName: string): string {
+	return `${packageRef}#src/element-templates/${fileName}`;
 }
 
-function packageOfRef(ref: string): string {
-	const hash = ref.indexOf("#");
-	return hash === -1 ? ref : ref.slice(0, hash);
-}
-
-function packTemplates(spec: string, expectedVersion?: string): Template[] {
+function installTemplates(spec: string): Template[] {
 	const c8ctl = globalThis.c8ctl;
 	if (!c8ctl) throw new Error("c8ctl npm runner is not available.");
-	const dir = mkdtempSync(join(tmpdir(), "c8ctl-element-templates-"));
+	const dir = mkdtempSync(join(getCacheDir(), ".staging-"));
 	try {
-		const output = c8ctl.npm({
+		c8ctl.npm({
 			args: [
-				"pack",
+				"install",
 				spec,
-				"--ignore-scripts",
-				"--json",
-				"--pack-destination",
+				"--prefix",
 				dir,
+				"--ignore-scripts",
+				"--no-package-lock",
 			],
-			stdout: true,
-		}).stdout;
-		const result: unknown = JSON.parse(output);
-		if (
-			!Array.isArray(result) ||
-			!isRecord(result[0]) ||
-			typeof result[0].filename !== "string" ||
-			!/^[^/\\]+\.tgz$/.test(result[0].filename)
-		) {
-			throw new Error("npm pack did not return a valid archive filename.");
-		}
-		const archivePath = join(dir, result[0].filename);
-		if (statSync(archivePath).size > 32 * 1024 * 1024) {
-			throw new Error("Element template package archive exceeds 32 MB.");
-		}
-		const entries = extractJsonEntries(readFileSync(archivePath));
-		const manifest = entries.find(
-			(entry) => entry.name === "package/package.json",
+			stdio: "pipe",
+		});
+		const stagingManifest: unknown = JSON.parse(
+			readFileSync(join(dir, "package.json"), "utf-8"),
 		);
-		if (!manifest)
-			throw new Error("Element template package has no package.json.");
-		const parsedManifest: unknown = JSON.parse(manifest.content);
-		if (
-			!isRecord(parsedManifest) ||
-			typeof parsedManifest.name !== "string" ||
-			typeof parsedManifest.version !== "string" ||
-			(expectedVersion && parsedManifest.name !== DEFAULT_PACKAGE) ||
-			(expectedVersion && parsedManifest.version !== expectedVersion)
-		) {
+		if (!isRecord(stagingManifest) || !isRecord(stagingManifest.dependencies)) {
 			throw new Error(
-				"Element template package has an unexpected name or version.",
+				"npm install did not record the template package dependency.",
 			);
 		}
-		const ref = `npm:${parsedManifest.name}@${parsedManifest.version}`;
+		const names = Object.keys(stagingManifest.dependencies);
+		const name = names[0];
+		if (
+			names.length !== 1 ||
+			typeof name !== "string" ||
+			!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i.test(name)
+		) {
+			throw new Error(
+				"npm install did not record a valid single package name.",
+			);
+		}
+		const packageDir = join(dir, "node_modules", name);
+		const installedManifest: unknown = JSON.parse(
+			readFileSync(join(packageDir, "package.json"), "utf-8"),
+		);
+		if (
+			!isRecord(installedManifest) ||
+			typeof installedManifest.name !== "string" ||
+			typeof installedManifest.version !== "string" ||
+			!semver.valid(installedManifest.version)
+		) {
+			throw new Error(
+				"Installed template package has no valid name or version.",
+			);
+		}
+		const ref = `npm:${installedManifest.name}@${installedManifest.version}`;
+		const templatesDir = join(packageDir, "src", "element-templates");
 		const templates: Template[] = [];
-		for (const entry of entries) {
-			if (
-				!entry.name.startsWith("package/src/element-templates/") ||
-				!entry.name.endsWith(".json")
-			)
-				continue;
+		for (const file of readdirSync(templatesDir, { withFileTypes: true })) {
+			if (!file.isFile() || !file.name.endsWith(".json")) continue;
+			const filePath = join(templatesDir, file.name);
 			let parsed: unknown;
 			try {
-				parsed = JSON.parse(entry.content);
-			} catch {
-				continue;
+				parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				throw new Error(
+					`Invalid element template JSON in ${file.name}: ${detail}`,
+				);
 			}
 			for (const value of Array.isArray(parsed) ? parsed : [parsed]) {
+				if (isRecord(value) && value.version === undefined) continue;
 				if (
 					!isTemplateLike(value) ||
 					typeof value.id !== "string" ||
 					typeof value.version !== "number"
-				)
-					continue;
+				) {
+					throw new Error(`Invalid element template in ${file.name}.`);
+				}
 				value.metadata = {
 					...value.metadata,
-					upstreamRef: buildUpstreamRef(ref, entry.name),
+					upstreamRef: buildUpstreamRef(ref, file.name),
 				};
 				templates.push(value);
 			}
 		}
-		if (templates.length === 0)
+		if (templates.length === 0) {
 			throw new Error("Package contained no element templates.");
+		}
 		return templates;
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
 }
 
-function latestPackageVersion(spec: string): string {
-	const c8ctl = globalThis.c8ctl;
-	if (!c8ctl) throw new Error("c8ctl npm runner is not available.");
-	const raw = c8ctl.npm({
-		args: ["view", spec, "version", "--json"],
-		stdout: true,
-	}).stdout;
-	const parsed: unknown = JSON.parse(raw);
-	if (typeof parsed !== "string" || !semver.valid(parsed)) {
-		throw new Error(`npm returned an invalid version for ${spec}.`);
+function syncErrorMessage(error: unknown, logger: Logger): string {
+	if (
+		isRecord(error) &&
+		(Buffer.isBuffer(error.stderr) || typeof error.stderr === "string")
+	) {
+		const stderr = String(error.stderr)
+			.trim()
+			.replaceAll(/https?:\/\/[^/\s@]+@/g, "https://[redacted]@");
+		logger.debug(`npm install stderr: ${stderr}`);
+		const code = /^npm (?:error|ERR!) code ([A-Z0-9]+)/m.exec(stderr)?.[1];
+		if (code)
+			return `npm install failed (${code}). Check npm registry settings or run with --verbose for details.`;
+		return "npm install failed. Run with --verbose for npm's error details.";
 	}
-	return parsed;
+	return error instanceof Error ? error.message : String(error);
 }
 
 function mergeTemplates(
@@ -515,9 +494,8 @@ function sortTemplates(templates: Template[]): Template[] {
 }
 
 /**
- * Sync the cache with the published npm package. Overrides can specify
- * an npm package spec, URL, or local path; these are repacked each time
- * so mutable local sources are not mistaken for immutable registry versions.
+ * Sync the cache with the npm package. Overrides can specify
+ * an npm package spec, URL, or local path; each sync stages a fresh install.
  * Returns a summary `{ total, fetched, cached, errors, pruned }`.
  */
 export async function syncTemplates({
@@ -538,17 +516,6 @@ async function syncTemplatesLocked({
 	prune: boolean;
 }): Promise<SyncSummary> {
 	const spec = process.env.C8CTL_ELEMENT_TEMPLATES_PACKAGE || DEFAULT_PACKAGE;
-	const suffix = spec.startsWith(`${DEFAULT_PACKAGE}@`)
-		? spec.slice(DEFAULT_PACKAGE.length + 1)
-		: "";
-	const registrySpec =
-		spec === DEFAULT_PACKAGE ||
-		(Boolean(suffix) &&
-			(Boolean(semver.valid(suffix)) ||
-				(semver.validRange(suffix) === null &&
-					/^[a-z][\w.-]*$/i.test(suffix))));
-	const version = registrySpec ? latestPackageVersion(spec) : undefined;
-	const desiredRef = version ? `npm:${DEFAULT_PACKAGE}@${version}` : undefined;
 
 	let existing: Template[];
 	try {
@@ -559,36 +526,16 @@ async function syncTemplatesLocked({
 		existing = [];
 	}
 
-	const packageState = loadPackageState();
-	const matching = desiredRef
-		? existing.filter(
-				(tpl) =>
-					tpl.metadata?.upstreamRef &&
-					packageOfRef(tpl.metadata.upstreamRef) === desiredRef,
-			)
-		: [];
-	const reusable =
-		desiredRef !== undefined &&
-		packageState !== null &&
-		packageState.ref === desiredRef &&
-		packageState.count === matching.length
-			? matching
-			: [];
 	let errors = 0;
-	let fresh = reusable;
-	if (reusable.length === 0) {
-		logger.info("Packing element templates with npm ...");
-		try {
-			fresh = packTemplates(
-				version ? `${DEFAULT_PACKAGE}@${version}` : spec,
-				version,
-			);
-		} catch {
-			errors = 1;
-			logger.warn(
-				"Could not pack element templates. Check the package spec and npm registry settings.",
-			);
-		}
+	let fresh: Template[] = [];
+	logger.info("Installing element templates with npm ...");
+	try {
+		fresh = installTemplates(spec);
+	} catch (error) {
+		errors = 1;
+		logger.warn(
+			`Could not install element templates: ${syncErrorMessage(error, logger)}`,
+		);
 	}
 	if (errors > 0) {
 		if (existing.length === 0) {
@@ -627,26 +574,19 @@ async function syncTemplatesLocked({
 		);
 	}
 
-	// A partial sync leaves the previous `fetched-at` in place so the
-	// staleness nudge keeps asking for a full refresh.
 	saveCache(next);
-	if (desiredRef) {
-		atomicWriteFileSync(
-			getPackageStatePath(),
-			JSON.stringify({ ref: desiredRef, count: added }),
-		);
-	} else {
-		try {
-			unlinkSync(getPackageStatePath());
-		} catch (error) {
-			if (getErrorCode(error) !== "ENOENT") throw error;
-		}
+	// A previous version of sync wrote this marker. It is no longer used:
+	// npm now reinstalls into an empty staging directory on every sync.
+	try {
+		unlinkSync(join(getCacheDir(), "package-state.json"));
+	} catch (error) {
+		if (getErrorCode(error) !== "ENOENT") throw error;
 	}
 
 	const summary: SyncSummary = {
 		total: next.length,
-		fetched: reusable.length ? 0 : added,
-		cached: reusable.length ? retained + added : retained,
+		fetched: added,
+		cached: retained,
 		errors,
 		pruned,
 	};

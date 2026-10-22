@@ -102,12 +102,11 @@ c8ctl element-template sync
 c8ctl element-template sync --prune    # also drop entries absent from the latest package
 ```
 
-`sync` checks the latest `@camunda/connectors-element-templates` version via
-your configured npm registry and downloads it only when the version changes.
-It uses npm's registry, authentication, proxy and CA settings. Set
+`sync` installs `@camunda/connectors-element-templates` into a temporary
+directory using npm's registry, authentication, proxy and CA settings. Set
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
-package path for pinned or offline use. Local, URL and version-range overrides
-are packed on each sync, so changes to a local source are picked up.
+package path for pinned or offline use. Every sync installs afresh, so changes
+to a local source are picked up.
 
 ## Migrating to a newer template
 
@@ -526,7 +525,7 @@ warning at the end (the property won't be applied).
 
 1. **Source**: the
    [`@camunda/connectors-element-templates` npm package](https://www.npmjs.com/package/@camunda/connectors-element-templates).
-   `sync` checks its current version and uses npm to pack it.
+   `sync` uses npm to install it in a temporary directory.
 2. **Populate the cache once** via `c8ctl element-template sync`.
    Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
    `apply`, `get`) exit non-zero with a hint to run `sync` when the
@@ -541,7 +540,7 @@ warning at the end (the property won't be applied).
    `engines.camunda` constraint. Without `@<version>`, the highest
    compatible version wins.
 5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
-   refresh — published package versions already cached are reused.
+   refresh — each explicit sync stages a new installation.
 6. **Concurrent syncs** are serialised by an advisory lock at
    `<cache-dir>/.sync.lock`. A second `sync` started while one is
    already running exits non-zero rather than racing.

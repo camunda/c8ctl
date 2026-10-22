@@ -29,18 +29,19 @@ the user's registry, scoped registry, proxy, CA and authentication settings.
 The package is published from `camunda/connectors` and includes connector
 templates and their metadata in one archive.
 
-The archive contains arrays of versions in
-`package/src/element-templates/*.json`. Entries without a numeric `version`
+The installed package contains arrays of versions in
+`src/element-templates/*.json`. Entries without a numeric `version`
 are legacy duplicates that version resolution cannot rank and are skipped;
 entries without `engines` remain eligible for version selection. Hybrid
 templates are not in the package.
 
-The default sync asks npm for the latest published version, then uses `npm pack`
-only if that immutable version is not cached completely. Set
-`C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL or local path
-to pin or supply the package offline. Local, URL and version-range overrides
-are packed every time so mutable sources are not silently treated as immutable
-registry versions.
+Each sync uses `npm install` in a temporary staging directory under the cache
+lock. npm resolves and extracts a single package from
+`C8CTL_ELEMENT_TEMPLATES_PACKAGE` (a package spec, tarball URL or local path)
+or the default package. The package name comes from the staging manifest's
+single dependency and the version from its installed package manifest. npm
+handles package archive formats and local symlinks; the staging directory is
+removed after reading its templates.
 
 ## Cache strategy
 
@@ -51,16 +52,14 @@ We mirror Desktop Modeler's approach
   - `templates.json` — flat array of all template objects (matches
     Modeler's `.camunda-connector-templates.json` shape).
   - `fetched-at` — epoch ms of last sync.
-  - `package-state.json` — completed registry package version and template
-    count, required before reusing it without downloading.
 - Each cached template gets
-  `metadata.upstreamRef = npm:<package>@<version>#<file-in-archive>` injected.
-  This identifies entries from the single current package separately from
-  older entries retained when `--prune` is omitted. Together with the
-  completion record it lets sync reuse an immutable published version without
-  downloading it again. It does not combine multiple configured packages.
+  `metadata.upstreamRef = npm:<package>@<version>#src/element-templates/<file>` injected.
+  The single current package replaces matching `id@version` entries, while
+  older entries remain until explicitly pruned. It does not combine multiple
+  configured packages.
   Matching `id@version` entries from the current package replace older copies.
-- A pack failure retains the old cache and timestamp, and disables pruning.
+- An install failure or malformed template file retains the old cache and
+  timestamp, and disables pruning.
   A cold sync fails instead of writing an empty cache.
 
 ### Lifecycle
@@ -81,9 +80,9 @@ We mirror Desktop Modeler's approach
   `c8ctl element-template sync`. We don't auto-refresh — surprise
   network activity inside `apply` is undesirable and a manual sync is
   cheap.
-- **`sync`** checks npm for the latest version, downloading only when it
-  changes. **`sync --prune`** drops cached entries absent from the current
-  package; a failed download never prunes the previous cache.
+- **`sync`** stages a fresh npm install. **`sync --prune`** drops cached
+  entries absent from the current package; a failed install never prunes the
+  previous cache.
 - **Atomicity**: `sync` writes `templates.json` and `fetched-at`
   via a sibling temp file + `renameSync`, so a kill mid-sync leaves
   the previous cache intact. `apply --in-place` uses the same recipe
