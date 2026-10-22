@@ -4077,6 +4077,51 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
+	test("rejects a template package that depends on another template package", async () => {
+		const dataDir = mkdtempSync(
+			join(tmpdir(), "c8ctl-et-dependent-templates-"),
+		);
+		const packageDir = join(dataDir, "package");
+		const dependencyDir = join(dataDir, "dependency");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Dependent", 1)]);
+		writeTemplatePackage(
+			dependencyDir,
+			[ootbTemplate("io.example.Dependency", 1)],
+			"1.0.0",
+			"fixture-dependency",
+		);
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({
+				name: "test-element-templates",
+				version: "1.0.0",
+				dependencies: { "fixture-dependency": `file:${dependencyDir}` },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: {
+						...syncEnv(dataDir, packageDir),
+						npm_config_install_links: "true",
+					},
+				},
+			);
+			assert.strictEqual(result.status, 1);
+			assert.match(
+				result.stderr,
+				/several packages with src\/element-templates \((?=.*fixture-dependency)(?=.*test-element-templates)[^)]*\)\. Sync supports a single template package/,
+			);
+			assert.ok(
+				!existsSync(join(dataDir, "element-templates", "templates.json")),
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("removes abandoned staging directories before a sync", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-abandoned-"));
 		const packageDir = join(dataDir, "package");

@@ -391,7 +391,7 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 			throw new Error(
 				packageNames.length === 0
 					? `npm install produced no package with src/element-templates (installed: ${found(installed)}).`
-					: `npm install produced several packages with src/element-templates (${found(packageNames)}); expected exactly one.`,
+					: `npm install produced several packages with src/element-templates (${found(packageNames)}). Sync supports a single template package; a package that depends on another template package counts as several.`,
 			);
 		}
 		const packageDir = join(modulesDir, packageNames[0]);

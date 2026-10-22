@@ -38,10 +38,16 @@ templates are not in the package.
 Each sync uses `npm install` in a temporary staging directory under the cache
 lock. npm resolves and extracts a single package from
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` (a package spec, tarball URL or local path)
-or the default package. The package name comes from the staging manifest's
-single dependency and the version from its installed package manifest. npm
-handles package archive formats and local symlinks; the staging directory is
-removed after reading its templates.
+or the default package. The package is the one directory in the staging
+`node_modules` that has `src/element-templates`, so discovery does not depend
+on npm's save settings; its name and version come from its installed package
+manifest. npm handles package archive formats and local symlinks; the staging
+directory is removed after reading its templates.
+
+Sync ingests one template package: a package that depends on another template
+package fails with an error naming both. Supporting several could ingest every
+template-bearing package in the install tree, with a dependent winning over its
+dependencies and a warning on conflicting `id@version` entries.
 
 ## Cache strategy
 

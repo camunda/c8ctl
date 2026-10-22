@@ -109,6 +109,8 @@ read, because npm runs the install in the temporary directory. Set
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
 package path for pinned or offline use. Every sync installs afresh, so changes
 to a local source are picked up.
+The override must resolve to one package that ships `src/element-templates`; a
+package that depends on another template package is not supported.
 
 ## Migrating to a newer template
 
