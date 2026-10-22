@@ -4102,7 +4102,12 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
-	test("reads symlinked template files from a local package", async () => {
+	test("reads symlinked template files from a local package", {
+		skip:
+			process.platform === "win32"
+				? "creating symlinks needs elevated rights on Windows"
+				: false,
+	}, async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-symlink-"));
 		const packageDir = join(dataDir, "package");
 		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Regular", 1)]);
