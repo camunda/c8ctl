@@ -28,6 +28,13 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Impact:** Running either command against an 8.8/8.9 cluster surfaces the gateway's 404 as a normal command error (no special-casing needed — the framework's error path already renders it clearly). The live CLI integration tests for these commands (`tests/integration/process-instances.test.ts`) are skipped on `CAMUNDA_VERSION` 8.8/8.9 via `suspendResumeSkip`, mirroring the existing `businessIdSkip` pattern in the same file.
   - **Remediation:** None needed — this is a platform version floor, not an SDK defect. Revisit only if a future SDK release needs adjusting for a change in the endpoint's shape.
 
+- [ ] **Cluster variable endpoints not available on Camunda 8.8**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0**
+  - **Behavior:** The SDK client exposes `createGlobalClusterVariable()`/`createTenantClusterVariable()` and the get/search/delete counterparts (`/cluster-variables/...`), but the 8.8 gateway returns `404 Not Found [createGlobalClusterVariable]: No static resource v2/cluster-variables/global.` — the endpoints exist from 8.9.
+  - **Affected:** `c8ctl list|search|get|create|delete cluster-variable(s)`.
+  - **Impact:** Commands surface the gateway's 404 as a normal command error. `tests/integration/cluster-variables.test.ts` is skipped on `CAMUNDA_VERSION` 8.8 via `clusterVariablesSkip`.
+  - **Remediation:** None needed — platform version floor, not an SDK defect.
+
 - [ ] **No config flag to disable the automatic `/v2` suffix on `CAMUNDA_REST_ADDRESS`**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**
   - **Behavior:** `hydrateConfig()` always appends `/v2` to `CAMUNDA_REST_ADDRESS` unless the value already ends with `/v2` or `/v2/`; there is no override.

@@ -21,7 +21,7 @@ description: "Use c8ctl to list, search, get, create, update, and delete global 
 | `delete` | `c8 delete cluster-variable <name>`      |
 
 :::note
-`update`, `--metadata`, and `--kind` require a Camunda 8.10 or later cluster.
+Cluster variable commands require a Camunda 8.9 or later cluster; the 8.8 gateway has no `/v2/cluster-variables` endpoints and returns `404 Not Found`. `update`, `--metadata`, and `--kind` require 8.10 or later.
 :::
 
 ## Global and tenant scope

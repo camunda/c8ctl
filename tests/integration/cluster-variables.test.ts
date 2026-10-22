@@ -19,6 +19,11 @@ const POLL_INTERVAL_MS = 1000;
 const DEFAULT_TENANT = "<default>";
 
 const camundaVersion = process.env.CAMUNDA_VERSION;
+// The 8.8 gateway has no /v2/cluster-variables endpoints (404 "No static resource").
+const clusterVariablesSkip =
+	camundaVersion?.startsWith("8.8") === true
+		? `Cluster variables require Camunda 8.9+ (CAMUNDA_VERSION=${camundaVersion})`
+		: false;
 // Update, metadata and kind are absent from the 8.9-era API spec.
 const updateSkip =
 	camundaVersion?.startsWith("8.8") === true ||
@@ -29,7 +34,9 @@ const updateSkip =
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
 
-describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8080)", () => {
+describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8080)", {
+	skip: clusterVariablesSkip,
+}, () => {
 	let dataDir: string;
 	let created: Array<{ name: string; tenantId?: string }>;
 
