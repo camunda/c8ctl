@@ -3,8 +3,8 @@
 A default [c8ctl](https://github.com/camunda/c8ctl) plugin for applying
 Camunda element templates to BPMN diagrams, inspecting their properties,
 and exporting raw template JSON. Supports out-of-the-box (OOTB)
-connector templates by id (downloaded on demand from the Camunda
-marketplace), plus arbitrary local paths and URLs.
+connector templates by id (cached from the Camunda npm package), plus
+arbitrary local paths and URLs.
 
 ## Subcommands
 
@@ -99,8 +99,15 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
-c8ctl element-template sync --prune    # also drop entries no longer in a selected release
+c8ctl element-template sync --prune    # also drop entries absent from the latest package
 ```
+
+`sync` checks the latest `@camunda/connectors-element-templates` version via
+your configured npm registry and downloads it only when the version changes.
+It uses npm's registry, authentication, proxy and CA settings. Set
+`C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
+package path for pinned or offline use. Local and URL overrides are packed on
+each sync, so changes to a local source are picked up.
 
 ## Migrating to a newer template
 
@@ -314,7 +321,7 @@ but sources, groups, guard lists, and value-map rules must be non-empty.
 
 c8ctl ships no connector recipes. The AI Agent v2 templates in
 `camunda/connectors` embed their v1 recipes as `metadata.migratesFrom`,
-so `update` picks them up from the cache once a release carries them.
+so `update` picks them up after syncing the npm package.
 
 ## Inspecting a template
 
@@ -517,14 +524,9 @@ warning at the end (the property won't be applied).
 
 ## How OOTB templates are resolved
 
-1. **Source**: the `camunda/connectors` GitHub releases. `sync` lists
-   the releases, keeps the newest release of each of the 4 newest minor
-   lines (8.8.x, 8.9.x, ... — alphas count, release candidates don't),
-   and downloads
-   each one's `connectors-bundle-templates-<tag>.tar.gz` asset from
-   `github.com`. `raw.githubusercontent.com` is deliberately not used:
-   it is blocked in many enterprise networks. Override the release
-   listing endpoint via `C8CTL_CONNECTORS_RELEASES_URL` for testing.
+1. **Source**: the `@camunda/connectors-element-templates` npm package.
+   `sync` checks its current version and uses npm to pack it; no
+   `raw.githubusercontent.com` template downloads are needed.
 2. **Populate the cache once** via `c8ctl element-template sync`.
    Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
    `apply`, `get`) exit non-zero with a hint to run `sync` when the
@@ -539,8 +541,7 @@ warning at the end (the property won't be applied).
    `engines.camunda` constraint. Without `@<version>`, the highest
    compatible version wins.
 5. **Stale cache** (>7 days) prints a hint to run `sync`. No automatic
-   refresh — `sync` only downloads bundles not already cached (release
-   assets are tag-pinned, so incremental sync is free).
+   refresh — published package versions already cached are reused.
 6. **Concurrent syncs** are serialised by an advisory lock at
    `<cache-dir>/.sync.lock`. A second `sync` started while one is
    already running exits non-zero rather than racing.
@@ -558,5 +559,5 @@ Set `C8CTL_DATA_DIR` to override.
 ## Design
 
 See [`docs/design.md`](./docs/design.md) for the full reasoning behind
-the release-bundle source choice, the vendor bundle, the cache strategy
+the npm source choice, the vendor bundle, the cache strategy
 (mirrored from Desktop Modeler), and version resolution.

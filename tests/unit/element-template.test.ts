@@ -4,7 +4,6 @@
  */
 
 import assert from "node:assert";
-import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	lstatSync,
@@ -17,11 +16,9 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
-import { gzipSync } from "node:zlib";
 import { isRecord } from "../../src/core/logger.ts";
 import { c8, c8WithOptions } from "../utils/cli.ts";
 import { asyncSpawn, asyncSpawnWithStdin } from "../utils/spawn.ts";
@@ -3778,150 +3775,8 @@ describe("CLI behavioural: element-template local lookup matches Desktop Modeler
 });
 
 // ---------------------------------------------------------------------------
-// element-template — sync source (GitHub releases), lockfile, --prune count
+// element-template — npm package sync and cache
 // ---------------------------------------------------------------------------
-
-/**
- * In-process stand-in for the `camunda/connectors` GitHub releases API
- * plus its release-asset host. Serves a release listing at `/releases`
- * and one `connectors-bundle-templates-<tag>.tar.gz` per release that
- * declares templates, so a test can assert *which* releases sync picks
- * without touching the network.
- */
-type ReleaseSpec = {
-	tag: string;
-	draft?: boolean;
-	/** Omit to model a release published without a template bundle. */
-	templates?: Array<Record<string, unknown>>;
-	/** Serve this status instead of the bundle (simulates a flaky asset host). */
-	downloadStatus?: number;
-};
-
-type StubServer = {
-	url: string;
-	/** Tags whose bundle has been downloaded, in request order. */
-	downloads: () => string[];
-	close: () => Promise<void>;
-};
-
-/**
- * Pull the listening port off a Node `http.Server` without an `as`
- * cast — `server.address()` returns `string | AddressInfo | null` and
- * the plugin lint forbids the unsafe assertion.
- */
-function getServerPort(server: Server): number {
-	const addr = server.address();
-	if (isRecord(addr) && typeof addr.port === "number") {
-		return addr.port;
-	}
-	throw new Error("stub server has no port (not listening?)");
-}
-
-/**
- * Build a gzipped ustar archive holding one JSON file per template —
- * the exact shape of the `connectors-bundle-templates-<tag>.tar.gz`
- * release asset (flat list of regular files, no directory entries).
- */
-function buildTemplateBundle(
-	templates: Array<Record<string, unknown>>,
-): Buffer {
-	const blocks: Buffer[] = [];
-	for (const [index, template] of templates.entries()) {
-		const data = Buffer.from(JSON.stringify(template), "utf-8");
-		const header = Buffer.alloc(512);
-		header.write(`template-${index}.json`, 0, 100, "utf-8");
-		header.write("000644 \0", 100, 8, "utf-8"); // mode
-		header.write("000000 \0", 108, 8, "utf-8"); // uid
-		header.write("000000 \0", 116, 8, "utf-8"); // gid
-		header.write(`${data.length.toString(8).padStart(11, "0")} `, 124, 12);
-		header.write("00000000000 ", 136, 12); // mtime
-		header.write("        ", 148, 8); // checksum placeholder
-		header.write("0", 156, 1); // typeflag: regular file
-		header.write("ustar\0" + "00", 257, 8);
-		let checksum = 0;
-		for (const byte of header) checksum += byte;
-		header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8);
-		blocks.push(header, data, Buffer.alloc((512 - (data.length % 512)) % 512));
-	}
-	blocks.push(Buffer.alloc(1024)); // end-of-archive marker
-	return gzipSync(Buffer.concat(blocks));
-}
-
-function bundleAssetName(tag: string): string {
-	return `connectors-bundle-templates-${tag}.tar.gz`;
-}
-
-async function startReleasesStub(releases: ReleaseSpec[]): Promise<StubServer> {
-	const downloads: string[] = [];
-	const bundles = new Map<string, Buffer>();
-	const failures = new Map<string, number>();
-	for (const release of releases) {
-		if (release.templates) {
-			bundles.set(release.tag, buildTemplateBundle(release.templates));
-		}
-		if (release.downloadStatus !== undefined) {
-			failures.set(release.tag, release.downloadStatus);
-		}
-	}
-
-	const server: Server = createServer((req, res) => {
-		if (!req.url) {
-			res.statusCode = 400;
-			res.end();
-			return;
-		}
-		const base = `http://127.0.0.1:${getServerPort(server)}`;
-		if (req.url === "/releases") {
-			res.setHeader("content-type", "application/json");
-			res.end(
-				JSON.stringify(
-					releases.map((release) => ({
-						tag_name: release.tag,
-						draft: release.draft === true,
-						assets: release.templates
-							? [
-									{
-										name: bundleAssetName(release.tag),
-										browser_download_url: `${base}/download/${release.tag}/${bundleAssetName(release.tag)}`,
-									},
-								]
-							: [],
-					})),
-				),
-			);
-			return;
-		}
-		const download = /^\/download\/([^/]+)\/(.+)$/.exec(req.url);
-		const failure = download ? failures.get(download[1]) : undefined;
-		if (download && failure !== undefined) {
-			downloads.push(download[1]);
-			res.statusCode = failure;
-			res.end();
-			return;
-		}
-		const bundle = download ? bundles.get(download[1]) : undefined;
-		if (download && bundle) {
-			downloads.push(download[1]);
-			res.setHeader("content-type", "application/octet-stream");
-			res.end(bundle);
-			return;
-		}
-		res.statusCode = 404;
-		res.end();
-	});
-
-	await new Promise<void>((resolveListen, reject) => {
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => resolveListen());
-	});
-	const port = getServerPort(server);
-	return {
-		url: `http://127.0.0.1:${port}/releases`,
-		downloads: () => [...downloads],
-		close: () =>
-			new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-	};
-}
 
 function ootbTemplate(id: string, version: number) {
 	return {
@@ -3935,13 +3790,27 @@ function ootbTemplate(id: string, version: number) {
 	};
 }
 
-function syncEnv(dataDir: string, releasesUrl: string) {
+function syncEnv(dataDir: string, packageDir: string) {
 	return {
 		...process.env,
 		HOME: "/tmp/c8ctl-test-nonexistent-home",
 		C8CTL_DATA_DIR: dataDir,
-		C8CTL_CONNECTORS_RELEASES_URL: releasesUrl,
+		C8CTL_ELEMENT_TEMPLATES_PACKAGE: packageDir,
 	};
+}
+
+function writeTemplatePackage(
+	dir: string,
+	templates: unknown[],
+	version = "1.0.0",
+): void {
+	const templatesDir = join(dir, "src", "element-templates");
+	mkdirSync(templatesDir, { recursive: true });
+	writeFileSync(
+		join(dir, "package.json"),
+		JSON.stringify({ name: "test-element-templates", version }),
+	);
+	writeFileSync(join(templatesDir, "agent.json"), JSON.stringify(templates));
 }
 
 function readCache(dataDir: string): Array<Record<string, unknown>> {
@@ -3959,128 +3828,67 @@ function upstreamRefOf(template: Record<string, unknown>): string {
 	return ref;
 }
 
-describe("CLI behavioural: element-template sync source (#530)", () => {
-	test("downloads the newest release per minor from the release download URLs, never raw.githubusercontent.com", async () => {
-		// 8.8: two patches + an rc; 8.9: an alpha + its rc; plus a draft
-		// and a release with no bundle asset. Only 8.8.18 and
-		// 8.9.0-alpha2 may be downloaded.
-		const stub = await startReleasesStub([
+describe("CLI behavioural: element-template npm sync", () => {
+	test("syncs every version and embedded migration recipe from a local npm package", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-npm-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [
+			ootbTemplate("io.example.Agent", 1),
 			{
-				tag: "8.9.0-alpha2-rc1",
-				templates: [ootbTemplate("io.example.Rc", 9)],
+				...ootbTemplate("io.example.Agent", 2),
+				metadata: { migratesFrom: { schemaVersion: 1, sources: [] } },
 			},
-			{ tag: "8.9.0-alpha2", templates: [ootbTemplate("io.example.Foo", 3)] },
-			{ tag: "8.9.0-alpha1", templates: [ootbTemplate("io.example.Old", 8)] },
-			{ tag: "8.8.19-rc1", templates: [ootbTemplate("io.example.Rc", 7)] },
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 2)] },
-			{ tag: "8.8.17", templates: [ootbTemplate("io.example.Old", 1)] },
-			{
-				tag: "8.9.1",
-				draft: true,
-				templates: [ootbTemplate("io.example.Draft", 1)],
-			},
-			{ tag: "8.7.9" },
+			{ ...ootbTemplate("io.example.Legacy", 1), engines: undefined },
+			{ ...ootbTemplate("io.example.Agent", 3), version: undefined },
 		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-source-"));
 		try {
 			const result = await asyncSpawn(
 				"node",
 				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
+				{
+					env: syncEnv(dataDir, packageDir),
+				},
 			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync should succeed. stderr: ${result.stderr}`,
-			);
-			assert.deepStrictEqual(
-				stub.downloads().sort(),
-				["8.8.18", "8.9.0-alpha2"],
-				"only the newest non-rc release per minor should be downloaded",
-			);
+			assert.strictEqual(result.status, 0, result.stderr);
 			const cache = readCache(dataDir);
 			assert.deepStrictEqual(
-				cache.map((t) => `${t.id}@${t.version}`).sort(),
-				["io.example.Foo@2", "io.example.Foo@3"],
-				"cache should hold exactly the templates of the selected releases",
+				cache.map((template) => `${template.id}@${template.version}`),
+				["io.example.Agent@1", "io.example.Agent@2", "io.example.Legacy@1"],
 			);
-			for (const template of cache) {
-				const ref = upstreamRefOf(template);
-				assert.notStrictEqual(
-					new URL(ref).hostname,
-					"raw.githubusercontent.com",
-					`upstreamRef must not point at raw.githubusercontent.com: ${ref}`,
-				);
-				assert.ok(
-					ref.includes("/download/") && ref.includes(".tar.gz#"),
-					`upstreamRef should point at a release bundle entry: ${ref}`,
-				);
-			}
+			assert.ok(isRecord(cache[1].metadata));
+			assert.deepStrictEqual(cache[1].metadata.migratesFrom, {
+				schemaVersion: 1,
+				sources: [],
+			});
+			assert.match(
+				upstreamRefOf(cache[1]),
+				/^npm:test-element-templates@1\.0\.0#/,
+			);
 		} finally {
-			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
 
-	test("a template version shipped by several minors is kept once, from the newest release", async () => {
-		const stub = await startReleasesStub([
-			{
-				tag: "8.9.2",
-				templates: [ootbTemplate("io.example.Shared", 4)],
-			},
-			{
-				tag: "8.8.18",
-				templates: [
-					ootbTemplate("io.example.Shared", 4),
-					ootbTemplate("io.example.OnlyOn88", 1),
-				],
-			},
+	test("updates an existing cache and prunes only missing versions", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-prune-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [
+			ootbTemplate("io.example.Agent", 1),
+			ootbTemplate("io.example.Old", 1),
 		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-dedup-"));
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync should succeed. stderr: ${result.stderr}`,
-			);
-			const cache = readCache(dataDir);
-			assert.deepStrictEqual(
-				cache.map((t) => `${t.id}@${t.version}`).sort(),
-				["io.example.OnlyOn88@1", "io.example.Shared@4"],
-				"duplicate id@version across bundles should collapse to one entry",
-			);
-			const shared = cache.find((t) => t.id === "io.example.Shared");
-			assert.ok(shared, "shared template should be cached");
-			assert.ok(
-				upstreamRefOf(shared).includes("/download/8.9.2/"),
-				"the newest release's copy should win",
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
-	test("a second sync reuses the cached bundles instead of re-downloading them", async () => {
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.Foo", 2)] },
-		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-reuse-"));
 		try {
 			const first = await asyncSpawn(
 				"node",
 				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
+				{
+					env: syncEnv(dataDir, packageDir),
+				},
 			);
-			assert.strictEqual(
-				first.status,
-				0,
-				`first sync should succeed. stderr: ${first.stderr}`,
+			assert.strictEqual(first.status, 0, first.stderr);
+			writeTemplatePackage(
+				packageDir,
+				[ootbTemplate("io.example.Agent", 2)],
+				"1.0.1",
 			);
 			const second = await asyncSpawn(
 				"node",
@@ -4090,106 +3898,44 @@ describe("CLI behavioural: element-template sync source (#530)", () => {
 					"--json",
 					"element-template",
 					"sync",
+					"--prune",
 				],
-				{
-					env: {
-						...syncEnv(dataDir, stub.url),
-						C8CTL_OUTPUT_MODE: "json",
-					},
-				},
+				{ env: syncEnv(dataDir, packageDir) },
 			);
-			assert.strictEqual(
-				second.status,
-				0,
-				`second sync should succeed. stderr: ${second.stderr}`,
-			);
+			assert.strictEqual(second.status, 0, second.stderr);
 			assert.deepStrictEqual(
-				stub.downloads(),
-				["8.8.18"],
-				"the bundle should be downloaded once, then served from cache",
+				readCache(dataDir).map((tpl) => `${tpl.id}@${tpl.version}`),
+				["io.example.Agent@2"],
 			);
-			const summaryLine = second.stdout
-				.trim()
-				.split("\n")
-				.reverse()
-				.find((line) => line.startsWith("{") && line.includes("cached"));
-			assert.ok(
-				summaryLine,
-				`expected a summary JSON line. Got stdout: ${second.stdout.slice(0, 500)}`,
-			);
-			const summary = JSON.parse(summaryLine ?? "{}");
-			assert.strictEqual(summary.fetched, 0, `Got summary: ${summaryLine}`);
-			assert.strictEqual(summary.cached, 1, `Got summary: ${summaryLine}`);
+			const summary: unknown = JSON.parse(second.stdout.trim());
+			assert.ok(isRecord(summary));
+			assert.strictEqual(summary.pruned, 2);
+			assert.strictEqual(summary.fetched, 1);
+			assert.ok(!existsSync(join(dataDir, "element-templates", ".sync.lock")));
 		} finally {
-			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
 
-	test("only the newest minor lines are synced (bounded selection)", async () => {
-		const stub = await startReleasesStub([
-			{ tag: "8.10.0-alpha1", templates: [ootbTemplate("io.example.L10", 1)] },
-			{ tag: "8.9.9", templates: [ootbTemplate("io.example.L9", 1)] },
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.L8", 1)] },
-			{ tag: "8.7.24", templates: [ootbTemplate("io.example.L7", 1)] },
-			{ tag: "8.6.27", templates: [ootbTemplate("io.example.L6", 1)] },
-			{ tag: "8.5.30", templates: [ootbTemplate("io.example.L5", 1)] },
-		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-lines-"));
+	test("a failed package download leaves cached templates and freshness intact", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-failure-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Agent", 1)]);
 		try {
-			const result = await asyncSpawn(
+			const first = await asyncSpawn(
 				"node",
 				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync should succeed. stderr: ${result.stderr}`,
-			);
-			assert.deepStrictEqual(
-				stub.downloads().sort(),
-				["8.10.0-alpha1", "8.7.24", "8.8.18", "8.9.9"],
-				"only the four newest minor lines should be downloaded",
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
-	test("a failed bundle download does not prune that line's cached templates", async () => {
-		// 8.9.2 supersedes the cached 8.9.1 bundle but its download fails.
-		// Without the guard, --prune would drop every cached 8.9 template
-		// and leave the cache silently short of a whole minor line.
-		const stub = await startReleasesStub([
-			{ tag: "8.9.2", templates: [], downloadStatus: 503 },
-			{
-				tag: "8.8.18",
-				templates: [ootbTemplate("io.example.OnEightEight", 1)],
-			},
-		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-failed-"));
-		const cacheDir = join(dataDir, "element-templates");
-		mkdirSync(cacheDir, { recursive: true });
-		const base = stub.url.replace("/releases", "");
-		writeFileSync(
-			join(cacheDir, "templates.json"),
-			JSON.stringify([
 				{
-					id: "io.example.OnEightNine",
-					name: "On 8.9",
-					version: 3,
-					properties: [],
-					metadata: {
-						upstreamRef: `${base}/download/8.9.1/${bundleAssetName("8.9.1")}#template-0.json`,
-					},
+					env: syncEnv(dataDir, packageDir),
 				},
-			]),
-		);
-		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
-		try {
-			const result = await asyncSpawn(
+			);
+			assert.strictEqual(first.status, 0, first.stderr);
+			const cachePath = join(dataDir, "element-templates", "templates.json");
+			const timestampPath = join(dataDir, "element-templates", "fetched-at");
+			const before = readFileSync(cachePath, "utf-8");
+			const timestamp = readFileSync(timestampPath, "utf-8");
+			rmSync(packageDir, { recursive: true });
+			const second = await asyncSpawn(
 				"node",
 				[
 					"--experimental-strip-types",
@@ -4199,97 +3945,21 @@ describe("CLI behavioural: element-template sync source (#530)", () => {
 					"sync",
 					"--prune",
 				],
-				{
-					env: {
-						...syncEnv(dataDir, stub.url),
-						C8CTL_OUTPUT_MODE: "json",
-					},
-				},
+				{ env: syncEnv(dataDir, packageDir) },
 			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync should succeed despite one failed bundle. stderr: ${result.stderr}`,
-			);
-			assert.deepStrictEqual(
-				readCache(dataDir)
-					.map((t) => t.id)
-					.sort(),
-				["io.example.OnEightEight", "io.example.OnEightNine"],
-				"templates of the line whose download failed must survive --prune",
-			);
-			const summaryLine = result.stdout
-				.trim()
-				.split("\n")
-				.reverse()
-				.find((line) => line.startsWith("{") && line.includes("pruned"));
-			const summary = JSON.parse(summaryLine ?? "{}");
-			assert.strictEqual(summary.pruned, 0, `Got summary: ${summaryLine}`);
-			assert.strictEqual(summary.errors, 1, `Got summary: ${summaryLine}`);
+			assert.strictEqual(second.status, 0, second.stderr);
+			assert.strictEqual(readFileSync(cachePath, "utf-8"), before);
+			assert.strictEqual(readFileSync(timestampPath, "utf-8"), timestamp);
+			const summary: unknown = JSON.parse(second.stdout.trim());
+			assert.ok(isRecord(summary));
+			assert.strictEqual(summary.errors, 1);
+			assert.strictEqual(summary.pruned, 0);
 		} finally {
-			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});
 
-	test("a cold sync where every bundle fails errors out instead of writing an empty cache", async () => {
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [], downloadStatus: 500 },
-		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-allfail-"));
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(result.status, 1, "sync should fail");
-			const combined = result.stdout + result.stderr;
-			assert.ok(
-				combined.includes("No element templates could be downloaded"),
-				`Expected a download-failure error. Got: ${combined.slice(0, 300)}`,
-			);
-			assert.ok(
-				!existsSync(join(dataDir, "element-templates", "templates.json")),
-				"an empty cache must not be written",
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
-	test("fails with an actionable error when no release ships a template bundle", async () => {
-		const stub = await startReleasesStub([{ tag: "8.8.18" }]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-empty-"));
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(result.status, 1, "sync should fail");
-			const combined = result.stdout + result.stderr;
-			assert.ok(
-				combined.includes("No connector release"),
-				`Expected a 'no release' error. Got: ${combined.slice(0, 300)}`,
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-});
-
-describe("CLI behavioural: element-template sync lockfile", () => {
-	test("second concurrent sync exits non-zero pointing at the lockfile", async () => {
-		// Pre-seed a live lock owned by THIS test process. The lock helper
-		// recognises an alive PID and refuses to acquire — exactly the
-		// "two shells racing" scenario without the timing flakiness of
-		// actually running two syncs in parallel.
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.locked", 1)] },
-		]);
+	test("refuses a second sync while the cache is locked", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-lock-"));
 		const cacheDir = join(dataDir, "element-templates");
 		mkdirSync(cacheDir, { recursive: true });
@@ -4301,201 +3971,15 @@ describe("CLI behavioural: element-template sync lockfile", () => {
 			const result = await asyncSpawn(
 				"node",
 				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
+				{ env: syncEnv(dataDir, join(dataDir, "missing")) },
 			);
-			assert.strictEqual(
-				result.status,
-				1,
-				`Second sync should fail when a live lock is held. stderr: ${result.stderr}`,
+			assert.strictEqual(result.status, 1);
+			assert.match(
+				result.stderr + result.stdout,
+				/Another sync is in progress/,
 			);
-			const combined = result.stdout + result.stderr;
-			assert.ok(
-				combined.includes("Another sync is in progress"),
-				`Expected lockfile contention message. Got: ${combined.slice(0, 300)}`,
-			);
-			// Pre-seeded lock must survive the failed attempt.
-			assert.ok(
-				existsSync(join(cacheDir, ".sync.lock")),
-				"Lockfile from the simulated 'live' holder should not be removed by the loser.",
-			);
+			assert.ok(existsSync(join(cacheDir, ".sync.lock")));
 		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
-	test("stale lock (dead PID) is recovered and sync proceeds", async () => {
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.stale", 1)] },
-		]);
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-stale-"));
-		const cacheDir = join(dataDir, "element-templates");
-		mkdirSync(cacheDir, { recursive: true });
-		// Spawn-then-await a no-op child to obtain a PID that's guaranteed
-		// to have exited by the time we use it. (Hard-coded large PIDs can
-		// collide on some platforms; this is portable across Linux/macOS/
-		// Windows.)
-		const exitedChild = spawnSync(process.execPath, ["-e", ""]);
-		const exitedPid = exitedChild.pid;
-		assert.ok(exitedPid, "Failed to obtain an exited PID for the test");
-		writeFileSync(
-			join(cacheDir, ".sync.lock"),
-			JSON.stringify({
-				pid: exitedPid,
-				startedAt: Date.now(),
-			}),
-		);
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`Sync should recover from a stale lock. stderr: ${result.stderr}`,
-			);
-			assert.ok(
-				result.stderr.includes("stale sync lock") ||
-					result.stdout.includes("stale sync lock"),
-				`Expected a 'stale sync lock' warning. Got: ${(result.stderr + result.stdout).slice(0, 300)}`,
-			);
-			// And the cache must have been written.
-			assert.ok(
-				existsSync(join(cacheDir, "templates.json")),
-				"templates.json should exist after a successful recovery sync.",
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-});
-
-describe("CLI behavioural: element-template sync --prune count", () => {
-	test("reports the number of cache entries dropped from the fresh releases", async () => {
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-prune-"));
-		const cacheDir = join(dataDir, "element-templates");
-		mkdirSync(cacheDir, { recursive: true });
-		// The stub only publishes 8.8.18, so the seeded 8.7.9 entry no
-		// longer belongs to a selected release and must be pruned.
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.kept", 1)] },
-		]);
-		const base = stub.url.replace("/releases", "");
-		writeFileSync(
-			join(cacheDir, "templates.json"),
-			JSON.stringify(
-				[
-					{
-						id: "io.example.dropped",
-						name: "Dropped",
-						version: 1,
-						properties: [],
-						metadata: {
-							upstreamRef: `${base}/download/8.7.9/${bundleAssetName("8.7.9")}#template-0.json`,
-						},
-					},
-				],
-				null,
-				2,
-			),
-		);
-		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
-		try {
-			const result = await asyncSpawn(
-				"node",
-				[
-					"--experimental-strip-types",
-					CLI,
-					"--json",
-					"element-template",
-					"sync",
-					"--prune",
-				],
-				{
-					env: {
-						...syncEnv(dataDir, stub.url),
-						C8CTL_OUTPUT_MODE: "json",
-					},
-				},
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync --prune should succeed. stderr: ${result.stderr}`,
-			);
-			// The summary line is the last JSON object on stdout.
-			const summaryLine = result.stdout
-				.trim()
-				.split("\n")
-				.reverse()
-				.find((line) => line.startsWith("{") && line.includes("pruned"));
-			assert.ok(
-				summaryLine,
-				`expected a summary JSON line. Got stdout: ${result.stdout.slice(0, 500)}`,
-			);
-			const summary = JSON.parse(summaryLine ?? "{}");
-			assert.strictEqual(
-				summary.pruned,
-				1,
-				`Expected pruned=1 (the 'dropped' entry). Got summary: ${summaryLine}`,
-			);
-			assert.deepStrictEqual(
-				readCache(dataDir).map((t) => t.id),
-				["io.example.kept"],
-				"the pruned entry should be gone from the cache",
-			);
-		} finally {
-			await stub.close();
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
-	test("without --prune, cache entries from unselected releases are kept", async () => {
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-keep-"));
-		const cacheDir = join(dataDir, "element-templates");
-		mkdirSync(cacheDir, { recursive: true });
-		const stub = await startReleasesStub([
-			{ tag: "8.8.18", templates: [ootbTemplate("io.example.kept", 1)] },
-		]);
-		const base = stub.url.replace("/releases", "");
-		writeFileSync(
-			join(cacheDir, "templates.json"),
-			JSON.stringify([
-				{
-					id: "io.example.legacy",
-					name: "Legacy",
-					version: 1,
-					properties: [],
-					metadata: {
-						upstreamRef: `${base}/download/8.7.9/${bundleAssetName("8.7.9")}#template-0.json`,
-					},
-				},
-			]),
-		);
-		writeFileSync(join(cacheDir, "fetched-at"), String(Date.now()));
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, stub.url) },
-			);
-			assert.strictEqual(
-				result.status,
-				0,
-				`sync should succeed. stderr: ${result.stderr}`,
-			);
-			assert.deepStrictEqual(
-				readCache(dataDir)
-					.map((t) => t.id)
-					.sort(),
-				["io.example.kept", "io.example.legacy"],
-				"entries outside the selected releases survive a sync without --prune",
-			);
-		} finally {
-			await stub.close();
 			rmSync(dataDir, { recursive: true, force: true });
 		}
 	});

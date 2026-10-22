@@ -24,61 +24,24 @@ shipped layout but during development we run directly from
 
 ## OOTB template integration
 
-Four sources publish the OOTB connector templates:
+`sync` reads `@camunda/connectors-element-templates` from npm. Unlike the
+per-minor release bundles, this package includes templates and migration
+recipes published from `camunda/connectors` main. npm honours the user's
+registry, scoped registry, proxy, CA and authentication settings. It downloads
+one archive instead of following hundreds of marketplace links to
+`raw.githubusercontent.com` (often blocked in enterprise networks).
 
-| | Source-of-truth | Inlines templates? | Has all versions? | Used by |
-|---|---|---|---|---|
-| `github.com/camunda/connectors` releases (bundle asset) | yes | yes (~1 MB gzip per line) | per minor line | c8ctl |
-| `marketplace.cloud.camunda.io/api/v1/ootb-connectors` | mirrors GH | no, URL refs | yes | Desktop Modeler |
-| `github.com/camunda/connectors/connector-templates.json` | yes | no, URL refs | yes | (the marketplace) |
-| `@camunda/connectors-element-templates` (npm) | derived | yes (~9MB) | yes, may lag | (Web Modeler skill) |
+The archive contains arrays of versions in
+`package/src/element-templates/*.json`. Entries without a numeric `version`
+are legacy duplicates that version resolution cannot rank and are skipped;
+entries without `engines` remain eligible for version selection. Hybrid
+templates are not in the package.
 
-We use the **release bundle assets** — every connectors release ships a
-`connectors-bundle-templates-<tag>.tar.gz` with one JSON file per
-template:
-
-- The marketplace endpoint (Desktop Modeler's source, and c8ctl's
-  original choice) only publishes *refs* into
-  `raw.githubusercontent.com`, a host routinely blocked in enterprise
-  networks — the reason for the switch, see c8ctl#530. Release
-  downloads are served from `github.com`, which those environments
-  generally do reach.
-- One request per minor line replaces ~650 per-template requests, so a
-  cold sync is a few MB and a few seconds instead of ~14 MB and ~30 s.
-- npm package was rejected: confirmed lag against the GH source and
-  some entries are missing `version`/`engines` (pre-versioned legacy
-  templates).
-
-### Which releases
-
-`sync` lists the releases (`api.github.com/repos/camunda/connectors/
-releases?per_page=100`, overridable via
-`C8CTL_CONNECTORS_RELEASES_URL`) and keeps **the newest release of each
-minor line** — 8.8.x, 8.9.x, 8.10.x, ...:
-
-- Bundles are cumulative within a line, so the newest patch of 8.8
-  already contains everything 8.8.17 shipped. Across lines they differ,
-  which is why one release per line is kept rather than just the newest
-  release overall.
-- Alphas count (`8.10.0-alpha3` is the only source for a line that has
-  no stable release yet); release candidates do not — they are
-  superseded within days. Note that semver ranks `8.10.0-alpha5-rc3`
-  *above* `8.10.0-alpha5`, so RCs are filtered explicitly rather than
-  by ordering.
-- Draft releases and releases without a bundle asset (a release that is
-  still being built) are skipped, so an in-flight release falls back to
-  the previous one on that line.
-- Only the **4 newest minor lines** are kept (`MAX_MINOR_LINES` in
-  `releases.ts`), roughly Camunda's supported-version window. This keeps
-  the selection deterministic: the newest release of each selected line
-  is always within the first page of the listing, whereas an EOL line's
-  newest release drifts down the listing until it falls off the page and
-  would silently vanish from the selection.
-
-Bundles contain a superset of the marketplace index: the `-hybrid`
-variants and a few templates the marketplace does not list are cached
-too, and templates without a numeric `version` (pre-versioned legacy
-entries that version resolution cannot rank) are skipped.
+The default sync asks npm for the latest published version, then uses `npm pack`
+only if that immutable version is not cached. Set
+`C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL or local path
+to pin or supply the package offline. Local and URL overrides are packed every
+time so changed local sources are not silently treated as immutable releases.
 
 ## Cache strategy
 
@@ -90,15 +53,12 @@ We mirror Desktop Modeler's approach
     Modeler's `.camunda-connector-templates.json` shape).
   - `fetched-at` — epoch ms of last sync.
 - Each cached template gets
-  `metadata.upstreamRef = <assetUrl>#<file-in-bundle>` injected. Release
-  assets are tag-pinned and therefore immutable, so "asset URL already
-  in the cache" ⇒ "bundle already ingested" ⇒ no re-download.
-- `id@version` is deduplicated across bundles, newest release wins.
-- Per-release fetch failures are logged + counted, and never abort the
-  run — unless *every* bundle failed and nothing was reusable from the
-  cache, in which case `sync` errors out rather than writing an empty
-  cache. A partial sync also leaves `fetched-at` untouched, so the
-  staleness nudge keeps asking for a full refresh.
+  `metadata.upstreamRef = npm:<package>@<version>#<file-in-archive>` injected.
+  Published package versions are immutable, so a cached package version needs
+  no new download. Existing release-bundle cache entries are replaced by
+  matching `id@version` from the npm package.
+- A pack failure retains the old cache and timestamp, and disables pruning.
+  A cold sync fails instead of writing an empty cache.
 
 ### Lifecycle
 
@@ -118,14 +78,9 @@ We mirror Desktop Modeler's approach
   `c8ctl element-template sync`. We don't auto-refresh — surprise
   network activity inside `apply` is undesirable and a manual sync is
   cheap.
-- **`sync`** always re-fetches the release listing but only downloads
-  bundles that aren't cached yet. **`sync --prune`** drops cached
-  entries that no longer belong to a selected release (opt-in: a user
-  may keep a legacy line intentionally). Pruning is skipped when any
-  bundle failed to download: a bundle URL changes with every patch, so
-  the previous patch's cached templates are always "stale", and dropping
-  them while their replacement failed would delete a whole minor line
-  over one transient HTTP error.
+- **`sync`** checks npm for the latest version, downloading only when it
+  changes. **`sync --prune`** drops cached entries absent from the current
+  package; a failed download never prunes the previous cache.
 - **Atomicity**: `sync` writes `templates.json` and `fetched-at`
   via a sibling temp file + `renameSync`, so a kill mid-sync leaves
   the previous cache intact. `apply --in-place` uses the same recipe
@@ -142,8 +97,8 @@ We mirror Desktop Modeler's approach
 
 Earlier draft considered fetching only the requested `(id, version)`
 on demand. Rejected because **search needs the template names**, which
-means every template has to be read anyway. Bundles make this moot: the
-whole line arrives in one request, so eager bulk fetch is both simpler
+means every template has to be read anyway. Package archives make this moot: the
+whole package arrives in one request, so eager bulk fetch is both simpler
 and faster than any lazy scheme.
 
 ## Version resolution
