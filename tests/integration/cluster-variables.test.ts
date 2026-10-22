@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { makeTestEnv } from "../utils/mocks.ts";
-import { pollUntilValue } from "../utils/polling.ts";
+import { pollUntil, pollUntilValue } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const POLL_TIMEOUT_MS = 30000;
@@ -56,6 +56,27 @@ describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8
 		created.push({ name, tenantId });
 	};
 
+	/**
+	 * Get is eventually consistent: 8.8 reads from Elasticsearch, 8.9+ from RDBMS.
+	 * Poll until the variable is readable and `accept` holds.
+	 */
+	const getEventually = (
+		name: string,
+		tenantArgs: string[],
+		accept: (v: Record<string, string>) => boolean = () => true,
+	) =>
+		pollUntilValue(
+			async () => {
+				const got = await cli("get", "cluster-variable", name, ...tenantArgs);
+				if (got.status !== 0) return undefined;
+				const variable: Record<string, string> = JSON.parse(got.stdout);
+				return accept(variable) ? variable : undefined;
+			},
+			POLL_TIMEOUT_MS,
+			POLL_INTERVAL_MS,
+			`cluster variable ${name}`,
+		);
+
 	beforeEach(() => {
 		dataDir = mkdtempSync(join(tmpdir(), "c8ctl-clustervar-int-"));
 		created = [];
@@ -81,9 +102,7 @@ describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8
 			const name = uniqueName(scope.toUpperCase());
 			await create(name, tenantId);
 
-			const got = await cli("get", "cluster-variable", name, ...tenantArgs);
-			assert.strictEqual(got.status, 0, `stderr: ${got.stderr}`);
-			const variable = JSON.parse(got.stdout);
+			const variable = await getEventually(name, tenantArgs);
 			assert.strictEqual(variable.name, name);
 			assert.strictEqual(variable.scope, scope.toUpperCase());
 			assert.deepStrictEqual(JSON.parse(variable.value), { a: 1 });
@@ -122,11 +141,12 @@ describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8
 			);
 			assert.strictEqual(updated.status, 0, `stderr: ${updated.stderr}`);
 
-			const got = await cli("get", "cluster-variable", name, ...tenantArgs);
-			assert.strictEqual(got.status, 0, `stderr: ${got.stderr}`);
-			assert.deepStrictEqual(JSON.parse(JSON.parse(got.stdout).value), {
-				a: 2,
-			});
+			const got = await getEventually(
+				name,
+				tenantArgs,
+				(v) => JSON.stringify(JSON.parse(v.value)) === '{"a":2}',
+			);
+			assert.deepStrictEqual(JSON.parse(got.value), { a: 2 });
 		});
 
 		test(`delete a ${scope} variable`, async () => {
@@ -141,8 +161,15 @@ describe("Cluster variables Integration Tests (requires Camunda 8 at localhost:8
 			);
 			assert.strictEqual(deleted.status, 0, `stderr: ${deleted.stderr}`);
 
-			const got = await cli("get", "cluster-variable", name, ...tenantArgs);
-			assert.strictEqual(got.status, 1, "deleted variable should not be found");
+			// Delete propagates to the read store eventually.
+			const gone = await pollUntil(
+				async () =>
+					(await cli("get", "cluster-variable", name, ...tenantArgs)).status ===
+					1,
+				POLL_TIMEOUT_MS,
+				POLL_INTERVAL_MS,
+			);
+			assert.ok(gone, "deleted variable should not be found");
 		});
 	}
 });
