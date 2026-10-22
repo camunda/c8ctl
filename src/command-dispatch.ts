@@ -8,6 +8,14 @@
  * lived in index.ts.
  */
 
+import {
+	createClusterVariableCommand,
+	deleteClusterVariableCommand,
+	getClusterVariableCommand,
+	listClusterVariablesCommand,
+	searchClusterVariablesCommand,
+	updateClusterVariableCommand,
+} from "./commands/cluster-variables.ts";
 import { completionCommand } from "./commands/completion.ts";
 import { deployCommand } from "./commands/deploy.ts";
 import { getFormCommand } from "./commands/forms.ts";
@@ -185,6 +193,12 @@ export const COMMAND_DISPATCH: ReadonlyMap<string, AnyCommandHandler> = new Map<
 	["complete:job", completeJobCommand],
 	["fail:job", failJobCommand],
 	["update:job", updateJobCommand],
+	["create:cluster-variable", createClusterVariableCommand],
+	["get:cluster-variable", getClusterVariableCommand],
+	["list:cluster-variable", listClusterVariablesCommand],
+	["search:cluster-variable", searchClusterVariablesCommand],
+	["update:cluster-variable", updateClusterVariableCommand],
+	["delete:cluster-variable", deleteClusterVariableCommand],
 
 	// ── Messages ───────────────────────────────────────────────────────
 	["publish:message", publishMessageCommand],
