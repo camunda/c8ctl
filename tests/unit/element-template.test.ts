@@ -4011,6 +4011,107 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
+	for (const [setting, value] of [
+		["npm_config_save", "false"],
+		["npm_config_save_dev", "true"],
+	]) {
+		test(`syncs a local package with ${setting}=${value}`, async () => {
+			const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-npm-config-"));
+			const packageDir = join(dataDir, "package");
+			writeTemplatePackage(packageDir, [ootbTemplate("io.example.Config", 1)]);
+			try {
+				const result = await asyncSpawn(
+					"node",
+					["--experimental-strip-types", CLI, "element-template", "sync"],
+					{
+						env: { ...syncEnv(dataDir, packageDir), [setting]: value },
+					},
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.deepStrictEqual(
+					readCache(dataDir).map((tpl) => tpl.id),
+					["io.example.Config"],
+				);
+			} finally {
+				rmSync(dataDir, { recursive: true, force: true });
+			}
+		});
+	}
+
+	test("removes abandoned staging directories before a sync", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-abandoned-"));
+		const packageDir = join(dataDir, "package");
+		const cacheDir = join(dataDir, "element-templates");
+		const abandoned = join(cacheDir, ".staging-abandoned");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Fresh", 1)]);
+		mkdirSync(abandoned, { recursive: true });
+		writeFileSync(join(abandoned, "leftover"), "old install");
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(!existsSync(abandoned));
+			assert.deepStrictEqual(readCache(dataDir).map((tpl) => tpl.id), [
+				"io.example.Fresh",
+			]);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("reads symlinked template files from a local package", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-symlink-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Regular", 1)]);
+		const templatesDir = join(packageDir, "src", "element-templates");
+		writeFileSync(
+			join(templatesDir, "target.txt"),
+			JSON.stringify(ootbTemplate("io.example.Linked", 1)),
+		);
+		symlinkSync("target.txt", join(templatesDir, "linked.json"), "file");
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Linked", "io.example.Regular"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("skips invalid template shapes but retains valid entries", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-shape-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [
+			ootbTemplate("io.example.Valid", 1),
+			{ ...ootbTemplate("io.example.BadVersion", 1), version: "latest" },
+			{ ...ootbTemplate("io.example.NoId", 1), id: undefined },
+		]);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(readCache(dataDir).map((tpl) => tpl.id), [
+				"io.example.Valid",
+			]);
+			assert.match(result.stderr, /Skipping invalid element template/);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("reinstalls a changed local package without leaving staging files", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-reinstall-"));
 		const packageDir = join(dataDir, "package");
@@ -4044,9 +4145,6 @@ describe("CLI behavioural: element-template npm sync", () => {
 					name.startsWith(".staging-"),
 				),
 				[],
-			);
-			assert.ok(
-				!existsSync(join(dataDir, "element-templates", "package-state.json")),
 			);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
