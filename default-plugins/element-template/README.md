@@ -103,7 +103,9 @@ c8ctl element-template sync --prune    # also drop entries absent from the insta
 ```
 
 `sync` installs `@camunda/connectors-element-templates` into a temporary
-directory using npm's registry, authentication, proxy and CA settings. Set
+directory using npm's user, global, and environment registry, authentication,
+proxy, and CA settings. A project `.npmrc` in the invoking directory is not
+read, because npm runs the install in the temporary directory. Set
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
 package path for pinned or offline use. Every sync installs afresh, so changes
 to a local source are picked up.

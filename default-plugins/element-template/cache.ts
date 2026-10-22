@@ -16,6 +16,7 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
@@ -344,10 +345,16 @@ function buildUpstreamRef(packageRef: string, fileName: string): string {
 	return `${packageRef}#src/element-templates/${fileName}`;
 }
 
-function installTemplates(spec: string): Template[] {
+function installTemplates(spec: string, logger: Logger): Template[] {
 	const c8ctl = globalThis.c8ctl;
 	if (!c8ctl) throw new Error("c8ctl npm runner is not available.");
-	const dir = mkdtempSync(join(getCacheDir(), ".staging-"));
+	const cacheDir = getCacheDir();
+	for (const entry of readdirSync(cacheDir, { withFileTypes: true })) {
+		if (entry.name.startsWith(".staging-") && entry.isDirectory()) {
+			rmSync(join(cacheDir, entry.name), { recursive: true, force: true });
+		}
+	}
+	const dir = mkdtempSync(join(cacheDir, ".staging-"));
 	try {
 		c8ctl.npm({
 			args: [
@@ -360,26 +367,26 @@ function installTemplates(spec: string): Template[] {
 			],
 			stdio: "pipe",
 		});
-		const stagingManifest: unknown = JSON.parse(
-			readFileSync(join(dir, "package.json"), "utf-8"),
-		);
-		if (!isRecord(stagingManifest) || !isRecord(stagingManifest.dependencies)) {
-			throw new Error(
-				"npm install did not record the template package dependency.",
+		const modulesDir = join(dir, "node_modules");
+		const packageNames = readdirSync(modulesDir, { withFileTypes: true })
+			.filter(
+				(entry) =>
+					!entry.name.startsWith(".") &&
+					(entry.isDirectory() || entry.isSymbolicLink()),
+			)
+			.flatMap((entry) =>
+				entry.name.startsWith("@")
+					? readdirSync(join(modulesDir, entry.name), {
+							withFileTypes: true,
+						})
+							.filter((child) => child.isDirectory() || child.isSymbolicLink())
+							.map((child) => join(entry.name, child.name))
+					: [entry.name],
 			);
+		if (packageNames.length !== 1) {
+			throw new Error("npm install did not produce a single template package.");
 		}
-		const names = Object.keys(stagingManifest.dependencies);
-		const name = names[0];
-		if (
-			names.length !== 1 ||
-			typeof name !== "string" ||
-			!/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i.test(name)
-		) {
-			throw new Error(
-				"npm install did not record a valid single package name.",
-			);
-		}
-		const packageDir = join(dir, "node_modules", name);
+		const packageDir = join(modulesDir, packageNames[0]);
 		const installedManifest: unknown = JSON.parse(
 			readFileSync(join(packageDir, "package.json"), "utf-8"),
 		);
@@ -397,8 +404,13 @@ function installTemplates(spec: string): Template[] {
 		const templatesDir = join(packageDir, "src", "element-templates");
 		const templates: Template[] = [];
 		for (const file of readdirSync(templatesDir, { withFileTypes: true })) {
-			if (!file.isFile() || !file.name.endsWith(".json")) continue;
+			if (!file.name.endsWith(".json")) continue;
 			const filePath = join(templatesDir, file.name);
+			if (
+				!file.isFile() &&
+				!(file.isSymbolicLink() && statSync(filePath).isFile())
+			)
+				continue;
 			let parsed: unknown;
 			try {
 				parsed = JSON.parse(readFileSync(filePath, "utf-8"));
@@ -415,7 +427,8 @@ function installTemplates(spec: string): Template[] {
 					typeof value.id !== "string" ||
 					typeof value.version !== "number"
 				) {
-					throw new Error(`Invalid element template in ${file.name}.`);
+					logger.warn(`Skipping invalid element template in ${file.name}.`);
+					continue;
 				}
 				value.metadata = {
 					...value.metadata,
@@ -537,7 +550,7 @@ async function syncTemplatesLocked({
 	let fresh: Template[] = [];
 	logger.info("Installing element templates with npm ...");
 	try {
-		fresh = installTemplates(spec);
+		fresh = installTemplates(spec, logger);
 	} catch (error) {
 		errors = 1;
 		logger.warn(
@@ -581,14 +594,6 @@ async function syncTemplatesLocked({
 	}
 
 	saveCache(next);
-	// A previous version of sync wrote this marker. It is no longer used:
-	// npm now reinstalls into an empty staging directory on every sync.
-	try {
-		unlinkSync(join(getCacheDir(), "package-state.json"));
-	} catch (error) {
-		if (getErrorCode(error) !== "ENOENT") throw error;
-	}
-
 	const summary: SyncSummary = {
 		total: next.length,
 		fetched: added,

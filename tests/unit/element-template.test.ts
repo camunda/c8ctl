@@ -4054,9 +4054,10 @@ describe("CLI behavioural: element-template npm sync", () => {
 			);
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.ok(!existsSync(abandoned));
-			assert.deepStrictEqual(readCache(dataDir).map((tpl) => tpl.id), [
-				"io.example.Fresh",
-			]);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Fresh"],
+			);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
 		}
@@ -4103,9 +4104,10 @@ describe("CLI behavioural: element-template npm sync", () => {
 				{ env: syncEnv(dataDir, packageDir) },
 			);
 			assert.strictEqual(result.status, 0, result.stderr);
-			assert.deepStrictEqual(readCache(dataDir).map((tpl) => tpl.id), [
-				"io.example.Valid",
-			]);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Valid"],
+			);
 			assert.match(result.stderr, /Skipping invalid element template/);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
