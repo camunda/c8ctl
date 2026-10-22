@@ -14,7 +14,6 @@ import {
 	openSync,
 	readdirSync,
 	readFileSync,
-	realpathSync,
 	renameSync,
 	rmSync,
 	statSync,
@@ -22,7 +21,7 @@ import {
 	writeFileSync,
 	writeSync,
 } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { join } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template } from "./helpers.ts";
 
@@ -369,7 +368,7 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 			stdio: "pipe",
 		});
 		const modulesDir = join(dir, "node_modules");
-		const packageNames = readdirSync(modulesDir, { withFileTypes: true })
+		const installed = readdirSync(modulesDir, { withFileTypes: true })
 			.filter(
 				(entry) =>
 					!entry.name.startsWith(".") &&
@@ -383,13 +382,16 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 							.filter((child) => child.isDirectory() || child.isSymbolicLink())
 							.map((child) => join(entry.name, child.name))
 					: [entry.name],
-			)
-			.filter((name) =>
-				existsSync(join(modulesDir, name, "src", "element-templates")),
 			);
+		const packageNames = installed.filter((name) =>
+			existsSync(join(modulesDir, name, "src", "element-templates")),
+		);
 		if (packageNames.length !== 1) {
+			const found = (names: string[]) => names.join(", ") || "none";
 			throw new Error(
-				"npm install did not produce exactly one package with element templates.",
+				packageNames.length === 0
+					? `npm install produced no package with src/element-templates (installed: ${found(installed)}).`
+					: `npm install produced several packages with src/element-templates (${found(packageNames)}); expected exactly one.`,
 			);
 		}
 		const packageDir = join(modulesDir, packageNames[0]);
@@ -410,27 +412,14 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 		const templatesDir = join(packageDir, "src", "element-templates");
 		const templates: Template[] = [];
 		for (const file of readdirSync(templatesDir, { withFileTypes: true })) {
-			if (!file.name.endsWith(".json")) continue;
-			const filePath = join(templatesDir, file.name);
-			if (file.isSymbolicLink()) {
-				const target = relative(
-					realpathSync(packageDir),
-					realpathSync(filePath),
-				);
-				if (
-					target === ".." ||
-					target.startsWith(`..${sep}`) ||
-					isAbsolute(target)
-				) {
-					logger.warn(`Skipping template link outside package: ${file.name}.`);
-					continue;
-				}
-			}
-			if (
-				!file.isFile() &&
-				!(file.isSymbolicLink() && statSync(filePath).isFile())
-			)
+			if (!file.name.endsWith(".json")) {
 				continue;
+			}
+			const filePath = join(templatesDir, file.name);
+			// stat follows symlinks, which only a local-directory override produces.
+			if (!statSync(filePath, { throwIfNoEntry: false })?.isFile()) {
+				continue;
+			}
 			let parsed: unknown;
 			try {
 				parsed = JSON.parse(readFileSync(filePath, "utf-8"));

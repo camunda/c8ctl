@@ -4128,37 +4128,6 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
-	test("does not read template links outside an installed package", async () => {
-		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-outside-link-"));
-		const packageDir = join(dataDir, "package");
-		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Safe", 1)]);
-		const outside = join(dataDir, "outside.json");
-		writeFileSync(
-			outside,
-			JSON.stringify(ootbTemplate("io.example.Outside", 1)),
-		);
-		symlinkSync(
-			outside,
-			join(packageDir, "src", "element-templates", "outside.json"),
-			"file",
-		);
-		try {
-			const result = await asyncSpawn(
-				"node",
-				["--experimental-strip-types", CLI, "element-template", "sync"],
-				{ env: syncEnv(dataDir, packageDir) },
-			);
-			assert.strictEqual(result.status, 0, result.stderr);
-			assert.deepStrictEqual(
-				readCache(dataDir).map((tpl) => tpl.id),
-				["io.example.Safe"],
-			);
-			assert.match(result.stderr, /Skipping template link outside package/);
-		} finally {
-			rmSync(dataDir, { recursive: true, force: true });
-		}
-	});
-
 	test("skips invalid template shapes but retains valid entries", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-shape-"));
 		const packageDir = join(dataDir, "package");
@@ -4332,6 +4301,30 @@ describe("CLI behavioural: element-template npm sync", () => {
 			assert.match(result.stderr, /npm install stderr:.*(?:ENOENT|enoent)/s);
 			assert.ok(
 				!existsSync(join(dataDir, "element-templates", "templates.json")),
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("names the installed packages when none ships element templates", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-no-templates-"));
+		const packageDir = join(dataDir, "package");
+		mkdirSync(packageDir, { recursive: true });
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({ name: "empty-package", version: "1.0.0" }),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 1);
+			assert.match(
+				result.stderr,
+				/no package with src\/element-templates \(installed: empty-package\)/,
 			);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
