@@ -440,7 +440,11 @@ function syncErrorMessage(error: unknown, logger: Logger): string {
 	) {
 		const stderr = String(error.stderr)
 			.trim()
-			.replaceAll(/https?:\/\/[^/\s@]+@/g, "https://[redacted]@");
+			.replaceAll(/(https?:\/\/)[^/\s@]+@/g, "$1[redacted]@")
+			.replaceAll(
+				/([?&](?:token|password|_authToken|key)=)[^&\s]+/gi,
+				"$1[redacted]",
+			);
 		logger.debug(`npm install stderr: ${stderr}`);
 		if (globalThis.c8ctl?.verbose && stderr) {
 			logger.warn(`npm install stderr: ${stderr}`);
@@ -549,7 +553,7 @@ async function syncTemplatesLocked({
 		}
 		if (prune) {
 			logger.warn(
-				"Skipping prune: package download failed — cached templates were kept.",
+				"Skipping prune: package install failed — cached templates were kept.",
 			);
 		}
 		return {
@@ -568,11 +572,10 @@ async function syncTemplatesLocked({
 	} = mergeTemplates(fresh, existing, prune);
 
 	if (next.length === 0) {
-		// Nothing downloaded, nothing reusable — writing an empty cache
-		// here would make `requireCachePresent()` pass over a cache that
-		// can never resolve a template.
+		// Writing an empty cache would let requireCachePresent() pass
+		// even though no template can be resolved.
 		throw new Error(
-			"No element templates could be downloaded (package was empty). " +
+			"No element templates could be installed (package was empty). " +
 				"Check the warnings above and retry 'c8ctl element-template sync'.",
 		);
 	}
