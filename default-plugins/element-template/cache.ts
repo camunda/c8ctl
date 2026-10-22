@@ -14,6 +14,7 @@ import {
 	openSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	statSync,
@@ -21,7 +22,7 @@ import {
 	writeFileSync,
 	writeSync,
 } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template } from "./helpers.ts";
 
@@ -382,9 +383,14 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 							.filter((child) => child.isDirectory() || child.isSymbolicLink())
 							.map((child) => join(entry.name, child.name))
 					: [entry.name],
+			)
+			.filter((name) =>
+				existsSync(join(modulesDir, name, "src", "element-templates")),
 			);
 		if (packageNames.length !== 1) {
-			throw new Error("npm install did not produce a single template package.");
+			throw new Error(
+				"npm install did not produce exactly one package with element templates.",
+			);
 		}
 		const packageDir = join(modulesDir, packageNames[0]);
 		const installedManifest: unknown = JSON.parse(
@@ -406,6 +412,20 @@ function installTemplates(spec: string, logger: Logger): Template[] {
 		for (const file of readdirSync(templatesDir, { withFileTypes: true })) {
 			if (!file.name.endsWith(".json")) continue;
 			const filePath = join(templatesDir, file.name);
+			if (file.isSymbolicLink()) {
+				const target = relative(
+					realpathSync(packageDir),
+					realpathSync(filePath),
+				);
+				if (
+					target === ".." ||
+					target.startsWith(`..${sep}`) ||
+					isAbsolute(target)
+				) {
+					logger.warn(`Skipping template link outside package: ${file.name}.`);
+					continue;
+				}
+			}
 			if (
 				!file.isFile() &&
 				!(file.isSymbolicLink() && statSync(filePath).isFile())

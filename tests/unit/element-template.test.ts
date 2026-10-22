@@ -4038,6 +4038,45 @@ describe("CLI behavioural: element-template npm sync", () => {
 		});
 	}
 
+	test("syncs a template package with an installed dependency", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-dependency-"));
+		const packageDir = join(dataDir, "package");
+		const dependencyDir = join(dataDir, "dependency");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Dependent", 1)]);
+		mkdirSync(dependencyDir);
+		writeFileSync(
+			join(dependencyDir, "package.json"),
+			JSON.stringify({ name: "fixture-dependency", version: "1.0.0" }),
+		);
+		writeFileSync(
+			join(packageDir, "package.json"),
+			JSON.stringify({
+				name: "test-element-templates",
+				version: "1.0.0",
+				dependencies: { "fixture-dependency": `file:${dependencyDir}` },
+			}),
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: {
+						...syncEnv(dataDir, packageDir),
+						npm_config_install_links: "true",
+					},
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Dependent"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("removes abandoned staging directories before a sync", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-abandoned-"));
 		const packageDir = join(dataDir, "package");
@@ -4084,6 +4123,37 @@ describe("CLI behavioural: element-template npm sync", () => {
 				readCache(dataDir).map((tpl) => tpl.id),
 				["io.example.Linked", "io.example.Regular"],
 			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("does not read template links outside an installed package", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-outside-link-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Safe", 1)]);
+		const outside = join(dataDir, "outside.json");
+		writeFileSync(
+			outside,
+			JSON.stringify(ootbTemplate("io.example.Outside", 1)),
+		);
+		symlinkSync(
+			outside,
+			join(packageDir, "src", "element-templates", "outside.json"),
+			"file",
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Safe"],
+			);
+			assert.match(result.stderr, /Skipping template link outside package/);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
 		}
