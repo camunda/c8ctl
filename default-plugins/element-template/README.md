@@ -106,8 +106,8 @@ c8ctl element-template sync --prune    # also drop entries absent from the lates
 your configured npm registry and downloads it only when the version changes.
 It uses npm's registry, authentication, proxy and CA settings. Set
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL, or local
-package path for pinned or offline use. Local and URL overrides are packed on
-each sync, so changes to a local source are picked up.
+package path for pinned or offline use. Local, URL and version-range overrides
+are packed on each sync, so changes to a local source are picked up.
 
 ## Migrating to a newer template
 

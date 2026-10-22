@@ -3869,6 +3869,31 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
+	test("packs a file: package spec from its local source", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-file-spec-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Local", 1)]);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{
+					env: syncEnv(
+						dataDir,
+						`@camunda/connectors-element-templates@file:${packageDir}`,
+					),
+				},
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.Local"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("updates an existing cache and prunes only missing versions", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-prune-"));
 		const packageDir = join(dataDir, "package");

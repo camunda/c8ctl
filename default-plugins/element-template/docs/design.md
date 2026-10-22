@@ -38,10 +38,11 @@ entries without `engines` remain eligible for version selection. Hybrid
 templates are not in the package.
 
 The default sync asks npm for the latest published version, then uses `npm pack`
-only if that immutable version is not cached. Set
+only if that immutable version is not cached completely. Set
 `C8CTL_ELEMENT_TEMPLATES_PACKAGE` to a package spec, tarball URL or local path
-to pin or supply the package offline. Local and URL overrides are packed every
-time so changed local sources are not silently treated as immutable releases.
+to pin or supply the package offline. Local, URL and version-range overrides
+are packed every time so mutable sources are not silently treated as immutable
+registry versions.
 
 ## Cache strategy
 
@@ -52,6 +53,8 @@ We mirror Desktop Modeler's approach
   - `templates.json` — flat array of all template objects (matches
     Modeler's `.camunda-connector-templates.json` shape).
   - `fetched-at` — epoch ms of last sync.
+  - `package-state.json` — completed registry package version and template
+    count, required before reusing it without downloading.
 - Each cached template gets
   `metadata.upstreamRef = npm:<package>@<version>#<file-in-archive>` injected.
   Published package versions are immutable, so a cached package version needs

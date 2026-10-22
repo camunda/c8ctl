@@ -62,6 +62,10 @@ function getFetchedAtPath(): string {
 	return join(getCacheDir(), "fetched-at");
 }
 
+function getPackageStatePath(): string {
+	return join(getCacheDir(), "package-state.json");
+}
+
 function getSyncLockPath(): string {
 	return join(getCacheDir(), ".sync.lock");
 }
@@ -273,6 +277,24 @@ function loadFetchedAt(): number | null {
 	const value = readFileSync(path, "utf-8").trim();
 	const ms = Number(value);
 	return Number.isFinite(ms) ? ms : null;
+}
+
+function loadPackageState(): { ref: string; count: number } | null {
+	try {
+		const parsed: unknown = JSON.parse(
+			readFileSync(getPackageStatePath(), "utf-8"),
+		);
+		if (
+			isRecord(parsed) &&
+			typeof parsed.ref === "string" &&
+			typeof parsed.count === "number"
+		) {
+			return { ref: parsed.ref, count: parsed.count };
+		}
+	} catch {
+		// An absent or incomplete marker means the package must be repacked.
+	}
+	return null;
 }
 
 /**
@@ -516,8 +538,13 @@ async function syncTemplatesLocked({
 	prune: boolean;
 }): Promise<SyncSummary> {
 	const spec = process.env.C8CTL_ELEMENT_TEMPLATES_PACKAGE || DEFAULT_PACKAGE;
+	const suffix = spec.startsWith(`${DEFAULT_PACKAGE}@`)
+		? spec.slice(DEFAULT_PACKAGE.length + 1)
+		: "";
 	const registrySpec =
-		spec === DEFAULT_PACKAGE || spec.startsWith(`${DEFAULT_PACKAGE}@`);
+		spec === DEFAULT_PACKAGE ||
+		(Boolean(suffix) &&
+			(Boolean(semver.valid(suffix)) || /^[a-z][\w.-]*$/i.test(suffix)));
 	const version = registrySpec ? latestPackageVersion(spec) : undefined;
 	const desiredRef = version ? `npm:${DEFAULT_PACKAGE}@${version}` : undefined;
 
@@ -530,13 +557,21 @@ async function syncTemplatesLocked({
 		existing = [];
 	}
 
-	const reusable = desiredRef
+	const packageState = loadPackageState();
+	const matching = desiredRef
 		? existing.filter(
 				(tpl) =>
 					tpl.metadata?.upstreamRef &&
 					packageOfRef(tpl.metadata.upstreamRef) === desiredRef,
 			)
 		: [];
+	const reusable =
+		desiredRef !== undefined &&
+		packageState !== null &&
+		packageState.ref === desiredRef &&
+		packageState.count === matching.length
+			? matching
+			: [];
 	let errors = 0;
 	let fresh = reusable;
 	if (reusable.length === 0) {
@@ -593,6 +628,18 @@ async function syncTemplatesLocked({
 	// A partial sync leaves the previous `fetched-at` in place so the
 	// staleness nudge keeps asking for a full refresh.
 	saveCache(next);
+	if (desiredRef) {
+		atomicWriteFileSync(
+			getPackageStatePath(),
+			JSON.stringify({ ref: desiredRef, count: added }),
+		);
+	} else {
+		try {
+			unlinkSync(getPackageStatePath());
+		} catch (error) {
+			if (getErrorCode(error) !== "ENOENT") throw error;
+		}
+	}
 
 	const summary: SyncSummary = {
 		total: next.length,
