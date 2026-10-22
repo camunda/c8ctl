@@ -99,7 +99,7 @@ c8ctl element-template get io.camunda.connectors.HttpJson.v2 --no-icon  # drop t
 
 # Refresh the local OOTB template cache
 c8ctl element-template sync
-c8ctl element-template sync --prune    # also drop entries absent from the latest package
+c8ctl element-template sync --prune    # also drop entries absent from the installed package
 ```
 
 `sync` installs `@camunda/connectors-element-templates` into a temporary

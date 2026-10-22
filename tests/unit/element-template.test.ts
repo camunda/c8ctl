@@ -3956,7 +3956,7 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
-	test("packs a file: package spec from its local source", async () => {
+	test("installs a file: package spec from its local source", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-file-spec-"));
 		const packageDir = join(dataDir, "package");
 		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Local", 1)]);
@@ -4011,6 +4011,48 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
+	test("reinstalls a changed local package without leaving staging files", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-reinstall-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Before", 1)]);
+		try {
+			const first = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(first.status, 0, first.stderr);
+			writeTemplatePackage(packageDir, [ootbTemplate("io.example.After", 1)]);
+			const second = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"element-template",
+					"sync",
+					"--prune",
+				],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(second.status, 0, second.stderr);
+			assert.deepStrictEqual(
+				readCache(dataDir).map((tpl) => tpl.id),
+				["io.example.After"],
+			);
+			assert.deepStrictEqual(
+				readdirSync(join(dataDir, "element-templates")).filter((name) =>
+					name.startsWith(".staging-"),
+				),
+				[],
+			);
+			assert.ok(
+				!existsSync(join(dataDir, "element-templates", "package-state.json")),
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("updates an existing cache and prunes only missing versions", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-prune-"));
 		const packageDir = join(dataDir, "package");
@@ -4059,7 +4101,7 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
-	test("a failed package download leaves cached templates and freshness intact", async () => {
+	test("a failed package install leaves cached templates and freshness intact", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-failure-"));
 		const packageDir = join(dataDir, "package");
 		writeTemplatePackage(packageDir, [ootbTemplate("io.example.Agent", 1)]);
@@ -4096,6 +4138,31 @@ describe("CLI behavioural: element-template npm sync", () => {
 			assert.ok(isRecord(summary));
 			assert.strictEqual(summary.errors, 1);
 			assert.strictEqual(summary.pruned, 0);
+			assert.match(second.stderr, /Could not install element templates/);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("a cold install reports npm failure details with --verbose", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-npm-error-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"element-template",
+					"sync",
+					"--verbose",
+				],
+				{ env: syncEnv(dataDir, join(dataDir, "missing")) },
+			);
+			assert.strictEqual(result.status, 1);
+			assert.match(result.stderr, /npm install stderr:.*(?:ENOENT|enoent)/s);
+			assert.ok(
+				!existsSync(join(dataDir, "element-templates", "templates.json")),
+			);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });
 		}

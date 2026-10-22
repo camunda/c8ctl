@@ -442,6 +442,9 @@ function syncErrorMessage(error: unknown, logger: Logger): string {
 			.trim()
 			.replaceAll(/https?:\/\/[^/\s@]+@/g, "https://[redacted]@");
 		logger.debug(`npm install stderr: ${stderr}`);
+		if (globalThis.c8ctl?.verbose && stderr) {
+			logger.warn(`npm install stderr: ${stderr}`);
+		}
 		const code = /^npm (?:error|ERR!) code ([A-Z0-9]+)/m.exec(stderr)?.[1];
 		if (code)
 			return `npm install failed (${code}). Check npm registry settings or run with --verbose for details.`;
@@ -540,7 +543,7 @@ async function syncTemplatesLocked({
 	if (errors > 0) {
 		if (existing.length === 0) {
 			throw new Error(
-				"No element templates could be downloaded (package download failed). " +
+				"No element templates could be installed (package install failed). " +
 					"Check the warnings above and retry 'c8ctl element-template sync'.",
 			);
 		}

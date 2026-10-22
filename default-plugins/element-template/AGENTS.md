@@ -26,16 +26,16 @@ version resolution.
   esbuild bundles.
 - **Cache file shape mirrors Desktop Modeler's
   `.camunda-connector-templates.json`.** Don't change the format
-  without reason — `metadata.upstreamRef` is the dedup key for
-  incremental sync.
+  without reason — current package templates replace cached entries
+  by `id@version`; `metadata.upstreamRef` records their origin.
 - **No subcommand auto-bootstraps the cache.** OOTB-id resolution
   is guarded by `requireCachePresent()` in `cache.ts`, which
   throws the shared `CACHE_NOT_FOUND_MESSAGE` when the cache is
   absent. The reason auto-bootstrap is forbidden: bootstrap progress
   goes through `logger.info`, which writes to stdout in text mode —
   it would corrupt `apply | bpmn lint` and `get <id> > template.json`
-  pipelines, and racing cold-cache invocations would both download the
-  same bundles. Don't re-add a bootstrap call to any subcommand
+  pipelines, and racing cold-cache invocations would both install the
+  same package. Don't re-add a bootstrap call to any subcommand
   without changing the logger story first.
 - **Path/URL refs and local id hits must not trigger the cache check.**
   Detection happens in `parseTemplateRef()` in `template-ref.ts`

@@ -57,7 +57,6 @@ We mirror Desktop Modeler's approach
   The single current package replaces matching `id@version` entries, while
   older entries remain until explicitly pruned. It does not combine multiple
   configured packages.
-  Matching `id@version` entries from the current package replace older copies.
 - An install failure or malformed template file retains the old cache and
   timestamp, and disables pruning.
   A cold sync fails instead of writing an empty cache.
@@ -86,7 +85,8 @@ We mirror Desktop Modeler's approach
 - **Atomicity**: `sync` writes `templates.json` and `fetched-at`
   via a sibling temp file + `renameSync`, so a kill mid-sync leaves
   the previous cache intact. `apply --in-place` uses the same recipe
-  for the user's BPMN file.
+  for the user's BPMN file. The temporary installation is created under
+  the cache lock and removed after its files have been read.
 - **Concurrent syncs** are serialised by an advisory lock
   (`<cacheDir>/.sync.lock`) holding `{pid, startedAt}`. A second
   `sync` exits non-zero with a pointer to the lockfile; stale locks
@@ -99,8 +99,8 @@ We mirror Desktop Modeler's approach
 
 Earlier draft considered fetching only the requested `(id, version)`
 on demand. Rejected because **search needs the template names**, which
-means every template has to be read anyway. Package archives make this moot: the
-whole package arrives in one request, so eager bulk fetch is both simpler
+means every template has to be read anyway. Installing the package makes this
+moot: the whole package arrives together, so eager bulk fetch is both simpler
 and faster than any lazy scheme.
 
 ## Version resolution
