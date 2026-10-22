@@ -4331,6 +4331,24 @@ describe("CLI behavioural: element-template npm sync", () => {
 		}
 	});
 
+	test("rejects a package override that npm would read as a flag", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-flag-spec-"));
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, "--registry=http://127.0.0.1:9/") },
+			);
+			assert.strictEqual(result.status, 1);
+			assert.match(result.stderr, /must not start with '-'/);
+			assert.ok(
+				!existsSync(join(dataDir, "element-templates", "templates.json")),
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
 	test("refuses a second sync while the cache is locked", async () => {
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-lock-"));
 		const cacheDir = join(dataDir, "element-templates");

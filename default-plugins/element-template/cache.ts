@@ -545,6 +545,12 @@ async function syncTemplatesLocked({
 	prune: boolean;
 }): Promise<SyncSummary> {
 	const spec = process.env.C8CTL_ELEMENT_TEMPLATES_PACKAGE || DEFAULT_PACKAGE;
+	if (spec.startsWith("-")) {
+		// npm would read a leading dash as one of its own flags.
+		throw new Error(
+			`Invalid C8CTL_ELEMENT_TEMPLATES_PACKAGE '${spec}': a package spec must not start with '-'.`,
+		);
+	}
 
 	let existing: Template[];
 	try {
