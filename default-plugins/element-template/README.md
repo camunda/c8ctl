@@ -524,9 +524,9 @@ warning at the end (the property won't be applied).
 
 ## How OOTB templates are resolved
 
-1. **Source**: the `@camunda/connectors-element-templates` npm package.
-   `sync` checks its current version and uses npm to pack it; no
-   `raw.githubusercontent.com` template downloads are needed.
+1. **Source**: the
+   [`@camunda/connectors-element-templates` npm package](https://www.npmjs.com/package/@camunda/connectors-element-templates).
+   `sync` checks its current version and uses npm to pack it.
 2. **Populate the cache once** via `c8ctl element-template sync`.
    Subcommands that resolve OOTB ids (`search`, `info`, `get-properties`,
    `apply`, `get`) exit non-zero with a hint to run `sync` when the

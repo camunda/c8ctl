@@ -3803,13 +3803,11 @@ function writeTemplatePackage(
 	dir: string,
 	templates: unknown[],
 	version = "1.0.0",
+	name = "test-element-templates",
 ): void {
 	const templatesDir = join(dir, "src", "element-templates");
 	mkdirSync(templatesDir, { recursive: true });
-	writeFileSync(
-		join(dir, "package.json"),
-		JSON.stringify({ name: "test-element-templates", version }),
-	);
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version }));
 	writeFileSync(join(templatesDir, "agent.json"), JSON.stringify(templates));
 }
 
@@ -3888,6 +3886,36 @@ describe("CLI behavioural: element-template npm sync", () => {
 			assert.deepStrictEqual(
 				readCache(dataDir).map((tpl) => tpl.id),
 				["io.example.Local"],
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
+	});
+
+	test("accepts a package override with a different package name", async () => {
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-et-custom-package-"));
+		const packageDir = join(dataDir, "package");
+		writeTemplatePackage(
+			packageDir,
+			[ootbTemplate("io.example.Custom", 1)],
+			"1.0.0",
+			"@company/element-templates",
+		);
+		try {
+			const result = await asyncSpawn(
+				"node",
+				["--experimental-strip-types", CLI, "element-template", "sync"],
+				{ env: syncEnv(dataDir, packageDir) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const cache = readCache(dataDir);
+			assert.deepStrictEqual(
+				cache.map((tpl) => tpl.id),
+				["io.example.Custom"],
+			);
+			assert.match(
+				upstreamRefOf(cache[0]),
+				/^npm:@company\/element-templates@1\.0\.0#/,
 			);
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true });

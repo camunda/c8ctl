@@ -24,12 +24,10 @@ shipped layout but during development we run directly from
 
 ## OOTB template integration
 
-`sync` reads `@camunda/connectors-element-templates` from npm. Unlike the
-per-minor release bundles, this package includes templates and migration
-recipes published from `camunda/connectors` main. npm honours the user's
-registry, scoped registry, proxy, CA and authentication settings. It downloads
-one archive instead of following hundreds of marketplace links to
-`raw.githubusercontent.com` (often blocked in enterprise networks).
+`sync` reads `@camunda/connectors-element-templates` from npm. npm honours
+the user's registry, scoped registry, proxy, CA and authentication settings.
+The package is published from `camunda/connectors` and includes connector
+templates and their metadata in one archive.
 
 The archive contains arrays of versions in
 `package/src/element-templates/*.json`. Entries without a numeric `version`
@@ -57,9 +55,11 @@ We mirror Desktop Modeler's approach
     count, required before reusing it without downloading.
 - Each cached template gets
   `metadata.upstreamRef = npm:<package>@<version>#<file-in-archive>` injected.
-  Published package versions are immutable, so a cached package version needs
-  no new download. Existing release-bundle cache entries are replaced by
-  matching `id@version` from the npm package.
+  This identifies entries from the single current package separately from
+  older entries retained when `--prune` is omitted. Together with the
+  completion record it lets sync reuse an immutable published version without
+  downloading it again. It does not combine multiple configured packages.
+  Matching `id@version` entries from the current package replace older copies.
 - A pack failure retains the old cache and timestamp, and disables pruning.
   A cold sync fails instead of writing an empty cache.
 
