@@ -58,7 +58,7 @@ These flags are available on `list` and `search` commands.
 
 List resources
 
-**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, profiles (profile), plugins (plugin), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule)
+**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, profiles (profile), plugins (plugin), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), cluster-variables (cluster-variable)
 
 **Verb-level flags:**
 
@@ -216,6 +216,7 @@ List resources
 c8ctl list pi                                               # List process instances
 c8ctl list pd                                               # List process definitions
 c8ctl list users                                            # List users
+c8ctl list cluster-variables                                # List cluster variables
 ```
 
 ---
@@ -224,7 +225,7 @@ c8ctl list users                                            # List users
 
 Search resources with filters (wildcards, date ranges, case-insensitive)
 
-**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), ws (wait-state)
+**Resources:** pi (process-instance), pd (process-definition), ut (user-task), inc (incident), jobs, vars (variable), users (user), roles (role), groups (group), tenants (tenant), auth (authorization), mapping-rules (mapping-rule), ws (wait-state), cluster-variables (cluster-variable)
 
 **Resource-specific flags:**
 
@@ -399,6 +400,21 @@ Search resources with filters (wildcards, date ranges, case-insensitive)
 
 </details>
 
+<details>
+<summary><code>cluster-variable</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--name` | string |  | Filter by name (supports wildcards) |
+| `--value` | string |  | Filter by value (supports wildcards) |
+| `--scope` | string |  | Filter by scope (GLOBAL, TENANT) |
+| `--tenantId` | string |  | Filter by tenant ID |
+| `--kind` | string |  | Filter by kind (JSON, SECRET_REFERENCE) |
+| `--isTruncated` | boolean |  | Only variables whose stored value is truncated |
+| `--fullValue` | boolean |  | Return full values |
+
+</details>
+
 **Examples:**
 
 ```bash
@@ -416,6 +432,7 @@ c8ctl search pd --iname='*order*'                           # Case-insensitive s
 c8ctl search ut --iassignee=John                            # Case-insensitive search by assignee
 c8ctl search ws --waitStateType=JOB                         # Search wait states of type JOB
 c8ctl search ws --elementType=SERVICE_TASK                  # Search wait states on service tasks
+c8ctl search cluster-variables --name='DB_*'                # Search cluster variables by name
 ```
 
 ---
@@ -424,7 +441,7 @@ c8ctl search ws --elementType=SERVICE_TASK                  # Search wait states
 
 Get a resource by key
 
-**Resources:** pi (process-instance), pd (process-definition), inc (incident), topology, form, user, role, group, tenant, auth (authorization), mapping-rule
+**Resources:** pi (process-instance), pd (process-definition), inc (incident), topology, form, user, role, group, tenant, auth (authorization), mapping-rule, cluster-variable
 
 **Positional arguments:**
 
@@ -438,6 +455,7 @@ Get a resource by key
 - **authorization:** `<authorizationKey>` (required)
 - **mapping-rule:** `<mappingRuleId>` (required)
 - **form:** `<key>` (required)
+- **cluster-variable:** `<name>` (required)
 
 **Resource-specific flags:**
 
@@ -471,6 +489,15 @@ Get a resource by key
 
 </details>
 
+<details>
+<summary><code>cluster-variable</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--tenantId` | string |  | Tenant ID (tenant scope; omit for global scope) |
+
+</details>
+
 **Examples:**
 
 ```bash
@@ -482,6 +509,7 @@ c8ctl get form 123456                                       # Get form (searches
 c8ctl get form 123456 --ut                                  # Get form for user task only
 c8ctl get form 123456 --pd                                  # Get start form for process definition only
 c8ctl get user john                                         # Get user by username
+c8ctl get cluster-variable MY_VAR --tenantId acme           # Get a tenant-scoped cluster variable
 ```
 
 ---
@@ -490,7 +518,11 @@ c8ctl get user john                                         # Get user by userna
 
 Create a resource (process instance, identity)
 
-**Resources:** pi (process-instance), user, role, group, tenant, auth (authorization), mapping-rule
+**Resources:** pi (process-instance), user, role, group, tenant, auth (authorization), mapping-rule, cluster-variable
+
+**Positional arguments:**
+
+- **cluster-variable:** `<name>` (required)
 
 **Resource-specific flags:**
 
@@ -565,6 +597,18 @@ Create a resource (process instance, identity)
 </details>
 
 <details>
+<summary><code>cluster-variable</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--value` | string | Yes | JSON object value (or @file.json / @- to read from file/stdin) |
+| `--metadata` | string |  | JSON object of string/number metadata (or @file.json / @-) |
+| `--tenantId` | string |  | Tenant ID (tenant scope; omit for global scope) |
+| `--kind` | string |  | Variable kind (JSON, SECRET_REFERENCE; default JSON) |
+
+</details>
+
+<details>
 <summary><code>authorization</code> (<code>auth</code>)</summary>
 
 | Flag | Type | Required | Description |
@@ -583,6 +627,7 @@ Create a resource (process instance, identity)
 c8ctl create pi --id=myProcess --businessId=order-123       # Create a process instance with a Business ID
 c8ctl create pi --id=myProcess --awaitCompletion            # Create and await completion
 c8ctl create user --username=john --name='John Doe' --email=john@example.com --password=secret  # Create a user
+c8ctl create cluster-variable MY_VAR --value '{"url":"https://example.org"}'  # Create a global cluster variable
 ```
 
 ---
@@ -593,7 +638,7 @@ Delete a resource by key
 
 **Usage:** `c8ctl delete <resource> <key>`
 
-**Resources:** user, role, group, tenant, auth (authorization), mapping-rule
+**Resources:** user, role, group, tenant, auth (authorization), mapping-rule, cluster-variable
 
 **Positional arguments:**
 
@@ -603,6 +648,18 @@ Delete a resource by key
 - **tenant:** `<tenantId>` (required)
 - **authorization:** `<authorizationKey>` (required)
 - **mapping-rule:** `<mappingRuleId>` (required)
+- **cluster-variable:** `<name>` (required)
+
+**Resource-specific flags:**
+
+<details>
+<summary><code>cluster-variable</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--tenantId` | string |  | Tenant ID (tenant scope; omit for global scope) |
+
+</details>
 
 **Examples:**
 
@@ -783,15 +840,19 @@ Mark a job as failed with optional error message and retry count
 
 ### `update`
 
-Update the retries or timeout of a job. At least one of --retries or --timeout must be provided.
+Update a job (retries/timeout) or a cluster variable (value/metadata). For a job, at least one of --retries or --timeout must be provided.
 
-**Resources:** job
+**Resources:** job, cluster-variable
 
 **Positional arguments:**
 
 - **job:** `<key>` (required)
+- **cluster-variable:** `<name>` (required)
 
-**Flags:**
+**Resource-specific flags:**
+
+<details>
+<summary><code>job</code></summary>
 
 | Flag | Type | Required | Description |
 |------|------|----------|-------------|
@@ -799,11 +860,25 @@ Update the retries or timeout of a job. At least one of --retries or --timeout m
 | `--timeout` | string |  | New job timeout in milliseconds |
 | `--operationReference` | string |  | Optional operation reference (long integer) |
 
+</details>
+
+<details>
+<summary><code>cluster-variable</code></summary>
+
+| Flag | Type | Required | Description |
+|------|------|----------|-------------|
+| `--value` | string | Yes | JSON object value (or @file.json / @- to read from file/stdin) |
+| `--metadata` | string |  | JSON object of string/number metadata (or @file.json / @-) |
+| `--tenantId` | string |  | Tenant ID (tenant scope; omit for global scope) |
+
+</details>
+
 **Examples:**
 
 ```bash
 c8ctl update job 12345 --retries 3                          # Set the retry count for a job
 c8ctl update job 12345 --timeout 60000                      # Set the job timeout to 60 seconds
+c8ctl update cluster-variable MY_VAR --value '{"url":"https://example.org"}'  # Update a global cluster variable
 ```
 
 ---

@@ -28,12 +28,33 @@ When a new SDK limitation is discovered during development, add it here followin
   - **Impact:** Running either command against an 8.8/8.9 cluster surfaces the gateway's 404 as a normal command error (no special-casing needed — the framework's error path already renders it clearly). The live CLI integration tests for these commands (`tests/integration/process-instances.test.ts`) are skipped on `CAMUNDA_VERSION` 8.8/8.9 via `suspendResumeSkip`, mirroring the existing `businessIdSkip` pattern in the same file.
   - **Remediation:** None needed — this is a platform version floor, not an SDK defect. Revisit only if a future SDK release needs adjusting for a change in the endpoint's shape.
 
+- [ ] **Cluster variable endpoints not available on Camunda 8.8**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0**
+  - **Behavior:** The SDK client exposes `createGlobalClusterVariable()`/`createTenantClusterVariable()` and the get/search/delete counterparts (`/cluster-variables/...`), but the 8.8 gateway returns `404 Not Found [createGlobalClusterVariable]: No static resource v2/cluster-variables/global.` — the endpoints exist from 8.9.
+  - **Affected:** `c8ctl list|search|get|create|delete cluster-variable(s)`.
+  - **Impact:** Commands surface the gateway's 404 as a normal command error. `tests/integration/cluster-variables.test.ts` is skipped on `CAMUNDA_VERSION` 8.8 via `clusterVariablesSkip`.
+  - **Remediation:** None needed — platform version floor, not an SDK defect.
+
 - [ ] **No config flag to disable the automatic `/v2` suffix on `CAMUNDA_REST_ADDRESS`**
   - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0-alpha.43**
   - **Behavior:** `hydrateConfig()` always appends `/v2` to `CAMUNDA_REST_ADDRESS` unless the value already ends with `/v2` or `/v2/`; there is no override.
   - **Affected:** gateway/proxy-fronted profiles whose base path doesn't match this convention (`c8ctl add profile --exactBaseUrl`, #547).
   - **Impact:** `createClient()` (`src/core/client.ts`) works around this by passing a custom `fetch` (`buildGatewayFetch`) that rewrites the outgoing `Request`'s URL, replacing the SDK-computed `.../v2` prefix with the profile's literal `baseUrl`. `rawPostWithHeaders()`/`resolveClusterConfig()` mirror the same suffixing rule for the manually-issued REST calls (the general-purpose escape hatch in `src/core/client.ts`) that bypass the SDK client.
   - **Remediation:** If the SDK adds a config flag (e.g. `CAMUNDA_REST_ADDRESS_EXACT`) to opt out of the suffix, use it directly and remove `buildGatewayFetch`'s URL-rewriting branch and the mirrored logic in `restBaseUrlForProfile()`. Tracked upstream: [camunda/orchestration-cluster-api-js#499](https://github.com/camunda/orchestration-cluster-api-js/issues/499).
+
+- [ ] **Cluster variable `value` typed object-only despite documenting primitives**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0**
+  - **Behavior:** `createGlobalClusterVariable()`/`createTenantClusterVariable()`/`update*ClusterVariable()` type `value` as `{ [key: string]: unknown }`, while the field description says "any JSON object or primitive value".
+  - **Affected:** `c8ctl create|update cluster-variable --value`.
+  - **Impact:** c8ctl accepts JSON objects only (arrays and primitives are rejected before the request).
+  - **Remediation:** If primitive values are intended, report upstream to camunda/orchestration-cluster-api-js and the REST spec, then relax the parser in `src/commands/cluster-variables.ts`.
+
+- [ ] **Cluster variable update, `metadata` and `kind` not in the 8.9-era API spec**
+  - **SDK:** `@camunda8/orchestration-cluster-api` — current version **10.0.0**
+  - **Behavior:** The backup spec in `assets/c8/rest-api/cluster-variables.yaml` defines create, get, delete and search only. The SDK exposes `update*ClusterVariable()` and the `metadata`/`kind` fields, which are most likely available from Camunda 8.10. The exact floor is not yet confirmed against a live cluster.
+  - **Affected:** `c8ctl update cluster-variable`, `--metadata`, `--kind`, and the `--kind`/`--isTruncated` search filters.
+  - **Impact:** Against an older cluster the gateway error surfaces as a normal command error (no special-casing). `tests/integration/cluster-variables.test.ts` skips update on `CAMUNDA_VERSION` 8.8/8.9.
+  - **Remediation:** None needed if this is a platform version floor. Confirm the floor on a live cluster and adjust the skip and the docs note.
 
 ---
 
