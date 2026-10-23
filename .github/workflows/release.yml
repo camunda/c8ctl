@@ -12,8 +12,12 @@ concurrency:
 jobs:
   test:
     name: Test
+    # Reusable workflows can't exceed the caller's grant, and the permission check is
+    # static: test.yml's agentic-revision job (never runs here) needs these read scopes.
     permissions:
       contents: read
+      issues: read
+      pull-requests: read
     uses: ./.github/workflows/test.yml
     with:
       os: '["ubuntu-latest"]'
