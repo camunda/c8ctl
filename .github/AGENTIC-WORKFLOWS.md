@@ -20,6 +20,26 @@ files and `.github/aw/actions-lock.json` are compiler output, not hand-edited po
 The ordinary `agentic-controller.yml` workflow runs the deterministic TypeScript
 coordinator in `scripts/agentic/`.
 
+Workers select [gh-aw model aliases](https://github.github.com/gh-aw/reference/model-tables/)
+rather than concrete model versions:
+
+| Worker | Engine | Model alias | Intent |
+| --- | --- | --- | --- |
+| Fitness | Copilot | `opus` | Thorough assessment of scope and acceptance criteria |
+| Implement | Copilot | `large` | Capable general-purpose implementation |
+| Review / Copilot | Copilot | `agent` | Agent-oriented correctness and compatibility review |
+| Review / Claude | Claude | `opus` | Independent, thorough review |
+| Reimplement | Copilot | `large` | Capable multi-step repairs |
+
+Aliases are ordered model-family preferences, not task-adaptive routing. The pinned
+compiler supplies their definitions; available models determine which concrete
+model is selected. Both `large` and `agent` prefer Sonnet before other families,
+so the Copilot engine does not imply an OpenAI model. Reviewer independence comes
+from separate engines and isolated reports, not guaranteed provider diversity.
+Opus prioritizes assessment and review depth over inference cost; rollout must
+confirm Opus access through both Copilot and Anthropic. Existing credit, turn,
+timeout, and model-fallback limits remain unchanged.
+
 ```mermaid
 flowchart TD
     Issue[Incoming issue] --> Fitness{Implementation fitness}

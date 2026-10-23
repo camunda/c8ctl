@@ -22,7 +22,7 @@ env:
   EXPECTED_ENGINE: claude
 engine:
   id: claude
-  model: claude-sonnet-4-6
+  model: opus
 max-turns: 30
 timeout-minutes: 30
 max-ai-credits: 100
