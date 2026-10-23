@@ -1,22 +1,22 @@
 /**
  * OOTB element-template cache.
  *
- * Source: the `camunda/connectors` GitHub releases (see `releases.ts`).
- * For every supported minor line we download that line's newest
- * `connectors-bundle-templates-<tag>.tar.gz` asset, inline its templates
- * into a single `templates.json` cache file, and inject
- * `metadata.upstreamRef = <assetUrl>#<file>` so subsequent syncs can skip
- * bundles that are already cached (same dedup idea as Modeler's
- * `app/lib/template-updater/util.js`).
+ * Source: the @camunda/connectors-element-templates npm package.
+ * npm installs the configured package in a temporary staging directory;
+ * the validated templates are then atomically written to the cache.
  */
 
 import {
 	closeSync,
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	openSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
+	statSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
@@ -24,15 +24,8 @@ import {
 import { join } from "node:path";
 import semver from "semver";
 import { isRecord, type Logger, type Template } from "./helpers.ts";
-import {
-	type ConnectorRelease,
-	extractJsonEntries,
-	fetchConnectorReleases,
-	fetchReleaseAsset,
-	getReleasesUrl,
-} from "./releases.ts";
 
-const FETCH_CONCURRENCY = 4;
+const DEFAULT_PACKAGE = "@camunda/connectors-element-templates";
 const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 // Backstop for ghost locks left by PID-recycled crashed syncs. Kept
 // well above realistic sync runtimes so a live but slow sync's lock
@@ -302,25 +295,15 @@ function atomicWriteFileSync(target: string, contents: string): void {
 	}
 }
 
-/**
- * Persist the cache. `stampFetchedAt: false` leaves the previous
- * timestamp alone — used when a sync only partially succeeded, so the
- * staleness nudge keeps pointing at the next `sync` instead of
- * pretending the cache is fresh and complete.
- */
-function saveCache(
-	templates: Template[],
-	{ stampFetchedAt = true }: { stampFetchedAt?: boolean } = {},
-): void {
+/** Persist the cache after a successful sync. */
+function saveCache(templates: Template[]): void {
 	const dir = getCacheDir();
 	mkdirSync(dir, { recursive: true });
 	atomicWriteFileSync(
 		getCachePath(),
 		`${JSON.stringify(templates, null, 2)}\n`,
 	);
-	if (stampFetchedAt) {
-		atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
-	}
+	atomicWriteFileSync(getFetchedAtPath(), String(Date.now()));
 }
 
 export function isCacheStale(): boolean {
@@ -348,7 +331,7 @@ export function nudgeIfStale(logger: Logger): void {
 }
 
 // ---------------------------------------------------------------------------
-// Bundle ingestion
+// Package ingestion
 // ---------------------------------------------------------------------------
 
 function isTemplateLike(value: unknown): value is Template {
@@ -356,82 +339,179 @@ function isTemplateLike(value: unknown): value is Template {
 }
 
 /**
- * `metadata.upstreamRef` for a template that came out of a release
- * bundle: the asset URL plus the archive entry it was read from.
- * Both halves are immutable (release assets are tag-pinned), so a
- * cached ref means "this bundle is already ingested".
+ * Identify the installed package and the file that supplied each version.
  */
-function buildUpstreamRef(assetUrl: string, entryName: string): string {
-	return `${assetUrl}#${entryName}`;
+function buildUpstreamRef(packageRef: string, fileName: string): string {
+	return `${packageRef}#src/element-templates/${fileName}`;
 }
 
-/** The asset URL half of an `upstreamRef` (everything before the `#`). */
-function assetUrlOfRef(ref: string): string {
-	const hash = ref.indexOf("#");
-	return hash === -1 ? ref : ref.slice(0, hash);
-}
-
-/**
- * Download and unpack one release bundle into templates carrying an
- * `upstreamRef`. Templates without a numeric `version` are skipped:
- * they are pre-versioned legacy templates that version resolution
- * cannot rank.
- */
-async function fetchReleaseTemplates(
-	release: ConnectorRelease,
-): Promise<Template[]> {
-	const bundle = await fetchReleaseAsset(release.assetUrl);
-	const templates: Template[] = [];
-	for (const entry of extractJsonEntries(bundle)) {
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(entry.content);
-		} catch {
-			continue;
+function installTemplates(spec: string, logger: Logger): Template[] {
+	const c8ctl = globalThis.c8ctl;
+	if (!c8ctl) throw new Error("c8ctl npm runner is not available.");
+	const cacheDir = getCacheDir();
+	for (const entry of readdirSync(cacheDir, { withFileTypes: true })) {
+		if (entry.name.startsWith(".staging-") && entry.isDirectory()) {
+			rmSync(join(cacheDir, entry.name), { recursive: true, force: true });
 		}
-		if (!isTemplateLike(parsed) || typeof parsed.version !== "number") {
-			continue;
-		}
-		parsed.metadata = {
-			...parsed.metadata,
-			upstreamRef: buildUpstreamRef(release.assetUrl, entry.name),
-		};
-		templates.push(parsed);
 	}
-	if (templates.length === 0) {
-		throw new Error(
-			`Bundle for release ${release.tag} contained no element templates`,
+	const dir = mkdtempSync(join(cacheDir, ".staging-"));
+	try {
+		c8ctl.npm({
+			args: [
+				"install",
+				spec,
+				"--prefix",
+				dir,
+				"--ignore-scripts",
+				"--no-package-lock",
+			],
+			stdio: "pipe",
+		});
+		const modulesDir = join(dir, "node_modules");
+		const installed = readdirSync(modulesDir, { withFileTypes: true })
+			.filter(
+				(entry) =>
+					!entry.name.startsWith(".") &&
+					(entry.isDirectory() || entry.isSymbolicLink()),
+			)
+			.flatMap((entry) =>
+				entry.name.startsWith("@")
+					? readdirSync(join(modulesDir, entry.name), {
+							withFileTypes: true,
+						})
+							.filter((child) => child.isDirectory() || child.isSymbolicLink())
+							.map((child) => join(entry.name, child.name))
+					: [entry.name],
+			);
+		const packageNames = installed.filter((name) =>
+			existsSync(join(modulesDir, name, "src", "element-templates")),
 		);
+		if (packageNames.length !== 1) {
+			const found = (names: string[]) => names.join(", ") || "none";
+			throw new Error(
+				packageNames.length === 0
+					? `npm install produced no package with src/element-templates (installed: ${found(installed)}).`
+					: `npm install produced several packages with src/element-templates (${found(packageNames)}). Sync supports a single template package; a package that depends on another template package counts as several.`,
+			);
+		}
+		const packageDir = join(modulesDir, packageNames[0]);
+		const installedManifest: unknown = JSON.parse(
+			readFileSync(join(packageDir, "package.json"), "utf-8"),
+		);
+		if (
+			!isRecord(installedManifest) ||
+			typeof installedManifest.name !== "string" ||
+			typeof installedManifest.version !== "string" ||
+			!semver.valid(installedManifest.version)
+		) {
+			throw new Error(
+				"Installed template package has no valid name or version.",
+			);
+		}
+		const ref = `npm:${installedManifest.name}@${installedManifest.version}`;
+		const templatesDir = join(packageDir, "src", "element-templates");
+		const templates: Template[] = [];
+		for (const file of readdirSync(templatesDir, { withFileTypes: true })) {
+			if (!file.name.endsWith(".json")) {
+				continue;
+			}
+			const filePath = join(templatesDir, file.name);
+			// stat follows symlinks, which only a local-directory override produces.
+			if (!statSync(filePath, { throwIfNoEntry: false })?.isFile()) {
+				continue;
+			}
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				throw new Error(
+					`Invalid element template JSON in ${file.name}: ${detail}`,
+				);
+			}
+			for (const value of Array.isArray(parsed) ? parsed : [parsed]) {
+				if (isRecord(value) && value.version === undefined) continue;
+				if (
+					!isTemplateLike(value) ||
+					typeof value.id !== "string" ||
+					typeof value.version !== "number"
+				) {
+					logger.warn(`Skipping invalid element template in ${file.name}.`);
+					continue;
+				}
+				value.metadata = {
+					...value.metadata,
+					upstreamRef: buildUpstreamRef(ref, file.name),
+				};
+				templates.push(value);
+			}
+		}
+		if (templates.length === 0) {
+			throw new Error("Package contained no element templates.");
+		}
+		return templates;
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
 	}
-	return templates;
+}
+
+function syncErrorMessage(error: unknown, logger: Logger): string {
+	if (
+		isRecord(error) &&
+		(Buffer.isBuffer(error.stderr) || typeof error.stderr === "string")
+	) {
+		const stderr = String(error.stderr)
+			.trim()
+			.replaceAll(/(https?:\/\/)[^/\s@]+@/g, "$1[redacted]@")
+			.replaceAll(
+				/([?&](?:token|password|_authToken|key)=)[^&\s]+/gi,
+				"$1[redacted]",
+			);
+		logger.debug(`npm install stderr: ${stderr}`);
+		if (globalThis.c8ctl?.verbose && stderr) {
+			logger.warn(`npm install stderr: ${stderr}`);
+		}
+		const code = /^npm (?:error|ERR!) code ([A-Z0-9]+)/m.exec(stderr)?.[1];
+		if (code)
+			return `npm install failed (${code}). Check npm registry settings or run with --verbose for details.`;
+		return "npm install failed. Run with --verbose for npm's error details.";
+	}
+	return error instanceof Error ? error.message : String(error);
+}
+
+function mergeTemplates(
+	fresh: Template[],
+	existing: Template[],
+	prune: boolean,
+): { templates: Template[]; fetched: number; cached: number; pruned: number } {
+	const templates: Template[] = [];
+	const seen = new Set<string>();
+	for (const tpl of sortTemplates(fresh)) {
+		const key = `${tpl.id}@${tpl.version}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		templates.push(tpl);
+	}
+	const fetched = templates.length;
+	let cached = 0;
+	let pruned = 0;
+	for (const tpl of sortTemplates(existing)) {
+		const key = `${tpl.id}@${tpl.version}`;
+		if (seen.has(key)) continue;
+		if (prune) {
+			pruned++;
+			continue;
+		}
+		seen.add(key);
+		templates.push(tpl);
+		cached++;
+	}
+	return { templates: sortTemplates(templates), fetched, cached, pruned };
 }
 
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------
-
-/**
- * Run `fn` over `items` with at most `concurrency` in flight.
- * Each fn() must handle its own errors — exceptions abort the pool.
- */
-async function pool<T>(
-	items: T[],
-	concurrency: number,
-	fn: (item: T) => Promise<void>,
-): Promise<void> {
-	const queue = items.slice();
-	const workers = Array.from(
-		{ length: Math.min(concurrency, queue.length) },
-		async () => {
-			while (queue.length > 0) {
-				const item = queue.shift();
-				if (item === undefined) break;
-				await fn(item);
-			}
-		},
-	);
-	await Promise.all(workers);
-}
 
 /** Order templates by id, then version — a stable cache ordering. */
 function sortTemplates(templates: Template[]): Template[] {
@@ -443,20 +523,8 @@ function sortTemplates(templates: Template[]): Template[] {
 }
 
 /**
- * Sync the cache with the connectors GitHub releases.
- *
- * - Always re-fetches the release listing and reduces it to the newest
- *   release per minor line.
- * - Downloads the template bundle of every selected release that isn't
- *   already cached (matched by the asset URL half of
- *   `metadata.upstreamRef`).
- * - Deduplicates `id@version` across bundles, preferring the newest
- *   release's copy.
- * - With `prune: true`, drops cached entries that no longer belong to a
- *   selected release.
- *
- * Per-release fetch failures are logged + counted but do not abort the run.
- *
+ * Sync the cache with the npm package. Overrides can specify
+ * an npm package spec, URL, or local path; each sync stages a fresh install.
  * Returns a summary `{ total, fetched, cached, errors, pruned }`.
  */
 export async function syncTemplates({
@@ -476,17 +544,13 @@ async function syncTemplatesLocked({
 	logger: Logger;
 	prune: boolean;
 }): Promise<SyncSummary> {
-	const releasesUrl = getReleasesUrl();
-	logger.info(`Fetching connector releases from ${releasesUrl} ...`);
-	const releases = await fetchConnectorReleases();
-	if (releases.length === 0) {
+	const spec = process.env.C8CTL_ELEMENT_TEMPLATES_PACKAGE || DEFAULT_PACKAGE;
+	if (spec.startsWith("-")) {
+		// npm would read a leading dash as one of its own flags.
 		throw new Error(
-			`No connector release with an element-template bundle found at ${releasesUrl}.`,
+			`Invalid C8CTL_ELEMENT_TEMPLATES_PACKAGE '${spec}': a package spec must not start with '-'.`,
 		);
 	}
-	logger.info(
-		`Latest release per minor: ${releases.map((r) => r.tag).join(", ")}.`,
-	);
 
 	let existing: Template[];
 	try {
@@ -497,128 +561,58 @@ async function syncTemplatesLocked({
 		existing = [];
 	}
 
-	// Group the cache by the bundle each template came from. Anything
-	// that doesn't belong to a selected release (no `upstreamRef`, or a
-	// bundle that dropped out of the selection) is a prune candidate.
-	const selectedAssets = new Set(releases.map((r) => r.assetUrl));
-	const cachedByAsset = new Map<string, Template[]>();
-	const staleCached: Template[] = [];
-	for (const tpl of existing) {
-		const ref = tpl.metadata?.upstreamRef;
-		const asset = ref ? assetUrlOfRef(ref) : undefined;
-		if (asset && selectedAssets.has(asset)) {
-			const bucket = cachedByAsset.get(asset);
-			if (bucket) bucket.push(tpl);
-			else cachedByAsset.set(asset, [tpl]);
-		} else {
-			staleCached.push(tpl);
-		}
-	}
-
-	// Release assets are tag-pinned and therefore immutable: a bundle
-	// already represented in the cache never has to be downloaded again.
-	const toFetch = releases.filter((r) => !cachedByAsset.has(r.assetUrl));
-	const reusedCount = [...cachedByAsset.values()].reduce(
-		(sum, bucket) => sum + bucket.length,
-		0,
-	);
-
-	logger.info(
-		`${
-			reusedCount > 0
-				? `Reusing ${reusedCount} cached templates from ${cachedByAsset.size} bundle(s), `
-				: ""
-		}downloading ${toFetch.length} bundle(s)...`,
-	);
-
 	let errors = 0;
-	let progress = 0;
-	const fetchedByAsset = new Map<string, Template[]>();
-
-	await pool(toFetch, FETCH_CONCURRENCY, async (release) => {
-		progress += 1;
-		const myProgress = progress;
-		try {
-			const templates = await fetchReleaseTemplates(release);
-			fetchedByAsset.set(release.assetUrl, templates);
-			logger.info(
-				`  [${myProgress}/${toFetch.length}] ${release.tag} — ${templates.length} templates`,
-			);
-		} catch (error) {
-			errors += 1;
-			const message = error instanceof Error ? error.message : String(error);
-			logger.warn(
-				`  [${myProgress}/${toFetch.length}] ${release.tag} — ${message}`,
-			);
-		}
-	});
-
-	// Build the new cache newest release first, so an `id@version` shipped
-	// by several minor lines is taken from the newest one. Each bundle's
-	// templates are sorted by id+version so cache order (and therefore
-	// search result order) is deterministic regardless of network timing.
-	const next: Template[] = [];
-	const seen = new Set<string>();
-	let fetched = 0;
-	let cached = 0;
-	const add = (tpl: Template): boolean => {
-		const key = `${tpl.id}@${tpl.version}`;
-		if (seen.has(key)) return false;
-		seen.add(key);
-		next.push(tpl);
-		return true;
-	};
-
-	for (const release of releases) {
-		const fresh = fetchedByAsset.get(release.assetUrl);
-		const templates = fresh ?? cachedByAsset.get(release.assetUrl) ?? [];
-		for (const tpl of sortTemplates(templates)) {
-			if (!add(tpl)) continue;
-			if (fresh) fetched += 1;
-			else cached += 1;
-		}
-	}
-
-	// A bundle URL changes with every patch release, so the previous
-	// patch's cached templates always land in `staleCached`. Dropping
-	// them while its replacement failed to download would delete a whole
-	// minor line's templates over one transient HTTP error, so pruning
-	// only happens on a fully successful sync.
-	const pruning = prune && errors === 0;
-	if (prune && errors > 0) {
+	let fresh: Template[] = [];
+	logger.info("Installing element templates with npm ...");
+	try {
+		fresh = installTemplates(spec, logger);
+	} catch (error) {
+		errors = 1;
 		logger.warn(
-			`Skipping prune: ${errors} bundle(s) failed to download — cached templates were kept.`,
+			`Could not install element templates: ${syncErrorMessage(error, logger)}`,
 		);
 	}
-
-	// Without pruning, keep templates that no longer belong to a selected
-	// release (e.g. the user wants to retain a line that dropped out of
-	// support). With --prune they are dropped and reported.
-	if (!pruning) {
-		for (const tpl of sortTemplates(staleCached)) {
-			add(tpl);
+	if (errors > 0) {
+		if (existing.length === 0) {
+			throw new Error(
+				"No element templates could be installed (package install failed). " +
+					"Check the warnings above and retry 'c8ctl element-template sync'.",
+			);
 		}
+		if (prune) {
+			logger.warn(
+				"Skipping prune: package install failed — cached templates were kept.",
+			);
+		}
+		return {
+			total: existing.length,
+			fetched: 0,
+			cached: existing.length,
+			errors,
+			pruned: 0,
+		};
 	}
-	const pruned = pruning ? staleCached.length : 0;
+	const {
+		templates: next,
+		fetched: added,
+		cached: retained,
+		pruned,
+	} = mergeTemplates(fresh, existing, prune);
 
 	if (next.length === 0) {
-		// Nothing downloaded, nothing reusable — writing an empty cache
-		// here would make `requireCachePresent()` pass over a cache that
-		// can never resolve a template.
+		// Writing an empty cache would let requireCachePresent() pass
+		// even though no template can be resolved.
 		throw new Error(
-			`No element templates could be downloaded (${errors} bundle(s) failed). ` +
+			"No element templates could be installed (package was empty). " +
 				"Check the warnings above and retry 'c8ctl element-template sync'.",
 		);
 	}
 
-	// A partial sync leaves the previous `fetched-at` in place so the
-	// staleness nudge keeps asking for a full refresh.
-	saveCache(next, { stampFetchedAt: errors === 0 });
-
+	saveCache(next);
 	const summary: SyncSummary = {
 		total: next.length,
-		fetched,
-		cached,
+		fetched: added,
+		cached: retained,
 		errors,
 		pruned,
 	};
