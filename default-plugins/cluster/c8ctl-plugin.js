@@ -334,12 +334,13 @@ export const metadata = {
       // so the subcommand flags are documented via `flagsHint` instead.
       passthrough: true,
       passthroughHint:
-        '--purge, --debug, --physical-tenants and --c8-version are read by the plugin. For local management, physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.',
+        '--purge, --debug, --port, --physical-tenants and --c8-version are read by the plugin. For local management, physical-tenants and --physical-tenant are forwarded unchanged to a compatible c8run release.',
       flagsHint: [
         '--c8-version <version>  Camunda version, alias or major.minor (alternative to the positional <version>)',
         '--debug                 (start, stop) Stream raw c8run output',
         '--purge                 (stop only) Also delete runtime data after stopping',
         '--physical-tenants <ids> (start only) Comma-separated physical tenants for this run (repeatable; Camunda 8.10+)',
+        '--port <number>          (start only) Main Camunda HTTP port (default 8080; gRPC 26500 and health 9600 stay fixed)',
         '--physical-tenant <id>   (secrets only) Scope secrets to one physical tenant (also --physical-tenant=<id>)',
       ],
       subcommands: [
@@ -360,6 +361,7 @@ export const metadata = {
         { command: 'c8ctl cluster start', description: 'Start a local Camunda 8 cluster (latest stable)' },
         { command: 'c8ctl cluster start 8.8', description: 'Start the latest cached 8.8.x release' },
         { command: 'c8ctl cluster start 8.9.0-alpha5', description: 'Start a specific version' },
+        { command: 'c8ctl cluster start --port 9091', description: 'Start a local cluster serving HTTP on port 9091' },
         { command: 'c8ctl cluster stop', description: 'Stop the running cluster' },
         { command: 'c8ctl cluster status', description: 'Show whether a cluster is running and how to connect' },
         { command: 'c8ctl cluster logs', description: 'Stream log output from the running cluster' },
@@ -404,6 +406,8 @@ function getLogger() {
 
 const ACTIVE_MARKER_FILE = 'cluster.active';
 const VERSION_MARKER_FILE = 'cluster.version';
+const PORT_MARKER_FILE = 'cluster.port';
+const DEFAULT_HTTP_PORT = 8080;
 // Durable running-cluster PID record, written at start time. Unlike c8run's
 // own `.process` pidfiles — which live INSIDE a version's install dir and
 // vanish when that dir is replaced or removed — this record lives at the
@@ -1578,29 +1582,39 @@ async function waitForClusterReady(maxWaitMs = CLUSTER_STARTUP_TIMEOUT_MS) {
   return false;
 }
 
-function printSummary(rawOutput, version) {
+function printSummary(rawOutput, version, port = DEFAULT_HTTP_PORT) {
   const summary = extractStartupSummary(rawOutput);
 
   if (summary) {
     console.log(`\n${summary}\n`);
-    return;
+  } else {
+    // c8run daemonizes so captured output is often empty — print known defaults
+    const urls = clusterUrls(port);
+    console.log('');
+    console.log(`Camunda 8 (${version}) is running:`);
+    console.log('');
+    console.log(`  - Operate:    ${urls.operate}`);
+    console.log(`  - Tasklist:   ${urls.tasklist}`);
+    console.log(`  - Zeebe GRPC: ${urls.zeebeGrpc}`);
+    console.log(`  - Zeebe REST: ${urls.zeebeRest}`);
+    console.log(`  - Health:     ${urls.health}`);
+    console.log('');
+    console.log('  Default credentials: demo / demo');
+    console.log('');
   }
 
-  // c8run daemonizes so captured output is often empty — print known defaults
-  console.log('');
-  console.log(`Camunda 8 (${version}) is running:`);
-  console.log('');
-  console.log('  - Operate:    http://localhost:8080/operate');
-  console.log('  - Tasklist:   http://localhost:8080/tasklist');
-  console.log('  - Zeebe GRPC: localhost:26500');
-  console.log('  - Zeebe REST: http://localhost:8080/v2/');
-  console.log('  - Health:     http://localhost:9600/actuator/health');
-  console.log('');
-  console.log('  Default credentials: demo / demo');
-  console.log('');
+  if (port !== DEFAULT_HTTP_PORT) {
+    // The built-in 'local' profile targets the default port; tell the user how
+    // to point c8ctl at this cluster rather than rewriting their profile.
+    console.log(`  c8ctl's 'local' profile targets port ${DEFAULT_HTTP_PORT}. To use this cluster, either:`);
+    console.log(`    c8ctl add profile local-${port} --baseUrl=http://localhost:${port}/v2 --username=demo --password=demo`);
+    console.log(`    c8ctl use profile local-${port}`);
+    console.log(`  or, with no active profile, set CAMUNDA_BASE_URL=http://localhost:${port}/v2`);
+    console.log('');
+  }
 }
 
-async function startC8Run(config, debug = false, startArgs = []) {
+async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_HTTP_PORT) {
   const logger = getLogger();
   const binaryPath = getC8RunBinaryPath(config);
   const logDir = join(dirname(binaryPath), 'log');
@@ -1633,6 +1647,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     logger.warn('Found stale cluster marker (no running processes detected). Cleaning up.');
     if (existsSync(markerFile)) rmSync(markerFile);
     if (existsSync(versionFile)) rmSync(versionFile);
+    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   } else if (hasRunningClusterPidfiles(config.cacheDir)) {
     // No active marker, but a live process is still tracked — typically an
     // orphan recorded only in the durable cache-root PID record after its
@@ -1653,10 +1668,14 @@ async function startC8Run(config, debug = false, startArgs = []) {
 
   logger.info('Starting Camunda 8 local cluster...');
 
+  // c8run passes its environment to every Java process it launches. An
+  // inherited SERVER_PORT would therefore move the bundled Connectors runtime
+  // onto the Camunda port as well (port clash) — use --port instead.
+  const { SERVER_PORT: _ignoredServerPort, ...launchEnv } = resolveLocalStoreEnv(process.env, process.cwd());
   const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
-    env: { ...resolveLocalStoreEnv(process.env, process.cwd()), C8RUN_CLI_NAME },
+    env: { ...launchEnv, C8RUN_CLI_NAME },
   });
 
   if (typeof proc.pid !== 'number') {
@@ -1713,6 +1732,9 @@ async function startC8Run(config, debug = false, startArgs = []) {
     if (startArgs.length > 0 && /flag provided but not defined: -physical-tenants/.test(startupOutput)) {
       logger.error('This cached c8run build lacks --physical-tenants. Install a Camunda 8.10+ build containing physical-tenant CLI support with "c8ctl cluster install 8.10".');
     }
+    if (/flag provided but not defined: -port\b/.test(startupOutput)) {
+      logger.error('This cached c8run build does not support --port. Install a newer Camunda 8 Run build (for example "c8ctl cluster install 8.10") or start without --port.');
+    }
     logger.error(
       `c8run start exited with code ${exitCode ?? 'unknown'}${exitSignal ? ` (signal: ${exitSignal})` : ''}. Cluster will not be marked as running.`,
     );
@@ -1748,7 +1770,8 @@ async function startC8Run(config, debug = false, startArgs = []) {
     }
     writeFileSync(markerFile, 'running');
     writeFileSync(versionFile, config.version);
-    printSummary(startupOutput, config.version);
+    writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+    printSummary(startupOutput, config.version, port);
   } else {
     // Readiness can fail even after c8run exits successfully. Retain the same
     // recovery handle as a nonzero launcher exit before reporting failure.
@@ -2350,6 +2373,7 @@ export async function stopC8Run(config, debug = false) {
     if (existsSync(markerFile)) {
       rmSync(markerFile);
     }
+    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
     clearRunningClusterRecord(config.cacheDir);
     return staleVersion;
   }
@@ -2505,6 +2529,7 @@ export async function stopC8Run(config, debug = false) {
   if (existsSync(versionFile)) {
     rmSync(versionFile);
   }
+  rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   const remainingPids = liveRecordedPids(config.cacheDir);
   if (remainingPids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
@@ -2824,13 +2849,28 @@ async function runClusterLocalCommand(
 // Status
 // ---------------------------------------------------------------------------
 
-const CLUSTER_URLS = {
-  operate: 'http://localhost:8080/operate',
-  tasklist: 'http://localhost:8080/tasklist',
-  zeebeGrpc: 'localhost:26500',
-  zeebeRest: 'http://localhost:8080/v2/',
-  health: 'http://localhost:9600/actuator/health',
-};
+/**
+ * Endpoints of the local cluster. `--port` moves only c8run's main HTTP port;
+ * gRPC (26500) and the management/health port (9600) stay fixed.
+ */
+export function clusterUrls(port = DEFAULT_HTTP_PORT) {
+  return {
+    operate: `http://localhost:${port}/operate`,
+    tasklist: `http://localhost:${port}/tasklist`,
+    zeebeGrpc: 'localhost:26500',
+    zeebeRest: `http://localhost:${port}/v2/`,
+    health: 'http://localhost:9600/actuator/health',
+  };
+}
+
+/** HTTP port recorded by the last successful start, or the c8run default. */
+export function readClusterPort(cacheDir) {
+  const portFile = join(cacheDir, PORT_MARKER_FILE);
+  if (!existsSync(portFile)) return DEFAULT_HTTP_PORT;
+  const raw = readFileSync(portFile, 'utf-8').trim();
+  const port = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return port >= 1 && port <= 65535 ? port : DEFAULT_HTTP_PORT;
+}
 
 export async function clusterStatus(cacheDir) {
   const logger = getLogger();
@@ -2839,6 +2879,7 @@ export async function clusterStatus(cacheDir) {
 
   const markerExists = existsSync(markerFile);
   const record = readRunningClusterRecord(cacheDir);
+  const CLUSTER_URLS = clusterUrls(markerExists ? readClusterPort(cacheDir) : DEFAULT_HTTP_PORT);
   // A live process may exist without (or despite) a marker — e.g. after its
   // install dir was replaced/removed, orphaning it (#560). Detect it so status
   // never reports "stopped" while a tracked cluster process is still alive.
@@ -3307,6 +3348,15 @@ export function parsePluginArgs(args) {
       continue;
     }
 
+    if (arg === '--port' || arg.startsWith('--port=')) {
+      const value = arg === '--port' ? args[i + 1] : arg.slice('--port='.length);
+      result.port = parsePort(value);
+      result.startArgs ??= [];
+      result.startArgs.push('--port', String(result.port));
+      i += arg === '--port' ? 2 : 1;
+      continue;
+    }
+
     if (arg === '--c8-version') {
       const next = args[i + 1];
       if (!next || next.startsWith('-')) {
@@ -3359,10 +3409,24 @@ export function parsePluginArgs(args) {
     i += 1;
   }
 
+  if (result.port !== undefined && result.subcommand !== 'start') {
+    throw new Error('--port can only be used with the start subcommand');
+  }
   if (result.startArgs && result.subcommand !== 'start') {
     throw new Error('--physical-tenants can only be used with the start subcommand');
   }
   return result;
+}
+
+function parsePort(value) {
+  if (!value || value.startsWith('-')) {
+    throw new Error('Missing value for --port. Provide the HTTP port, for example: c8ctl cluster start --port 9091');
+  }
+  const port = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid value for --port: "${value}". Use an integer between 1 and 65535.`);
+  }
+  return port;
 }
 
 // ---------------------------------------------------------------------------
@@ -3622,7 +3686,7 @@ export const commands = {
     if (parsed.subcommand === 'start') {
       try {
         await ensureC8RunInstalled(config);
-        await startC8Run(config, parsed.debug, parsed.startArgs);
+        await startC8Run(config, parsed.debug, parsed.startArgs, parsed.port);
       } catch (error) {
         logger.error(`Failed to start cluster: ${formatErrorWithCause(error)}`);
         process.exit(1);

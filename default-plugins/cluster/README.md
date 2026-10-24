@@ -21,6 +21,9 @@ c8ctl cluster start
 # Start with debug output (streams raw c8run logs)
 c8ctl cluster start --debug
 
+# Serve Camunda HTTP on another port (when 8080 is taken)
+c8ctl cluster start --port 9091
+
 # Stop the running cluster
 c8ctl cluster stop
 
