@@ -1,20 +1,24 @@
 import assert from "node:assert/strict";
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 // @ts-expect-error — JS plugin has no declaration file, as in cluster-plugin.test.ts
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 const { parsePluginArgs, clusterUrls, readClusterPort } = plugin;
 
-import { c8WithEnv } from "../utils/cli.ts";
+import { c8WithEnv, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 
 describe("cluster start --port argument handling", () => {
 	test("both flag forms set the port and forward it to c8run", () => {
@@ -153,5 +157,104 @@ exit 7
 		);
 		assert.equal(result.status, 7);
 		assert.match(result.stderr, /does not support --port/);
+	});
+});
+
+describe("successful custom-port lifecycle through the CLI", {
+	skip: process.platform === "win32",
+}, () => {
+	let cacheDir: string;
+	let installDir: string;
+	let preload: string;
+
+	before(() => {
+		cacheDir = mkdtempSync(join(tmpdir(), "c8ctl-port-lifecycle-"));
+		installDir = join(cacheDir, "c8run-8.10.1");
+		mkdirSync(installDir);
+		// Same mocked-health pattern as cluster-startup-outcome.test.ts: the
+		// preload redirects the spawn of the fixture binary to launcher.mjs and
+		// answers every readiness/health probe — no real cluster needed.
+		preload = join(cacheDir, "health.mjs");
+		writeFileSync(
+			preload,
+			`import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { join } from 'node:path';
+const spawn = childProcess.spawn;
+const installDir = join(process.env.C8RUN_CACHE_DIR, 'c8run-8.10.1');
+const binary = join(installDir, 'c8run');
+childProcess.spawn = (command, args, options) => command === binary
+  ? spawn(process.execPath, [join(installDir, 'launcher.mjs'), ...args], options)
+  : spawn(command, args, options);
+syncBuiltinESMExports();
+globalThis.fetch = async () => new Response(JSON.stringify({ status: process.env.TEST_HEALTH }), { status: 200 });`,
+		);
+		const binary = join(installDir, "c8run");
+		writeFileSync(binary, "fixture executable redirected by preload");
+		chmodSync(binary, 0o755);
+		// A successful start: prints a c8run-like summary and exits 0. The
+		// readiness probe is mocked UP, so no real processes or ports exist.
+		writeFileSync(
+			join(installDir, "launcher.mjs"),
+			`if (process.argv[2] === 'start') console.log('Camunda 8 Run started');
+`,
+		);
+	});
+	after(() => rmSync(cacheDir, { recursive: true, force: true }));
+
+	const cluster = (health: string, ...args: string[]) =>
+		c8WithEnv(
+			{
+				C8RUN_CACHE_DIR: cacheDir,
+				C8CTL_OUTPUT_MODE: "text",
+				NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+				TEST_HEALTH: health,
+			},
+			"cluster",
+			...args,
+		);
+
+	test("start persists the port, status serves its URLs, and stop removes it", async () => {
+		const start = await cluster("UP", "start", "8.10.1", "--port=9091");
+		assert.equal(start.status, 0, start.stderr);
+		assert.match(start.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		// The built-in 'local' profile still targets 8080, so start prints the
+		// connection guidance for the custom port.
+		assert.match(
+			start.stdout,
+			/add profile local-9091 --baseUrl=http:\/\/localhost:9091\/v2/,
+		);
+		assert.match(start.stdout, /CAMUNDA_BASE_URL=http:\/\/localhost:9091\/v2/);
+		// The port is persisted by start itself, not by test scaffolding.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+
+		const status = await cluster("UP", "status");
+		assert.equal(status.status, 0, status.stderr);
+		assert.match(status.stdout, /Cluster status: running/);
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.match(status.stdout, /Zeebe REST:\s+http:\/\/localhost:9091\/v2\//);
+		// gRPC and health stay on their fixed ports.
+		assert.match(status.stdout, /Zeebe GRPC:\s+localhost:26500/);
+		assert.match(
+			status.stdout,
+			/Health:\s+http:\/\/localhost:9600\/actuator\/health/,
+		);
+
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(json.status, "running");
+		const urls = asRecord(json.urls, "status urls");
+		assert.equal(urls.operate, "http://localhost:9091/operate");
+		assert.equal(urls.zeebeRest, "http://localhost:9091/v2/");
+
+		const stop = await cluster("DOWN", "stop");
+		assert.equal(stop.status, 0, stop.stderr);
+		// Stop reaps the marker set, including the recorded port.
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+		assert.equal(existsSync(join(cacheDir, "cluster.active")), false);
+		const stopped = parseJson(await cluster("DOWN", "status", "--json"));
+		assert.equal(stopped.status, "stopped");
 	});
 });
