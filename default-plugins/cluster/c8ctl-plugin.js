@@ -2538,10 +2538,14 @@ export async function stopC8Run(config, debug = false) {
   if (existsSync(versionFile)) {
     rmSync(versionFile);
   }
-  rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   const remainingPids = liveRecordedPids(config.cacheDir);
   if (remainingPids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
+    // The port record describes the cluster that was just stopped. Only drop it
+    // once no recorded process survives: while a PID is still tracked the
+    // cluster may still be serving, and deleting the port would make a later
+    // `cluster status` advertise the default port for a custom-port cluster.
+    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   } else {
     logger.warn(
       'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
