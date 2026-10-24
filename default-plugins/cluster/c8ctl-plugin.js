@@ -1670,8 +1670,9 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
 
   // c8run passes its environment to every Java process it launches. An
   // inherited SERVER_PORT would therefore move the bundled Connectors runtime
-  // onto the Camunda port as well (port clash) — use --port instead.
-  const { SERVER_PORT: _ignoredServerPort, ...launchEnv } = resolveLocalStoreEnv(process.env, process.cwd());
+  // onto the Camunda port as well (port clash) — use --port instead. On Windows
+  // the variable name is case-insensitive, so the exclusion must be too.
+  const launchEnv = buildC8RunLaunchEnv(resolveLocalStoreEnv(process.env, process.cwd()));
   const proc = spawn(binaryPath, ['start', ...startArgs], {
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: dirname(binaryPath),
@@ -2714,6 +2715,32 @@ function resolveLocalStoreEnv(env, cwd) {
     }
   }
   return resolvedEnv;
+}
+
+/**
+ * Build the environment handed to the c8run child process. c8run forwards its
+ * environment to every Java process it launches, so an inherited SERVER_PORT
+ * would also move the bundled Connectors runtime onto the Camunda port (a port
+ * clash) — strip it and pass the port via --port instead.
+ *
+ * On Windows environment-variable names are case-insensitive, so the exclusion
+ * must match case-insensitively there: an inherited `Server_Port` or
+ * `server_port` is the same variable as `SERVER_PORT` and must be removed too.
+ * Elsewhere names are case-sensitive, so only the exact `SERVER_PORT` is dropped
+ * (a distinct lowercase `server_port` is a different variable and is left alone).
+ *
+ * @param {Record<string, string | undefined>} env
+ * @param {string} [platform]
+ * @returns {Record<string, string | undefined>}
+ */
+export function buildC8RunLaunchEnv(env, platform = osPlatform()) {
+  if (platform === 'win32') {
+    return Object.fromEntries(
+      Object.entries(env).filter(([name]) => name.toUpperCase() !== 'SERVER_PORT'),
+    );
+  }
+  const { SERVER_PORT: _ignoredServerPort, ...launchEnv } = env;
+  return launchEnv;
 }
 
 /**
