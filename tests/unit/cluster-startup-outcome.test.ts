@@ -123,6 +123,12 @@ if (process.argv[2] === 'stop') {
 	// live and tracked) but then never exits — simulating c8run still starting
 	// the Java services when c8ctl is interrupted. The CLI's spawn-helper
 	// timeout SIGTERMs it mid-start, before any success/failure port write.
+	//
+	// The launcher and its service children are real processes the test must
+	// reap: it records every spawned PID in `fixture.pids` (the launcher's own
+	// PID included) so the test can signal the whole fixture in guaranteed
+	// teardown — the launcher is unref'd and the services are doubly-orphaned,
+	// so none is reachable through `children`.
 	async function hangingLauncher() {
 		const binary = join(
 			installDir,
@@ -132,13 +138,19 @@ if (process.argv[2] === 'stop') {
 		writeFileSync(
 			join(installDir, "launcher.mjs"),
 			`import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 if (process.argv[2] === 'start') {
+  // Record our own PID first so the test can signal the launcher itself.
+  appendFileSync('fixture.pids', process.pid + '\\n');
   // Launch + pidfile the cluster processes, then hang (never exit) so the
-  // parent c8ctl is interrupted while we are still "starting".
+  // parent c8ctl is interrupted while we are still "starting". Record each
+  // service PID for teardown; the .process pidfiles are the readiness signal.
   for (const name of ['camunda', 'connectors', 'connectors-sales']) {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-    child.on('spawn', () => writeFileSync(name + '.process', String(child.pid)));
+    child.on('spawn', () => {
+      writeFileSync(name + '.process', String(child.pid));
+      appendFileSync('fixture.pids', child.pid + '\\n');
+    });
     child.unref();
   }
   setInterval(() => {}, 1000);
@@ -402,33 +414,72 @@ if (process.argv[2] === 'start') {
 
 	test("an interrupted start persists the port so status serves its URLs", async () => {
 		await hangingLauncher();
-		// The launcher writes its .process pidfiles then hangs; the spawn-helper
-		// timeout SIGTERMs c8ctl mid-start, before any success/failure port write.
-		const start = await c8WithOptions(
-			{
-				env: {
-					C8RUN_CACHE_DIR: cacheDir,
-					C8CTL_OUTPUT_MODE: "text",
-					NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
-					TEST_HEALTH: "UP",
+		const fixturePids = join(installDir, "fixture.pids");
+		// Guaranteed teardown: the hanging launcher and its three service
+		// processes are not in `children` (the launcher is unref'd, the services
+		// doubly-orphaned), so reap them by the PIDs the launcher recorded — even
+		// when an assertion fails. Runs before `afterEach` removes cacheDir.
+		try {
+			// Interrupt c8ctl mid-start. The timeout is a safety bound only — the
+			// readiness poll below (not this deadline) establishes that c8ctl has
+			// reached the hanging launcher before we assert on its side effects.
+			const startPromise = c8WithOptions(
+				{
+					env: {
+						C8RUN_CACHE_DIR: cacheDir,
+						C8CTL_OUTPUT_MODE: "text",
+						NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+						TEST_HEALTH: "UP",
+					},
+					timeout: 30_000,
 				},
-				timeout: 5_000,
-			},
-			"cluster",
-			"start",
-			"8.10.1",
-			"--port=9091",
-		);
-		assert.equal(start.timedOut, true, start.stderr);
+				"cluster",
+				"start",
+				"8.10.1",
+				"--port=9091",
+			);
+			// Fixture-ready signal: the launcher runs with cwd=installDir and has
+			// written all three .process pidfiles, so the cluster is live and
+			// tracked before the interruption lands. Without this, a busy runner
+			// could SIGTERM c8ctl before the pidfiles/port exist.
+			const ready = await pollUntil(
+				async () =>
+					["camunda", "connectors", "connectors-sales"].every((name) =>
+						existsSync(join(installDir, `${name}.process`)),
+					),
+				20_000,
+				50,
+			);
+			assert.ok(ready, "hanging launcher wrote its .process pidfiles");
+			const start = await startPromise;
+			assert.equal(start.timedOut, true, start.stderr);
 
-		// The interrupted start left live .process pidfiles behind; the port must
-		// already be recorded so status serves the custom-port URLs, not 8080.
-		assert.equal(
-			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
-			"9091",
-		);
-		const status = await cluster("UP", "status");
-		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
-		assert.doesNotMatch(status.stdout, /localhost:8080/);
+			// The interrupted start left live .process pidfiles behind; the port
+			// must already be recorded so status serves the custom-port URLs.
+			assert.equal(
+				readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+				"9091",
+			);
+			const status = await cluster("UP", "status");
+			assert.match(
+				status.stdout,
+				/Operate:\s+http:\/\/localhost:9091\/operate/,
+			);
+			assert.doesNotMatch(status.stdout, /localhost:8080/);
+		} finally {
+			// Reap every fixture process the launcher recorded (itself included).
+			if (existsSync(fixturePids)) {
+				for (const line of readFileSync(fixturePids, "utf8").split("\n")) {
+					const pid = Number(line.trim());
+					if (Number.isInteger(pid) && pid > 0) {
+						try {
+							process.kill(pid);
+						} catch {
+							// Already exited.
+						}
+					}
+				}
+			}
+		}
 	});
 });
