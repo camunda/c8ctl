@@ -3202,6 +3202,69 @@ describe("Cluster Plugin – stopC8Run", () => {
 			"Should return the stale version so stop --purge can purge it",
 		);
 	});
+
+	test("incomplete stop keeps the recorded custom port while a tracked process survives", async () => {
+		// Stand in for a cluster process that cannot be confirmed stopped: record
+		// the test process's OWN pid with a matching signature, so it is genuinely
+		// live-recorded, and reapClusterProcesses' self-protection (targets.delete(
+		// process.pid)) guarantees it survives the stop — the same shape as a real
+		// EPERM survivor, without relying on permissions.
+		writeFileSync(join(tempDir, "cluster.active"), "running");
+		writeFileSync(join(tempDir, "cluster.version"), "8.9");
+		writeFileSync(join(tempDir, "cluster.port"), "9091");
+		plugin.writeRunningClusterRecord(tempDir, await liveSelfRecord());
+
+		await assert.rejects(
+			() => plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" }),
+			/Stop incomplete/,
+		);
+
+		// The survivor is still tracked, so the port record must survive too —
+		// otherwise `cluster status` would advertise the default port for the
+		// still-running custom-port cluster.
+		assert.strictEqual(plugin.readClusterPort(tempDir), 9091);
+		assert.notStrictEqual(plugin.readRunningClusterRecord(tempDir), null);
+	});
+
+	test("complete stop removes the recorded custom port", async () => {
+		// A real child that CAN be reaped (matching signature), so stop completes.
+		const child = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1e9)"],
+			{ stdio: "ignore" },
+		);
+		await new Promise<void>((resolveSpawn, rejectSpawn) => {
+			child.once("spawn", () => resolveSpawn());
+			child.once("error", rejectSpawn);
+		});
+
+		try {
+			assert.ok(child.pid, "spawned child must have a PID");
+			writeFileSync(join(tempDir, "cluster.active"), "running");
+			writeFileSync(join(tempDir, "cluster.version"), "8.9");
+			writeFileSync(join(tempDir, "cluster.port"), "9091");
+			plugin.writeRunningClusterRecord(
+				tempDir,
+				await liveSelfRecord({ pid: child.pid }),
+			);
+
+			await plugin.stopC8Run({ cacheDir: tempDir, version: "8.9" });
+
+			await pollUntil(async () => !plugin.isPidAlive(child.pid), 5000, 50);
+			// Port record and durable PID record are gone once nothing survives.
+			assert.strictEqual(plugin.readClusterPort(tempDir), 8080);
+			assert.strictEqual(existsSync(join(tempDir, "cluster.port")), false);
+			assert.strictEqual(plugin.readRunningClusterRecord(tempDir), null);
+		} finally {
+			if (child.pid && plugin.isPidAlive(child.pid)) {
+				try {
+					process.kill(child.pid, "SIGKILL");
+				} catch {
+					// already gone
+				}
+			}
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------
