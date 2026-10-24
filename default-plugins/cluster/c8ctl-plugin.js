@@ -1668,6 +1668,15 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
 
   logger.info('Starting Camunda 8 local cluster...');
 
+  // Persist the chosen port BEFORE spawning c8run. If c8ctl is interrupted
+  // while the launcher is still running (SIGINT/SIGTERM, crash), c8run's
+  // `.process` pidfiles can remain live without the success/failure writes
+  // below ever running — and `cluster status` reads the recorded port whenever
+  // tracked processes survive. Without this early write, recovery status would
+  // advertise the default port for a cluster actually serving on the custom
+  // one. The later writes re-persist the same value, so this is idempotent.
+  writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
+
   // c8run passes its environment to every Java process it launches. An
   // inherited SERVER_PORT would therefore move the bundled Connectors runtime
   // onto the Camunda port as well (port clash) — use --port instead. On Windows

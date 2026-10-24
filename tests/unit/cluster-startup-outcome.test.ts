@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { c8WithEnv, parseJson } from "../utils/cli.ts";
+import { c8WithEnv, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { asRecord } from "../utils/guards.ts";
 import { pollUntil } from "../utils/polling.ts";
 
@@ -114,6 +114,34 @@ if (process.argv[2] === 'stop') {
     try { process.kill(Number(readFileSync(name + '.process', 'utf8').trim())); } catch {}
     try { rmSync(name + '.process'); } catch {}
   }
+}
+`,
+		);
+	}
+
+	// A launcher whose `start` writes its .process pidfiles (so the cluster is
+	// live and tracked) but then never exits — simulating c8run still starting
+	// the Java services when c8ctl is interrupted. The CLI's spawn-helper
+	// timeout SIGTERMs it mid-start, before any success/failure port write.
+	async function hangingLauncher() {
+		const binary = join(
+			installDir,
+			process.platform === "win32" ? "c8run.exe" : "c8run",
+		);
+		writeFileSync(binary, "fixture executable redirected by preload");
+		writeFileSync(
+			join(installDir, "launcher.mjs"),
+			`import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+if (process.argv[2] === 'start') {
+  // Launch + pidfile the cluster processes, then hang (never exit) so the
+  // parent c8ctl is interrupted while we are still "starting".
+  for (const name of ['camunda', 'connectors', 'connectors-sales']) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    child.on('spawn', () => writeFileSync(name + '.process', String(child.pid)));
+    child.unref();
+  }
+  setInterval(() => {}, 1000);
 }
 `,
 		);
@@ -370,5 +398,37 @@ if (process.argv[2] === 'stop') {
 		rmSync(join(installDir, "survivor.process"), { force: true });
 		assert.equal((await cluster("DOWN", "stop")).status, 0);
 		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+	});
+
+	test("an interrupted start persists the port so status serves its URLs", async () => {
+		await hangingLauncher();
+		// The launcher writes its .process pidfiles then hangs; the spawn-helper
+		// timeout SIGTERMs c8ctl mid-start, before any success/failure port write.
+		const start = await c8WithOptions(
+			{
+				env: {
+					C8RUN_CACHE_DIR: cacheDir,
+					C8CTL_OUTPUT_MODE: "text",
+					NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+					TEST_HEALTH: "UP",
+				},
+				timeout: 5_000,
+			},
+			"cluster",
+			"start",
+			"8.10.1",
+			"--port=9091",
+		);
+		assert.equal(start.timedOut, true, start.stderr);
+
+		// The interrupted start left live .process pidfiles behind; the port must
+		// already be recorded so status serves the custom-port URLs, not 8080.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
 	});
 });
