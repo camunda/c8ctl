@@ -2360,8 +2360,11 @@ export async function stopC8Run(config, debug = false) {
 
   if (!markerExists && !clusterAppearsRunning) {
     // Nothing live to stop. Retire any stale record left by a crash/kill so its
-    // dead PIDs cannot later be mistaken for this cluster (#560).
+    // dead PIDs cannot later be mistaken for this cluster (#560). No process is
+    // serving, so the port record is stale too — drop it, otherwise a later
+    // status would keep advertising the old custom port for a stopped cluster.
     clearStaleRunningClusterRecord(config.cacheDir);
+    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
     logger.warn(
       'No cluster is currently running.',
     );
@@ -2542,16 +2545,22 @@ export async function stopC8Run(config, debug = false) {
   const remainingPids = liveRecordedPids(config.cacheDir);
   if (remainingPids.length === 0) {
     clearRunningClusterRecord(config.cacheDir);
-    // The port record describes the cluster that was just stopped. Only drop it
-    // once no recorded process survives: while a PID is still tracked the
-    // cluster may still be serving, and deleting the port would make a later
-    // `cluster status` advertise the default port for a custom-port cluster.
-    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   } else {
     logger.warn(
       'Some recorded cluster processes could not be confirmed stopped; keeping the durable ' +
         'PID record so "c8ctl cluster stop" can retry.',
     );
+  }
+
+  // The port record describes the cluster that was just stopped. Only drop it
+  // once NOTHING still tracks a live process — neither the durable PID record
+  // nor c8run's own `.process` pidfiles. `remainingPids` alone misses a process
+  // tracked only by a pidfile (e.g. one the durable record never captured, or
+  // whose record was already cleared), so gating on it would delete the port
+  // while that survivor still serves — and a later `cluster status` would
+  // advertise the default port for a custom-port cluster.
+  if (!hasRunningClusterPidfiles(config.cacheDir)) {
+    rmSync(join(config.cacheDir, PORT_MARKER_FILE), { force: true });
   }
 
   if (attempted === 0 && !hadSuccessfulStop) {

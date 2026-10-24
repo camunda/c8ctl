@@ -97,7 +97,7 @@ globalThis.fetch = async () => {
 		writeFileSync(binary, "fixture executable redirected by preload");
 		writeFileSync(
 			join(installDir, "launcher.mjs"),
-			`import { copyFileSync, appendFileSync } from 'node:fs';
+			`import { copyFileSync, appendFileSync, readFileSync, rmSync } from 'node:fs';
 appendFileSync('invocations.log', process.argv[2] + '\\n');
 if (process.argv[2] === 'start') {
   for (const name of ['camunda', 'connectors', 'connectors-sales']) {
@@ -105,6 +105,15 @@ if (process.argv[2] === 'start') {
   }
   if (${exitCode} !== 0) console.error('sales NOT READY');
   process.exitCode = ${exitCode};
+}
+if (process.argv[2] === 'stop') {
+  // Mimic c8run stop: signal the processes its .process pidfiles track, then
+  // remove those pidfiles. A process NOT tracked by a pidfile (the survivor the
+  // test adds directly to the durable record) is left running.
+  for (const name of ['camunda', 'connectors', 'connectors-sales']) {
+    try { process.kill(Number(readFileSync(name + '.process', 'utf8').trim())); } catch {}
+    try { rmSync(name + '.process'); } catch {}
+  }
 }
 `,
 		);
@@ -291,5 +300,75 @@ if (process.argv[2] === 'start') {
 			"http://localhost:9091/operate",
 		);
 		assert.equal((await cluster("DOWN", "stop")).status, 0);
+	});
+
+	test("a failed stop keeps the recorded port while pidfile-only survivors remain", async () => {
+		await launcher(0);
+		assert.equal(
+			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
+			0,
+		);
+		// A process c8run tracks ONLY through a .process pidfile — the durable
+		// PID record never captured it. Its liveness is real (a live child), so
+		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1000)"],
+			{ stdio: "ignore" },
+		);
+		children.push(survivor);
+		await once(survivor, "spawn");
+		assert.ok(survivor.pid);
+		const survivorPid = survivor.pid;
+		writeFileSync(join(installDir, "survivor.process"), String(survivorPid));
+
+		// c8run stop signals + reaps the three recorded processes (the launcher
+		// removes their pidfiles), but the pidfile-only survivor stays alive.
+		const stop = await cluster("DOWN", "stop");
+		assert.equal(stop.status, 0, stop.stderr);
+		assert.ok(
+			await pollUntil(
+				async () =>
+					children
+						.filter((c) => c !== survivor)
+						.every((c) => c.exitCode !== null || c.signalCode !== null),
+				10_000,
+				50,
+			),
+		);
+
+		// The port record must survive: the survivor still serves on 9091, so a
+		// later status must not fall back to advertising the default port.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+
+		// Once the last tracked process exits, stop clears the port record. Wait
+		// for the survivor to actually die (kill is async) before removing its
+		// pidfile, so the next stop sees no live process and no pidfile.
+		const exited = once(survivor, "exit");
+		survivor.kill();
+		await exited;
+		assert.ok(
+			await pollUntil(
+				async () => {
+					try {
+						process.kill(survivorPid, 0);
+						return false;
+					} catch {
+						return true;
+					}
+				},
+				10_000,
+				50,
+			),
+		);
+		rmSync(join(installDir, "survivor.process"), { force: true });
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
 	});
 });
