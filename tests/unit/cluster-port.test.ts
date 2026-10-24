@@ -15,7 +15,8 @@ import { pathToFileURL } from "node:url";
 
 // @ts-expect-error — JS plugin has no declaration file, as in cluster-plugin.test.ts
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
-const { parsePluginArgs, clusterUrls, readClusterPort } = plugin;
+const { parsePluginArgs, clusterUrls, readClusterPort, buildC8RunLaunchEnv } =
+	plugin;
 
 import { c8WithEnv, parseJson } from "../utils/cli.ts";
 import { asRecord } from "../utils/guards.ts";
@@ -96,6 +97,56 @@ describe("cluster URLs follow the HTTP port", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("c8run launch environment strips SERVER_PORT", () => {
+	test("drops the exact-case SERVER_PORT on every platform", () => {
+		for (const platform of ["linux", "darwin", "win32"]) {
+			const env = buildC8RunLaunchEnv(
+				{ SERVER_PORT: "9091", PATH: "/bin", FOO: "bar" },
+				platform,
+			);
+			assert.equal(env.SERVER_PORT, undefined, platform);
+			assert.equal(env.PATH, "/bin", platform);
+			assert.equal(env.FOO, "bar", platform);
+		}
+	});
+
+	test("on Windows the exclusion is case-insensitive (env-var names are case-insensitive there)", () => {
+		for (const name of [
+			"SERVER_PORT",
+			"Server_Port",
+			"server_port",
+			"sErVeR_pOrT",
+		]) {
+			const env = buildC8RunLaunchEnv(
+				{ [name]: "9091", PATH: "/bin" },
+				"win32",
+			);
+			assert.equal(env[name], undefined, `win32 should strip ${name}`);
+			assert.equal(env.PATH, "/bin", `win32 should keep PATH (${name})`);
+		}
+	});
+
+	test("off Windows a differently-cased name is a distinct variable and is left alone", () => {
+		for (const platform of ["linux", "darwin"]) {
+			const env = buildC8RunLaunchEnv(
+				{ server_port: "9091", Server_Port: "9092", PATH: "/bin" },
+				platform,
+			);
+			assert.equal(env.server_port, "9091", platform);
+			assert.equal(env.Server_Port, "9092", platform);
+			assert.equal(env.PATH, "/bin", platform);
+		}
+	});
+
+	test("strips every case variant at once on Windows, not just the first", () => {
+		const env = buildC8RunLaunchEnv(
+			{ SERVER_PORT: "1", server_port: "2", Server_Port: "3", KEEP: "x" },
+			"win32",
+		);
+		assert.deepEqual(env, { KEEP: "x" });
 	});
 });
 
