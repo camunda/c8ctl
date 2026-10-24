@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { c8WithEnv, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 import { pollUntil } from "../utils/polling.ts";
 
 describe("cluster startup outcomes through the CLI", () => {
@@ -243,5 +244,52 @@ if (process.argv[2] === 'start') {
 			assert.match(result.stdout, /c8ctl cluster stop/);
 			assert.doesNotMatch(result.stdout, /replaced|removed|failed startup/);
 		}
+	});
+
+	test("a failed custom-port start persists the port so status serves its URLs", async () => {
+		await launcher(7);
+		const start = await cluster("UP", "start", "8.10.1", "--port=9091");
+		assert.equal(start.status, 7);
+		// The port is recorded even though the start failed and no active
+		// marker was written — the survivors serve on it.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+		assert.equal(existsSync(join(cacheDir, "cluster.active")), false);
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /running after failed startup/);
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.match(status.stdout, /Zeebe REST:\s+http:\/\/localhost:9091\/v2\//);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(
+			asRecord(json.urls, "status urls").operate,
+			"http://localhost:9091/operate",
+		);
+		// Stop clears the recorded port along with the survivors.
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+	});
+
+	test("status recovers the recorded port when the active marker is missing", async () => {
+		await launcher(0);
+		assert.equal(
+			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
+			0,
+		);
+		// Marker loss (e.g. a crash between marker writes) must not make
+		// status advertise the default port while the cluster is tracked.
+		rmSync(join(cacheDir, "cluster.active"));
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /running \(untracked\)/);
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(
+			asRecord(json.urls, "status urls").operate,
+			"http://localhost:9091/operate",
+		);
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
 	});
 });

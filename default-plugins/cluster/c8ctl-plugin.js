@@ -1723,6 +1723,11 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     // for stop/status even if the installation directory is subsequently replaced.
     try {
       recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+      // Persist the port for the survivors too: the success-only marker write
+      // below never runs on this path, so without it a failed custom-port
+      // start would leave status reporting the default port for processes
+      // that actually serve on the custom one.
+      writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
     }
@@ -1777,6 +1782,10 @@ async function startC8Run(config, debug = false, startArgs = [], port = DEFAULT_
     // recovery handle as a nonzero launcher exit before reporting failure.
     try {
       recordRunningClusterPids(config, { skipEmpty: true, startupFailed: true });
+      // Persist the port for the survivors too (same reason as the nonzero
+      // launcher exit path above): without it, status would report the
+      // default port for processes serving on the custom one.
+      writeFileSync(join(config.cacheDir, PORT_MARKER_FILE), String(port));
     } catch (error) {
       logger.warn(`Could not record surviving cluster processes: ${formatErrorWithCause(error)}. Use "c8ctl cluster stop" while the installation is still present.`);
     }
@@ -2879,11 +2888,15 @@ export async function clusterStatus(cacheDir) {
 
   const markerExists = existsSync(markerFile);
   const record = readRunningClusterRecord(cacheDir);
-  const CLUSTER_URLS = clusterUrls(markerExists ? readClusterPort(cacheDir) : DEFAULT_HTTP_PORT);
   // A live process may exist without (or despite) a marker — e.g. after its
   // install dir was replaced/removed, orphaning it (#560). Detect it so status
   // never reports "stopped" while a tracked cluster process is still alive.
   const processesRunning = hasRunningClusterPidfiles(cacheDir);
+  // Read the recorded port whenever the cluster may be serving: after a
+  // successful start (marker present) AND when tracked processes survive a
+  // failed start or marker loss. Without the second case, recovery status for
+  // a custom-port cluster would advertise the default port.
+  const CLUSTER_URLS = clusterUrls(markerExists || processesRunning ? readClusterPort(cacheDir) : DEFAULT_HTTP_PORT);
   const markerVersion = markerExists && existsSync(versionFile)
     ? readFileSync(versionFile, 'utf-8').trim() || null
     : null;
