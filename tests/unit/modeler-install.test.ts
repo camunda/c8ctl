@@ -74,7 +74,7 @@ describe("CLI behavioural: modeler install", () => {
 		);
 		assert.ok(
 			(result.stdout + result.stderr).includes(
-				"https://downloads.camunda.cloud/release/camunda-modeler/",
+				"Download Modeler manually from",
 			),
 		);
 	});
