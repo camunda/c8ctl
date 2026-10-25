@@ -19,9 +19,19 @@ import {
 import { c8, c8WithOptions } from "../utils/cli.ts";
 
 const MODELER_BUNDLE = "Camunda Modeler.app";
-const MODELER_ALREADY_INSTALLED_ON_HOST =
-	existsSync(join("/Applications", MODELER_BUNDLE)) ||
-	existsSync(join(process.env.HOME ?? "", "Applications", MODELER_BUNDLE));
+
+function hideSystemModelerPreload(): string[] {
+	return [
+		'import fs from "node:fs";',
+		'import { syncBuiltinESMExports } from "node:module";',
+		"const originalExistsSync = fs.existsSync;",
+		"fs.existsSync = (path) => {",
+		'  if (String(path) === "/Applications/Camunda Modeler.app") return false;',
+		"  return originalExistsSync(path);",
+		"};",
+		"syncBuiltinESMExports();",
+	];
+}
 
 describe("Modeler installer helpers", () => {
 	test("selects the latest stable release and architecture-specific archive", () => {
@@ -83,6 +93,8 @@ describe("CLI behavioural: modeler install", () => {
 		skip: process.platform !== "darwin",
 	}, async () => {
 		const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
+		const preloadPath = join(home, "hide-system-modeler.mjs");
+		writeFileSync(preloadPath, hideSystemModelerPreload().join("\n"));
 		mkdirSync(join(home, "Applications", MODELER_BUNDLE), {
 			recursive: true,
 		});
@@ -90,6 +102,7 @@ describe("CLI behavioural: modeler install", () => {
 		try {
 			const result = await c8WithOptions(
 				{
+					nodeArgs: ["--import", preloadPath],
 					env: {
 						HOME: home,
 						C8CTL_DATA_DIR: join(home, "data"),
@@ -108,13 +121,15 @@ describe("CLI behavioural: modeler install", () => {
 	});
 
 	test("uses Homebrew to install and skips an installed cask", {
-		skip: process.platform !== "darwin" || MODELER_ALREADY_INSTALLED_ON_HOST,
+		skip: process.platform !== "darwin",
 	}, async () => {
 		const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
 		const binDir = join(home, "bin");
 		const brewPath = join(binDir, "brew");
 		const brewLog = join(home, "brew.log");
+		const preloadPath = join(home, "hide-system-modeler.mjs");
 		mkdirSync(binDir);
+		writeFileSync(preloadPath, hideSystemModelerPreload().join("\n"));
 		writeFileSync(
 			brewPath,
 			[
@@ -138,7 +153,11 @@ describe("CLI behavioural: modeler install", () => {
 		};
 
 		try {
-			const installed = await c8WithOptions({ env }, "modeler", "install");
+			const installed = await c8WithOptions(
+				{ nodeArgs: ["--import", preloadPath], env },
+				"modeler",
+				"install",
+			);
 			assert.strictEqual(installed.status, 0, installed.stderr);
 			assert.ok(
 				(installed.stdout + installed.stderr).includes("Homebrew"),
@@ -155,7 +174,10 @@ describe("CLI behavioural: modeler install", () => {
 
 			writeFileSync(brewLog, "");
 			const alreadyInstalled = await c8WithOptions(
-				{ env: { ...env, BREW_INSTALLED: "0" } },
+				{
+					nodeArgs: ["--import", preloadPath],
+					env: { ...env, BREW_INSTALLED: "0" },
+				},
 				"modeler",
 				"install",
 			);
@@ -175,13 +197,14 @@ describe("CLI behavioural: modeler install", () => {
 	});
 
 	test("installs the latest stable app bundle when Homebrew is absent", {
-		skip: process.platform !== "darwin" || MODELER_ALREADY_INSTALLED_ON_HOST,
+		skip: process.platform !== "darwin",
 	}, async () => {
 		const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
 		const binDir = join(home, "bin");
 		const dittoPath = join(binDir, "ditto");
 		const dittoLog = join(home, "ditto.log");
 		const preloadPath = join(home, "mock-downloads.mjs");
+		const installRoot = join(home, "install-root");
 		const archiveName = modelerMacArchiveName("5.52.0", process.arch);
 		const releaseUrl =
 			"https://downloads.camunda.cloud/release/camunda-modeler/";
@@ -201,7 +224,9 @@ describe("CLI behavioural: modeler install", () => {
 				'  mkdirSync(join(appPath, "Contents"), { recursive: true });',
 				'  writeFileSync(join(appPath, "Contents", "Info.plist"), "CFBundleDocumentTypes .bpmn");',
 				"} else {",
-				"  cpSync(args[0], args[1], { recursive: true });",
+				'  const destination = args[1] === "/Applications/Camunda Modeler.app" ? join(process.env.DITTO_INSTALL_ROOT, "Camunda Modeler.app") : args[1];',
+				"  mkdirSync(process.env.DITTO_INSTALL_ROOT, { recursive: true });",
+				"  cpSync(args[0], destination, { recursive: true });",
 				"}",
 			].join("\n"),
 		);
@@ -209,6 +234,8 @@ describe("CLI behavioural: modeler install", () => {
 		writeFileSync(
 			preloadPath,
 			[
+				...hideSystemModelerPreload(),
+				"Object.defineProperty(process.stderr, 'isTTY', { value: true });",
 				`const releaseUrl = ${JSON.stringify(releaseUrl)};`,
 				`const archiveUrl = ${JSON.stringify(archiveUrl)};`,
 				"const originalFetch = globalThis.fetch;",
@@ -221,7 +248,7 @@ describe("CLI behavioural: modeler install", () => {
 			].join("\n"),
 		);
 
-		const appPath = join(home, "Applications", "Camunda Modeler.app");
+		const appPath = join(installRoot, MODELER_BUNDLE);
 		try {
 			const result = await c8WithOptions(
 				{
@@ -230,6 +257,7 @@ describe("CLI behavioural: modeler install", () => {
 						PATH: binDir,
 						HOME: home,
 						DITTO_LOG: dittoLog,
+						DITTO_INSTALL_ROOT: installRoot,
 						C8CTL_DATA_DIR: join(home, "data"),
 						C8CTL_OUTPUT_MODE: "text",
 					},
@@ -243,6 +271,7 @@ describe("CLI behavioural: modeler install", () => {
 				(result.stdout + result.stderr).includes("5.52.0"),
 				`stdout: ${result.stdout}\nstderr: ${result.stderr}`,
 			);
+			assert.match(result.stderr, /\[[#-]+\] 100%/);
 			assert.ok(existsSync(appPath));
 			assert.ok(
 				readFileSync(join(appPath, "Contents", "Info.plist"), "utf-8").includes(
@@ -250,6 +279,11 @@ describe("CLI behavioural: modeler install", () => {
 				),
 			);
 			assert.ok(readFileSync(dittoLog, "utf-8").includes(archiveName));
+			assert.ok(
+				readFileSync(dittoLog, "utf-8").includes(
+					"/Applications/Camunda Modeler.app",
+				),
+			);
 		} finally {
 			rmSync(home, { recursive: true, force: true });
 		}

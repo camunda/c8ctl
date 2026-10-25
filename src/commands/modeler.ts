@@ -118,10 +118,50 @@ async function fetchReleaseIndex(): Promise<string> {
 	}
 }
 
+function formatMegabytes(bytes: number): string {
+	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function writeDownloadProgress(
+	downloadedBytes: number,
+	totalBytes: number,
+	percent: number | undefined,
+): void {
+	if (!process.stderr.isTTY) return;
+
+	const width = 28;
+	const filled =
+		percent === undefined ? undefined : Math.round((percent / 100) * width);
+	let bar: string;
+	if (filled === undefined) {
+		const movingWidth = 5;
+		const distance = width - movingWidth;
+		const phase = Math.floor(downloadedBytes / 131_072) % (distance * 2);
+		const position = phase <= distance ? phase : distance * 2 - phase;
+		bar =
+			" ".repeat(position) +
+			"#".repeat(movingWidth) +
+			" ".repeat(width - position - movingWidth);
+	} else {
+		bar = "#".repeat(filled) + "-".repeat(width - filled);
+	}
+
+	const styledBar =
+		process.env.NO_COLOR === undefined && process.env.TERM !== "dumb"
+			? `\u001b[36m${bar}\u001b[0m`
+			: bar;
+	const detail =
+		percent === undefined
+			? `${formatMegabytes(downloadedBytes)} downloaded`
+			: `${percent}%  ${formatMegabytes(downloadedBytes)} / ${formatMegabytes(totalBytes)}`;
+	process.stderr.write(
+		`\r\u001b[2KDownloading Camunda Modeler [${styledBar}] ${detail}`,
+	);
+}
+
 async function downloadArchive(
 	url: string,
 	destination: string,
-	logger: { info: (message: string) => void },
 ): Promise<void> {
 	const response = await fetchResponse(
 		url,
@@ -134,23 +174,23 @@ async function downloadArchive(
 
 	const contentLength = Number(response.headers.get("content-length"));
 	let downloadedBytes = 0;
-	let nextProgressPercent = 10;
+	let lastProgressUpdate = 0;
 	const progress = new Transform({
 		transform(chunk: Buffer, _encoding, callback) {
 			downloadedBytes += chunk.byteLength;
-			if (Number.isFinite(contentLength) && contentLength > 0) {
-				const percent = Math.min(
-					100,
-					Math.floor((downloadedBytes / contentLength) * 100),
-				);
-				if (percent >= nextProgressPercent) {
-					logger.info(`Download progress: ${percent}%`);
-					nextProgressPercent = Math.floor(percent / 10) * 10 + 10;
-				}
+			const now = Date.now();
+			if (now - lastProgressUpdate >= 100) {
+				const percent =
+					Number.isFinite(contentLength) && contentLength > 0
+						? Math.min(100, Math.floor((downloadedBytes / contentLength) * 100))
+						: undefined;
+				writeDownloadProgress(downloadedBytes, contentLength, percent);
+				lastProgressUpdate = now;
 			}
 			callback(null, chunk);
 		},
 	});
+	let completed = false;
 
 	try {
 		await pipeline(
@@ -158,10 +198,27 @@ async function downloadArchive(
 			progress,
 			createWriteStream(destination),
 		);
+		completed = true;
 	} catch (error) {
 		throw manualDownloadError(
 			`Could not download Camunda Modeler: ${errorMessage(error)}`,
 		);
+	} finally {
+		if (process.stderr.isTTY) {
+			const knownSize = Number.isFinite(contentLength) && contentLength > 0;
+			if (completed) {
+				writeDownloadProgress(
+					downloadedBytes,
+					contentLength,
+					knownSize ? 100 : undefined,
+				);
+			}
+			process.stderr.write("\n");
+		} else if (completed) {
+			process.stderr.write(
+				`Downloaded Camunda Modeler (${formatMegabytes(downloadedBytes)}).\n`,
+			);
+		}
 	}
 }
 
@@ -182,7 +239,7 @@ async function installFromOfficialDownload(logger: {
 		mkdirSync(extractDir);
 
 		logger.info(`Downloading Camunda Modeler ${version} for macOS...`);
-		await downloadArchive(archiveUrl, archivePath, logger);
+		await downloadArchive(archiveUrl, archivePath);
 
 		logger.info("Extracting Camunda Modeler...");
 		runCommand(
@@ -198,7 +255,7 @@ async function installFromOfficialDownload(logger: {
 			);
 		}
 
-		const applicationsDir = join(homedir(), "Applications");
+		const applicationsDir = "/Applications";
 		const destination = join(applicationsDir, APP_BUNDLE_NAME);
 		if (existsSync(destination)) {
 			throw new Error(
@@ -206,12 +263,11 @@ async function installFromOfficialDownload(logger: {
 			);
 		}
 
-		mkdirSync(applicationsDir, { recursive: true });
 		logger.info(`Installing Camunda Modeler to ${destination}...`);
 		runCommand(
 			"ditto",
 			[sourceApp, destination],
-			"Could not install Camunda Modeler",
+			"Could not install Camunda Modeler to /Applications; administrator permissions may be required",
 		);
 
 		return { version, destination };
