@@ -44,6 +44,7 @@ describe("COMMAND_REGISTRY completeness", () => {
 		"suspend",
 		"resume",
 		"migrate",
+		"modeler",
 		"modify",
 		"await",
 		"complete",

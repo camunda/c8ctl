@@ -682,6 +682,22 @@ c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 
 
 ---
 
+### `modeler`
+
+Install the latest stable Camunda Desktop Modeler release for macOS
+
+**Usage:** `c8ctl modeler install`
+
+**Resources:** install
+
+**Examples:**
+
+```bash
+c8ctl modeler install                                       # Install the latest stable Camunda Desktop Modeler
+```
+
+---
+
 ### `modify`
 
 Modify a running process instance by activating elements, terminating element instances or moving tokens, or move tokens in all active instances of a definition (batch)
