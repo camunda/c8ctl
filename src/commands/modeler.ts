@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	renameSync,
 	rmSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -19,6 +20,8 @@ import {
 
 const APP_BUNDLE_NAME = "Camunda Modeler.app";
 const MANUAL_DOWNLOAD_URL = MODELER_RELEASE_URL;
+const LAUNCH_SERVICES_REGISTER =
+	"/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -263,14 +266,47 @@ async function installFromOfficialDownload(logger: {
 			);
 		}
 
-		logger.info(`Installing Camunda Modeler to ${destination}...`);
-		runCommand(
-			"ditto",
-			[sourceApp, destination],
-			"Could not install Camunda Modeler to /Applications; administrator permissions may be required",
-		);
+		let stagingDir: string;
+		try {
+			stagingDir = mkdtempSync(join(applicationsDir, ".c8ctl-modeler-"));
+		} catch (error) {
+			throw new Error(
+				`Could not create an install staging directory in /Applications; administrator permissions may be required: ${errorMessage(error)}`,
+			);
+		}
 
-		return { version, destination };
+		try {
+			const stagedApp = join(stagingDir, APP_BUNDLE_NAME);
+			logger.info(`Installing Camunda Modeler to ${destination}...`);
+			runCommand(
+				"ditto",
+				[sourceApp, stagedApp],
+				"Could not copy Camunda Modeler to its staging directory",
+			);
+
+			try {
+				renameSync(stagedApp, destination);
+			} catch (error) {
+				throw new Error(
+					`Could not publish Camunda Modeler to ${destination}; administrator permissions may be required: ${errorMessage(error)}`,
+				);
+			}
+
+			try {
+				runCommand(
+					LAUNCH_SERVICES_REGISTER,
+					["-f", destination],
+					"Could not register Camunda Modeler with macOS Launch Services",
+				);
+			} catch (error) {
+				rmSync(destination, { recursive: true, force: true });
+				throw error;
+			}
+
+			return { version, destination };
+		} finally {
+			rmSync(stagingDir, { recursive: true, force: true });
+		}
 	} finally {
 		rmSync(tempDir, { recursive: true, force: true });
 	}

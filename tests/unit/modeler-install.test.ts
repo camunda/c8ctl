@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	symlinkSync,
@@ -20,14 +21,36 @@ import { c8, c8WithOptions } from "../utils/cli.ts";
 
 const MODELER_BUNDLE = "Camunda Modeler.app";
 
-function hideSystemModelerPreload(): string[] {
+function modelerInstallPreload(): string[] {
 	return [
+		'import childProcess from "node:child_process";',
 		'import fs from "node:fs";',
 		'import { syncBuiltinESMExports } from "node:module";',
+		"const installRoot = process.env.DITTO_INSTALL_ROOT;",
 		"const originalExistsSync = fs.existsSync;",
-		"fs.existsSync = (path) => {",
-		'  if (String(path) === "/Applications/Camunda Modeler.app") return false;',
-		"  return originalExistsSync(path);",
+		"const originalMkdtempSync = fs.mkdtempSync;",
+		"const originalRenameSync = fs.renameSync;",
+		"const originalSpawnSync = childProcess.spawnSync;",
+		'const lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";',
+		"const remapPath = (value) => {",
+		"  const path = String(value);",
+		"  if (!installRoot) return value;",
+		'  if (path === "/Applications") return installRoot;',
+		'  if (path.startsWith("/Applications/")) return installRoot + path.slice("/Applications".length);',
+		"  return value;",
+		"};",
+		"fs.existsSync = (value) => {",
+		'  if (!installRoot && String(value) === "/Applications/Camunda Modeler.app") return false;',
+		"  return originalExistsSync(remapPath(value));",
+		"};",
+		"fs.mkdtempSync = (prefix, options) => originalMkdtempSync(remapPath(prefix), options);",
+		"fs.renameSync = (from, to) => originalRenameSync(remapPath(from), remapPath(to));",
+		"childProcess.spawnSync = (command, args, options) => {",
+		"  if (String(command) === lsregisterPath) {",
+		'    fs.appendFileSync(process.env.LSREGISTER_LOG, JSON.stringify(args) + "\\n");',
+		"    return { error: undefined, status: 0 };",
+		"  }",
+		"  return originalSpawnSync(command, args, options);",
 		"};",
 		"syncBuiltinESMExports();",
 	];
@@ -94,7 +117,7 @@ describe("CLI behavioural: modeler install", () => {
 	}, async () => {
 		const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
 		const preloadPath = join(home, "hide-system-modeler.mjs");
-		writeFileSync(preloadPath, hideSystemModelerPreload().join("\n"));
+		writeFileSync(preloadPath, modelerInstallPreload().join("\n"));
 		mkdirSync(join(home, "Applications", MODELER_BUNDLE), {
 			recursive: true,
 		});
@@ -129,7 +152,7 @@ describe("CLI behavioural: modeler install", () => {
 		const brewLog = join(home, "brew.log");
 		const preloadPath = join(home, "hide-system-modeler.mjs");
 		mkdirSync(binDir);
-		writeFileSync(preloadPath, hideSystemModelerPreload().join("\n"));
+		writeFileSync(preloadPath, modelerInstallPreload().join("\n"));
 		writeFileSync(
 			brewPath,
 			[
@@ -203,6 +226,7 @@ describe("CLI behavioural: modeler install", () => {
 		const binDir = join(home, "bin");
 		const dittoPath = join(binDir, "ditto");
 		const dittoLog = join(home, "ditto.log");
+		const launchServicesLog = join(home, "launch-services.log");
 		const preloadPath = join(home, "mock-downloads.mjs");
 		const installRoot = join(home, "install-root");
 		const archiveName = modelerMacArchiveName("5.52.0", process.arch);
@@ -216,7 +240,7 @@ describe("CLI behavioural: modeler install", () => {
 			[
 				"#!/usr/bin/env node",
 				'const { appendFileSync, cpSync, mkdirSync, writeFileSync } = require("node:fs");',
-				'const { join } = require("node:path");',
+				'const { dirname, join } = require("node:path");',
 				"const args = process.argv.slice(2);",
 				'appendFileSync(process.env.DITTO_LOG, JSON.stringify(args) + "\\n");',
 				'if (args[0] === "-x" && args[1] === "-k") {',
@@ -224,9 +248,15 @@ describe("CLI behavioural: modeler install", () => {
 				'  mkdirSync(join(appPath, "Contents"), { recursive: true });',
 				'  writeFileSync(join(appPath, "Contents", "Info.plist"), "CFBundleDocumentTypes .bpmn");',
 				"} else {",
-				'  const destination = args[1] === "/Applications/Camunda Modeler.app" ? join(process.env.DITTO_INSTALL_ROOT, "Camunda Modeler.app") : args[1];',
-				"  mkdirSync(process.env.DITTO_INSTALL_ROOT, { recursive: true });",
-				"  cpSync(args[0], destination, { recursive: true });",
+				'  const destination = args[1].startsWith("/Applications/") ? join(process.env.DITTO_INSTALL_ROOT, args[1].slice("/Applications/".length)) : args[1];',
+				"  mkdirSync(dirname(destination), { recursive: true });",
+				'  if (process.env.DITTO_FAIL_INSTALL === "1") {',
+				"    mkdirSync(destination, { recursive: true });",
+				'    writeFileSync(join(destination, "partial"), "partial");',
+				"    process.exitCode = 1;",
+				"  } else {",
+				"    cpSync(args[0], destination, { recursive: true });",
+				"  }",
 				"}",
 			].join("\n"),
 		);
@@ -234,7 +264,7 @@ describe("CLI behavioural: modeler install", () => {
 		writeFileSync(
 			preloadPath,
 			[
-				...hideSystemModelerPreload(),
+				...modelerInstallPreload(),
 				"Object.defineProperty(process.stderr, 'isTTY', { value: true });",
 				`const releaseUrl = ${JSON.stringify(releaseUrl)};`,
 				`const archiveUrl = ${JSON.stringify(archiveUrl)};`,
@@ -250,22 +280,40 @@ describe("CLI behavioural: modeler install", () => {
 
 		const appPath = join(installRoot, MODELER_BUNDLE);
 		try {
-			const result = await c8WithOptions(
+			mkdirSync(installRoot);
+			const installEnv = {
+				PATH: binDir,
+				HOME: home,
+				DITTO_LOG: dittoLog,
+				DITTO_INSTALL_ROOT: installRoot,
+				LSREGISTER_LOG: launchServicesLog,
+				C8CTL_DATA_DIR: join(home, "data"),
+				C8CTL_OUTPUT_MODE: "text",
+			};
+			const failedCopy = await c8WithOptions(
 				{
 					nodeArgs: ["--import", preloadPath],
-					env: {
-						PATH: binDir,
-						HOME: home,
-						DITTO_LOG: dittoLog,
-						DITTO_INSTALL_ROOT: installRoot,
-						C8CTL_DATA_DIR: join(home, "data"),
-						C8CTL_OUTPUT_MODE: "text",
-					},
+					env: { ...installEnv, DITTO_FAIL_INSTALL: "1" },
 				},
 				"modeler",
 				"install",
 			);
 
+			assert.strictEqual(failedCopy.status, 1);
+			assert.ok(
+				(failedCopy.stdout + failedCopy.stderr).includes(
+					"Could not copy Camunda Modeler",
+				),
+			);
+			assert.ok(!existsSync(appPath));
+			assert.deepStrictEqual(readdirSync(installRoot), []);
+
+			writeFileSync(dittoLog, "");
+			const result = await c8WithOptions(
+				{ nodeArgs: ["--import", preloadPath], env: installEnv },
+				"modeler",
+				"install",
+			);
 			assert.strictEqual(result.status, 0, result.stderr);
 			assert.ok(
 				(result.stdout + result.stderr).includes("5.52.0"),
@@ -279,10 +327,9 @@ describe("CLI behavioural: modeler install", () => {
 				),
 			);
 			assert.ok(readFileSync(dittoLog, "utf-8").includes(archiveName));
-			assert.ok(
-				readFileSync(dittoLog, "utf-8").includes(
-					"/Applications/Camunda Modeler.app",
-				),
+			assert.deepStrictEqual(
+				JSON.parse(readFileSync(launchServicesLog, "utf-8").trim()),
+				["-f", "/Applications/Camunda Modeler.app"],
 			);
 		} finally {
 			rmSync(home, { recursive: true, force: true });
