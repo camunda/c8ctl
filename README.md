@@ -121,6 +121,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `suspend` - Suspend resource
 - `resume` - Resume resource
 - `migrate` - Migrate process instances to another process definition
+- `modeler` - Install Camunda Desktop Modeler
 - `modify` - Modify process instances: activate, terminate or move elements
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
@@ -154,7 +155,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode
 
-**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
+**Resources**: authorization (auth), form, group, incident (inc), install, job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
 <!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.
