@@ -445,9 +445,17 @@ function installOnWindows({
 		logger.info("Installing Camunda Modeler with winget...");
 		// winget picks the build for this machine, verifies its checksum, and
 		// lists it under Installed apps, so `winget upgrade` can update it.
+		// User scope needs no administrator rights, whatever winget's settings prefer.
 		runCommand(
 			"winget",
-			["install", ...WINGET_PACKAGE, "--location", installDir],
+			[
+				"install",
+				...WINGET_PACKAGE,
+				"--scope",
+				"user",
+				"--location",
+				installDir,
+			],
 			"winget could not install Camunda Modeler",
 		);
 	} catch (error) {

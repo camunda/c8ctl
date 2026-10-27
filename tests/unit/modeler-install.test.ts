@@ -536,7 +536,7 @@ describe("CLI behavioural: modeler install", () => {
 			const calls = sandbox.toolCalls();
 			assert.deepStrictEqual(calls.slice(0, 3), [
 				...wingetChecks,
-				`winget install --id Camunda.Modeler --exact --source winget --location ${sandbox.installDir}`,
+				`winget install --id Camunda.Modeler --exact --source winget --scope user --location ${sandbox.installDir}`,
 			]);
 			for (const type of ["bpmn", "dmn", "form", "rpa"]) {
 				const progId = `CamundaModeler.${type.toUpperCase()}`;
