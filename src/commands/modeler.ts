@@ -11,7 +11,7 @@ import {
 	rmSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Logger } from "../core/index.ts";
@@ -54,6 +54,10 @@ const MODELER_FILE_TYPES = ["bpmn", "dmn", "form", "rpa"];
 // Both paths arrive through the environment, so they need no quoting.
 const CREATE_SHORTCUT_SCRIPT =
 	"$ErrorActionPreference = 'Stop'; $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:C8CTL_SHORTCUT); $shortcut.TargetPath = $env:C8CTL_TARGET; $shortcut.Save()";
+// Camunda's Linux installation docs extract the release into /usr/bin as root
+// and link its launcher there.
+const LINUX_INSTALL_ROOT = "/usr/bin";
+const LINUX_EXECUTABLE = "camunda-modeler";
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -314,6 +318,36 @@ async function downloadArchive({
 	}
 }
 
+/** Downloads the latest stable release into `dir`, with progress. */
+async function downloadLatestRelease({
+	dir,
+	platform,
+	archiveName,
+	logger,
+	quiet,
+	signal,
+}: {
+	dir: string;
+	platform: string;
+	archiveName: (version: string) => string;
+	logger: Logger;
+	quiet: boolean;
+	signal: AbortSignal;
+}): Promise<{ version: string; archivePath: string }> {
+	const version = latestStableModelerVersion(await fetchReleaseIndex());
+	const name = archiveName(version);
+	const archivePath = join(dir, name);
+	logger.info(`Downloading Camunda Modeler ${version} for ${platform}...`);
+	await downloadArchive({
+		url: new URL(`${version}/${name}`, MODELER_RELEASE_URL).toString(),
+		destination: archivePath,
+		logger,
+		quiet,
+		signal,
+	});
+	return { version, archivePath };
+}
+
 async function installFromOfficialDownload({
 	applicationsDir,
 	logger,
@@ -323,12 +357,6 @@ async function installFromOfficialDownload({
 	logger: Logger;
 	quiet: boolean;
 }): Promise<{ version: string; destination: string }> {
-	const version = latestStableModelerVersion(await fetchReleaseIndex());
-	const archiveName = modelerMacArchiveName(version, process.arch);
-	const archiveUrl = new URL(
-		`${version}/${archiveName}`,
-		MODELER_RELEASE_URL,
-	).toString();
 	const destination = join(applicationsDir, APP_BUNDLE_NAME);
 	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
 	const controller = new AbortController();
@@ -343,11 +371,10 @@ async function installFromOfficialDownload({
 	process.on("SIGTERM", onSigterm);
 
 	try {
-		const archivePath = join(tempDir, archiveName);
-		logger.info(`Downloading Camunda Modeler ${version} for macOS...`);
-		await downloadArchive({
-			url: archiveUrl,
-			destination: archivePath,
+		const { version, archivePath } = await downloadLatestRelease({
+			dir: tempDir,
+			platform: "macOS",
+			archiveName: (version) => modelerMacArchiveName(version, process.arch),
 			logger,
 			quiet,
 			signal: controller.signal,
@@ -535,14 +562,148 @@ function installOnWindows({
 	};
 }
 
+function findOnPath(command: string): string | undefined {
+	return (process.env.PATH ?? "")
+		.split(delimiter)
+		.filter((dir) => dir !== "")
+		.map((dir) => join(dir, command))
+		.find((path) => existsSync(path));
+}
+
+/** Runs `args` as root: directly when c8ctl runs as root, otherwise with sudo. */
+function runAsRoot(args: string[], failureMessage: string): void {
+	const [command, ...rest] =
+		process.getuid?.() === 0 ? args : ["sudo", ...args];
+	try {
+		runCommand(command, rest, { failureMessage, quiet: false });
+	} catch (error) {
+		throw manualDownloadError(errorMessage(error));
+	}
+}
+
+/** Modeler's own script installs its desktop entry, icons, and MIME types for the current user. */
+function registerWithDesktop(installDir: string, logger: Logger): void {
+	const script = join(installDir, "support", "xdg_register.sh");
+	// The script reports success even when the xdg-utils it calls are missing.
+	if (!findOnPath("xdg-mime")) {
+		logger.warn(
+			`Could not register Camunda Modeler for .bpmn, .dmn, .form, and .rpa files because xdg-utils is not installed. Install xdg-utils, then run ${script}.`,
+		);
+		return;
+	}
+	const result = spawnSync(script, [], {
+		stdio: ["ignore", process.stderr.fd, process.stderr.fd],
+	});
+	if (result.error || result.status !== 0) {
+		logger.warn(
+			`Could not register Camunda Modeler for .bpmn, .dmn, .form, and .rpa files. Run ${script} to retry.`,
+		);
+	}
+}
+
+async function installOnLinux({
+	isDryRun,
+	logger,
+	quiet,
+}: Pick<
+	CommandContext,
+	"isDryRun" | "logger" | "quiet"
+>): Promise<CommandResult> {
+	const installedPath = findOnPath(LINUX_EXECUTABLE);
+	if (installedPath) {
+		return {
+			kind: "info",
+			message: `Camunda Modeler is already installed at ${installedPath}; skipping installation.`,
+		};
+	}
+	if (process.arch !== "x64") {
+		throw manualDownloadError(
+			`Unsupported Linux architecture "${process.arch}"`,
+		);
+	}
+	if (isDryRun) {
+		return {
+			kind: "dryRun",
+			info: {
+				dryRun: true,
+				command: "modeler install",
+				message: `Dry run: would download the latest stable Camunda Modeler and install it to ${LINUX_INSTALL_ROOT} as root.`,
+			},
+		};
+	}
+
+	if (process.getuid?.() !== 0) {
+		logger.info(
+			`Installing to ${LINUX_INSTALL_ROOT} needs root privileges; sudo may ask for your password.`,
+		);
+	}
+	runAsRoot(["true"], "Could not get root privileges");
+
+	logger.info("Checking for the latest stable Camunda Modeler release...");
+	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
+	const controller = new AbortController();
+	let interruptedSignal: NodeJS.Signals | undefined;
+	const interrupt = (signal: NodeJS.Signals): void => {
+		interruptedSignal ??= signal;
+		controller.abort(new Error(`Installation interrupted by ${signal}`));
+	};
+	const onSigint = (): void => interrupt("SIGINT");
+	const onSigterm = (): void => interrupt("SIGTERM");
+	process.on("SIGINT", onSigint);
+	process.on("SIGTERM", onSigterm);
+	try {
+		const { version, archivePath } = await downloadLatestRelease({
+			dir: tempDir,
+			platform: "Linux",
+			archiveName: (version) => `camunda-modeler-${version}-linux-x64.tar.gz`,
+			logger,
+			quiet,
+			signal: controller.signal,
+		});
+		const releaseDir = `camunda-modeler-${version}-linux-x64`;
+		const installDir = join(LINUX_INSTALL_ROOT, releaseDir);
+		logger.info(`Installing Camunda Modeler to ${installDir}...`);
+		// The launcher link comes last: until it exists, Modeler counts as not
+		// installed, and a retry extracts the release again.
+		runAsRoot(
+			["tar", "--no-same-owner", "-xzf", archivePath, "-C", LINUX_INSTALL_ROOT],
+			"Could not extract Camunda Modeler",
+		);
+		runAsRoot(
+			["chmod", "4755", join(installDir, "chrome-sandbox")],
+			"Could not set up the Camunda Modeler sandbox",
+		);
+		runAsRoot(
+			[
+				"ln",
+				"-sfn",
+				join(releaseDir, LINUX_EXECUTABLE),
+				join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE),
+			],
+			`Could not link ${LINUX_EXECUTABLE} into ${LINUX_INSTALL_ROOT}`,
+		);
+		registerWithDesktop(installDir, logger);
+		return {
+			kind: "success",
+			message: `Installed Camunda Modeler ${version} to ${installDir}.`,
+		};
+	} finally {
+		process.off("SIGINT", onSigint);
+		process.off("SIGTERM", onSigterm);
+		rmSync(tempDir, { recursive: true, force: true });
+		if (interruptedSignal) process.kill(process.pid, interruptedSignal);
+	}
+}
+
 export const modelerInstallCommand = defineCommand(
 	"modeler",
 	"install",
 	async (ctx) => {
 		if (process.platform === "win32") return installOnWindows(ctx);
+		if (process.platform === "linux") return installOnLinux(ctx);
 		if (process.platform !== "darwin") {
 			throw new Error(
-				`c8ctl modeler install currently supports macOS and Windows only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+				`c8ctl modeler install currently supports macOS, Windows, and Linux only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
 			);
 		}
 
