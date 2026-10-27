@@ -123,9 +123,9 @@ syncBuiltinESMExports();
 
 /**
  * Loaded into the CLI subprocess on Linux: maps /usr/bin to USR_BIN_ROOT, runs
- * root commands without sudo and records them in TOOL_LOG (SUDO_STATUS makes
- * sudo fail), fakes the user id and architecture, and serves ARCHIVE as the
- * 5.52.0 release.
+ * root commands without sudo and records them in TOOL_LOG (FAIL_AT=<tool>
+ * makes that tool fail), fakes the user id and architecture, and serves
+ * ARCHIVE as the 5.52.0 release.
  */
 const LINUX_PRELOAD = `
 import childProcess from "node:child_process";
@@ -136,19 +136,18 @@ const remap = (path) =>
 	String(path) === "/usr/bin" || String(path).startsWith("/usr/bin/")
 		? process.env.USR_BIN_ROOT + String(path).slice("/usr/bin".length)
 		: path;
-const { existsSync } = fs;
+const { accessSync, existsSync, statSync } = fs;
+fs.accessSync = (path, mode) => accessSync(remap(path), mode);
 fs.existsSync = (path) => existsSync(remap(path));
+fs.statSync = (path, options) => statSync(remap(path), options);
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
-	if (!["sudo", "true", "tar", "chmod", "ln"].includes(command) && !command.startsWith("/usr/bin/")) {
+	if (!["sudo", "true", "rm", "tar", "chmod", "ln"].includes(command) && !command.startsWith("/usr/bin/")) {
 		return spawnSync(command, args, options);
 	}
 	fs.appendFileSync(process.env.TOOL_LOG, [command, ...args].join(" ") + "\\n");
-	if (command === "sudo" && process.env.SUDO_STATUS) {
-		return { status: Number(process.env.SUDO_STATUS) };
-	}
 	const [real, ...rest] = (command === "sudo" ? args : [command, ...args]).map(remap);
-	return spawnSync(real, rest, options);
+	return real === process.env.FAIL_AT ? { status: 1 } : spawnSync(real, rest, options);
 };
 syncBuiltinESMExports();
 
@@ -309,6 +308,7 @@ function createLinuxSandbox() {
 	writeFileSync(preload, LINUX_PRELOAD);
 
 	return {
+		binDir,
 		usrBin,
 		/** Put a stub command on PATH. */
 		fakeTool: (name: string): void =>
@@ -703,11 +703,22 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
-	test("skips a Modeler that is already on PATH on Linux", {
+	test("skips only an executable Modeler on PATH on Linux", {
 		skip: !isLinux,
 	}, async () => {
 		const sandbox = createLinuxSandbox();
+		const onPath = join(sandbox.binDir, "camunda-modeler");
 		try {
+			// Neither a directory nor a non-executable file can run Modeler.
+			for (const create of [
+				() => mkdirSync(onPath),
+				() => writeFileSync(onPath, "", { mode: 0o644 }),
+			]) {
+				create();
+				const dryRun = await sandbox.install({}, "--dry-run");
+				assert.match(dryRun.stdout, /Dry run: would download/, dryRun.stderr);
+				rmSync(onPath, { recursive: true });
+			}
 			sandbox.fakeTool("camunda-modeler");
 
 			const result = await sandbox.install();
@@ -743,8 +754,10 @@ describe("CLI behavioural: modeler install", () => {
 				),
 				result.stdout,
 			);
-			const [authenticate, extract, ...rest] = sandbox.toolCalls();
+			const [authenticate, removeLauncher, extract, ...rest] =
+				sandbox.toolCalls();
 			assert.strictEqual(authenticate, "sudo true");
+			assert.strictEqual(removeLauncher, "sudo rm -f /usr/bin/camunda-modeler");
 			assert.match(
 				extract,
 				/^sudo tar --no-same-owner -xzf \S+\/camunda-modeler-5\.52\.0-linux-x64\.tar\.gz -C \/usr\/bin$/,
@@ -790,7 +803,7 @@ describe("CLI behavioural: modeler install", () => {
 			const calls = sandbox.toolCalls();
 			assert.deepStrictEqual(
 				calls.map((call) => call.split(" ")[0]),
-				["true", "tar", "chmod", "ln"],
+				["true", "rm", "tar", "chmod", "ln"],
 			);
 			assert.ok(
 				output.includes(
@@ -810,7 +823,7 @@ describe("CLI behavioural: modeler install", () => {
 		const failures: Array<[Record<string, string>, RegExp, string[]]> = [
 			[{ FAKE_ARCH: "arm64" }, /Unsupported Linux architecture "arm64"/, []],
 			[
-				{ SUDO_STATUS: "1" },
+				{ FAIL_AT: "true" },
 				/Could not get root privileges \(exit code 1\)/,
 				["sudo true"],
 			],
@@ -826,6 +839,28 @@ describe("CLI behavioural: modeler install", () => {
 				assert.deepStrictEqual(sandbox.toolCalls(), calls);
 				assert.deepStrictEqual(readdirSync(sandbox.usrBin), []);
 			}
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("removes a stale launcher first, so an unfinished install is retried", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const launcher = join(sandbox.usrBin, "camunda-modeler");
+		try {
+			// Extraction would make this dangling link valid.
+			symlinkSync("camunda-modeler-5.52.0-linux-x64/camunda-modeler", launcher);
+
+			const failed = await sandbox.install({ FAIL_AT: "chmod" });
+
+			const output = failed.stdout + failed.stderr;
+			assert.strictEqual(failed.status, 1, output);
+			assert.match(output, /Could not set up the Camunda Modeler sandbox/);
+			assert.ok(!readdirSync(sandbox.usrBin).includes("camunda-modeler"));
+			const retry = await sandbox.install({}, "--dry-run");
+			assert.match(retry.stdout, /Dry run: would download/, retry.stderr);
 		} finally {
 			sandbox.cleanup();
 		}

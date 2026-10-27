@@ -8,6 +8,7 @@ import {
 	mkdtempSync,
 	renameSync,
 	rmSync,
+	statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -489,12 +490,20 @@ function installOnWindows({
 	};
 }
 
+/** Like a shell's command lookup: the first executable regular file on PATH. */
 function findOnPath(command: string): string | undefined {
 	return (process.env.PATH ?? "")
 		.split(delimiter)
 		.filter((dir) => dir !== "")
 		.map((dir) => join(dir, command))
-		.find((path) => existsSync(path));
+		.find((path) => {
+			try {
+				accessSync(path, constants.X_OK);
+				return statSync(path).isFile();
+			} catch {
+				return false;
+			}
+		});
 }
 
 /** Runs `args` as root: directly when c8ctl runs as root, otherwise with sudo. */
@@ -571,9 +580,12 @@ async function installOnLinux({
 		});
 		const releaseDir = `camunda-modeler-${version}-linux-x64`;
 		const installDir = join(LINUX_INSTALL_ROOT, releaseDir);
+		const launcher = join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE);
 		logger.info(`Installing Camunda Modeler to ${installDir}...`);
-		// The launcher link comes last: until it exists, Modeler counts as not
-		// installed, and a retry extracts the release again.
+		// The launcher marks Modeler as installed, so it goes first and comes back
+		// last: a stale link that extraction would revive cannot make an
+		// unfinished installation look complete, and a retry starts over.
+		runAsRoot(["rm", "-f", launcher], `Could not remove ${launcher}`);
 		runAsRoot(
 			["tar", "--no-same-owner", "-xzf", archivePath, "-C", LINUX_INSTALL_ROOT],
 			"Could not extract Camunda Modeler",
@@ -585,13 +597,8 @@ async function installOnLinux({
 			"Could not set up the Camunda Modeler sandbox",
 		);
 		runAsRoot(
-			[
-				"ln",
-				"-sfn",
-				join(releaseDir, LINUX_EXECUTABLE),
-				join(LINUX_INSTALL_ROOT, LINUX_EXECUTABLE),
-			],
-			`Could not link ${LINUX_EXECUTABLE} into ${LINUX_INSTALL_ROOT}`,
+			["ln", "-sfn", join(releaseDir, LINUX_EXECUTABLE), launcher],
+			`Could not link ${launcher}`,
 		);
 		registerWithDesktop(installDir, logger);
 		return {
