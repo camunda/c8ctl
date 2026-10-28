@@ -209,6 +209,10 @@ Never skip the lint and type-check steps before pushing.
 - `npm run test:unit` — fast unit tests (no live Camunda required)
 - `.githooks/pre-commit` — on commit, runs biome on staged files and typechecks a temporary tsconfig scoped to the staged set (transitive imports are still resolved). When any `src/` file is staged it also runs the layering guard (`check:layering`) against the working tree, so import-boundary regressions are caught at commit time instead of in CI. Skips biome, tsc, or the guard individually if the toolchain is not installed locally.
 
+#### Test user-data isolation — never touch the real c8ctl data dir
+
+Both `test:unit` and `test:integration` preload `tests/utils/isolate-user-data-dir.ts` via `--import`, which points `C8CTL_DATA_DIR` at a throwaway temp directory (per test subprocess). Several tests create, overwrite and delete `profiles.json`, `session.json` and `plugins.json`; without this preload they would wipe the developer's saved profiles and active-profile selection. Any test code that deletes or overwrites files in `getUserDataDir()` must call `assertIsolatedUserDataDir()` from that module first. `tests/unit/user-data-dir-isolation.test.ts` fails if the preload is dropped. When running a test file directly, pass `--import ./tests/utils/isolate-user-data-dir.ts`.
+
 #### Test process isolation — `--experimental-test-isolation=none` for integration tests
 
 `tests/unit/*.test.ts` runs with the default per-file process isolation of `node:test`. `tests/integration/*.test.ts` runs with `--experimental-test-isolation=none` (single process for all integration files).
