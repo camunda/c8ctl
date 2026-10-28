@@ -142,7 +142,13 @@ fs.existsSync = (path) => existsSync(remap(path));
 fs.statSync = (path, options) => statSync(remap(path), options);
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
-	if (!["sudo", "true", "rm", "tar", "chmod", "ln"].includes(command) && !command.startsWith("/usr/bin/")) {
+	const desktopRegistration =
+	command === "/bin/bash" && String(args[0]).startsWith("/usr/bin/");
+	if (
+		!["sudo", "true", "rm", "tar", "chmod", "ln"].includes(command) &&
+		!command.startsWith("/usr/bin/") &&
+		!desktopRegistration
+	) {
 		return spawnSync(command, args, options);
 	}
 	fs.appendFileSync(process.env.TOOL_LOG, [command, ...args].join(" ") + "\\n");
@@ -151,8 +157,10 @@ childProcess.spawnSync = (command, args, options) => {
 };
 syncBuiltinESMExports();
 
+Object.defineProperty(process, "platform", { value: "linux" });
 process.getuid = () => Number(process.env.FAKE_UID);
 Object.defineProperty(process, "arch", { value: process.env.FAKE_ARCH });
+if (process.env.UNSET_PATH === "1") delete process.env.PATH;
 const releaseUrl = "https://downloads.camunda.cloud/release/camunda-modeler/";
 globalThis.fetch = async (input) => {
 	const url = String(input);
@@ -289,14 +297,16 @@ function createLinuxSandbox() {
 	mkdirSync(binDir);
 	mkdirSync(usrBin);
 	mkdirSync(join(release, "support"), { recursive: true });
-	// PATH below hides the host's /bin, but the CLI subprocess still needs node.
+	// The isolated PATH exposes system tools; this symlink supplies Node.
 	symlinkSync(process.execPath, join(binDir, "node"));
 	for (const file of [
 		"camunda-modeler",
 		"chrome-sandbox",
 		"support/xdg_register.sh",
 	]) {
-		writeFileSync(join(release, file), "#!/bin/sh\n", { mode: 0o755 });
+		const script =
+			file === "support/xdg_register.sh" ? "#!/bin/bash\n" : "#!/bin/sh\n";
+		writeFileSync(join(release, file), script, { mode: 0o755 });
 	}
 	execFileSync("tar", [
 		"-czf",
@@ -307,7 +317,38 @@ function createLinuxSandbox() {
 	]);
 	writeFileSync(preload, LINUX_PRELOAD);
 
+	const runInstall = ({
+		cwd,
+		env = {},
+		args,
+	}: {
+		cwd?: string;
+		env?: Record<string, string | undefined>;
+		args: string[];
+	}) =>
+		c8WithOptions(
+			{
+				nodeArgs: ["--import", preload],
+				env: {
+					PATH: [binDir, "/usr/bin", "/bin"].join(delimiter),
+					USR_BIN_ROOT: usrBin,
+					TOOL_LOG: toolLog,
+					ARCHIVE: archive,
+					FAKE_UID: "1000",
+					FAKE_ARCH: "x64",
+					C8CTL_DATA_DIR: join(home, "data"),
+					C8CTL_OUTPUT_MODE: "text",
+					...env,
+				},
+				...(cwd === undefined ? {} : { cwd }),
+			},
+			"modeler",
+			"install",
+			...args,
+		);
+
 	return {
+		home,
 		binDir,
 		usrBin,
 		/** Put a stub command on PATH. */
@@ -316,25 +357,12 @@ function createLinuxSandbox() {
 		toolCalls: (): string[] => readToolLog(toolLog),
 		resetToolCalls: (): void => rmSync(toolLog, { force: true }),
 		install: (env: Record<string, string> = {}, ...args: string[]) =>
-			c8WithOptions(
-				{
-					nodeArgs: ["--import", preload],
-					env: {
-						PATH: [binDir, "/usr/bin"].join(delimiter),
-						USR_BIN_ROOT: usrBin,
-						TOOL_LOG: toolLog,
-						ARCHIVE: archive,
-						FAKE_UID: "1000",
-						FAKE_ARCH: "x64",
-						C8CTL_DATA_DIR: join(home, "data"),
-						C8CTL_OUTPUT_MODE: "text",
-						...env,
-					},
-				},
-				"modeler",
-				"install",
-				...args,
-			),
+			runInstall({ env, args }),
+		installFrom: (
+			cwd: string,
+			env: Record<string, string | undefined> = {},
+			...args: string[]
+		) => runInstall({ cwd, env, args }),
 		cleanup: (): void => rmSync(home, { recursive: true, force: true }),
 	};
 }
@@ -734,6 +762,85 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("finds Modeler in empty PATH components on Linux", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const modeler = join(sandbox.home, "camunda-modeler");
+		writeFileSync(modeler, "#!/bin/sh\n", { mode: 0o755 });
+		const paths = [
+			["", sandbox.binDir],
+			[sandbox.binDir, ""],
+			[sandbox.binDir, "", sandbox.binDir],
+		];
+		try {
+			for (const entries of paths) {
+				const result = await sandbox.installFrom(
+					sandbox.home,
+					{ PATH: entries.join(delimiter) },
+					"--dry-run",
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(
+					result.stdout,
+					/already installed at camunda-modeler; skipping/,
+					result.stdout,
+				);
+				assert.deepStrictEqual(sandbox.toolCalls(), []);
+			}
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("does not search the current directory when PATH is unset on Linux", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		writeFileSync(join(sandbox.home, "camunda-modeler"), "#!/bin/sh\n", {
+			mode: 0o755,
+		});
+		try {
+			const result = await sandbox.installFrom(
+				sandbox.home,
+				{ UNSET_PATH: "1" },
+				"--dry-run",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /Dry run: would download/);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("finds xdg-utils in an empty PATH component on Linux", {
+		skip: !isLinux,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		writeFileSync(join(sandbox.home, "xdg-mime"), "#!/bin/sh\n", {
+			mode: 0o755,
+		});
+		try {
+			const result = await sandbox.installFrom(sandbox.home, {
+				PATH: ["", sandbox.binDir, "/usr/bin", "/bin"].join(delimiter),
+			});
+			const output = result.stdout + result.stderr;
+			assert.strictEqual(result.status, 0, output);
+			assert.ok(!output.includes("xdg-utils is not installed"), output);
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.includes(
+						"/bin/bash /usr/bin/camunda-modeler-5.52.0-linux-x64/support/xdg_register.sh",
+					),
+				sandbox.toolCalls().join("\n"),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("installs the release into /usr/bin with sudo as documented, then registers file types", {
 		skip: !isLinux,
 	}, async () => {
@@ -765,7 +872,7 @@ describe("CLI behavioural: modeler install", () => {
 			assert.deepStrictEqual(rest, [
 				`sudo chmod 4755 ${releaseDir}/chrome-sandbox`,
 				"sudo ln -sfn camunda-modeler-5.52.0-linux-x64/camunda-modeler /usr/bin/camunda-modeler",
-				`${releaseDir}/support/xdg_register.sh`,
+				`/bin/bash ${releaseDir}/support/xdg_register.sh`,
 			]);
 			const installed = join(sandbox.usrBin, basename(releaseDir));
 			assert.strictEqual(

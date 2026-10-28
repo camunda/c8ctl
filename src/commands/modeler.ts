@@ -492,10 +492,11 @@ function installOnWindows({
 
 /** Like a shell's command lookup: the first executable regular file on PATH. */
 function findOnPath(command: string): string | undefined {
-	return (process.env.PATH ?? "")
+	const path = process.env.PATH;
+	if (path === undefined) return undefined;
+	return path
 		.split(delimiter)
-		.filter((dir) => dir !== "")
-		.map((dir) => join(dir, command))
+		.map((dir) => join(dir || ".", command))
 		.find((path) => {
 			try {
 				accessSync(path, constants.X_OK);
@@ -527,7 +528,8 @@ function registerWithDesktop(installDir: string, logger: Logger): void {
 		);
 		return;
 	}
-	const result = spawnSync(script, [], {
+	// Keep the interpreter fixed; the script path is versioned release data.
+	const result = spawnSync("/bin/bash", [script], {
 		stdio: ["ignore", process.stderr.fd, process.stderr.fd],
 	});
 	if (result.error || result.status !== 0) {
