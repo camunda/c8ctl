@@ -122,24 +122,28 @@ syncBuiltinESMExports();
 `;
 
 /**
- * Loaded into the CLI subprocess on Linux: maps /usr/bin to USR_BIN_ROOT, runs
- * root commands without sudo and records them in TOOL_LOG (FAIL_AT=<tool>
- * makes that tool fail), fakes the user id and architecture, and serves
- * ARCHIVE as the 5.52.0 release.
+ * Loaded into the CLI subprocess on Linux: maps /usr/bin and /bin filesystem
+ * lookups into temp roots, runs root commands without sudo and records them in
+ * TOOL_LOG (FAIL_AT=<tool> makes that tool fail), fakes the user id and
+ * architecture, and serves ARCHIVE as the 5.52.0 release.
  */
 const LINUX_PRELOAD = `
 import childProcess from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 
-const remap = (path) =>
+const remapUsrBin = (path) =>
 	String(path) === "/usr/bin" || String(path).startsWith("/usr/bin/")
 		? process.env.USR_BIN_ROOT + String(path).slice("/usr/bin".length)
 		: path;
+const remapFilesystemPath = (path) =>
+	String(path) === "/bin" || String(path).startsWith("/bin/")
+		? process.env.BIN_ROOT + String(path).slice("/bin".length)
+		: remapUsrBin(path);
 const { accessSync, existsSync, statSync } = fs;
-fs.accessSync = (path, mode) => accessSync(remap(path), mode);
-fs.existsSync = (path) => existsSync(remap(path));
-fs.statSync = (path, options) => statSync(remap(path), options);
+fs.accessSync = (path, mode) => accessSync(remapFilesystemPath(path), mode);
+fs.existsSync = (path) => existsSync(remapFilesystemPath(path));
+fs.statSync = (path, options) => statSync(remapFilesystemPath(path), options);
 const { spawnSync } = childProcess;
 childProcess.spawnSync = (command, args, options) => {
 	const desktopRegistration =
@@ -152,7 +156,9 @@ childProcess.spawnSync = (command, args, options) => {
 		return spawnSync(command, args, options);
 	}
 	fs.appendFileSync(process.env.TOOL_LOG, [command, ...args].join(" ") + "\\n");
-	const [real, ...rest] = (command === "sudo" ? args : [command, ...args]).map(remap);
+	const [real, ...rest] = (command === "sudo" ? args : [command, ...args]).map(
+		remapUsrBin,
+	);
 	return real === process.env.FAIL_AT ? { status: 1 } : spawnSync(real, rest, options);
 };
 syncBuiltinESMExports();
@@ -285,20 +291,25 @@ function createWindowsSandbox() {
 	};
 }
 
-/** Maps /usr/bin into a temp dir, and builds a 5.52.0 release archive of stub files. */
+/** Maps /usr/bin and /bin into temp dirs, and builds a stub 5.52.0 archive. */
 function createLinuxSandbox() {
 	const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
 	const binDir = join(home, "bin");
+	const binRoot = join(home, "bin-root");
 	const usrBin = join(home, "usr-bin");
 	const release = join(home, "release", "camunda-modeler-5.52.0-linux-x64");
 	const archive = join(home, "release.tar.gz");
 	const toolLog = join(home, "tools.log");
 	const preload = join(home, "preload.mjs");
 	mkdirSync(binDir);
+	mkdirSync(binRoot);
 	mkdirSync(usrBin);
 	mkdirSync(join(release, "support"), { recursive: true });
 	// The isolated PATH exposes system tools; this symlink supplies Node.
 	symlinkSync(process.execPath, join(binDir, "node"));
+	for (const command of ["chmod", "ln", "rm"]) {
+		symlinkSync(`/bin/${command}`, join(binDir, command));
+	}
 	for (const file of [
 		"camunda-modeler",
 		"chrome-sandbox",
@@ -331,6 +342,7 @@ function createLinuxSandbox() {
 				nodeArgs: ["--import", preload],
 				env: {
 					PATH: [binDir, "/usr/bin", "/bin"].join(delimiter),
+					BIN_ROOT: binRoot,
 					USR_BIN_ROOT: usrBin,
 					TOOL_LOG: toolLog,
 					ARCHIVE: archive,
@@ -350,6 +362,7 @@ function createLinuxSandbox() {
 	return {
 		home,
 		binDir,
+		binRoot,
 		usrBin,
 		/** Put a stub command on PATH. */
 		fakeTool: (name: string): void =>
@@ -762,6 +775,36 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("finds Modeler in a sandboxed /bin PATH entry on Linux", {
+		skip: isWindows,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const pathSuffix = basename(sandbox.home);
+		const pathEntry = join("/bin", pathSuffix);
+		const modeler = join(sandbox.binRoot, pathSuffix, "camunda-modeler");
+		mkdirSync(dirname(modeler), { recursive: true });
+		writeFileSync(modeler, "#!/bin/sh\n", { mode: 0o755 });
+		try {
+			const result = await sandbox.install(
+				{
+					PATH: [sandbox.binDir, "/usr/bin", pathEntry].join(delimiter),
+				},
+				"--dry-run",
+			);
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.ok(
+				result.stdout.includes(
+					`already installed at ${pathEntry}/camunda-modeler; skipping`,
+				),
+				result.stdout,
+			);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("finds Modeler in empty PATH components on Linux", {
 		skip: !isLinux,
 	}, async () => {
@@ -826,6 +869,36 @@ describe("CLI behavioural: modeler install", () => {
 				PATH: ["", sandbox.binDir, "/usr/bin", "/bin"].join(delimiter),
 			});
 			const output = result.stdout + result.stderr;
+			assert.strictEqual(result.status, 0, output);
+			assert.ok(!output.includes("xdg-utils is not installed"), output);
+			assert.ok(
+				sandbox
+					.toolCalls()
+					.includes(
+						"/bin/bash /usr/bin/camunda-modeler-5.52.0-linux-x64/support/xdg_register.sh",
+					),
+				sandbox.toolCalls().join("\n"),
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("finds xdg-utils in a sandboxed /bin PATH entry on Linux", {
+		skip: isWindows,
+	}, async () => {
+		const sandbox = createLinuxSandbox();
+		const pathSuffix = basename(sandbox.home);
+		const pathEntry = join("/bin", pathSuffix);
+		const xdgMime = join(sandbox.binRoot, pathSuffix, "xdg-mime");
+		mkdirSync(dirname(xdgMime), { recursive: true });
+		writeFileSync(xdgMime, "#!/bin/sh\n", { mode: 0o755 });
+		try {
+			const result = await sandbox.install({
+				PATH: [sandbox.binDir, "/usr/bin", pathEntry].join(delimiter),
+			});
+			const output = result.stdout + result.stderr;
+
 			assert.strictEqual(result.status, 0, output);
 			assert.ok(!output.includes("xdg-utils is not installed"), output);
 			assert.ok(
