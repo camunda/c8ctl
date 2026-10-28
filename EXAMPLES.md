@@ -12,6 +12,7 @@ Find examples for each area here:
 | Install, local cluster, credentials, profiles, output modes, shell completion | [Getting started](docs/getting-started.md) |
 | Process instances, user tasks, incidents, jobs, variables, search, messages, forms | [Cluster inspection and process management](docs/cluster-inspection.md) |
 | Users, roles, groups, tenants, authorizations, mapping rules | [Identity management](docs/identity-management.md) |
+| Global and tenant-scoped cluster variables | [Cluster variables](docs/cluster-variables.md) |
 | Deploy, run, watch, profiles, sessions, MCP proxy, opening web apps | [Development workflows](docs/development-workflows.md) |
 | Scaffold, install, and manage plugins | [Plugins](docs/plugins.md) |
 | Every command, flag, resource, and alias | [Command reference](docs/command-reference.md) |
