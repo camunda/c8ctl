@@ -249,6 +249,14 @@ If you find yourself wanting to promote a flag into the top-level Flags section:
 - **If the flag is verb-specific but you want it discoverable** — keep it verb-specific. If an example would help, add an entry to the verb's `helpExamples` in `COMMAND_REGISTRY`; those examples are aggregated into the top-level `c8ctl --help` output under the global `Examples:` section, not into `c8ctl help <verb>`.
 - **Do not** reintroduce a per-flag opt-in field on `FlagDef`. Class-scoped guards in `tests/unit/help.test.ts` (`Top-level help is scoped to global flags (#321)`) compare the rendered top-level Flags section against `Object.keys(GLOBAL_FLAGS)` and will fail if anything else leaks in.
 
+### Agent instruction files
+
+- [`CLAUDE.md`](CLAUDE.md) carries only the tenet that must always be in context (there are no flaky tests) and imports this file with `@AGENTS.md`.
+- This file is the single source for everything else, including the triage procedure.
+- The `.claude/skills/steward` skill only points here, so it adds no second copy of any rule.
+- Derive, don't duplicate: duplicated content is limited to the stable tenet, so there is no drift surface. Add new rules here, not in `CLAUDE.md` or the skill.
+- [`tests/unit/agent-instructions.test.ts`](tests/unit/agent-instructions.test.ts) guards the chain.
+
 ### Work environment
 
 - when you are not in "Cloud" mode, make sure to evaluate the OS environment and adapt behavior accordingly
@@ -323,7 +331,7 @@ We do not acknowledge the existence of "flaky tests". A test that passes sometim
 1. **A test defect** — the test contains a race, an unbounded timeout, an order-of-operation assumption, an unsynchronised readiness signal, or a dependency on wall-clock timing. Fix the test so its outcome is deterministic for the behaviour it claims to assert.
 2. **A product defect** — the production code has a race, a missed signal, an unhandled error path, or a resource it leaks under load. Fix the product.
 
-Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" in the PR description. "Re-run and hope" is a coping strategy, not engineering.
+Either way, an intermittent failure is a real defect that must be diagnosed and fixed before the change merges. Do not retry the CI job, mark the test `skip`, add a `.retry()`, or describe the failure as "flaky" or "unrelated" anywhere: PR descriptions, review comments and status updates. "Re-run and hope" is a coping strategy, not engineering.
 
 When triaging an intermittent CI failure:
 

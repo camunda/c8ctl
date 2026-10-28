@@ -1,4 +1,5 @@
 # CLAUDE.md
 
-Claude does not natively support AGENTS.md yet.
-Until it does, please read and follow [AGENTS.md](./AGENTS.md) before starting any task.
+There are no flaky tests. An intermittent failure is a real defect (test or product): diagnose it before the change merges. Never retry the CI job, skip the test, or describe a failure as "flaky" or "unrelated", whether in a PR description, a comment or a status update.
+
+@AGENTS.md
