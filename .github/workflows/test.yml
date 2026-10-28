@@ -274,7 +274,7 @@ jobs:
           C8CTL_APP_BOT_LOGIN: ${{ vars.C8CTL_APP_BOT_LOGIN }}
           C8CTL_AUTOMATION_ENABLED: ${{ vars.C8CTL_AUTOMATION_ENABLED }}
         run: node --experimental-strip-types scripts/agentic/ci.ts publish
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-report-${{ needs.agentic-revision.outputs.correlation }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/report.json
