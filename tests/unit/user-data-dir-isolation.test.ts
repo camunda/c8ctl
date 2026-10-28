@@ -12,8 +12,8 @@
 
 import assert from "node:assert";
 import { realpathSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { isAbsolute, relative } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, relative } from "node:path";
 import { describe, test } from "node:test";
 import { getUserDataDir } from "../../src/core/config.ts";
 
@@ -30,16 +30,17 @@ describe("test-suite user data dir isolation", () => {
 		);
 	});
 
-	test("the resolved user data dir is a temp dir, not under the real home", () => {
+	test("the resolved user data dir is a fresh preload-created temp dir", () => {
 		const dir = getUserDataDir();
+		// Only the temp-dir containment is checked (not "outside home"): on
+		// Windows the OS temp dir normally lives under the user's home.
 		assert.ok(
 			isInside(dir, tmpdir()),
 			`user data dir ${dir} must live under ${tmpdir()}`,
 		);
-		assert.notStrictEqual(
-			dir.startsWith(homedir()) && !homedir().startsWith(tmpdir()),
-			true,
-			`user data dir ${dir} must not live under the real home ${homedir()}`,
+		assert.ok(
+			basename(dir).startsWith("c8ctl-test-data-"),
+			`user data dir ${dir} must be the preload-created dir, not an inherited override`,
 		);
 	});
 });
