@@ -14,7 +14,11 @@ import { join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Logger } from "../core/index.ts";
-import { defineCommand } from "../framework/index.ts";
+import {
+	type CommandContext,
+	type CommandResult,
+	defineCommand,
+} from "../framework/index.ts";
 import {
 	latestStableModelerVersion,
 	MODELER_RELEASE_URL,
@@ -32,6 +36,23 @@ const LAUNCH_SERVICES_REGISTER =
 // checks them; require Camunda's Developer ID signature before installing.
 const MODELER_CODE_REQUIREMENT =
 	'identifier "com.camunda.CamundaModeler" and anchor apple generic and certificate leaf[subject.OU] = "3JVGD57JQZ"';
+const WINGET_PACKAGE_ID = "Camunda.Modeler";
+const WINGET_PACKAGE = [
+	"--id",
+	WINGET_PACKAGE_ID,
+	"--exact",
+	"--source",
+	"winget",
+];
+const WINGET_INSTALL_URL =
+	"https://learn.microsoft.com/windows/package-manager/winget/";
+// APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND: `winget list` matched nothing.
+const WINGET_NO_APPLICATIONS_FOUND = 0x8a150014;
+const WINDOWS_EXECUTABLE = "Camunda Modeler.exe";
+const MODELER_FILE_TYPES = ["bpmn", "dmn", "form", "rpa"];
+// Both paths arrive through the environment, so they need no quoting.
+const CREATE_SHORTCUT_SCRIPT =
+	"$ErrorActionPreference = 'Stop'; $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($env:C8CTL_SHORTCUT); $shortcut.TargetPath = $env:C8CTL_TARGET; $shortcut.Save()";
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -39,6 +60,13 @@ function errorMessage(error: unknown): string {
 
 function manualDownloadError(message: string): Error {
 	return new Error(`${message}. Download manually from ${MANUAL_DOWNLOAD_URL}`);
+}
+
+/** winget exits with HRESULTs, which its documentation lists in hex. */
+function formatExitCode(status: number | null): string {
+	return status !== null && status > 0xffff
+		? `0x${status.toString(16).toUpperCase()}`
+		: String(status);
 }
 
 function runCommand(
@@ -53,7 +81,9 @@ function runCommand(
 		throw new Error(`${failureMessage}: ${result.error.message}`);
 	}
 	if (result.status !== 0) {
-		throw new Error(`${failureMessage} (exit code ${String(result.status)}).`);
+		throw new Error(
+			`${failureMessage} (exit code ${formatExitCode(result.status)})`,
+		);
 	}
 }
 
@@ -68,35 +98,41 @@ function registerWithLaunchServices(appPath: string, logger: Logger): void {
 	}
 }
 
-function isHomebrewAvailable(): boolean {
-	const result = spawnSync("brew", ["--version"], { stdio: "ignore" });
+/** Whether a package manager is on PATH; one that is present but broken is an error. */
+function hasPackageManager(command: string, name: string): boolean {
+	const result = spawnSync(command, ["--version"], { stdio: "ignore" });
 	if (result.error) {
 		if ("code" in result.error && result.error.code === "ENOENT") return false;
-		throw new Error(`Could not check Homebrew: ${result.error.message}`);
+		throw new Error(`Could not check ${name}: ${result.error.message}`);
 	}
 	if (result.status !== 0) {
 		throw new Error(
-			`Homebrew is available but \`brew --version\` failed (exit code ${String(result.status)}).`,
+			`${name} is available but \`${command} --version\` failed (exit code ${formatExitCode(result.status)})`,
 		);
 	}
 	return true;
 }
 
-function isModelerInstalledWithHomebrew(): boolean {
-	const result = spawnSync(
-		"brew",
-		["list", "--cask", "--versions", "camunda-modeler"],
-		{ stdio: "ignore" },
-	);
+/** Runs a package query that exits with 0 when Modeler is installed and `notInstalledStatus` when it is not. */
+function isInstalledWith({
+	command,
+	args,
+	notInstalledStatus,
+	description,
+}: {
+	command: string;
+	args: string[];
+	notInstalledStatus: number;
+	description: string;
+}): boolean {
+	const result = spawnSync(command, args, { stdio: "ignore" });
 	if (result.error) {
-		throw new Error(
-			`Could not check the Homebrew Modeler cask: ${result.error.message}`,
-		);
+		throw new Error(`Could not check ${description}: ${result.error.message}`);
 	}
 	if (result.status === 0) return true;
-	if (result.status === 1) return false;
+	if (result.status === notInstalledStatus) return false;
 	throw new Error(
-		`Could not check the Homebrew Modeler cask (exit code ${String(result.status)}).`,
+		`Could not check ${description} (exit code ${formatExitCode(result.status)})`,
 	);
 }
 
@@ -307,13 +343,139 @@ async function installFromOfficialDownload({
 	}
 }
 
+/** winget's portable installs set up neither file associations nor a Start Menu entry. */
+function registerWithWindows(executable: string, logger: Logger): void {
+	// The per-user keys of Modeler's support/fileassoc.reg; its register script
+	// breaks on paths with spaces and leaves the command unquoted.
+	const registered = MODELER_FILE_TYPES.flatMap(
+		(type): Array<[key: string, value: string]> => {
+			const progId = `CamundaModeler.${type.toUpperCase()}`;
+			const progIdKey = `HKCU\\Software\\Classes\\${progId}`;
+			return [
+				[`HKCU\\Software\\Classes\\.${type}`, progId],
+				[progIdKey, `${type.toUpperCase()} file`],
+				[`${progIdKey}\\DefaultIcon`, `${executable},0`],
+				[`${progIdKey}\\shell\\open\\command`, `"${executable}" "%1"`],
+			];
+		},
+	).every(([key, value]) => {
+		const result = spawnSync("reg", ["add", key, "/ve", "/d", value, "/f"], {
+			stdio: "ignore",
+		});
+		return !result.error && result.status === 0;
+	});
+	if (!registered) {
+		logger.warn(
+			'Could not register Camunda Modeler for .bpmn, .dmn, .form, and .rpa files. Choose it with "Open with" instead.',
+		);
+	}
+
+	const appData = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
+	const shortcut = join(
+		appData,
+		"Microsoft",
+		"Windows",
+		"Start Menu",
+		"Programs",
+		"Camunda Modeler.lnk",
+	);
+	const result = spawnSync(
+		"powershell",
+		["-NoProfile", "-NonInteractive", "-Command", CREATE_SHORTCUT_SCRIPT],
+		{
+			stdio: "ignore",
+			env: {
+				...process.env,
+				C8CTL_SHORTCUT: shortcut,
+				C8CTL_TARGET: executable,
+			},
+		},
+	);
+	if (result.error || result.status !== 0) {
+		logger.warn(
+			`Could not add Camunda Modeler to the Start Menu. Start it from ${executable}.`,
+		);
+	}
+}
+
+function installOnWindows({
+	isDryRun,
+	logger,
+}: Pick<CommandContext, "isDryRun" | "logger">): CommandResult {
+	const localAppData =
+		process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+	const installDir = join(localAppData, "Programs", "Camunda Modeler");
+	const executable = join(installDir, WINDOWS_EXECUTABLE);
+	if (existsSync(executable)) {
+		return {
+			kind: "info",
+			message: `Camunda Modeler is already installed at ${installDir}; skipping installation.`,
+		};
+	}
+
+	// Any winget failure, such as a source blocked by policy or no build for
+	// this machine, ends with the manual download link.
+	try {
+		if (!hasPackageManager("winget", "winget")) {
+			throw new Error(
+				`winget is not available (install it from ${WINGET_INSTALL_URL})`,
+			);
+		}
+		if (
+			isInstalledWith({
+				command: "winget",
+				args: ["list", ...WINGET_PACKAGE],
+				notInstalledStatus: WINGET_NO_APPLICATIONS_FOUND,
+				description: "the winget Modeler package",
+			})
+		) {
+			return {
+				kind: "info",
+				message:
+					"Camunda Modeler is already installed with winget; skipping installation.",
+			};
+		}
+		if (isDryRun) {
+			return {
+				kind: "info",
+				message: `Dry run: would install Camunda Modeler to ${installDir} with \`winget install --id ${WINGET_PACKAGE_ID}\`.`,
+			};
+		}
+
+		logger.info("Installing Camunda Modeler with winget...");
+		// winget picks the build for this machine, verifies its checksum, and
+		// lists it under Installed apps, so `winget upgrade` can update it.
+		// User scope needs no administrator rights, whatever winget's settings prefer.
+		runCommand(
+			"winget",
+			[
+				"install",
+				...WINGET_PACKAGE,
+				"--scope",
+				"user",
+				"--location",
+				installDir,
+			],
+			"winget could not install Camunda Modeler",
+		);
+	} catch (error) {
+		throw manualDownloadError(errorMessage(error));
+	}
+	registerWithWindows(executable, logger);
+	return {
+		kind: "success",
+		message: `Installed Camunda Modeler with winget to ${installDir}.`,
+	};
+}
+
 export const modelerInstallCommand = defineCommand(
 	"modeler",
 	"install",
 	async (ctx) => {
+		if (process.platform === "win32") return installOnWindows(ctx);
 		if (process.platform !== "darwin") {
 			throw new Error(
-				`c8ctl modeler install currently supports macOS only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
+				`c8ctl modeler install currently supports macOS and Windows only. Download Modeler manually from ${MANUAL_DOWNLOAD_URL}`,
 			);
 		}
 
@@ -325,8 +487,15 @@ export const modelerInstallCommand = defineCommand(
 			};
 		}
 
-		if (isHomebrewAvailable()) {
-			if (isModelerInstalledWithHomebrew()) {
+		if (hasPackageManager("brew", "Homebrew")) {
+			if (
+				isInstalledWith({
+					command: "brew",
+					args: ["list", "--cask", "--versions", "camunda-modeler"],
+					notInstalledStatus: 1,
+					description: "the Homebrew Modeler cask",
+				})
+			) {
 				return {
 					kind: "info",
 					message:
