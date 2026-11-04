@@ -1544,6 +1544,11 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
  * cluster would run the command against the wrong target.
  */
 function requireExplicitProfile(name: string): Profile {
+	if (name.trim() === "") {
+		throw new Error(
+			"Profile name must not be empty. Check that the value passed to --profile is set.",
+		);
+	}
 	const profile = getProfileOrModeler(name);
 	if (!profile) {
 		throw new Error(
@@ -1558,7 +1563,7 @@ function requireExplicitProfile(name: string): Profile {
 
 function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	// 1. Try profile flag (profile name, including modeler: prefix)
-	if (profileFlag) {
+	if (profileFlag !== undefined) {
 		return profileToClusterConfig(requireExplicitProfile(profileFlag));
 	}
 
@@ -1629,8 +1634,8 @@ export function resolveTenantId(profileFlag?: string): string {
 	}
 
 	// 2. Try profile default tenant (from flag or session)
-	const profileName = profileFlag || c8ctl.activeProfile;
-	if (profileName) {
+	const profileName = profileFlag ?? c8ctl.activeProfile;
+	if (profileName !== undefined) {
 		const profile = requireExplicitProfile(profileName);
 		if (profile.defaultTenantId) {
 			return profile.defaultTenantId;

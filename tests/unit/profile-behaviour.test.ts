@@ -77,6 +77,24 @@ describe("CLI behavioural: unknown profile", () => {
 		);
 	});
 
+	test("list fails when --profile is empty", async () => {
+		// when
+		const result = await c8(
+			"list",
+			"process-instances",
+			"--profile=",
+			"--dry-run",
+		);
+
+		// then
+		assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
+		assert.ok(
+			`${result.stdout}${result.stderr}`.includes(
+				"Profile name must not be empty",
+			),
+		);
+	});
+
 	test("list fails when the active session profile no longer exists", async () => {
 		// given
 		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-stale-profile-"));
