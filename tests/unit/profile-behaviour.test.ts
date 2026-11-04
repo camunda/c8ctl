@@ -7,8 +7,11 @@
  */
 
 import assert from "node:assert";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, test } from "node:test";
-import { c8 } from "../utils/cli.ts";
+import { c8, c8WithEnv } from "../utils/cli.ts";
 
 // ─── list profiles ──────────────────────────────────────────────────────────
 
@@ -36,5 +39,70 @@ describe("CLI behavioural: use command", () => {
 			result.stdout.includes("profile") || result.stderr.includes("profile"),
 			'Expected "profile" in available resources',
 		);
+	});
+});
+
+// ─── unknown profile ────────────────────────────────────────────────────────
+
+describe("CLI behavioural: unknown profile", () => {
+	test("open fails when --profile does not exist", async () => {
+		// when
+		const result = await c8("open", "operate", "--profile", "nonexistent");
+
+		// then
+		assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
+		assert.ok(
+			`${result.stdout}${result.stderr}`.includes(
+				"Profile 'nonexistent' not found",
+			),
+		);
+	});
+
+	test("list fails when --profile does not exist", async () => {
+		// when
+		const result = await c8(
+			"list",
+			"process-instances",
+			"--profile",
+			"nonexistent",
+			"--dry-run",
+		);
+
+		// then
+		assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
+		assert.ok(
+			`${result.stdout}${result.stderr}`.includes(
+				"Profile 'nonexistent' not found",
+			),
+		);
+	});
+
+	test("list fails when the active session profile no longer exists", async () => {
+		// given
+		const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-stale-profile-"));
+		writeFileSync(
+			join(dataDir, "session.json"),
+			JSON.stringify({ outputMode: "json", activeProfile: "ghost" }),
+		);
+
+		try {
+			// when
+			const result = await c8WithEnv(
+				{ C8CTL_DATA_DIR: dataDir },
+				"list",
+				"process-instances",
+				"--dry-run",
+			);
+
+			// then
+			assert.strictEqual(result.status, 1, `stdout: ${result.stdout}`);
+			assert.ok(
+				`${result.stdout}${result.stderr}`.includes(
+					"Profile 'ghost' not found",
+				),
+			);
+		} finally {
+			rmSync(dataDir, { recursive: true, force: true });
+		}
 	});
 });

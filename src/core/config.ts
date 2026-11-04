@@ -1538,34 +1538,47 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	return config;
 }
 
+/**
+ * Resolve a profile the user explicitly selected (via `--profile` or the
+ * session). An unknown name is an error: silently falling back to another
+ * cluster would run the command against the wrong target.
+ */
+function requireExplicitProfile(name: string): Profile {
+	const profile = getProfileOrModeler(name);
+	if (!profile) {
+		throw new Error(
+			`Profile '${name}' not found. Run 'c8 list profiles' to see available profiles` +
+				(c8ctl.activeProfile === name
+					? ", or 'c8 use profile --none' to clear the active profile."
+					: "."),
+		);
+	}
+	return profile;
+}
+
 function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	// 1. Try profile flag (profile name, including modeler: prefix)
 	if (profileFlag) {
-		const profile = getProfileOrModeler(profileFlag);
-		if (profile) {
-			return profileToClusterConfig(profile);
-		}
+		return profileToClusterConfig(requireExplicitProfile(profileFlag));
 	}
 
 	// 2. Try session profile (only when user explicitly selected one)
 	if (c8ctl.activeProfile) {
-		const profile = getProfileOrModeler(c8ctl.activeProfile);
-		if (profile) {
-			// Warn when env vars are also present — avoids silent surprise
-			// Only warn when CAMUNDA_BASE_URL is set, since resolveClusterConfig
-			// only uses env vars when CAMUNDA_BASE_URL is present
-			if (process.env.CAMUNDA_BASE_URL?.trim()) {
-				const logger = getLogger();
-				logger.warn(
-					`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
-				);
-				logger.info("  To use env vars instead, run: c8 use profile --none");
-				logger.info(
-					"  To create a profile from env vars: c8 add profile <name> --from-env",
-				);
-			}
-			return profileToClusterConfig(profile);
+		const profile = requireExplicitProfile(c8ctl.activeProfile);
+		// Warn when env vars are also present — avoids silent surprise
+		// Only warn when CAMUNDA_BASE_URL is set, since resolveClusterConfig
+		// only uses env vars when CAMUNDA_BASE_URL is present
+		if (process.env.CAMUNDA_BASE_URL?.trim()) {
+			const logger = getLogger();
+			logger.warn(
+				`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
+			);
+			logger.info("  To use env vars instead, run: c8 use profile --none");
+			logger.info(
+				"  To create a profile from env vars: c8 add profile <name> --from-env",
+			);
 		}
+		return profileToClusterConfig(profile);
 	}
 
 	// 3. Try environment variables
@@ -1618,8 +1631,8 @@ export function resolveTenantId(profileFlag?: string): string {
 	// 2. Try profile default tenant (from flag or session)
 	const profileName = profileFlag || c8ctl.activeProfile;
 	if (profileName) {
-		const profile = getProfileOrModeler(profileName);
-		if (profile?.defaultTenantId) {
+		const profile = requireExplicitProfile(profileName);
+		if (profile.defaultTenantId) {
 			return profile.defaultTenantId;
 		}
 	}
