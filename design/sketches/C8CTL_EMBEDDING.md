@@ -37,7 +37,7 @@ flowchart LR
 3. __MCP over STDIO__ - proxies the cluster's MCP server only.
 4. __In-process plugin__ - extends `c8ctl` from the inside.
 5. __Shared files__ - `c8ctl` reads Modeler connections (`modeler:` profiles), never writes them.
-6. __Library import__ - not supported. `exports` only exposes `./runtime`; command handlers are internal.
+6. __Library import__ - not supported. `exports` only exposes `./runtime`; command handlers are internal. See [Core libraries](#core-libraries) for what it could become.
 
 ### The "server" model today
 
@@ -98,6 +98,53 @@ flowchart TB
 * Embedders __save before calling `c8ctl`__ (e.g. Modeler saves before deploy). Tools take paths - files, folders, a `camunda.json` project root - never content. Matches `c8ctl deploy <paths>` today.
 * __Explicitly no language-server duality.__ No in-memory overlays, no virtual file system, no `didChange` for in-flight edits. An unsaved diagram must be saved first.
 * Editing-time features that operate on unsaved state (live linting, FEEL completion, properties panel) stay shared __libraries__ inside the editor - out of scope for `c8ctl`.
+
+### Core libraries
+
+`c8ctl` also __hosts and exports its core utilities__ as Node libraries - a second, in-process embedding model next to the protocol. Modeler already talks to clusters from its Node main process, so it can import them directly.
+
+Modeler re-implements several of them today:
+
+| `c8ctl` utility                                                  | Modeler duplicate                                                       |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Profiles + credential resolution (`core/config.ts`)              | Connection store, `app/lib/zeebe-api` connection handling               |
+| Client factory (`core/client.ts`, `@camunda8/orchestration-cluster-api`) | `app/lib/zeebe-api` on `@camunda8/sdk` - a different client       |
+| Project resolution (`camunda.json`, `.c8ignore`, deployable set) | `app/lib/file-context/processors/camundaProjectProcessor.js`            |
+| Element template sync + cache (`element-template/cache.ts`)      | `app/lib/template-updater/`                                             |
+| Local cluster manager (c8run download, pids, health)             | -                                                                       |
+
+#### Layered, not alternative
+
+```mermaid
+flowchart TB
+  LIB["Core libraries<br/>profiles, client, project, templates, cluster"]
+  CMD[Commands / capabilities] --> LIB
+  CLI[Terminal adapter] --> CMD
+  SRV[c8ctl mcp] --> CMD
+  MM[Modeler main] -->|import| LIB
+  MM -->|tools/call| SRV
+```
+
+* Libraries are the base; commands compose them; CLI and MCP stay thin adapters. One implementation, three entry points.
+* __Import__ what is pure, fast and synchronous to the caller: read profiles, resolve a project's deploy set, look up a template, build a client.
+* __Call over MCP__ what is long-running, stateful, interactive or plugin-extensible: cluster start, hub login, watch, plugin commands, anything needing progress, cancellation or elicitation.
+
+| Concern                   | Library import                            | MCP                                         |
+| ------------------------- | ----------------------------------------- | ------------------------------------------- |
+| Errors                    | Typed (`instanceof`, `code`)              | Error code catalog in `structuredContent`   |
+| Latency / process         | In-process, no child                      | Child process, JSON-RPC                     |
+| Coupling                  | Same Node, same dependency tree, semver API | Protocol version handshake                |
+| Plugins                   | Not visible                               | Included                                    |
+| Long-running work         | Bound to the caller's process             | Handles outliving the client                |
+| Consumers                 | Node hosts (Modeler main, VS Code)        | Any host, AI agents                         |
+
+#### What it means for `c8ctl`
+
+* __Public API surface__ - subpath exports (`@camunda8/cli/profiles`, `/project`, `/templates`, `/cluster`) or separate packages; versioned with semver, distinct from the CLI's own contract.
+* __Runtime-free core__ - library code takes dependencies explicitly (data dir, logger, signal) and never reads `globalThis.c8ctl` (`core/config.ts` imports `runtime.ts` today). Enforced by an extended layering guard: a `lib` layer importing only itself.
+* __Promote command-private helpers__ - e.g. `commands/helpers/deploy-helpers.ts` (project resolution) and the cluster plugin's c8run lifecycle move into `lib`.
+* __State stays file-owned__ - libraries read and write the same files with the same atomic writes and locks as the CLI; importing never bypasses ownership (e.g. profiles keep a single writer path).
+* __Ownership boundaries__ - editing-time logic stays where it is shared today (`@camunda/linting`, `bpmn-js-element-templates`); `c8ctl` hosts what touches disk, clusters and credentials.
 
 ### Errors
 
@@ -210,19 +257,20 @@ sequenceDiagram
 9. __Profile ownership moves to `c8ctl`__ - Modeler connections migrate into `c8ctl` profiles, inverting today's read-only `modeler:` bridge.
 10. __Distribution + compatibility__ - Modeler bundles a pinned `c8ctl`; protocol version handshake on connect.
 11. __Local security__ - reachable by the current user only (STDIO child; no open port).
+12. __Exported core libraries__ - runtime-free, semver-versioned public API, see [Core libraries](#core-libraries).
 
 ## Rollout
 
-1. Refactor handlers to `ctx` progress, prompts and cancellation; derive schemas from the registry. Valuable on its own.
+1. Refactor handlers to `ctx` progress, prompts and cancellation; derive schemas from the registry; extract a runtime-free `lib` layer. Valuable on its own.
 2. Ship `c8ctl mcp` exposing `c8ctl`'s own commands as tools (error codes, pagination, audiences). Immediate value for agents; validates the contract.
 3. Credential broker + hub login, cluster handles, state notifications.
-4. Migrate Modeler features one by one (local cluster and deploy first), then move connections into `c8ctl` profiles.
+4. Migrate Modeler features one by one: import libraries for project resolution and element templates, call `c8ctl mcp` for local cluster and deploy; then move connections into `c8ctl` profiles.
 
 ## Open questions
 
 * __One shared server vs. one per client?__ Per client (LSP-style) is simpler and leans on files for consistency; shared allows in-memory state but needs discovery and lifecycle management.
 * __MCP vs. custom JSON-RPC?__ MCP gives agents the same surface for free; resources + subscriptions may prove too thin for rich application state.
-* __Library import__ in addition to the protocol, or the protocol as the only contract?
+* __Library packaging__ - subpath exports of one package, or separate packages? Which utilities are worth the semver commitment?
 * __Relation to `mcp-proxy`__ - fold into `c8ctl mcp` (cluster tools re-exported next to `c8ctl` tools), or keep separate?
 * __Hub login and Modeler__ - which Modeler connection types migrate as-is, which are superseded by hub login?
 
