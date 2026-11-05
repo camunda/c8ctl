@@ -38,7 +38,8 @@ export const STAGES: Record<Stage, StageConfig> = {
 		accounts: "https://accounts.cloud.dev.ultrawombat.com",
 		console: "https://console.cloud.dev.ultrawombat.com",
 		hub: "https://hub.dev.ultrawombat.com",
-		clientId: "",
+		// Auth0 tenant camunda-excitingdev: "c8ctl (saas login prototype)"
+		clientId: "MAYPSkgA88vsd4g4ymkoPy8l04LqoFIH",
 	},
 };
 
