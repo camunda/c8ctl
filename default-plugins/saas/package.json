@@ -1,0 +1,9 @@
+{
+  "name": "c8ctl-plugin-saas",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "c8ctl plugin to log in to Camunda SaaS as a user (prototype)",
+  "keywords": ["c8ctl", "c8ctl-plugin", "saas", "login"],
+  "main": "c8ctl-plugin.ts"
+}
