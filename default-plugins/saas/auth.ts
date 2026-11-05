@@ -16,6 +16,9 @@ import {
 
 export type FetchFn = typeof fetch;
 
+/** Kept well below LOCK_DEFAULTS.staleMs, see tokens.ts. */
+export const AUTH0_TIMEOUT_MS = 10_000;
+
 export interface AuthCfg {
 	auth0Domain: string;
 	audience: string;
@@ -68,7 +71,7 @@ async function postForm(
 		headers: { "content-type": "application/x-www-form-urlencoded" },
 		body: new URLSearchParams(form).toString(),
 		redirect: "manual",
-		signal: AbortSignal.timeout(30_000),
+		signal: AbortSignal.timeout(AUTH0_TIMEOUT_MS),
 	});
 	let body: unknown;
 	try {

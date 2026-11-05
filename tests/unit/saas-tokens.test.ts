@@ -133,3 +133,18 @@ describe("saas token lock", () => {
 		);
 	});
 });
+
+describe("saas lock timing", () => {
+	test("auth0 timeout < stale window < lock wait", async () => {
+		const { AUTH0_TIMEOUT_MS } = await import(
+			"../../default-plugins/saas/auth.ts"
+		);
+		const { LOCK_DEFAULTS } = await import(
+			"../../default-plugins/saas/tokens.ts"
+		);
+		// A refresh must finish before others may call its lock stale, and a
+		// waiter must outlive the stale window of a lock left by a killed process.
+		assert.ok(AUTH0_TIMEOUT_MS < LOCK_DEFAULTS.staleMs);
+		assert.ok(LOCK_DEFAULTS.staleMs < LOCK_DEFAULTS.timeoutMs);
+	});
+});

@@ -88,13 +88,24 @@ export function needsRefresh(token: StoredToken, nowSec: number): boolean {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * staleMs must exceed the Auth0 request timeout (a live refresh is never
+ * called stale), and timeoutMs must exceed staleMs (a waiter outlives a lock
+ * left behind by a killed process).
+ */
+export const LOCK_DEFAULTS = {
+	staleMs: 30_000,
+	retryMs: 100,
+	timeoutMs: 40_000,
+};
+
 export async function withLock<T>(
 	dir: string,
 	stage: Stage,
 	fn: () => Promise<T>,
 	opts: { staleMs?: number; retryMs?: number; timeoutMs?: number } = {},
 ): Promise<T> {
-	const { staleMs = 30_000, retryMs = 100, timeoutMs = 15_000 } = opts;
+	const { staleMs, retryMs, timeoutMs } = { ...LOCK_DEFAULTS, ...opts };
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const lock = join(dir, `${stage}.lock`);
 	const deadline = Date.now() + timeoutMs;
