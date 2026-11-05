@@ -6,6 +6,7 @@
  *
  * Usage:
  *   c8ctl saas login|logout|status|token [--stage prod|int|dev]
+ *   c8ctl saas orgs|clusters|hub [--org <id>] [--stage prod|int|dev]
  */
 
 import { spawn } from "node:child_process";
@@ -15,6 +16,7 @@ import type {
 	PluginCtx,
 	PluginMetadata,
 } from "../../src/framework/plugins/plugin-loader.ts";
+import { apiGet, resolveOrg } from "./api.ts";
 import {
 	type AuthCfg,
 	getAccessToken,
@@ -22,6 +24,7 @@ import {
 	requestDeviceCode,
 	toStored,
 } from "./auth.ts";
+import { defaultOrgId, isRecord } from "./jwt.ts";
 import {
 	clientIdFor,
 	parseStage,
@@ -42,9 +45,16 @@ export interface SaasCmdCtx {
 	ctx: PluginCtx | undefined;
 }
 
+/** clientId resolves on first use: a fresh token needs no client id. */
 export function authCfg(stage: Stage): AuthCfg {
 	const { auth0Domain, audience } = STAGES[stage];
-	return { auth0Domain, audience, clientId: clientIdFor(stage) };
+	return {
+		auth0Domain,
+		audience,
+		get clientId() {
+			return clientIdFor(stage);
+		},
+	};
 }
 
 const logger = () => c8ctl.getLogger();
@@ -114,17 +124,65 @@ async function status(c: SaasCmdCtx): Promise<void> {
 	else log.table(rows);
 }
 
+const accessToken = (c: SaasCmdCtx) =>
+	getAccessToken(c.dir, c.stage, authCfg(c.stage));
+
 async function token(c: SaasCmdCtx): Promise<void> {
-	const { auth0Domain, audience } = STAGES[c.stage];
-	// clientId is only needed when a refresh happens; resolve it lazily.
-	const cfg: AuthCfg = {
-		auth0Domain,
-		audience,
-		get clientId() {
-			return clientIdFor(c.stage);
-		},
-	};
-	logger().output(await getAccessToken(c.dir, c.stage, cfg));
+	logger().output(await accessToken(c));
+}
+
+/** Text mode: id + name (+ extra) per row. JSON mode: the API data as is. */
+function render(
+	data: unknown,
+	extra?: (row: Record<string, unknown>) => object,
+) {
+	const log = logger();
+	if (log.mode === "json") return log.json(data);
+	const rows = (Array.isArray(data) ? data : []).filter(isRecord);
+	if (rows.length === 0) return log.info("Nothing found.");
+	log.table(
+		rows.map((row) => ({
+			id: row.uuid ?? row.id,
+			name: row.name,
+			...extra?.(row),
+		})),
+	);
+}
+
+async function orgs(c: SaasCmdCtx): Promise<void> {
+	const tok = await accessToken(c);
+	const data = await apiGet(
+		`${c.cfg.accounts}/api/organizations/my`,
+		tok,
+		c.stage,
+	);
+	const def = defaultOrgId(tok);
+	const marked = Array.isArray(data)
+		? data.map((org) =>
+				isRecord(org) ? { ...org, default: (org.uuid ?? org.id) === def } : org,
+			)
+		: data;
+	render(marked, (row) => ({ default: row.default ? "*" : "" }));
+}
+
+async function clusters(c: SaasCmdCtx): Promise<void> {
+	const tok = await accessToken(c);
+	const org = encodeURIComponent(resolveOrg(c.flags.org, tok));
+	render(
+		await apiGet(`${c.cfg.console}/api/orgs/${org}/clusters`, tok, c.stage),
+	);
+}
+
+async function hub(c: SaasCmdCtx): Promise<void> {
+	const tok = await accessToken(c);
+	const org = encodeURIComponent(resolveOrg(c.flags.org, tok));
+	render(
+		await apiGet(
+			`${c.cfg.hub}/api/internal/organizations/${org}/projects`,
+			tok,
+			c.stage,
+		),
+	);
 }
 
 const SUBCOMMANDS: Record<string, (c: SaasCmdCtx) => Promise<void>> = {
@@ -132,6 +190,9 @@ const SUBCOMMANDS: Record<string, (c: SaasCmdCtx) => Promise<void>> = {
 	logout,
 	status,
 	token,
+	orgs,
+	clusters,
+	hub,
 };
 
 async function saasHandler(
@@ -181,6 +242,12 @@ export const metadata = {
 				{ name: "logout", description: "Forget the login of a stage" },
 				{ name: "status", description: "Show login state of all stages" },
 				{ name: "token", description: "Print a valid access token" },
+				{ name: "orgs", description: "List your organisations" },
+				{ name: "clusters", description: "List clusters of an organisation" },
+				{
+					name: "hub",
+					description: "List Hub projects of an organisation (internal API)",
+				},
 			],
 			examples: [
 				{ command: "c8ctl saas login", description: "Log in to SaaS prod" },
@@ -189,6 +256,14 @@ export const metadata = {
 					description: "Log in to int, open the URL yourself",
 				},
 				{ command: "c8ctl saas status", description: "Show login state" },
+				{
+					command: "c8ctl saas clusters",
+					description: "Clusters of your default organisation",
+				},
+				{
+					command: "c8ctl saas hub --org <id>",
+					description: "Hub projects of an organisation",
+				},
 			],
 		},
 	},

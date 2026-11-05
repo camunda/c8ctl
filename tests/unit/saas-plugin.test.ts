@@ -62,6 +62,12 @@ describe("saas plugin", () => {
 		assert.match(r.stdout + r.stderr, /C8CTL_SAAS_CLIENT_ID/);
 	});
 
+	test("clusters without login exits 1 with the login hint", async () => {
+		const r = await saas(dataDir(), "clusters");
+		assert.strictEqual(r.status, 1);
+		assert.match(r.stderr, /c8ctl saas login --stage prod/);
+	});
+
 	test("logout removes the stored token", async () => {
 		const dir = dataDir();
 		writeToken(tokenDir(dir), "int", {
