@@ -318,6 +318,7 @@ describe("Spec: Resource selection and matching", () => {
 		["a negated absolute path", "!/resources/**"],
 		["a leading ..", "../shared/**"],
 		["an embedded ..", "resources/../../shared/**"],
+		["a .. hidden by trailing whitespace", "resources/.. "],
 	] as const) {
 		test(`"Containment: patterns are project-root-relative; absolute paths and .. are invalid" — ${label} fails without deploying`, async () => {
 			const root = project(

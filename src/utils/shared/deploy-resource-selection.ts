@@ -72,11 +72,14 @@ export class DeployResourcesError extends Error {
 
 /** Describe why a single pattern is invalid, or `null` when it is valid. */
 function patternProblem(pattern: string): string | null {
-	const body = pattern.startsWith("!") ? pattern.slice(1) : pattern;
+	// Validate what the matcher sees: `parsePattern` trims trailing
+	// whitespace, so `resources/.. ` must be checked as `resources/..`.
+	const trimmed = pattern.trimEnd();
+	const body = trimmed.startsWith("!") ? trimmed.slice(1) : trimmed;
 	if (body.trim() === "") {
 		return "patterns must not be empty";
 	}
-	if (pattern.startsWith("#")) {
+	if (trimmed.startsWith("#")) {
 		return "comments are not supported in deployResources";
 	}
 	// Absolute paths: POSIX root, Windows drive letter, UNC / backslash root.
