@@ -167,6 +167,14 @@ async function waitForOutput(pattern: RegExp, w: WatchProcess) {
 }
 
 describe('Spec: Watch and live updates — "c8ctl watch --project: watches the resolved selection"', () => {
+	test('".c8ignore … do not apply" — a directory named .c8ignore does not prevent watching', async () => {
+		const root = makeProject();
+		writeProjectFile(root, ".c8ignore/placeholder.txt", "");
+		const { w, baseline } = await startWatch(root);
+		writeFileSync(join(root, "resources", "prompt.md"), "# edited");
+		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
+	});
+
 	test("the banner reports the selected set and no server version check is made", async () => {
 		const { w } = await startWatch(makeProject(), [], { settled: false });
 		assert.match(
@@ -295,6 +303,27 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		await waitForOutput(/No deployable files found/, w);
 		writeProjectFile(root, "nothing/now-something.bpmn", BPMN("n"));
 		await waitForDeploymentOf(["now-something.bpmn"], baseline, w);
+	});
+
+	test("with --force, file changes made while the descriptor is invalid are deployed once it is fixed", async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root, ["--force"]);
+		const continuing = /Continuing to watch \(--force\)/g;
+		writeFileSync(join(root, "camunda.json"), descriptor([42]));
+		await waitUntil(() => countMatches(w, continuing) >= 1, w);
+		writeFileSync(
+			join(root, "resources", "prompt.md"),
+			"# edited while broken",
+		);
+		// The edit is processed (and still blocked) by a second resolution.
+		await waitUntil(() => countMatches(w, continuing) >= 2, w);
+		// Restoring a descriptor with the same selected set must still
+		// deploy the edit that happened during recovery.
+		writeFileSync(
+			join(root, "camunda.json"),
+			descriptor(["resources/**", "!resources/drafts/"]),
+		);
+		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
 	});
 
 	test("an invalid descriptor at startup fails without --force", () => {

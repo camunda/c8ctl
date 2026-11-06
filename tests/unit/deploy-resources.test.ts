@@ -394,6 +394,21 @@ describe("Spec: Resource selection and matching", () => {
 		assert.deepStrictEqual(withExplicitFile.names, ["main.bpmn", "notes.md"]);
 	});
 
+	test('"same pattern engine" — directory pruning agrees with the matcher for "." segments', async () => {
+		const s = compileDeployResources(["resources/./sub/*.bpmn"]);
+		assert.ok(s.selects("resources/sub/main.bpmn"));
+		assert.ok(s.couldSelectUnder("resources/sub"));
+		const root = project(
+			{ deployResources: ["resources/./sub/*.bpmn"] },
+			{
+				"resources/sub/main.bpmn": BPMN("main"),
+			},
+		);
+		const result = await deployDryRun([root]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(result.names, ["main.bpmn"]);
+	});
+
 	test('"same pattern engine" — directory pruning agrees with the matcher for repeated separators', async () => {
 		const s = compileDeployResources(["resources//sub/*.bpmn"]);
 		assert.ok(s.selects("resources/sub/main.bpmn"));
