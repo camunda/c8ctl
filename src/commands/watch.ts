@@ -196,8 +196,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
+	// A `deployResources` selection ignores .c8ignore, so it is not read.
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
-	const ig = loadIgnoreRules(ignoreBaseDir);
+	const ig = descriptorMode ? null : loadIgnoreRules(ignoreBaseDir);
 
 	// Keep track of recently deployed files to avoid duplicate deploys
 	const recentlyDeployed = new Map<string, number>();
@@ -221,12 +222,14 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	 * and redeploy when a selected file changed or the selected set did.
 	 */
 	const onDescriptorModeChange = async (root: string): Promise<void> => {
+		// Pending changes are kept until a resolution succeeds, so edits made
+		// while the descriptor is invalid (--force) are deployed on recovery.
 		const changed = [...pendingChanges];
-		pendingChanges.clear();
 
 		let next: string[];
 		try {
 			next = resolveSelection(root);
+			pendingChanges.clear();
 		} catch (error) {
 			const err = normalizeToError(error, "Invalid resource selection");
 			logger.error("Invalid resource selection", err);
@@ -342,7 +345,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const fullPath = isDirectory ? resolve(path, filename) : path;
 
 				// Skip files matching .c8ignore rules
-				if (isIgnored(ig, fullPath, ignoreBaseDir)) {
+				if (ig && isIgnored(ig, fullPath, ignoreBaseDir)) {
 					return;
 				}
 
