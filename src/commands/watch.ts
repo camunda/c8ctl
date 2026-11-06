@@ -250,7 +250,14 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		const selectedFileChanged = changed.some(
 			(rel) => rel !== CAMUNDA_PROJECT_FILE && touches(rel),
 		);
-		if (!setChanged && !selectedFileChanged) return;
+		if (!setChanged && !selectedFileChanged) {
+			if (changed.includes(CAMUNDA_PROJECT_FILE)) {
+				logger.info(
+					"camunda.json changed; the selected resources are unchanged — not redeploying",
+				);
+			}
+			return;
+		}
 
 		logger.info(
 			`\n🔄 Change detected: ${changed.join(", ")} — deploying ${next.length} selected resource(s)`,
