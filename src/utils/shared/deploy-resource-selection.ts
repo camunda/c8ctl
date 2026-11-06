@@ -239,7 +239,9 @@ export function compileDeployResources(
 					// Braces and extglobs can hide a `/` inside a group, so a
 					// per-segment check is not reliable — walk conservatively.
 					/[{}()]/.test(glob) ||
-					globCouldMatchBelow(dirSegments, glob.split("/")),
+					// Empty segments (`a//b`) are dropped, as the native
+					// matcher collapses repeated separators.
+					globCouldMatchBelow(dirSegments, glob.split("/").filter(Boolean)),
 			);
 		},
 	};
@@ -249,10 +251,13 @@ export function compileDeployResources(
  * Walk `projectRoot` and return the project-relative (`/`-separated)
  * paths of every file the selector selects, sorted.
  *
- * - Symlinks are followed (same as the default deploy discovery); a
- *   directory reached twice through symlinks is walked once, and files
- *   that resolve to the same real path are kept once (first path in
- *   sorted order wins).
+ * - Symlinks are followed (same as the default deploy discovery). A
+ *   directory reachable under several project-relative paths (a symlink
+ *   alias and its real path) is walked under each of them, because
+ *   patterns are evaluated against the project-relative path. Cycles are
+ *   cut by skipping a directory whose real path is already on the
+ *   current descent (an active ancestor). Files that resolve to the same
+ *   real path are kept once (first path in sorted order wins).
  * - Hidden files and directories are not skipped by the walker — the
  *   pattern engine decides (see module docs).
  * - Nested `camunda.json` folders are ordinary folders here: nested
@@ -263,7 +268,8 @@ export function selectProjectFiles(
 	selector: ResourceSelector,
 ): string[] {
 	const selected: string[] = [];
-	const visitedDirs = new Set<string>();
+	// Real paths of the directories on the current descent.
+	const activeAncestors = new Set<string>();
 
 	const visit = (dirAbs: string, relDir: string): void => {
 		let real = dirAbs;
@@ -272,8 +278,8 @@ export function selectProjectFiles(
 		} catch {
 			return;
 		}
-		if (visitedDirs.has(real)) return;
-		visitedDirs.add(real);
+		if (activeAncestors.has(real)) return;
+		activeAncestors.add(real);
 
 		for (const entry of readdirSync(dirAbs).sort()) {
 			const abs = join(dirAbs, entry);
@@ -291,6 +297,7 @@ export function selectProjectFiles(
 				selected.push(rel);
 			}
 		}
+		activeAncestors.delete(real);
 	};
 	visit(projectRoot, "");
 
