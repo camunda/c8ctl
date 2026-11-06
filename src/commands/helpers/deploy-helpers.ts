@@ -681,23 +681,31 @@ export function collectResourcesForPaths(
 
 	// Load .c8ignore rules from the effective target directory (which may
 	// be the project root) so that `c8 deploy <target>` picks up the
-	// .c8ignore inside the target. (#258) Projects that select their
-	// resources with `deployResources` never consult .c8ignore, so their
-	// roots do not take part in the base-dir resolution.
-	const scanPaths = plan
-		.filter((entry) => entry.kind !== "descriptor")
+	// .c8ignore inside the target. (#258) Only default scans and explicit
+	// files outside `deployResources` projects consult .c8ignore, so only
+	// they take part in the base-dir resolution — and when none does, the
+	// file is not read at all (a descriptor-only deploy must not fail on an
+	// unreadable .c8ignore it ignores anyway).
+	const ignorePaths = plan
+		.filter(
+			(entry) =>
+				entry.kind === "scan" ||
+				(entry.kind === "file" && !entry.inDescriptorProject),
+		)
 		.map((entry) => entry.path);
 	const ignoreBaseDir = resolveIgnoreBaseDir(
-		scanPaths.length > 0 ? scanPaths : effectivePaths,
+		ignorePaths.length > 0 ? ignorePaths : effectivePaths,
 	);
-	const ig = loadIgnoreRules(ignoreBaseDir);
+	const ig =
+		ignorePaths.length > 0 ? loadIgnoreRules(ignoreBaseDir) : undefined;
 
 	// Load !path negation patterns from .c8ignore. Files matching a
 	// negation bypass extension filtering ("deploy them always").
 	// Skipped on servers <8.10 where extended extensions aren't supported.
-	const deployAlways = loadDeployAlways
-		? loadDeployAlwaysRules(ignoreBaseDir)
-		: null;
+	const deployAlways =
+		loadDeployAlways && ignorePaths.length > 0
+			? loadDeployAlwaysRules(ignoreBaseDir)
+			: null;
 
 	const resources: ResourceFile[] = [];
 	const skippedExtensions = new Set<string>();
