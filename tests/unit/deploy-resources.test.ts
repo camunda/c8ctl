@@ -355,6 +355,60 @@ describe("Spec: Resource selection and matching", () => {
 		assert.strictEqual(result.names?.length, 1, `got ${result.names}`);
 	});
 
+	test('"Symlink handling … follow c8ctl\'s existing discovery" — a directory reached through an alias and through its real path is evaluated under both project-relative paths', {
+		skip:
+			process.platform === "win32" &&
+			"symlinks need elevated rights on Windows",
+	}, async () => {
+		const root = project(
+			{ deployResources: ["alias/a.bpmn", "resources/b.bpmn"] },
+			{
+				"resources/a.bpmn": BPMN("a"),
+				"resources/b.bpmn": BPMN("b"),
+			},
+		);
+		symlinkSync(join(root, "resources"), join(root, "alias"));
+		const result = await deployDryRun([root]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(result.names, ["a.bpmn", "b.bpmn"]);
+	});
+
+	test('"The default extension scan and .c8ignore do not apply" — .c8ignore is not even read: a directory named .c8ignore does not abort a descriptor-only deploy', async () => {
+		const root = project(
+			{ deployResources: ["resources/**"] },
+			{
+				"resources/main.bpmn": BPMN("main"),
+				"resources/notes.md": "# notes",
+				".c8ignore/placeholder.txt": "",
+			},
+		);
+		const projectOnly = await deployDryRun([root]);
+		assert.strictEqual(projectOnly.status, 0, projectOnly.stderr);
+		assert.deepStrictEqual(projectOnly.names, ["main.bpmn", "notes.md"]);
+
+		const withExplicitFile = await deployDryRun([
+			root,
+			join(root, "resources", "notes.md"),
+		]);
+		assert.strictEqual(withExplicitFile.status, 0, withExplicitFile.stderr);
+		assert.deepStrictEqual(withExplicitFile.names, ["main.bpmn", "notes.md"]);
+	});
+
+	test('"same pattern engine" — directory pruning agrees with the matcher for repeated separators', async () => {
+		const s = compileDeployResources(["resources//sub/*.bpmn"]);
+		assert.ok(s.selects("resources/sub/main.bpmn"));
+		assert.ok(s.couldSelectUnder("resources/sub"));
+		const root = project(
+			{ deployResources: ["resources//sub/*.bpmn"] },
+			{
+				"resources/sub/main.bpmn": BPMN("main"),
+			},
+		);
+		const result = await deployDryRun([root]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(result.names, ["main.bpmn"]);
+	});
+
 	test('"When deployResources is absent, the existing scan rules apply, filtered by .c8ignore"', async () => {
 		const root = project(
 			{},
