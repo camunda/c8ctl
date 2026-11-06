@@ -239,9 +239,13 @@ export function compileDeployResources(
 					// Braces and extglobs can hide a `/` inside a group, so a
 					// per-segment check is not reliable — walk conservatively.
 					/[{}()]/.test(glob) ||
-					// Empty segments (`a//b`) are dropped, as the native
-					// matcher collapses repeated separators.
-					globCouldMatchBelow(dirSegments, glob.split("/").filter(Boolean)),
+					// Empty (`a//b`) and `.` (`a/./b`) segments are dropped, as
+					// the native matcher collapses them. Dropping more than the
+					// matcher does only makes pruning more conservative.
+					globCouldMatchBelow(
+						dirSegments,
+						glob.split("/").filter((seg) => seg !== "" && seg !== "."),
+					),
 			);
 		},
 	};
