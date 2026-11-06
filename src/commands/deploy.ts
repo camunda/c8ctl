@@ -33,6 +33,8 @@ import {
 	deployResources,
 	logMessage,
 	logSkippedExtensions,
+	planDeployPaths,
+	rejectSelectionFlagsForDescriptor,
 } from "./helpers/deploy-helpers.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
@@ -268,6 +270,30 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			? ctx.positionals
 			: ["."];
 
+	// Projects that declare `deployResources` in camunda.json select their
+	// own resources. Resolve (and validate) the plan up front so an invalid
+	// descriptor or a conflicting selection flag fails before any prompt,
+	// preview, or server call.
+	const plan = planDeployPaths(paths, { announce: false });
+	const descriptorRoots = plan
+		.filter((entry) => entry.kind === "descriptor")
+		.map((entry) => entry.path);
+	rejectSelectionFlagsForDescriptor({
+		descriptorRoots,
+		extensions: flags.extensions,
+		allExtensions: flags["all-extensions"],
+		force: flags.force,
+	});
+	// Only a default directory scan consults the extension allow-list, so
+	// a deploy made solely of `deployResources` selections (plus explicit
+	// files) skips the <8.10 extension fallback and its version check: the
+	// selected set is submitted unchanged and the server rejects resource
+	// types it does not support.
+	const skipVersionCheck =
+		!!flags.force ||
+		(descriptorRoots.length > 0 &&
+			!plan.some((entry) => entry.kind === "scan"));
+
 	// Resolve the active extension allow-list from flags.
 	const extensionList = resolveExtensionList(flags);
 
@@ -374,8 +400,9 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 
 	// ── Pre-flight version check ──
 	// Skip the topology call when --force is set — extension filtering
-	// is bypassed entirely, so the result is unused.
-	const serverSupportsExtensions = flags.force
+	// is bypassed entirely, so the result is unused — and for
+	// `deployResources`-only deploys (see `skipVersionCheck`).
+	const serverSupportsExtensions = skipVersionCheck
 		? true
 		: await checkServerSupportsExtensions(createClient(deployProfile));
 

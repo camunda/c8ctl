@@ -3,16 +3,19 @@
  */
 
 import { existsSync, realpathSync, statSync, watch } from "node:fs";
-import { basename, extname, resolve } from "node:path";
-import { createClient, normalizeToError } from "../core/index.ts";
+import { basename, extname, resolve, sep } from "node:path";
+import { createClient, normalizeToError, SilentError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	CAMUNDA_PROJECT_FILE,
 	DEPLOY_COOLDOWN,
 	DEPLOYABLE_EXTENSIONS,
+	declaresDeployResources,
 	isIgnored,
 	loadIgnoreRules,
+	readDeployResources,
+	resolveDeployResources,
 	resolveIgnoreBaseDir,
 } from "../utils/index.ts";
 import {
@@ -20,6 +23,7 @@ import {
 	deployResources,
 	findProjectRoot,
 	logMessage,
+	rejectSelectionFlagsForDescriptor,
 } from "./helpers/deploy-helpers.ts";
 
 export { DEPLOY_COOLDOWN };
@@ -124,12 +128,54 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		resolvedPaths.push(projectRoot);
 	}
 
+	// ── deployResources (project mode) ─────────────────────────────────
+	// When the project descriptor declares `deployResources`, the watcher
+	// tracks the descriptor-selected set instead of an extension list:
+	// changes to selected files (create, modify, delete, rename) redeploy
+	// the re-resolved set, and a camunda.json edit redeploys only when it
+	// changes the set. `--force` keeps its meaning of "continue after
+	// errors" (including invalid configuration / empty selection).
+	const descriptorMode =
+		projectRoot !== null && declaresDeployResources(projectRoot);
+	if (descriptorMode && projectRoot) {
+		rejectSelectionFlagsForDescriptor({
+			descriptorRoots: [projectRoot],
+			extensions: flags.extensions,
+			allExtensions: flags["all-extensions"],
+		});
+	}
+	/** Resolve the current selection; throws on invalid config / empty set. */
+	const resolveSelection = (root: string): string[] => {
+		const patterns = readDeployResources(root);
+		if (patterns === null) {
+			throw new Error(
+				'"deployResources" was removed from camunda.json. ' +
+					"Restart `c8 watch --project` to watch the default resource scan.",
+			);
+		}
+		return resolveDeployResources(root, patterns);
+	};
+	let selected: string[] = [];
+	if (descriptorMode && projectRoot) {
+		try {
+			selected = resolveSelection(projectRoot);
+		} catch (error) {
+			if (!flags.force) throw error;
+			logger.error(
+				"Invalid resource selection",
+				normalizeToError(error, "Invalid resource selection"),
+			);
+		}
+	}
+
 	// ── Pre-flight version check ──
-	// Always perform the topology check — --force means "continue after
-	// deploy errors", not "bypass extension filtering".
-	const serverSupportsExtensions = await checkServerSupportsExtensions(
-		createClient(ctx.profile),
-	);
+	// Always perform the topology check for extension-based watching —
+	// --force means "continue after deploy errors", not "bypass extension
+	// filtering". A `deployResources` selection is independent of the
+	// server version, so it needs no check.
+	const serverSupportsExtensions = descriptorMode
+		? true
+		: await checkServerSupportsExtensions(createClient(ctx.profile));
 
 	// Clamp watched extensions on servers that don't support extended types.
 	// Note: explicit file paths bypass extension filtering by design, so
@@ -150,8 +196,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 
 	// Load .c8ignore rules from the target directory (not cwd) so that
 	// `c8 watch <target>` picks up the .c8ignore inside the target. (#258)
+	// A `deployResources` selection ignores .c8ignore, so it is not read.
 	const ignoreBaseDir = resolveIgnoreBaseDir(resolvedPaths);
-	const ig = loadIgnoreRules(ignoreBaseDir);
+	const ig = descriptorMode ? null : loadIgnoreRules(ignoreBaseDir);
 
 	// Keep track of recently deployed files to avoid duplicate deploys
 	const recentlyDeployed = new Map<string, number>();
@@ -163,6 +210,106 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	// Set on SIGINT to short-circuit any debounce callback that fires
 	// between signal receipt and the synchronous shutdown work below.
 	let shuttingDown = false;
+	// Rejects the lifecycle promise below — used to stop watching on an
+	// invalid `deployResources` configuration when --force is not set.
+	let failWatch: ((error: Error) => void) | undefined;
+	// Project-relative paths changed since the last descriptor-mode
+	// resolution (collapsed by the debounce window).
+	const pendingChanges = new Set<string>();
+
+	/**
+	 * Descriptor mode: re-resolve the selection after a burst of changes
+	 * and redeploy when a selected file changed or the selected set did.
+	 */
+	const onDescriptorModeChange = async (root: string): Promise<void> => {
+		// Pending changes are kept until a resolution succeeds, so edits made
+		// while the descriptor is invalid (--force) are deployed on recovery.
+		const changed = [...pendingChanges];
+
+		let next: string[];
+		try {
+			next = resolveSelection(root);
+			pendingChanges.clear();
+		} catch (error) {
+			const err = normalizeToError(error, "Invalid resource selection");
+			logger.error("Invalid resource selection", err);
+			if (flags.force) {
+				logger.info("Continuing to watch (--force).");
+				return;
+			}
+			failWatch?.(new SilentError(err.message));
+			return;
+		}
+
+		const previous = new Set(selected);
+		const current = new Set(next);
+		selected = next;
+		const setChanged =
+			previous.size !== current.size || next.some((rel) => !previous.has(rel));
+		const touches = (rel: string) =>
+			[...previous, ...current].some(
+				(file) => file === rel || file.startsWith(`${rel}/`),
+			);
+		const selectedFileChanged = changed.some(
+			(rel) => rel !== CAMUNDA_PROJECT_FILE && touches(rel),
+		);
+		if (!setChanged && !selectedFileChanged) {
+			if (changed.includes(CAMUNDA_PROJECT_FILE)) {
+				logger.info(
+					"camunda.json changed; the selected resources are unchanged — not redeploying",
+				);
+			}
+			return;
+		}
+
+		logger.info(
+			`\n🔄 Change detected: ${changed.join(", ")} — deploying ${next.length} selected resource(s)`,
+		);
+		recentlyDeployed.set(root, Date.now());
+		const ac = new AbortController();
+		inflightDeploys.add(ac);
+		try {
+			await deployResources([root], {
+				profile: ctx.profile,
+				continueOnError: flags.force,
+				continueOnUserError: true,
+				signal: ac.signal,
+				verbose: ctx.verbose,
+			});
+		} catch (error) {
+			if (ac.signal.aborted) return;
+			logger.error(
+				"Failed to deploy project",
+				normalizeToError(error, "Deployment request failed"),
+			);
+		} finally {
+			inflightDeploys.delete(ac);
+		}
+	};
+
+	/** Debounce descriptor-mode changes into one re-resolution. */
+	const scheduleDescriptorModeChange = (root: string, delay: number): void => {
+		const existing = debounceTimers.get(root);
+		if (existing) clearTimeout(existing);
+		debounceTimers.set(
+			root,
+			setTimeout(() => {
+				debounceTimers.delete(root);
+				if (shuttingDown) return;
+				// Within the cooldown, postpone rather than drop: the pending
+				// changes must still be resolved once the window passes.
+				const lastDeploy = recentlyDeployed.get(root);
+				const remaining = lastDeploy
+					? DEPLOY_COOLDOWN - (Date.now() - lastDeploy)
+					: 0;
+				if (remaining > 0) {
+					scheduleDescriptorModeChange(root, remaining);
+					return;
+				}
+				void onDescriptorModeChange(root);
+			}, delay),
+		);
+	};
 
 	// Watch each path
 	const watchers = resolvedPaths.map((path) => {
@@ -176,6 +323,12 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				if (!filename) return;
 
 				const file = filename;
+
+				if (descriptorMode && projectRoot) {
+					pendingChanges.add(filename.split(sep).join("/"));
+					scheduleDescriptorModeChange(projectRoot, DEBOUNCE_DELAY);
+					return;
+				}
 
 				const ext = extname(filename);
 				if (!effectiveExtensions.includes(ext)) {
@@ -192,7 +345,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				const fullPath = isDirectory ? resolve(path, filename) : path;
 
 				// Skip files matching .c8ignore rules
-				if (isIgnored(ig, fullPath, ignoreBaseDir)) {
+				if (ig && isIgnored(ig, fullPath, ignoreBaseDir)) {
 					return;
 				}
 
@@ -292,17 +445,26 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	//   `signal.aborted` and swallow the AbortError instead of logging.
 	// Together these drain the event loop within one tick, so the framework
 	// can return naturally and own the exit code.
-	await new Promise<void>((resolveSignal) => {
-		process.once("SIGINT", () => {
+	await new Promise<void>((resolveSignal, rejectSignal) => {
+		const shutdown = () => {
 			shuttingDown = true;
-			logger.info("\n\n🍹 - bottoms up.");
 			for (const w of watchers) w.close();
 			for (const timer of debounceTimers.values()) clearTimeout(timer);
 			debounceTimers.clear();
 			for (const ac of inflightDeploys) ac.abort();
 			inflightDeploys.clear();
+		};
+		const onSigint = () => {
+			logger.info("\n\n🍹 - bottoms up.");
+			shutdown();
 			resolveSignal();
-		});
+		};
+		failWatch = (error) => {
+			process.off("SIGINT", onSigint);
+			shutdown();
+			rejectSignal(error);
+		};
+		process.once("SIGINT", onSigint);
 
 		// Emit the readiness banner ONLY AFTER both the fs watchers and the
 		// SIGINT handler are registered. Tests poll the "Watching for
@@ -313,7 +475,15 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		// FSEvents on macOS, ReadDirectoryChangesW on Windows) and the
 		// file event is silently lost.
 		logger.info(`👁️  Watching for changes in: ${resolvedPaths.join(", ")}`);
-		logger.info(`📋 Monitoring extensions: ${effectiveExtensions.join(", ")}`);
+		if (descriptorMode) {
+			logger.info(
+				`📋 Monitoring ${selected.length} resource(s) selected by "deployResources" in camunda.json`,
+			);
+		} else {
+			logger.info(
+				`📋 Monitoring extensions: ${effectiveExtensions.join(", ")}`,
+			);
+		}
 		if (projectMode && projectRoot) {
 			logger.info(
 				`📦 Project mode: deploying all resources from ${projectRoot}`,

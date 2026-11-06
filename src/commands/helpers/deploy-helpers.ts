@@ -29,6 +29,7 @@ import {
 import {
 	CAMUNDA_PROJECT_FILE,
 	DEPLOYABLE_EXTENSIONS,
+	declaresDeployResources,
 	type Ignore,
 	isIgnored,
 	loadDeployAlwaysRules,
@@ -36,6 +37,8 @@ import {
 	meetsMinExtensionVersion,
 	PROCESS_APPLICATION_FILE,
 	readCamundaProject,
+	readDeployResources,
+	resolveDeployResources,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
 
@@ -472,6 +475,161 @@ function findDuplicateDefinitionIds(
 }
 
 /**
+ * How one deploy/watch input path is collected.
+ *
+ * - `file`: an explicitly named file — deployed regardless of extension
+ *   and of `deployResources`. `inDescriptorProject` is set when the file
+ *   lives in a project that declares `deployResources`, in which case
+ *   `.c8ignore` is not consulted either.
+ * - `scan`: a directory scanned with the default extension allow-list
+ *   filtered by `.c8ignore` (possibly expanded to its project root).
+ * - `descriptor`: a project root whose `camunda.json` declares
+ *   `deployResources`; the descriptor alone selects the files.
+ */
+export type DeployPathPlan =
+	| { kind: "file"; path: string; inDescriptorProject: boolean }
+	| { kind: "scan"; path: string }
+	| { kind: "descriptor"; path: string; patterns: string[] };
+
+/**
+ * Resolve the input paths of `deploy` / `watch` into a collection plan:
+ * directories expand to their Camunda project root (deduplicated), and a
+ * root whose descriptor declares `deployResources` is selected by that
+ * field. Explicit files are never expanded.
+ *
+ * @throws {Error} When a project's `camunda.json` is invalid JSON or its
+ *   `deployResources` field is invalid (`DeployResourcesError`).
+ */
+export function planDeployPaths(
+	paths: string[],
+	{
+		markerCache = new Map(),
+		announce = true,
+	}: {
+		markerCache?: ProjectMarkerCache;
+		/** Log when a directory expands to an enclosing project root. */
+		announce?: boolean;
+	} = {},
+): DeployPathPlan[] {
+	// ── Project auto-detection ─────────────────────────────────────────
+	// For each directory path, walk up looking for a project marker
+	// (camunda.json or legacy .process-application). If found, expand to
+	// the project root so the entire project is deployed — matching
+	// Desktop Modeler behaviour.
+	// File paths are NOT expanded so that watch-mode single-file deploys
+	// remain scoped to the changed file.
+	const plan: DeployPathPlan[] = [];
+	const seenRoots = new Set<string>();
+	for (const p of paths) {
+		const abs = resolve(p);
+		let isFile = false;
+		try {
+			isFile = statSync(abs).isFile();
+		} catch {
+			// Path does not exist — skip project detection and keep the
+			// absolute path so collectResourceFiles (which silently
+			// skips missing paths) falls through to the "No deployable
+			// files found" guard.
+			plan.push({ kind: "scan", path: abs });
+			continue;
+		}
+
+		if (isFile) {
+			plan.push({
+				kind: "file",
+				path: abs,
+				inDescriptorProject: fileInDescriptorProject(abs, markerCache),
+			});
+			continue;
+		}
+
+		const projectRoot = findProjectRoot(abs, markerCache);
+		if (!projectRoot) {
+			plan.push({ kind: "scan", path: abs });
+			continue;
+		}
+		// Deduplicate: multiple input dirs inside the same project
+		// should only trigger one resource walk from the project root.
+		// Use realpathSync for the dedup key to handle symlinks/case.
+		let canonical = projectRoot;
+		try {
+			canonical = realpathSync(projectRoot);
+		} catch {
+			// Best-effort fallback.
+		}
+		if (seenRoots.has(canonical)) continue;
+		seenRoots.add(canonical);
+		// Tell the user when the deploy scope widened beyond the
+		// paths they named — a stray marker in a parent directory
+		// should never silently expand the deploy.
+		if (announce && projectRoot !== abs) {
+			logMessage(`📦 Deploying Camunda project at ${projectRoot}`);
+		}
+		const patterns = readDeployResources(projectRoot);
+		plan.push(
+			patterns === null
+				? { kind: "scan", path: projectRoot }
+				: { kind: "descriptor", path: projectRoot, patterns },
+		);
+	}
+	return plan;
+}
+
+/**
+ * Reject resource-selection flags when an input path expands to a project
+ * that selects its resources with `deployResources`: the descriptor is the
+ * single source of truth for the project's resource set.
+ *
+ * `force` is only passed by `deploy`, where it bypasses extension
+ * filtering. `watch --project --force` keeps its separate meaning
+ * (continue after deployment errors) and is never rejected.
+ */
+export function rejectSelectionFlagsForDescriptor({
+	descriptorRoots,
+	extensions,
+	allExtensions,
+	force,
+}: {
+	descriptorRoots: readonly string[];
+	extensions?: string;
+	allExtensions?: boolean;
+	force?: boolean;
+}): void {
+	if (descriptorRoots.length === 0) return;
+	const conflicting = [
+		extensions !== undefined ? "--extensions" : null,
+		allExtensions ? "--all-extensions" : null,
+		force ? "--force" : null,
+	].filter((flag): flag is string => flag !== null);
+	if (conflicting.length === 0) return;
+	const descriptor = join(descriptorRoots[0], CAMUNDA_PROJECT_FILE);
+	throw new Error(
+		`${conflicting.join(", ")} cannot be used with a project that selects its resources ` +
+			`with "deployResources" (${descriptor}). ` +
+			`The descriptor defines which files deploy: add or adjust patterns in "deployResources" instead, ` +
+			"or name files explicitly on the command line (explicitly named files always deploy).",
+	);
+}
+
+/**
+ * Whether an explicitly named file lives inside a project whose
+ * descriptor declares `deployResources`. Lenient: a broken descriptor
+ * never blocks an explicit file (explicit files deploy regardless of
+ * `deployResources`).
+ */
+function fileInDescriptorProject(
+	file: string,
+	markerCache: ProjectMarkerCache,
+): boolean {
+	try {
+		const root = findProjectRoot(dirname(file), markerCache);
+		return root !== null && declaresDeployResources(root);
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Result of collecting deployable resources, including any extensions
  * that were skipped during directory walks (for user feedback).
  */
@@ -484,6 +642,8 @@ interface CollectResult {
 	 *  rather than the user-supplied input paths. Used downstream for
 	 *  `ignoreBaseDir` resolution and `basePaths` in `deployResources`. */
 	effectivePaths: string[];
+	/** Project roots whose resources were selected by `deployResources`. */
+	descriptorRoots: string[];
 }
 
 /**
@@ -512,86 +672,68 @@ export function collectResourcesForPaths(
 		);
 	}
 
-	// ── Project auto-detection ─────────────────────────────────────────
-	// For each directory path, walk up looking for a project marker
-	// (camunda.json or legacy .process-application). If found, expand to
-	// the project root so the entire project is deployed — matching
-	// Desktop Modeler behaviour.
-	// File paths are NOT expanded so that watch-mode single-file deploys
-	// remain scoped to the changed file.
-	const effectivePaths: string[] = [];
-	const seenRoots = new Set<string>();
 	// Memoizes marker checks across the scope walk and the per-file
 	// display tagging below — the descriptor would otherwise be read and
 	// parsed once per collected file.
 	const markerCache: ProjectMarkerCache = new Map();
-	for (const p of paths) {
-		const abs = resolve(p);
-		let isFile = false;
-		try {
-			isFile = statSync(abs).isFile();
-		} catch {
-			// Path does not exist — skip project detection and keep the
-			// absolute path so collectResourceFiles (which silently
-			// skips missing paths) falls through to the "No deployable
-			// files found" guard.
-			effectivePaths.push(abs);
-			continue;
-		}
-
-		if (isFile) {
-			effectivePaths.push(abs);
-			continue;
-		}
-
-		const projectRoot = findProjectRoot(abs, markerCache);
-		if (projectRoot) {
-			// Deduplicate: multiple input dirs inside the same project
-			// should only trigger one resource walk from the project root.
-			// Use realpathSync for the dedup key to handle symlinks/case.
-			let canonical = projectRoot;
-			try {
-				canonical = realpathSync(projectRoot);
-			} catch {
-				// Best-effort fallback.
-			}
-			if (!seenRoots.has(canonical)) {
-				seenRoots.add(canonical);
-				effectivePaths.push(projectRoot);
-				// Tell the user when the deploy scope widened beyond the
-				// paths they named — a stray marker in a parent directory
-				// should never silently expand the deploy.
-				if (projectRoot !== abs) {
-					logMessage(`📦 Deploying Camunda project at ${projectRoot}`);
-				}
-			}
-		} else {
-			effectivePaths.push(abs);
-		}
-	}
+	const plan = planDeployPaths(paths, { markerCache });
+	const effectivePaths = plan.map((entry) => entry.path);
 
 	// Load .c8ignore rules from the effective target directory (which may
 	// be the project root) so that `c8 deploy <target>` picks up the
-	// .c8ignore inside the target. (#258)
-	const ignoreBaseDir = resolveIgnoreBaseDir(effectivePaths);
-	const ig = loadIgnoreRules(ignoreBaseDir);
+	// .c8ignore inside the target. (#258) Only default scans and explicit
+	// files outside `deployResources` projects consult .c8ignore, so only
+	// they take part in the base-dir resolution — and when none does, the
+	// file is not read at all (a descriptor-only deploy must not fail on an
+	// unreadable .c8ignore it ignores anyway).
+	const ignorePaths = plan
+		.filter(
+			(entry) =>
+				entry.kind === "scan" ||
+				(entry.kind === "file" && !entry.inDescriptorProject),
+		)
+		.map((entry) => entry.path);
+	const ignoreBaseDir = resolveIgnoreBaseDir(
+		ignorePaths.length > 0 ? ignorePaths : effectivePaths,
+	);
+	const ig =
+		ignorePaths.length > 0 ? loadIgnoreRules(ignoreBaseDir) : undefined;
 
 	// Load !path negation patterns from .c8ignore. Files matching a
 	// negation bypass extension filtering ("deploy them always").
 	// Skipped on servers <8.10 where extended extensions aren't supported.
-	const deployAlways = loadDeployAlways
-		? loadDeployAlwaysRules(ignoreBaseDir)
-		: null;
+	const deployAlways =
+		loadDeployAlways && ignorePaths.length > 0
+			? loadDeployAlwaysRules(ignoreBaseDir)
+			: null;
 
 	const resources: ResourceFile[] = [];
 	const skippedExtensions = new Set<string>();
 	const skippedFiles: string[] = [];
-	effectivePaths.forEach((path) => {
+	for (const entry of plan) {
+		if (entry.kind === "descriptor") {
+			// `deployResources` is an allowlist: the descriptor alone selects
+			// the files — no extension filter, no .c8ignore, no hidden-file
+			// pre-skip, no nested-project boundary.
+			for (const rel of resolveDeployResources(entry.path, entry.patterns)) {
+				const file = join(entry.path, ...rel.split("/"));
+				resources.push({
+					path: file,
+					name: basename(file),
+					content: readFileSync(file),
+					isBuildingBlock: false,
+					isProcessApplication: true,
+					groupPath: entry.path,
+				});
+			}
+			continue;
+		}
+		const bypassIgnore = entry.kind === "file" && entry.inDescriptorProject;
 		collectResourceFiles(
-			path,
+			entry.path,
 			resources,
 			undefined,
-			ig,
+			bypassIgnore ? undefined : ig,
 			ignoreBaseDir,
 			force,
 			extensionList,
@@ -600,7 +742,7 @@ export function collectResourcesForPaths(
 			deployAlways ?? undefined,
 			markerCache,
 		);
-	});
+	}
 
 	// Deduplicate resources by canonical path — can happen when an explicit
 	// file path is also covered by a project-root or scoped-directory walk,
@@ -637,6 +779,9 @@ export function collectResourcesForPaths(
 		skippedExtensions,
 		skippedFiles,
 		effectivePaths,
+		descriptorRoots: plan
+			.filter((entry) => entry.kind === "descriptor")
+			.map((entry) => entry.path),
 	};
 }
 
