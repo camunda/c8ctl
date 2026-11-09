@@ -7,8 +7,11 @@ name: Breaking change guard
 # The repo squash-merges with "PR title + commit messages", so both the PR
 # title and every commit message on the PR are scanned.
 
+# pull_request_target runs the workflow definition from the base branch, so a
+# PR cannot replace this guard with a no-op. It is safe here: the job only
+# reads PR metadata via the API and never checks out or executes PR code.
 on:
-  pull_request:
+  pull_request_target:
     branches: [ main ]
     types: [ opened, edited, synchronize, reopened, labeled, unlabeled ]
 
@@ -38,12 +41,16 @@ jobs:
           # Conventional Commits breaking markers:
           #   subject: <type>(<scope>)!: ...   or   <type>!: ...
           #   footer:  BREAKING CHANGE: ...    or   BREAKING-CHANGE: ...
+          # The footer match mirrors conventional-commits-parser's note
+          # pattern: case-insensitive, optional leading whitespace / '*' / '|'.
           subject_re='^[a-zA-Z]+(\([^)]*\))?!:'
-          footer_re='^BREAKING[ -]CHANGE:'
+          footer_re='^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]'
 
           found=()
 
-          if printf '%s\n' "$PR_TITLE" | grep -qE "$subject_re"; then
+          # Here-strings (not producer pipelines) avoid SIGPIPE under pipefail
+          # when grep -q / head exit early on large inputs.
+          if grep -qE "$subject_re" <<< "$PR_TITLE"; then
             found+=("PR title: $PR_TITLE")
           fi
 
@@ -57,9 +64,9 @@ jobs:
             # --jq emits a newline after each NUL-terminated message, so every
             # message after the first starts with a separator newline. Strip it.
             msg="${msg#$'\n'}"
-            subject=$(printf '%s\n' "$msg" | head -n1)
-            if printf '%s\n' "$subject" | grep -qE "$subject_re" \
-              || printf '%s\n' "$msg" | grep -qE "$footer_re"; then
+            subject="${msg%%$'\n'*}"
+            if grep -qE "$subject_re" <<< "$subject" \
+              || grep -qiE "$footer_re" <<< "$msg"; then
               found+=("commit: $subject")
             fi
           done < "$messages_file"
