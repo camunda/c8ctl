@@ -588,7 +588,7 @@ describe("two-stage parser: globals before and after the verb", () => {
 			"--json",
 			"--dry-run",
 			"list",
-			"--profile=__unused__",
+			"--profile=local",
 			"pi",
 		);
 		assert.strictEqual(payload.command, "list process-instances");
@@ -730,7 +730,7 @@ describe("two-stage parser: command-specific flags before the command are reject
 			"--json",
 			"--dry-run",
 			"--profile",
-			"x",
+			"local",
 			"list",
 			"pi",
 		);
