@@ -429,6 +429,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		skippedFiles,
 		skippedExtensions,
 		effectivePaths: resolvedPaths,
+		ignoreBaseDir,
 	} = collectResourcesForPaths(
 		paths,
 		flags.force,
@@ -447,10 +448,13 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		serverSupportsExtensions &&
 		isInteractive()
 	) {
+		// Persist "always" choices to the .c8ignore that is actually read —
+		// skipped files only come from default scans, so it is always set
+		// here. `deployResources` project roots don't take part in it.
 		extraPaths = await handleSkippedFiles(
 			skippedFiles,
 			skippedExtensions,
-			basePath,
+			ignoreBaseDir ?? basePath,
 		);
 	} else if (skippedFiles.length > 0) {
 		logSkippedExtensions(skippedExtensions);

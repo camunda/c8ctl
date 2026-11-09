@@ -644,6 +644,10 @@ interface CollectResult {
 	effectivePaths: string[];
 	/** Project roots whose resources were selected by `deployResources`. */
 	descriptorRoots: string[];
+	/** Directory whose `.c8ignore` was consulted, or `null` when no entry
+	 *  needed `.c8ignore` (only `deployResources` projects). Interactive
+	 *  "always" choices must write `.c8ignore` here. */
+	ignoreBaseDir: string | null;
 }
 
 /**
@@ -782,6 +786,7 @@ export function collectResourcesForPaths(
 		descriptorRoots: plan
 			.filter((entry) => entry.kind === "descriptor")
 			.map((entry) => entry.path),
+		ignoreBaseDir: ignorePaths.length > 0 ? ignoreBaseDir : null,
 	};
 }
 
