@@ -28,7 +28,7 @@
   ],
   "packageRules": [
     {
-      "description": "bpmnlint 12 requires Node >= 24 and adds nothing over 11.x; stay on 11 while Node 22 is supported. See https://github.com/camunda/c8ctl/issues/752",
+      "description": "bpmnlint 12 requires Node >= 24; stay on 11.x while the toolchain pins Node 22. See https://github.com/camunda/c8ctl/issues/752",
       "matchPackageNames": ["bpmnlint"],
       "allowedVersions": "<12"
     },
