@@ -56,6 +56,8 @@ Validation:
 - A `camunda.json` that exists but can't be read (for example a folder with that name, or a file without read permission) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case.
 - A pattern that matches no file is silently ignored.
 
+Naming the project's `camunda.json` explicitly on the command line (`c8 deploy camunda.json`) is refused, as it was before `deployResources`. A pattern such as `**/*` does select the root `camunda.json` in a project deployment, because patterns behave exactly as written. Add `!camunda.json` to leave it out.
+
 Nested projects are not supported. A `camunda.json` in a subfolder doesn't exclude that subfolder from the selection. Add a `!` pattern to exclude it.
 
 For usage scenarios, such as generated resources, hidden files, and command-line flags, see [Select resources with `deployResources`](development-workflows.md#select-resources-with-deployresources).
