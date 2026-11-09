@@ -47,14 +47,22 @@ jobs:
             found+=("PR title: $PR_TITLE")
           fi
 
+          # Fetch in the foreground so an API failure fails the job (set -e)
+          # instead of silently yielding zero commits to scan.
+          messages_file=$(mktemp)
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
+            --jq '.[].commit.message + "\u0000"' > "$messages_file"
+
           while IFS= read -r -d '' msg; do
+            # --jq emits a newline after each NUL-terminated message, so every
+            # message after the first starts with a separator newline. Strip it.
+            msg="${msg#$'\n'}"
             subject=$(printf '%s\n' "$msg" | head -n1)
             if printf '%s\n' "$subject" | grep -qE "$subject_re" \
               || printf '%s\n' "$msg" | grep -qE "$footer_re"; then
               found+=("commit: $subject")
             fi
-          done < <(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
-                     --jq '.[].commit.message + "\u0000"')
+          done < "$messages_file"
 
           if [ ${#found[@]} -eq 0 ]; then
             echo "No breaking-change markers found."
