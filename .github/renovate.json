@@ -28,6 +28,11 @@
   ],
   "packageRules": [
     {
+      "description": "bpmnlint 12 requires Node >= 24 and adds nothing over 11.x; stay on 11 while Node 22 is supported. See https://github.com/camunda/c8ctl/issues/752",
+      "matchPackageNames": ["bpmnlint"],
+      "allowedVersions": "<12"
+    },
+    {
       "description": "AGENTS.md pins the toolchain to Node 22 LTS and treats .nvmrc as authoritative; never bump the Node version.",
       "matchDatasources": ["node-version"],
       "enabled": false
