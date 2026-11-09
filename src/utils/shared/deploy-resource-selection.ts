@@ -89,13 +89,16 @@ function patternProblem(pattern: string): string | null {
 	if (trimmed.startsWith("#")) {
 		return "comments are not supported in deployResources";
 	}
-	// Absolute paths: POSIX root, Windows drive letter, UNC / backslash root.
+	// A single leading `/` is the gitignore root anchor (same as .c8ignore),
+	// not an absolute path. Absolute paths that cannot be anchors are
+	// invalid: a Windows drive letter, a UNC root (`//server`, `\\server`)
+	// or any leading backslash.
 	if (
-		body.startsWith("/") ||
 		/^[A-Za-z]:/.test(body) ||
+		body.startsWith("//") ||
 		body.startsWith("\\")
 	) {
-		return "patterns are relative to the project root; absolute paths are not allowed";
+		return "patterns are relative to the project root; drive-letter, UNC and backslash-rooted paths are not allowed (a leading / anchors the pattern to the project root)";
 	}
 	if (body.split(/[/\\]/).includes("..")) {
 		return "patterns must stay inside the project; '..' is not allowed";

@@ -317,10 +317,10 @@ describe("Spec: Resource selection and matching", () => {
 	});
 
 	for (const [label, pattern] of [
-		["a POSIX absolute path", "/resources/**"],
+		["a UNC path", "//server/share/**"],
 		["a Windows drive path", "C:/project/**"],
 		["a Windows backslash path", "C:\\project\\**"],
-		["a negated absolute path", "!/resources/**"],
+		["a negated drive path", "!C:/project/drafts/**"],
 		["a leading ..", "../shared/**"],
 		["an embedded ..", "resources/../../shared/**"],
 		["a .. hidden by trailing whitespace", "resources/.. "],
@@ -338,6 +338,40 @@ describe("Spec: Resource selection and matching", () => {
 			);
 		});
 	}
+
+	test('"anchoring … inherited from that engine" — a leading / anchors the pattern to the project root, as in .c8ignore', async () => {
+		const root = project(
+			{ deployResources: ["/process.bpmn"] },
+			{
+				"process.bpmn": BPMN("root-process"),
+				"sub/process.bpmn": BPMN("sub-process"),
+			},
+		);
+		const result = await deployDryRun([root]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(result.names, ["process.bpmn"]);
+		const s = compileDeployResources(["/process.bpmn"]);
+		assert.ok(s.selects("process.bpmn"));
+		assert.ok(!s.selects("sub/process.bpmn"));
+		const unanchored = compileDeployResources(["process.bpmn"]);
+		assert.ok(unanchored.selects("sub/process.bpmn"), "no slash: any depth");
+	});
+
+	test('"anchoring … inherited from that engine" — a negated leading / deselects only at the project root', () => {
+		const s = compileDeployResources(["**/*.bpmn", "!/process.bpmn"]);
+		assert.ok(!s.selects("process.bpmn"));
+		assert.ok(s.selects("sub/process.bpmn"));
+	});
+
+	test('"A pattern matching no files: silently ignored" — an absolute-looking /Users/... pattern is root-anchored and simply matches nothing', async () => {
+		const root = project(
+			{ deployResources: ["/Users/me/project/**", "resources/**"] },
+			{ "resources/main.bpmn": BPMN("main") },
+		);
+		const result = await deployDryRun([root]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.deepStrictEqual(result.names, ["main.bpmn"]);
+	});
 
 	test('"Symlink handling and duplicate detection follow c8ctl\'s existing discovery (realpath-based)" — a symlinked duplicate deploys once and a symlink loop terminates', {
 		skip:
