@@ -145,6 +145,20 @@ Rules:
 - Keep subject concise; body can include details, rationale, links.
 - Prefix breaking changes with BREAKING CHANGE: either in body or footer.
 
+#### Breaking changes are rare — fixing a bug is not one
+
+A `BREAKING CHANGE:` footer in a commit message makes semantic-release cut a **new major version** (the configured Angular preset recognizes only this form — a `!` after the type/scope or a `BREAKING-CHANGE:` footer alone does **not** trigger the major release). The merge guard treats all three forms as breaking-change *intent* and blocks merging until a maintainer applies the `ack-breaking-change` label — so if you mean to ship a major version, always include the `BREAKING CHANGE:` footer, even when you also use `!`. Use these markers only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
+
+Do **not** mark a change as breaking just because:
+
+- it fixes a bug that some users may have relied on (for example, a command that silently fell back to the wrong cluster now fails with an error) — that is a `fix:`
+- it changes an exit code, error message or output on a path that was already wrong
+- it tightens validation of input that was never valid
+
+Describe the user-visible behaviour change in the commit body instead, so it still shows up in the release notes.
+
+If you are unsure, default to non-breaking and ask the engineer. A PR whose title or commits contain a breaking-change marker cannot be merged until a maintainer applies the `ack-breaking-change` label (enforced by [`.github/workflows/breaking-change-guard.yml`](.github/workflows/breaking-change-guard.yml)). AI agents must never apply that label themselves.
+
 #### Review-comment fix-ups
 
 Commits that address PR review comments must use the `chore` type (e.g. `chore:` or `chore(<scope>):`), **not** the `fix` type.

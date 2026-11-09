@@ -1,0 +1,114 @@
+name: Breaking change guard
+
+# A breaking-change marker declares breaking-change intent. Block merging a PR
+# that carries one until a maintainer explicitly applies the
+# `ack-breaking-change` label.
+#
+# The guard deliberately matches more forms than the release tooling does: with
+# the default (Angular) preset, only a `BREAKING CHANGE:` footer makes
+# semantic-release cut a new major version — a `!` subject or a
+# `BREAKING-CHANGE:` footer alone does not. Those forms still signal intent, so
+# they require the label too.
+#
+# The repo squash-merges with "PR title + commit messages", so both the PR
+# title and every commit message on the PR are scanned.
+
+# pull_request_target runs the workflow definition from the base branch, so a
+# PR cannot replace this guard with a no-op. It is safe here: the job only
+# reads PR metadata via the API and never checks out or executes PR code.
+on:
+  pull_request_target:
+    branches: [ main ]
+    types: [ opened, edited, synchronize, reopened, labeled, unlabeled ]
+
+concurrency:
+  group: breaking-change-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  breaking-change-guard:
+    name: Breaking change acknowledged
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for unacknowledged breaking-change markers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          ACKED: ${{ contains(github.event.pull_request.labels.*.name, 'ack-breaking-change') }}
+        run: |
+          set -euo pipefail
+
+          # Conventional Commits breaking markers:
+          #   subject: <type>(<scope>)!: ...   or   <type>!: ...
+          #   footer:  BREAKING CHANGE: ...    or   BREAKING-CHANGE: ...
+          # The footer match mirrors conventional-commits-parser's note
+          # pattern: case-insensitive, optional leading whitespace / '*' / '|'.
+          subject_re='^[a-zA-Z]+(\([^)]*\))?!:'
+          footer_re='^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]'
+
+          found=()
+
+          # Here-strings (not producer pipelines) avoid SIGPIPE under pipefail
+          # when grep -q / head exit early on large inputs.
+          # The title becomes the squash commit's first line, so check it for
+          # both marker forms (a title like "BREAKING CHANGE: ..." counts too).
+          if grep -qE "$subject_re" <<< "$PR_TITLE" \
+            || grep -qiE "$footer_re" <<< "$PR_TITLE"; then
+            found+=("PR title: $PR_TITLE")
+          fi
+
+          # Fetch in the foreground so an API failure fails the job (set -e)
+          # instead of silently yielding zero commits to scan.
+          messages_file=$(mktemp)
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
+            --jq '.[].commit.message + "\u0000"' > "$messages_file"
+
+          # The PR-commits endpoint caps at 250 commits even with --paginate
+          # (https://docs.github.com/en/rest/pulls/pulls#list-commits-on-a-pull-request).
+          # Fail closed when the scan is incomplete: a breaking footer in an
+          # omitted commit must not slip through unacknowledged.
+          scanned=$(tr -cd '\0' < "$messages_file" | wc -c)
+          total=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .commits)
+          # A maintainer's acknowledgement label overrides an incomplete scan
+          # (the label is the same escape hatch as for a detected marker).
+          if [ "$total" -gt "$scanned" ]; then
+            if [ "$ACKED" = "true" ]; then
+              echo "Only $scanned of $total commits scanned (API limit); acknowledged via the 'ack-breaking-change' label."
+              exit 0
+            fi
+            echo "::error title=Incomplete commit scan::This PR has $total commits but only the first $scanned could be scanned (API limit). Rebase or squash the PR, or have a maintainer apply the 'ack-breaking-change' label if the breaking change is intended."
+            exit 1
+          fi
+
+          while IFS= read -r -d '' msg; do
+            # --jq emits a newline after each NUL-terminated message, so every
+            # message after the first starts with a separator newline. Strip it.
+            msg="${msg#$'\n'}"
+            subject="${msg%%$'\n'*}"
+            if grep -qE "$subject_re" <<< "$subject" \
+              || grep -qiE "$footer_re" <<< "$msg"; then
+              found+=("commit: $subject")
+            fi
+          done < "$messages_file"
+
+          if [ ${#found[@]} -eq 0 ]; then
+            echo "No breaking-change markers found."
+            exit 0
+          fi
+
+          echo "Breaking-change markers found:"
+          printf '  - %s\n' "${found[@]}"
+
+          if [ "$ACKED" = "true" ]; then
+            echo "Acknowledged via the 'ack-breaking-change' label."
+            exit 0
+          fi
+
+          echo "::error title=Unacknowledged breaking change::This PR declares a breaking change. If that is intended, a maintainer must apply the 'ack-breaking-change' label — and make sure the PR title or a commit carries a 'BREAKING CHANGE:' footer, the only form that makes semantic-release cut a major version (a '!' subject or 'BREAKING-CHANGE:' footer does not). If it is a bug fix, drop the '!' and any 'BREAKING CHANGE:' footer from the PR title and commit messages (see AGENTS.md, 'Breaking changes are rare')."
+          exit 1
