@@ -290,6 +290,26 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 		);
 	});
 
+	test('"A camunda.json edit re-resolves the selection and redeploys if the set changed" — successive editor-style saves (write a temp file, then rename over camunda.json) keep being detected', async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root);
+		const saveAtomically = (patterns: string[]) => {
+			const temp = join(root, ".camunda.json.swp");
+			writeFileSync(temp, descriptor(patterns));
+			renameSync(temp, join(root, "camunda.json"));
+		};
+		saveAtomically(["resources/**"]);
+		await waitForDeploymentOf(
+			["main.bpmn", "prompt.md", "wip.bpmn"],
+			baseline,
+			w,
+		);
+		saveAtomically(["resources/*.md"]);
+		await waitForDeploymentOf(["prompt.md"], baseline, w);
+		saveAtomically(["resources/*.bpmn"]);
+		await waitForDeploymentOf(["main.bpmn"], baseline, w);
+	});
+
 	test('"A camunda.json edit … redeploys if the set changed" — an edit that keeps the set does not redeploy', async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
