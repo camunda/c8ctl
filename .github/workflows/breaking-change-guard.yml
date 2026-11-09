@@ -56,7 +56,10 @@ jobs:
 
           # Here-strings (not producer pipelines) avoid SIGPIPE under pipefail
           # when grep -q / head exit early on large inputs.
-          if grep -qE "$subject_re" <<< "$PR_TITLE"; then
+          # The title becomes the squash commit's first line, so check it for
+          # both marker forms (a title like "BREAKING CHANGE: ..." counts too).
+          if grep -qE "$subject_re" <<< "$PR_TITLE" \
+            || grep -qiE "$footer_re" <<< "$PR_TITLE"; then
             found+=("PR title: $PR_TITLE")
           fi
 
