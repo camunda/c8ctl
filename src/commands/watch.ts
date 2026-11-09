@@ -169,6 +169,12 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	 * saving by delete-and-recreate): the change is resolved again once the
 	 * new file appears, never via the default scan.
 	 */
+	// Descriptor read discipline (see `planDeployPaths`): at startup the
+	// descriptor read while finding the project root decides everything;
+	// afterwards each re-resolution reads it once (`resolveSelection`) and
+	// the redeploy uses exactly that snapshot (`resolvedPatterns`). The
+	// polling and the check after arming only detect changes and route
+	// them to a re-resolution; they never decide what is deployed.
 	// Patterns of the last successful resolution: the redeploy uses them
 	// instead of re-reading camunda.json, which may change mid-deploy.
 	let resolvedPatterns: string[] = [];
@@ -552,6 +558,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			: null;
 	if (descriptorFile && projectRoot) {
 		const root = projectRoot;
+		// Change detection only (stat polling): never decides the selection.
 		watchFile(descriptorFile, { interval: 250 }, (current, previous) => {
 			if (
 				current.mtimeMs === previous.mtimeMs &&

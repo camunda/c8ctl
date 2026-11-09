@@ -29,8 +29,9 @@ import {
 import {
 	CAMUNDA_PROJECT_FILE,
 	type CamundaProject,
+	DEPLOY_RESOURCES_FIELD,
 	DEPLOYABLE_EXTENSIONS,
-	declaresDeployResources,
+	deployResourcesStateOf,
 	type Ignore,
 	isIgnored,
 	loadDeployAlwaysRules,
@@ -38,7 +39,6 @@ import {
 	meetsMinExtensionVersion,
 	PROCESS_APPLICATION_FILE,
 	readCamundaProject,
-	readDeployResources,
 	readProjectDescriptor,
 	resolveDeployResources,
 	resolveIgnoreBaseDir,
@@ -227,8 +227,17 @@ function findGroupRoot(
 		}
 
 		// Check if this directory is a Camunda project root
-		// (camunda.json or legacy .process-application marker)
-		if (hasProjectMarker(currentDir, cache)) {
+		// (camunda.json or legacy .process-application marker). Display
+		// tagging only: it runs after the plan was resolved, so a
+		// descriptor that changed or broke meanwhile must not fail the run
+		// (it cannot change what is deployed either).
+		let isProjectRoot = false;
+		try {
+			isProjectRoot = hasProjectMarker(currentDir, cache);
+		} catch {
+			isProjectRoot = false;
+		}
+		if (isProjectRoot) {
 			return { type: "pa", root: currentDir };
 		}
 
@@ -518,6 +527,17 @@ export type DeployPathPlan =
  * root whose descriptor declares `deployResources` is selected by that
  * field. Explicit files are never expanded.
  *
+ * Descriptor read discipline: this is the single place where a deploy run
+ * reads `camunda.json` to decide what gets deployed. Each descriptor is
+ * read once (while finding the project root) and every decision of the
+ * run — project mode, `deployResources` patterns, whether `.c8ignore`
+ * applies to an explicitly named file — derives from that snapshot. Later
+ * steps (dry-run preview, collection, deployment) receive the plan and
+ * must not read the descriptor again. `watch --project` follows the same
+ * rule per redeploy (see `watch.ts`). Other reads of `camunda.json`
+ * (display tagging and the nested-project skip of a default scan) only
+ * affect default-scan entries, never a `deployResources` selection.
+ *
  * @throws {Error} When a project's `camunda.json` is invalid JSON or its
  *   `deployResources` field is invalid (`DeployResourcesError`).
  */
@@ -540,6 +560,8 @@ export function planDeployPaths(
 	// File paths are NOT expanded so that watch-mode single-file deploys
 	// remain scoped to the changed file.
 	const plan: DeployPathPlan[] = [];
+	// The snapshot: the descriptor read for each project root found.
+	const descriptors = new Map<string, CamundaProject>();
 	const seenRoots = new Set<string>();
 	for (const p of paths) {
 		const abs = resolve(p);
@@ -559,12 +581,16 @@ export function planDeployPaths(
 			plan.push({
 				kind: "file",
 				path: abs,
-				inDescriptorProject: fileInDescriptorProject(abs, markerCache),
+				inDescriptorProject: fileInDescriptorProject(
+					abs,
+					markerCache,
+					descriptors,
+				),
 			});
 			continue;
 		}
 
-		const projectRoot = findProjectRoot(abs, markerCache);
+		const projectRoot = findProjectRoot(abs, markerCache, descriptors);
 		if (!projectRoot) {
 			plan.push({ kind: "scan", path: abs });
 			continue;
@@ -586,11 +612,14 @@ export function planDeployPaths(
 		if (announce && projectRoot !== abs) {
 			logMessage(`📦 Deploying Camunda project at ${projectRoot}`);
 		}
-		const patterns = readDeployResources(projectRoot);
+		const state = deployResourcesStateOf(
+			descriptors.get(projectRoot) ?? null,
+			projectRoot,
+		);
 		plan.push(
-			patterns === null
-				? { kind: "scan", path: projectRoot }
-				: { kind: "descriptor", path: projectRoot, patterns },
+			state.kind === "patterns"
+				? { kind: "descriptor", path: projectRoot, patterns: state.patterns }
+				: { kind: "scan", path: projectRoot },
 		);
 	}
 	return plan;
@@ -641,10 +670,15 @@ export function rejectSelectionFlagsForDescriptor({
 function fileInDescriptorProject(
 	file: string,
 	markerCache: ProjectMarkerCache,
+	descriptors: Map<string, CamundaProject>,
 ): boolean {
 	try {
-		const root = findProjectRoot(dirname(file), markerCache);
-		return root !== null && declaresDeployResources(root);
+		const root = findProjectRoot(dirname(file), markerCache, descriptors);
+		const descriptor = root === null ? undefined : descriptors.get(root);
+		return (
+			descriptor !== undefined &&
+			Object.hasOwn(descriptor, DEPLOY_RESOURCES_FIELD)
+		);
 	} catch {
 		return false;
 	}

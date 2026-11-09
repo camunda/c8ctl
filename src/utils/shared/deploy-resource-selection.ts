@@ -43,7 +43,6 @@ import {
 	type CamundaProject,
 	decodeCamundaJson,
 	parseCamundaJson,
-	readCamundaProject,
 } from "./camunda-json.ts";
 import {
 	matchesParsedPattern,
@@ -263,19 +262,6 @@ export function deployResourcesStateOf(
 export function readDeployResources(projectRoot: string): string[] | null {
 	const state = readDeployResourcesState(projectRoot);
 	return state.kind === "patterns" ? state.patterns : null;
-}
-
-/**
- * Lenient presence check: whether the project's descriptor declares a
- * `deployResources` key at all, without validating it. Never throws.
- */
-export function declaresDeployResources(projectRoot: string): boolean {
-	try {
-		const project = readCamundaProject(projectRoot);
-		return project !== null && Object.hasOwn(project, DEPLOY_RESOURCES_FIELD);
-	} catch {
-		return false;
-	}
 }
 
 /** A compiled `deployResources` pattern list. */
@@ -517,9 +503,15 @@ export function selectProjectFiles(
 				// An entry no pattern can select (as a file or as a folder) is
 				// irrelevant. One a pattern can select must never be skipped
 				// silently: the deployment would succeed without it.
+				// The root camunda.json is the descriptor, already read for
+				// this run: it only matters if a pattern selects it as a file
+				// (it may be mid-replacement, e.g. briefly a dangling link).
+				const isDescriptor = relDir === "" && entry === CAMUNDA_PROJECT_FILE;
 				if (
 					!selector.selects(rel) &&
-					(!selector.couldSelectUnder(rel) || selector.excludesFolder(rel))
+					(isDescriptor ||
+						!selector.couldSelectUnder(rel) ||
+						selector.excludesFolder(rel))
 				) {
 					continue;
 				}
