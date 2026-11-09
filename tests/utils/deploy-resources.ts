@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert";
+import { spawn } from "node:child_process";
 import {
 	cpSync,
 	mkdirSync,
@@ -22,6 +23,7 @@ import { listenOnLoopback } from "./http-server.ts";
 import { asyncSpawn, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
+const FAKE_TTY = resolve(import.meta.dirname, "fake-tty.ts");
 
 /** Directory holding the shared parity fixtures. */
 export const PARITY_FIXTURES_DIR = resolve(
@@ -307,6 +309,76 @@ export async function deployTo(
 				},
 			},
 		);
+	} finally {
+		rmSync(dataDir, { recursive: true, force: true });
+	}
+}
+
+/** Keystrokes understood by the interactive `select` prompt. */
+export const KEY = { down: "\u001b[B", enter: "\r" } as const;
+
+/**
+ * Run a real `c8 deploy <args>` against `baseUrl` as if in a terminal.
+ * Once stderr shows `promptText`, `keys` are written to stdin.
+ */
+export async function deployInteractively(
+	baseUrl: string,
+	args: string[],
+	{ promptText, keys }: { promptText: string; keys: string },
+): Promise<SpawnResult> {
+	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-deploy-resources-data-"));
+	try {
+		return await new Promise<SpawnResult>((resolveRun, rejectRun) => {
+			const child = spawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					"--import",
+					FAKE_TTY,
+					CLI,
+					"deploy",
+					...args,
+				],
+				{
+					cwd: tmpdir(),
+					stdio: ["pipe", "pipe", "pipe"],
+					env: {
+						PATH: process.env.PATH,
+						CAMUNDA_BASE_URL: baseUrl,
+						HOME: "/tmp/c8ctl-test-nonexistent-home",
+						C8CTL_DATA_DIR: dataDir,
+						C8CTL_INTERACTIVE: "true",
+						NO_COLOR: "1",
+					},
+				},
+			);
+			let stdout = "";
+			let stderr = "";
+			let sent = false;
+			child.stdout.setEncoding("utf-8");
+			child.stderr.setEncoding("utf-8");
+			child.stdout.on("data", (chunk: string) => {
+				stdout += chunk;
+			});
+			child.stderr.on("data", (chunk: string) => {
+				stderr += chunk;
+				if (!sent && stderr.includes(promptText)) {
+					sent = true;
+					child.stdin.end(keys);
+				}
+			});
+			// Safety net only: a stuck prompt must not hang the test runner.
+			let timedOut = false;
+			const timer = setTimeout(() => {
+				timedOut = true;
+				child.kill("SIGKILL");
+			}, 60_000);
+			child.on("error", rejectRun);
+			child.on("close", (status, signal) => {
+				clearTimeout(timer);
+				resolveRun({ status, signal, stdout, stderr, timedOut });
+			});
+		});
 	} finally {
 		rmSync(dataDir, { recursive: true, force: true });
 	}

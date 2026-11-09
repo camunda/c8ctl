@@ -15,8 +15,10 @@
 
 import assert from "node:assert";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -34,7 +36,9 @@ import {
 	CLI_ERROR_SIGNATURE,
 	createProject,
 	deployDryRun,
+	deployInteractively,
 	deployTo,
+	KEY,
 	type MockCluster,
 	startMockCluster,
 	writeProjectFile,
@@ -552,6 +556,49 @@ describe("Spec: Descriptor precedence (c8ctl)", () => {
 		const result = await deployDryRun([join(root, "main.bpmn"), "--force"]);
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.deepStrictEqual(result.names, ["main.bpmn"]);
+	});
+	test('mixed deploy: "Deploy them always" writes .c8ignore where the default scan reads it, not at the common parent with the deployResources project', async () => {
+		mock = await startMockCluster({ gatewayVersion: "8.10.0" });
+		const descriptorProject = project(
+			{ deployResources: ["**/*.bpmn"] },
+			{
+				"main.bpmn": BPMN("main"),
+			},
+		);
+		const plainDir = join(tempDir, "plain");
+		writeProjectFile(plainDir, "plain.bpmn", BPMN("plain"));
+		writeProjectFile(plainDir, "notes.md", "# notes");
+
+		const result = await deployInteractively(
+			mock.baseUrl,
+			[descriptorProject, plainDir],
+			{
+				promptText: "What do you want to do about these files?",
+				keys: KEY.down + KEY.down + KEY.enter,
+			},
+		);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.ok(!result.timedOut);
+		assert.strictEqual(
+			readFileSync(join(plainDir, ".c8ignore"), "utf-8").includes("!/notes.md"),
+			true,
+		);
+		assert.ok(
+			!existsSync(join(tempDir, ".c8ignore")),
+			"must not write to the common parent of both paths",
+		);
+		assert.deepStrictEqual(mock.deployments, [
+			["main.bpmn", "notes.md", "plain.bpmn"],
+		]);
+
+		// The persisted rule is read back by the next (non-interactive) deploy.
+		const again = await deployTo(mock.baseUrl, [descriptorProject, plainDir]);
+		assert.strictEqual(again.status, 0, again.stderr);
+		assert.deepStrictEqual(mock.deployments[1], [
+			"main.bpmn",
+			"notes.md",
+			"plain.bpmn",
+		]);
 	});
 });
 

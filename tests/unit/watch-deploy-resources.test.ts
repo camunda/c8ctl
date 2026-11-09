@@ -271,7 +271,8 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		const { w, baseline } = await startWatch(root);
 		writeFileSync(join(root, "camunda.json"), descriptor("resources/**"));
 		const code = await w.waitForExit(SAFETY_NET_MS);
-		assert.notStrictEqual(code, 0, w.getOutput());
+		// `null` would mean the watcher had to be killed: it must exit on its own.
+		assert.strictEqual(code, 1, w.getOutput());
 		assert.match(w.getOutput(), /Invalid "deployResources"/);
 		assert.strictEqual(mock.deployments.length, baseline);
 	});
@@ -281,7 +282,8 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		const { w, baseline } = await startWatch(root);
 		writeFileSync(join(root, "camunda.json"), descriptor(["nothing/**"]));
 		const code = await w.waitForExit(SAFETY_NET_MS);
-		assert.notStrictEqual(code, 0, w.getOutput());
+		// `null` would mean the watcher had to be killed: it must exit on its own.
+		assert.strictEqual(code, 1, w.getOutput());
 		assert.match(w.getOutput(), /No deployable files found/);
 		assert.strictEqual(mock.deployments.length, baseline);
 	});
