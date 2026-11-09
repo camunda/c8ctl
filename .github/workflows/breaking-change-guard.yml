@@ -1,0 +1,73 @@
+name: Breaking change guard
+
+# A breaking-change marker makes semantic-release cut a new major version.
+# Block merging a PR that carries one until a maintainer explicitly applies
+# the `ack-breaking-change` label.
+#
+# The repo squash-merges with "PR title + commit messages", so both the PR
+# title and every commit message on the PR are scanned.
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, edited, synchronize, reopened, labeled, unlabeled ]
+
+concurrency:
+  group: breaking-change-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  breaking-change-guard:
+    name: Breaking change acknowledged
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for unacknowledged breaking-change markers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          ACKED: ${{ contains(github.event.pull_request.labels.*.name, 'ack-breaking-change') }}
+        run: |
+          set -euo pipefail
+
+          # Conventional Commits breaking markers:
+          #   subject: <type>(<scope>)!: ...   or   <type>!: ...
+          #   footer:  BREAKING CHANGE: ...    or   BREAKING-CHANGE: ...
+          subject_re='^[a-zA-Z]+(\([^)]*\))?!:'
+          footer_re='^BREAKING[ -]CHANGE:'
+
+          found=()
+
+          if printf '%s\n' "$PR_TITLE" | grep -qE "$subject_re"; then
+            found+=("PR title: $PR_TITLE")
+          fi
+
+          while IFS= read -r -d '' msg; do
+            subject=$(printf '%s\n' "$msg" | head -n1)
+            if printf '%s\n' "$subject" | grep -qE "$subject_re" \
+              || printf '%s\n' "$msg" | grep -qE "$footer_re"; then
+              found+=("commit: $subject")
+            fi
+          done < <(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
+                     --jq '.[].commit.message + "\u0000"')
+
+          if [ ${#found[@]} -eq 0 ]; then
+            echo "No breaking-change markers found."
+            exit 0
+          fi
+
+          echo "Breaking-change markers found:"
+          printf '  - %s\n' "${found[@]}"
+
+          if [ "$ACKED" = "true" ]; then
+            echo "Acknowledged via the 'ack-breaking-change' label — this will release a new major version."
+            exit 0
+          fi
+
+          echo "::error title=Unacknowledged breaking change::This PR would release a new major version. If that is intended, a maintainer must apply the 'ack-breaking-change' label. If it is a bug fix, drop the '!' and any 'BREAKING CHANGE:' footer from the PR title and commit messages (see AGENTS.md, 'Breaking changes are rare')."
+          exit 1
