@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	c8ctl,
 	createClient,
@@ -30,6 +30,7 @@ import {
 import {
 	checkServerSupportsExtensions,
 	collectResourcesForPaths,
+	type DeployPathPlan,
 	deployResources,
 	logMessage,
 	logSkippedExtensions,
@@ -274,7 +275,10 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// own resources. Resolve (and validate) the plan up front so an invalid
 	// descriptor or a conflicting selection flag fails before any prompt,
 	// preview, or server call.
-	const plan = planDeployPaths(paths, { announce: false });
+	// The plan is resolved once and reused below, so each descriptor is
+	// read once per invocation: an edit to camunda.json that lands while
+	// deploying can never switch the project to the default scan.
+	const plan = planDeployPaths(paths);
 	const descriptorRoots = plan
 		.filter((entry) => entry.kind === "descriptor")
 		.map((entry) => entry.path);
@@ -381,7 +385,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// and avoids an unnecessary HTTP call when only previewing.
 	if (ctx.isDryRun) {
 		const { resources: previewResources, skippedExtensions } =
-			collectResourcesForPaths(paths, flags.force, extensionList);
+			collectResourcesForPaths(paths, flags.force, extensionList, true, plan);
 
 		logSkippedExtensions(skippedExtensions);
 
@@ -435,6 +439,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		flags.force,
 		effectiveExtensions,
 		serverSupportsExtensions,
+		plan,
 	);
 
 	// Use the effective (possibly PA-expanded) paths for .c8ignore and
@@ -468,6 +473,18 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		loadDeployAlways: serverSupportsExtensions,
 		basePath,
 		verbose: ctx.verbose,
+		plan: [
+			...plan,
+			// Files the user chose to deploy from the skipped-files menu come
+			// from default scans, never from a deployResources project.
+			...extraPaths.map(
+				(path): DeployPathPlan => ({
+					kind: "file",
+					path: resolve(path),
+					inDescriptorProject: false,
+				}),
+			),
+		],
 	});
 	return { kind: "none" };
 });

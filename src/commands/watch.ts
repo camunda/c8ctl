@@ -158,6 +158,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	 * saving by delete-and-recreate): the change is resolved again once the
 	 * new file appears, never via the default scan.
 	 */
+	// Patterns of the last successful resolution: the redeploy uses them
+	// instead of re-reading camunda.json, which may change mid-deploy.
+	let resolvedPatterns: string[] = [];
 	const resolveSelection = (root: string): string[] | null => {
 		const state = readDeployResourcesState(root);
 		if (state.kind === "no-descriptor") return null;
@@ -167,7 +170,9 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 					"Restart `c8 watch --project` to watch the default resource scan.",
 			);
 		}
-		return resolveDeployResources(root, state.patterns);
+		const files = resolveDeployResources(root, state.patterns);
+		resolvedPatterns = state.patterns;
+		return files;
 	};
 	let selected: string[] = [];
 	// Real paths of the selected files, so an event reported under another
@@ -340,6 +345,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				continueOnUserError: true,
 				signal: ac.signal,
 				verbose: ctx.verbose,
+				plan: [{ kind: "descriptor", path: root, patterns: resolvedPatterns }],
 			});
 		} catch (error) {
 			if (ac.signal.aborted) return;

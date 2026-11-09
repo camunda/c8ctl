@@ -181,7 +181,21 @@ export function readProjectDescriptor(dirPath: string): CamundaProject | null {
 		buffer = readFileSync(file);
 	} catch (error) {
 		const code = isRecord(error) ? error.code : undefined;
-		if (code === "ENOENT" || code === "ENOTDIR") return null;
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			// No entry at all: not a project. An entry that exists but can't
+			// be followed (a dangling symlink) is a broken descriptor.
+			let dangling = false;
+			try {
+				dangling = lstatSync(file).isSymbolicLink();
+			} catch {
+				// Genuinely absent.
+			}
+			if (!dangling) return null;
+			throw new DeployResourcesError(
+				"invalid-config",
+				`Failed to read ${file}: it is a dangling symlink (its target does not exist)`,
+			);
+		}
 		throw new DeployResourcesError(
 			"invalid-config",
 			`Failed to read ${file}: ${normalizeToError(error).message}`,

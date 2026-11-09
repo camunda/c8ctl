@@ -53,7 +53,7 @@ Validation:
 
 - A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, a drive-letter, UNC or backslash-rooted path, or one containing `..`), is an error. Nothing is deployed.
 - An empty final selection is an error. Nothing is deployed.
-- A `camunda.json` that exists but can't be read (for example a folder with that name, or a file without read permission) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case.
+- A `camunda.json` that exists but can't be read (for example a folder with that name, a file without read permission, or a dangling symlink) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case. Each command reads the descriptor once, so an edit that lands while it runs can't switch the project to the default scan either.
 - A file or folder that a pattern can select but that can't be read (no permission, a dangling symlink, a file removed during the deployment) is an error that names the path. Nothing is deployed: `c8ctl` never deploys the selection without it. Paths that no pattern can reach are not read, so their errors don't matter.
 - A pattern that matches no file is silently ignored.
 

@@ -678,6 +678,10 @@ export function collectResourcesForPaths(
 	/** When false, skip loading deploy-always negation rules from .c8ignore.
 	 *  Used to suppress them on servers <8.10 that don't support extended extensions. */
 	loadDeployAlways = true,
+	/** A plan resolved earlier in the same invocation. When given, the
+	 *  descriptors are not read again, so an edit that lands mid-command
+	 *  can never switch a `deployResources` project to the default scan. */
+	pinnedPlan?: DeployPathPlan[],
 ): CollectResult {
 	if (paths.length === 0) {
 		throw new Error(
@@ -689,7 +693,7 @@ export function collectResourcesForPaths(
 	// display tagging below — the descriptor would otherwise be read and
 	// parsed once per collected file.
 	const markerCache: ProjectMarkerCache = new Map();
-	const plan = planDeployPaths(paths, { markerCache });
+	const plan = pinnedPlan ?? planDeployPaths(paths, { markerCache });
 	const effectivePaths = plan.map((entry) => entry.path);
 
 	// Load .c8ignore rules from the effective target directory (which may
@@ -846,6 +850,9 @@ export async function deployResources(
 		basePath?: string;
 		/** Whether --verbose was set (surfaces raw errors with stack traces). */
 		verbose?: boolean;
+		/** Plan resolved earlier in the same invocation (see
+		 *  `collectResourcesForPaths`); descriptors are then not re-read. */
+		plan?: DeployPathPlan[];
 	},
 ): Promise<void> {
 	const logger = getLogger();
@@ -863,6 +870,7 @@ export async function deployResources(
 			options.force,
 			options.extensionList ?? DEPLOYABLE_EXTENSIONS,
 			options.loadDeployAlways ?? true,
+			options.plan,
 		);
 
 	if (!options.suppressSkippedLog) {
