@@ -178,7 +178,27 @@ If a rewrite does happen, every open PR branched from the old history still carr
 
 - rebase every open PR onto the new `main` (`git rebase origin/main` drops a replaced commit whose change is already upstream; for Renovate PRs, tick the rebase boxes on the Dependency Dashboard)
 - confirm no open PR still contains the replaced commit SHAs before merging anything
-- if a bad version was already released, delete its tag and GitHub release; on npm, move the dist-tag and unpublish or deprecate the version. The version number can never be reused, so recreate its tag before the next genuine release in that range, or semantic-release will try to publish it again and fail
+- if a bad version was already released, delete its tag and GitHub release; on npm, move the dist-tag and unpublish or deprecate the version. Then see *Retiring a wrongly released version* below
+
+##### Retiring a wrongly released version
+
+npm never lets a version number be reused, even after unpublishing. semantic-release decides the next version from the git tags it can see, so it must keep "seeing" the retired version or it will compute that number again and fail at npm publish (`E403`).
+
+semantic-release records each release's channel in a git note, in the ref `refs/notes/semantic-release-<tag>`, attached to the tagged commit (for example `{"channels":["alpha"]}`). On the `main` prerelease branch it only counts tags whose note lists the `alpha` channel. A tag without that note is ignored. So a restored tag needs its note as well:
+
+- **Don't restore the tag straight away.** While it exists, semantic-release treats it as the last release, so every ordinary fix would be numbered after it (for example `5.0.0-alpha.2` instead of `4.6.2-alpha.4`).
+- **Just before the next genuine release in that range** (for example, before merging a real breaking change), recreate the tag on a commit reachable from the release branch and attach the channel note to that same commit:
+
+  ```bash
+  git fetch origin '+refs/notes/*:refs/notes/*'
+  git tag v5.0.0-alpha.1 <commit-on-main>
+  git notes --ref=semantic-release-v5.0.0-alpha.1 add -f -m '{"channels":["alpha"]}' <commit-on-main>
+  git push origin v5.0.0-alpha.1 refs/notes/semantic-release-v5.0.0-alpha.1
+  ```
+
+  semantic-release then continues from the next number (`5.0.0-alpha.2`).
+- **Releasing straight to stable** on the `release` branch avoids the problem: the stable number (for example `5.0.0`) was never used.
+- **Leftover notes refs are harmless.** Deleting a release's tag leaves its notes ref on the remote, attached to the old commit. Without the tag it has no effect, and the commands above add the note to the new commit.
 
 #### Review-comment fix-ups
 
