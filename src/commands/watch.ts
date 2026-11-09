@@ -10,7 +10,7 @@ import {
 	watch,
 	watchFile,
 } from "node:fs";
-import { basename, extname, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { createClient, normalizeToError, SilentError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
@@ -169,10 +169,33 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		return resolveDeployResources(root, state.patterns);
 	};
 	let selected: string[] = [];
+	// Real paths of the selected files, so an event reported under another
+	// path of the same file (a symlink alias and its target) still counts
+	// as a change to a selected file. Kept from the previous resolution for
+	// deletions, whose files can no longer be resolved.
+	let selectedIdentities = new Set<string>();
+	/** Real path of a project-relative path; for a missing file, its real
+	 *  parent joined with the name (best effort). */
+	const identityOf = (root: string, rel: string): string => {
+		const abs = join(root, ...rel.split("/"));
+		try {
+			return realpathSync(abs);
+		} catch {
+			try {
+				return join(realpathSync(dirname(abs)), basename(abs));
+			} catch {
+				return abs;
+			}
+		}
+	};
 	if (descriptorMode && projectRoot) {
 		try {
 			// At startup the descriptor was just found, so it is present.
 			selected = resolveSelection(projectRoot) ?? [];
+			const root = projectRoot;
+			selectedIdentities = new Set(
+				selected.map((rel) => identityOf(root, rel)),
+			);
 		} catch (error) {
 			if (!flags.force) throw error;
 			logger.error(
@@ -272,12 +295,25 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		const previous = new Set(selected);
 		const current = new Set(next);
 		selected = next;
+		const previousIdentities = selectedIdentities;
+		const currentIdentities = new Set(next.map((rel) => identityOf(root, rel)));
+		selectedIdentities = currentIdentities;
 		const setChanged =
 			previous.size !== current.size || next.some((rel) => !previous.has(rel));
-		const touches = (rel: string) =>
-			[...previous, ...current].some(
-				(file) => file === rel || file.startsWith(`${rel}/`),
+		const identities = [...previousIdentities, ...currentIdentities];
+		const touches = (rel: string) => {
+			if (
+				[...previous, ...current].some(
+					(file) => file === rel || file.startsWith(`${rel}/`),
+				)
+			) {
+				return true;
+			}
+			const identity = identityOf(root, rel);
+			return identities.some(
+				(file) => file === identity || file.startsWith(`${identity}${sep}`),
 			);
+		};
 		const selectedFileChanged = changed.some(
 			(rel) => rel !== CAMUNDA_PROJECT_FILE && touches(rel),
 		);
