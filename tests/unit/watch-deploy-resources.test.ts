@@ -493,6 +493,68 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		);
 	});
 
+	// Descriptor races. Sets: *.md -> notes.md, *.txt -> prompt.txt. The
+	// default scan would deploy main.bpmn, which no descriptor here selects,
+	// so any deployment containing it would be a fallback.
+	const racyProject = (name: string) =>
+		createProject(
+			join(tempDir, name),
+			{ deployResources: ["*.md"] },
+			{
+				"main.bpmn": BPMN("main"),
+				"notes.md": "# notes",
+				"prompt.txt": "prompt",
+			},
+		);
+	const noFallback = () =>
+		assert.ok(
+			mock.deployments.every((names) => !names.includes("main.bpmn")),
+			`never the default scan: ${JSON.stringify(mock.deployments)}`,
+		);
+
+	test("descriptor race: an edit landing right after a re-resolution deploys the resolved set, then the new set last", async () => {
+		const root = racyProject("race-after-resolution");
+		// Three reads at startup, the fourth is the re-resolution after the
+		// notes.md edit: the descriptor changes right after it.
+		const { w } = await startWatch(root, [], {
+			settled: false,
+			mutateAfterReads: `${join(root, "camunda.json")}|4|${descriptor(["*.txt"])}`,
+		});
+		writeFileSync(join(root, "notes.md"), "# edited");
+		await waitForDeploymentOf(["notes.md"], 0, w);
+		await waitForDeploymentOf(["prompt.txt"], 0, w);
+		assert.deepStrictEqual(mock.deployments.at(-1), ["prompt.txt"]);
+		noFallback();
+	});
+
+	test("descriptor race: an edit while a deployment is in flight is deployed after it, and its set lands last", async () => {
+		const root = racyProject("race-in-flight");
+		const { w, baseline } = await startWatch(root);
+		const release = mock.holdNextDeployment();
+		writeFileSync(join(root, "notes.md"), "# edited");
+		await waitUntil(() => mock.deployments.length === baseline + 1, w);
+		writeDescriptor(root, descriptor(["*.txt"]));
+		await waitForOutput(/Waiting for the in-flight deployment/, w);
+		release();
+		await waitForDeploymentOf(["prompt.txt"], baseline, w);
+		assert.deepStrictEqual(mock.deployments.at(-1), ["prompt.txt"]);
+		noFallback();
+	});
+
+	test("descriptor race: rapid successive edits end with the latest descriptor's set deployed last", async () => {
+		const root = racyProject("race-rapid");
+		const { w, baseline } = await startWatch(root);
+		writeDescriptor(root, descriptor(["*.txt"]));
+		writeDescriptor(root, descriptor(["*.md", "*.txt"]));
+		writeDescriptor(root, descriptor(["*.txt"]));
+		writeDescriptor(root, descriptor(["*.md", "*.txt", "unmatched/**"]));
+		await waitForDeploymentOf(["notes.md", "prompt.txt"], baseline, w);
+		// Flush any pending events, then check nothing older landed after.
+		await settle(w, root);
+		assert.deepStrictEqual(mock.deployments.at(-1), ["notes.md", "prompt.txt"]);
+		noFallback();
+	});
+
 	test("an invalid descriptor at startup fails without --force", () => {
 		const root = createProject(
 			join(tempDir, "bad"),

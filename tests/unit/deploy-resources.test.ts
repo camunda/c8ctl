@@ -950,6 +950,97 @@ describe('"no surprise": a path that a deployResources pattern can select but th
 		},
 	);
 
+	for (const [label, pattern] of [
+		["a brace group", "{a,b}/**"],
+		["a brace group containing a /", "{a/x,b}/**"],
+		["an extglob", "+(a|b)/**"],
+		["a character class", "[ab]/**"],
+	] as const) {
+		test(
+			`grouped patterns: an unreadable folder that ${label} (${pattern}) cannot reach is not an error`,
+			posixOnly,
+			async () => {
+				const root = project(
+					{ deployResources: [pattern, "!**/skip.bpmn"] },
+					{
+						"a/x/main.bpmn": BPMN("main"),
+						"a/main.bpmn": BPMN("main-a"),
+						"c/locked/z.bpmn": BPMN("z"),
+					},
+				);
+				chmodSync(join(root, "c"), 0o000);
+				try {
+					const result = await deployDryRun([root]);
+					assert.strictEqual(result.status, 0, result.stderr);
+					assert.ok((result.names ?? []).length > 0, result.stderr);
+				} finally {
+					chmodSync(join(root, "c"), 0o755);
+				}
+			},
+		);
+	}
+
+	for (const pattern of ["{a,c}/**", "+(a|c)/**", "**/a/*.bpmn"]) {
+		test(
+			`grouped patterns: an unreadable folder that ${pattern} can reach still fails`,
+			posixOnly,
+			async () => {
+				const root = project(
+					{ deployResources: [pattern] },
+					{
+						"a/main.bpmn": BPMN("main"),
+						"c/locked/z.bpmn": BPMN("z"),
+					},
+				);
+				chmodSync(join(root, "c"), 0o000);
+				try {
+					assertFailsWith(
+						await deployDryRun([root]),
+						/Cannot read [^\n]*\/c\b/,
+					);
+				} finally {
+					chmodSync(join(root, "c"), 0o755);
+				}
+			},
+		);
+	}
+
+	test(
+		"grouped patterns: an extglob spanning a / is checked conservatively; the error names the folder and an explicit !folder/ skips it",
+		posixOnly,
+		async () => {
+			const files = {
+				"a/x/main.bpmn": BPMN("main"),
+				"c/locked/z.bpmn": BPMN("z"),
+			};
+			const conservative = project(
+				{ deployResources: ["a/**", "@(a/x|b)/**"] },
+				files,
+			);
+			chmodSync(join(conservative, "c"), 0o000);
+			try {
+				const result = await deployDryRun([conservative]);
+				assertFailsWith(result, /Cannot read [^\n]*\/c\b/);
+				assert.match(result.stderr, /!c\//);
+			} finally {
+				chmodSync(join(conservative, "c"), 0o755);
+			}
+
+			const excluded = createProject(
+				join(tempDir, "excluded"),
+				{ deployResources: ["a/**", "@(a/x|b)/**", "!c/"] },
+				files,
+			);
+			chmodSync(join(excluded, "c"), 0o000);
+			try {
+				const result = await deployDryRun([excluded]);
+				assert.strictEqual(result.status, 0, result.stderr);
+			} finally {
+				chmodSync(join(excluded, "c"), 0o755);
+			}
+		},
+	);
+
 	test("a selected file that cannot be read", posixOnly, async () => {
 		const root = project(
 			{ deployResources: ["resources/**"] },
