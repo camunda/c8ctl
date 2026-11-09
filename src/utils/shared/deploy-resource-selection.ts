@@ -276,6 +276,12 @@ export interface ResourceSelector {
 	 * never contribute (e.g. `.git/` under `["**\/*"]`).
 	 */
 	couldSelectUnder(relDir: string): boolean;
+	/**
+	 * Whether the last pattern matching the folder itself (`relDir/`) is a
+	 * `!` pattern, e.g. `!vendor/`. Used to skip a folder that can't be read
+	 * when the user excluded it explicitly.
+	 */
+	excludesFolder(relDir: string): boolean;
 }
 
 /**
@@ -302,6 +308,75 @@ function globCouldMatchBelow(
 }
 
 /**
+ * Expand comma brace groups (`{a,b}`, nesting allowed) into alternative
+ * globs. Braces without a top-level comma (`{1..3}`, a literal `{x}`) are
+ * left to the matcher.
+ */
+function expandBraces(glob: string): string[] {
+	let depth = 0;
+	let start = -1;
+	for (let i = 0; i < glob.length; i++) {
+		const ch = glob[i];
+		if (ch === "\\") {
+			i++;
+		} else if (ch === "{") {
+			if (depth === 0) start = i;
+			depth++;
+		} else if (ch === "}" && depth > 0) {
+			depth--;
+			if (depth === 0) {
+				const options = splitTopLevel(glob.slice(start + 1, i));
+				if (options.length > 1) {
+					const prefix = glob.slice(0, start);
+					const suffix = glob.slice(i + 1);
+					return options.flatMap((option) =>
+						expandBraces(`${prefix}${option}${suffix}`),
+					);
+				}
+			}
+		}
+	}
+	return [glob];
+}
+
+/** Split a brace body on its top-level commas. */
+function splitTopLevel(body: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let current = "";
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === "\\") {
+			current += ch + (body[i + 1] ?? "");
+			i++;
+			continue;
+		}
+		if (ch === "{" || ch === "(") depth++;
+		if ((ch === "}" || ch === ")") && depth > 0) depth--;
+		if (ch === "," && depth === 0) {
+			parts.push(current);
+			current = "";
+		} else {
+			current += ch;
+		}
+	}
+	parts.push(current);
+	return parts;
+}
+
+/** Whether some `/`-separated segment has an unbalanced group. */
+function hasSplitGroup(glob: string): boolean {
+	return glob.split("/").some((segment) => {
+		let depth = 0;
+		for (const ch of segment) {
+			if (ch === "(" || ch === "{") depth++;
+			else if (ch === ")" || ch === "}") depth--;
+		}
+		return depth !== 0;
+	});
+}
+
+/**
  * Compile validated `deployResources` patterns into a selector.
  * Call {@link parseDeployResources} first to validate raw input.
  */
@@ -315,10 +390,20 @@ export function compileDeployResources(
 		.map(parsePattern)
 		.filter((p): p is ParsedPattern => p !== null);
 	const ordered = [...defaults, ...user];
-	const positiveGlobs = user.filter((p) => !p.negate).flatMap((p) => p.globs);
+	// Brace groups are expanded so reachability is checked per alternative.
+	const positiveAlternatives = user
+		.filter((p) => !p.negate)
+		.flatMap((p) => p.globs)
+		.flatMap(expandBraces);
 
 	return {
 		patterns: [...patterns],
+		excludesFolder: (relDir) =>
+			ordered.reduce<boolean>(
+				(excluded, p) =>
+					matchesParsedPattern(`${relDir}/`, p) ? p.negate : excluded,
+				false,
+			),
 		selects: (relPath) =>
 			ordered.reduce<boolean>(
 				(selected, p) =>
@@ -327,11 +412,12 @@ export function compileDeployResources(
 			),
 		couldSelectUnder: (relDir) => {
 			const dirSegments = relDir.split("/").filter(Boolean);
-			return positiveGlobs.some(
+			return positiveAlternatives.some(
 				(glob) =>
-					// Braces and extglobs can hide a `/` inside a group, so a
-					// per-segment check is not reliable — walk conservatively.
-					/[{}()]/.test(glob) ||
+					// A group that still spans a `/` (an extglob such as
+					// `@(a/b|c)`) can't be checked segment by segment: walk
+					// conservatively. Other groups are segment-local.
+					hasSplitGroup(glob) ||
 					// Empty (`a//b`) and `.` (`a/./b`) segments are dropped, as
 					// the native matcher collapses them. Dropping more than the
 					// matcher does only makes pruning more conservative.
@@ -375,7 +461,10 @@ export function selectProjectFiles(
 			real = realpathSync(dirAbs);
 			entries = readdirSync(dirAbs).sort();
 		} catch (error) {
-			throw unreadablePath(dirAbs, error);
+			// A folder the user excluded explicitly (`!folder/`) is skipped
+			// even if a broad pattern could reach into it.
+			if (relDir !== "" && selector.excludesFolder(relDir)) return;
+			throw unreadablePath(dirAbs, error, relDir);
 		}
 		if (activeAncestors.has(real)) return;
 		activeAncestors.add(real);
@@ -390,10 +479,13 @@ export function selectProjectFiles(
 				// An entry no pattern can select (as a file or as a folder) is
 				// irrelevant. One a pattern can select must never be skipped
 				// silently: the deployment would succeed without it.
-				if (!selector.selects(rel) && !selector.couldSelectUnder(rel)) {
+				if (
+					!selector.selects(rel) &&
+					(!selector.couldSelectUnder(rel) || selector.excludesFolder(rel))
+				) {
 					continue;
 				}
-				throw unreadablePath(abs, error);
+				throw unreadablePath(abs, error, rel);
 			}
 			if (stat.isDirectory()) {
 				if (selector.couldSelectUnder(rel)) visit(abs, rel);
@@ -427,6 +519,8 @@ export function selectProjectFiles(
 export function unreadablePath(
 	path: string,
 	error: unknown,
+	/** Project-relative path, used to suggest an exclusion pattern. */
+	rel?: string,
 ): DeployResourcesError {
 	const code = isRecord(error) ? error.code : undefined;
 	let reason = normalizeToError(error).message;
@@ -443,8 +537,11 @@ export function unreadablePath(
 	}
 	return new DeployResourcesError(
 		"read-error",
-		`Cannot read ${path}, which "${DEPLOY_RESOURCES_FIELD}" selects: ${reason}. ` +
-			"Nothing was deployed. Fix the file permissions or the path, or exclude it with a ! pattern.",
+		`Cannot read ${path}, which a "${DEPLOY_RESOURCES_FIELD}" pattern can select: ${reason}. ` +
+			"Nothing was deployed. Fix the file permissions or the path, or exclude it " +
+			(rel
+				? `with a ! pattern placed after the patterns that reach it, such as "!${rel}/" for a folder or "!${rel}" for a file.`
+				: "with a ! pattern."),
 	);
 }
 
