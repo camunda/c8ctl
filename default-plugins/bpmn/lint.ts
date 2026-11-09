@@ -431,7 +431,7 @@ function renderLintText(
 		`✖ ${problemCount} ${pluralize("problem", problemCount)} ` +
 		`(${errorCount} ${pluralize("error", errorCount)}, ` +
 		`${warningCount} ${pluralize("warning", warningCount)})`;
-	const summaryColor: ReadonlyArray<"bold" | "red" | "yellow"> =
+	const summaryColor: Array<"bold" | "red" | "yellow"> =
 		errorCount > 0 ? ["bold", "red"] : ["bold", "yellow"];
 	logger.output("");
 	logger.output(styleText(summaryColor, summary));
