@@ -29,9 +29,16 @@
  * such explicit patterns can reach them.
  */
 
-import { readdirSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, matchesGlob } from "node:path";
-import { CAMUNDA_PROJECT_FILE, readCamundaProject } from "./camunda-json.ts";
+import { isRecord, normalizeToError } from "../../core/index.ts";
+import {
+	CAMUNDA_PROJECT_FILE,
+	type CamundaProject,
+	decodeCamundaJson,
+	parseCamundaJson,
+	readCamundaProject,
+} from "./camunda-json.ts";
 import {
 	matchesParsedPattern,
 	type ParsedPattern,
@@ -140,24 +147,81 @@ export function parseDeployResources(
 }
 
 /**
+ * Strictly read the `camunda.json` descriptor of a directory that is being
+ * resolved for deployment or watching.
+ *
+ * Unlike `readCamundaProject` (lenient marker detection), a descriptor
+ * that exists but cannot be read — a directory named `camunda.json`, no
+ * permission, an I/O error — is an `invalid-config` error. Degrading to
+ * "no descriptor" would silently fall back to the default scan and
+ * bypass a `deployResources` allowlist.
+ *
+ * @returns The parsed descriptor, or `null` only when no `camunda.json`
+ *   exists.
+ * @throws {DeployResourcesError} `invalid-config` when the file exists but
+ *   cannot be read.
+ * @throws {Error} When `camunda.json` is not valid JSON.
+ */
+export function readProjectDescriptor(dirPath: string): CamundaProject | null {
+	const file = join(dirPath, CAMUNDA_PROJECT_FILE);
+	let buffer: Buffer;
+	try {
+		buffer = readFileSync(file);
+	} catch (error) {
+		const code = isRecord(error) ? error.code : undefined;
+		if (code === "ENOENT" || code === "ENOTDIR") return null;
+		throw new DeployResourcesError(
+			"invalid-config",
+			`Failed to read ${file}: ${normalizeToError(error).message}`,
+		);
+	}
+	return parseCamundaJson(decodeCamundaJson(buffer), file);
+}
+
+/** Outcome of reading a project's `deployResources` configuration. */
+export type DeployResourcesState =
+	| { kind: "no-descriptor" }
+	| { kind: "no-field" }
+	| { kind: "patterns"; patterns: string[] };
+
+/**
+ * Read a project's `deployResources` state, distinguishing a missing
+ * descriptor from a descriptor without the field.
+ *
+ * @throws {DeployResourcesError} `invalid-config` when the descriptor
+ *   cannot be read or the field is invalid.
+ * @throws {Error} When `camunda.json` is not valid JSON.
+ */
+export function readDeployResourcesState(
+	projectRoot: string,
+): DeployResourcesState {
+	const project = readProjectDescriptor(projectRoot);
+	if (!project) return { kind: "no-descriptor" };
+	if (!Object.hasOwn(project, DEPLOY_RESOURCES_FIELD)) {
+		return { kind: "no-field" };
+	}
+	return {
+		kind: "patterns",
+		patterns: parseDeployResources(
+			project.deployResources,
+			join(projectRoot, CAMUNDA_PROJECT_FILE),
+		),
+	};
+}
+
+/**
  * Read the validated `deployResources` patterns of the project rooted at
  * `projectRoot`.
  *
  * @returns The patterns, or `null` when there is no descriptor or the
  *   descriptor has no `deployResources` key (default scan applies).
  * @throws {Error} When `camunda.json` is not valid JSON.
- * @throws {DeployResourcesError} `invalid-config` when the field is present
- *   but invalid.
+ * @throws {DeployResourcesError} `invalid-config` when the descriptor
+ *   cannot be read or the field is invalid.
  */
 export function readDeployResources(projectRoot: string): string[] | null {
-	const project = readCamundaProject(projectRoot);
-	if (!project || !Object.hasOwn(project, DEPLOY_RESOURCES_FIELD)) {
-		return null;
-	}
-	return parseDeployResources(
-		project.deployResources,
-		join(projectRoot, CAMUNDA_PROJECT_FILE),
-	);
+	const state = readDeployResourcesState(projectRoot);
+	return state.kind === "patterns" ? state.patterns : null;
 }
 
 /**

@@ -38,6 +38,7 @@ import {
 	PROCESS_APPLICATION_FILE,
 	readCamundaProject,
 	readDeployResources,
+	readProjectDescriptor,
 	resolveDeployResources,
 	resolveIgnoreBaseDir,
 } from "../../utils/index.ts";
@@ -168,21 +169,28 @@ function hasProcessApplicationFile(dirPath: string): boolean {
  *
  * The descriptor is read once: a present `camunda.json` is parsed and
  * validated, so malformed JSON is a hard error (the file must never
- * silently count as a project marker) and an unreadable or concurrently
- * removed descriptor does not select this directory as a root. Results
+ * silently count as a project marker). In lenient mode (display tagging,
+ * nested-project checks) an unreadable descriptor does not select this
+ * directory as a root; in strict mode (resolving the project root to
+ * deploy or watch) it is an `invalid-config` error. Results
  * are memoized in `cache` when one is provided.
  */
 function hasProjectMarker(
 	dirPath: string,
 	cache?: ProjectMarkerCache,
+	{ strict = false }: { strict?: boolean } = {},
 ): boolean {
 	const cached = cache?.get(dirPath);
 	if (cached !== undefined) {
 		return cached;
 	}
-	const result = readCamundaProject(dirPath)
-		? true
-		: hasProcessApplicationFile(dirPath);
+	// Strict (project-root resolution for deploy/watch): a camunda.json
+	// that exists but cannot be read is an error, never "not a project" —
+	// that would fall back to the default scan and bypass deployResources.
+	const descriptor = strict
+		? readProjectDescriptor(dirPath)
+		: readCamundaProject(dirPath);
+	const result = descriptor ? true : hasProcessApplicationFile(dirPath);
 	cache?.set(dirPath, result);
 	return result;
 }
@@ -252,7 +260,7 @@ export function findProjectRoot(
 	let currentDir = resolve(startDir);
 
 	while (true) {
-		if (hasProjectMarker(currentDir, cache)) {
+		if (hasProjectMarker(currentDir, cache, { strict: true })) {
 			return currentDir;
 		}
 

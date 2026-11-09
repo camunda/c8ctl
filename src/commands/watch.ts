@@ -21,7 +21,7 @@ import {
 	declaresDeployResources,
 	isIgnored,
 	loadIgnoreRules,
-	readDeployResources,
+	readDeployResourcesState,
 	resolveDeployResources,
 	resolveIgnoreBaseDir,
 } from "../utils/index.ts";
@@ -151,21 +151,28 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			allExtensions: flags["all-extensions"],
 		});
 	}
-	/** Resolve the current selection; throws on invalid config / empty set. */
-	const resolveSelection = (root: string): string[] => {
-		const patterns = readDeployResources(root);
-		if (patterns === null) {
+	/**
+	 * Resolve the current selection; throws on invalid config / empty set.
+	 * Returns `null` while camunda.json is momentarily missing (an editor
+	 * saving by delete-and-recreate): the change is resolved again once the
+	 * new file appears, never via the default scan.
+	 */
+	const resolveSelection = (root: string): string[] | null => {
+		const state = readDeployResourcesState(root);
+		if (state.kind === "no-descriptor") return null;
+		if (state.kind === "no-field") {
 			throw new Error(
 				'"deployResources" was removed from camunda.json. ' +
 					"Restart `c8 watch --project` to watch the default resource scan.",
 			);
 		}
-		return resolveDeployResources(root, patterns);
+		return resolveDeployResources(root, state.patterns);
 	};
 	let selected: string[] = [];
 	if (descriptorMode && projectRoot) {
 		try {
-			selected = resolveSelection(projectRoot);
+			// At startup the descriptor was just found, so it is present.
+			selected = resolveSelection(projectRoot) ?? [];
 		} catch (error) {
 			if (!flags.force) throw error;
 			logger.error(
@@ -240,7 +247,16 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 
 		let next: string[];
 		try {
-			next = resolveSelection(root);
+			const resolved = resolveSelection(root);
+			if (resolved === null) {
+				// Keep the pending changes: the descriptor is being replaced,
+				// and its re-creation triggers another resolution.
+				logger.info(
+					"camunda.json is missing — waiting for it to be written again",
+				);
+				return;
+			}
+			next = resolved;
 			pendingChanges.clear();
 		} catch (error) {
 			const err = normalizeToError(error, "Invalid resource selection");

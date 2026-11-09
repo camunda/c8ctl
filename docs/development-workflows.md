@@ -237,7 +237,7 @@ c8 watch ./my-app --project
 When the project defines [`deployResources`](#select-resources-with-deployresources), `--project` watches the selected set instead of an extension list:
 
 - Creating, changing, deleting, or renaming a selected file redeploys the re-resolved set.
-- Editing `camunda.json` re-resolves the selection and redeploys only if the set changed.
+- Editing `camunda.json` re-resolves the selection and redeploys only if the set changed. This includes editors that save by replacing the file. If `camunda.json` is briefly missing during a save, `c8ctl` waits for the new file instead of falling back to the default scan.
 - An invalid `deployResources` value or an empty selection is reported and stops watching. With `--force`, `c8ctl` reports it and keeps watching, so you can fix the descriptor.
 - `--extensions` and `--all-extensions` are rejected. `--force` keeps its usual meaning of continuing after errors.
 

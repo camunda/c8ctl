@@ -53,6 +53,7 @@ Validation:
 
 - A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, an absolute path, or one containing `..`), is an error. Nothing is deployed.
 - An empty final selection is an error. Nothing is deployed.
+- A `camunda.json` that exists but can't be read (for example a folder with that name, or a file without read permission) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case.
 - A pattern that matches no file is silently ignored.
 
 Nested projects are not supported. A `camunda.json` in a subfolder doesn't exclude that subfolder from the selection. Add a `!` pattern to exclude it.
