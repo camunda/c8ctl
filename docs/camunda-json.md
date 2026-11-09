@@ -37,21 +37,21 @@ Selects which files in the project are its resources, using an array of glob pat
 
 Patterns use the same syntax as [`.c8ignore`](development-workflows.md#exclude-files-with-c8ignore), a subset of [`.gitignore`](https://git-scm.com/docs/gitignore), but reversed: patterns **select** files instead of excluding them.
 
-- Patterns are relative to the project root and use `/` separators. Absolute paths (including a leading `/`) and `..` are invalid.
-- A pattern without a `/` in the middle matches at any depth (`*.bpmn`, `drafts/`). A pattern with a `/` in the middle is anchored to the project root (`resources/**`). A directory pattern such as `resources/` selects everything inside matching directories.
+- Patterns are relative to the project root and use `/` separators. `..`, Windows drive letters (`C:/...`), UNC paths (`//server/...`) and paths starting with a backslash are invalid.
+- A pattern without a `/` at the start or in the middle matches at any depth (`*.bpmn`, `drafts/`). A leading `/` anchors the pattern to the project root, as in `.c8ignore` and `.gitignore`: `/process.bpmn` selects only the root file, while `process.bpmn` also selects `sub/process.bpmn`. A pattern with a `/` in the middle is anchored too (`resources/**`). A leading `/` is never a file system path: `/Users/me/project/**` is a root-anchored pattern that simply matches nothing. A directory pattern such as `resources/` selects everything inside matching directories.
 - Prefix a pattern with `!` to deselect matches.
 - Selection starts empty. Patterns apply in order, and the last matching pattern wins for each file.
 - Positive patterns select files in subdirectories directly, and a later positive pattern re-selects a file below an earlier excluded directory. Unlike `.gitignore`, you don't need to re-include the parent directory first.
 
 When `deployResources` is present, it acts as an allowlist: the default extension scan doesn't apply and `.c8ignore` is ignored. When it is omitted, the default scan rules apply unchanged.
 
-Patterns behave exactly as written: there are no hidden exclusions on top of them. `node_modules/`, `target/`, `.git/`, and the project-root `camunda.json` are excluded by default, but these defaults apply before your patterns, so any positive pattern that matches a file inside them selects it. For example, `target/classes/**` selects generated resources and `**/*` selects everything, including `target/`, `node_modules/` and `camunda.json`. Add exclusions after a broad pattern to narrow it, such as `["**/*", "!node_modules/", "!target/", "!camunda.json"]`.
+Patterns behave exactly as written: there are no hidden exclusions on top of them. `node_modules/`, `target/`, `.git/`, and the project-root `camunda.json` are excluded by default, but these defaults apply before your patterns, so any positive pattern that matches a file inside them selects it. For example, `target/classes/**` selects generated resources and `**/*` selects everything, including `target/`, `node_modules/` and `camunda.json`. Add exclusions after a broad pattern to narrow it, such as `["**/*", "!node_modules/", "!target/", "!camunda.json"]`. This override applies to `deployResources` patterns only. In `.c8ignore`, which keeps its `.gitignore` semantics, a negation can't re-include a file below an excluded folder, so the default exclusions can't be undone there.
 
-Wildcards (`*`, `?`, `**`, `[...]`) never match a file or folder whose name starts with a dot. A pattern that names it explicitly selects it, for example `resources/.prompt.md` or `.camunda/**`. Control files such as `.c8ignore` and `.process-application` are therefore never selected by wildcards.
+Patterns behave like standard globs: `*`, `?`, `**` and `[...]` don't match names starting with a dot, whether the name is a file or a folder in the path. This is deliberate: `resources/**` doesn't select `resources/.env` or `resources/.cache/x.bpmn`, and `**/*` never reaches `.git/`. Name a dot-prefixed file or folder explicitly to select it, for example `resources/.prompt.md` or `.camunda/**`. Control files such as `.c8ignore` and `.process-application` are therefore never selected by wildcards.
 
 Validation:
 
-- A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, an absolute path, or one containing `..`), is an error. Nothing is deployed.
+- A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, a drive-letter, UNC or backslash-rooted path, or one containing `..`), is an error. Nothing is deployed.
 - An empty final selection is an error. Nothing is deployed.
 - A `camunda.json` that exists but can't be read (for example a folder with that name, or a file without read permission) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case.
 - A pattern that matches no file is silently ignored.

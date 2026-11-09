@@ -152,6 +152,8 @@ old-process.bpmn
 
 Place the `.c8ignore` file in the root of the directory you pass to `c8 deploy` or `c8 watch`. Patterns are matched against relative file paths within that directory.
 
+`.c8ignore` keeps its `.gitignore` semantics: `node_modules/`, `target/` and `.git/` are always excluded, and because a negation can't re-include a file below an excluded folder, a pattern such as `!target/classes/x.bpmn` doesn't bring it back. To deploy files from a default-excluded folder, use [`deployResources`](#select-resources-with-deployresources), where a matching pattern overrides the defaults.
+
 When the project defines [`deployResources`](#select-resources-with-deployresources), `.c8ignore` is ignored for that project. The descriptor alone selects which files deploy.
 
 ### Select resources with `deployResources`
