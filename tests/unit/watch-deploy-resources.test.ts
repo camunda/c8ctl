@@ -21,12 +21,15 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import {
+	closeSync,
 	mkdtempSync,
+	openSync,
 	readFileSync,
 	renameSync,
 	rmSync,
 	unlinkSync,
 	writeFileSync,
+	writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,14 +77,22 @@ const descriptor = (deployResources: unknown) =>
 	JSON.stringify({ deployResources });
 
 /**
- * Replace camunda.json atomically (write a sibling file, then rename), as
- * editors do on save. A plain truncate-and-write can be observed half
- * written by the watcher's debounced read on a loaded runner.
+ * Rewrite camunda.json in place without truncating it first. A plain
+ * truncate-and-write can be observed as an empty descriptor by the
+ * watcher's debounced read on a loaded runner, and replacing the file by
+ * rename loses the file's watch on Linux (Node 22). Every descriptor is
+ * padded to the same size and written with one write at offset 0, so a
+ * read sees either the old or the new descriptor and the inode is kept.
  */
+const DESCRIPTOR_SIZE = 1024;
 function writeDescriptor(root: string, content: string) {
-	const temp = join(root, ".camunda.json.tmp");
-	writeFileSync(temp, content);
-	renameSync(temp, join(root, "camunda.json"));
+	assert.ok(content.length <= DESCRIPTOR_SIZE, "descriptor too large");
+	const fd = openSync(join(root, "camunda.json"), "r+");
+	try {
+		writeSync(fd, content.padEnd(DESCRIPTOR_SIZE, " "), 0);
+	} finally {
+		closeSync(fd);
+	}
 }
 
 function makeProject(): string {
