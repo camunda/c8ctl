@@ -2,8 +2,15 @@
  * Watch command - monitor files for changes and auto-deploy
  */
 
-import { existsSync, realpathSync, statSync, watch } from "node:fs";
-import { basename, extname, resolve, sep } from "node:path";
+import {
+	existsSync,
+	realpathSync,
+	statSync,
+	unwatchFile,
+	watch,
+	watchFile,
+} from "node:fs";
+import { basename, extname, join, resolve, sep } from "node:path";
 import { createClient, normalizeToError, SilentError } from "../core/index.ts";
 import { defineCommand } from "../framework/index.ts";
 import {
@@ -449,6 +456,30 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		return watcher;
 	});
 
+	// Editors often save by replacing the file (write a temp file, then
+	// rename). On some platforms (Linux with Node 22) the recursive watcher
+	// then stops reporting later changes to that path, so the descriptor
+	// is also polled by path, which survives replacement. Events from both
+	// sources collapse in the debounce window.
+	const descriptorFile =
+		descriptorMode && projectRoot
+			? join(projectRoot, CAMUNDA_PROJECT_FILE)
+			: null;
+	if (descriptorFile && projectRoot) {
+		const root = projectRoot;
+		watchFile(descriptorFile, { interval: 250 }, (current, previous) => {
+			if (
+				current.mtimeMs === previous.mtimeMs &&
+				current.ino === previous.ino &&
+				current.size === previous.size
+			) {
+				return;
+			}
+			pendingChanges.add(CAMUNDA_PROJECT_FILE);
+			scheduleDescriptorModeChange(root, DEBOUNCE_DELAY);
+		});
+	}
+
 	// Block until SIGINT, then close watchers, cancel any pending debounced
 	// deploys, abort any in-flight HTTP deploys, and resolve so the handler
 	// returns naturally. The framework treats this as `{ kind: "never" }`
@@ -467,6 +498,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		const shutdown = () => {
 			shuttingDown = true;
 			for (const w of watchers) w.close();
+			if (descriptorFile) unwatchFile(descriptorFile);
 			for (const timer of debounceTimers.values()) clearTimeout(timer);
 			debounceTimers.clear();
 			for (const ac of inflightDeploys) ac.abort();
