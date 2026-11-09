@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 
 const ENGINE_ROOT = resolve(
 	import.meta.dirname,

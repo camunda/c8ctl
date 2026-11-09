@@ -92,6 +92,7 @@
     "ajv": "^8.20.0",
     "esbuild": "^0.28.0",
     "semantic-release": "^25.0.3",
-    "typescript": "^7.0.0"
+    "typescript": "^7.0.0",
+    "typescript-compiler-api": "npm:typescript@^6.0.3"
   }
 }

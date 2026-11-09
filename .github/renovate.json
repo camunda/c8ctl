@@ -50,6 +50,11 @@
       "description": "assets/c8/8.8, 8.9 and 8.10 pin the camunda/camunda image to a specific test-matrix version (in docker-compose.yml via CAMUNDA_VERSION, and in .env). Renovate has already auto-bumped this pin twice (PR #500, PR #543), breaking the release; do not let it touch these paths again.",
       "matchFileNames": ["assets/c8/8.8/**", "assets/c8/8.9/**", "assets/c8/8.10/**"],
       "enabled": false
+    },
+    {
+      "description": "The AST guard tests use the TypeScript compiler API (ts.createSourceFile, ts.forEachChild, ...), which TypeScript 7 no longer exports. They import it via this TypeScript 6 alias while tsc itself runs on TypeScript 7. Remove the alias once the guards move to TypeScript 7's AST API.",
+      "matchDepNames": ["typescript-compiler-api"],
+      "allowedVersions": "<7"
     }
   ],
   "vulnerabilityAlerts": { "enabled": true },
