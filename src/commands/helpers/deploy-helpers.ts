@@ -41,6 +41,7 @@ import {
 	readProjectDescriptor,
 	resolveDeployResources,
 	resolveIgnoreBaseDir,
+	unreadablePath,
 } from "../../utils/index.ts";
 
 /**
@@ -729,10 +730,18 @@ export function collectResourcesForPaths(
 			// pre-skip, no nested-project boundary.
 			for (const rel of resolveDeployResources(entry.path, entry.patterns)) {
 				const file = join(entry.path, ...rel.split("/"));
+				// All contents are read before any request is sent, so a read
+				// failure aborts the whole deployment (never a partial one).
+				let content: Buffer;
+				try {
+					content = readFileSync(file);
+				} catch (error) {
+					throw unreadablePath(file, error);
+				}
 				resources.push({
 					path: file,
 					name: basename(file),
-					content: readFileSync(file),
+					content,
 					isBuildingBlock: false,
 					isProcessApplication: true,
 					groupPath: entry.path,

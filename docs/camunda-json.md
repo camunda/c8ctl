@@ -54,6 +54,7 @@ Validation:
 - A field that is not an array of strings, or an invalid pattern (empty, a bare `!`, a `#` comment, a drive-letter, UNC or backslash-rooted path, or one containing `..`), is an error. Nothing is deployed.
 - An empty final selection is an error. Nothing is deployed.
 - A `camunda.json` that exists but can't be read (for example a folder with that name, or a file without read permission) is an error when you deploy or watch the project. `c8ctl` never falls back to the default scan in that case.
+- A file or folder that a pattern can select but that can't be read (no permission, a dangling symlink, a file removed during the deployment) is an error that names the path. Nothing is deployed: `c8ctl` never deploys the selection without it. Paths that no pattern can reach are not read, so their errors don't matter.
 - A pattern that matches no file is silently ignored.
 
 Naming the project's `camunda.json` explicitly on the command line (`c8 deploy camunda.json`) is refused, as it was before `deployResources`. A pattern such as `**/*` does select the root `camunda.json` in a project deployment, because patterns behave exactly as written. Add `!camunda.json` to leave it out.

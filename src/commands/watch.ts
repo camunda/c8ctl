@@ -18,6 +18,7 @@ import {
 	CAMUNDA_PROJECT_FILE,
 	DEPLOY_COOLDOWN,
 	DEPLOYABLE_EXTENSIONS,
+	DeployResourcesError,
 	declaresDeployResources,
 	isIgnored,
 	loadIgnoreRules,
@@ -342,6 +343,18 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			});
 		} catch (error) {
 			if (ac.signal.aborted) return;
+			// A selected file that cannot be read is a selection error, not a
+			// deployment error: nothing was sent, and it stops watching unless
+			// --force is set (same as invalid configuration).
+			if (error instanceof DeployResourcesError) {
+				logger.error("Invalid resource selection", error);
+				if (flags.force) {
+					logger.info("Continuing to watch (--force).");
+					return;
+				}
+				failWatch?.(new SilentError(error.message));
+				return;
+			}
 			logger.error(
 				"Failed to deploy project",
 				normalizeToError(error, "Deployment request failed"),

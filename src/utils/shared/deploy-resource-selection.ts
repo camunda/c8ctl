@@ -29,7 +29,13 @@
  * such explicit patterns can reach them.
  */
 
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import {
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
 import { join, matchesGlob } from "node:path";
 import { isRecord, normalizeToError } from "../../core/index.ts";
 import {
@@ -61,11 +67,14 @@ export const DEPLOY_RESOURCES_DEFAULT_EXCLUSIONS: readonly string[] = [
 ];
 
 /** Tool-agnostic error codes, shared with the parity fixtures. */
-export type DeployResourcesErrorCode = "invalid-config" | "empty-selection";
+export type DeployResourcesErrorCode =
+	| "invalid-config"
+	| "empty-selection"
+	| "read-error";
 
 /**
- * Raised for an invalid `deployResources` configuration or an empty final
- * selection. `code` matches the `error` value used by the shared parity
+ * Raised for an invalid `deployResources` configuration, an empty final
+ * selection, or a selected path that cannot be read (`read-error`). `code` matches the `error` value used by the shared parity
  * fixtures.
  */
 export class DeployResourcesError extends Error {
@@ -346,24 +355,31 @@ export function selectProjectFiles(
 	const activeAncestors = new Set<string>();
 
 	const visit = (dirAbs: string, relDir: string): void => {
-		let real = dirAbs;
+		let real: string;
+		let entries: string[];
 		try {
 			real = realpathSync(dirAbs);
-		} catch {
-			return;
+			entries = readdirSync(dirAbs).sort();
+		} catch (error) {
+			throw unreadablePath(dirAbs, error);
 		}
 		if (activeAncestors.has(real)) return;
 		activeAncestors.add(real);
 
-		for (const entry of readdirSync(dirAbs).sort()) {
+		for (const entry of entries) {
 			const abs = join(dirAbs, entry);
 			const rel = relDir ? `${relDir}/${entry}` : entry;
 			let stat: ReturnType<typeof statSync>;
 			try {
 				stat = statSync(abs);
-			} catch {
-				// Broken symlink or a file removed mid-walk.
-				continue;
+			} catch (error) {
+				// An entry no pattern can select (as a file or as a folder) is
+				// irrelevant. One a pattern can select must never be skipped
+				// silently: the deployment would succeed without it.
+				if (!selector.selects(rel) && !selector.couldSelectUnder(rel)) {
+					continue;
+				}
+				throw unreadablePath(abs, error);
 			}
 			if (stat.isDirectory()) {
 				if (selector.couldSelectUnder(rel)) visit(abs, rel);
@@ -387,6 +403,35 @@ export function selectProjectFiles(
 		seenReal.add(key);
 		return true;
 	});
+}
+
+/**
+ * The `read-error` raised when a path a `deployResources` pattern can
+ * select cannot be read. Names the path and, for a dangling symlink,
+ * says so.
+ */
+export function unreadablePath(
+	path: string,
+	error: unknown,
+): DeployResourcesError {
+	const code = isRecord(error) ? error.code : undefined;
+	let reason = normalizeToError(error).message;
+	if (code === "ENOENT") {
+		let dangling = false;
+		try {
+			dangling = lstatSync(path).isSymbolicLink();
+		} catch {
+			// The path itself is gone (removed while deploying).
+		}
+		reason = dangling
+			? "it is a dangling symlink (its target does not exist)"
+			: "it was removed while the selection was being read";
+	}
+	return new DeployResourcesError(
+		"read-error",
+		`Cannot read ${path}, which "${DEPLOY_RESOURCES_FIELD}" selects: ${reason}. ` +
+			"Nothing was deployed. Fix the file permissions or the path, or exclude it with a ! pattern.",
+	);
 }
 
 /**
