@@ -27,6 +27,7 @@ import {
 	readFileSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	unlinkSync,
 	writeFileSync,
 	writeSync,
@@ -258,6 +259,22 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 		await waitUntil(() => mock.deployments.length === baseline + 2, w);
 		assert.match(mock.deploymentBodies[baseline], /version-one/);
 		assert.match(mock.deploymentBodies[baseline + 1], /version-two/);
+	});
+
+	test('"Changes to selected files … trigger redeployment" — a file selected only through a symlink alias redeploys when edited through its real path', {
+		skip:
+			process.platform === "win32" &&
+			"symlinks need elevated rights on Windows",
+	}, async () => {
+		const root = createProject(
+			join(tempDir, "aliased"),
+			{ deployResources: ["alias/*.bpmn"] },
+			{ "resources/main.bpmn": BPMN("main") },
+		);
+		symlinkSync(join(root, "resources"), join(root, "alias"));
+		const { w, baseline } = await startWatch(root);
+		writeFileSync(join(root, "resources", "main.bpmn"), BPMN("main-edited"));
+		await waitForDeploymentOf(["main.bpmn"], baseline, w);
 	});
 
 	test("changes to files outside the selection do not redeploy", async () => {
