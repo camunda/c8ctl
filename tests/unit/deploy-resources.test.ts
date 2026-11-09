@@ -791,6 +791,93 @@ describe('Spec: Validation and feedback — "Invalid field type or entries … e
 	}
 });
 
+// ─── A broken or changing descriptor never falls back to the default scan ──
+
+describe('"no surprise": a broken or changing camunda.json never falls back to the default scan', () => {
+	const descriptorError = /Failed to read [^\n]*camunda\.json/;
+	const symlinks = {
+		skip:
+			process.platform === "win32" &&
+			"symlinks need elevated rights on Windows",
+	};
+
+	test(
+		"a dangling camunda.json symlink is invalid-config, in the deployed folder or above it",
+		symlinks,
+		async () => {
+			const root = join(tempDir, "dangling");
+			writeProjectFile(root, "sub/main.bpmn", BPMN("main"));
+			writeProjectFile(root, "notes.md", "# notes");
+			symlinkSync(join(tempDir, "missing.json"), join(root, "camunda.json"));
+			for (const target of [root, join(root, "sub")]) {
+				const result = await deployDryRun([target]);
+				assertFailsWith(result, descriptorError);
+				assert.match(result.stderr, /dangling symlink/);
+			}
+		},
+	);
+
+	test("a camunda.json symlink whose target cannot be read is invalid-config", {
+		skip:
+			(process.platform === "win32" && "POSIX permissions only") ||
+			(process.getuid?.() === 0 && "root can read any file"),
+	}, async () => {
+		const root = join(tempDir, "locked-target");
+		writeProjectFile(root, "main.bpmn", BPMN("main"));
+		const target = writeProjectFile(
+			tempDir,
+			"real-camunda.json",
+			'{"deployResources":["*.md"]}',
+		);
+		symlinkSync(target, join(root, "camunda.json"));
+		chmodSync(target, 0o000);
+		try {
+			assertFailsWith(await deployDryRun([root]), descriptorError);
+		} finally {
+			chmodSync(target, 0o644);
+		}
+	});
+
+	// The descriptor is read twice to resolve the plan (marker check, then
+	// the field); the mutation lands right after, before any later step.
+	for (const [label, action] of [
+		["removed", "delete"],
+		["replaced by {} (field gone)", "{}"],
+		["half written (empty)", ""],
+	] as const) {
+		test(`a camunda.json ${label} after the selection was resolved: --dry-run still previews the selection`, async () => {
+			const root = project(
+				{ deployResources: ["*.md"] },
+				{
+					"main.bpmn": BPMN("main"),
+					"notes.md": "# notes",
+				},
+			);
+			const result = await deployDryRun([root], {
+				mutateAfterReads: `${join(root, "camunda.json")}|2|${action}`,
+			});
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(result.names, ["notes.md"]);
+		});
+
+		test(`a camunda.json ${label} after the selection was resolved: deploy still submits the selection`, async () => {
+			mock = await startMockCluster({ gatewayVersion: "8.10.0" });
+			const root = project(
+				{ deployResources: ["*.md"] },
+				{
+					"main.bpmn": BPMN("main"),
+					"notes.md": "# notes",
+				},
+			);
+			const result = await deployTo(mock.baseUrl, [root], {
+				mutateAfterReads: `${join(root, "camunda.json")}|2|${action}`,
+			});
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(mock.deployments, [["notes.md"]]);
+		});
+	}
+});
+
 // ─── Read errors never silently shrink a selection ───────────────────────────
 
 describe('"no surprise": a path that a deployResources pattern can select but that cannot be read fails the deploy instead of being skipped', () => {

@@ -25,6 +25,9 @@ import { listenOnLoopback } from "./http-server.ts";
 import { asyncSpawn, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
+export const MUTATE_AFTER_READS = pathToFileURL(
+	resolve(import.meta.dirname, "mutate-after-reads.ts"),
+).href;
 const VANISH_ON_READ = pathToFileURL(
 	resolve(import.meta.dirname, "vanish-on-read.ts"),
 ).href;
@@ -157,10 +160,13 @@ export async function deployDryRun(
 	{
 		cwd = tmpdir(),
 		vanishOnRead,
+		mutateAfterReads,
 	}: {
 		cwd?: string;
 		/** Absolute path deleted right before its first content read. */
 		vanishOnRead?: string;
+		/** `<path>|<n>|<"delete" or content>`: change a file after n reads. */
+		mutateAfterReads?: string;
 	} = {},
 ): Promise<DryRunOutcome> {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-deploy-resources-data-"));
@@ -174,6 +180,7 @@ export async function deployDryRun(
 			[
 				"--experimental-strip-types",
 				...(vanishOnRead ? ["--import", VANISH_ON_READ] : []),
+				...(mutateAfterReads ? ["--import", MUTATE_AFTER_READS] : []),
 				CLI,
 				"deploy",
 				...args,
@@ -187,6 +194,12 @@ export async function deployDryRun(
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
 					...(vanishOnRead ? { C8CTL_TEST_VANISH_ON_READ: vanishOnRead } : {}),
+					...(mutateAfterReads
+						? { C8CTL_TEST_MUTATE_AFTER_READS: mutateAfterReads }
+						: {}),
+					...(process.env.C8CTL_TEST_TRACE_READS
+						? { C8CTL_TEST_TRACE_READS: process.env.C8CTL_TEST_TRACE_READS }
+						: {}),
 				},
 			},
 		);
@@ -348,12 +361,20 @@ export async function startMockCluster({
 export async function deployTo(
 	baseUrl: string,
 	args: string[],
+	{ mutateAfterReads }: { mutateAfterReads?: string } = {},
 ): Promise<SpawnResult> {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-deploy-resources-data-"));
 	try {
 		return await asyncSpawn(
 			"node",
-			["--experimental-strip-types", CLI, "deploy", ...args, "--yes"],
+			[
+				"--experimental-strip-types",
+				...(mutateAfterReads ? ["--import", MUTATE_AFTER_READS] : []),
+				CLI,
+				"deploy",
+				...args,
+				"--yes",
+			],
 			{
 				cwd: tmpdir(),
 				env: {
@@ -361,6 +382,9 @@ export async function deployTo(
 					CAMUNDA_BASE_URL: baseUrl,
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
+					...(mutateAfterReads
+						? { C8CTL_TEST_MUTATE_AFTER_READS: mutateAfterReads }
+						: {}),
 				},
 			},
 		);

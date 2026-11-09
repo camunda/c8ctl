@@ -40,6 +40,7 @@ import { isRecord } from "../../src/core/index.ts";
 import {
 	createProject,
 	type MockCluster,
+	MUTATE_AFTER_READS,
 	startMockCluster,
 	writeProjectFile,
 } from "../utils/deploy-resources.ts";
@@ -113,13 +114,26 @@ function makeProject(): string {
 async function startWatch(
 	root: string,
 	extraArgs: string[] = [],
-	{ settled = true }: { settled?: boolean } = {},
+	{
+		settled = true,
+		mutateAfterReads,
+	}: {
+		settled?: boolean;
+		/** `<path>|<n>|<"delete" or content>`: change a file after n reads. */
+		mutateAfterReads?: string;
+	} = {},
 ) {
 	watcher = startWatchProcess({
 		watchDir: root,
 		dataDir,
 		extraArgs: ["--project", ...extraArgs],
-		env: { CAMUNDA_BASE_URL: mock.baseUrl },
+		env: {
+			CAMUNDA_BASE_URL: mock.baseUrl,
+			...(mutateAfterReads
+				? { C8CTL_TEST_MUTATE_AFTER_READS: mutateAfterReads }
+				: {}),
+		},
+		nodeArgs: mutateAfterReads ? ["--import", MUTATE_AFTER_READS] : [],
 	});
 	const w = watcher;
 	const ready = await pollUntil(
@@ -456,6 +470,27 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		chmodSync(file, 0o644);
 		writeFileSync(file, "# readable again");
 		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
+	});
+
+	test("a camunda.json removed between the re-resolution and the redeploy never switches the project to the default scan", async () => {
+		const root = createProject(
+			join(tempDir, "racy"),
+			{ deployResources: ["*.md"] },
+			{ "main.bpmn": BPMN("main"), "notes.md": "# notes" },
+		);
+		// The watcher reads the descriptor three times at startup (project
+		// root, field presence, selection) and once when re-resolving after a
+		// change: delete it right after that fourth read, before the redeploy.
+		const { w } = await startWatch(root, [], {
+			settled: false,
+			mutateAfterReads: `${join(root, "camunda.json")}|4|delete`,
+		});
+		writeFileSync(join(root, "notes.md"), "# edited");
+		await waitForDeploymentOf(["notes.md"], 0, w);
+		assert.ok(
+			mock.deployments.every((names) => !names.includes("main.bpmn")),
+			`the default scan must never be deployed: ${JSON.stringify(mock.deployments)}`,
+		);
 	});
 
 	test("an invalid descriptor at startup fails without --force", () => {
