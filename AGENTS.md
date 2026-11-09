@@ -170,6 +170,16 @@ Describe the user-visible behaviour change in the commit body instead, so it sti
 
 If you are unsure, default to non-breaking and ask the engineer. A PR whose title or commits contain a breaking-change marker cannot be merged until a maintainer applies the `ack-breaking-change` label (enforced by [`.github/workflows/breaking-change-guard.yml`](.github/workflows/breaking-change-guard.yml)). AI agents must never apply that label themselves.
 
+#### If `main` is ever rewritten
+
+Rewriting `main` (for example, force-pushing a reworded commit to strip a wrongly added breaking-change marker) is an emergency measure, not a way of working. The guard is the normal defence: it runs on every PR event and keeps markers out of `main` in the first place.
+
+If a rewrite does happen, every open PR branched from the old history still carries the replaced commits. They now count as the PR's own commits, so a squash merge would put the old message — marker included — back on `main`. The guard does **not** re-check open PRs when `main` changes, so their earlier green results are stale. After the rewrite:
+
+- rebase every open PR onto the new `main` (`git rebase origin/main` drops a replaced commit whose change is already upstream; for Renovate PRs, tick the rebase boxes on the Dependency Dashboard)
+- confirm no open PR still contains the replaced commit SHAs before merging anything
+- if a bad version was already released, delete its tag and GitHub release; on npm, move the dist-tag and unpublish or deprecate the version. The version number can never be reused, so recreate its tag before the next genuine release in that range, or semantic-release will try to publish it again and fail
+
 #### Review-comment fix-ups
 
 Commits that address PR review comments must use the `chore` type (e.g. `chore:` or `chore(<scope>):`), **not** the `fix` type.
