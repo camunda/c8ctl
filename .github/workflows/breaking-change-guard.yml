@@ -72,7 +72,13 @@ jobs:
           # omitted commit must not slip through unacknowledged.
           scanned=$(tr -cd '\0' < "$messages_file" | wc -c)
           total=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .commits)
+          # A maintainer's acknowledgement label overrides an incomplete scan
+          # (the label is the same escape hatch as for a detected marker).
           if [ "$total" -gt "$scanned" ]; then
+            if [ "$ACKED" = "true" ]; then
+              echo "Only $scanned of $total commits scanned (API limit); acknowledged via the 'ack-breaking-change' label."
+              exit 0
+            fi
             echo "::error title=Incomplete commit scan::This PR has $total commits but only the first $scanned could be scanned (API limit). Rebase or squash the PR, or have a maintainer apply the 'ack-breaking-change' label if the breaking change is intended."
             exit 1
           fi
