@@ -15,6 +15,7 @@
 
 import assert from "node:assert";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -693,6 +694,67 @@ describe("Spec: Validation and feedback", () => {
 		assert.deepStrictEqual(result.names, ["main.bpmn"]);
 		assert.doesNotMatch(result.stderr, /does-not-exist|missing\.bpmn/);
 	});
+});
+
+// ─── Validation: the descriptor itself ──────────────────────────────────────
+
+describe('Spec: Validation and feedback — "Invalid field type or entries … error, no deployment" applies to a descriptor that cannot be read', () => {
+	const readFailure = /Failed to read [^\n]*camunda\.json/;
+
+	test("a directory named camunda.json fails instead of falling back to the default scan", async () => {
+		const root = join(tempDir, "project");
+		mkdirSync(join(root, "camunda.json"), { recursive: true });
+		writeProjectFile(root, "main.bpmn", BPMN("main"));
+		assertFailsWith(await deployDryRun([root]), readFailure);
+	});
+
+	test("an unreadable camunda.json (no permission) fails instead of falling back to the default scan", {
+		skip:
+			(process.platform === "win32" && "POSIX permissions only") ||
+			(process.getuid?.() === 0 && "root can read any file"),
+	}, async () => {
+		const root = project(
+			{ deployResources: ["*.md"] },
+			{
+				"main.bpmn": BPMN("main"),
+				"notes.md": "# notes",
+			},
+		);
+		chmodSync(join(root, "camunda.json"), 0o000);
+		try {
+			assertFailsWith(await deployDryRun([root]), readFailure);
+		} finally {
+			chmodSync(join(root, "camunda.json"), 0o644);
+		}
+	});
+
+	for (const [label, bytes] of [
+		[
+			"UTF-8 BOM",
+			Buffer.concat([
+				Buffer.from([0xef, 0xbb, 0xbf]),
+				Buffer.from('{"deployResources":["*.md"]}', "utf-8"),
+			]),
+		],
+		[
+			"UTF-16LE BOM",
+			Buffer.concat([
+				Buffer.from([0xff, 0xfe]),
+				Buffer.from('{"deployResources":["*.md"]}', "utf16le"),
+			]),
+		],
+	] as const) {
+		test(`a camunda.json with a ${label} is parsed and its deployResources applied`, async () => {
+			const root = project(
+				{},
+				{ "main.bpmn": BPMN("main"), "notes.md": "# notes" },
+			);
+			writeFileSync(join(root, "camunda.json"), bytes);
+			const result = await deployDryRun([root]);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(result.names, ["notes.md"]);
+		});
+	}
 });
 
 // ─── Specification: Camunda 8 version compatibility ─────────────────────────

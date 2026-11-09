@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isRecord } from "../../src/core/index.ts";
+import { decodeCamundaJson } from "../../src/utils/index.ts";
 import { listenOnLoopback } from "./http-server.ts";
 import { asyncSpawn, type SpawnResult } from "./spawn.ts";
 
@@ -77,8 +78,9 @@ export function loadParityCases(): ParityCase[] {
 				);
 				expected = { kind: "selected", selected: selected.map(String) };
 			}
+			// Fixtures may carry a UTF-8 or UTF-16LE BOM.
 			const descriptor: unknown = JSON.parse(
-				readFileSync(join(dir, "camunda.json"), "utf-8"),
+				decodeCamundaJson(readFileSync(join(dir, "camunda.json"))),
 			);
 			const declaresField =
 				isRecord(descriptor) && Object.hasOwn(descriptor, "deployResources");

@@ -310,6 +310,22 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 		await waitForDeploymentOf(["main.bpmn"], baseline, w);
 	});
 
+	test('"A camunda.json edit re-resolves the selection" — a descriptor briefly missing mid-save is re-read from the new file, never replaced by the default scan', async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root);
+		unlinkSync(join(root, "camunda.json"));
+		await waitForOutput(/camunda\.json is missing/, w);
+		writeFileSync(join(root, "camunda.json"), descriptor(["resources/*.md"]));
+		await waitForDeploymentOf(["prompt.md"], baseline, w);
+		assert.ok(
+			mock.deployments
+				.slice(baseline)
+				.every((names) => !names.includes("wip.bpmn")),
+			"the default scan must never be deployed",
+		);
+		assert.strictEqual(w.child.exitCode, null, "watching continues");
+	});
+
 	test('"A camunda.json edit … redeploys if the set changed" — an edit that keeps the set does not redeploy', async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
