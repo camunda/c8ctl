@@ -45,7 +45,7 @@ Patterns use the same syntax as [`.c8ignore`](development-workflows.md#exclude-f
 
 When `deployResources` is present, it acts as an allowlist: the default extension scan doesn't apply and `.c8ignore` is ignored. When it is omitted, the default scan rules apply unchanged.
 
-`node_modules/`, `target/`, `.git/`, and the project-root `camunda.json` are excluded by default. These defaults apply before your patterns, so a later positive pattern that matches a file inside them selects it. For example, `target/classes/**` selects generated resources and `**/*` selects everything, including `target/`, `node_modules/` and `camunda.json`. Add exclusions after a broad pattern to narrow it, such as `["**/*", "!node_modules/", "!target/", "!camunda.json"]`.
+Patterns behave exactly as written: there are no hidden exclusions on top of them. `node_modules/`, `target/`, `.git/`, and the project-root `camunda.json` are excluded by default, but these defaults apply before your patterns, so any positive pattern that matches a file inside them selects it. For example, `target/classes/**` selects generated resources and `**/*` selects everything, including `target/`, `node_modules/` and `camunda.json`. Add exclusions after a broad pattern to narrow it, such as `["**/*", "!node_modules/", "!target/", "!camunda.json"]`.
 
 Wildcards (`*`, `?`, `**`, `[...]`) never match a file or folder whose name starts with a dot. A pattern that names it explicitly selects it, for example `resources/.prompt.md` or `.camunda/**`. Control files such as `.c8ignore` and `.process-application` are therefore never selected by wildcards.
 
