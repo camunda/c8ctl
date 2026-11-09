@@ -216,6 +216,11 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	// Project-relative paths changed since the last descriptor-mode
 	// resolution (collapsed by the debounce window).
 	const pendingChanges = new Set<string>();
+	// Descriptor-mode resolutions and deploys run one at a time, so a
+	// change made during an in-flight deploy is deployed after it and the
+	// newest content always lands last.
+	let descriptorQueue: Promise<void> = Promise.resolve();
+	let descriptorBusy = false;
 
 	/**
 	 * Descriptor mode: re-resolve the selection after a burst of changes
@@ -306,7 +311,20 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 					scheduleDescriptorModeChange(root, remaining);
 					return;
 				}
-				void onDescriptorModeChange(root);
+				if (descriptorBusy) {
+					logger.info(
+						"⏳ Waiting for the in-flight deployment to finish before redeploying",
+					);
+				}
+				descriptorQueue = descriptorQueue.then(async () => {
+					if (shuttingDown) return;
+					descriptorBusy = true;
+					try {
+						await onDescriptorModeChange(root);
+					} finally {
+						descriptorBusy = false;
+					}
+				});
 			}, delay),
 		);
 	};
