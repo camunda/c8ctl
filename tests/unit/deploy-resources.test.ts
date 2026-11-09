@@ -1041,6 +1041,69 @@ describe('"no surprise": a path that a deployResources pattern can select but th
 		},
 	);
 
+	for (const [label, patterns, folder] of [
+		[
+			"a later positive pattern below an earlier !vendor/",
+			["main.bpmn", "!vendor/", "vendor/keep.bpmn"],
+			"vendor",
+		],
+		[
+			"a positive pattern below the default target/ exclusion",
+			["main.bpmn", "target/classes/**"],
+			"target",
+		],
+		[
+			"a positive pattern below the default node_modules/ exclusion",
+			["main.bpmn", "node_modules/pkg/x.bpmn"],
+			"node_modules",
+		],
+	] as const) {
+		test(
+			`folder exclusions: an unreadable folder is not skipped when ${label} can select inside it`,
+			posixOnly,
+			async () => {
+				const root = project(
+					{ deployResources: [...patterns] },
+					{
+						"main.bpmn": BPMN("main"),
+						[`${folder}/keep.bpmn`]: BPMN("keep"),
+					},
+				);
+				chmodSync(join(root, folder), 0o000);
+				try {
+					assertFailsWith(
+						await deployDryRun([root]),
+						new RegExp(`Cannot read [^\\n]*/${folder}\\b`),
+					);
+				} finally {
+					chmodSync(join(root, folder), 0o755);
+				}
+			},
+		);
+	}
+
+	test(
+		"folder exclusions: an unreadable folder whose last matching pattern is ! and that no later pattern reaches is skipped",
+		posixOnly,
+		async () => {
+			const root = project(
+				{ deployResources: ["**/*.bpmn", "!vendor/"] },
+				{
+					"main.bpmn": BPMN("main"),
+					"vendor/lib.bpmn": BPMN("lib"),
+				},
+			);
+			chmodSync(join(root, "vendor"), 0o000);
+			try {
+				const result = await deployDryRun([root]);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.deepStrictEqual(result.names, ["main.bpmn"]);
+			} finally {
+				chmodSync(join(root, "vendor"), 0o755);
+			}
+		},
+	);
+
 	test("a selected file that cannot be read", posixOnly, async () => {
 		const root = project(
 			{ deployResources: ["resources/**"] },

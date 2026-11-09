@@ -277,9 +277,10 @@ export interface ResourceSelector {
 	 */
 	couldSelectUnder(relDir: string): boolean;
 	/**
-	 * Whether the last pattern matching the folder itself (`relDir/`) is a
-	 * `!` pattern, e.g. `!vendor/`. Used to skip a folder that can't be read
-	 * when the user excluded it explicitly.
+	 * Whether the folder is excluded: a `!` pattern matches it (e.g.
+	 * `!vendor/`, or a default exclusion) and no later positive pattern
+	 * matches it or can reach below it. Used to skip a folder that can't be
+	 * read only when nothing inside it can be selected.
 	 */
 	excludesFolder(relDir: string): boolean;
 }
@@ -377,6 +378,28 @@ function hasSplitGroup(glob: string): boolean {
 }
 
 /**
+ * Whether a brace-expanded glob could match a path strictly below the
+ * folder `dirSegments`.
+ */
+function globReachesBelow(
+	dirSegments: readonly string[],
+	glob: string,
+): boolean {
+	return (
+		// A group that still spans a `/` (an extglob such as `@(a/b|c)`)
+		// can't be checked segment by segment: assume it can reach.
+		hasSplitGroup(glob) ||
+		// Empty (`a//b`) and `.` (`a/./b`) segments are dropped, as the
+		// native matcher collapses them. Dropping more than the matcher
+		// does only makes the answer more conservative.
+		globCouldMatchBelow(
+			dirSegments,
+			glob.split("/").filter((seg) => seg !== "" && seg !== "."),
+		)
+	);
+}
+
+/**
  * Compile validated `deployResources` patterns into a selector.
  * Call {@link parseDeployResources} first to validate raw input.
  */
@@ -398,12 +421,23 @@ export function compileDeployResources(
 
 	return {
 		patterns: [...patterns],
-		excludesFolder: (relDir) =>
-			ordered.reduce<boolean>(
-				(excluded, p) =>
-					matchesParsedPattern(`${relDir}/`, p) ? p.negate : excluded,
-				false,
-			),
+		excludesFolder: (relDir) => {
+			// In pattern order: a `!` pattern matching the folder excludes it;
+			// a later positive pattern that matches the folder or can reach
+			// below it cancels that, since it may select files inside.
+			const dirSegments = relDir.split("/").filter(Boolean);
+			return ordered.reduce<boolean>((excluded, p) => {
+				if (p.negate) {
+					return matchesParsedPattern(`${relDir}/`, p) ? true : excluded;
+				}
+				const reaches =
+					matchesParsedPattern(`${relDir}/`, p) ||
+					p.globs
+						.flatMap(expandBraces)
+						.some((glob) => globReachesBelow(dirSegments, glob));
+				return reaches ? false : excluded;
+			}, false);
+		},
 		selects: (relPath) =>
 			ordered.reduce<boolean>(
 				(selected, p) =>
@@ -412,19 +446,8 @@ export function compileDeployResources(
 			),
 		couldSelectUnder: (relDir) => {
 			const dirSegments = relDir.split("/").filter(Boolean);
-			return positiveAlternatives.some(
-				(glob) =>
-					// A group that still spans a `/` (an extglob such as
-					// `@(a/b|c)`) can't be checked segment by segment: walk
-					// conservatively. Other groups are segment-local.
-					hasSplitGroup(glob) ||
-					// Empty (`a//b`) and `.` (`a/./b`) segments are dropped, as
-					// the native matcher collapses them. Dropping more than the
-					// matcher does only makes pruning more conservative.
-					globCouldMatchBelow(
-						dirSegments,
-						glob.split("/").filter((seg) => seg !== "" && seg !== "."),
-					),
+			return positiveAlternatives.some((glob) =>
+				globReachesBelow(dirSegments, glob),
 			);
 		},
 	};
