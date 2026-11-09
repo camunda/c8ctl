@@ -73,6 +73,17 @@ afterEach(async () => {
 const descriptor = (deployResources: unknown) =>
 	JSON.stringify({ deployResources });
 
+/**
+ * Replace camunda.json atomically (write a sibling file, then rename), as
+ * editors do on save. A plain truncate-and-write can be observed half
+ * written by the watcher's debounced read on a loaded runner.
+ */
+function writeDescriptor(root: string, content: string) {
+	const temp = join(root, ".camunda.json.tmp");
+	writeFileSync(temp, content);
+	renameSync(temp, join(root, "camunda.json"));
+}
+
 function makeProject(): string {
 	return createProject(
 		join(tempDir, "project"),
@@ -127,8 +138,8 @@ async function settle(w: WatchProcess, root: string): Promise<number> {
 	const parsed: unknown = JSON.parse(readFileSync(file, "utf-8"));
 	assert.ok(isRecord(parsed) && Array.isArray(parsed.deployResources));
 	const before = countMatches(w, DESCRIPTOR_PROCESSED);
-	writeFileSync(
-		file,
+	writeDescriptor(
+		root,
 		descriptor([...parsed.deployResources, `settle-${before}/**`]),
 	);
 	await waitUntil(() => countMatches(w, DESCRIPTOR_PROCESSED) > before, w);
@@ -260,7 +271,7 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 	test('"A camunda.json edit re-resolves the selection and redeploys if the set changed"', async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
-		writeFileSync(join(root, "camunda.json"), descriptor(["resources/**"]));
+		writeDescriptor(root, descriptor(["resources/**"]));
 		await waitForDeploymentOf(
 			["main.bpmn", "prompt.md", "wip.bpmn"],
 			baseline,
@@ -272,8 +283,8 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
 		const before = countMatches(w, /selected resources are unchanged/g);
-		writeFileSync(
-			join(root, "camunda.json"),
+		writeDescriptor(
+			root,
 			descriptor(["!README.md", "resources/**", "!resources/drafts/"]),
 		);
 		await waitUntil(
@@ -288,7 +299,7 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 	test("an invalid deployResources edit without --force surfaces the error and stops watching", async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
-		writeFileSync(join(root, "camunda.json"), descriptor("resources/**"));
+		writeDescriptor(root, descriptor("resources/**"));
 		const code = await w.waitForExit(SAFETY_NET_MS);
 		// `null` would mean the watcher had to be killed: it must exit on its own.
 		assert.strictEqual(code, 1, w.getOutput());
@@ -299,7 +310,7 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 	test("an empty-selection edit without --force surfaces the error and stops watching", async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
-		writeFileSync(join(root, "camunda.json"), descriptor(["nothing/**"]));
+		writeDescriptor(root, descriptor(["nothing/**"]));
 		const code = await w.waitForExit(SAFETY_NET_MS);
 		// `null` would mean the watcher had to be killed: it must exit on its own.
 		assert.strictEqual(code, 1, w.getOutput());
@@ -310,17 +321,17 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 	test("with --force, an invalid edit is reported, watching continues, and the fixed descriptor redeploys", async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root, ["--force"]);
-		writeFileSync(join(root, "camunda.json"), descriptor([42]));
+		writeDescriptor(root, descriptor([42]));
 		await waitForOutput(/Invalid "deployResources"/, w);
 		await waitForOutput(/Continuing to watch \(--force\)/, w);
-		writeFileSync(join(root, "camunda.json"), descriptor(["resources/*.md"]));
+		writeDescriptor(root, descriptor(["resources/*.md"]));
 		await waitForDeploymentOf(["prompt.md"], baseline, w);
 	});
 
 	test("with --force, an empty selection is reported and watching continues", async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root, ["--force"]);
-		writeFileSync(join(root, "camunda.json"), descriptor(["nothing/**"]));
+		writeDescriptor(root, descriptor(["nothing/**"]));
 		await waitForOutput(/No deployable files found/, w);
 		writeProjectFile(root, "nothing/now-something.bpmn", BPMN("n"));
 		await waitForDeploymentOf(["now-something.bpmn"], baseline, w);
@@ -330,7 +341,7 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root, ["--force"]);
 		const continuing = /Continuing to watch \(--force\)/g;
-		writeFileSync(join(root, "camunda.json"), descriptor([42]));
+		writeDescriptor(root, descriptor([42]));
 		await waitUntil(() => countMatches(w, continuing) >= 1, w);
 		writeFileSync(
 			join(root, "resources", "prompt.md"),
@@ -340,10 +351,7 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		await waitUntil(() => countMatches(w, continuing) >= 2, w);
 		// Restoring a descriptor with the same selected set must still
 		// deploy the edit that happened during recovery.
-		writeFileSync(
-			join(root, "camunda.json"),
-			descriptor(["resources/**", "!resources/drafts/"]),
-		);
+		writeDescriptor(root, descriptor(["resources/**", "!resources/drafts/"]));
 		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
 	});
 
@@ -366,7 +374,7 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		);
 		const { w } = await startWatch(root, ["--force"], { settled: false });
 		assert.match(w.getOutput(), /No deployable files found/);
-		writeFileSync(join(root, "camunda.json"), descriptor(["*.bpmn"]));
+		writeDescriptor(root, descriptor(["*.bpmn"]));
 		await waitForDeploymentOf(["main.bpmn"], 0, w);
 	});
 });

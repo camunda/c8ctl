@@ -18,12 +18,16 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { isRecord } from "../../src/core/index.ts";
 import { listenOnLoopback } from "./http-server.ts";
 import { asyncSpawn, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
-const FAKE_TTY = resolve(import.meta.dirname, "fake-tty.ts");
+// `--import` takes a URL; a bare Windows path (C:\...) is rejected.
+const FAKE_TTY = pathToFileURL(
+	resolve(import.meta.dirname, "fake-tty.ts"),
+).href;
 
 /** Directory holding the shared parity fixtures. */
 export const PARITY_FIXTURES_DIR = resolve(
