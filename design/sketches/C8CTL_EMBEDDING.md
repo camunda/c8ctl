@@ -14,7 +14,7 @@ Every option below is measured against these. Each is rooted in an existing cons
 
 | #  | Need                                                                                     | Rooted in                                                                                                                                                                                             |
 | -- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| N1 | __One implementation__ of cluster access, project resolution, templates, local cluster   | Modeler duplicates them today (see [Duplication](#duplication-today))                                                                                                                                 |
+| N1 | __One implementation__ of cluster access, project resolution, templates, local cluster   | Modeler duplicates them today, and some already diverge (see [Implemented twice](#implemented-twice))                                                                                                 |
 | N2 | __One shared state__ - profiles, login, local cluster - visible to every tool, changes observable | Goal. A profile added in the terminal must show up in Modeler's connection picker                                                                                                           |
 | N3 | __Actionable errors__ - stable codes, not sentences                                      | Modeler attaches connection errors to form fields (see [Errors](#errors))                                                                                                                             |
 | N4 | __Long-running operations__ with progress, cancellation and user interaction             | `cluster start` downloads and boots c8run for minutes; hub login needs a browser step                                                                                                                 |
@@ -29,15 +29,83 @@ Explicitly __not__ a need (assumptions to confirm):
 
 ## Status quo
 
-### Duplication today
+### Modeler and `c8ctl` today
 
-| Capability                       | `c8ctl`                                                     | Desktop Modeler                                                                   |
-| -------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Cluster access                   | `core/client.ts` on `@camunda8/orchestration-cluster-api`   | `app/lib/zeebe-api` on `@camunda8/sdk` - 18 `zeebe:*` IPC handlers (deploy, start instance, connection check, searches, FEEL, variables) |
-| Connections / profiles           | `core/config.ts` - profiles, reads Modeler connections      | Own connection store in `settings.json`                                           |
-| Project resolution               | `camunda.json`, `.c8ignore`, deployable set                 | `app/lib/file-context/processors/camundaProjectProcessor.js`                      |
-| Element template sync            | `element-template/cache.ts`                                 | `app/lib/template-updater/`                                                       |
-| Local cluster                    | `cluster` plugin (c8run download, start, status)            | -                                                                                 |
+Function-level comparison of Desktop Modeler (`develop`) and `c8ctl` (`main`), as of November 2026. This is the concrete surface the proposal builds from.
+
+#### Shared today
+
+Only __conventions__ are shared, no code. The two use different SDKs: Modeler uses `@camunda8/sdk` (gRPC + REST), `c8ctl` uses `@camunda8/orchestration-cluster-api` (REST only).
+
+* __Connection schema__ - `c8ctl`'s `Connection` type mirrors Modeler's `connectionManagerPlugin.c8connections` entries. `c8ctl` reads them as read-only `modeler:` profiles.
+* __`camunda.json`__ (and legacy `.process-application`) as the project marker.
+* __`.camunda/element-templates/`__ as the project template folder.
+* __`modeler:executionPlatformVersion`__ in the diagram, which both use to select version-specific lint rules and templates.
+
+#### Implemented twice
+
+| Function                  | Modeler                                                                                                                                                       | `c8ctl`                                                                                                                                  | Divergence to resolve                                             |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Client + auth             | `zeebe-api/camunda-client-factory.js` - none / basic / OAuth, SaaS / self-managed, gRPC-first probing with REST fallback, custom CA (`--zeebe-ssl-certificate`, system certificates) | `core/client.ts` `createClient`, `resolveClusterConfig` - none / basic / OAuth, custom headers, env vars; REST only; CA via `NODE_EXTRA_CA_CERTS` | gRPC support; CA configuration                                     |
+| Connection store          | `settings.json` `connectionManagerPlugin.c8connections`; secrets stored in plain text in settings                                                            | `profiles.json`; plus Modeler connections, read-only                                                                                     | Two stores, bridged in one direction only                          |
+| Connection check          | `zeebe:checkConnection`, `zeebe:getGatewayVersion` - 11 classified error reasons                                                                              | `get topology` - error message text                                                                                                      | Error codes, see [Errors](#errors)                                 |
+| Deploy file               | `zeebe:deploy`; normalizes REST results to the gRPC result shape                                                                                              | `deploy <file>`                                                                                                                          | Result shape                                                      |
+| Deploy project            | `CamundaProjectsDeploymentPlugin` - every BPMN / DMN / form file in the project; the watcher skips only `node_modules` and `.git`                              | `deploy` - `findProjectRoot`, `collectResourcesForPaths`: deployable extensions, `.c8ignore`, deploy-always rules, extension allow-list per server version | __Same project, different deploy set__ - Modeler ignores `.c8ignore` today. _Note: Modeler will support `.c8ignore`._ |
+| Start instance            | `zeebe:startInstance` - variables, business ID, start instructions, runtime terminate instructions (task testing)                                             | `create pi` - variables, business ID; `run` (deploy + start)                                                                             | `c8ctl` lacks start and runtime instructions                       |
+| Instance inspection       | `zeebe:search{ProcessInstances,Variables,Incidents,Jobs,UserTasks}` (task testing)                                                                            | `search pi`, `search variable`, `search incident`, `search jobs`, `search user-task`                                                     | Pagination defaults                                               |
+| Element instances         | `zeebe:searchElementInstances`, `zeebe:searchMessageSubscriptions` (task testing)                                                                             | Partly, via `search wait-state`                                                                                                          | `c8ctl` gap                                                       |
+| Authorizations            | `zeebe:getAuthorizations`                                                                                                                                     | `search authorization`                                                                                                                   | -                                                                 |
+| FEEL evaluation           | `zeebe:evaluateExpression` (cluster)                                                                                                                          | `feel evaluate` (cluster or local)                                                                                                       | -                                                                 |
+| Cluster variables         | `zeebe:{search,get,create,update}ClusterVariable(s)`                                                                                                          | -                                                                                                                                        | `c8ctl` gap                                                       |
+| Secret names              | `zeebe:listSecrets`                                                                                                                                           | - (`cluster secrets` manages local c8run secrets only)                                                                                   | `c8ctl` gap                                                       |
+| Project index             | `file-context` - watcher and indexer, resolves links: `calledElement`, `calledDecision`, `formId`                                                             | `readCamundaProject`, `findProjectRoot` - no index, no links                                                                             | Modeler resolves links for editing; `c8ctl` does not need them yet |
+| OOTB templates            | `template-updater` from `marketplace.cloud.camunda.io/api/v1/ootb-connectors`, plus custom URL sources                                                       | `element-template sync` from npm `@camunda/connectors-element-templates`                                                                 | __Same catalog, different sources__                               |
+| Template resolution       | `ElementTemplatesProvider` - bundled, user, project templates                                                                                                 | `template-ref.ts` - project templates, then OOTB cache                                                                                   | User and custom-source templates                                  |
+| BPMN linting              | `@camunda/linting` (renderer)                                                                                                                                 | `bpmn lint` - `bpmnlint:recommended` + `camunda-compat` for the diagram's version                                                        | __Different rule sets__ - the same diagram can lint differently    |
+
+#### `c8ctl` capabilities Modeler does not use
+
+| `c8ctl` capability                                                                        | Modeler today                                                    | Potential for Modeler                                                     |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Local cluster - `cluster install / start / stop / status / logs / list-remote / purge`     | Links to c8run download and docs                                 | __High__ - one-click local cluster with a matching connection              |
+| Hub login (planned)                                                                       | Manual client credentials                                        | __High__ - sign in once; connections come with it                          |
+| Instance operations - `cancel`, `suspend` / `resume`, `modify`, `migrate pi`              | -                                                                | Medium - clean up or migrate test instances after redeploying              |
+| `search wait-state` - where an instance is waiting                                         | Assembled from several searches                                  | Medium - simpler task testing                                             |
+| `watch` - redeploy on change                                                               | Manual deploy                                                    | Medium - deploy on save                                                   |
+| c8run secrets and physical tenants                                                         | -                                                                | Medium - connector secrets for local runs                                 |
+| `await pi`                                                                                 | Task testing polls                                               | Low                                                                       |
+| Profiles from env vars / `.env`, custom headers                                            | -                                                                | Low - gateways that require extra headers                                 |
+| Plugins                                                                                    | -                                                                | Unclear (see [Open questions](#open-questions))                           |
+| Drive an instance - `complete job`, `fail job`, `complete user-task`, `resolve incident`, `publish` / `correlate message` | Task testing is read-only                                        | None - _Note: in Modeler, the user drives an instance forward._           |
+| Identity management, `mcp-proxy`, `bpmn format`, `open operate / tasklist / optimize`      | -                                                                | None - not an authoring concern, or already covered                       |
+
+#### Built in the wrong place
+
+Some editing features were built in `c8ctl`, though they belong in a shared editor library. They are not gaps in Modeler. Built in the right place, the library serves both: `c8ctl` consumes it through its plugin, Modeler through its editor.
+
+| Feature                                                                              | Built in                                                     | Belongs in                    | Why                                                                                     |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------- |
+| Template migration - `element-template update` with recipes (values carried over)   | `c8ctl` `element-template` plugin (`migration/`)             | `bpmn-js-element-templates`   | Runs on a diagram, not on a cluster or disk state. Modeler needs it on the open diagram. |
+
+The migration engine is runtime-free by design (`migration/` imports nothing from `c8ctl`), so it can move without a rewrite.
+
+#### What this means
+
+* __Before Modeler can drop `zeebe-api`__, `c8ctl` needs:
+  * start and runtime instructions
+  * element instance and message subscription search
+  * cluster variables
+  * secret names
+  * CA configuration
+  * classified connection errors
+
+  Plus a decision on __gRPC__: do the engines and endpoints Modeler supports still need it?
+* __Divergences to align first__ - otherwise building on `c8ctl` changes behavior for Modeler users:
+  * the deploy set (`.c8ignore`) - _Note: planned, Modeler will support `.c8ignore`._
+  * the OOTB template source
+  * the lint rule set
+* __The largest gains for Modeler are capabilities it lacks__, not the ones it duplicates: local cluster and hub login.
+* __Move editing features to their library__ - template migration goes to `bpmn-js-element-templates`; the `c8ctl` plugin then consumes it, as Modeler does.
 
 ### How tools call `c8ctl` today
 
@@ -181,9 +249,10 @@ What it means for `c8ctl`:
 ## Rollout
 
 1. __Option-independent requirements__ - handler `ctx` (progress, prompts, cancellation), explicit context, error codes, bounded results. Immediate value for CLI users and agents.
-2. __Extract the runtime-free core__ and export a first library where Modeler duplicates most (project resolution or element template sync). __Spike in Modeler__ - validates D, including `require(esm)` and dependency size.
+2. __Align the divergences__ - deploy set (Modeler adopts `.c8ignore`), OOTB template source, lint rule set. Then __extract the runtime-free core__ and export a first library: project deploy-set resolution - small, pure, and already divergent. __Spike in Modeler__ to validate D, including `require(esm)` and dependency size.
 3. __`c8ctl mcp`__ exposing `c8ctl`'s own commands to agent hosts.
-4. __Hub login + local cluster__ as libraries consumed by Modeler; migrate connections into `c8ctl` profiles.
+4. __Local cluster + hub login__ as libraries consumed by Modeler. These are the highest-value capabilities Modeler lacks today. Migrate connections into `c8ctl` profiles.
+5. __Close the `zeebe-api` gaps__ (start and runtime instructions, element instance search, cluster variables, secret names, CA configuration), then retire `zeebe-api` in favor of `c8ctl` libraries.
 
 ## Open questions
 
@@ -193,6 +262,8 @@ What it means for `c8ctl`:
 * __Relation to `mcp-proxy`__ - fold into `c8ctl mcp`, or keep separate?
 * __Hub login and Modeler__ - which Modeler connection types migrate as-is, which are superseded by hub login?
 * __Plugins in Modeler__ - a real need? It would favor B over D.
+* __gRPC__ - Modeler probes gRPC first, `c8ctl` is REST only. Which Modeler-supported engines or endpoints still need gRPC?
+* __Who owns linting?__ Linting runs on unsaved editor state, so it is a library. Should `c8ctl` adopt `@camunda/linting`? (Template migration: see [Built in the wrong place](#built-in-the-wrong-place).)
 
 ## Future extensions
 
