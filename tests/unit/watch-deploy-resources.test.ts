@@ -21,6 +21,7 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import {
+	chmodSync,
 	closeSync,
 	mkdtempSync,
 	openSync,
@@ -416,6 +417,44 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		// Restoring a descriptor with the same selected set must still
 		// deploy the edit that happened during recovery.
 		writeDescriptor(root, descriptor(["resources/**", "!resources/drafts/"]));
+		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
+	});
+
+	test("a selected file that becomes unreadable stops watching without --force, with no partial redeploy", {
+		skip:
+			(process.platform === "win32" && "POSIX permissions only") ||
+			(process.getuid?.() === 0 && "root can read any file"),
+	}, async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root);
+		const file = join(root, "resources", "prompt.md");
+		writeFileSync(file, "# edited");
+		chmodSync(file, 0o000);
+		try {
+			const code = await w.waitForExit(SAFETY_NET_MS);
+			// `null` would mean the watcher had to be killed: it must exit on its own.
+			assert.strictEqual(code, 1, w.getOutput());
+			assert.match(w.getOutput(), /Cannot read [^\n]*prompt\.md/);
+			assert.strictEqual(mock.deployments.length, baseline);
+		} finally {
+			chmodSync(file, 0o644);
+		}
+	});
+
+	test("with --force, a selected file that becomes unreadable is reported and watching continues", {
+		skip:
+			(process.platform === "win32" && "POSIX permissions only") ||
+			(process.getuid?.() === 0 && "root can read any file"),
+	}, async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root, ["--force"]);
+		const file = join(root, "resources", "prompt.md");
+		writeFileSync(file, "# edited");
+		chmodSync(file, 0o000);
+		await waitForOutput(/Cannot read [^\n]*prompt\.md/, w);
+		assert.strictEqual(mock.deployments.length, baseline);
+		chmodSync(file, 0o644);
+		writeFileSync(file, "# readable again");
 		await waitForDeploymentOf(["main.bpmn", "prompt.md"], baseline, w);
 	});
 

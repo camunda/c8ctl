@@ -25,6 +25,9 @@ import { listenOnLoopback } from "./http-server.ts";
 import { asyncSpawn, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
+const VANISH_ON_READ = pathToFileURL(
+	resolve(import.meta.dirname, "vanish-on-read.ts"),
+).href;
 // `--import` takes a URL; a bare Windows path (C:\...) is rejected.
 const FAKE_TTY = pathToFileURL(
 	resolve(import.meta.dirname, "fake-tty.ts"),
@@ -151,7 +154,14 @@ export interface DryRunOutcome extends SpawnResult {
  */
 export async function deployDryRun(
 	args: string[],
-	{ cwd = tmpdir() }: { cwd?: string } = {},
+	{
+		cwd = tmpdir(),
+		vanishOnRead,
+	}: {
+		cwd?: string;
+		/** Absolute path deleted right before its first content read. */
+		vanishOnRead?: string;
+	} = {},
 ): Promise<DryRunOutcome> {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-deploy-resources-data-"));
 	writeFileSync(
@@ -161,7 +171,14 @@ export async function deployDryRun(
 	try {
 		const result = await asyncSpawn(
 			"node",
-			["--experimental-strip-types", CLI, "deploy", ...args, "--dry-run"],
+			[
+				"--experimental-strip-types",
+				...(vanishOnRead ? ["--import", VANISH_ON_READ] : []),
+				CLI,
+				"deploy",
+				...args,
+				"--dry-run",
+			],
 			{
 				cwd,
 				env: {
@@ -169,6 +186,7 @@ export async function deployDryRun(
 					CAMUNDA_BASE_URL: "http://test-cluster/v2",
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
 					C8CTL_DATA_DIR: dataDir,
+					...(vanishOnRead ? { C8CTL_TEST_VANISH_ON_READ: vanishOnRead } : {}),
 				},
 			},
 		);

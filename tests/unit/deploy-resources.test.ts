@@ -791,6 +791,139 @@ describe('Spec: Validation and feedback — "Invalid field type or entries … e
 	}
 });
 
+// ─── Read errors never silently shrink a selection ───────────────────────────
+
+describe('"no surprise": a path that a deployResources pattern can select but that cannot be read fails the deploy instead of being skipped', () => {
+	const posixOnly = {
+		skip:
+			(process.platform === "win32" && "POSIX permissions only") ||
+			(process.getuid?.() === 0 && "root can read any file"),
+	};
+	const readError = /Cannot read [^\n]*(locked|secret\.bpmn|missing|vanishing)/;
+
+	test(
+		"a selected directory whose entries cannot be inspected (no execute permission)",
+		posixOnly,
+		async () => {
+			const root = project(
+				{ deployResources: ["resources/**"] },
+				{
+					"resources/main.bpmn": BPMN("main"),
+					"resources/locked/a.bpmn": BPMN("a"),
+				},
+			);
+			chmodSync(join(root, "resources", "locked"), 0o600);
+			try {
+				assertFailsWith(await deployDryRun([root]), readError);
+			} finally {
+				chmodSync(join(root, "resources", "locked"), 0o755);
+			}
+		},
+	);
+
+	test(
+		"a selected directory that cannot be listed (no permission)",
+		posixOnly,
+		async () => {
+			const root = project(
+				{ deployResources: ["resources/**"] },
+				{
+					"resources/main.bpmn": BPMN("main"),
+					"resources/locked/a.bpmn": BPMN("a"),
+				},
+			);
+			chmodSync(join(root, "resources", "locked"), 0o000);
+			try {
+				assertFailsWith(await deployDryRun([root]), readError);
+			} finally {
+				chmodSync(join(root, "resources", "locked"), 0o755);
+			}
+		},
+	);
+
+	test(
+		"an unreadable directory that no pattern can reach is not an error",
+		posixOnly,
+		async () => {
+			const root = project(
+				{ deployResources: ["resources/**"] },
+				{
+					"resources/main.bpmn": BPMN("main"),
+					"other/locked/a.bpmn": BPMN("a"),
+				},
+			);
+			chmodSync(join(root, "other", "locked"), 0o000);
+			try {
+				const result = await deployDryRun([root]);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.deepStrictEqual(result.names, ["main.bpmn"]);
+			} finally {
+				chmodSync(join(root, "other", "locked"), 0o755);
+			}
+		},
+	);
+
+	test("a selected file that cannot be read", posixOnly, async () => {
+		const root = project(
+			{ deployResources: ["resources/**"] },
+			{
+				"resources/main.bpmn": BPMN("main"),
+				"resources/secret.bpmn": BPMN("secret"),
+			},
+		);
+		chmodSync(join(root, "resources", "secret.bpmn"), 0o000);
+		try {
+			assertFailsWith(await deployDryRun([root]), readError);
+		} finally {
+			chmodSync(join(root, "resources", "secret.bpmn"), 0o644);
+		}
+	});
+
+	test("a selected dangling symlink is an error; one no pattern selects is ignored", {
+		skip:
+			process.platform === "win32" &&
+			"symlinks need elevated rights on Windows",
+	}, async () => {
+		const root = project(
+			{ deployResources: ["resources/*.bpmn"] },
+			{
+				"resources/main.bpmn": BPMN("main"),
+			},
+		);
+		symlinkSync(
+			join(root, "missing-target.md"),
+			join(root, "resources", "notes.md"),
+		);
+		const ignored = await deployDryRun([root]);
+		assert.strictEqual(ignored.status, 0, ignored.stderr);
+		assert.deepStrictEqual(ignored.names, ["main.bpmn"]);
+
+		symlinkSync(
+			join(root, "missing.bpmn"),
+			join(root, "resources", "link.bpmn"),
+		);
+		const selected = await deployDryRun([root]);
+		assertFailsWith(
+			selected,
+			/dangling symlink[^\n]*link\.bpmn|link\.bpmn[^\n]*dangling symlink/,
+		);
+	});
+
+	test("a selected file removed between the selection walk and the content read", async () => {
+		const root = project(
+			{ deployResources: ["resources/**"] },
+			{
+				"resources/main.bpmn": BPMN("main"),
+				"resources/vanishing.bpmn": BPMN("vanishing"),
+			},
+		);
+		const result = await deployDryRun([root], {
+			vanishOnRead: join(root, "resources", "vanishing.bpmn"),
+		});
+		assertFailsWith(result, readError);
+	});
+});
+
 // ─── Specification: Camunda 8 version compatibility ─────────────────────────
 
 describe("Spec: Camunda 8 version compatibility", () => {
