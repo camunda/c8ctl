@@ -16,13 +16,16 @@ import { defineCommand } from "../framework/index.ts";
 import {
 	ALL_DEPLOYABLE_EXTENSIONS,
 	CAMUNDA_PROJECT_FILE,
+	type CamundaProject,
 	DEPLOY_COOLDOWN,
+	DEPLOY_RESOURCES_FIELD,
 	DEPLOYABLE_EXTENSIONS,
 	DeployResourcesError,
-	declaresDeployResources,
+	deployResourcesStateOf,
 	isIgnored,
 	loadIgnoreRules,
 	readDeployResourcesState,
+	readProjectDescriptor,
 	resolveDeployResources,
 	resolveIgnoreBaseDir,
 } from "../utils/index.ts";
@@ -99,12 +102,18 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 		);
 	}
 	let projectRoot: string | null = null;
+	// The descriptor read while finding the project root: the startup
+	// decisions below use this single read, so an edit landing between
+	// separate reads can't downgrade a deployResources project to the
+	// default scan. Later changes are picked up by the watcher.
+	const startupDescriptors = new Map<string, CamundaProject>();
+	let startupDescriptor: CamundaProject | null = null;
 	if (projectMode) {
 		// Resolve the project root from every watched path and verify they
 		// all belong to the same Camunda project.
 		let resolvedRoot: string | undefined;
 		for (const p of resolvedPaths) {
-			const root = findProjectRoot(p);
+			const root = findProjectRoot(p, undefined, startupDescriptors);
 			if (!root) {
 				throw new Error(
 					`--project: no camunda.json or .process-application marker found above ${p}. ` +
@@ -122,6 +131,7 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 				);
 			}
 			resolvedRoot = normalizedRoot;
+			startupDescriptor = startupDescriptors.get(root) ?? null;
 		}
 		// Invariant: resolvedPaths always has ≥1 entry (defaults to ["."]),
 		// so the loop above always runs at least once and sets resolvedRoot.
@@ -144,7 +154,8 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	// changes the set. `--force` keeps its meaning of "continue after
 	// errors" (including invalid configuration / empty selection).
 	const descriptorMode =
-		projectRoot !== null && declaresDeployResources(projectRoot);
+		startupDescriptor !== null &&
+		Object.hasOwn(startupDescriptor, DEPLOY_RESOURCES_FIELD);
 	if (descriptorMode && projectRoot) {
 		rejectSelectionFlagsForDescriptor({
 			descriptorRoots: [projectRoot],
@@ -196,8 +207,11 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 	};
 	if (descriptorMode && projectRoot) {
 		try {
-			// At startup the descriptor was just found, so it is present.
-			selected = resolveSelection(projectRoot) ?? [];
+			const state = deployResourcesStateOf(startupDescriptor, projectRoot);
+			if (state.kind === "patterns") {
+				selected = resolveDeployResources(projectRoot, state.patterns);
+				resolvedPatterns = state.patterns;
+			}
 			const root = projectRoot;
 			selectedIdentities = new Set(
 				selected.map((rel) => identityOf(root, rel)),
@@ -549,6 +563,22 @@ export const watchCommand = defineCommand("watch", "", async (ctx, flags) => {
 			pendingChanges.add(CAMUNDA_PROJECT_FILE);
 			scheduleDescriptorModeChange(root, DEBOUNCE_DELAY);
 		});
+		// The startup decisions used the descriptor read while finding the
+		// project root. Now that changes are observed, check once whether it
+		// changed in between (edited, removed or broken): if so, resolve it
+		// again through the normal change path.
+		let unchanged = false;
+		try {
+			unchanged =
+				JSON.stringify(readProjectDescriptor(root)) ===
+				JSON.stringify(startupDescriptor);
+		} catch {
+			unchanged = false;
+		}
+		if (!unchanged) {
+			pendingChanges.add(CAMUNDA_PROJECT_FILE);
+			scheduleDescriptorModeChange(root, DEBOUNCE_DELAY);
+		}
 	}
 
 	// Block until SIGINT, then close watchers, cancel any pending debounced

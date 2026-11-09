@@ -221,7 +221,22 @@ export type DeployResourcesState =
 export function readDeployResourcesState(
 	projectRoot: string,
 ): DeployResourcesState {
-	const project = readProjectDescriptor(projectRoot);
+	return deployResourcesStateOf(
+		readProjectDescriptor(projectRoot),
+		projectRoot,
+	);
+}
+
+/**
+ * The `deployResources` state of an already-read descriptor (`null` when
+ * there is none), so a caller can decide from a single read.
+ *
+ * @throws {DeployResourcesError} `invalid-config` when the field is invalid.
+ */
+export function deployResourcesStateOf(
+	project: CamundaProject | null,
+	projectRoot: string,
+): DeployResourcesState {
 	if (!project) return { kind: "no-descriptor" };
 	if (!Object.hasOwn(project, DEPLOY_RESOURCES_FIELD)) {
 		return { kind: "no-field" };

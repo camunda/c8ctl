@@ -478,12 +478,12 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 			{ deployResources: ["*.md"] },
 			{ "main.bpmn": BPMN("main"), "notes.md": "# notes" },
 		);
-		// The watcher reads the descriptor three times at startup (project
-		// root, field presence, selection) and once when re-resolving after a
-		// change: delete it right after that fourth read, before the redeploy.
+		// The watcher reads the descriptor twice at startup (project root,
+		// then the check once it is armed) and once when re-resolving after a
+		// change: delete it right after that third read, before the redeploy.
 		const { w } = await startWatch(root, [], {
 			settled: false,
-			mutateAfterReads: `${join(root, "camunda.json")}|4|delete`,
+			mutateAfterReads: `${join(root, "camunda.json")}|3|delete`,
 		});
 		writeFileSync(join(root, "notes.md"), "# edited");
 		await waitForDeploymentOf(["notes.md"], 0, w);
@@ -514,11 +514,12 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 
 	test("descriptor race: an edit landing right after a re-resolution deploys the resolved set, then the new set last", async () => {
 		const root = racyProject("race-after-resolution");
-		// Three reads at startup, the fourth is the re-resolution after the
-		// notes.md edit: the descriptor changes right after it.
+		// Two reads at startup (project root, then the check once the watcher
+		// is armed); the third is the re-resolution after the notes.md edit:
+		// the descriptor changes right after it.
 		const { w } = await startWatch(root, [], {
 			settled: false,
-			mutateAfterReads: `${join(root, "camunda.json")}|4|${descriptor(["*.txt"])}`,
+			mutateAfterReads: `${join(root, "camunda.json")}|3|${descriptor(["*.txt"])}`,
 		});
 		writeFileSync(join(root, "notes.md"), "# edited");
 		await waitForDeploymentOf(["notes.md"], 0, w);
@@ -552,6 +553,48 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		// Flush any pending events, then check nothing older landed after.
 		await settle(w, root);
 		assert.deepStrictEqual(mock.deployments.at(-1), ["notes.md", "prompt.txt"]);
+		noFallback();
+	});
+
+	// Startup races: the descriptor changes right after the first read
+	// (project-root detection) or the second read (the check made once the
+	// watcher is armed). A deployResources project must never start in
+	// default-scan mode, and the change must be picked up.
+	const startupWatch = (root: string, after: number, action: string) =>
+		startWatch(root, [], {
+			settled: false,
+			mutateAfterReads: `${join(root, "camunda.json")}|${after}|${action}`,
+		});
+	const descriptorBanner = /selected by "deployResources"/;
+
+	test("startup race: camunda.json removed after the first read starts in deployResources mode and waits for it", async () => {
+		const root = racyProject("startup-removed");
+		const { w } = await startupWatch(root, 1, "delete");
+		assert.match(w.getOutput(), descriptorBanner);
+		assert.doesNotMatch(w.getOutput(), /Monitoring extensions/);
+		await waitForOutput(/camunda\.json is missing/, w);
+		writeFileSync(join(root, "camunda.json"), descriptor(["*.txt"]));
+		await waitForDeploymentOf(["prompt.txt"], 0, w);
+		noFallback();
+	});
+
+	for (const after of [1, 2]) {
+		test(`startup race: camunda.json replaced after read ${after} is picked up and deployed`, async () => {
+			const root = racyProject(`startup-replaced-${after}`);
+			const { w } = await startupWatch(root, after, descriptor(["*.txt"]));
+			assert.match(w.getOutput(), descriptorBanner);
+			await waitForDeploymentOf(["prompt.txt"], 0, w);
+			noFallback();
+		});
+	}
+
+	test("startup race: deployResources removed after the first read is reported, never the default scan", async () => {
+		const root = racyProject("startup-field-removed");
+		const { w } = await startupWatch(root, 1, "{}");
+		const code = await w.waitForExit(SAFETY_NET_MS);
+		// `null` would mean the watcher had to be killed: it must exit on its own.
+		assert.strictEqual(code, 1, w.getOutput());
+		assert.match(w.getOutput(), /"deployResources" was removed/);
 		noFallback();
 	});
 

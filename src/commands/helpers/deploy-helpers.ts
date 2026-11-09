@@ -28,6 +28,7 @@ import {
 } from "../../core/index.ts";
 import {
 	CAMUNDA_PROJECT_FILE,
+	type CamundaProject,
 	DEPLOYABLE_EXTENSIONS,
 	declaresDeployResources,
 	type Ignore,
@@ -179,7 +180,14 @@ function hasProcessApplicationFile(dirPath: string): boolean {
 function hasProjectMarker(
 	dirPath: string,
 	cache?: ProjectMarkerCache,
-	{ strict = false }: { strict?: boolean } = {},
+	{
+		strict = false,
+		descriptors,
+	}: {
+		strict?: boolean;
+		/** Collects the descriptor read for each folder checked (strict). */
+		descriptors?: Map<string, CamundaProject>;
+	} = {},
 ): boolean {
 	const cached = cache?.get(dirPath);
 	if (cached !== undefined) {
@@ -191,6 +199,7 @@ function hasProjectMarker(
 	const descriptor = strict
 		? readProjectDescriptor(dirPath)
 		: readCamundaProject(dirPath);
+	if (descriptor) descriptors?.set(dirPath, descriptor);
 	const result = descriptor ? true : hasProcessApplicationFile(dirPath);
 	cache?.set(dirPath, result);
 	return result;
@@ -257,11 +266,14 @@ function findGroupRoot(
 export function findProjectRoot(
 	startDir: string,
 	cache?: ProjectMarkerCache,
+	/** When given, receives the descriptor read for the returned root, so
+	 *  callers can use that single read instead of reading it again. */
+	descriptors?: Map<string, CamundaProject>,
 ): string | null {
 	let currentDir = resolve(startDir);
 
 	while (true) {
-		if (hasProjectMarker(currentDir, cache, { strict: true })) {
+		if (hasProjectMarker(currentDir, cache, { strict: true, descriptors })) {
 			return currentDir;
 		}
 
