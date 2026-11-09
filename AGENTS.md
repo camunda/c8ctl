@@ -143,11 +143,22 @@ Rules:
 - Use imperative mood ("add support", not "added support").
 - Lowercase subject (except proper nouns). No PascalCase subjects (rule enforced).
 - Keep subject concise; body can include details, rationale, links.
-- Prefix breaking changes with BREAKING CHANGE: either in body or footer.
+- Mark a breaking change with a `BREAKING CHANGE:` footer: a paragraph after the body that starts with exactly `BREAKING CHANGE:` (uppercase, with a space). See the next section for the forms that do **not** work.
 
 #### Breaking changes are rare — fixing a bug is not one
 
-A `BREAKING CHANGE:` footer in a commit message makes semantic-release cut a **new major version** (the configured Angular preset recognizes only this form — a `!` after the type/scope or a `BREAKING-CHANGE:` footer alone does **not** trigger the major release). The merge guard treats all three forms as breaking-change *intent* and blocks merging until a maintainer applies the `ack-breaking-change` label — so if you mean to ship a major version, always include the `BREAKING CHANGE:` footer, even when you also use `!`. Use these markers only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
+A `BREAKING CHANGE:` footer in a commit message makes semantic-release cut a **new major version**. The configured Angular preset (`conventional-changelog-angular`) recognizes only this form. The other Conventional Commits forms behave differently:
+
+| Commit message | What semantic-release does |
+| --- | --- |
+| `fix: …` with a `BREAKING CHANGE: …` footer | **major** release |
+| `fix!: …` or `fix(scope)!: …` with a `BREAKING CHANGE: …` footer | **major** release |
+| `fix: …` with a `BREAKING-CHANGE: …` footer (hyphen) | patch release; the footer is ignored |
+| `fix!: …` or `fix(scope)!: …` with no footer | **nothing**: the preset can't parse a `!` header, so the commit triggers no release and is left out of the release notes |
+
+So a `!` on its own is worse than useless: it silently drops the change. The merge guard treats all three markers as breaking-change *intent* and blocks merging until a maintainer applies the `ack-breaking-change` label. If you mean to ship a major version, always include the `BREAKING CHANGE:` footer, even when you also use `!`.
+
+Use these markers only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
 
 Do **not** mark a change as breaking just because:
 
