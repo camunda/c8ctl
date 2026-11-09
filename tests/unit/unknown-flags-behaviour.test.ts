@@ -176,7 +176,7 @@ describe("CLI behavioural: unknown flags — search", () => {
 	});
 
 	test("no warning for valid global flag (--profile)", async () => {
-		const result = await c8("search", "pi", "--dry-run", "--profile", "dev");
+		const result = await c8("search", "pi", "--dry-run", "--profile", "local");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
 	});
@@ -273,7 +273,7 @@ describe("CLI behavioural: unknown flags — get", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -424,7 +424,7 @@ describe("CLI behavioural: unknown flags — delete", () => {
 			"user-key-123",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -456,7 +456,7 @@ describe("CLI behavioural: unknown flags — cancel", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
@@ -597,7 +597,7 @@ describe("CLI behavioural: unknown flags — resolve", () => {
 			"12345",
 			"--dry-run",
 			"--profile",
-			"dev",
+			"local",
 		);
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
 		assertNoWarning(result.stderr);
