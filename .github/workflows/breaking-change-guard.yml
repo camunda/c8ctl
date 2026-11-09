@@ -1,8 +1,14 @@
 name: Breaking change guard
 
-# A breaking-change marker makes semantic-release cut a new major version.
-# Block merging a PR that carries one until a maintainer explicitly applies
-# the `ack-breaking-change` label.
+# A breaking-change marker declares breaking-change intent. Block merging a PR
+# that carries one until a maintainer explicitly applies the
+# `ack-breaking-change` label.
+#
+# The guard deliberately matches more forms than the release tooling does: with
+# the default (Angular) preset, only a `BREAKING CHANGE:` footer makes
+# semantic-release cut a new major version — a `!` subject or a
+# `BREAKING-CHANGE:` footer alone does not. Those forms still signal intent, so
+# they require the label too.
 #
 # The repo squash-merges with "PR title + commit messages", so both the PR
 # title and every commit message on the PR are scanned.
@@ -60,6 +66,17 @@ jobs:
           gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/commits" \
             --jq '.[].commit.message + "\u0000"' > "$messages_file"
 
+          # The PR-commits endpoint caps at 250 commits even with --paginate
+          # (https://docs.github.com/en/rest/pulls/pulls#list-commits-on-a-pull-request).
+          # Fail closed when the scan is incomplete: a breaking footer in an
+          # omitted commit must not slip through unacknowledged.
+          scanned=$(tr -cd '\0' < "$messages_file" | wc -c)
+          total=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq .commits)
+          if [ "$total" -gt "$scanned" ]; then
+            echo "::error title=Incomplete commit scan::This PR has $total commits but only the first $scanned could be scanned (API limit). Rebase or squash the PR, or have a maintainer apply the 'ack-breaking-change' label if the breaking change is intended."
+            exit 1
+          fi
+
           while IFS= read -r -d '' msg; do
             # --jq emits a newline after each NUL-terminated message, so every
             # message after the first starts with a separator newline. Strip it.
@@ -80,9 +97,9 @@ jobs:
           printf '  - %s\n' "${found[@]}"
 
           if [ "$ACKED" = "true" ]; then
-            echo "Acknowledged via the 'ack-breaking-change' label — this will release a new major version."
+            echo "Acknowledged via the 'ack-breaking-change' label."
             exit 0
           fi
 
-          echo "::error title=Unacknowledged breaking change::This PR would release a new major version. If that is intended, a maintainer must apply the 'ack-breaking-change' label. If it is a bug fix, drop the '!' and any 'BREAKING CHANGE:' footer from the PR title and commit messages (see AGENTS.md, 'Breaking changes are rare')."
+          echo "::error title=Unacknowledged breaking change::This PR declares a breaking change. If that is intended, a maintainer must apply the 'ack-breaking-change' label — and make sure the PR title or a commit carries a 'BREAKING CHANGE:' footer, the only form that makes semantic-release cut a major version (a '!' subject or 'BREAKING-CHANGE:' footer does not). If it is a bug fix, drop the '!' and any 'BREAKING CHANGE:' footer from the PR title and commit messages (see AGENTS.md, 'Breaking changes are rare')."
           exit 1

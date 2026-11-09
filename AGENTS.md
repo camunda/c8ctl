@@ -147,7 +147,7 @@ Rules:
 
 #### Breaking changes are rare — fixing a bug is not one
 
-A `!` after the type/scope (`fix(config)!:`) or a `BREAKING CHANGE:` / `BREAKING-CHANGE:` footer makes semantic-release cut a **new major version**. Use them only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
+A `BREAKING CHANGE:` footer in a commit message makes semantic-release cut a **new major version** (the configured Angular preset recognizes only this form — a `!` after the type/scope or a `BREAKING-CHANGE:` footer alone does **not** trigger the major release). The merge guard treats all three forms as breaking-change *intent* and blocks merging until a maintainer applies the `ack-breaking-change` label — so if you mean to ship a major version, always include the `BREAKING CHANGE:` footer, even when you also use `!`. Use these markers only when **intentionally supported, documented behaviour** changes in a way users must adapt to (a removed command or flag, a renamed flag, a changed output contract that is documented as stable).
 
 Do **not** mark a change as breaking just because:
 
