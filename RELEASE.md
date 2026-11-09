@@ -59,7 +59,11 @@ Examples:
 
 - `fix: ...` → patch
 - `feat: ...` → minor
-- `feat!: ...` or `BREAKING CHANGE: ...` → major
+- a commit with a `BREAKING CHANGE: ...` footer (a paragraph after the body starting with exactly `BREAKING CHANGE:`) → major
+
+A `!` after the type (`feat!: ...`, `fix(scope)!: ...`) does **not** produce a major on its own: the configured Angular preset can't parse that header, so without the footer the commit triggers no release and is missing from the release notes. A hyphenated `BREAKING-CHANGE:` footer is ignored. See AGENTS.md, *Breaking changes are rare*, for the full table.
+
+Any breaking-change marker in a PR's title or commits blocks the merge until a maintainer applies the `ack-breaking-change` label (the *Breaking change acknowledged* required check).
 
 If you merge commits that don’t follow Conventional Commits, semantic-release may do **no release**.
 
@@ -83,7 +87,7 @@ This is the normal day-to-day prerelease flow.
 
 If the workflow says “no release”:
 
-- Confirm at least one commit since the last tag uses `fix:`, `feat:`, or contains a breaking change marker.
+- Confirm at least one commit since the last tag uses `fix:`, `feat:`, or has a `BREAKING CHANGE:` footer. A `type!:` subject without that footer is not recognized and triggers no release.
 
 ### One-time bootstrap (only if the package does not exist on npm yet)
 
