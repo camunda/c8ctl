@@ -878,6 +878,79 @@ describe('"no surprise": a broken or changing camunda.json never falls back to t
 	}
 });
 
+// ─── Descriptor read discipline: one snapshot per command ─────────────────
+
+describe("descriptor read discipline: a camunda.json change at any read index never changes what one deploy run submits", () => {
+	const mutations = [
+		["edited to another selection", '{"deployResources":["*.txt"]}'],
+		["removed", "delete"],
+		["replaced by {}", "{}"],
+		["broken JSON", "{ broken"],
+		["replaced by a dangling symlink", "dangling"],
+	] as const;
+	const symlinkUnsupported = process.platform === "win32";
+	// Selection *.md -> notes.md; the default scan would submit main.bpmn.
+	const files = {
+		"main.bpmn": BPMN("main"),
+		"notes.md": "# notes",
+		"prompt.txt": "prompt",
+	};
+	const cases = mutations.flatMap(([label, action]) =>
+		[1, 2, 3].map((index) => ({ label, action, index })),
+	);
+
+	for (const { label, action, index } of cases) {
+		const skip =
+			action === "dangling" &&
+			symlinkUnsupported &&
+			"symlinks need elevated rights on Windows";
+		const mutate = (root: string) =>
+			`${join(root, "camunda.json")}|${index}|${action}`;
+
+		test(`--dry-run: descriptor ${label} after read ${index} → the snapshot's selection`, {
+			skip,
+		}, async () => {
+			const root = project({ deployResources: ["*.md"] }, files);
+			const result = await deployDryRun([root], {
+				mutateAfterReads: mutate(root),
+			});
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(result.names, ["notes.md"]);
+		});
+
+		test(`deploy: descriptor ${label} after read ${index} → the snapshot's selection`, {
+			skip,
+		}, async () => {
+			mock = await startMockCluster({ gatewayVersion: "8.10.0" });
+			const root = project({ deployResources: ["*.md"] }, files);
+			const result = await deployTo(mock.baseUrl, [root], {
+				mutateAfterReads: mutate(root),
+			});
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(mock.deployments, [["notes.md"]]);
+		});
+
+		test(`explicit files in a deployResources project: descriptor ${label} after read ${index} → exactly the named files`, {
+			skip,
+		}, async () => {
+			// .c8ignore must not apply to them (decided from the snapshot).
+			const root = project(
+				{ deployResources: ["*.md"] },
+				{
+					...files,
+					".c8ignore": "main.bpmn\n",
+				},
+			);
+			const result = await deployDryRun(
+				[join(root, "main.bpmn"), join(root, "prompt.txt")],
+				{ mutateAfterReads: mutate(root) },
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.deepStrictEqual(result.names, ["main.bpmn", "prompt.txt"]);
+		});
+	}
+});
+
 // ─── Read errors never silently shrink a selection ───────────────────────────
 
 describe('"no surprise": a path that a deployResources pattern can select but that cannot be read fails the deploy instead of being skipped', () => {

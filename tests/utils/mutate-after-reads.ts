@@ -2,7 +2,8 @@
  * Preload (`node --import`) that changes a file after it has been read a
  * given number of times, to simulate an edit that lands between two reads
  * of the same invocation. Configured by `C8CTL_TEST_MUTATE_AFTER_READS`:
- * `<absolute path>|<read count>|<"delete" or replacement content>`. Reads
+ * `<absolute path>|<read count>|<action>`, where the action is "delete",
+ * "dangling" (replace the file by a dangling symlink) or replacement content. Reads
  * are counted under both the given and the real path of the file.
  * Set `C8CTL_TEST_TRACE_READS=1` to log each counted read to stderr.
  */
@@ -25,8 +26,14 @@ if (spec) {
 			reads++;
 			if (trace) process.stderr.write(`[read ${reads}] ${target}\n`);
 			if (reads === after) {
-				if (action === "delete") fs.unlinkSync(target);
-				else fs.writeFileSync(target, action);
+				if (action === "delete") {
+					fs.unlinkSync(target);
+				} else if (action === "dangling") {
+					fs.unlinkSync(target);
+					fs.symlinkSync(`${target}.missing-target`, target);
+				} else {
+					fs.writeFileSync(target, action);
+				}
 			}
 		}
 		return result;

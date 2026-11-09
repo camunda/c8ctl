@@ -598,6 +598,48 @@ describe('Spec: Watch and live updates — "Invalid configuration or an empty se
 		noFallback();
 	});
 
+	// Descriptor read discipline: reads at startup (project root, check
+	// after arming) and at re-resolution. Whatever the read index and the
+	// mutation, a deployment is only ever the snapshot's selection: the
+	// startup *.md set or the edited *.txt set, never a mix and never the
+	// default scan (main.bpmn).
+	for (const [label, action] of [
+		["edited to another selection", descriptor(["*.txt"])],
+		["removed", "delete"],
+		["replaced by {}", "{}"],
+		["broken JSON", "{ broken"],
+		["replaced by a dangling symlink", "dangling"],
+	] as const) {
+		for (const index of [1, 2, 3]) {
+			test(`read discipline: descriptor ${label} after read ${index} → only snapshot selections are deployed`, {
+				skip:
+					action === "dangling" &&
+					process.platform === "win32" &&
+					"symlinks need elevated rights on Windows",
+			}, async () => {
+				const root = racyProject(`discipline-${index}-${action.length}`);
+				const { w } = await startupWatch(root, index, action);
+				assert.match(w.getOutput(), descriptorBanner);
+				writeFileSync(join(root, "notes.md"), "# edited");
+				await waitUntil(
+					() =>
+						w.child.exitCode !== null ||
+						mock.deployments.length > 0 ||
+						/is missing|Invalid resource selection/.test(w.getOutput()),
+					w,
+				);
+				for (const names of mock.deployments) {
+					assert.ok(
+						JSON.stringify(names) === JSON.stringify(["notes.md"]) ||
+							JSON.stringify(names) === JSON.stringify(["prompt.txt"]),
+						`unexpected deployment ${JSON.stringify(names)}:\n${w.getOutput()}`,
+					);
+				}
+				noFallback();
+			});
+		}
+	}
+
 	test("an invalid descriptor at startup fails without --force", () => {
 		const root = createProject(
 			join(tempDir, "bad"),
