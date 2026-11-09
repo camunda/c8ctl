@@ -206,6 +206,13 @@ export interface MockCluster {
 	baseUrl: string;
 	/** File names of each received deployment request, in order. */
 	deployments: string[][];
+	/** Raw multipart body of each received deployment request, in order. */
+	deploymentBodies: string[];
+	/**
+	 * Hold the response to the next deployment request until the returned
+	 * release function is called (simulates a slow in-flight deploy).
+	 */
+	holdNextDeployment: () => () => void;
 	/** Number of `GET /topology` calls (the <8.10 extension check). */
 	topologyCalls: () => number;
 	close: () => Promise<void>;
@@ -225,6 +232,10 @@ export async function startMockCluster({
 	rejectDeployments?: boolean;
 } = {}): Promise<MockCluster> {
 	const deployments: string[][] = [];
+	const deploymentBodies: string[] = [];
+	let holdArmed = false;
+	let releaseHeld: (() => void) | undefined;
+	let releasedEarly = false;
 	let topology = 0;
 	const server = createServer((req, res) => {
 		const chunks: Buffer[] = [];
@@ -253,6 +264,7 @@ export async function startMockCluster({
 			}
 			if (req.method === "POST" && url.endsWith("/deployments")) {
 				const body = Buffer.concat(chunks).toString("latin1");
+				deploymentBodies.push(body);
 				deployments.push(
 					[...body.matchAll(/filename="([^"]+)"/g)].map((m) => m[1]).sort(),
 				);
@@ -266,11 +278,19 @@ export async function startMockCluster({
 					});
 					return;
 				}
-				send(200, {
-					deploymentKey: "2251799813685249",
-					tenantId: "<default>",
-					deployments: [],
-				});
+				const succeed = () =>
+					send(200, {
+						deploymentKey: "2251799813685249",
+						tenantId: "<default>",
+						deployments: [],
+					});
+				if (holdArmed) {
+					holdArmed = false;
+					if (releasedEarly) succeed();
+					else releaseHeld = succeed;
+					return;
+				}
+				succeed();
 				return;
 			}
 			send(404, { title: "NOT_FOUND", status: 404 });
@@ -280,6 +300,17 @@ export async function startMockCluster({
 	return {
 		baseUrl: `http://127.0.0.1:${port}/v2`,
 		deployments,
+		deploymentBodies,
+		holdNextDeployment: () => {
+			holdArmed = true;
+			releasedEarly = false;
+			releaseHeld = undefined;
+			return () => {
+				if (releaseHeld) releaseHeld();
+				else releasedEarly = true;
+				releaseHeld = undefined;
+			};
+		},
 		topologyCalls: () => topology,
 		close: () =>
 			new Promise<void>((done) => {

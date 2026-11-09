@@ -219,6 +219,25 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 		await waitForDeploymentOf(["main.bpmn"], baseline, w);
 	});
 
+	test("deployments never overlap: a change during an in-flight deploy is deployed after it, so the newest content lands last", async () => {
+		const root = makeProject();
+		const { w, baseline } = await startWatch(root);
+		const release = mock.holdNextDeployment();
+		writeFileSync(join(root, "resources", "prompt.md"), "# version-one");
+		await waitUntil(() => mock.deployments.length === baseline + 1, w);
+		writeFileSync(join(root, "resources", "prompt.md"), "# version-two");
+		await waitForOutput(/Waiting for the in-flight deployment/, w);
+		assert.strictEqual(
+			mock.deployments.length,
+			baseline + 1,
+			"no second deployment while the first is in flight",
+		);
+		release();
+		await waitUntil(() => mock.deployments.length === baseline + 2, w);
+		assert.match(mock.deploymentBodies[baseline], /version-one/);
+		assert.match(mock.deploymentBodies[baseline + 1], /version-two/);
+	});
+
 	test("changes to files outside the selection do not redeploy", async () => {
 		const root = makeProject();
 		const { w, baseline } = await startWatch(root);
