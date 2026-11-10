@@ -20,6 +20,7 @@ jobs:
       # GitHub does not document which one is checked for a PR target.
       issues: write
       pull-requests: write
+      id-token: write # mint GitHub OIDC token for Vault JWT auth
     uses: camunda/sdk-infra/.github/workflows/sdk-slack-community-notify.yml@v1
     with:
       repo-name: c8ctl
@@ -30,5 +31,6 @@ jobs:
       slack-webhook-url: ${{ secrets.SLACK_SDK_ALERTS }}
       slack-bot-token: ${{ secrets.SLACK_SDK_BOT_TOKEN }}
       vault-addr: ${{ secrets.VAULT_ADDR }}
-      vault-role-id: ${{ secrets.VAULT_ROLE_ID }}
-      vault-secret-id: ${{ secrets.VAULT_SECRET_ID }}
+      vault-jwt-role: ${{ secrets.VAULT_JWT_ROLE }}
+      vault-jwt-path: ${{ secrets.VAULT_JWT_PATH }}
+      vault-jwt-audience: ${{ secrets.VAULT_JWT_AUDIENCE }}
