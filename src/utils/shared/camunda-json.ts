@@ -39,6 +39,14 @@ export interface CamundaProject {
 		/** ID of the linked project in Camunda Hub. */
 		projectId?: string;
 	};
+	/**
+	 * Raw value of the optional `deployResources` field, kept verbatim
+	 * when the key is present (even when it is `null` or wrong-typed) so
+	 * the integration that consumes it can validate strictly and report
+	 * a precise error. Absent key → property absent. Validate with
+	 * `parseDeployResources` from `deploy-resource-selection.ts`.
+	 */
+	deployResources?: unknown;
 }
 
 /**
@@ -93,6 +101,10 @@ export function parseCamundaJson(
 	if (isRecord(hub)) {
 		project.hub =
 			typeof hub.projectId === "string" ? { projectId: hub.projectId } : {};
+	}
+
+	if (Object.hasOwn(parsed, "deployResources")) {
+		project.deployResources = parsed.deployResources;
 	}
 
 	return project;

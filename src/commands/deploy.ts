@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
 	c8ctl,
 	createClient,
@@ -30,9 +30,12 @@ import {
 import {
 	checkServerSupportsExtensions,
 	collectResourcesForPaths,
+	type DeployPathPlan,
 	deployResources,
 	logMessage,
 	logSkippedExtensions,
+	planDeployPaths,
+	rejectSelectionFlagsForDescriptor,
 } from "./helpers/deploy-helpers.ts";
 
 // ─── defineCommand ───────────────────────────────────────────────────────────
@@ -268,6 +271,33 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			? ctx.positionals
 			: ["."];
 
+	// Projects that declare `deployResources` in camunda.json select their
+	// own resources. Resolve (and validate) the plan up front so an invalid
+	// descriptor or a conflicting selection flag fails before any prompt,
+	// preview, or server call.
+	// The plan is resolved once and reused below, so each descriptor is
+	// read once per invocation: an edit to camunda.json that lands while
+	// deploying can never switch the project to the default scan.
+	const plan = planDeployPaths(paths);
+	const descriptorRoots = plan
+		.filter((entry) => entry.kind === "descriptor")
+		.map((entry) => entry.path);
+	rejectSelectionFlagsForDescriptor({
+		descriptorRoots,
+		extensions: flags.extensions,
+		allExtensions: flags["all-extensions"],
+		force: flags.force,
+	});
+	// Only a default directory scan consults the extension allow-list, so
+	// a deploy made solely of `deployResources` selections (plus explicit
+	// files) skips the <8.10 extension fallback and its version check: the
+	// selected set is submitted unchanged and the server rejects resource
+	// types it does not support.
+	const skipVersionCheck =
+		!!flags.force ||
+		(descriptorRoots.length > 0 &&
+			!plan.some((entry) => entry.kind === "scan"));
+
 	// Resolve the active extension allow-list from flags.
 	const extensionList = resolveExtensionList(flags);
 
@@ -355,7 +385,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 	// and avoids an unnecessary HTTP call when only previewing.
 	if (ctx.isDryRun) {
 		const { resources: previewResources, skippedExtensions } =
-			collectResourcesForPaths(paths, flags.force, extensionList);
+			collectResourcesForPaths(paths, flags.force, extensionList, true, plan);
 
 		logSkippedExtensions(skippedExtensions);
 
@@ -374,8 +404,9 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 
 	// ── Pre-flight version check ──
 	// Skip the topology call when --force is set — extension filtering
-	// is bypassed entirely, so the result is unused.
-	const serverSupportsExtensions = flags.force
+	// is bypassed entirely, so the result is unused — and for
+	// `deployResources`-only deploys (see `skipVersionCheck`).
+	const serverSupportsExtensions = skipVersionCheck
 		? true
 		: await checkServerSupportsExtensions(createClient(deployProfile));
 
@@ -402,11 +433,13 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		skippedFiles,
 		skippedExtensions,
 		effectivePaths: resolvedPaths,
+		ignoreBaseDir,
 	} = collectResourcesForPaths(
 		paths,
 		flags.force,
 		effectiveExtensions,
 		serverSupportsExtensions,
+		plan,
 	);
 
 	// Use the effective (possibly PA-expanded) paths for .c8ignore and
@@ -420,10 +453,13 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		serverSupportsExtensions &&
 		isInteractive()
 	) {
+		// Persist "always" choices to the .c8ignore that is actually read —
+		// skipped files only come from default scans, so it is always set
+		// here. `deployResources` project roots don't take part in it.
 		extraPaths = await handleSkippedFiles(
 			skippedFiles,
 			skippedExtensions,
-			basePath,
+			ignoreBaseDir ?? basePath,
 		);
 	} else if (skippedFiles.length > 0) {
 		logSkippedExtensions(skippedExtensions);
@@ -437,6 +473,18 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 		loadDeployAlways: serverSupportsExtensions,
 		basePath,
 		verbose: ctx.verbose,
+		plan: [
+			...plan,
+			// Files the user chose to deploy from the skipped-files menu come
+			// from default scans, never from a deployResources project.
+			...extraPaths.map(
+				(path): DeployPathPlan => ({
+					kind: "file",
+					path: resolve(path),
+					inDescriptorProject: false,
+				}),
+			),
+		],
 	});
 	return { kind: "none" };
 });

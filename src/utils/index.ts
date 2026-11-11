@@ -12,6 +12,7 @@ export * from "./command-local/search-helpers.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";
 export * from "./shared/date-filter.ts";
+export * from "./shared/deploy-resource-selection.ts";
 export * from "./shared/ignore.ts";
 export * from "./shared/npm-exec.ts";
 export * from "./shared/resource-extensions.ts";

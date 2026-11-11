@@ -82,6 +82,8 @@ Use `--force` to disable extension filtering during directory discovery, deployi
 c8 deploy ./my-project --force
 ```
 
+When a project's `camunda.json` defines [`deployResources`](camunda-json.md#deployresources), the descriptor selects the project's files instead, and `--extensions`, `--all-extensions`, and `--force` are rejected with an error. Files named explicitly on the command line are always deployed. See [Select resources with `deployResources`](#select-resources-with-deployresources).
+
 ### Building blocks and projects
 
 `c8ctl` recognizes two special folder conventions during deployment:
@@ -150,6 +152,47 @@ old-process.bpmn
 
 Place the `.c8ignore` file in the root of the directory you pass to `c8 deploy` or `c8 watch`. Patterns are matched against relative file paths within that directory.
 
+`.c8ignore` keeps its `.gitignore` semantics: `node_modules/`, `target/` and `.git/` are always excluded, and because a negation can't re-include a file below an excluded folder, a pattern such as `!target/classes/x.bpmn` doesn't bring it back. To deploy files from a default-excluded folder, use [`deployResources`](#select-resources-with-deployresources), where a matching pattern overrides the defaults.
+
+When the project defines [`deployResources`](#select-resources-with-deployresources), `.c8ignore` is ignored for that project. The descriptor alone selects which files deploy.
+
+### Select resources with `deployResources`
+
+Define [`deployResources`](camunda-json.md#deployresources) in `camunda.json` to choose the project's resources yourself. This lets you deploy generated resources, or non-diagram files such as agent task prompts, without picking up documentation or configuration:
+
+```json
+{
+  "deployResources": [
+    "resources/**",
+    "target/classes/**",
+    "!target/classes/drafts/**",
+    "target/classes/drafts/keep.bpmn",
+    "resources/.prompt.md"
+  ]
+}
+```
+
+This selects:
+
+- Everything under `resources/`.
+- The generated resources under `target/classes/`, except drafts. `keep.bpmn` is selected again by the later pattern.
+- The hidden prompt file, because it is named explicitly.
+
+It doesn't select `resources/.env`, `node_modules/`, `.git/`, or a `README.md` in the project root. Use `["**/*"]` to select all non-hidden project files, including `target/` and `node_modules/` contents, then add `!` patterns to narrow the set.
+
+`deployResources` applies whenever a path you pass to `c8 deploy` belongs to the project, including a subdirectory. Preview the selected set with `--dry-run`:
+
+```bash
+c8 deploy ./my-project --dry-run
+```
+
+How the descriptor interacts with the rest of `c8 deploy`:
+
+- `--extensions`, `--all-extensions`, and `--force` are rejected while the descriptor selects the resources. Change the patterns instead.
+- Explicitly named files are always deployed, whether or not the patterns select them, for example `c8 deploy ./my-project/notes/standalone.md`. Naming a file this way doesn't add it to the project's selection.
+- The selected set doesn't depend on the target cluster version. `c8ctl` doesn't check the server version or fall back to the default extensions on clusters older than 8.10. It submits the selected set unchanged, and the server rejects resource types it doesn't support.
+- An invalid `deployResources` value or an empty selection fails before anything is deployed.
+
 ## Run
 
 The `run` command deploys a file and immediately creates a process instance in a single step:
@@ -192,6 +235,13 @@ When watching inside a project (a folder tree containing a `camunda.json` marker
 ```bash
 c8 watch ./my-app --project
 ```
+
+When the project defines [`deployResources`](#select-resources-with-deployresources), `--project` watches the selected set instead of an extension list:
+
+- Creating, changing, deleting, or renaming a selected file redeploys the re-resolved set.
+- Editing `camunda.json` re-resolves the selection and redeploys only if the set changed. This includes editors that save by replacing the file. If `camunda.json` is briefly missing during a save, `c8ctl` waits for the new file instead of falling back to the default scan.
+- An invalid `deployResources` value or an empty selection is reported and stops watching. With `--force`, `c8ctl` reports it and keeps watching, so you can fix the descriptor.
+- `--extensions` and `--all-extensions` are rejected. `--force` keeps its usual meaning of continuing after errors.
 
 ### Continue watching after deployment errors
 
