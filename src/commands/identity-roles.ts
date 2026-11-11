@@ -69,7 +69,7 @@ export const searchIdentityRolesCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No roles found");
+			logger.info("No roles found", { essential: true });
 			return;
 		}
 

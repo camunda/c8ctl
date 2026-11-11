@@ -29,7 +29,7 @@ function listProfiles(): void {
 	const profiles = getAllProfiles();
 
 	if (profiles.length === 0) {
-		logger.info("No profiles configured");
+		logger.info("No profiles configured", { essential: true });
 		logger.info("");
 		logger.info(
 			"Add a profile with: c8ctl profiles add <name> --url <cluster-url>",

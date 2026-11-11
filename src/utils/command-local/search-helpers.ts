@@ -90,9 +90,12 @@ export function logNoResults(
 		const flagList = unknownFlags.map((f) => `--${f}`).join(", ");
 		logger.info(
 			`🕳️ No ${resourceName} found matching the criteria (ignored unknown flag(s): ${flagList})`,
+			{ essential: true },
 		);
 	} else {
-		logger.info(`🕳️ No ${resourceName} found matching the criteria`);
+		logger.info(`🕳️ No ${resourceName} found matching the criteria`, {
+			essential: true,
+		});
 	}
 	if (!hasFilters) {
 		logger.info(

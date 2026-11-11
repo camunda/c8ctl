@@ -724,7 +724,7 @@ export const listPluginsCommand = defineCommand(
 			}
 
 			if (plugins.length === 0) {
-				logger.info("No c8ctl plugins installed");
+				logger.info("No c8ctl plugins installed", { essential: true });
 				return;
 			}
 

@@ -11,7 +11,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { c8WithEnv } from "../utils/cli.ts";
+import { c8WithEnv, c8WithOptions } from "../utils/cli.ts";
 import { listenOnLoopback } from "../utils/http-server.ts";
 
 let dataDir: string;
@@ -127,6 +127,27 @@ describe("--quiet in help", () => {
 
 const INSTANCE_KEY = "2251799813685249";
 
+/**
+ * Preload for the CLI subprocess that replaces the browser launcher
+ * (`open` / `xdg-open` / `cmd.exe`) with a stub that reports its arguments
+ * on stderr, so `open` can run its real path without opening a browser.
+ */
+const BROWSER_STUB = `data:text/javascript,${encodeURIComponent(`
+import cp from "node:child_process";
+import { EventEmitter } from "node:events";
+import { writeSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const realSpawn = cp.spawn;
+cp.spawn = (command, args, options) => {
+	if (!["open", "xdg-open", "cmd.exe"].includes(command)) {
+		return realSpawn(command, args, options);
+	}
+	writeSync(2, "BROWSER-STUB " + JSON.stringify(args) + "\\n");
+	return Object.assign(new EventEmitter(), { unref() {} });
+};
+syncBuiltinESMExports();
+`)}`;
+
 /** A stub cluster: creates process instances and has user tasks with no form. */
 async function withStubCluster(
 	fn: (baseUrl: string) => Promise<void>,
@@ -143,6 +164,16 @@ async function withStubCluster(
 					tenantId: "<default>",
 					variables: {},
 					tags: [],
+				}),
+			);
+			return;
+		}
+		if (req.method === "POST" && req.url?.endsWith("/search")) {
+			res.setHeader("content-type", "application/json");
+			res.end(
+				JSON.stringify({
+					items: [],
+					page: { totalItems: 0, startCursor: null, endCursor: null },
 				}),
 			);
 			return;
@@ -242,14 +273,52 @@ describe("--quiet keeps keys and answers", () => {
 		assert.match(result.stdout, /http:\/\/127\.0\.0\.1:1\/operate/);
 	});
 
-	test("open without --dry-run still hides the status line", async () => {
-		const result = await runAgainst(
-			"http://127.0.0.1:1/v2",
-			"text",
+	test("open without --dry-run hides the status line and still opens the URL", async () => {
+		const result = await c8WithOptions(
+			{
+				nodeArgs: ["--import", BROWSER_STUB],
+				env: {
+					C8CTL_DATA_DIR: dataDir,
+					C8CTL_OUTPUT_MODE: "text",
+					CAMUNDA_BASE_URL: "http://127.0.0.1:1/v2",
+				},
+			},
 			"open",
 			"operate",
 			"--quiet",
 		);
-		assert.doesNotMatch(result.stdout, /Opening operate/);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.strictEqual(result.stdout, "");
+		assert.match(
+			result.stderr,
+			/BROWSER-STUB .*http:\/\/127\.0\.0\.1:1\/operate/,
+			"the browser opener should have been called with the URL",
+		);
+	});
+
+	for (const [resource, answer] of [
+		["pd", /No process definitions found/],
+		["group", /No groups found/],
+	] as const) {
+		test(`an empty search ${resource} keeps its answer`, async () => {
+			await withStubCluster(async (baseUrl) => {
+				const result = await runAgainst(
+					baseUrl,
+					"text",
+					"search",
+					resource,
+					"--quiet",
+				);
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.match(result.stdout, answer);
+				assert.doesNotMatch(result.stdout, /No filters were applied/);
+			});
+		});
+	}
+
+	test("list plugins with none installed keeps its answer", async () => {
+		const result = await run("text", "list", "plugins", "--quiet");
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /No c8ctl plugins installed/);
 	});
 });
