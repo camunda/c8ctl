@@ -1225,6 +1225,25 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	modeler: {
+		description: "Install Camunda Desktop Modeler",
+		helpDescription:
+			"Install the latest stable Camunda Desktop Modeler on macOS. Skips the installation when Modeler is already installed, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable).",
+		helpResource: "install",
+		hasDetailedHelp: true,
+		helpFooterLabel: "Show modeler install help",
+		mutating: true,
+		requiresResource: true,
+		helpExamples: [
+			{
+				command: "c8ctl modeler install",
+				description: "Install the latest stable Camunda Desktop Modeler",
+			},
+		],
+		resources: ["install"],
+		flags: {},
+	},
+
 	modify: {
 		description:
 			"Modify process instances: activate, terminate or move elements",

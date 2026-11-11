@@ -278,6 +278,7 @@ describe("Completion Module", () => {
 		assert.ok(output.includes("create"));
 		assert.ok(output.includes("deploy"));
 		assert.ok(output.includes("run"));
+		assert.ok(output.includes("modeler"));
 		assert.ok(output.includes("upgrade"));
 		assert.ok(output.includes("downgrade"));
 		assert.ok(output.includes("init"));
