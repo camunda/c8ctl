@@ -1646,7 +1646,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     );
     const record = readRunningClusterRecord(config.cacheDir);
     if (record?.version) {
-      logger.info(`Detected running version from the durable PID record: ${record.version}`);
+      logger.info(`Detected running version from the durable PID record: ${record.version}`, { essential: true });
     }
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }

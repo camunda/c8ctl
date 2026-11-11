@@ -53,9 +53,25 @@ describe("Logger Module", () => {
 					logger.info("status");
 					logger.info("status", { stream: "stdout" });
 					logger.success("done");
-					logger.success("done", 42);
 					assert.deepStrictEqual(consoleLogSpy, []);
 					assert.deepStrictEqual(consoleErrorSpy, []);
+				});
+
+				test("a success with a key still emits the key", () => {
+					const logger = new Logger();
+					logger.success("Process instance created", "2251799813685249");
+					const out = [...consoleLogSpy, ...consoleErrorSpy];
+					assert.strictEqual(out.length, 1);
+					assert.ok(out[0].includes("2251799813685249"));
+					if (mode === "text") {
+						assert.deepStrictEqual(consoleLogSpy, ["2251799813685249"]);
+					} else {
+						assert.deepStrictEqual(JSON.parse(consoleErrorSpy[0]), {
+							status: "success",
+							message: "Process instance created",
+							key: "2251799813685249",
+						});
+					}
 				});
 
 				test("still writes essential info messages", () => {

@@ -40,7 +40,8 @@ export const openAppCommand = defineCommand("open", "", async (ctx) => {
 		);
 	}
 
-	ctx.logger.info(`Opening ${app} at: ${url}`);
+	// Under --dry-run the URL is the command's answer.
+	ctx.logger.info(`Opening ${app} at: ${url}`, { essential: dryRun });
 	if (!dryRun) {
 		openUrl(url);
 	}

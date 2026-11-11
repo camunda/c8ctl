@@ -285,7 +285,7 @@ Use the client factory when your plugin needs direct Camunda API access, `resolv
 
 Use `logger.output(content)` for raw stdout content and `logger.json(data)` for structured data with `--fields` filtering.
 
-With `--quiet`, `logger.info` and `logger.success` print nothing. Pass `{ essential: true }` to `logger.info` when the message is the command's answer or explains a warning or error, so it still prints. Data written with `logger.output`, `logger.json` or `logger.table`, warnings and errors are never hidden.
+With `--quiet`, `logger.info` and `logger.success` print nothing, except that `logger.success(message, key)` still prints the key (bare on stdout in text mode; JSON mode keeps the record). Pass `{ essential: true }` to `logger.info` when the message is the command's answer or explains a warning or error, so it still prints. Data written with `logger.output`, `logger.json` or `logger.table`, warnings and errors are never hidden.
 
 ### Declaring the c8ctl version you need
 

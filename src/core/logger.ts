@@ -279,9 +279,17 @@ export class Logger {
 		}
 	}
 
-	/** Success confirmation. Hidden by `--quiet`. */
+	/**
+	 * Success confirmation. Hidden by `--quiet`, except that a `key` is
+	 * data (e.g. a new process instance's key): quiet text mode prints it
+	 * bare on stdout, and JSON mode keeps the record, which carries it.
+	 */
 	success(message: string, key?: string | number): void {
-		if (c8ctl.quiet) return;
+		if (c8ctl.quiet && key === undefined) return;
+		if (c8ctl.quiet && this.mode === "text") {
+			this._writeLog(String(key));
+			return;
+		}
 		if (this.mode === "text") {
 			if (key !== undefined) {
 				this._writeLog(`✓ ${message} [Key: ${key}]`);

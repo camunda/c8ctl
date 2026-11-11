@@ -221,6 +221,7 @@ export const loadPluginCommand = defineCommand(
 				if (!pluginName || pluginName.trim() === "") {
 					logger.info(
 						"Ensure the URL points to a valid npm package with a package.json file",
+						{ essential: true },
 					);
 					throw new Error("Failed to extract plugin name from URL");
 				}
@@ -496,7 +497,9 @@ export const unloadPluginCommand = defineCommand(
 		const isPresent = existsSync(join(pluginsDir, "node_modules", packageName));
 
 		if (!isRegistered && !isPresent) {
-			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			logger.info('Run "c8ctl list plugins" to see installed plugins', {
+				essential: true,
+			});
 			throw new Error(
 				`Plugin "${packageName}" is neither registered nor installed in the global plugins directory.`,
 			);
@@ -506,6 +509,7 @@ export const unloadPluginCommand = defineCommand(
 		if (!isRegistered && !force) {
 			logger.info(
 				`Use --force to remove it: c8ctl unload plugin ${packageName} --force`,
+				{ essential: true },
 			);
 			throw new Error(
 				`Plugin "${packageName}" is installed in node_modules but not in the registry (limbo state).`,
@@ -876,13 +880,13 @@ export const syncPluginsCommand = defineCommand(
 		logger.info(`  ✓ Synced: ${syncedCount} plugin(s)`);
 
 		if (failedCount > 0) {
-			logger.info(`  ✗ Failed: ${failedCount} plugin(s)`);
-			logger.info("");
-			logger.info("Failed plugins:");
+			logger.info(`  ✗ Failed: ${failedCount} plugin(s)`, { essential: true });
+			logger.info("", { essential: true });
+			logger.info("Failed plugins:", { essential: true });
 			for (const failure of failures) {
 				logger.error(`  - ${failure.plugin}: ${failure.error}`);
 			}
-			logger.info("");
+			logger.info("", { essential: true });
 			const syncError = new Error(
 				failures.map((f) => `${f.plugin}: ${f.error}`).join("; "),
 			);
@@ -919,7 +923,9 @@ export const upgradePluginCommand = defineCommand(
 
 		// Check if plugin is registered
 		if (!isPluginRegistered(packageName)) {
-			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			logger.info('Run "c8ctl list plugins" to see installed plugins', {
+				essential: true,
+			});
 			throw new Error(`Plugin "${packageName}" is not registered.`);
 		}
 
@@ -931,9 +937,10 @@ export const upgradePluginCommand = defineCommand(
 		// Versioned upgrade needs to respect source type
 		// File-based plugins do not have a version selector in npm install syntax
 		if (version && /^file:/i.test(source)) {
-			logger.info(`Plugin source is: ${source}`);
+			logger.info(`Plugin source is: ${source}`, { essential: true });
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
+				{ essential: true },
 			);
 			throw new Error(
 				`Cannot upgrade file-based plugin "${packageName}" to a specific version.`,
@@ -1006,7 +1013,9 @@ export const downgradePluginCommand = defineCommand(
 
 		// Check if plugin is registered
 		if (!isPluginRegistered(packageName)) {
-			logger.info('Run "c8ctl list plugins" to see installed plugins');
+			logger.info('Run "c8ctl list plugins" to see installed plugins', {
+				essential: true,
+			});
 			throw new Error(`Plugin "${packageName}" is not registered.`);
 		}
 
@@ -1018,9 +1027,10 @@ export const downgradePluginCommand = defineCommand(
 		// Downgrade needs to respect the plugin source
 		// File-based plugins do not have a version selector in npm install syntax
 		if (/^file:/i.test(source)) {
-			logger.info(`Plugin source is: ${source}`);
+			logger.info(`Plugin source is: ${source}`, { essential: true });
 			logger.info(
 				'Use "c8ctl load plugin --from <file-url>" after checking out the desired plugin version in your local source directory',
+				{ essential: true },
 			);
 			throw new Error(
 				`Cannot downgrade file-based plugin "${packageName}" by version.`,
@@ -1090,7 +1100,7 @@ export const initPluginCommand = defineCommand(
 			: rawName;
 
 		if (!pluginName) {
-			logger.info("Example: c8ctl init plugin myplugin");
+			logger.info("Example: c8ctl init plugin myplugin", { essential: true });
 			throw new Error(
 				'Plugin name cannot be empty. Provide a name suffix after "c8ctl-plugin-".',
 			);
@@ -1101,7 +1111,9 @@ export const initPluginCommand = defineCommand(
 
 		// Check if directory already exists
 		if (existsSync(pluginDir)) {
-			logger.info("Choose a different name or remove the existing directory");
+			logger.info("Choose a different name or remove the existing directory", {
+				essential: true,
+			});
 			throw new Error(`Directory "${dirName}" already exists.`);
 		}
 

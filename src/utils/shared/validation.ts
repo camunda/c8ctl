@@ -23,7 +23,7 @@ export function requirePositional(
 	if (!value) {
 		const logger = getLogger();
 		logger.error(`${label} is required`);
-		if (hint) logger.info(hint);
+		if (hint) logger.info(hint, { essential: true });
 		process.exit(1);
 	}
 	return value;
@@ -47,7 +47,7 @@ export function requireOneOf<T extends string>(
 		logger.error(
 			`Unknown ${label} '${value}'. Available: ${allowed.join(", ")}`,
 		);
-		if (hint) logger.info(hint);
+		if (hint) logger.info(hint, { essential: true });
 		process.exit(1);
 	}
 	return match;

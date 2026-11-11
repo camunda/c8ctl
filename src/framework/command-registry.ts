@@ -223,7 +223,8 @@ export const GLOBAL_FLAGS = {
 		agentDescription:
 			"Hide informational and success messages (status lines, progress, " +
 			'"✓ … done" confirmations) in both text and JSON output modes.\n' +
-			"A command's data and answer, warnings and errors are still printed, " +
+			"A command's data and answer (including the key of a created resource, " +
+			"printed bare in text mode), warnings and errors are still printed, " +
 			"and the exit code is unchanged.",
 		agentAppliesTo: "all commands",
 	},
