@@ -231,6 +231,25 @@ Stream raw c8run logs during startup:
 c8 cluster start --debug
 ```
 
+### Custom HTTP port
+
+If port 8080 is already in use, start the cluster on another port:
+
+```bash
+c8 cluster start --port 9091
+```
+
+`--port` moves only the main Camunda HTTP port (Operate, Tasklist and the REST API). The gRPC port (26500) and the health port (9600) stay fixed, so you still cannot run two local clusters side by side. The bundled Connectors runtime is pointed at the custom port automatically. `cluster status` reports the URLs for the port the cluster was started with.
+
+The built-in `local` profile keeps targeting port 8080, so point c8ctl at the cluster yourself — the start output prints the commands:
+
+```bash
+c8 add profile local-9091 --baseUrl=http://localhost:9091/v2 --username=demo --password=demo
+c8 use profile local-9091
+```
+
+Set the port with `--port`, not the `SERVER_PORT` environment variable: c8run would pass `SERVER_PORT` to Connectors too, so c8ctl removes it before launching c8run.
+
 ### Supported platforms
 
 - macOS (x86_64, aarch64)

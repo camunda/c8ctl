@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { c8WithEnv, parseJson } from "../utils/cli.ts";
+import { c8WithEnv, c8WithOptions, parseJson } from "../utils/cli.ts";
+import { asRecord } from "../utils/guards.ts";
 import { pollUntil } from "../utils/polling.ts";
 
 describe("cluster startup outcomes through the CLI", () => {
@@ -96,7 +97,7 @@ globalThis.fetch = async () => {
 		writeFileSync(binary, "fixture executable redirected by preload");
 		writeFileSync(
 			join(installDir, "launcher.mjs"),
-			`import { copyFileSync, appendFileSync } from 'node:fs';
+			`import { copyFileSync, appendFileSync, readFileSync, rmSync } from 'node:fs';
 appendFileSync('invocations.log', process.argv[2] + '\\n');
 if (process.argv[2] === 'start') {
   for (const name of ['camunda', 'connectors', 'connectors-sales']) {
@@ -104,6 +105,55 @@ if (process.argv[2] === 'start') {
   }
   if (${exitCode} !== 0) console.error('sales NOT READY');
   process.exitCode = ${exitCode};
+}
+if (process.argv[2] === 'stop') {
+  // Mimic c8run stop: signal the processes its .process pidfiles track, then
+  // remove those pidfiles. A process NOT tracked by a pidfile (the survivor the
+  // test adds directly to the durable record) is left running.
+  for (const name of ['camunda', 'connectors', 'connectors-sales']) {
+    try { process.kill(Number(readFileSync(name + '.process', 'utf8').trim())); } catch {}
+    try { rmSync(name + '.process'); } catch {}
+  }
+}
+`,
+		);
+	}
+
+	// A launcher whose `start` writes its .process pidfiles (so the cluster is
+	// live and tracked) but then never exits — simulating c8run still starting
+	// the Java services when c8ctl is interrupted. The CLI's spawn-helper
+	// timeout SIGTERMs it mid-start, before any success/failure port write.
+	//
+	// The launcher and its service children are real processes the test must
+	// reap: it records every spawned PID in `fixture.pids` (the launcher's own
+	// PID included) so the test can signal the whole fixture in guaranteed
+	// teardown — the launcher is unref'd and the services are doubly-orphaned,
+	// so none is reachable through `children`.
+	async function hangingLauncher() {
+		const binary = join(
+			installDir,
+			process.platform === "win32" ? "c8run.exe" : "c8run",
+		);
+		writeFileSync(binary, "fixture executable redirected by preload");
+		writeFileSync(
+			join(installDir, "launcher.mjs"),
+			`import { spawn } from 'node:child_process';
+import { appendFileSync, writeFileSync } from 'node:fs';
+if (process.argv[2] === 'start') {
+  // Record our own PID first so the test can signal the launcher itself.
+  appendFileSync('fixture.pids', process.pid + '\\n');
+  // Launch + pidfile the cluster processes, then hang (never exit) so the
+  // parent c8ctl is interrupted while we are still "starting". Record each
+  // service PID for teardown; the .process pidfiles are the readiness signal.
+  for (const name of ['camunda', 'connectors', 'connectors-sales']) {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    child.on('spawn', () => {
+      writeFileSync(name + '.process', String(child.pid));
+      appendFileSync('fixture.pids', child.pid + '\\n');
+    });
+    child.unref();
+  }
+  setInterval(() => {}, 1000);
 }
 `,
 		);
@@ -242,6 +292,194 @@ if (process.argv[2] === 'start') {
 			assert.match(result.stdout, /running \(untracked\)/);
 			assert.match(result.stdout, /c8ctl cluster stop/);
 			assert.doesNotMatch(result.stdout, /replaced|removed|failed startup/);
+		}
+	});
+
+	test("a failed custom-port start persists the port so status serves its URLs", async () => {
+		await launcher(7);
+		const start = await cluster("UP", "start", "8.10.1", "--port=9091");
+		assert.equal(start.status, 7);
+		// The port is recorded even though the start failed and no active
+		// marker was written — the survivors serve on it.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+		assert.equal(existsSync(join(cacheDir, "cluster.active")), false);
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /running after failed startup/);
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.match(status.stdout, /Zeebe REST:\s+http:\/\/localhost:9091\/v2\//);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(
+			asRecord(json.urls, "status urls").operate,
+			"http://localhost:9091/operate",
+		);
+		// Stop clears the recorded port along with the survivors.
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+	});
+
+	test("status recovers the recorded port when the active marker is missing", async () => {
+		await launcher(0);
+		assert.equal(
+			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
+			0,
+		);
+		// Marker loss (e.g. a crash between marker writes) must not make
+		// status advertise the default port while the cluster is tracked.
+		rmSync(join(cacheDir, "cluster.active"));
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /running \(untracked\)/);
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+		const json = parseJson(await cluster("UP", "status", "--json"));
+		assert.equal(
+			asRecord(json.urls, "status urls").operate,
+			"http://localhost:9091/operate",
+		);
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
+	});
+
+	test("a failed stop keeps the recorded port while pidfile-only survivors remain", async () => {
+		await launcher(0);
+		assert.equal(
+			(await cluster("UP", "start", "8.10.1", "--port=9091")).status,
+			0,
+		);
+		// A process c8run tracks ONLY through a .process pidfile — the durable
+		// PID record never captured it. Its liveness is real (a live child), so
+		// hasRunningClusterPidfiles sees it even after the recorded PIDs exit.
+		const survivor = spawn(
+			process.execPath,
+			["-e", "setInterval(() => {}, 1000)"],
+			{ stdio: "ignore" },
+		);
+		children.push(survivor);
+		await once(survivor, "spawn");
+		assert.ok(survivor.pid);
+		const survivorPid = survivor.pid;
+		writeFileSync(join(installDir, "survivor.process"), String(survivorPid));
+
+		// c8run stop signals + reaps the three recorded processes (the launcher
+		// removes their pidfiles), but the pidfile-only survivor stays alive.
+		const stop = await cluster("DOWN", "stop");
+		assert.equal(stop.status, 0, stop.stderr);
+		assert.ok(
+			await pollUntil(
+				async () =>
+					children
+						.filter((c) => c !== survivor)
+						.every((c) => c.exitCode !== null || c.signalCode !== null),
+				10_000,
+				50,
+			),
+		);
+
+		// The port record must survive: the survivor still serves on 9091, so a
+		// later status must not fall back to advertising the default port.
+		assert.equal(
+			readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+			"9091",
+		);
+		const status = await cluster("UP", "status");
+		assert.match(status.stdout, /Operate:\s+http:\/\/localhost:9091\/operate/);
+		assert.doesNotMatch(status.stdout, /localhost:8080/);
+
+		// Once the last tracked process exits, stop clears the port record. Wait
+		// for the survivor to actually die (kill is async) before removing its
+		// pidfile, so the next stop sees no live process and no pidfile.
+		const exited = once(survivor, "exit");
+		survivor.kill();
+		await exited;
+		assert.ok(
+			await pollUntil(
+				async () => {
+					try {
+						process.kill(survivorPid, 0);
+						return false;
+					} catch {
+						return true;
+					}
+				},
+				10_000,
+				50,
+			),
+		);
+		rmSync(join(installDir, "survivor.process"), { force: true });
+		assert.equal((await cluster("DOWN", "stop")).status, 0);
+		assert.equal(existsSync(join(cacheDir, "cluster.port")), false);
+	});
+
+	test("an interrupted start persists the port so status serves its URLs", async () => {
+		await hangingLauncher();
+		const fixturePids = join(installDir, "fixture.pids");
+		// Guaranteed teardown: the hanging launcher and its three service
+		// processes are not in `children` (the launcher is unref'd, the services
+		// doubly-orphaned), so reap them by the PIDs the launcher recorded — even
+		// when an assertion fails. Runs before `afterEach` removes cacheDir.
+		try {
+			// Interrupt c8ctl mid-start. The timeout is a safety bound only — the
+			// readiness poll below (not this deadline) establishes that c8ctl has
+			// reached the hanging launcher before we assert on its side effects.
+			const startPromise = c8WithOptions(
+				{
+					env: {
+						C8RUN_CACHE_DIR: cacheDir,
+						C8CTL_OUTPUT_MODE: "text",
+						NODE_OPTIONS: `--import ${pathToFileURL(preload).href}`,
+						TEST_HEALTH: "UP",
+					},
+					timeout: 30_000,
+				},
+				"cluster",
+				"start",
+				"8.10.1",
+				"--port=9091",
+			);
+			// Fixture-ready signal: the launcher runs with cwd=installDir and has
+			// written all three .process pidfiles, so the cluster is live and
+			// tracked before the interruption lands. Without this, a busy runner
+			// could SIGTERM c8ctl before the pidfiles/port exist.
+			const ready = await pollUntil(
+				async () =>
+					["camunda", "connectors", "connectors-sales"].every((name) =>
+						existsSync(join(installDir, `${name}.process`)),
+					),
+				20_000,
+				50,
+			);
+			assert.ok(ready, "hanging launcher wrote its .process pidfiles");
+			const start = await startPromise;
+			assert.equal(start.timedOut, true, start.stderr);
+
+			// The interrupted start left live .process pidfiles behind; the port
+			// must already be recorded so status serves the custom-port URLs.
+			assert.equal(
+				readFileSync(join(cacheDir, "cluster.port"), "utf8").trim(),
+				"9091",
+			);
+			const status = await cluster("UP", "status");
+			assert.match(
+				status.stdout,
+				/Operate:\s+http:\/\/localhost:9091\/operate/,
+			);
+			assert.doesNotMatch(status.stdout, /localhost:8080/);
+		} finally {
+			// Reap every fixture process the launcher recorded (itself included).
+			if (existsSync(fixturePids)) {
+				for (const line of readFileSync(fixturePids, "utf8").split("\n")) {
+					const pid = Number(line.trim());
+					if (Number.isInteger(pid) && pid > 0) {
+						try {
+							process.kill(pid);
+						} catch {
+							// Already exited.
+						}
+					}
+				}
+			}
 		}
 	});
 });
