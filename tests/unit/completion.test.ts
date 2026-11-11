@@ -286,6 +286,7 @@ describe("Completion Module", () => {
 		assert.ok(output.includes("process-instance"));
 		assert.ok(output.includes("user-task"));
 		assert.ok(output.includes("incident"));
+		assert.ok(output.includes("cluster-variable"));
 
 		// Check for open command (resources are app names from registry)
 		assert.ok(output.includes("open"), "Should include open verb");

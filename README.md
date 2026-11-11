@@ -56,6 +56,7 @@ The full documentation is maintained in this repository under [`docs/`](docs/) a
 - [Getting started](docs/getting-started.md) — install, spin up a local cluster, credentials, profiles, output modes, and shell completion.
 - [Cluster inspection and process management](docs/cluster-inspection.md) — list, search, get, and manage process instances, user tasks, incidents, jobs, variables, messages, and forms.
 - [Identity management](docs/identity-management.md) — users, roles, groups, tenants, authorizations, and mapping rules.
+- [Cluster variables](docs/cluster-variables.md) — global and tenant-scoped cluster variables.
 - [Development workflows](docs/development-workflows.md) — deploy, run, watch, profiles, sessions, and the MCP proxy.
 - [Plugins](docs/plugins.md) — scaffold, install, and manage custom commands.
 - [Command reference](docs/command-reference.md) — every command, flag, resource, and alias.
@@ -124,7 +125,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `await` - Create and await completion (alias for create --awaitCompletion)
 - `complete` - Complete resource
 - `fail` - Fail a job
-- `update` - Update a job
+- `update` - Update a job or cluster variable
 - `activate` - Activate jobs by type
 - `resolve` - Resolve incident
 - `publish` - Publish message
@@ -153,7 +154,7 @@ c8ctl <verb> <resource> [arguments] [flags]
 - `help` (alias: `menu`) - Show help
 - `which` - Show active profile or output mode
 
-**Resources**: authorization (auth), form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
+**Resources**: authorization (auth), cluster-variable, form, group, incident (inc), job, jobs, mapping-rule (mr), message (msg), plugin, process-definition (pd), process-instance (pi), profile, role, tenant, topology, user, user-task (ut), variable (var, vars), wait-state (ws)
 <!-- verb-resource-list:end -->
 
 **Tip**: Run `c8ctl help <command>` to see detailed help for specific commands with all available flags.

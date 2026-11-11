@@ -195,6 +195,7 @@ describe("RESOURCE_ALIASES consistency", () => {
 		assert.strictEqual(resolveAlias("tenants"), "tenant");
 		assert.strictEqual(resolveAlias("authorizations"), "authorization");
 		assert.strictEqual(resolveAlias("mapping-rules"), "mapping-rule");
+		assert.strictEqual(resolveAlias("cluster-variables"), "cluster-variable");
 	});
 
 	test("unknown resources pass through unchanged", () => {
@@ -225,6 +226,7 @@ describe("search resourceFlags consistency", () => {
 		"tenant",
 		"authorization",
 		"mapping-rule",
+		"cluster-variable",
 	];
 
 	test("every searchable resource has a flag set", () => {

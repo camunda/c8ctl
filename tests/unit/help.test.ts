@@ -521,6 +521,9 @@ describe("Help Module", () => {
 		assert.ok(output.includes("job"));
 		assert.ok(output.includes("--retries"));
 		assert.ok(output.includes("--timeout"));
+		assert.ok(output.includes("cluster-variable"));
+		assert.ok(output.includes("--value"));
+		assert.ok(output.includes("--metadata"));
 	});
 
 	test("showCommandHelp shows activate help", () => {
@@ -988,6 +991,26 @@ describe("Help Module", () => {
 		assert.ok(output.includes("tenant"));
 		assert.ok(output.includes("authorization"));
 		assert.ok(output.includes("mapping-rule"));
+		assert.ok(output.includes("cluster-variable"));
+		assert.ok(output.includes("--tenantId"));
+	});
+
+	test("showVerbResources lists cluster-variable for every supported verb", () => {
+		for (const verb of [
+			"list",
+			"search",
+			"get",
+			"create",
+			"update",
+			"delete",
+		]) {
+			consoleLogSpy.length = 0;
+			showVerbResources(verb);
+			assert.ok(
+				consoleLogSpy.join("\n").includes("cluster-variable"),
+				`${verb} resources should include cluster-variable`,
+			);
+		}
 	});
 
 	test("showCommandHelp shows assign help", () => {
