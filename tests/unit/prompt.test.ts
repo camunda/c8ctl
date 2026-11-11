@@ -8,8 +8,10 @@
  */
 
 import assert from "node:assert";
+import { resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import {
 	confirm,
@@ -20,6 +22,7 @@ import {
 	PromptNotInteractiveError,
 	select,
 } from "../../src/framework/index.ts";
+import { asyncSpawn } from "../utils/spawn.ts";
 
 const ENTER = "\r";
 const DOWN = "\x1b[B";
@@ -29,10 +32,15 @@ function fakeTTY(): PromptIO & {
 	input: PassThrough;
 	output: PassThrough;
 	text: () => string;
+	rawModes: boolean[];
 } {
+	const rawModes: boolean[] = [];
 	const input = Object.assign(new PassThrough(), {
 		isTTY: true,
-		setRawMode: (_mode: boolean) => true,
+		setRawMode: (mode: boolean) => {
+			rawModes.push(mode);
+			return true;
+		},
 	});
 	const output = Object.assign(new PassThrough(), {
 		isTTY: true,
@@ -42,7 +50,15 @@ function fakeTTY(): PromptIO & {
 	output.on("data", (chunk: Buffer) => {
 		written += chunk.toString();
 	});
-	return { input, output, text: () => written };
+	return { input, output, text: () => written, rawModes };
+}
+
+const SHOW_CURSOR = "\x1b[?25h";
+
+/** Raw mode was switched on while prompting and is off again afterwards. */
+function assertTerminalRestored(io: ReturnType<typeof fakeTTY>): void {
+	assert.ok(io.rawModes.includes(true), "raw mode was never enabled");
+	assert.strictEqual(io.rawModes.at(-1), false, "raw mode left enabled");
 }
 
 function fakePipe(): PromptIO {
@@ -158,6 +174,20 @@ describe("select()", () => {
 		assert.deepStrictEqual(result, { interactive: true, cancelled: true });
 	});
 
+	for (const [name, keys] of [
+		["Enter", [ENTER]],
+		["a number key", ["2"]],
+		["Escape", [ESCAPE]],
+	] as const) {
+		test(`restores raw mode and the cursor after ${name}`, async () => {
+			const io = fakeTTY();
+			type(io, ...keys);
+			await select({ message: "Pick", options: OPTIONS, io });
+			assertTerminalRestored(io);
+			assert.ok(io.text().includes(SHOW_CURSOR), "cursor left hidden");
+		});
+	}
+
 	test("non-TTY returns the default with a hint", async () => {
 		const result = await select({
 			message: "Pick",
@@ -214,6 +244,40 @@ describe("confirm()", () => {
 		const result = await confirm({ message: "Continue?", io });
 		assert.strictEqual(result.value, true);
 		assert.match(io.text(), /Please answer y or n/);
+	});
+
+	for (const defaultValue of [true, false]) {
+		test(`Escape cancels instead of answering (default ${defaultValue})`, async () => {
+			const io = fakeTTY();
+			type(io, ESCAPE);
+			const result = await confirm({ message: "Continue?", defaultValue, io });
+			assert.deepStrictEqual(result, {
+				interactive: true,
+				value: false,
+				cancelled: true,
+			});
+			assertTerminalRestored(io);
+		});
+	}
+
+	test("Enter after Escape does not answer the cancelled question", async () => {
+		const io = fakeTTY();
+		type(io, ESCAPE);
+		const result = await confirm({
+			message: "Continue?",
+			defaultValue: true,
+			io,
+		});
+		io.input.write(ENTER);
+		assert.strictEqual(result.value, false);
+		assert.strictEqual(result.cancelled, true);
+	});
+
+	test("restores raw mode after an answer", async () => {
+		const io = fakeTTY();
+		type(io, "y\r");
+		await confirm({ message: "Continue?", io });
+		assertTerminalRestored(io);
 	});
 
 	test("non-TTY returns the default with a hint", async () => {
@@ -329,6 +393,17 @@ describe("createPromptSession()", () => {
 			);
 		});
 
+		test("Escape in confirm rejects with PromptCancelledError", async () => {
+			const io = fakeTTY();
+			const prompts = createPromptSession({ yes: false, io });
+			type(io, ESCAPE);
+			await assert.rejects(
+				prompts.confirm({ message: "Install?", defaultValue: true }),
+				PromptCancelledError,
+			);
+			assertTerminalRestored(io);
+		});
+
 		test("Escape in select rejects with PromptCancelledError", async () => {
 			const io = fakeTTY();
 			const prompts = createPromptSession({ yes: false, io });
@@ -338,5 +413,73 @@ describe("createPromptSession()", () => {
 				PromptCancelledError,
 			);
 		});
+	});
+});
+
+/**
+ * Ctrl+C re-raises SIGINT, which would kill the test runner, so each
+ * prompt runs in its own child process. The child reports raw-mode and
+ * cursor changes with synchronous writes as they happen, then dies from
+ * the re-raised SIGINT under the default disposition.
+ */
+describe("Ctrl+C", () => {
+	const FRAMEWORK = pathToFileURL(
+		resolve(import.meta.dirname, "..", "..", "src", "framework", "index.ts"),
+	).href;
+
+	const childScript = (call: string) =>
+		[
+			`import { writeSync } from "node:fs";`,
+			`import { PassThrough, Writable } from "node:stream";`,
+			`import { confirm, select } from ${JSON.stringify(FRAMEWORK)};`,
+			`const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (m) => { writeSync(1, "raw:" + m + ";"); return true; } });`,
+			`const output = Object.assign(new Writable({ write(chunk, _enc, cb) { if (String(chunk).includes("\\x1b[?25h")) writeSync(1, "cursor:shown;"); cb(); } }), { isTTY: true, columns: 80 });`,
+			`const io = { input, output };`,
+			`setImmediate(() => input.write("\\x03"));`,
+			`await ${call};`,
+			`writeSync(1, "resolved;");`,
+		].join("\n");
+
+	const run = (call: string) =>
+		asyncSpawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				"--input-type=module",
+				"-e",
+				childScript(call),
+			],
+			{
+				env: {
+					...process.env,
+					CI: "",
+					C8CTL_INTERACTIVE: "",
+					C8CTL_NON_INTERACTIVE: "",
+				},
+				timeout: 15_000,
+			},
+		);
+
+	// Windows has no POSIX signal dispositions: process.kill(pid, "SIGINT")
+	// terminates unconditionally and the exit is not reported as a signal.
+	const skip =
+		process.platform === "win32" && "POSIX signal semantics required";
+
+	test("select restores the terminal and re-raises SIGINT", {
+		skip,
+	}, async () => {
+		const result = await run(
+			`select({ message: "Pick", options: [{ label: "A", value: "a" }], io })`,
+		);
+		assert.strictEqual(result.signal, "SIGINT", result.stderr);
+		assert.strictEqual(result.stdout, "raw:true;raw:false;cursor:shown;");
+	});
+
+	test("confirm restores the terminal and re-raises SIGINT", {
+		skip,
+	}, async () => {
+		const result = await run(`confirm({ message: "OK?", io })`);
+		assert.strictEqual(result.signal, "SIGINT", result.stderr);
+		assert.match(result.stdout, /^raw:true;.*raw:false;$/);
 	});
 });

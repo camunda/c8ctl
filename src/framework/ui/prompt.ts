@@ -174,7 +174,10 @@ export interface ConfirmConfig {
 
 export interface ConfirmResult {
 	interactive: boolean;
+	/** The answer. Always `false` when cancelled, whatever the default. */
 	value: boolean;
+	/** True when the user pressed Escape instead of answering. */
+	cancelled?: boolean;
 	/** Hint message suitable for logging in non-interactive mode. */
 	hint?: string;
 }
@@ -416,7 +419,8 @@ function parseYesNo(
  * Ask a yes/no question. Returns the answer.
  *
  * - **Interactive**: prompts on stderr with `[y/N]` or `[Y/n]`. Enter
- *   accepts the default; an unrecognised answer asks again.
+ *   accepts the default; an unrecognised answer asks again. Escape
+ *   cancels with `cancelled: true` and `value: false`.
  * - **Non-interactive**: returns `defaultValue` (false if omitted)
  *   with a hint string.
  */
@@ -450,6 +454,7 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 		// (Ctrl+C, stream end), settle the promise so the command
 		// doesn't hang.
 		rl.on("close", () => {
+			io.input.removeListener("keypress", onKeypress);
 			if (!settled) {
 				settled = true;
 				if (sigint) {
@@ -458,6 +463,18 @@ export async function confirm(config: ConfirmConfig): Promise<ConfirmResult> {
 				resolve({ interactive: true, value: defaultValue });
 			}
 		});
+
+		// readline ignores a lone Escape, so watch for it directly. A
+		// cancelled question answers "no" so a caller that only checks
+		// `value` never proceeds on a default of "yes".
+		function onKeypress(_chunk: Buffer | string, key?: Key) {
+			if (key?.name !== "escape" || settled) return;
+			settled = true;
+			io.output.write("\n");
+			rl.close();
+			resolve({ interactive: true, value: false, cancelled: true });
+		}
+		io.input.on("keypress", onKeypress);
 
 		const ask = () =>
 			rl.question(
@@ -518,8 +535,8 @@ export interface PromptSession {
  * - Otherwise a non-interactive session throws
  *   `PromptNotInteractiveError` naming the question and suggesting
  *   `--yes`, so scripts fail fast instead of guessing.
- * - Escape on a choice throws `PromptCancelledError`. Ctrl+C re-raises
- *   SIGINT, as the underlying prompts do.
+ * - Escape throws `PromptCancelledError`. Ctrl+C re-raises SIGINT, as
+ *   the underlying prompts do.
  */
 export function createPromptSession(
 	config: PromptSessionConfig,
@@ -544,7 +561,11 @@ export function createPromptSession(
 			if (!isInteractive(io)) {
 				throw notInteractive(question.message, question.nonInteractiveHint);
 			}
-			return (await confirm({ ...question, io })).value;
+			const result = await confirm({ ...question, io });
+			if (result.cancelled) {
+				throw new PromptCancelledError(`Cancelled: ${question.message}`);
+			}
+			return result.value;
 		},
 
 		async select<T>(question: Omit<SelectConfig<T>, "io">) {
