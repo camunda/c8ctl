@@ -76,7 +76,7 @@ export const searchIdentityMappingRulesCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No mapping rules found");
+			logger.info("No mapping rules found", { essential: true });
 			return;
 		}
 

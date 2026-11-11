@@ -143,6 +143,37 @@ describe("Passthrough plugin contract (#366)", () => {
 			);
 		});
 
+		test("strips a bundle made only of boolean global short flags", async () => {
+			for (const bundle of ["-qy", "-yq"]) {
+				const result = await c8("pass-through-cmd", bundle, "--from", "URL");
+				assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+				assert.deepStrictEqual(JSON.parse(result.stdout).args, [
+					"--from",
+					"URL",
+				]);
+			}
+		});
+
+		test("forwards a bundle that is not only global short flags verbatim", async () => {
+			// `-qx` may be the wrapped tool's own `-q` with flags, or a short
+			// option with an attached value; only the tool can tell.
+			const result = await c8("pass-through-cmd", "-qx", "target");
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.deepStrictEqual(JSON.parse(result.stdout).args, ["-qx", "target"]);
+		});
+
+		test("forwards a lone `-` (stdin) verbatim", async () => {
+			const result = await c8("pass-through-cmd", "-", "-qy");
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.deepStrictEqual(JSON.parse(result.stdout).args, ["-"]);
+		});
+
+		test("forwards a global short bundle after `--` verbatim", async () => {
+			const result = await c8("pass-through-cmd", "--", "-qy");
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.deepStrictEqual(JSON.parse(result.stdout).args, ["--", "-qy"]);
+		});
+
 		test("strips GLOBAL_FLAGS from forwarded args (string flag with value)", async () => {
 			const result = await c8(
 				"pass-through-cmd",

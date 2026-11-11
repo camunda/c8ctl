@@ -833,7 +833,7 @@ export async function downloadWithRetry({
   progressIntervalMs = PROGRESS_INTERVAL_MS,
   extraHints = [],
 }) {
-  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr' }) : () => {};
+  const vlog = verbose ? (message) => logger.info(`[verbose] ${message}`, { stream: 'stderr', essential: true }) : () => {};
   const invalid = invalidDownloadUrlReason(url);
   if (invalid) {
     throw downloadError(
@@ -1622,10 +1622,10 @@ async function startC8Run(config, debug = false, startArgs = []) {
       if (existsSync(versionFile)) {
         const runningVersion = readFileSync(versionFile, 'utf-8').trim();
         if (runningVersion) {
-          logger.info(`Detected running version marker: ${runningVersion}`);
+          logger.info(`Detected running version marker: ${runningVersion}`, { essential: true });
         }
       }
-      logger.info('Use "c8ctl cluster stop" to stop it first.');
+      logger.info('Use "c8ctl cluster stop" to stop it first.', { essential: true });
       return;
     }
 
@@ -1646,7 +1646,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
     );
     const record = readRunningClusterRecord(config.cacheDir);
     if (record?.version) {
-      logger.info(`Detected running version from the durable PID record: ${record.version}`);
+      logger.info(`Detected running version from the durable PID record: ${record.version}`, { essential: true });
     }
     throw new Error('Refusing to start while cluster processes survive without an active marker. Stop them first with "c8ctl cluster stop".');
   }
@@ -1662,7 +1662,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
   if (typeof proc.pid !== 'number') {
     logger.error('Failed to start cluster process: no PID received from c8run.');
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
     process.exit(1);
   }
 
@@ -1761,7 +1761,7 @@ async function startC8Run(config, debug = false, startArgs = []) {
       'Cluster failed to start within timeout.',
     );
     logger.error(`Check logs in: ${logDir}`);
-    logger.info(`Print logs with: cat "${logDir}"/*.log`);
+    logger.info(`Print logs with: cat "${logDir}"/*.log`, { essential: true });
     process.exit(1);
   }
 }
@@ -2994,7 +2994,7 @@ export async function listRemoteVersions() {
     html = await response.text();
   } catch (error) {
     logger.error(`Failed to query the Camunda Download Center: ${error}`);
-    logger.info('Check your network connection and try again.');
+    logger.info('Check your network connection and try again.', { essential: true });
     process.exit(1);
   }
 
@@ -3221,7 +3221,7 @@ export async function streamLogs(cacheDir) {
 
   if (!existsSync(markerFile)) {
     logger.warn('No cluster is currently running.');
-    logger.info('Start one with: c8ctl cluster start');
+    logger.info('Start one with: c8ctl cluster start', { essential: true });
     return;
   }
 
@@ -3252,7 +3252,7 @@ export async function streamLogs(cacheDir) {
 
   if (existingLogs.length === 0) {
     logger.warn(`No log files found in ${logDir}`);
-    logger.info('The cluster may still be starting. Try again in a moment.');
+    logger.info('The cluster may still be starting. Try again in a moment.', { essential: true });
     return;
   }
 

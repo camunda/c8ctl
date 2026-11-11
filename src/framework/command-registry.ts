@@ -216,6 +216,18 @@ export const GLOBAL_FLAGS = {
 		agentAppliesTo: "all commands",
 	},
 	verbose: { type: "boolean", description: "Show verbose output" },
+	quiet: {
+		type: "boolean",
+		description: "Hide informational and success messages",
+		short: "q",
+		agentDescription:
+			"Hide informational and success messages (status lines, progress, " +
+			'"✓ … done" confirmations) in both text and JSON output modes.\n' +
+			"A command's data and answer (including the key of a created resource, " +
+			"printed bare in text mode), warnings and errors are still printed, " +
+			"and the exit code is unchanged.",
+		agentAppliesTo: "all commands",
+	},
 	fields: {
 		type: "string",
 		description: "Comma-separated list of fields to display",

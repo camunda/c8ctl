@@ -711,8 +711,12 @@ async function feelHandler(
 		const lead = subcommand
 			? `Unknown subcommand '${subcommand}'.`
 			: "c8ctl feel requires a subcommand.";
-		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-		logger.info("Run 'c8ctl feel --help' for full usage.");
+		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`, {
+			essential: true,
+		});
+		logger.info("Run 'c8ctl feel --help' for full usage.", {
+			essential: true,
+		});
 		process.exitCode = 1;
 		return;
 	}

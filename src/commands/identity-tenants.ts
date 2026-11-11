@@ -73,7 +73,7 @@ export const searchIdentityTenantsCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No tenants found");
+			logger.info("No tenants found", { essential: true });
 			return;
 		}
 
