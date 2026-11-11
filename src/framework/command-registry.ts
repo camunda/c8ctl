@@ -1228,7 +1228,7 @@ export const COMMAND_REGISTRY = {
 	modeler: {
 		description: "Install Camunda Desktop Modeler",
 		helpDescription:
-			"Install the latest stable Camunda Desktop Modeler on macOS. Skips the installation when Modeler is already installed, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable).",
+			"Install the latest stable Camunda Desktop Modeler on macOS or Windows, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\\Programs\\Camunda Modeler, then registers its file types and adds it to the Start Menu.",
 		helpResource: "install",
 		hasDetailedHelp: true,
 		helpFooterLabel: "Show modeler install help",

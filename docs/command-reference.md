@@ -684,7 +684,7 @@ c8ctl migrate pi 2251799813685249 --targetProcessDefinitionKey 2251799813686001 
 
 ### `modeler`
 
-Install the latest stable Camunda Desktop Modeler on macOS. Skips the installation when Modeler is already installed, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable).
+Install the latest stable Camunda Desktop Modeler on macOS or Windows, skipping the installation when Modeler is already installed. On macOS, uses Homebrew when available, and otherwise installs the Camunda-signed release into /Applications (or ~/Applications when /Applications is not writable). On Windows, installs it with winget into %LOCALAPPDATA%\Programs\Camunda Modeler, then registers its file types and adds it to the Start Menu.
 
 **Usage:** `c8ctl modeler install`
 
