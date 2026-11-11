@@ -439,6 +439,16 @@ export function stripGlobalFlags(argv: readonly string[]): string[] {
 				i += argv[i + 1] === "--" ? 1 : 2; // consume short flag and its value, never the terminator
 				continue;
 			}
+		} else if (
+			tok.startsWith("-") &&
+			tok.length > 2 &&
+			[...tok.slice(1)].every((c) => booleanShorts.has(c))
+		) {
+			// A bundle of boolean global shorts (`-qy`). A bundle with any other
+			// character is left alone: it may be the wrapped tool's own option
+			// with an attached value, which only that tool can parse.
+			i++;
+			continue;
 		}
 		out.push(tok);
 		i++;

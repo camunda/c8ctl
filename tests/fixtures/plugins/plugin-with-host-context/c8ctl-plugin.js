@@ -15,6 +15,7 @@ export const commands = {
   'echo-ctx': {
     flags: {
       flag1: { type: 'string', description: 'A plugin-declared flag' },
+      label: { type: 'string', short: 'l', description: 'A string flag with a short alias' },
     },
     handler: async (args, flags, ctx) => {
       // Snapshot only the documented shape — skip the lazy client getter

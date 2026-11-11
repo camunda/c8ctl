@@ -186,10 +186,11 @@ function applyGlobalFlags(values: ParsedValues): void {
 		c8ctl.verbose = true;
 	}
 
-	// Resolve --quiet flag (hide informational and success messages)
-	if (values.quiet) {
-		c8ctl.quiet = true;
-	}
+	// Resolve --quiet flag (hide informational and success messages).
+	// Recomputed on every call, not only set: the early globals-only pass
+	// can misread a plugin flag's attached value (`-lq` is `-l q`) as `-q`,
+	// and the final, command-aware pass must be able to correct that.
+	c8ctl.quiet = values.quiet === true;
 }
 
 /**
