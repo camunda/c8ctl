@@ -127,6 +127,7 @@ Only c8ctl's **global** flags are reserved. A plugin flag cannot use these names
 | `--profile` | |
 | `--dry-run` | |
 | `--verbose` | |
+| `--quiet` | `-q` |
 | `--fields` | |
 | `--json` | |
 | `--yes` | `-y` |
@@ -148,6 +149,7 @@ A flag handler is called as `handler(args, flags, ctx)`. Read global flags from 
 | `--profile` (or the session profile) | `ctx.profile` |
 | `--dry-run` | `ctx.dryRun` |
 | `--verbose` | `ctx.verbose` |
+| `--quiet` | `ctx.quiet` |
 | `--json` / session output mode | `ctx.outputMode` |
 | `--yes` | `ctx.yes` |
 | `--fields` | `ctx.fields` |
@@ -258,7 +260,7 @@ export const commands = {
 ```
 
 - A command is **either** passthrough **or** `{ flags, handler }` — declaring both is rejected at load time, so a command cannot mix declared flags with raw ones. A command whose subcommands need both (like `cluster`, which has its own `--purge` and forwards arbitrary flags to `c8run secrets`) should be a passthrough command and parse its own flags.
-- c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
+- c8ctl strips only its **global** flags (`--help`, `--version`/`-v`, `--profile`, `--dry-run`, `--verbose`, `--quiet`/`-q`, `--fields`, `--json`, `--yes`/`-y`), including the value of string-typed ones. They are not forwarded. If the wrapped tool needs one of those names (for example `--yes`), read the host's interpretation from `ctx` (`ctx.yes`, `ctx.profile`, `ctx.dryRun`, ...) and forward it explicitly.
 - A `--` terminator is forwarded too, and everything after it verbatim, global flag names included.
 - `flagsHint` documents flags handled by the plugin or underlying tool. It does not declare host-parsed flags or shell completions. Passthrough flag completion offers only global flags; subcommands and file completion remain available.
 - Use `passthroughHint` to describe which arguments the plugin handles and which it forwards. For example, `cluster secrets` handles a leading `--c8-version` and forwards `--physical-tenant` unchanged to c8run.
@@ -282,6 +284,8 @@ Use the client factory when your plugin needs direct Camunda API access, `resolv
 `logger.info(message)` writes plain text to stdout in text mode and a `{"status":"info","message":"..."}` envelope to stderr in JSON mode. Pass `{ stream: "stdout" }` as the second argument for a primary result, or `{ stream: "stderr" }` for a diagnostic in either mode. Formatting remains mode-aware; the override affects only that call and does not apply `--fields` filtering.
 
 Use `logger.output(content)` for raw stdout content and `logger.json(data)` for structured data with `--fields` filtering.
+
+With `--quiet`, `logger.info` and `logger.success` print nothing. Pass `{ essential: true }` to `logger.info` when the message is the command's answer or explains a warning or error, so it still prints. Data written with `logger.output`, `logger.json` or `logger.table`, warnings and errors are never hidden.
 
 ### Declaring the c8ctl version you need
 

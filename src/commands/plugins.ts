@@ -141,9 +141,10 @@ function assertHostCompatible({
 
 	const summary = `Plugin '${pluginName}' is not compatible with this c8ctl`;
 	logger.error(summary);
-	logger.info(verdict.message ?? "");
+	logger.info(verdict.message ?? "", { essential: true });
 	logger.info(
 		"The plugin is installed but none of its commands will run. Run 'c8ctl doctor plugin' to see this again.",
+		{ essential: true },
 	);
 	throw new SilentError(summary);
 }
@@ -1191,6 +1192,8 @@ export const doctorPluginCommand = defineCommand(
 	"plugin",
 	async (ctx, _flags, _args) => {
 		const { logger } = ctx;
+		// The text report is the command's answer, so --quiet keeps it.
+		const say = (message: string) => logger.info(message, { essential: true });
 
 		const loaded = getLoadedPluginSummaries();
 		const collisions = getPluginCollisions();
@@ -1203,9 +1206,9 @@ export const doctorPluginCommand = defineCommand(
 		}
 
 		if (loaded.length === 0) {
-			logger.info("No plugins loaded.");
+			say("No plugins loaded.");
 		} else {
-			logger.info(`Loaded plugins (${loaded.length}):`);
+			say(`Loaded plugins (${loaded.length}):`);
 			logger.table(
 				loaded.map((p) => ({
 					Plugin: p.name,
@@ -1216,8 +1219,8 @@ export const doctorPluginCommand = defineCommand(
 		}
 
 		if (incompatible.length > 0) {
-			logger.info("");
-			logger.info(`Incompatible with this c8ctl (${incompatible.length}):`);
+			say("");
+			say(`Incompatible with this c8ctl (${incompatible.length}):`);
 			logger.table(
 				incompatible.map((i) => ({
 					Plugin: i.plugin,
@@ -1226,13 +1229,13 @@ export const doctorPluginCommand = defineCommand(
 					Running: i.running,
 				})),
 			);
-			logger.info("");
-			logger.info(
+			say("");
+			say(
 				"These plugins are installed and still listed in help, but their commands refuse to run: " +
 					"the c8ctl they declare (engines.c8ctl) is not the one you have. If one of their command " +
 					"names appears above under a different plugin, that plugin has taken it over and it works.",
 			);
-			logger.info(
+			say(
 				"To resolve: upgrade c8ctl with 'npm install -g @camunda8/cli@latest', or install a plugin " +
 					"release that supports this version. See docs/plugins.md for the requirement contract.",
 			);
@@ -1242,8 +1245,8 @@ export const doctorPluginCommand = defineCommand(
 		// delivered to the plugin. Reported here once, on demand, instead of on
 		// every invocation of the plugin command.
 		if (flagCollisions.length > 0) {
-			logger.info("");
-			logger.info(
+			say("");
+			say(
 				`Plugin flags that collide with c8ctl global flags (${flagCollisions.length}):`,
 			);
 			logger.table(
@@ -1258,14 +1261,14 @@ export const doctorPluginCommand = defineCommand(
 							: "reserved by c8ctl; never passed to the plugin (read it from ctx)",
 				})),
 			);
-			logger.info(
+			say(
 				"To resolve, in the plugin: rename a reserved flag; change or drop a reserved short alias. A required flag with a reserved name makes the command unusable.",
 			);
 		}
 
 		if (collisions.length === 0) {
-			logger.info("");
-			logger.info(
+			say("");
+			say(
 				flagCollisions.length > 0
 					? "No plugin name or command collisions detected."
 					: "No plugin collisions detected.",
@@ -1273,8 +1276,8 @@ export const doctorPluginCommand = defineCommand(
 			return;
 		}
 
-		logger.info("");
-		logger.info(`Detected collisions (${collisions.length}):`);
+		say("");
+		say(`Detected collisions (${collisions.length}):`);
 		logger.table(
 			collisions.map((c) => ({
 				Kind: c.kind,
@@ -1283,11 +1286,11 @@ export const doctorPluginCommand = defineCommand(
 				Command: c.command ?? "—",
 			})),
 		);
-		logger.info("");
-		logger.info(
+		say("");
+		say(
 			"Resolution policy: first-registration-wins. The losing plugin's command (or the entire losing plugin, for plugin-name collisions) was dropped at load time.",
 		);
-		logger.info(
+		say(
 			"To resolve: uninstall one of the colliding plugins, or ask the plugin author to rename. See docs/plugin-collisions.md for the full policy.",
 		);
 	},

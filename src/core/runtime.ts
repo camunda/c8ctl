@@ -86,6 +86,8 @@ export interface C8ctlPluginRuntime {
 	dryRun?: boolean;
 	/** When true, enables SDK trace logging and surfaces raw errors instead of user-friendly messages */
 	verbose?: boolean;
+	/** When true, informational and success messages are not printed (data, warnings and errors still are) */
+	quiet?: boolean;
 	createClient(
 		profileFlag?: string,
 		additionalSdkConfig?: Partial<CamundaOptions>,
@@ -186,6 +188,7 @@ class C8ctl implements C8ctlPluginRuntime {
 	private _fields?: string[];
 	private _dryRun?: boolean;
 	private _verbose?: boolean;
+	private _quiet?: boolean;
 	private _resolvedBaseUrl?: string;
 	private _deps?: C8ctlDeps;
 
@@ -330,6 +333,14 @@ class C8ctl implements C8ctlPluginRuntime {
 
 	set verbose(value: boolean | undefined) {
 		this._verbose = value;
+	}
+
+	get quiet(): boolean | undefined {
+		return this._quiet;
+	}
+
+	set quiet(value: boolean | undefined) {
+		this._quiet = value;
 	}
 
 	get resolvedBaseUrl(): string | undefined {

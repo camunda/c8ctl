@@ -206,7 +206,10 @@ export function getVersion(): string {
  * Display version
  */
 export function showVersion(): void {
-	getLogger().info(`c8ctl v${getVersion()}`, { stream: "stdout" });
+	getLogger().info(`c8ctl v${getVersion()}`, {
+		stream: "stdout",
+		essential: true,
+	});
 }
 
 // ─── Derived help generation ─────────────────────────────────────────────────
@@ -897,7 +900,7 @@ function showFlagAwarePluginHelp(command: string): void {
 			lines.push(`      ${ex.description}`);
 		}
 	}
-	logger.info(lines.join("\n"));
+	logger.info(lines.join("\n"), { essential: true });
 }
 
 /** Subcommand name column: at least 16 wide, always leaving a gap before the description. */
@@ -990,7 +993,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 				lines.push(`      ${ex.description}`);
 			}
 		}
-		logger.info(lines.join("\n"));
+		logger.info(lines.join("\n"), { essential: true });
 		return;
 	}
 

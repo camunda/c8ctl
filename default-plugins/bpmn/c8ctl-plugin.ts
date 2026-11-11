@@ -75,8 +75,12 @@ async function bpmnHandler(
 		const lead = subcommand
 			? `Unknown subcommand '${subcommand}'.`
 			: "c8ctl bpmn requires a subcommand.";
-		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`);
-		logger.info("Run 'c8ctl bpmn --help' for full usage.");
+		logger.info(`${lead} Available: ${validSubcommands.join(", ")}`, {
+			essential: true,
+		});
+		logger.info("Run 'c8ctl bpmn --help' for full usage.", {
+			essential: true,
+		});
 		process.exitCode = 1;
 		return;
 	}
@@ -164,11 +168,6 @@ export const metadata = {
 export const commands = {
 	bpmn: {
 		flags: {
-			quiet: {
-				type: "boolean",
-				short: "q",
-				description: 'Suppress the "No issues found." line on a clean lint',
-			},
 			"in-place": {
 				type: "boolean",
 				short: "i",

@@ -35,8 +35,65 @@ describe("Logger Module", () => {
 	afterEach(() => {
 		console.log = originalLog;
 		console.error = originalError;
+		c8ctl.quiet = undefined;
 		c8ctl.activeProfile = undefined;
 		c8ctl.resolvedBaseUrl = undefined;
+	});
+
+	describe("Quiet mode", () => {
+		for (const mode of ["text", "json"] as const) {
+			describe(`in ${mode} mode`, () => {
+				beforeEach(() => {
+					c8ctl.outputMode = mode;
+					c8ctl.quiet = true;
+				});
+
+				test("suppresses info and success messages", () => {
+					const logger = new Logger();
+					logger.info("status");
+					logger.info("status", { stream: "stdout" });
+					logger.success("done");
+					logger.success("done", 42);
+					assert.deepStrictEqual(consoleLogSpy, []);
+					assert.deepStrictEqual(consoleErrorSpy, []);
+				});
+
+				test("still writes essential info messages", () => {
+					const logger = new Logger();
+					logger.info("the answer", { essential: true });
+					assert.strictEqual(consoleLogSpy.length + consoleErrorSpy.length, 1);
+					assert.ok(
+						[...consoleLogSpy, ...consoleErrorSpy][0].includes("the answer"),
+					);
+				});
+
+				test("still writes warnings and errors", () => {
+					const logger = new Logger();
+					logger.warn("careful");
+					logger.error("broken", new Error("cause"));
+					assert.ok(consoleErrorSpy.some((l) => l.includes("careful")));
+					assert.ok(consoleErrorSpy.some((l) => l.includes("broken")));
+				});
+
+				test("still writes data output", () => {
+					const logger = new Logger();
+					logger.json({ key: 1 });
+					logger.output("raw content");
+					logger.table([{ Key: 1 }]);
+					assert.ok(consoleLogSpy.some((l) => l.includes('"key"')));
+					assert.ok(consoleLogSpy.some((l) => l.includes("raw content")));
+					assert.ok(consoleLogSpy.join("\n").includes("Key"));
+				});
+			});
+		}
+
+		test("essential has no effect when quiet is off", () => {
+			c8ctl.outputMode = "text";
+			const logger = new Logger();
+			logger.info("plain");
+			logger.info("essential", { essential: true });
+			assert.deepStrictEqual(consoleLogSpy, ["plain", "essential"]);
+		});
 	});
 
 	describe("Text Mode", () => {

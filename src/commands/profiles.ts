@@ -210,21 +210,23 @@ function removeProfile(name: string): void {
  */
 function whichProfile(): void {
 	const logger = getLogger();
+	// The profile name is the command's answer, so --quiet keeps it.
+	const say = (message: string) => logger.info(message, { essential: true });
 	const active = c8ctl.activeProfile;
 	if (!active) {
 		const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
 		if (hasBaseUrl) {
-			logger.info("(none — CAMUNDA_* env vars will be used)");
+			say("(none — CAMUNDA_* env vars will be used)");
 		} else if (hasCamundaEnvVars()) {
-			logger.info(
+			say(
 				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`,
 			);
 		} else {
-			logger.info(`${DEFAULT_PROFILE} (default)`);
+			say(`${DEFAULT_PROFILE} (default)`);
 		}
 		return;
 	}
-	logger.info(active);
+	say(active);
 }
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────

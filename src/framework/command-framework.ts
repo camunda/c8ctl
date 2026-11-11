@@ -268,6 +268,8 @@ export interface CommandContext {
 	dryRun: DryRunFn;
 	/** Whether --verbose was set. */
 	verbose: boolean;
+	/** Whether --quiet was set (the logger already hides info and success messages). */
+	quiet: boolean;
 	/** Active profile name (for client/tenant resolution). */
 	profile: string | undefined;
 	/** Whether --yes was set (skip confirmation prompts). */

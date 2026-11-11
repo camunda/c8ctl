@@ -98,6 +98,16 @@ describe("CLI behavioural: bpmn lint", () => {
 		);
 	});
 
+	for (const flag of ["--quiet", "-q"]) {
+		test(`${flag} is the global quiet flag, not a reserved plugin flag`, async () => {
+			const file = join(FIXTURES_DIR, "simple.bpmn");
+			const result = await c8text("bpmn", "lint", flag, file);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			assert.strictEqual(result.stdout, "");
+			assert.strictEqual(result.stderr, "", "no reserved-flag warning");
+		});
+	}
+
 	test("--quiet does not suppress problems", async () => {
 		// --quiet only silences the success line. Problem output is the
 		// whole point of running the linter, so it must always render.

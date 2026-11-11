@@ -70,23 +70,26 @@ export function setOutputFormat(mode: string): void {
  */
 export function showSessionState(): void {
 	const logger = getLogger();
+	const say = (message: string) => logger.info(message, { essential: true });
 
-	logger.info("\nCurrent Session State:");
-	logger.info(`  Active Profile: ${c8ctl.activeProfile || "(none)"}`);
-	logger.info(`  Active Tenant: ${c8ctl.activeTenant || "(none)"}`);
-	logger.info(`  Output Mode: ${c8ctl.outputMode}`);
-	logger.info("");
+	say("\nCurrent Session State:");
+	say(`  Active Profile: ${c8ctl.activeProfile || "(none)"}`);
+	say(`  Active Tenant: ${c8ctl.activeTenant || "(none)"}`);
+	say(`  Output Mode: ${c8ctl.outputMode}`);
+	say("");
 }
 
 // ─── defineCommand wrappers ──────────────────────────────────────────────────
 
 export const outputCommand = defineCommand("output", "", async (ctx) => {
 	if (!ctx.resource) {
-		ctx.logger.info(`Current output mode: ${c8ctl.outputMode}`);
+		const say = (message: string) =>
+			ctx.logger.info(message, { essential: true });
+		say(`Current output mode: ${c8ctl.outputMode}`);
 		if (c8ctl.outputMode === "text") {
-			ctx.logger.info("");
+			say("");
 		}
-		ctx.logger.info("Available modes: json|text");
+		say("Available modes: json|text");
 		return { kind: "none" };
 	}
 	setOutputFormat(ctx.resource);
@@ -151,6 +154,6 @@ export const useTenantCommand = defineCommand(
 
 export const whichOutputCommand = defineCommand("which", "output", async () => {
 	const logger = getLogger();
-	logger.info(c8ctl.outputMode);
+	logger.info(c8ctl.outputMode, { essential: true });
 	return { kind: "none" };
 });
