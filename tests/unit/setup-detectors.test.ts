@@ -219,10 +219,13 @@ describe("checkLocalClusterHealth()", () => {
 			),
 			"utf-8",
 		);
-		assert.ok(
-			source.includes(`'${LOCAL_CLUSTER_HEALTH_URL}'`),
-			LOCAL_CLUSTER_HEALTH_URL,
-		);
+		// The URL `waitForClusterReady` polls, not any occurrence: the same
+		// URL also appears in the plugin's list of cluster URLs.
+		const polled =
+			/async function waitForClusterReady\([^)]*\) \{[^}]*?const healthUrl = '([^']+)'/.exec(
+				source,
+			)?.[1];
+		assert.strictEqual(polled, LOCAL_CLUSTER_HEALTH_URL);
 	});
 
 	test("healthy when the health endpoint reports UP", async () => {
@@ -269,6 +272,37 @@ describe("checkLocalClusterHealth()", () => {
 			assert.match(result.detail, detail);
 		});
 	}
+
+	/** A body that never ends, and errors once `signal` aborts. */
+	const stalledBody = (signal: AbortSignal) =>
+		new ReadableStream({
+			start(controller) {
+				signal.addEventListener("abort", () => controller.error(signal.reason));
+			},
+		});
+
+	test("a body that stalls is reported as a timeout", async () => {
+		const result = await checkLocalClusterHealth({
+			fetch: async (_url, init) => new Response(stalledBody(init.signal)),
+			timeoutMs: 20,
+		});
+		assert.deepStrictEqual(result, {
+			healthy: false,
+			detail: "not reachable (timed out after 0.02s)",
+		});
+	});
+
+	test("an unread error response is released when the check returns", async () => {
+		let signal: AbortSignal | undefined;
+		const result = await checkLocalClusterHealth({
+			fetch: async (_url, init) => {
+				signal = init.signal;
+				return new Response(stalledBody(init.signal), { status: 503 });
+			},
+		});
+		assert.strictEqual(result.detail, "HTTP 503");
+		assert.strictEqual(signal?.aborted, true, "the request should be aborted");
+	});
 
 	test("not healthy when the request times out", async () => {
 		const result = await checkLocalClusterHealth({

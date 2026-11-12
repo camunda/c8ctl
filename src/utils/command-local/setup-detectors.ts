@@ -145,7 +145,9 @@ export async function checkLocalClusterHealth({
 		let body: unknown;
 		try {
 			body = await response.json();
-		} catch {
+		} catch (error) {
+			// A body that stalls past the timeout is a timeout, not bad data.
+			if (timedOut) throw error;
 			return { healthy: false, detail: "unexpected response" };
 		}
 		const status =
@@ -160,5 +162,8 @@ export async function checkLocalClusterHealth({
 		return { healthy: false, detail: `not reachable (${reason})` };
 	} finally {
 		clearTimeout(timer);
+		// Release a response whose body was not read (e.g. a 503), so an open
+		// connection cannot keep the process alive.
+		controller.abort();
 	}
 }
