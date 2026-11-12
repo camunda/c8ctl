@@ -109,15 +109,17 @@ export function checkNodeVersion({
 // ── Platform ───────────────────────────────────────────────────────
 
 /**
- * Where Camunda 8 Run can be downloaded and run. Mirrors the platforms the
- * bundled cluster plugin can install for.
+ * Platform and architecture pairs Camunda 8 Run is published for: exactly
+ * the darwin-aarch64, darwin-x86_64, linux-x86_64 and windows-x86_64
+ * builds on the Camunda Download Center. Other pairs, including Linux and
+ * Windows on arm64, have no build to download.
  */
-const SUPPORTED_PLATFORMS: ReadonlySet<string> = new Set([
-	"darwin",
-	"linux",
-	"win32",
-]);
-const SUPPORTED_ARCHS: ReadonlySet<string> = new Set(["x64", "arm64"]);
+const SUPPORTED_ARCHS_BY_PLATFORM: Readonly<Record<string, readonly string[]>> =
+	{
+		darwin: ["x64", "arm64"],
+		linux: ["x64"],
+		win32: ["x64"],
+	};
 
 export function checkPlatform({
 	platform = process.platform,
@@ -127,7 +129,9 @@ export function checkPlatform({
 	arch?: string;
 } = {}): PrerequisiteResult {
 	const title = "Operating system";
-	const ok = SUPPORTED_PLATFORMS.has(platform) && SUPPORTED_ARCHS.has(arch);
+	const ok =
+		Object.hasOwn(SUPPORTED_ARCHS_BY_PLATFORM, platform) &&
+		SUPPORTED_ARCHS_BY_PLATFORM[platform].includes(arch);
 	return ok
 		? { id: "platform", title, ok, detail: `${platform} ${arch}.` }
 		: {
@@ -135,7 +139,7 @@ export function checkPlatform({
 				title,
 				ok,
 				detail: `Camunda 8 Run is not available for ${platform} ${arch}.`,
-				hint: "Camunda 8 Run supports macOS, Linux and Windows on x64 or arm64.",
+				hint: "Camunda 8 Run is available for macOS (x64, arm64), Linux (x64) and Windows (x64).",
 			};
 }
 

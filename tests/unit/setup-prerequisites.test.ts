@@ -81,15 +81,22 @@ describe("checkNodeVersion()", () => {
 });
 
 describe("checkPlatform()", () => {
-	for (const platform of ["darwin", "linux", "win32"] as const) {
-		for (const arch of ["x64", "arm64"]) {
-			test(`supports ${platform} ${arch}`, () => {
-				assert.strictEqual(checkPlatform({ platform, arch }).ok, true);
-			});
-		}
+	// Exactly the builds published on the Camunda Download Center:
+	// darwin-aarch64, darwin-x86_64, linux-x86_64, windows-x86_64.
+	for (const [platform, arch] of [
+		["darwin", "x64"],
+		["darwin", "arm64"],
+		["linux", "x64"],
+		["win32", "x64"],
+	] as const) {
+		test(`supports ${platform} ${arch}`, () => {
+			assert.strictEqual(checkPlatform({ platform, arch }).ok, true);
+		});
 	}
 
 	for (const [platform, arch] of [
+		["win32", "arm64"],
+		["linux", "arm64"],
 		["freebsd", "x64"],
 		["aix", "ppc64"],
 		["linux", "ia32"],
@@ -101,6 +108,13 @@ describe("checkPlatform()", () => {
 			assert.match(result.detail, new RegExp(`${platform}.*${arch}`));
 		});
 	}
+
+	test("the failure hint lists exactly the supported combinations", () => {
+		const { hint } = checkPlatform({ platform: "win32", arch: "arm64" });
+		assert.match(hint ?? "", /macOS \(x64, arm64\)/);
+		assert.match(hint ?? "", /Linux \(x64\)/);
+		assert.match(hint ?? "", /Windows \(x64\)/);
+	});
 });
 
 describe("checkNetwork()", () => {
