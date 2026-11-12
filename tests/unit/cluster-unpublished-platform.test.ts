@@ -17,6 +17,8 @@ import { c8WithOptions } from "../utils/cli.ts";
 // @ts-expect-error — JS plugin has no declaration file
 const plugin = await import("../../default-plugins/cluster/c8ctl-plugin.js");
 
+// The no-mirror cases pass `mirror: ""` explicitly: `undefined` would fall
+// back to the developer's C8CTL_C8RUN_DOWNLOAD_URL.
 describe("unpublishedPlatformMessage()", () => {
 	for (const [platform, arch] of [
 		["darwin", "x64"],
@@ -29,7 +31,7 @@ describe("unpublishedPlatformMessage()", () => {
 				plugin.unpublishedPlatformMessage({
 					platform,
 					arch,
-					mirror: undefined,
+					mirror: "",
 				}),
 				null,
 			);
@@ -45,7 +47,7 @@ describe("unpublishedPlatformMessage()", () => {
 			const message = plugin.unpublishedPlatformMessage({
 				platform,
 				arch,
-				mirror: undefined,
+				mirror: "",
 			});
 			assert.match(message ?? "", new RegExp(`${platform} ${arch}`));
 			assert.match(
@@ -102,6 +104,8 @@ describe("cluster install on a platform with no published build", () => {
 					C8CTL_DATA_DIR: dataDir,
 					C8CTL_OUTPUT_MODE: "text",
 					C8CTL_C8RUN_DOWNLOAD_URL: undefined,
+					// An empty cache, so an installed 8.9.0 cannot skip the download path.
+					C8RUN_CACHE_DIR: join(dataDir, "c8run-cache"),
 				},
 			},
 			"cluster",
