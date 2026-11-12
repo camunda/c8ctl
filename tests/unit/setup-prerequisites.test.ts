@@ -25,9 +25,9 @@ const DEFAULT_HOST = "https://downloads.camunda.cloud/release/camunda/c8run/";
 
 /** A fetch stub that records requests and answers with `respond`. */
 function stubFetch(respond: (url: string) => Promise<unknown>) {
-	const calls: { url: string; method: string }[] = [];
+	const calls: { url: string; method: string; redirect: string }[] = [];
 	const fetch: PrerequisiteFetch = (url, init) => {
-		calls.push({ url, method: init.method });
+		calls.push({ url, method: init.method, redirect: init.redirect });
 		return respond(url);
 	};
 	return { fetch, calls };
@@ -104,14 +104,17 @@ describe("checkPlatform()", () => {
 });
 
 describe("checkNetwork()", () => {
-	for (const status of [200, 403, 404]) {
+	for (const status of [200, 301, 403, 404]) {
 		test(`any HTTP response (${status}) means the host is reachable`, async () => {
 			const { fetch, calls } = stubFetch(
 				async () => new Response(null, { status }),
 			);
 			const result = await checkNetwork({ fetch, env: {} });
 			assert.strictEqual(result.ok, true, result.detail);
-			assert.deepStrictEqual(calls, [{ url: DEFAULT_HOST, method: "HEAD" }]);
+			// Redirects are not followed: the redirect itself is the answer.
+			assert.deepStrictEqual(calls, [
+				{ url: DEFAULT_HOST, method: "HEAD", redirect: "manual" },
+			]);
 		});
 	}
 
@@ -160,17 +163,62 @@ describe("checkNetwork()", () => {
 		assert.match(result.hint ?? "", /C8CTL_C8RUN_DOWNLOAD_URL/);
 	});
 
-	test("credentials in a mirror URL are not shown", async () => {
-		const { fetch } = stubFetch(async () => {
-			throw connectionError("ECONNREFUSED");
+	test("a query string or fragment in a mirror URL is not shown", async () => {
+		for (const respond of [
+			async () => new Response(null, { status: 200 }),
+			async () => {
+				throw connectionError("ECONNREFUSED");
+			},
+		]) {
+			const { fetch } = stubFetch(respond);
+			const result = await checkNetwork({
+				fetch,
+				env: {
+					C8CTL_C8RUN_DOWNLOAD_URL:
+						"https://mirror.example/c8run?token=abc123#part",
+				},
+			});
+			assert.doesNotMatch(`${result.detail} ${result.hint}`, /abc123|part/);
+			assert.match(result.detail, /mirror\.example\/c8run\/?\?<redacted>/);
+		}
+	});
+
+	for (const [url, problem] of [
+		["https://user:secret@mirror.example/c8run", /contains credentials/],
+		["not a url", /not a valid URL/],
+		["ftp://mirror.example/c8run", /unsupported protocol ftp:/],
+	] as const) {
+		test(`a mirror URL that cannot work fails without a request: ${url}`, async () => {
+			const { fetch, calls } = stubFetch(async () => new Response(null));
+			const result = await checkNetwork({
+				fetch,
+				env: { C8CTL_C8RUN_DOWNLOAD_URL: url },
+			});
+			assert.strictEqual(result.ok, false);
+			assert.strictEqual(calls.length, 0);
+			assert.match(result.detail, problem);
+			assert.doesNotMatch(`${result.detail} ${result.hint}`, /secret/);
 		});
+	}
+
+	test("a credentials mirror URL never reaches the real fetch or prints the password", async () => {
 		const result = await checkNetwork({
-			fetch,
 			env: {
 				C8CTL_C8RUN_DOWNLOAD_URL: "https://user:secret@mirror.example/c8run",
 			},
 		});
-		assert.doesNotMatch(`${result.detail} ${result.hint}`, /secret/);
+		assert.strictEqual(result.ok, false);
+		assert.doesNotMatch(formatPrerequisiteFailures([result]), /secret/);
+	});
+
+	test("an error without a code is reported generically, not by its message", async () => {
+		const { fetch } = stubFetch(async () => {
+			throw new Error("boom at https://user:hunter2@mirror.example/");
+		});
+		const result = await checkNetwork({ fetch, env: {} });
+		assert.strictEqual(result.ok, false);
+		assert.match(result.detail, /connection failed/);
+		assert.doesNotMatch(result.detail, /hunter2|boom/);
 	});
 });
 

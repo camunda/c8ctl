@@ -26,7 +26,7 @@ export interface PrerequisiteResult {
 /** The `fetch` subset the network check uses. */
 export type PrerequisiteFetch = (
 	url: string,
-	init: { method: string; signal: AbortSignal },
+	init: { method: string; redirect: "manual"; signal: AbortSignal },
 ) => Promise<unknown>;
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -153,16 +153,41 @@ function downloadBaseUrl(env: Env): string {
 	);
 }
 
-/** A URL safe to print: credentials removed, falling back to the host. */
+/**
+ * A URL safe to print, redacted like the cluster plugin's download URLs:
+ * credentials become `***`, and a query string or fragment `?<redacted>`.
+ */
 function displayUrl(url: string): string {
 	try {
 		const parsed = new URL(url);
-		parsed.username = "";
-		parsed.password = "";
-		return parsed.toString();
+		if (parsed.username || parsed.password) {
+			parsed.username = "***";
+			parsed.password = "";
+		}
+		const query = parsed.search || parsed.hash ? "?<redacted>" : "";
+		parsed.search = "";
+		parsed.hash = "";
+		return `${parsed.toString()}${query}`;
 	} catch {
-		return "the download host";
+		return "(invalid URL)";
 	}
+}
+
+/** Why a download URL cannot work, as the cluster plugin reports it, or undefined. */
+function downloadUrlProblem(url: string): string | undefined {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return "not a valid URL";
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		return `unsupported protocol ${parsed.protocol} (use http or https)`;
+	}
+	if (parsed.username || parsed.password) {
+		return "the URL contains credentials, which fetch() does not send";
+	}
+	return undefined;
 }
 
 /** The first error code in an error's cause chain, e.g. ENOTFOUND. */
@@ -197,8 +222,9 @@ function networkHint(env: Env): string {
 }
 
 /**
- * Check that the Camunda 8 Run download host answers. Any HTTP response
- * counts as reachable; only a connection failure or timeout fails.
+ * Check that the Camunda 8 Run download host answers. Any HTTP response,
+ * including a redirect, counts as reachable; a connection failure, a
+ * timeout, or a download URL that cannot work fails.
  */
 export async function checkNetwork({
 	fetch = globalThis.fetch,
@@ -212,6 +238,16 @@ export async function checkNetwork({
 	const title = "Network access";
 	const url = downloadBaseUrl(env);
 	const shown = displayUrl(url);
+	const problem = downloadUrlProblem(url);
+	if (problem) {
+		return {
+			id: "network",
+			title,
+			ok: false,
+			detail: `Cannot use ${shown}: ${problem}.`,
+			hint: networkHint(env),
+		};
+	}
 	// A referenced timer rather than AbortSignal.timeout(), whose timer is
 	// unreferenced: the timeout must fire even when nothing else keeps the
 	// event loop alive, or a stalled request could end the process early.
@@ -222,13 +258,18 @@ export async function checkNetwork({
 		controller.abort();
 	}, timeoutMs);
 	try {
-		await fetch(url, { method: "HEAD", signal: controller.signal });
+		// A redirect is an answer from the host, so it is not followed.
+		await fetch(url, {
+			method: "HEAD",
+			redirect: "manual",
+			signal: controller.signal,
+		});
 		return { id: "network", title, ok: true, detail: `${shown} is reachable.` };
 	} catch (error) {
+		// Never the error's message: it can repeat the URL, credentials included.
 		const reason = timedOut
 			? `timed out after ${timeoutMs / 1000}s`
-			: (causeCode(error) ??
-				(error instanceof Error ? error.message : String(error)));
+			: (causeCode(error) ?? "connection failed");
 		return {
 			id: "network",
 			title,
