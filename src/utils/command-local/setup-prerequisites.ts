@@ -212,15 +212,19 @@ export async function checkNetwork({
 	const title = "Network access";
 	const url = downloadBaseUrl(env);
 	const shown = displayUrl(url);
+	// A referenced timer rather than AbortSignal.timeout(), whose timer is
+	// unreferenced: the timeout must fire even when nothing else keeps the
+	// event loop alive, or a stalled request could end the process early.
+	const controller = new AbortController();
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, timeoutMs);
 	try {
-		await fetch(url, {
-			method: "HEAD",
-			signal: AbortSignal.timeout(timeoutMs),
-		});
+		await fetch(url, { method: "HEAD", signal: controller.signal });
 		return { id: "network", title, ok: true, detail: `${shown} is reachable.` };
 	} catch (error) {
-		const timedOut =
-			error instanceof DOMException && error.name === "TimeoutError";
 		const reason = timedOut
 			? `timed out after ${timeoutMs / 1000}s`
 			: (causeCode(error) ??
@@ -232,6 +236,8 @@ export async function checkNetwork({
 			detail: `Could not reach ${shown} (${reason}).`,
 			hint: networkHint(env),
 		};
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
