@@ -9,6 +9,7 @@ export * from "./command-local/mcp-proxy-helpers.ts";
 export * from "./command-local/open-helpers.ts";
 export * from "./command-local/process-instance-helpers.ts";
 export * from "./command-local/search-helpers.ts";
+export * from "./command-local/setup-detectors.ts";
 export * from "./command-local/setup-prerequisites.ts";
 export * from "./command-local/watch-constants.ts";
 export * from "./shared/camunda-json.ts";

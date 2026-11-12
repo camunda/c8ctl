@@ -414,7 +414,7 @@ const CLUSTER_STARTUP_TIMEOUT_MS = 120000;
 const HEALTH_CHECK_TIMEOUT_MS = 3_000;
 const ALIAS_COLUMN_WIDTH = 22;
 
-function getCacheDir() {
+export function getCacheDir() {
   const envDir = process.env.C8RUN_CACHE_DIR;
   if (envDir) {
     return envDir;
