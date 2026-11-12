@@ -161,8 +161,10 @@ Set the version to the actual installed cache version. The test uses temporary t
 ## Supported platforms
 
 - macOS (x86_64, aarch64)
-- Linux (x86_64, aarch64)
+- Linux (x86_64)
 - Windows (x86_64)
+
+These are the platforms the Camunda Download Center publishes Camunda 8 Run for. On any other platform, such as Linux or Windows on arm64, `c8 cluster install` and `c8 cluster start` stop with an explanation instead of downloading. To use your own build, set `C8CTL_C8RUN_DOWNLOAD_URL` to a mirror with the same layout that hosts it.
 
 ## License
 

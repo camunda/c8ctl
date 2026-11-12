@@ -440,6 +440,38 @@ function getCacheDir() {
   }
 }
 
+/**
+ * Platform/architecture pairs the Camunda Download Center publishes a
+ * Camunda 8 Run build for: darwin-aarch64, darwin-x86_64, linux-x86_64 and
+ * windows-x86_64. There is no Linux or Windows arm64 build.
+ */
+const PUBLISHED_PLATFORMS = {
+  darwin: ['x64', 'arm64'],
+  linux: ['x64'],
+  win32: ['x64'],
+};
+
+/**
+ * Why Camunda 8 Run cannot be downloaded for this platform, or null when it
+ * can. A mirror (C8CTL_C8RUN_DOWNLOAD_URL) may host other builds, so any
+ * platform is allowed when one is set.
+ */
+export function unpublishedPlatformMessage({
+  platform = osPlatform(),
+  arch = osArch(),
+  mirror = process.env.C8CTL_C8RUN_DOWNLOAD_URL,
+} = {}) {
+  if (mirror) return null;
+  if (Object.hasOwn(PUBLISHED_PLATFORMS, platform) && PUBLISHED_PLATFORMS[platform].includes(arch)) {
+    return null;
+  }
+  return (
+    `Camunda 8 Run is not published for ${platform} ${arch}. ` +
+    'The Camunda Download Center has builds for macOS (x64, arm64), Linux (x64) and Windows (x64). ' +
+    'To use your own build, set C8CTL_C8RUN_DOWNLOAD_URL to a mirror with the same layout that hosts it.'
+  );
+}
+
 function getPlatformIdentifier() {
   const platform = osPlatform();
   const arch = osArch();
@@ -1178,6 +1210,10 @@ export function quoteForHint(path, platform = osPlatform()) {
 async function downloadC8Run(config) {
   const logger = getLogger();
   const version = config.version;
+
+  // Fail before requesting an archive that was never published.
+  const unpublished = unpublishedPlatformMessage();
+  if (unpublished) throw new Error(unpublished);
 
   const downloadUrl = getDownloadUrl(version);
 
