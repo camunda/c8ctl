@@ -28,7 +28,7 @@ import assert from "node:assert";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, test } from "node:test";
-import ts from "typescript";
+import ts from "typescript-compiler-api";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const SRC_DIR = join(PROJECT_ROOT, "src");

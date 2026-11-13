@@ -64,7 +64,7 @@ fi
 # Typecheck the staged files (transitive imports are still resolved, so any
 # broken code reachable from a staged file is caught — but unrelated WIP in
 # src/ or tests/ won't block the commit). Skip if tsc is not installed.
-if [ ${#all_staged[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1; then
+if [ ${#all_staged[@]} -gt 0 ] && node node_modules/typescript/bin/tsc --version >/dev/null 2>&1; then
   repo_root=$(git rev-parse --show-toplevel)
   tmp_tsconfig=$(mktemp "$repo_root/.tsconfig.pre-commit.XXXXXX.json")
   trap 'rm -f "$tmp_tsconfig"' EXIT
@@ -85,7 +85,7 @@ if [ ${#all_staged[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1
 }
 EOF
 
-  npx --no-install tsc --noEmit -p "$tmp_tsconfig"
+  node node_modules/typescript/bin/tsc --noEmit -p "$tmp_tsconfig"
   TSC_EXIT=$?
   [ $TSC_EXIT -ne 0 ] && EXIT_CODE=$TSC_EXIT
 elif [ ${#all_staged[@]} -gt 0 ]; then
@@ -100,8 +100,9 @@ fi
 # dirty-file check above guarantees staged files match disk; only unstaged WIP
 # in *other* src files could surface here, which is an acceptable trade for
 # catching layering regressions at commit time instead of in CI. Needs the
-# TypeScript compiler API, so it shares the tsc availability gate.
-if [ ${#staged_src[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1; then
+# TypeScript compiler API, which comes from the typescript-compiler-api alias
+# (TypeScript 6; TypeScript 7 no longer exports it).
+if [ ${#staged_src[@]} -gt 0 ] && [ -f node_modules/typescript-compiler-api/package.json ]; then
   guard_output=$(node --experimental-strip-types --test tests/unit/layering-import-boundary.test.ts 2>&1)
   if [ $? -ne 0 ]; then
     echo "pre-commit: architectural layering guard failed (npm run check:layering):"
@@ -109,7 +110,7 @@ if [ ${#staged_src[@]} -gt 0 ] && npx --no-install tsc --version >/dev/null 2>&1
     EXIT_CODE=1
   fi
 elif [ ${#staged_src[@]} -gt 0 ]; then
-  echo "pre-commit: Skipping layering guard — tsc not installed locally. Run npm install first."
+  echo "pre-commit: Skipping layering guard — TypeScript compiler API not installed locally. Run npm install first."
 fi
 
 exit $EXIT_CODE
