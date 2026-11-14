@@ -13,6 +13,12 @@ import { asyncSpawn, asyncSpawnWithStdin, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "../../src/index.ts");
 
+/** Names the failing module if Node's type stripper fails (see the file). */
+const TS_STRIP_DIAGNOSTICS = resolve(
+	import.meta.dirname,
+	"ts-strip-diagnostics.ts",
+);
+
 /**
  * A shared temp data dir with outputMode set to "json" so that tests
  * produce deterministic output regardless of the host environment.
@@ -105,6 +111,8 @@ export async function c8WithOptions(
 	}
 	const argv = [
 		"--experimental-strip-types",
+		"--import",
+		TS_STRIP_DIAGNOSTICS,
 		...(opts.nodeArgs ?? []),
 		CLI,
 		...args,
@@ -140,11 +148,21 @@ export function c8WithClosedStdout(
 		if (value === undefined) delete env[key];
 	}
 	return new Promise((resolvePromise, reject) => {
-		const child = spawn("node", ["--experimental-strip-types", CLI, ...args], {
-			env,
-			stdio: ["ignore", "pipe", "pipe"],
-			timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
-		});
+		const child = spawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				"--import",
+				TS_STRIP_DIAGNOSTICS,
+				CLI,
+				...args,
+			],
+			{
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
+			},
+		);
 		let stderr = "";
 		child.stderr.setEncoding("utf-8");
 		child.stderr.on("data", (chunk: string) => {
