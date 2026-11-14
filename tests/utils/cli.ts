@@ -9,15 +9,18 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { asyncSpawn, asyncSpawnWithStdin, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "../../src/index.ts");
 
-/** Names the failing module if Node's type stripper fails (see the file). */
-const TS_STRIP_DIAGNOSTICS = resolve(
-	import.meta.dirname,
-	"ts-strip-diagnostics.ts",
-);
+/**
+ * Names the failing module if Node's type stripper fails (see the file).
+ * A file URL, because `--import` rejects absolute Windows paths (`C:\…`).
+ */
+const TS_STRIP_DIAGNOSTICS = pathToFileURL(
+	resolve(import.meta.dirname, "ts-strip-diagnostics.ts"),
+).href;
 
 /**
  * A shared temp data dir with outputMode set to "json" so that tests

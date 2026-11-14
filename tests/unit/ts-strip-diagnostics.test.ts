@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 
-const PRELOAD = resolve(
-	import.meta.dirname,
-	"../utils/ts-strip-diagnostics.ts",
-);
+// A file URL, because `--import` rejects absolute Windows paths (`C:\…`).
+const PRELOAD = pathToFileURL(
+	resolve(import.meta.dirname, "../utils/ts-strip-diagnostics.ts"),
+).href;
 
 const run = (files: Record<string, string>) => {
 	const dir = mkdtempSync(join(tmpdir(), "c8-ts-strip-diag-"));
