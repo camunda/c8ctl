@@ -367,6 +367,68 @@ describe("SDK environment variable compatibility", () => {
 			);
 		});
 
+		test("envVarsToProfile trims address candidates before applying precedence", () => {
+			const profile = envVarsToProfile("sdk", {
+				CAMUNDA_BASE_URL: "   ",
+				CAMUNDA_REST_ADDRESS: " http://localhost:8088 ",
+			});
+
+			assert.strictEqual(profile.baseUrl, "http://localhost:8088");
+		});
+
+		test("envVarsToProfile imports SDK-standard BASIC credentials", () => {
+			const profile = envVarsToProfile("sdk", {
+				CAMUNDA_REST_ADDRESS: "http://localhost:8088",
+				CAMUNDA_AUTH_STRATEGY: "BASIC",
+				CAMUNDA_BASIC_AUTH_USERNAME: "user",
+				CAMUNDA_BASIC_AUTH_PASSWORD: "pass",
+			});
+
+			assert.strictEqual(profile.username, "user");
+			assert.strictEqual(profile.password, "pass");
+		});
+
+		test("a profile imported from SDK BASIC credentials authenticates with the source env cleared", async () => {
+			const server = await startCapturingServer();
+			try {
+				assertIsolatedUserDataDir();
+				addProfile(
+					envVarsToProfile("sdk-basic", {
+						CAMUNDA_REST_ADDRESS: `${server.url}/v2`,
+						CAMUNDA_AUTH_STRATEGY: "BASIC",
+						CAMUNDA_BASIC_AUTH_USERNAME: "user",
+						CAMUNDA_BASIC_AUTH_PASSWORD: "pass",
+					}),
+				);
+				clearCamundaEnv();
+				const client: unknown = createClient("sdk-basic");
+				assert.ok(isTopologyClient(client));
+				await client.getTopology();
+			} finally {
+				await server.close();
+			}
+			const topology = server.requests.find((r) =>
+				r.url?.endsWith("/topology"),
+			);
+			assert.ok(topology, "expected a /topology request");
+			assert.strictEqual(
+				topology.headers.authorization,
+				`Basic ${Buffer.from("user:pass").toString("base64")}`,
+			);
+		});
+
+		test("resolveClusterConfig accepts SDK-standard BASIC credential names", () => {
+			clearCamundaEnv();
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+			process.env.CAMUNDA_BASIC_AUTH_USERNAME = "user";
+			process.env.CAMUNDA_BASIC_AUTH_PASSWORD = "pass";
+
+			const config = resolveClusterConfig();
+
+			assert.strictEqual(config.username, "user");
+			assert.strictEqual(config.password, "pass");
+		});
+
 		test("a saved profile's authStrategy round-trips into the cluster config", () => {
 			assertIsolatedUserDataDir();
 			addProfile({
@@ -448,6 +510,15 @@ describe("SDK environment variable compatibility", () => {
 			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
 			process.env.CAMUNDA_CLIENT_ID = "id";
 			process.env.CAMUNDA_CLIENT_SECRET = "secret";
+
+			resolveClusterConfig();
+
+			assert.strictEqual(stderrSpy.join("\n"), "");
+		});
+
+		test("does not list CAMUNDA_DEFAULT_TENANT_ID, which still applies to the local cluster", () => {
+			clearCamundaEnv();
+			process.env.CAMUNDA_DEFAULT_TENANT_ID = "tenant-a";
 
 			resolveClusterConfig();
 

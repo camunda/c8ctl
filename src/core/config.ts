@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { resolveEnvBaseUrl } from "./env-address.ts";
+import { resolveEnvBaseUrl, resolveEnvBasicAuth } from "./env-address.ts";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
@@ -438,6 +438,12 @@ function isValidProfile(value: unknown): value is Profile {
 		return false;
 	}
 	if (value.headers !== undefined && !isStringRecord(value.headers)) {
+		return false;
+	}
+	if (
+		value.authStrategy !== undefined &&
+		!CAMUNDA_AUTH_STRATEGIES.some((s) => s === value.authStrategy)
+	) {
 		return false;
 	}
 	return true;
@@ -1538,9 +1544,13 @@ export function envVarsToProfile(
 			profile[profileField] = value;
 		}
 	}
-	if (!profile.baseUrl && vars.CAMUNDA_REST_ADDRESS) {
-		profile.baseUrl = vars.CAMUNDA_REST_ADDRESS;
-	}
+	// Address and basic-auth credentials go through the same alias-aware,
+	// trimming resolvers as live env resolution, so importing an environment
+	// saves exactly the target and credentials that environment would use.
+	profile.baseUrl = resolveEnvBaseUrl(vars) ?? "";
+	const basic = resolveEnvBasicAuth(vars);
+	if (basic.username) profile.username = basic.username;
+	if (basic.password) profile.password = basic.password;
 	// CAMUNDA_AUTH_STRATEGY is validated (not string-mapped) so an imported
 	// profile keeps an explicit NONE/BASIC/OAUTH choice instead of silently
 	// re-deriving it from whatever credentials sit alongside it.
@@ -1611,7 +1621,8 @@ const SDK_ONLY_ENV_VARS = [
 	"CAMUNDA_OAUTH_SCOPE",
 	"CAMUNDA_USERNAME",
 	"CAMUNDA_PASSWORD",
-	"CAMUNDA_DEFAULT_TENANT_ID",
+	"CAMUNDA_BASIC_AUTH_USERNAME",
+	"CAMUNDA_BASIC_AUTH_PASSWORD",
 	"CAMUNDA_AUTH_STRATEGY",
 ] as const;
 
@@ -1687,8 +1698,7 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
 	const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
 	const scope = process.env.CAMUNDA_OAUTH_SCOPE;
-	const username = process.env.CAMUNDA_USERNAME;
-	const password = process.env.CAMUNDA_PASSWORD;
+	const { username, password } = resolveEnvBasicAuth();
 	const authStrategy = resolveAuthStrategy(process.env.CAMUNDA_AUTH_STRATEGY);
 
 	if (baseUrl) {
