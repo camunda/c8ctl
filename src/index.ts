@@ -185,6 +185,12 @@ function applyGlobalFlags(values: ParsedValues): void {
 	if (values.verbose) {
 		c8ctl.verbose = true;
 	}
+
+	// Resolve --quiet flag (hide informational and success messages).
+	// Recomputed on every call, not only set: the early globals-only pass
+	// can misread a plugin flag's attached value (`-lq` is `-l q`) as `-q`,
+	// and the final, command-aware pass must be able to correct that.
+	c8ctl.quiet = values.quiet === true;
 }
 
 /**
@@ -207,7 +213,7 @@ async function main() {
 	// applied again below once stage 2 has parsed them.
 	applyGlobalFlags(stage1.globals);
 
-	// The same three boolean globals may also follow the verb
+	// The boolean output globals may also follow the verb
 	// (`c8ctl list pi --json`), and plugin loading renders diagnostics in the
 	// output mode, so honour them now too. Only booleans: a global flag is
 	// never a plugin flag, and they cannot be mistaken for a flag's value.
@@ -218,6 +224,7 @@ async function main() {
 		const {
 			json,
 			verbose,
+			quiet,
 			"dry-run": dryRun,
 		} = parseFlags({
 			args: stage1.rest,
@@ -227,6 +234,7 @@ async function main() {
 			...stage1.globals,
 			...(json !== undefined && { json }),
 			...(verbose !== undefined && { verbose }),
+			...(quiet !== undefined && { quiet }),
 			...(dryRun !== undefined && { "dry-run": dryRun }),
 		});
 	}
@@ -392,7 +400,9 @@ async function main() {
 						version: info.version,
 					});
 				} else {
-					logger.info(`${info.pluginName} ${info.version}`);
+					logger.info(`${info.pluginName} ${info.version}`, {
+						essential: true,
+					});
 				}
 				return;
 			}
@@ -411,6 +421,7 @@ async function main() {
 			profile: pluginProfile,
 			dryRun: c8ctl.dryRun === true,
 			verbose: c8ctl.verbose === true,
+			quiet: c8ctl.quiet === true,
 			outputMode: c8ctl.outputMode,
 			yes: bool(values.yes) === true,
 			fields: c8ctl.fields,
@@ -652,6 +663,7 @@ async function main() {
 			isDryRun: c8ctl.dryRun ?? false,
 			dryRun: createDryRun(c8ctl.dryRun ?? false),
 			verbose: c8ctl.verbose ?? false,
+			quiet: c8ctl.quiet ?? false,
 			profile,
 			yes: bool(values.yes) === true,
 		};
@@ -661,7 +673,7 @@ async function main() {
 
 	// Unknown command (plugin check was already done above)
 	logger.error(`Unknown command: ${verb}${resource ? ` ${resource}` : ""}`);
-	logger.info('Run "c8 help" for usage information');
+	logger.info('Run "c8 help" for usage information', { essential: true });
 	process.exit(1);
 }
 

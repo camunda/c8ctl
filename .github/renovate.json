@@ -28,9 +28,25 @@
   ],
   "packageRules": [
     {
+      "description": "bpmnlint 12 requires Node >= 24; stay on 11.x while the toolchain pins Node 22. See https://github.com/camunda/c8ctl/issues/752",
+      "matchPackageNames": ["bpmnlint"],
+      "allowedVersions": "<12"
+    },
+    {
       "description": "AGENTS.md pins the toolchain to Node 22 LTS and treats .nvmrc as authoritative; never bump the Node version.",
       "matchDatasources": ["node-version"],
       "enabled": false
+    },
+    {
+      "description": "Same policy for workflow Node versions: actions/setup-node's node-version input resolves through the actions/node-versions GitHub releases, not the node-version datasource. CI deliberately runs fixed Node versions (22 LTS for tooling and release, plus the test matrix); change them by hand.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["node"],
+      "enabled": false
+    },
+    {
+      "description": "@types/node tracks the lowest supported Node (22, engines >=22.18.0), so code that needs a newer Node API fails typecheck instead of failing at runtime on Node 22. Raise together with the minimum supported Node.",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<23"
     },
     {
       "description": "Check the compiler daily; GitHub release metadata, not numeric tag shape, decides stability. Toolchain changes require manual review.",

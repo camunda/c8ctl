@@ -72,7 +72,7 @@ export const searchIdentityUsersCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No users found");
+			logger.info("No users found", { essential: true });
 			return;
 		}
 

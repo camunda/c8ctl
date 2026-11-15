@@ -431,7 +431,7 @@ function renderLintText(
 		`✖ ${problemCount} ${pluralize("problem", problemCount)} ` +
 		`(${errorCount} ${pluralize("error", errorCount)}, ` +
 		`${warningCount} ${pluralize("warning", warningCount)})`;
-	const summaryColor: ReadonlyArray<"bold" | "red" | "yellow"> =
+	const summaryColor: Array<"bold" | "red" | "yellow"> =
 		errorCount > 0 ? ["bold", "red"] : ["bold", "yellow"];
 	logger.output("");
 	logger.output(styleText(summaryColor, summary));
@@ -441,15 +441,14 @@ export async function lintSubcommand(args: string[]): Promise<void> {
 	const logger = c8ctl.getLogger();
 
 	const usage = "Usage: c8ctl bpmn lint [<file.bpmn>] [--quiet | -q]";
+	// --quiet is the global c8ctl flag; the host consumes it before the
+	// plugin sees its arguments.
+	const quiet = c8ctl.quiet === true;
 	const endOfOpts = args.indexOf("--");
 	const optionArgs = endOfOpts === -1 ? args : args.slice(0, endOfOpts);
 	const positionalArgs = endOfOpts === -1 ? [] : args.slice(endOfOpts + 1);
 
-	const quiet = optionArgs.includes("--quiet") || optionArgs.includes("-q");
-
-	const unknownFlag = optionArgs.find(
-		(a) => a.startsWith("-") && a !== "--quiet" && a !== "-q",
-	);
+	const unknownFlag = optionArgs.find((a) => a.startsWith("-"));
 	if (unknownFlag) {
 		throw new Error(`Unknown flag: ${unknownFlag}. ${usage}`);
 	}

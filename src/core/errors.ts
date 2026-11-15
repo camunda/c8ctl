@@ -127,9 +127,11 @@ export function handleCommandError(
 	}
 	if (additionalHints) {
 		for (const hint of additionalHints) {
-			logger.info(hint);
+			logger.info(hint, { essential: true });
 		}
 	}
-	logger.info("For more details on the error, run with the --verbose flag");
+	logger.info("For more details on the error, run with the --verbose flag", {
+		essential: true,
+	});
 	process.exit(1);
 }

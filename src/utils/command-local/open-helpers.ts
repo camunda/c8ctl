@@ -80,11 +80,11 @@ export function openUrl(url: string): void {
 			logger.error(
 				`Could not open the browser automatically because '${command}' is not available on PATH.`,
 			);
-			logger.info(`Open this URL manually: ${url}`);
+			logger.info(`Open this URL manually: ${url}`, { essential: true });
 			return;
 		}
 		logger.error(`Could not open the browser automatically: ${error.message}`);
-		logger.info(`Open this URL manually: ${url}`);
+		logger.info(`Open this URL manually: ${url}`, { essential: true });
 	});
 
 	child.unref();

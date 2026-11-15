@@ -1119,10 +1119,11 @@ export function installCompletion(
 		logger.info(`  ${buildSourceLine(completionFile)}`);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
-		logger.info(`Target path: ${completionFile}`);
+		logger.info(`Target path: ${completionFile}`, { essential: true });
 		if (rcFile) {
 			logger.info(
 				`Add this line manually to your shell config:\n  ${buildSourceLine(completionFile)}`,
+				{ essential: true },
 			);
 		}
 		throw new Error(`Failed to install completions: ${msg}`);

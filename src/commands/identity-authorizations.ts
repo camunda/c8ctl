@@ -93,7 +93,7 @@ export const searchIdentityAuthorizationsCommand = defineCommand(
 		);
 
 		if (items.length === 0) {
-			logger.info("No authorizations found");
+			logger.info("No authorizations found", { essential: true });
 			return;
 		}
 

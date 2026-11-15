@@ -269,10 +269,11 @@ export function startUpdateCheck(currentVersion: string): void {
  * Print the update notification if one was resolved.
  * Call this after the main command has completed. Never waits.
  *
- * Suppressed in JSON output mode.
+ * Suppressed in JSON output mode and with --quiet; either way the notice
+ * is not recorded as shown, so it appears on a later run.
  */
 export function printUpdateNotification(): void {
-	if (c8ctl.outputMode === "json") return;
+	if (c8ctl.outputMode === "json" || c8ctl.quiet) return;
 	if (!pendingNotification) return;
 
 	// Persist so we don't nag about this version again (deferred to print time

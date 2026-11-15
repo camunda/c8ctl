@@ -159,6 +159,46 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 		assert.strictEqual(parsed.ctx.verbose, true);
 	});
 
+	test("ctx.quiet reflects --quiet", async () => {
+		const result = await c8Plugin("echo-ctx", "--quiet");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.quiet, true);
+	});
+
+	test("ctx.quiet is false when --quiet is omitted", async () => {
+		const result = await c8Plugin("echo-ctx");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx));
+		assert.strictEqual(parsed.ctx.quiet, false);
+	});
+
+	// `-lq` is `-l` with the value "q", not `-l` plus `-q`. Only the parse
+	// that knows the plugin's flags can tell, so quiet must follow it.
+	test("an attached string value that looks like -q does not enable quiet", async () => {
+		const result = await c8Plugin("echo-ctx", "-lq");
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		const parsed = lastJsonRecord(result.stdout);
+		assert.ok(isRecord(parsed.ctx) && isRecord(parsed.flags));
+		assert.strictEqual(parsed.flags.label, "q");
+		assert.strictEqual(parsed.ctx.quiet, false);
+	});
+
+	for (const args of [
+		["echo-ctx", "-l", "x", "-q"],
+		["-q", "echo-ctx", "-lq"],
+	]) {
+		test(`a real -q still enables quiet: ${args.join(" ")}`, async () => {
+			const result = await c8Plugin(...args);
+			assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+			const parsed = lastJsonRecord(result.stdout);
+			assert.ok(isRecord(parsed.ctx));
+			assert.strictEqual(parsed.ctx.quiet, true);
+		});
+	}
+
 	test("ctx.profile reflects --profile", async () => {
 		const result = await c8Plugin("echo-ctx", "--profile", "myprofile");
 		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
@@ -248,6 +288,7 @@ describe("plugin host context: ctx is passed as the third handler argument", () 
 			["profile", "profile"],
 			["dry-run", "dryRun"],
 			["verbose", "verbose"],
+			["quiet", "quiet"],
 			["fields", "fields"],
 			["json", "outputMode"], // --json toggles outputMode
 			["yes", "yes"],

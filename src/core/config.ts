@@ -1578,9 +1578,12 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 			logger.warn(
 				`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
 			);
-			logger.info("  To use env vars instead, run: c8 use profile --none");
+			logger.info("  To use env vars instead, run: c8 use profile --none", {
+				essential: true,
+			});
 			logger.info(
 				"  To create a profile from env vars: c8 add profile <name> --from-env",
+				{ essential: true },
 			);
 		}
 		return profileToClusterConfig(profile);
