@@ -1,26 +1,34 @@
 /**
- * CLI behavioural tests for SDK-style environment variables (#772).
+ * CLI behavioural tests for SDK-style environment variables.
  *
  * The Camunda SDKs address a cluster with `CAMUNDA_REST_ADDRESS` and select
  * authentication with `CAMUNDA_AUTH_STRATEGY`; c8ctl historically read only
  * `CAMUNDA_BASE_URL` and derived the strategy from whichever credentials were
  * present. These tests spawn the real CLI against a local mock server to
  * prove the SDK variables are honoured end to end through the real client —
- * including the `mcp-proxy` path from the issue report, where the silent
+ * including the `mcp-proxy` path, where the silent
  * fallback to the `local` profile surfaced as "connection refused on
  * localhost".
  */
 
 import assert from "node:assert";
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, test } from "node:test";
 import { isRecord } from "../utils/guards.ts";
+import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "..", "..", "src", "index.ts");
+const FIXTURE_BPMN = resolve(
+	import.meta.dirname,
+	"..",
+	"fixtures",
+	"mini-process.bpmn",
+);
 
 interface CapturedRequest {
 	method?: string;
@@ -90,16 +98,13 @@ const MOCK_JOB = {
 };
 
 /** An isolated, profile-free data dir so env vars drive resolution. */
-function makeDataDir(): string {
+function makeDataDir(outputMode: "json" | "text" = "json"): string {
 	const dataDir = mkdtempSync(join(tmpdir(), "c8ctl-sdk-env-"));
-	writeFileSync(
-		join(dataDir, "session.json"),
-		JSON.stringify({ outputMode: "json" }),
-	);
+	writeFileSync(join(dataDir, "session.json"), JSON.stringify({ outputMode }));
 	return dataDir;
 }
 
-describe("CLI behavioural: SDK env vars (#772)", () => {
+describe("CLI behavioural: SDK env vars", () => {
 	let server: {
 		url: string;
 		requests: CapturedRequest[];
@@ -122,14 +127,8 @@ describe("CLI behavioural: SDK env vars (#772)", () => {
 		server = await startMcpMockServer();
 		dataDir = makeDataDir();
 
-		// The proxy blocks on SIGINT/SIGTERM once started, so the assertion
-		// runs on the timeout kill: a proxy that connected to the mock and
-		// started cleanly is terminated by the helper's deadline (its SIGTERM
-		// handler shuts down gracefully, so the exit code itself is 0), while
-		// a proxy that fell back to the unreachable localhost default exits 1
-		// on its own, long before the deadline.
-		const result = await asyncSpawn(
-			"node",
+		const child = spawn(
+			process.execPath,
 			["--experimental-strip-types", CLI, "mcp-proxy"],
 			{
 				env: {
@@ -140,14 +139,52 @@ describe("CLI behavioural: SDK env vars (#772)", () => {
 					CAMUNDA_REST_ADDRESS: server.url,
 					CAMUNDA_AUTH_STRATEGY: "NONE",
 				},
-				timeout: 15_000,
+				stdio: ["pipe", "pipe", "pipe"],
 			},
 		);
+		let stderr = "";
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		const exited = new Promise<number | null>((res) => {
+			child.once("exit", (code) => res(code));
+		});
+		let exitCode: number | null | undefined;
+		void exited.then((code) => {
+			exitCode = code;
+		});
 
-		assert.ok(
-			result.timedOut,
-			`expected the proxy to still be running at the deadline (helper timeout kill), got exit ${result.status} before it — stderr: ${result.stderr}`,
-		);
+		try {
+			// The deterministic readiness signal is the proxy's own
+			// "started successfully" log line, emitted only after the
+			// remote handshake completed. The deadline is a failure safety
+			// net for a loaded runner, not a correctness signal.
+			const started = await pollUntil(
+				async () =>
+					stderr.includes("MCP proxy started successfully") ||
+					exitCode !== undefined,
+				20_000,
+				50,
+			);
+			assert.ok(
+				started && exitCode === undefined,
+				`expected the proxy to report a completed startup, exit=${exitCode} stderr: ${stderr}`,
+			);
+		} finally {
+			// Close stdin as well: on Windows `kill()` cannot deliver a
+			// catchable signal, and EOF lets the proxy wind down either way.
+			child.stdin.end();
+			child.kill("SIGTERM");
+		}
+		const code = await exited;
+		if (process.platform !== "win32") {
+			assert.strictEqual(
+				code,
+				0,
+				`expected a clean shutdown on SIGTERM, stderr: ${stderr}`,
+			);
+		}
+
 		const initialize = server.requests.find((r) =>
 			r.url?.endsWith("/mcp/cluster"),
 		);
@@ -158,6 +195,73 @@ describe("CLI behavioural: SDK env vars (#772)", () => {
 		// CAMUNDA_AUTH_STRATEGY=NONE: no Authorization header even though the
 		// default local profile would have sent demo:demo basic auth.
 		assert.strictEqual(initialize.headers.authorization, undefined);
+	});
+
+	test("mcp-proxy keeps an invalid CAMUNDA_AUTH_STRATEGY error off stdout", async () => {
+		dataDir = makeDataDir("text");
+
+		const result = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, "mcp-proxy"],
+			{
+				env: {
+					...process.env,
+					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: dataDir,
+					CAMUNDA_BASE_URL: undefined,
+					CAMUNDA_REST_ADDRESS: "http://127.0.0.1:1",
+					CAMUNDA_AUTH_STRATEGY: "KERBEROS",
+				},
+			},
+		);
+
+		assert.strictEqual(result.status, 1, `stderr: ${result.stderr}`);
+		// stdout is the MCP protocol channel — nothing may be written there.
+		assert.strictEqual(result.stdout, "");
+		assert.match(result.stderr, /CAMUNDA_AUTH_STRATEGY/);
+	});
+
+	test("deploy treats CAMUNDA_REST_ADDRESS as an environment-selected target", async () => {
+		dataDir = makeDataDir();
+		const env = {
+			...process.env,
+			HOME: "/tmp/c8ctl-test-nonexistent-home",
+			C8CTL_DATA_DIR: dataDir,
+			CAMUNDA_BASE_URL: undefined,
+			CAMUNDA_REST_ADDRESS: undefined,
+		};
+		for (const name of ["one", "two"]) {
+			const added = await asyncSpawn(
+				"node",
+				[
+					"--experimental-strip-types",
+					CLI,
+					"add",
+					"profile",
+					name,
+					`--baseUrl=http://${name}.example.com/v2`,
+				],
+				{ env },
+			);
+			assert.strictEqual(added.status, 0, `stderr: ${added.stderr}`);
+		}
+
+		// With several saved profiles and no active one, deploy only skips
+		// its profile prompt when the environment selects the cluster.
+		// --dry-run stops before any network I/O.
+		const result = await asyncSpawn(
+			"node",
+			["--experimental-strip-types", CLI, "deploy", FIXTURE_BPMN, "--dry-run"],
+			{
+				env: {
+					...env,
+					CAMUNDA_REST_ADDRESS: "http://127.0.0.1:1",
+				},
+			},
+		);
+
+		assert.strictEqual(result.status, 0, `stderr: ${result.stderr}`);
+		assert.doesNotMatch(result.stderr, /Multiple profiles configured/);
 	});
 
 	test("CAMUNDA_BASE_URL wins over CAMUNDA_REST_ADDRESS when both are set", async () => {

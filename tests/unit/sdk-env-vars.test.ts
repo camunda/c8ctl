@@ -14,11 +14,16 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { createClient } from "../../src/core/client.ts";
 import {
 	addProfile,
+	envVarsToProfile,
+	getProfile,
+	profileToClusterConfig,
 	resolveAuthStrategy,
 	resolveClusterConfig,
 } from "../../src/core/config.ts";
+import { resolveEnvBaseUrl } from "../../src/core/env-address.ts";
 import { c8ctl } from "../../src/core/runtime.ts";
 import { isRecord } from "../utils/guards.ts";
+import { assertIsolatedUserDataDir } from "../utils/isolate-user-data-dir.ts";
 
 /**
  * The SDK module is dual ESM/CJS, so a require-cache stub cannot intercept
@@ -143,6 +148,10 @@ describe("SDK environment variable compatibility", () => {
 
 	beforeEach(() => {
 		originalEnv = { ...process.env };
+		// Start every test from a CAMUNDA_*-free environment so ambient
+		// developer/CI credentials (e.g. an exported CAMUNDA_CLIENT_ID) can
+		// never change which auth strategy a test observes.
+		clearCamundaEnv();
 		c8ctl.activeProfile = undefined;
 		c8ctl.outputMode = "text";
 		stderrSpy = [];
@@ -211,6 +220,8 @@ describe("SDK environment variable compatibility", () => {
 		test("an active session profile still wins over CAMUNDA_REST_ADDRESS", () => {
 			clearCamundaEnv();
 			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+			// Overwrites the saved 'local' profile — only ever in a throwaway dir.
+			assertIsolatedUserDataDir();
 			addProfile({
 				name: "local",
 				baseUrl: "http://localhost:8080/v2",
@@ -330,6 +341,90 @@ describe("SDK environment variable compatibility", () => {
 				() => resolveAuthStrategy("KERBEROS"),
 				/CAMUNDA_AUTH_STRATEGY.*NONE.*BASIC.*OAUTH/s,
 			);
+		});
+	});
+
+	describe("CAMUNDA_AUTH_STRATEGY on imported profiles", () => {
+		test("envVarsToProfile keeps an explicit CAMUNDA_AUTH_STRATEGY", () => {
+			const profile = envVarsToProfile("sdk", {
+				CAMUNDA_REST_ADDRESS: "http://localhost:8088",
+				CAMUNDA_AUTH_STRATEGY: "none",
+				CAMUNDA_CLIENT_ID: "stale-id",
+				CAMUNDA_CLIENT_SECRET: "stale-secret",
+			});
+
+			assert.strictEqual(profile.authStrategy, "NONE");
+		});
+
+		test("envVarsToProfile rejects an unsupported CAMUNDA_AUTH_STRATEGY", () => {
+			assert.throws(
+				() =>
+					envVarsToProfile("sdk", {
+						CAMUNDA_BASE_URL: "http://localhost:8088",
+						CAMUNDA_AUTH_STRATEGY: "KERBEROS",
+					}),
+				/CAMUNDA_AUTH_STRATEGY/,
+			);
+		});
+
+		test("a saved profile's authStrategy round-trips into the cluster config", () => {
+			assertIsolatedUserDataDir();
+			addProfile({
+				name: "sdk-none",
+				baseUrl: "http://localhost:8088",
+				clientId: "stale-id",
+				clientSecret: "stale-secret",
+				authStrategy: "NONE",
+			});
+
+			const saved = getProfile("sdk-none");
+			assert.ok(saved, "profile must be persisted");
+			assert.strictEqual(saved.authStrategy, "NONE");
+			assert.strictEqual(profileToClusterConfig(saved).authStrategy, "NONE");
+			assert.strictEqual(resolveClusterConfig("sdk-none").authStrategy, "NONE");
+		});
+
+		test("a profile with authStrategy NONE sends no Authorization header despite stale credentials", async () => {
+			const server = await startCapturingServer();
+			try {
+				assertIsolatedUserDataDir();
+				addProfile({
+					name: "sdk-none-http",
+					baseUrl: `${server.url}/v2`,
+					clientId: "stale-id",
+					clientSecret: "stale-secret",
+					authStrategy: "NONE",
+				});
+				const client: unknown = createClient("sdk-none-http");
+				assert.ok(isTopologyClient(client));
+				await client.getTopology();
+			} finally {
+				await server.close();
+			}
+			const topology = server.requests.find((r) =>
+				r.url?.endsWith("/topology"),
+			);
+			assert.ok(topology, "expected a /topology request");
+			assert.strictEqual(topology.headers.authorization, undefined);
+		});
+	});
+
+	describe("environment address detection", () => {
+		test("CAMUNDA_REST_ADDRESS alone counts as an environment-selected cluster", () => {
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+			assert.strictEqual(resolveEnvBaseUrl(), "http://localhost:8088");
+		});
+
+		test("CAMUNDA_BASE_URL wins over CAMUNDA_REST_ADDRESS", () => {
+			process.env.CAMUNDA_BASE_URL = "http://base.example.com";
+			process.env.CAMUNDA_REST_ADDRESS = "http://rest.example.com";
+			assert.strictEqual(resolveEnvBaseUrl(), "http://base.example.com");
+		});
+
+		test("whitespace-only address variables do not count", () => {
+			process.env.CAMUNDA_BASE_URL = "  ";
+			process.env.CAMUNDA_REST_ADDRESS = "";
+			assert.strictEqual(resolveEnvBaseUrl(), undefined);
 		});
 	});
 

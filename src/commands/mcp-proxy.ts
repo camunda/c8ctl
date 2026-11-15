@@ -232,18 +232,21 @@ export const mcpProxyCommand = defineCommand("mcp-proxy", "", async (ctx) => {
 	};
 
 	const logger = new Logger(stderrLogWriter);
-	const camundaClient = createClient(ctx.profile, {
-		log: {
-			transport: (evt) => {
-				logger.json(evt);
-			},
-		},
-	});
-
 	const mcpServerPath = allPositionals[0] ?? "/mcp/cluster";
 
 	let proxy: McpProxy | null = null;
 	try {
+		// Client creation resolves the cluster config (and validates
+		// CAMUNDA_AUTH_STRATEGY), so it must sit inside this try: a config
+		// error escaping to the framework would print hints to stdout and
+		// corrupt the MCP protocol channel.
+		const camundaClient = createClient(ctx.profile, {
+			log: {
+				transport: (evt) => {
+					logger.json(evt);
+				},
+			},
+		});
 		proxy = new McpProxy(camundaClient, logger, mcpServerPath);
 		await proxy.start();
 

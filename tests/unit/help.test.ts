@@ -13,6 +13,7 @@ import {
 	showVerbResources,
 	showVersion,
 } from "../../src/framework/ui/help.ts";
+import { isRecord } from "../utils/guards.ts";
 
 describe("Help Module", () => {
 	let consoleLogSpy: string[];
@@ -1462,15 +1463,15 @@ describe("Search flags are consolidated into a single section per verb (#322 fol
 	}
 });
 
-// ─── SDK environment variable documentation (camunda/c8ctl#772) ─────────────
+// ─── SDK environment variable documentation ─────────────────────────────────
 //
-// The issue: SDK-standard variables (`CAMUNDA_REST_ADDRESS`,
+// SDK-standard variables (`CAMUNDA_REST_ADDRESS`,
 // `CAMUNDA_AUTH_STRATEGY`) were silently ignored, and the supported
 // `CAMUNDA_*` variables were documented nowhere in `c8ctl help`. These tests
 // pin the env-var documentation surface: a dedicated section in the top-level
 // help (kept out of the Flags section, which is reserved for GLOBAL_FLAGS)
 // and the connection/mcp-path details in `c8ctl help mcp-proxy`.
-describe("Help documents the CAMUNDA_* environment variables (#772)", () => {
+describe("Help documents the CAMUNDA_* environment variables", () => {
 	let consoleLogSpy: string[];
 	let originalLog: typeof console.log;
 	let originalOutputMode: typeof c8ctl.outputMode;
@@ -1546,5 +1547,48 @@ describe("Help documents the CAMUNDA_* environment variables (#772)", () => {
 				`mcp-proxy help must document ${envVar}`,
 			);
 		}
+	});
+
+	function parseJsonOutput(): Record<string, unknown> {
+		const parsed: unknown = JSON.parse(consoleLogSpy.join("\n"));
+		assert.ok(isRecord(parsed), "help JSON must be an object");
+		return parsed;
+	}
+
+	function envVarNames(value: unknown): string[] {
+		assert.ok(Array.isArray(value), "environmentVariables must be an array");
+		return value.map((entry: unknown) =>
+			isRecord(entry) && typeof entry.name === "string" ? entry.name : "",
+		);
+	}
+
+	test("top-level JSON help carries the environment variables", () => {
+		c8ctl.outputMode = "json";
+		showHelp();
+		const help = parseJsonOutput();
+		const names = envVarNames(help.environmentVariables);
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+		]) {
+			assert.ok(names.includes(envVar), `JSON help must list ${envVar}`);
+		}
+	});
+
+	test("mcp-proxy JSON help carries its usage notes and the environment variables", async () => {
+		c8ctl.outputMode = "json";
+		await showCommandHelp("mcp-proxy");
+		const help = parseJsonOutput();
+		assert.ok(
+			Array.isArray(help.notes),
+			"mcp-proxy JSON help must carry notes",
+		);
+		const notes = help.notes.join("\n");
+		assert.ok(notes.includes("/mcp/cluster"));
+		assert.ok(notes.includes("/mcp/processes"));
+		assert.ok(
+			envVarNames(help.environmentVariables).includes("CAMUNDA_REST_ADDRESS"),
+		);
 	});
 });

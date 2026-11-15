@@ -34,6 +34,14 @@ import { c8ctl } from "../../src/core/runtime.ts";
 
 const CLI_ENTRY = join(process.cwd(), "src", "index.ts");
 
+/**
+ * Safety net only, not a correctness signal: a CLI subprocess cold-starts
+ * Node with type stripping, which can take several seconds on a loaded
+ * runner. A tight deadline here killed healthy children and surfaced as an
+ * empty-output assertion failure.
+ */
+const CLI_SPAWN_TIMEOUT_MS = 60_000;
+
 describe("Profile management", () => {
 	describe("parseEnvFile", () => {
 		test("parses simple KEY=VALUE pairs", () => {
@@ -343,7 +351,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -383,7 +391,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -416,7 +424,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -449,7 +457,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: {
 						...process.env,
 						C8CTL_DATA_DIR: testDataDir,
@@ -506,7 +514,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: childEnv,
 				},
 			);
@@ -533,7 +541,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "local"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -544,7 +552,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "use", "profile", "--none"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -562,7 +570,7 @@ describe("Profile management", () => {
 				["--experimental-strip-types", CLI_ENTRY, "which", "profile"],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -746,7 +754,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -784,7 +792,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -818,7 +826,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -858,7 +866,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);
@@ -891,7 +899,7 @@ describe("Profile management", () => {
 				],
 				{
 					encoding: "utf-8",
-					timeout: 5000,
+					timeout: CLI_SPAWN_TIMEOUT_MS,
 					env: { ...process.env, C8CTL_DATA_DIR: testDataDir },
 				},
 			);

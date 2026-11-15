@@ -61,6 +61,7 @@ interface HelpCommand {
 	description: string;
 	mutating: boolean;
 	examples?: Array<{ command: string; description: string }> | string[];
+	notes?: string[];
 }
 
 interface HelpJson {
@@ -71,6 +72,7 @@ interface HelpJson {
 	globalFlags: HelpFlag[];
 	searchFlags: HelpFlag[];
 	agentFlags: HelpFlag[];
+	environmentVariables: Array<{ name: string; description: string }>;
 }
 
 /**
@@ -113,6 +115,7 @@ function buildHelpJson(
 			resources: [...def.resources],
 			description: def.helpDescription ?? def.description,
 			mutating: def.mutating,
+			...(def.helpNotes?.length ? { notes: [...def.helpNotes] } : {}),
 		});
 	}
 
@@ -191,6 +194,7 @@ function buildHelpJson(
 				description: (f.agentDescription ?? "").replace(/\n/g, " "),
 				...(f.agentAppliesTo ? { appliesTo: f.agentAppliesTo } : {}),
 			})),
+		environmentVariables: ENVIRONMENT_VARIABLES_HELP.map((v) => ({ ...v })),
 	};
 }
 
@@ -890,6 +894,7 @@ function showFlagAwarePluginHelp(command: string): void {
 			globalFlags: allHelp.globalFlags,
 			searchFlags: allHelp.searchFlags,
 			agentFlags: allHelp.agentFlags,
+			environmentVariables: allHelp.environmentVariables,
 		});
 		return;
 	}
@@ -981,6 +986,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 				globalFlags: allHelp.globalFlags,
 				searchFlags: allHelp.searchFlags,
 				agentFlags: allHelp.agentFlags,
+				environmentVariables: allHelp.environmentVariables,
 			});
 			return;
 		}
@@ -1042,6 +1048,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 			globalFlags: allHelp.globalFlags,
 			searchFlags: allHelp.searchFlags,
 			agentFlags: allHelp.agentFlags,
+			environmentVariables: allHelp.environmentVariables,
 		});
 		return;
 	}
