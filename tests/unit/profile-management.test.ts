@@ -501,6 +501,7 @@ describe("Profile management", () => {
 			delete childEnv.CAMUNDA_CLIENT_SECRET;
 			delete childEnv.CAMUNDA_USERNAME;
 			delete childEnv.CAMUNDA_PASSWORD;
+			delete childEnv.CAMUNDA_REST_ADDRESS;
 
 			const result = spawnSync(
 				"node",

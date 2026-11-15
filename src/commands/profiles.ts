@@ -94,6 +94,9 @@ interface AddProfileOptions {
  * Describe the auth type of a profile for user feedback.
  */
 function describeAuth(profile: Profile): string {
+	if (profile.authStrategy === "NONE") return "None";
+	if (profile.authStrategy === "BASIC") return "Basic auth";
+	if (profile.authStrategy === "OAUTH") return "OAuth (client credentials)";
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
 	if (profile.username && profile.password) return "Basic auth";

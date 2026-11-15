@@ -1680,12 +1680,15 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 			logger.warn(
 				`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
 			);
+			// stderr explicitly: this runs during client construction, including
+			// in `mcp-proxy`, where stdout carries the MCP protocol stream.
 			logger.info("  To use env vars instead, run: c8 use profile --none", {
 				essential: true,
+				stream: "stderr",
 			});
 			logger.info(
 				"  To create a profile from env vars: c8 add profile <name> --from-env",
-				{ essential: true },
+				{ essential: true, stream: "stderr" },
 			);
 		}
 		return profileToClusterConfig(profile);
