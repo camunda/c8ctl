@@ -9,9 +9,18 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { asyncSpawn, asyncSpawnWithStdin, type SpawnResult } from "./spawn.ts";
 
 const CLI = resolve(import.meta.dirname, "../../src/index.ts");
+
+/**
+ * Names the failing module if Node's type stripper fails (see the file).
+ * A file URL, because `--import` rejects absolute Windows paths (`C:\…`).
+ */
+const TS_STRIP_DIAGNOSTICS = pathToFileURL(
+	resolve(import.meta.dirname, "ts-strip-diagnostics.ts"),
+).href;
 
 /**
  * A shared temp data dir with outputMode set to "json" so that tests
@@ -105,6 +114,8 @@ export async function c8WithOptions(
 	}
 	const argv = [
 		"--experimental-strip-types",
+		"--import",
+		TS_STRIP_DIAGNOSTICS,
 		...(opts.nodeArgs ?? []),
 		CLI,
 		...args,
@@ -140,11 +151,21 @@ export function c8WithClosedStdout(
 		if (value === undefined) delete env[key];
 	}
 	return new Promise((resolvePromise, reject) => {
-		const child = spawn("node", ["--experimental-strip-types", CLI, ...args], {
-			env,
-			stdio: ["ignore", "pipe", "pipe"],
-			timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
-		});
+		const child = spawn(
+			"node",
+			[
+				"--experimental-strip-types",
+				"--import",
+				TS_STRIP_DIAGNOSTICS,
+				CLI,
+				...args,
+			],
+			{
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: opts.timeout ?? DEFAULT_CLI_TIMEOUT,
+			},
+		);
 		let stderr = "";
 		child.stderr.setEncoding("utf-8");
 		child.stderr.on("data", (chunk: string) => {
