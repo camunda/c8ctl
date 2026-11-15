@@ -19,6 +19,7 @@ import {
 	getAllProfiles,
 	getProfileOrModeler,
 	readSkipDeployConfirm,
+	resolveEnvBaseUrl,
 	saveSkipDeployConfirm,
 } from "../core/index.ts";
 import { defineCommand, isInteractive, select } from "../framework/index.ts";
@@ -311,7 +312,7 @@ export const deployCommand = defineCommand("deploy", "", async (ctx, flags) => {
 			const activeConfig =
 				activeProfile != null ? getProfileOrModeler(activeProfile) : undefined;
 			const envIsEffectiveTarget =
-				!!process.env.CAMUNDA_BASE_URL && activeConfig == null;
+				!!resolveEnvBaseUrl() && activeConfig == null;
 
 			if (!envIsEffectiveTarget) {
 				const skipDeployConfirm = readSkipDeployConfirm();

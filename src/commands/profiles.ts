@@ -18,6 +18,7 @@ import {
 	parseEnvFile,
 	parseHeaderFlags,
 	removeProfile as removeProfileConfig,
+	resolveEnvBaseUrl,
 } from "../core/index.ts";
 import { confirm, defineCommand, select } from "../framework/index.ts";
 
@@ -231,10 +232,7 @@ function whichProfile(): void {
 	const say = (message: string) => logger.info(message, { essential: true });
 	const active = c8ctl.activeProfile;
 	if (!active) {
-		const hasBaseUrl = !!(
-			process.env.CAMUNDA_BASE_URL?.trim() ||
-			process.env.CAMUNDA_REST_ADDRESS?.trim()
-		);
+		const hasBaseUrl = !!resolveEnvBaseUrl();
 		if (hasBaseUrl) {
 			say("(none — CAMUNDA_* env vars will be used)");
 		} else if (hasCamundaEnvVars()) {

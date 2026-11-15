@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { resolveEnvBaseUrl } from "./env-address.ts";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
@@ -120,6 +121,12 @@ export interface Profile {
 	 * path does not match c8ctl's assumed suffixing.
 	 */
 	exactBaseUrl?: boolean;
+	/**
+	 * Explicit SDK authentication strategy (from `CAMUNDA_AUTH_STRATEGY` on
+	 * `--from-file` / `--from-env` import). When set it wins over the
+	 * strategy derived from whichever credentials the profile carries.
+	 */
+	authStrategy?: CamundaAuthStrategy;
 }
 
 export interface SessionState {
@@ -1108,6 +1115,7 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		password: profile.password,
 		headers: profile.headers,
 		exactBaseUrl: profile.exactBaseUrl,
+		authStrategy: profile.authStrategy,
 	};
 }
 
@@ -1384,10 +1392,11 @@ export function hasCamundaEnvVars(): boolean {
  * Profile fields whose value is a plain string — the only fields
  * `ENV_VAR_PROFILE_MAP` may target, since every CAMUNDA_* env var maps to a
  * single string value. `headers` (a map) and `exactBaseUrl` (a boolean)
- * have no env-var equivalent and are deliberately excluded.
+ * have no env-var equivalent and are deliberately excluded; `authStrategy`
+ * (a validated union) is set by `envVarsToProfile` after validation.
  */
 type StringProfileField = {
-	[K in keyof Profile]-?: Profile[K] extends string | undefined ? K : never;
+	[K in keyof Profile]-?: string extends NonNullable<Profile[K]> ? K : never;
 }[keyof Profile];
 
 /**
@@ -1532,6 +1541,11 @@ export function envVarsToProfile(
 	if (!profile.baseUrl && vars.CAMUNDA_REST_ADDRESS) {
 		profile.baseUrl = vars.CAMUNDA_REST_ADDRESS;
 	}
+	// CAMUNDA_AUTH_STRATEGY is validated (not string-mapped) so an imported
+	// profile keeps an explicit NONE/BASIC/OAUTH choice instead of silently
+	// re-deriving it from whatever credentials sit alongside it.
+	const authStrategy = resolveAuthStrategy(vars.CAMUNDA_AUTH_STRATEGY);
+	if (authStrategy) profile.authStrategy = authStrategy;
 	return profile;
 }
 
@@ -1581,19 +1595,6 @@ export function resolveAuthStrategy(
 		);
 	}
 	return match;
-}
-
-/**
- * The cluster address from the environment: `CAMUNDA_BASE_URL` (c8ctl's
- * documented name) with `CAMUNDA_REST_ADDRESS` (the SDK-standard name) as an
- * alias. `CAMUNDA_BASE_URL` wins when both are set.
- */
-function resolveEnvBaseUrl(): string | undefined {
-	return (
-		process.env.CAMUNDA_BASE_URL?.trim() ||
-		process.env.CAMUNDA_REST_ADDRESS?.trim() ||
-		undefined
-	);
 }
 
 /**
