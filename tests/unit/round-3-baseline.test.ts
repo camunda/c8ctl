@@ -453,7 +453,7 @@ describe("baseline: profiles.ts validation guards", () => {
 				// In JSON mode, backslashes in paths are doubled by JSON.stringify.
 				// On Windows, path.join() uses backslashes; we must match the
 				// JSON-encoded form (each \ becomes \\) that appears in stderr.
-				`CAMUNDA_BASE_URL not found in ${envFile.replaceAll("\\", "\\\\")}`,
+				`CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found in ${envFile.replaceAll("\\", "\\\\")}`,
 				"add profile (env file missing CAMUNDA_BASE_URL)",
 			);
 		} finally {
@@ -475,7 +475,7 @@ describe("baseline: profiles.ts validation guards", () => {
 		);
 		assertExitOneWithMessage(
 			result,
-			"CAMUNDA_BASE_URL not set in environment",
+			"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
 			"add profile --from-env (CAMUNDA_BASE_URL='')",
 		);
 	});

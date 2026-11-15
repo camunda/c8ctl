@@ -160,29 +160,45 @@ export function createClient(
 		CAMUNDA_REST_ADDRESS: config.baseUrl,
 	};
 
-	// Add OAuth configuration if present
-	if (config.clientId && config.clientSecret) {
-		sdkConfig.CAMUNDA_AUTH_STRATEGY = "OAUTH";
+	// An explicit CAMUNDA_AUTH_STRATEGY (surfaced on the resolved config)
+	// wins over the strategy derived from whichever credentials are present
+	// — e.g. an SDK `.env` with CAMUNDA_AUTH_STRATEGY=NONE must stay
+	// unauthenticated even if stale credentials sit alongside it. The
+	// credential keys are passed through unconditionally: the SDK merges its
+	// config over process.env, so omitting them here would not stop it from
+	// picking the same CAMUNDA_* variables up itself, and leaving them in
+	// keeps the resolution visible in one place.
+	const strategy = config.authStrategy;
+
+	if (config.clientId) {
 		sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
-		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
-		if (config.audience) {
-			sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
-		}
-		if (config.oAuthUrl) {
-			sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
-		}
-		if (config.scope) {
-			sdkConfig.CAMUNDA_OAUTH_SCOPE = config.scope;
-		}
 	}
-	// Add Basic auth configuration if present
-	else if (config.username && config.password) {
-		sdkConfig.CAMUNDA_AUTH_STRATEGY = "BASIC";
+	if (config.clientSecret) {
+		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
+	}
+	if (config.audience) {
+		sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
+	}
+	if (config.oAuthUrl) {
+		sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
+	}
+	if (config.scope) {
+		sdkConfig.CAMUNDA_OAUTH_SCOPE = config.scope;
+	}
+	if (config.username) {
 		sdkConfig.CAMUNDA_BASIC_AUTH_USERNAME = config.username;
+	}
+	if (config.password) {
 		sdkConfig.CAMUNDA_BASIC_AUTH_PASSWORD = config.password;
 	}
-	// No authentication
-	else {
+
+	if (strategy) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = strategy;
+	} else if (config.clientId && config.clientSecret) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "OAUTH";
+	} else if (config.username && config.password) {
+		sdkConfig.CAMUNDA_AUTH_STRATEGY = "BASIC";
+	} else {
 		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
 	}
 

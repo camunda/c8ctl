@@ -356,10 +356,14 @@ Add the following to your `.vscode/mcp.json`:
 | Variable                 | Description                                                                  |
 | :----------------------- | :--------------------------------------------------------------------------- |
 | `CAMUNDA_BASE_URL`       | Base URL of your Orchestration Cluster, **without** the `/mcp/cluster` path. |
+| `CAMUNDA_REST_ADDRESS`   | SDK-standard alias for `CAMUNDA_BASE_URL` (`CAMUNDA_BASE_URL` wins when both are set). |
+| `CAMUNDA_AUTH_STRATEGY`  | Authentication strategy: `NONE`, `BASIC`, or `OAUTH` (default: derived from the credentials present). |
 | `CAMUNDA_CLIENT_ID`      | OAuth client ID from your API client credentials.                            |
 | `CAMUNDA_CLIENT_SECRET`  | OAuth client secret from your API client credentials.                        |
 | `CAMUNDA_OAUTH_URL`      | OAuth token endpoint URL.                                                    |
 | `CAMUNDA_TOKEN_AUDIENCE` | Token audience for the Orchestration Cluster API.                            |
+
+The optional `[mcp-path]` positional selects the MCP endpoint: `/mcp/cluster` (cluster administration tools, the default) or `/mcp/processes` (process execution tools).
 
 :::tip
 When you [create API client credentials](/components/saas/clusters/manage-api-clients.md#create-a-client) in the Camunda Console, all required connection details are shown on the credentials page. You can also copy a ready-to-use `c8ctl` configuration snippet from the MCP tab.

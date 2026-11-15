@@ -10,6 +10,7 @@ import {
 	COMMAND_REGISTRY,
 	COMMAND_REGISTRY_BY_VERB,
 	type CommandDef,
+	ENVIRONMENT_VARIABLES_HELP,
 	type FlagDef,
 	GLOBAL_FLAGS,
 	getCommandDef,
@@ -316,6 +317,24 @@ function generateFlagsSection(): string {
 }
 
 /**
+ * Generate the Environment Variables section from ENVIRONMENT_VARIABLES_HELP.
+ * These are the CAMUNDA_* variables c8ctl resolves when no `--profile` or
+ * session profile is selected — documented here so an SDK project's `.env`
+ * (CAMUNDA_REST_ADDRESS, CAMUNDA_AUTH_STRATEGY, …) is discoverable.
+ */
+function generateEnvironmentVariablesSection(): string {
+	const lines: string[] = [];
+	const COL = 28;
+	for (const { name, description } of ENVIRONMENT_VARIABLES_HELP) {
+		lines.push(`  ${name.padEnd(COL)}${description}`);
+	}
+	lines.push(
+		"  Env vars apply when no --profile or session profile is selected; a profile always wins.",
+	);
+	return lines.join("\n");
+}
+
+/**
  * Generate the Search Flags section from SEARCH_FLAGS and
  * all unique search-specific flags across command resourceFlags.
  */
@@ -529,6 +548,7 @@ export function showHelp(): void {
 	const helpFooter = generateHelpFooter();
 	const examplesSection = generateExamplesSection();
 	const agentFlagsSection = generateAgentFlagsSection();
+	const envVarsSection = generateEnvironmentVariablesSection();
 
 	console.log(
 		`
@@ -547,6 +567,9 @@ ${searchFlagsSection}
 
 Resource Aliases:
 ${resourceAliases}
+
+Environment Variables:
+${envVarsSection}
 
 ━━━ Agent Flags (for programmatic / AI-agent consumption) ━━━
 
@@ -760,6 +783,13 @@ function showGenericVerbHelp(verb: string): void {
 				FLAG_COL,
 			),
 		);
+	}
+
+	// Usage notes that don't fit the flag schema (e.g. mcp-proxy's
+	// [mcp-path] values and connection precedence).
+	if (def.helpNotes?.length) {
+		lines.push("");
+		lines.push(...def.helpNotes);
 	}
 
 	console.log(`\n${lines.join("\n")}`);

@@ -1461,3 +1461,90 @@ describe("Search flags are consolidated into a single section per verb (#322 fol
 		});
 	}
 });
+
+// ─── SDK environment variable documentation (camunda/c8ctl#772) ─────────────
+//
+// The issue: SDK-standard variables (`CAMUNDA_REST_ADDRESS`,
+// `CAMUNDA_AUTH_STRATEGY`) were silently ignored, and the supported
+// `CAMUNDA_*` variables were documented nowhere in `c8ctl help`. These tests
+// pin the env-var documentation surface: a dedicated section in the top-level
+// help (kept out of the Flags section, which is reserved for GLOBAL_FLAGS)
+// and the connection/mcp-path details in `c8ctl help mcp-proxy`.
+describe("Help documents the CAMUNDA_* environment variables (#772)", () => {
+	let consoleLogSpy: string[];
+	let originalLog: typeof console.log;
+	let originalOutputMode: typeof c8ctl.outputMode;
+
+	beforeEach(() => {
+		consoleLogSpy = [];
+		originalLog = console.log;
+		originalOutputMode = c8ctl.outputMode;
+		c8ctl.outputMode = "text";
+		console.log = (...args: unknown[]) => {
+			consoleLogSpy.push(args.join(" "));
+		};
+	});
+
+	afterEach(() => {
+		console.log = originalLog;
+		c8ctl.outputMode = originalOutputMode;
+	});
+
+	test("top-level help lists the supported CAMUNDA_* variables", () => {
+		showHelp();
+		const output = consoleLogSpy.join("\n");
+
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+			"CAMUNDA_CLIENT_ID",
+			"CAMUNDA_CLIENT_SECRET",
+			"CAMUNDA_USERNAME",
+			"CAMUNDA_PASSWORD",
+			"CAMUNDA_DEFAULT_TENANT_ID",
+		]) {
+			assert.ok(
+				output.includes(envVar),
+				`top-level help must document ${envVar}`,
+			);
+		}
+		assert.match(output, /Environment Variables:/);
+	});
+
+	test("top-level help documents the CAMUNDA_BASE_URL > CAMUNDA_REST_ADDRESS precedence", () => {
+		showHelp();
+		const output = consoleLogSpy.join("\n");
+
+		// The alias relationship must be stated, not just both names listed.
+		assert.match(
+			output,
+			/CAMUNDA_REST_ADDRESS[^\n]*(alias|CAMUNDA_BASE_URL)|alias[^\n]*CAMUNDA_REST_ADDRESS/i,
+			"top-level help must state that CAMUNDA_REST_ADDRESS is an alias",
+		);
+	});
+
+	test("c8ctl help mcp-proxy documents the mcp-path values and connection selection", async () => {
+		await showCommandHelp("mcp-proxy");
+		const output = consoleLogSpy.join("\n");
+
+		assert.ok(
+			output.includes("/mcp/cluster"),
+			"mcp-proxy help must name the default /mcp/cluster path",
+		);
+		assert.ok(
+			output.includes("/mcp/processes"),
+			"mcp-proxy help must name the /mcp/processes path",
+		);
+		for (const envVar of [
+			"CAMUNDA_BASE_URL",
+			"CAMUNDA_REST_ADDRESS",
+			"CAMUNDA_AUTH_STRATEGY",
+		]) {
+			assert.ok(
+				output.includes(envVar),
+				`mcp-proxy help must document ${envVar}`,
+			);
+		}
+	});
+});

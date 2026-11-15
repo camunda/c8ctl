@@ -144,6 +144,16 @@ describe("Profile management", () => {
 			assert.strictEqual(hasCamundaEnvVars(), true);
 		});
 
+		test("returns true when only CAMUNDA_REST_ADDRESS is set", () => {
+			delete process.env.CAMUNDA_BASE_URL;
+			delete process.env.CAMUNDA_CLIENT_ID;
+			delete process.env.CAMUNDA_CLIENT_SECRET;
+			delete process.env.CAMUNDA_USERNAME;
+			delete process.env.CAMUNDA_PASSWORD;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+			assert.strictEqual(hasCamundaEnvVars(), true);
+		});
+
 		test("returns false when no CAMUNDA_* credential vars are set", () => {
 			delete process.env.CAMUNDA_BASE_URL;
 			delete process.env.CAMUNDA_CLIENT_ID;
@@ -232,6 +242,27 @@ describe("Profile management", () => {
 			assert.ok(
 				!allOutput.includes("overriding"),
 				"Should not warn when --profile flag is used",
+			);
+		});
+
+		test("warns when session profile active and only CAMUNDA_REST_ADDRESS is set", () => {
+			addProfile({
+				name: "rest-profile",
+				baseUrl: "https://profile-cluster.example.com",
+			});
+			c8ctl.activeProfile = "rest-profile";
+			delete process.env.CAMUNDA_BASE_URL;
+			process.env.CAMUNDA_REST_ADDRESS = "http://localhost:8088";
+
+			const config = resolveClusterConfig();
+
+			assert.strictEqual(config.baseUrl, "https://profile-cluster.example.com");
+			const allOutput = `${consoleErrorSpy.join("\n")}\n${consoleLogSpy.join("\n")}`;
+			assert.ok(
+				allOutput.includes(
+					"Active profile 'rest-profile' is overriding CAMUNDA_*",
+				),
+				`Expected env var conflict warning, got:\nstderr: ${consoleErrorSpy.join("\n")}\nstdout: ${consoleLogSpy.join("\n")}`,
 			);
 		});
 
@@ -392,7 +423,7 @@ describe("Profile management", () => {
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not found"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
@@ -482,7 +513,7 @@ describe("Profile management", () => {
 
 			const output = (result.stdout ?? "") + (result.stderr ?? "");
 			assert.ok(
-				output.includes("CAMUNDA_BASE_URL not set"),
+				output.includes("CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set"),
 				`Expected missing URL error, got: ${output}`,
 			);
 			assert.notStrictEqual(result.status, 0);
