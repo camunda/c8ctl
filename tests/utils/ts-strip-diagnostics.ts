@@ -42,7 +42,15 @@ module.registerHooks?.({
 		} catch (error) {
 			// The default loader strips types inside nextLoad, so the
 			// failing module never returns a source: record it here.
-			failing ??= url;
+			// Only stripping failures count, and the latest one wins, so an
+			// earlier import error that was caught cannot be misreported.
+			if (
+				error instanceof Error &&
+				"code" in error &&
+				error.code === "ERR_INVALID_TYPESCRIPT_SYNTAX"
+			) {
+				failing = url;
+			}
 			throw error;
 		}
 		const source = sourceText(result.source);

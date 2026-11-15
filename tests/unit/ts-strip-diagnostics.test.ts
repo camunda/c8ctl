@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -48,6 +49,44 @@ describe("type-stripping diagnostics preload", () => {
 		assert.match(
 			result.stderr,
 			/failing module: file:\/\/\S*bad\.ts: now \d+ chars, [0-9a-f]{12} on disk; fails again: /,
+		);
+	});
+
+	test("reports the latest stripping failure, not an earlier caught one", () => {
+		const result = run({
+			"main.ts":
+				'try {\n  await import("./recovered.ts");\n} catch {}\nawait import("./bad.ts");\n',
+			"recovered.ts": "class A {\n  (x) {}\n}\n",
+			"bad.ts": "class B {\n  (y) {}\n}\n",
+		});
+		assert.notStrictEqual(result.status, 0);
+		assert.match(result.stderr, /failing module: file:\/\/\S*bad\.ts: /);
+		assert.doesNotMatch(result.stderr, /failing module: \S*recovered\.ts/);
+	});
+
+	test("reports hash, disk state and re-strip result of recent modules", () => {
+		const dep = "export const n: number = 1;\n";
+		const changed = "export const m: number = 2;\n";
+		const hash = (text: string) =>
+			createHash("sha256").update(text).digest("hex").slice(0, 12);
+		const result = run({
+			"main.ts": `import { writeFileSync } from "node:fs";\nimport "./dep.ts";\nimport "./changing.ts";\nwriteFileSync(new URL("./changing.ts", import.meta.url), ${JSON.stringify(changed)});\nawait import("./bad.ts");\n`,
+			"dep.ts": dep,
+			"changing.ts": dep,
+			"bad.ts": "class A {\n  (x) {}\n}\n",
+		});
+		assert.notStrictEqual(result.status, 0);
+		assert.match(
+			result.stderr,
+			new RegExp(
+				`dep\\.ts \\(${dep.length} chars, ${hash(dep)}\\): unchanged on disk; strips cleanly now`,
+			),
+		);
+		assert.match(
+			result.stderr,
+			new RegExp(
+				`changing\\.ts \\(${dep.length} chars, ${hash(dep)}\\): CHANGED on disk \\(now ${changed.length} chars, ${hash(changed)}\\); strips cleanly now`,
+			),
 		);
 	});
 });
