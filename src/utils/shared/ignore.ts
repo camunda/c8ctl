@@ -34,7 +34,8 @@ export interface Ignore {
 	ignores(path: string): boolean;
 }
 
-interface ParsedPattern {
+/** A single gitignore-style line compiled into `path.matchesGlob` globs. */
+export interface ParsedPattern {
 	negate: boolean;
 	globs: string[];
 }
@@ -57,7 +58,7 @@ interface ParsedPattern {
  * - A leading `/` or an embedded `/` anchors the pattern to the base dir.
  * - Otherwise the pattern matches at any depth.
  */
-function parsePattern(raw: string): ParsedPattern | null {
+export function parsePattern(raw: string): ParsedPattern | null {
 	// Trim trailing whitespace. The full gitignore spec allows a trailing `\ `
 	// to preserve spaces, but that edge case is not needed here — we
 	// deliberately omit it for simplicity.
@@ -105,11 +106,18 @@ function parsePattern(raw: string): ParsedPattern | null {
 	return { negate, globs };
 }
 
+/** Whether a project-relative, `/`-separated path matches a parsed pattern. */
+export function matchesParsedPattern(
+	path: string,
+	{ globs }: ParsedPattern,
+): boolean {
+	return globs.some((g) => matchesGlob(path, g));
+}
+
 function buildIgnoreChecker(
 	patterns: ParsedPattern[],
 ): (path: string) => boolean {
-	const matches = (path: string, { globs }: ParsedPattern) =>
-		globs.some((g) => matchesGlob(path, g));
+	const matches = matchesParsedPattern;
 
 	// gitignore rule: you cannot re-include a file if a parent directory of
 	// that file is excluded. Returns true when any ancestor of `rel` is

@@ -1,0 +1,601 @@
+/**
+ * `deployResources` — descriptor-based selection of a project's resources.
+ *
+ * The optional top-level `deployResources` array in `camunda.json` selects
+ * which project files are deployed (and watched with `watch --project`).
+ *
+ * Patterns use the same engine and syntax as `.c8ignore` (`parsePattern`
+ * from `ignore.ts`, evaluated with `node:path#matchesGlob` relative to the
+ * project root with `/` separators), with two deliberate differences:
+ *
+ * - **Inverted polarity.** Selection starts empty; a positive pattern
+ *   selects, a `!` pattern deselects, and the last matching pattern wins
+ *   per file.
+ * - **Direct descendant selection.** There is no gitignore "excluded
+ *   parent" rule: a later positive pattern restores a file below an
+ *   earlier excluded directory. The directory walk therefore never prunes
+ *   a directory because a negative pattern matched it — it only skips a
+ *   directory when no positive pattern can match anything below it.
+ *
+ * Defaults: `node_modules/`, `target/`, `.git/` and the project-root
+ * `camunda.json` are evaluated as implicit leading `!` patterns, so any
+ * later positive pattern that matches a file inside them overrides them.
+ *
+ * Hidden files: the engine's wildcards (`*`, `?`, `**`, `[...]`) never
+ * match a path segment that starts with `.`. A pattern selects a
+ * dot-prefixed file — or anything inside a dot-prefixed directory — only
+ * when it names that segment explicitly (e.g. `resources/.prompt.md`,
+ * `.config/**`). The walker still descends into hidden directories so
+ * such explicit patterns can reach them.
+ */
+
+import {
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	statSync,
+} from "node:fs";
+import { join, matchesGlob } from "node:path";
+import { isRecord, normalizeToError } from "../../core/index.ts";
+import {
+	CAMUNDA_PROJECT_FILE,
+	type CamundaProject,
+	decodeCamundaJson,
+	parseCamundaJson,
+} from "./camunda-json.ts";
+import {
+	matchesParsedPattern,
+	type ParsedPattern,
+	parsePattern,
+} from "./ignore.ts";
+
+/** Name of the descriptor field. */
+export const DEPLOY_RESOURCES_FIELD = "deployResources";
+
+/**
+ * Default exclusions, applied as implicit leading negations before the
+ * user's patterns. The root descriptor is anchored; the directories match
+ * at any depth (same as the `.c8ignore` defaults).
+ */
+export const DEPLOY_RESOURCES_DEFAULT_EXCLUSIONS: readonly string[] = [
+	"node_modules/",
+	"target/",
+	".git/",
+	"/camunda.json",
+];
+
+/** Tool-agnostic error codes, shared with the parity fixtures. */
+export type DeployResourcesErrorCode =
+	| "invalid-config"
+	| "empty-selection"
+	| "read-error";
+
+/**
+ * Raised for an invalid `deployResources` configuration, an empty final
+ * selection, or a selected path that cannot be read (`read-error`). `code` matches the `error` value used by the shared parity
+ * fixtures.
+ */
+export class DeployResourcesError extends Error {
+	readonly code: DeployResourcesErrorCode;
+	constructor(code: DeployResourcesErrorCode, message: string) {
+		super(message);
+		this.name = "DeployResourcesError";
+		this.code = code;
+	}
+}
+
+/** Describe why a single pattern is invalid, or `null` when it is valid. */
+function patternProblem(pattern: string): string | null {
+	// Validate what the matcher sees: `parsePattern` trims trailing
+	// whitespace, so `resources/.. ` must be checked as `resources/..`.
+	const trimmed = pattern.trimEnd();
+	const body = trimmed.startsWith("!") ? trimmed.slice(1) : trimmed;
+	if (body.trim() === "") {
+		return "patterns must not be empty";
+	}
+	if (trimmed.startsWith("#")) {
+		return "comments are not supported in deployResources";
+	}
+	// A single leading `/` is the gitignore root anchor (same as .c8ignore),
+	// not an absolute path. Absolute paths that cannot be anchors are
+	// invalid: a Windows drive letter, a UNC root (`//server`, `\\server`)
+	// or any leading backslash.
+	if (
+		/^[A-Za-z]:/.test(body) ||
+		body.startsWith("//") ||
+		body.startsWith("\\")
+	) {
+		return "patterns are relative to the project root; drive-letter, UNC and backslash-rooted paths are not allowed (a leading / anchors the pattern to the project root)";
+	}
+	if (body.split(/[/\\]/).includes("..")) {
+		return "patterns must stay inside the project; '..' is not allowed";
+	}
+	if (parsePattern(pattern) === null) {
+		return "pattern does not select anything";
+	}
+	return null;
+}
+
+/**
+ * Validate the raw `deployResources` value read from `camunda.json`.
+ *
+ * @param value - The raw field value (`CamundaProject.deployResources`).
+ * @param source - Descriptor path used in error messages.
+ * @returns The validated pattern list (possibly empty).
+ * @throws {DeployResourcesError} `invalid-config` when the value is not an
+ *   array of valid pattern strings.
+ */
+export function parseDeployResources(
+	value: unknown,
+	source = "camunda.json",
+): string[] {
+	if (!Array.isArray(value)) {
+		throw new DeployResourcesError(
+			"invalid-config",
+			`Invalid "${DEPLOY_RESOURCES_FIELD}" in ${source}: expected an array of glob strings, ` +
+				`got ${value === null ? "null" : typeof value}. ` +
+				`Example: "${DEPLOY_RESOURCES_FIELD}": ["resources/**"]`,
+		);
+	}
+	return value.map((entry, index) => {
+		if (typeof entry !== "string") {
+			throw new DeployResourcesError(
+				"invalid-config",
+				`Invalid "${DEPLOY_RESOURCES_FIELD}" in ${source}: entry ${index} must be a string, ` +
+					`got ${entry === null ? "null" : typeof entry}`,
+			);
+		}
+		const problem = patternProblem(entry);
+		if (problem) {
+			throw new DeployResourcesError(
+				"invalid-config",
+				`Invalid "${DEPLOY_RESOURCES_FIELD}" pattern ${JSON.stringify(entry)} in ${source}: ${problem}`,
+			);
+		}
+		return entry;
+	});
+}
+
+/**
+ * Strictly read the `camunda.json` descriptor of a directory that is being
+ * resolved for deployment or watching.
+ *
+ * Unlike `readCamundaProject` (lenient marker detection), a descriptor
+ * that exists but cannot be read — a directory named `camunda.json`, no
+ * permission, an I/O error — is an `invalid-config` error. Degrading to
+ * "no descriptor" would silently fall back to the default scan and
+ * bypass a `deployResources` allowlist.
+ *
+ * @returns The parsed descriptor, or `null` only when no `camunda.json`
+ *   exists.
+ * @throws {DeployResourcesError} `invalid-config` when the file exists but
+ *   cannot be read.
+ * @throws {Error} When `camunda.json` is not valid JSON.
+ */
+export function readProjectDescriptor(dirPath: string): CamundaProject | null {
+	const file = join(dirPath, CAMUNDA_PROJECT_FILE);
+	let buffer: Buffer;
+	try {
+		buffer = readFileSync(file);
+	} catch (error) {
+		const code = isRecord(error) ? error.code : undefined;
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			// No entry at all: not a project. An entry that exists but can't
+			// be followed (a dangling symlink) is a broken descriptor.
+			let dangling = false;
+			try {
+				dangling = lstatSync(file).isSymbolicLink();
+			} catch {
+				// Genuinely absent.
+			}
+			if (!dangling) return null;
+			throw new DeployResourcesError(
+				"invalid-config",
+				`Failed to read ${file}: it is a dangling symlink (its target does not exist)`,
+			);
+		}
+		throw new DeployResourcesError(
+			"invalid-config",
+			`Failed to read ${file}: ${normalizeToError(error).message}`,
+		);
+	}
+	return parseCamundaJson(decodeCamundaJson(buffer), file);
+}
+
+/** Outcome of reading a project's `deployResources` configuration. */
+export type DeployResourcesState =
+	| { kind: "no-descriptor" }
+	| { kind: "no-field" }
+	| { kind: "patterns"; patterns: string[] };
+
+/**
+ * Read a project's `deployResources` state, distinguishing a missing
+ * descriptor from a descriptor without the field.
+ *
+ * @throws {DeployResourcesError} `invalid-config` when the descriptor
+ *   cannot be read or the field is invalid.
+ * @throws {Error} When `camunda.json` is not valid JSON.
+ */
+export function readDeployResourcesState(
+	projectRoot: string,
+): DeployResourcesState {
+	return deployResourcesStateOf(
+		readProjectDescriptor(projectRoot),
+		projectRoot,
+	);
+}
+
+/**
+ * The `deployResources` state of an already-read descriptor (`null` when
+ * there is none), so a caller can decide from a single read.
+ *
+ * @throws {DeployResourcesError} `invalid-config` when the field is invalid.
+ */
+export function deployResourcesStateOf(
+	project: CamundaProject | null,
+	projectRoot: string,
+): DeployResourcesState {
+	if (!project) return { kind: "no-descriptor" };
+	if (!Object.hasOwn(project, DEPLOY_RESOURCES_FIELD)) {
+		return { kind: "no-field" };
+	}
+	return {
+		kind: "patterns",
+		patterns: parseDeployResources(
+			project.deployResources,
+			join(projectRoot, CAMUNDA_PROJECT_FILE),
+		),
+	};
+}
+
+/**
+ * Read the validated `deployResources` patterns of the project rooted at
+ * `projectRoot`.
+ *
+ * @returns The patterns, or `null` when there is no descriptor or the
+ *   descriptor has no `deployResources` key (default scan applies).
+ * @throws {Error} When `camunda.json` is not valid JSON.
+ * @throws {DeployResourcesError} `invalid-config` when the descriptor
+ *   cannot be read or the field is invalid.
+ */
+export function readDeployResources(projectRoot: string): string[] | null {
+	const state = readDeployResourcesState(projectRoot);
+	return state.kind === "patterns" ? state.patterns : null;
+}
+
+/** A compiled `deployResources` pattern list. */
+export interface ResourceSelector {
+	/** The user's patterns, in order. */
+	readonly patterns: readonly string[];
+	/** Whether the project-relative file path is selected. */
+	selects(relPath: string): boolean;
+	/**
+	 * Whether any file below the project-relative directory could be
+	 * selected. Conservative: `true` whenever a positive pattern might
+	 * match below `relDir`. Used only to skip walking directories that can
+	 * never contribute (e.g. `.git/` under `["**\/*"]`).
+	 */
+	couldSelectUnder(relDir: string): boolean;
+	/**
+	 * Whether the folder is excluded: a `!` pattern matches it (e.g.
+	 * `!vendor/`, or a default exclusion) and no later positive pattern
+	 * matches it or can reach below it. Used to skip a folder that can't be
+	 * read only when nothing inside it can be selected.
+	 */
+	excludesFolder(relDir: string): boolean;
+}
+
+/**
+ * Whether glob `segments` could match some path strictly below the
+ * directory `dirSegments`. Mirrors the engine's segment semantics: `**`
+ * spans zero or more segments but never a dot-prefixed one.
+ */
+function globCouldMatchBelow(
+	dirSegments: readonly string[],
+	globSegments: readonly string[],
+): boolean {
+	const step = (d: number, g: number): boolean => {
+		if (d === dirSegments.length) return g < globSegments.length;
+		if (g === globSegments.length) return false;
+		const seg = globSegments[g];
+		if (seg === "**") {
+			return (
+				step(d, g + 1) || (!dirSegments[d].startsWith(".") && step(d + 1, g))
+			);
+		}
+		return matchesGlob(dirSegments[d], seg) && step(d + 1, g + 1);
+	};
+	return step(0, 0);
+}
+
+/**
+ * Expand comma brace groups (`{a,b}`, nesting allowed) into alternative
+ * globs. Braces without a top-level comma (`{1..3}`, a literal `{x}`) are
+ * left to the matcher.
+ */
+function expandBraces(glob: string): string[] {
+	let depth = 0;
+	let start = -1;
+	for (let i = 0; i < glob.length; i++) {
+		const ch = glob[i];
+		if (ch === "\\") {
+			i++;
+		} else if (ch === "{") {
+			if (depth === 0) start = i;
+			depth++;
+		} else if (ch === "}" && depth > 0) {
+			depth--;
+			if (depth === 0) {
+				const options = splitTopLevel(glob.slice(start + 1, i));
+				if (options.length > 1) {
+					const prefix = glob.slice(0, start);
+					const suffix = glob.slice(i + 1);
+					return options.flatMap((option) =>
+						expandBraces(`${prefix}${option}${suffix}`),
+					);
+				}
+			}
+		}
+	}
+	return [glob];
+}
+
+/** Split a brace body on its top-level commas. */
+function splitTopLevel(body: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let current = "";
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === "\\") {
+			current += ch + (body[i + 1] ?? "");
+			i++;
+			continue;
+		}
+		if (ch === "{" || ch === "(") depth++;
+		if ((ch === "}" || ch === ")") && depth > 0) depth--;
+		if (ch === "," && depth === 0) {
+			parts.push(current);
+			current = "";
+		} else {
+			current += ch;
+		}
+	}
+	parts.push(current);
+	return parts;
+}
+
+/** Whether some `/`-separated segment has an unbalanced group. */
+function hasSplitGroup(glob: string): boolean {
+	return glob.split("/").some((segment) => {
+		let depth = 0;
+		for (const ch of segment) {
+			if (ch === "(" || ch === "{") depth++;
+			else if (ch === ")" || ch === "}") depth--;
+		}
+		return depth !== 0;
+	});
+}
+
+/**
+ * Whether a brace-expanded glob could match a path strictly below the
+ * folder `dirSegments`.
+ */
+function globReachesBelow(
+	dirSegments: readonly string[],
+	glob: string,
+): boolean {
+	return (
+		// A group that still spans a `/` (an extglob such as `@(a/b|c)`)
+		// can't be checked segment by segment: assume it can reach.
+		hasSplitGroup(glob) ||
+		// Empty (`a//b`) and `.` (`a/./b`) segments are dropped, as the
+		// native matcher collapses them. Dropping more than the matcher
+		// does only makes the answer more conservative.
+		globCouldMatchBelow(
+			dirSegments,
+			glob.split("/").filter((seg) => seg !== "" && seg !== "."),
+		)
+	);
+}
+
+/**
+ * Compile validated `deployResources` patterns into a selector.
+ * Call {@link parseDeployResources} first to validate raw input.
+ */
+export function compileDeployResources(
+	patterns: readonly string[],
+): ResourceSelector {
+	const defaults = DEPLOY_RESOURCES_DEFAULT_EXCLUSIONS.map((p) =>
+		parsePattern(`!${p}`),
+	).filter((p): p is ParsedPattern => p !== null);
+	const user = patterns
+		.map(parsePattern)
+		.filter((p): p is ParsedPattern => p !== null);
+	const ordered = [...defaults, ...user];
+	// Brace groups are expanded so reachability is checked per alternative.
+	const positiveAlternatives = user
+		.filter((p) => !p.negate)
+		.flatMap((p) => p.globs)
+		.flatMap(expandBraces);
+
+	return {
+		patterns: [...patterns],
+		excludesFolder: (relDir) => {
+			// In pattern order: a `!` pattern matching the folder excludes it;
+			// a later positive pattern that matches the folder or can reach
+			// below it cancels that, since it may select files inside.
+			const dirSegments = relDir.split("/").filter(Boolean);
+			return ordered.reduce<boolean>((excluded, p) => {
+				if (p.negate) {
+					return matchesParsedPattern(`${relDir}/`, p) ? true : excluded;
+				}
+				const reaches =
+					matchesParsedPattern(`${relDir}/`, p) ||
+					p.globs
+						.flatMap(expandBraces)
+						.some((glob) => globReachesBelow(dirSegments, glob));
+				return reaches ? false : excluded;
+			}, false);
+		},
+		selects: (relPath) =>
+			ordered.reduce<boolean>(
+				(selected, p) =>
+					matchesParsedPattern(relPath, p) ? !p.negate : selected,
+				false,
+			),
+		couldSelectUnder: (relDir) => {
+			const dirSegments = relDir.split("/").filter(Boolean);
+			return positiveAlternatives.some((glob) =>
+				globReachesBelow(dirSegments, glob),
+			);
+		},
+	};
+}
+
+/**
+ * Walk `projectRoot` and return the project-relative (`/`-separated)
+ * paths of every file the selector selects, sorted.
+ *
+ * - Symlinks are followed (same as the default deploy discovery). A
+ *   directory reachable under several project-relative paths (a symlink
+ *   alias and its real path) is walked under each of them, because
+ *   patterns are evaluated against the project-relative path. Cycles are
+ *   cut by skipping a directory whose real path is already on the
+ *   current descent (an active ancestor). Files that resolve to the same
+ *   real path are kept once (first path in sorted order wins).
+ * - Hidden files and directories are not skipped by the walker — the
+ *   pattern engine decides (see module docs).
+ * - Nested `camunda.json` folders are ordinary folders here: nested
+ *   projects are unsupported and are not excluded from the selection.
+ */
+export function selectProjectFiles(
+	projectRoot: string,
+	selector: ResourceSelector,
+): string[] {
+	const selected: string[] = [];
+	// Real paths of the directories on the current descent.
+	const activeAncestors = new Set<string>();
+
+	const visit = (dirAbs: string, relDir: string): void => {
+		let real: string;
+		let entries: string[];
+		try {
+			real = realpathSync(dirAbs);
+			entries = readdirSync(dirAbs).sort();
+		} catch (error) {
+			// A folder the user excluded explicitly (`!folder/`) is skipped
+			// even if a broad pattern could reach into it.
+			if (relDir !== "" && selector.excludesFolder(relDir)) return;
+			throw unreadablePath(dirAbs, error, relDir);
+		}
+		if (activeAncestors.has(real)) return;
+		activeAncestors.add(real);
+
+		for (const entry of entries) {
+			const abs = join(dirAbs, entry);
+			const rel = relDir ? `${relDir}/${entry}` : entry;
+			let stat: ReturnType<typeof statSync>;
+			try {
+				stat = statSync(abs);
+			} catch (error) {
+				// An entry no pattern can select (as a file or as a folder) is
+				// irrelevant. One a pattern can select must never be skipped
+				// silently: the deployment would succeed without it.
+				// The root camunda.json is the descriptor, already read for
+				// this run: it only matters if a pattern selects it as a file
+				// (it may be mid-replacement, e.g. briefly a dangling link).
+				const isDescriptor = relDir === "" && entry === CAMUNDA_PROJECT_FILE;
+				if (
+					!selector.selects(rel) &&
+					(isDescriptor ||
+						!selector.couldSelectUnder(rel) ||
+						selector.excludesFolder(rel))
+				) {
+					continue;
+				}
+				throw unreadablePath(abs, error, rel);
+			}
+			if (stat.isDirectory()) {
+				if (selector.couldSelectUnder(rel)) visit(abs, rel);
+			} else if (stat.isFile() && selector.selects(rel)) {
+				selected.push(rel);
+			}
+		}
+		activeAncestors.delete(real);
+	};
+	visit(projectRoot, "");
+
+	const seenReal = new Set<string>();
+	return selected.sort().filter((rel) => {
+		let key = rel;
+		try {
+			key = realpathSync(join(projectRoot, rel));
+		} catch {
+			// Best effort: fall back to the relative path.
+		}
+		if (seenReal.has(key)) return false;
+		seenReal.add(key);
+		return true;
+	});
+}
+
+/**
+ * The `read-error` raised when a path a `deployResources` pattern can
+ * select cannot be read. Names the path and, for a dangling symlink,
+ * says so.
+ */
+export function unreadablePath(
+	path: string,
+	error: unknown,
+	/** Project-relative path, used to suggest an exclusion pattern. */
+	rel?: string,
+): DeployResourcesError {
+	const code = isRecord(error) ? error.code : undefined;
+	let reason = normalizeToError(error).message;
+	if (code === "ENOENT") {
+		let dangling = false;
+		try {
+			dangling = lstatSync(path).isSymbolicLink();
+		} catch {
+			// The path itself is gone (removed while deploying).
+		}
+		reason = dangling
+			? "it is a dangling symlink (its target does not exist)"
+			: "it was removed while the selection was being read";
+	}
+	return new DeployResourcesError(
+		"read-error",
+		`Cannot read ${path}, which a "${DEPLOY_RESOURCES_FIELD}" pattern can select: ${reason}. ` +
+			"Nothing was deployed. Fix the file permissions or the path, or exclude it " +
+			(rel
+				? `with a ! pattern placed after the patterns that reach it, such as "!${rel}/" for a folder or "!${rel}" for a file.`
+				: "with a ! pattern."),
+	);
+}
+
+/**
+ * Resolve the deployed resource set of a project from its validated
+ * `deployResources` patterns.
+ *
+ * @throws {DeployResourcesError} `empty-selection` when nothing is
+ *   selected (an unmatched pattern alone is silently ignored).
+ */
+export function resolveDeployResources(
+	projectRoot: string,
+	patterns: readonly string[],
+): string[] {
+	const files = selectProjectFiles(
+		projectRoot,
+		compileDeployResources(patterns),
+	);
+	if (files.length === 0) {
+		throw new DeployResourcesError(
+			"empty-selection",
+			`No deployable files found: "${DEPLOY_RESOURCES_FIELD}" in ${join(projectRoot, CAMUNDA_PROJECT_FILE)} ` +
+				"selects no files. Adjust the patterns so they match at least one project file.",
+		);
+	}
+	return files;
+}
