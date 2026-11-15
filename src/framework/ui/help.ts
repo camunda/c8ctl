@@ -10,6 +10,7 @@ import {
 	COMMAND_REGISTRY,
 	COMMAND_REGISTRY_BY_VERB,
 	type CommandDef,
+	ENVIRONMENT_VARIABLES_HELP,
 	type FlagDef,
 	GLOBAL_FLAGS,
 	getCommandDef,
@@ -60,6 +61,7 @@ interface HelpCommand {
 	description: string;
 	mutating: boolean;
 	examples?: Array<{ command: string; description: string }> | string[];
+	notes?: string[];
 }
 
 interface HelpJson {
@@ -70,6 +72,7 @@ interface HelpJson {
 	globalFlags: HelpFlag[];
 	searchFlags: HelpFlag[];
 	agentFlags: HelpFlag[];
+	environmentVariables: Array<{ name: string; description: string }>;
 }
 
 /**
@@ -112,6 +115,7 @@ function buildHelpJson(
 			resources: [...def.resources],
 			description: def.helpDescription ?? def.description,
 			mutating: def.mutating,
+			...(def.helpNotes?.length ? { notes: [...def.helpNotes] } : {}),
 		});
 	}
 
@@ -190,6 +194,7 @@ function buildHelpJson(
 				description: (f.agentDescription ?? "").replace(/\n/g, " "),
 				...(f.agentAppliesTo ? { appliesTo: f.agentAppliesTo } : {}),
 			})),
+		environmentVariables: ENVIRONMENT_VARIABLES_HELP.map((v) => ({ ...v })),
 	};
 }
 
@@ -312,6 +317,24 @@ function generateFlagsSection(): string {
 		const typeHint = def.type === "string" ? ` <${name}>` : "";
 		lines.push(`  ${(flag + typeHint).padEnd(FLAG_COL)}${def.description}`);
 	}
+	return lines.join("\n");
+}
+
+/**
+ * Generate the Environment Variables section from ENVIRONMENT_VARIABLES_HELP.
+ * These are the CAMUNDA_* variables c8ctl resolves when no `--profile` or
+ * session profile is selected — documented here so an SDK project's `.env`
+ * (CAMUNDA_REST_ADDRESS, CAMUNDA_AUTH_STRATEGY, …) is discoverable.
+ */
+function generateEnvironmentVariablesSection(): string {
+	const lines: string[] = [];
+	const COL = 28;
+	for (const { name, description } of ENVIRONMENT_VARIABLES_HELP) {
+		lines.push(`  ${name.padEnd(COL)}${description}`);
+	}
+	lines.push(
+		"  Env vars apply when no --profile or session profile is selected; a profile always wins.",
+	);
 	return lines.join("\n");
 }
 
@@ -529,6 +552,7 @@ export function showHelp(): void {
 	const helpFooter = generateHelpFooter();
 	const examplesSection = generateExamplesSection();
 	const agentFlagsSection = generateAgentFlagsSection();
+	const envVarsSection = generateEnvironmentVariablesSection();
 
 	console.log(
 		`
@@ -547,6 +571,9 @@ ${searchFlagsSection}
 
 Resource Aliases:
 ${resourceAliases}
+
+Environment Variables:
+${envVarsSection}
 
 ━━━ Agent Flags (for programmatic / AI-agent consumption) ━━━
 
@@ -762,6 +789,13 @@ function showGenericVerbHelp(verb: string): void {
 		);
 	}
 
+	// Usage notes that don't fit the flag schema (e.g. mcp-proxy's
+	// [mcp-path] values and connection precedence).
+	if (def.helpNotes?.length) {
+		lines.push("");
+		lines.push(...def.helpNotes);
+	}
+
 	console.log(`\n${lines.join("\n")}`);
 }
 
@@ -860,6 +894,7 @@ function showFlagAwarePluginHelp(command: string): void {
 			globalFlags: allHelp.globalFlags,
 			searchFlags: allHelp.searchFlags,
 			agentFlags: allHelp.agentFlags,
+			environmentVariables: allHelp.environmentVariables,
 		});
 		return;
 	}
@@ -951,6 +986,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 				globalFlags: allHelp.globalFlags,
 				searchFlags: allHelp.searchFlags,
 				agentFlags: allHelp.agentFlags,
+				environmentVariables: allHelp.environmentVariables,
 			});
 			return;
 		}
@@ -1012,6 +1048,7 @@ export async function showCommandHelp(command: string): Promise<void> {
 			globalFlags: allHelp.globalFlags,
 			searchFlags: allHelp.searchFlags,
 			agentFlags: allHelp.agentFlags,
+			environmentVariables: allHelp.environmentVariables,
 		});
 		return;
 	}

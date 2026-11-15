@@ -141,6 +141,8 @@ describe("profile data integrity", () => {
 		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "exactBaseUrl": "yes" } ]}',
 		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "headers": "nope" } ]}',
 		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "headers": { "k": 1 } } ]}',
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "authStrategy": false } ]}',
+		'{"profiles": [ { "name": "m", "baseUrl": "http://x", "authStrategy": "KERBEROS" } ]}',
 	]) {
 		test(`schema-corrupt profiles.json is rejected, not treated as empty: ${malformed}`, () => {
 			writeFileSync(profilesPath(), malformed, "utf-8");

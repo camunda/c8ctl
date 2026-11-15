@@ -161,16 +161,23 @@ c8ctl <verb> <resource> [arguments] [flags]
 
 ## Environment Variables
 
-- `CAMUNDA_BASE_URL`: Cluster base URL
+- `CAMUNDA_BASE_URL`: Cluster base URL (e.g. `http://localhost:8080/v2`)
+- `CAMUNDA_REST_ADDRESS`: SDK-standard alias for `CAMUNDA_BASE_URL`; `CAMUNDA_BASE_URL` wins when both are set
+- `CAMUNDA_AUTH_STRATEGY`: Authentication strategy — `NONE`, `BASIC`, or `OAUTH` (default: derived from the credentials present)
 - `CAMUNDA_CLIENT_ID`: OAuth client ID
 - `CAMUNDA_CLIENT_SECRET`: OAuth client secret
 - `CAMUNDA_TOKEN_AUDIENCE`: OAuth token audience
 - `CAMUNDA_OAUTH_URL`: OAuth token endpoint
+- `CAMUNDA_OAUTH_SCOPE`: OAuth scope (space-separated)
+- `CAMUNDA_USERNAME`: Basic auth username
+- `CAMUNDA_PASSWORD`: Basic auth password
 - `CAMUNDA_DEFAULT_TENANT_ID`: Default tenant ID
 - `C8CTL_OUTPUT_MODE`: Per-invocation output mode override (`json` or `text`); does not persist. Lower precedence than `--json`.
 - `C8CTL_DATA_DIR`: Override the OS-default data directory for plugins and session state.
 - `C8CTL_DEBUG` / `DEBUG`: Enable debug logging to stderr (also sets Camunda SDK logging to `debug`).
 - `CAMUNDA_SDK_LOG_LEVEL`: Camunda SDK log level (logs go to stderr). Defaults to `silent`; `--verbose` uses `trace`.
+
+Env vars apply when no `--profile` flag or active session profile is set; a profile always wins. When credential variables are set without a cluster address variable, c8ctl warns that it is falling back to the default `local` profile.
 
 ## Configuration Files
 

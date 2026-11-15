@@ -18,6 +18,7 @@ import {
 	parseEnvFile,
 	parseHeaderFlags,
 	removeProfile as removeProfileConfig,
+	resolveEnvBaseUrl,
 } from "../core/index.ts";
 import { confirm, defineCommand, select } from "../framework/index.ts";
 
@@ -93,6 +94,9 @@ interface AddProfileOptions {
  * Describe the auth type of a profile for user feedback.
  */
 function describeAuth(profile: Profile): string {
+	if (profile.authStrategy === "NONE") return "None";
+	if (profile.authStrategy === "BASIC") return "Basic auth";
+	if (profile.authStrategy === "OAUTH") return "OAuth (client credentials)";
 	if (profile.clientId && profile.clientSecret)
 		return "OAuth (client credentials)";
 	if (profile.username && profile.password) return "Basic auth";
@@ -140,10 +144,15 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		const vars = parseEnvFile(content);
 		profile = { ...envVarsToProfile(name, vars), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("The .env file must contain at least CAMUNDA_BASE_URL.", {
-				essential: true,
-			});
-			throw new Error(`CAMUNDA_BASE_URL not found in ${options.envFile}`);
+			logger.info(
+				"The .env file must contain at least CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS).",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				`CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not found in ${options.envFile}`,
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from ${options.envFile})`);
@@ -153,10 +162,15 @@ function addProfile(name: string, options: AddProfileOptions): void {
 		// --from-env: read from current process environment
 		profile = { ...envVarsToProfile(name, process.env), headers, exactBaseUrl };
 		if (!profile.baseUrl) {
-			logger.info("Set CAMUNDA_BASE_URL before using --from-env.", {
-				essential: true,
-			});
-			throw new Error("CAMUNDA_BASE_URL not set in environment");
+			logger.info(
+				"Set CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) before using --from-env.",
+				{
+					essential: true,
+				},
+			);
+			throw new Error(
+				"CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) not set in environment",
+			);
 		}
 		addProfileConfig(profile);
 		logger.success(`Profile '${name}' added (from environment)`);
@@ -221,12 +235,12 @@ function whichProfile(): void {
 	const say = (message: string) => logger.info(message, { essential: true });
 	const active = c8ctl.activeProfile;
 	if (!active) {
-		const hasBaseUrl = !!process.env.CAMUNDA_BASE_URL?.trim();
+		const hasBaseUrl = !!resolveEnvBaseUrl();
 		if (hasBaseUrl) {
 			say("(none — CAMUNDA_* env vars will be used)");
 		} else if (hasCamundaEnvVars()) {
 			say(
-				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL to use them)`,
+				`${DEFAULT_PROFILE} (default — CAMUNDA_* env vars detected but incomplete; set CAMUNDA_BASE_URL or CAMUNDA_REST_ADDRESS to use them)`,
 			);
 		} else {
 			say(`${DEFAULT_PROFILE} (default)`);

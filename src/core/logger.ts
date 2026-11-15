@@ -3,6 +3,7 @@
  * Handles output in multiple modes (text, json) based on session state
  */
 
+import { resolveEnvBaseUrl } from "./env-address.ts";
 import { c8ctl } from "./runtime.ts";
 
 export type OutputMode = "text" | "json";
@@ -135,7 +136,7 @@ function getLocalClusterHint(error?: Error): string | undefined {
 	// and no CAMUNDA_* env vars are configured (env vars point elsewhere)
 	if (c8ctl.activeProfile !== undefined && c8ctl.activeProfile !== "local")
 		return undefined;
-	if (!c8ctl.activeProfile && process.env.CAMUNDA_BASE_URL) return undefined;
+	if (!c8ctl.activeProfile && resolveEnvBaseUrl()) return undefined;
 
 	const isConnectionError = isNetworkError(error);
 	if (!isConnectionError) return undefined;

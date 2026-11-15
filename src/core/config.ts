@@ -24,6 +24,7 @@ import {
 } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
+import { resolveEnvBaseUrl, resolveEnvBasicAuth } from "./env-address.ts";
 import type { OutputMode } from "./logger.ts";
 import { getLogger, isRecord } from "./logger.ts";
 import { c8ctl } from "./runtime.ts";
@@ -120,6 +121,12 @@ export interface Profile {
 	 * path does not match c8ctl's assumed suffixing.
 	 */
 	exactBaseUrl?: boolean;
+	/**
+	 * Explicit SDK authentication strategy (from `CAMUNDA_AUTH_STRATEGY` on
+	 * `--from-file` / `--from-env` import). When set it wins over the
+	 * strategy derived from whichever credentials the profile carries.
+	 */
+	authStrategy?: CamundaAuthStrategy;
 }
 
 export interface SessionState {
@@ -152,6 +159,12 @@ export interface ClusterConfig {
 	scope?: string;
 	username?: string;
 	password?: string;
+	/**
+	 * Explicit SDK authentication strategy from `CAMUNDA_AUTH_STRATEGY`
+	 * (NONE/BASIC/OAUTH). When set, `createClient` uses it verbatim instead
+	 * of deriving the strategy from whichever credentials are present.
+	 */
+	authStrategy?: CamundaAuthStrategy;
 	/** See `Profile.headers`. */
 	headers?: Record<string, string>;
 	/** See `Profile.exactBaseUrl`. */
@@ -425,6 +438,12 @@ function isValidProfile(value: unknown): value is Profile {
 		return false;
 	}
 	if (value.headers !== undefined && !isStringRecord(value.headers)) {
+		return false;
+	}
+	if (
+		value.authStrategy !== undefined &&
+		!CAMUNDA_AUTH_STRATEGIES.some((s) => s === value.authStrategy)
+	) {
 		return false;
 	}
 	return true;
@@ -1102,6 +1121,7 @@ export function profileToClusterConfig(profile: Profile): ClusterConfig {
 		password: profile.password,
 		headers: profile.headers,
 		exactBaseUrl: profile.exactBaseUrl,
+		authStrategy: profile.authStrategy,
 	};
 }
 
@@ -1366,6 +1386,7 @@ export function setOutputMode(mode: OutputMode): void {
 export function hasCamundaEnvVars(): boolean {
 	return !!(
 		process.env.CAMUNDA_BASE_URL ||
+		process.env.CAMUNDA_REST_ADDRESS ||
 		process.env.CAMUNDA_CLIENT_ID ||
 		process.env.CAMUNDA_CLIENT_SECRET ||
 		process.env.CAMUNDA_USERNAME ||
@@ -1377,14 +1398,19 @@ export function hasCamundaEnvVars(): boolean {
  * Profile fields whose value is a plain string — the only fields
  * `ENV_VAR_PROFILE_MAP` may target, since every CAMUNDA_* env var maps to a
  * single string value. `headers` (a map) and `exactBaseUrl` (a boolean)
- * have no env-var equivalent and are deliberately excluded.
+ * have no env-var equivalent and are deliberately excluded; `authStrategy`
+ * (a validated union) is set by `envVarsToProfile` after validation.
  */
 type StringProfileField = {
-	[K in keyof Profile]-?: Profile[K] extends string | undefined ? K : never;
+	[K in keyof Profile]-?: string extends NonNullable<Profile[K]> ? K : never;
 }[keyof Profile];
 
 /**
  * The env var → profile field mapping used by --from-file and --from-env.
+ *
+ * `CAMUNDA_REST_ADDRESS` is intentionally absent: it is an alias for
+ * `CAMUNDA_BASE_URL` (which wins when both are set), resolved by
+ * `envVarsToProfile` after this map is applied.
  */
 export const ENV_VAR_PROFILE_MAP: Record<string, StringProfileField> = {
 	CAMUNDA_BASE_URL: "baseUrl",
@@ -1502,7 +1528,9 @@ export function parseHeaderFlags(entries: string[]): Record<string, string> {
 
 /**
  * Build a partial Profile from an env-var map (either from a .env file or process.env).
- * Only keys present in ENV_VAR_PROFILE_MAP are considered.
+ * Only keys present in ENV_VAR_PROFILE_MAP are considered, plus the
+ * `CAMUNDA_REST_ADDRESS` alias for `CAMUNDA_BASE_URL` (the SDK-standard name;
+ * `CAMUNDA_BASE_URL` wins when both are set).
  */
 export function envVarsToProfile(
 	name: string,
@@ -1516,6 +1544,18 @@ export function envVarsToProfile(
 			profile[profileField] = value;
 		}
 	}
+	// Address and basic-auth credentials go through the same alias-aware,
+	// trimming resolvers as live env resolution, so importing an environment
+	// saves exactly the target and credentials that environment would use.
+	profile.baseUrl = resolveEnvBaseUrl(vars) ?? "";
+	const basic = resolveEnvBasicAuth(vars);
+	if (basic.username) profile.username = basic.username;
+	if (basic.password) profile.password = basic.password;
+	// CAMUNDA_AUTH_STRATEGY is validated (not string-mapped) so an imported
+	// profile keeps an explicit NONE/BASIC/OAUTH choice instead of silently
+	// re-deriving it from whatever credentials sit alongside it.
+	const authStrategy = resolveAuthStrategy(vars.CAMUNDA_AUTH_STRATEGY);
+	if (authStrategy) profile.authStrategy = authStrategy;
 	return profile;
 }
 
@@ -1536,6 +1576,68 @@ export function resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	const config = _resolveClusterConfig(profileFlag);
 	c8ctl.resolvedBaseUrl = config.baseUrl;
 	return config;
+}
+
+export const CAMUNDA_AUTH_STRATEGIES = ["NONE", "BASIC", "OAUTH"] as const;
+
+/**
+ * The values `CAMUNDA_AUTH_STRATEGY` accepts, matching the Camunda SDK.
+ */
+export type CamundaAuthStrategy = (typeof CAMUNDA_AUTH_STRATEGIES)[number];
+
+/**
+ * Normalize a raw `CAMUNDA_AUTH_STRATEGY` value to the SDK's canonical
+ * upper-case form. Throws with an actionable message on an unsupported value
+ * — silently ignoring a misspelled strategy would authenticate (or not)
+ * against the user's intent.
+ */
+export function resolveAuthStrategy(
+	raw: string | undefined,
+): CamundaAuthStrategy | undefined {
+	if (!raw?.trim()) return undefined;
+	const strategy = raw.trim().toUpperCase();
+	const match = CAMUNDA_AUTH_STRATEGIES.find(
+		(candidate) => candidate === strategy,
+	);
+	if (!match) {
+		throw new Error(
+			`Unsupported CAMUNDA_AUTH_STRATEGY '${raw.trim()}' — expected one of ${CAMUNDA_AUTH_STRATEGIES.join(", ")}.`,
+		);
+	}
+	return match;
+}
+
+/**
+ * Credential-style CAMUNDA_* variables that are silently dropped when no
+ * cluster address variable is set (resolution falls through to the default
+ * `local` profile). Listing them by name in the warning is what turns a
+ * "connection refused on localhost" mystery into an actionable hint.
+ */
+const SDK_ONLY_ENV_VARS = [
+	"CAMUNDA_CLIENT_ID",
+	"CAMUNDA_CLIENT_SECRET",
+	"CAMUNDA_OAUTH_URL",
+	"CAMUNDA_TOKEN_AUDIENCE",
+	"CAMUNDA_OAUTH_SCOPE",
+	"CAMUNDA_USERNAME",
+	"CAMUNDA_PASSWORD",
+	"CAMUNDA_BASIC_AUTH_USERNAME",
+	"CAMUNDA_BASIC_AUTH_PASSWORD",
+	"CAMUNDA_AUTH_STRATEGY",
+] as const;
+
+/**
+ * Warn when CAMUNDA_* variables are present but cannot take effect because
+ * neither address variable is set — the classic case being an SDK project's
+ * `.env` that sets credentials while c8ctl quietly connects to localhost.
+ */
+function warnOnIgnoredSdkEnvVars(fallbackBaseUrl: string): void {
+	const ignored = SDK_ONLY_ENV_VARS.filter((name) => process.env[name]?.trim());
+	if (ignored.length === 0) return;
+	const logger = getLogger();
+	logger.warn(
+		`${ignored.join(", ")} ${ignored.length === 1 ? "is" : "are"} set but no cluster address variable is — set CAMUNDA_BASE_URL (or CAMUNDA_REST_ADDRESS) to use them. Falling back to the default 'local' profile (${fallbackBaseUrl}).`,
+	);
 }
 
 /**
@@ -1571,33 +1673,36 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 	if (c8ctl.activeProfile) {
 		const profile = requireExplicitProfile(c8ctl.activeProfile);
 		// Warn when env vars are also present — avoids silent surprise
-		// Only warn when CAMUNDA_BASE_URL is set, since resolveClusterConfig
-		// only uses env vars when CAMUNDA_BASE_URL is present
-		if (process.env.CAMUNDA_BASE_URL?.trim()) {
+		// Only warn when a cluster address env var is set, since
+		// resolveClusterConfig only uses env vars when one is present
+		if (resolveEnvBaseUrl()) {
 			const logger = getLogger();
 			logger.warn(
 				`Active profile '${c8ctl.activeProfile}' is overriding CAMUNDA_* environment variables.`,
 			);
+			// stderr explicitly: this runs during client construction, including
+			// in `mcp-proxy`, where stdout carries the MCP protocol stream.
 			logger.info("  To use env vars instead, run: c8 use profile --none", {
 				essential: true,
+				stream: "stderr",
 			});
 			logger.info(
 				"  To create a profile from env vars: c8 add profile <name> --from-env",
-				{ essential: true },
+				{ essential: true, stream: "stderr" },
 			);
 		}
 		return profileToClusterConfig(profile);
 	}
 
 	// 3. Try environment variables
-	const baseUrl = process.env.CAMUNDA_BASE_URL;
+	const baseUrl = resolveEnvBaseUrl();
 	const clientId = process.env.CAMUNDA_CLIENT_ID;
 	const clientSecret = process.env.CAMUNDA_CLIENT_SECRET;
 	const audience = process.env.CAMUNDA_TOKEN_AUDIENCE;
 	const oAuthUrl = process.env.CAMUNDA_OAUTH_URL;
 	const scope = process.env.CAMUNDA_OAUTH_SCOPE;
-	const username = process.env.CAMUNDA_USERNAME;
-	const password = process.env.CAMUNDA_PASSWORD;
+	const { username, password } = resolveEnvBasicAuth();
+	const authStrategy = resolveAuthStrategy(process.env.CAMUNDA_AUTH_STRATEGY);
 
 	if (baseUrl) {
 		return {
@@ -1609,18 +1714,22 @@ function _resolveClusterConfig(profileFlag?: string): ClusterConfig {
 			scope,
 			username,
 			password,
+			authStrategy,
 		};
 	}
 
 	// 4. Default 'local' profile (manifested by ensureDefaultProfile at startup)
 	const localProfile = getProfile(DEFAULT_PROFILE);
 	if (localProfile) {
+		warnOnIgnoredSdkEnvVars(localProfile.baseUrl);
 		return profileToClusterConfig(localProfile);
 	}
 
 	// 5. Hardcoded fallback (safety net, should not be reached)
+	const hardcodedBaseUrl = "http://localhost:8080/v2";
+	warnOnIgnoredSdkEnvVars(hardcodedBaseUrl);
 	return {
-		baseUrl: "http://localhost:8080/v2",
+		baseUrl: hardcodedBaseUrl,
 		username: "demo",
 		password: "demo",
 	};

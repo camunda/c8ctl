@@ -6,6 +6,7 @@
 // by tests/unit/layering-import-boundary.test.ts (Rules A and B).
 export * from "./client.ts";
 export * from "./config.ts";
+export * from "./env-address.ts";
 export * from "./errors.ts";
 export * from "./logger.ts";
 export * from "./runtime.ts";

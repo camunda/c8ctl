@@ -147,6 +147,25 @@ export function buildGatewayFetch(opts: {
 }
 
 /**
+ * The auth strategy actually used for a resolved config: an explicit
+ * `authStrategy` wins; otherwise it is derived from complete credential sets
+ * (OAuth before Basic). Shared by SDK construction and manual header
+ * resolution so both paths authenticate identically.
+ */
+export function effectiveAuthStrategy(config: {
+	authStrategy?: "NONE" | "BASIC" | "OAUTH";
+	clientId?: string;
+	clientSecret?: string;
+	username?: string;
+	password?: string;
+}): "NONE" | "BASIC" | "OAUTH" {
+	if (config.authStrategy) return config.authStrategy;
+	if (config.clientId && config.clientSecret) return "OAUTH";
+	if (config.username && config.password) return "BASIC";
+	return "NONE";
+}
+
+/**
  * Create a Camunda 8 cluster client with resolved configuration
  */
 export function createClient(
@@ -160,31 +179,37 @@ export function createClient(
 		CAMUNDA_REST_ADDRESS: config.baseUrl,
 	};
 
-	// Add OAuth configuration if present
-	if (config.clientId && config.clientSecret) {
-		sdkConfig.CAMUNDA_AUTH_STRATEGY = "OAUTH";
+	// An explicit CAMUNDA_AUTH_STRATEGY (surfaced on the resolved config)
+	// wins over the strategy derived from whichever credentials are present
+	// — e.g. an SDK `.env` with CAMUNDA_AUTH_STRATEGY=NONE must stay
+	// unauthenticated even if stale credentials sit alongside it. The
+	// credential keys are passed through unconditionally: the SDK merges its
+	// config over process.env, so omitting them here would not stop it from
+	// picking the same CAMUNDA_* variables up itself, and leaving them in
+	// keeps the resolution visible in one place.
+	if (config.clientId) {
 		sdkConfig.CAMUNDA_CLIENT_ID = config.clientId;
-		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
-		if (config.audience) {
-			sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
-		}
-		if (config.oAuthUrl) {
-			sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
-		}
-		if (config.scope) {
-			sdkConfig.CAMUNDA_OAUTH_SCOPE = config.scope;
-		}
 	}
-	// Add Basic auth configuration if present
-	else if (config.username && config.password) {
-		sdkConfig.CAMUNDA_AUTH_STRATEGY = "BASIC";
+	if (config.clientSecret) {
+		sdkConfig.CAMUNDA_CLIENT_SECRET = config.clientSecret;
+	}
+	if (config.audience) {
+		sdkConfig.CAMUNDA_TOKEN_AUDIENCE = config.audience;
+	}
+	if (config.oAuthUrl) {
+		sdkConfig.CAMUNDA_OAUTH_URL = config.oAuthUrl;
+	}
+	if (config.scope) {
+		sdkConfig.CAMUNDA_OAUTH_SCOPE = config.scope;
+	}
+	if (config.username) {
 		sdkConfig.CAMUNDA_BASIC_AUTH_USERNAME = config.username;
+	}
+	if (config.password) {
 		sdkConfig.CAMUNDA_BASIC_AUTH_PASSWORD = config.password;
 	}
-	// No authentication
-	else {
-		sdkConfig.CAMUNDA_AUTH_STRATEGY = "NONE";
-	}
+
+	sdkConfig.CAMUNDA_AUTH_STRATEGY = effectiveAuthStrategy(config);
 
 	// SDK logging: trace with --verbose, debug when c8ctl debug logging is
 	// enabled, otherwise silent unless the user set CAMUNDA_SDK_LOG_LEVEL.
@@ -354,7 +379,13 @@ export async function resolveAuthHeaders(
 		"Content-Type": "application/json",
 	};
 
-	if (config.clientId && config.clientSecret) {
+	const strategy = effectiveAuthStrategy(config);
+	if (strategy === "OAUTH") {
+		if (!config.clientId || !config.clientSecret) {
+			throw new Error(
+				"Auth strategy OAUTH is selected but CAMUNDA_CLIENT_ID / CAMUNDA_CLIENT_SECRET are missing",
+			);
+		}
 		const tokenUrl = config.oAuthUrl;
 		if (!tokenUrl) {
 			throw new Error(
@@ -390,7 +421,12 @@ export async function resolveAuthHeaders(
 				"OAuth token response did not contain a valid access_token",
 			);
 		}
-	} else if (config.username && config.password) {
+	} else if (strategy === "BASIC") {
+		if (!config.username || !config.password) {
+			throw new Error(
+				"Auth strategy BASIC is selected but CAMUNDA_USERNAME / CAMUNDA_PASSWORD are missing",
+			);
+		}
 		const encoded = Buffer.from(
 			`${config.username}:${config.password}`,
 		).toString("base64");
