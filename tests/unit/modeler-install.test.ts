@@ -106,7 +106,14 @@ function createSandbox() {
 			const path = join(binDir, name);
 			writeFileSync(
 				path,
-				`#!/bin/sh\nprintf '${name} %s\\n' "$*" >> "$TOOL_LOG"\n${body}\n`,
+				`#!/bin/sh
+printf '${name} %s\\n' "$*" >> "$TOOL_LOG"
+if [ "$TOOL_CHATTER" = "1" ]; then
+  printf '${name} routine stdout\\n'
+  printf '${name} routine stderr\\n' >&2
+fi
+${body}
+`,
 			);
 			chmodSync(path, 0o755);
 		},
@@ -375,6 +382,45 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	for (const mode of ["text", "json"]) {
+		test(`quiet Homebrew installs hide chatter but keep failure details in ${mode} mode`, {
+			skip: !isMac,
+		}, async () => {
+			const sandbox = createSandbox();
+			try {
+				sandbox.fakeTool(
+					"brew",
+					[
+						'case "$1" in',
+						"  --version) exit 0 ;;",
+						"  list) exit 1 ;;",
+						"  install)",
+						'    if [ "$FAIL_AT" = brew ]; then printf "brew failure detail\\n" >&2; exit 2; fi',
+						'    /bin/mkdir -p "$APPLICATIONS_ROOT/Camunda Modeler.app" ;;',
+						"  *) exit 1 ;;",
+						"esac",
+					].join("\n"),
+				);
+				const env = { TOOL_CHATTER: "1", C8CTL_OUTPUT_MODE: mode };
+				const failed = await sandbox.install(
+					{ ...env, FAIL_AT: "brew" },
+					"--quiet",
+				);
+				assert.strictEqual(failed.status, 1, failed.stderr);
+				assert.doesNotMatch(failed.stdout, /brew routine stdout/);
+				assert.match(failed.stderr, /brew failure detail/);
+
+				const result = await sandbox.install(env, "--quiet");
+				assert.strictEqual(result.status, 0, result.stderr);
+				assert.strictEqual(result.stdout, "");
+				assert.strictEqual(result.stderr, "");
+				assert.ok(existsSync(join(sandbox.applicationsRoot, MODELER_BUNDLE)));
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
 	test("registers the Homebrew bundle in a custom application directory", {
 		skip: !isMac,
 	}, async () => {
@@ -536,6 +582,41 @@ describe("CLI behavioural: modeler install", () => {
 			assert.strictEqual(
 				sandbox.toolCalls().at(-1),
 				`lsregister -f ${userApp}`,
+			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("quiet TTY downloads hide progress and tool chatter but keep failure details", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		fakeReleaseTools(sandbox);
+		try {
+			const env = { TOOL_CHATTER: "1" };
+			const failed = await sandbox.install(
+				{ ...env, FAIL_AT: "verify" },
+				"--quiet",
+			);
+			assert.strictEqual(failed.status, 1, failed.stderr);
+			assert.match(failed.stderr, /not signed by Camunda/);
+			assert.match(failed.stderr, /codesign routine stdout/);
+			assert.match(failed.stderr, /codesign routine stderr/);
+
+			const result = await sandbox.install(env, "--quiet");
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.strictEqual(result.stdout, "");
+			assert.strictEqual(result.stderr, "");
+			assert.ok(
+				existsSync(
+					join(
+						sandbox.applicationsRoot,
+						MODELER_BUNDLE,
+						"Contents",
+						"Info.plist",
+					),
+				),
 			);
 		} finally {
 			sandbox.cleanup();

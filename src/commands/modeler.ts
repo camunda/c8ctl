@@ -45,16 +45,25 @@ function manualDownloadError(message: string): Error {
 function runCommand(
 	command: string,
 	args: string[],
-	failureMessage: string,
+	{ failureMessage, quiet }: { failureMessage: string; quiet: boolean },
 ): void {
 	const result = spawnSync(command, args, {
-		stdio: ["inherit", process.stderr.fd, process.stderr.fd],
+		encoding: "utf8",
+		stdio: quiet
+			? ["inherit", "pipe", "pipe"]
+			: ["inherit", process.stderr.fd, process.stderr.fd],
 	});
+	const diagnostics = quiet
+		? `${result.stdout ?? ""}${result.stderr ?? ""}`.trim()
+		: "";
+	const details = diagnostics ? `\n${diagnostics}` : "";
 	if (result.error) {
-		throw new Error(`${failureMessage}: ${result.error.message}`);
+		throw new Error(`${failureMessage}: ${result.error.message}${details}`);
 	}
 	if (result.status !== 0) {
-		throw new Error(`${failureMessage} (exit code ${String(result.status)}).`);
+		throw new Error(
+			`${failureMessage} (exit code ${String(result.status)}).${details}`,
+		);
 	}
 }
 
@@ -184,11 +193,13 @@ async function downloadArchive({
 	url,
 	destination,
 	logger,
+	quiet,
 	signal: interruptionSignal,
 }: {
 	url: string;
 	destination: string;
 	logger: Logger;
+	quiet: boolean;
 	signal: AbortSignal;
 }): Promise<void> {
 	// Only time out on stalls, so slow connections can still finish.
@@ -204,6 +215,7 @@ async function downloadArchive({
 		DOWNLOAD_STALL_TIMEOUT_MS,
 	);
 	const live =
+		!quiet &&
 		Boolean(process.stderr.isTTY) &&
 		process.env.TERM !== "dumb" &&
 		logger.mode === "text";
@@ -271,9 +283,11 @@ async function downloadArchive({
 async function installFromOfficialDownload({
 	applicationsDir,
 	logger,
+	quiet,
 }: {
 	applicationsDir: string;
 	logger: Logger;
+	quiet: boolean;
 }): Promise<{ version: string; destination: string }> {
 	const version = latestStableModelerVersion(await fetchReleaseIndex());
 	const archiveName = modelerMacArchiveName(version, process.arch);
@@ -301,6 +315,7 @@ async function installFromOfficialDownload({
 			url: archiveUrl,
 			destination: archivePath,
 			logger,
+			quiet,
 			signal: controller.signal,
 		});
 
@@ -312,11 +327,10 @@ async function installFromOfficialDownload({
 		const stagingDir = mkdtempSync(join(applicationsDir, ".c8ctl-modeler-"));
 		try {
 			logger.info(`Installing Camunda Modeler to ${destination}...`);
-			runCommand(
-				"ditto",
-				["-x", "-k", archivePath, stagingDir],
-				"Could not extract Camunda Modeler",
-			);
+			runCommand("ditto", ["-x", "-k", archivePath, stagingDir], {
+				failureMessage: "Could not extract Camunda Modeler",
+				quiet,
+			});
 			const stagedApp = join(stagingDir, APP_BUNDLE_NAME);
 			if (!existsSync(stagedApp)) {
 				throw manualDownloadError(
@@ -332,7 +346,11 @@ async function installFromOfficialDownload({
 					`-R=${MODELER_CODE_REQUIREMENT}`,
 					stagedApp,
 				],
-				"The downloaded Camunda Modeler is not signed by Camunda; refusing to install it",
+				{
+					failureMessage:
+						"The downloaded Camunda Modeler is not signed by Camunda; refusing to install it",
+					quiet,
+				},
 			);
 			renameSync(stagedApp, destination);
 		} finally {
@@ -389,11 +407,10 @@ export const modelerInstallCommand = defineCommand(
 			}
 
 			ctx.logger.info("Installing Camunda Modeler with Homebrew...");
-			runCommand(
-				"brew",
-				["install", "--cask", "camunda-modeler"],
-				"Homebrew could not install Camunda Modeler",
-			);
+			runCommand("brew", ["install", "--cask", "camunda-modeler"], {
+				failureMessage: "Homebrew could not install Camunda Modeler",
+				quiet: ctx.quiet,
+			});
 			// Homebrew does not register new apps with Launch Services.
 			const brewInstalledPath =
 				findInstalledModeler() ?? resolveHomebrewModelerPath();
@@ -427,6 +444,7 @@ export const modelerInstallCommand = defineCommand(
 		const { version, destination } = await installFromOfficialDownload({
 			applicationsDir,
 			logger: ctx.logger,
+			quiet: ctx.quiet,
 		});
 		return {
 			kind: "success",
