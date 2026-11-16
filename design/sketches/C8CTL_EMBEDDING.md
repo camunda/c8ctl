@@ -194,7 +194,8 @@ As B, with an LSP-style protocol of our own.
 
 * __Example:__ `await deploy({ profile, paths })` returns a typed result or throws a typed error. `startCluster({ onProgress, signal })` drives the cluster; c8run keeps running when Modeler exits.
 * __Strengths:__ the most direct way to remove duplication (N1); typed errors and results, no serialization (N3); no extra process; progress and cancellation are plain callbacks and `AbortSignal` (N4); profile changes observable by watching files, as Modeler's `file-context/watcher.js` already does (N2).
-* __Weaknesses:__ couples dependency trees (Modeler would carry `@camunda8/orchestration-cluster-api` next to `@camunda8/sdk` until it migrates); a semver'd public API is a real commitment; ESM library into Modeler's CommonJS main relies on Electron's `require(esm)` (to verify); no agent access (N7); plugins would run in Modeler's main process if exposed.
+* __Weaknesses:__ couples dependency trees (Modeler would carry `@camunda8/orchestration-cluster-api` next to `@camunda8/sdk` until it migrates); `c8ctl` must expose an [internal API](#internal-api) it does not have today; no agent access (N7); plugins would run in Modeler's main process if exposed.
+* __Not a risk:__ ESM from Modeler's CommonJS main. `require(esm)` works in Electron's main process without flags (verified on Electron 45 / Node 24), as long as the loaded modules use no top-level `await`.
 
 Not considered: a local HTTP daemon - an open port needs auth, discovery and lifecycle management without serving any need better than B.
 
@@ -207,7 +208,7 @@ Not considered: a local HTTP daemon - an open port needs auth, discovery and lif
 | N3 Actionable errors         | ✅ with catalog               | ✅ with catalog                 | ✅ with catalog      | ✅ typed                         |
 | N4 Long-running operations   | ◐ NDJSON events, ad-hoc prompts | ✅                            | ✅                   | ✅ callbacks + `AbortSignal`     |
 | N5 Bounded results           | ✅ with requirement           | ✅ with requirement             | ✅ with requirement  | ✅ with requirement              |
-| N6 Independent cadence       | ✅ pinned binary              | ✅ pinned binary + handshake    | ✅                   | ◐ semver API, shared deps        |
+| N6 Independent cadence       | ✅ pinned binary              | ✅ pinned binary + handshake    | ✅                   | ◐ exact pin, shared deps         |
 | N7 Agent access              | ◐ shell agents only           | ✅                              | ❌ needs MCP too     | ❌                               |
 | Cost to build                | low                           | medium                          | high                 | medium                           |
 
@@ -241,23 +242,43 @@ flowchart TB
 What it means for `c8ctl`:
 
 * __Runtime-free core__ - library code takes dependencies explicitly (data dir, logger, signal) and never reads `globalThis.c8ctl` (`core/config.ts` imports `runtime.ts` today). Enforced by extending the layering guard.
-* __Public API__ - subpath exports or separate packages, semver-versioned, distinct from the CLI contract.
+* __Internal API__ - an entry point for Camunda tools, not a public API (see [Internal API](#internal-api)).
 * __Promote command-private helpers__ - e.g. `commands/helpers/deploy-helpers.ts` (project resolution) and the cluster plugin's c8run lifecycle move into the core.
 * __State stays file-owned__ - libraries use the same atomic writes and locks as the CLI; one writer path per file.
 * __Ownership boundaries__ - editing-time logic stays where it is shared today (`@camunda/linting`, `bpmn-js-element-templates`); `c8ctl` hosts what touches disk, clusters and credentials.
 
+### Internal API
+
+`c8ctl` is a CLI; its package exports only `./runtime` (the plugin runtime). Building Modeler on it needs an API for __our tools__, not a public API with a compatibility promise. Modeler is open source, so whatever it imports is published - "internal" means "no compatibility promise", not "invisible". That rules out a private registry; deep imports into `dist/` are blocked by `exports`; git dependencies need a build first.
+
+| Option                       | How                                                                                                   | Pros                                                         | Cons                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| __1. Internal entry point__  | `@camunda8/cli/internal` in `exports`, over the runtime-free core; typed `@internal`, undocumented     | Cheapest; one package, one release                           | Importable by anyone; versions follow the CLI, so Modeler pins exactly        |
+| __2. Bundled artifact__      | The build emits one self-contained bundle for Modeler (esbuild, already used by `build:vendor`)    | No shared dependency tree                                    | Bundle size, harder debugging, deliberate upgrade step                        |
+| __3. Separate package__      | Core as its own workspace package (the repo already uses npm workspaces), e.g. `@camunda8/cli-core` at `0.x` | Clean boundary, own dependencies                        | A published name looks like a product; more release setup                     |
+| __4. No import__             | Modeler ships the binary and calls `--json` or `c8ctl mcp` (option A / B)                              | No code export                                               | The protocol is public by nature - agents use it too                          |
+
+Safeguards for 1-3:
+
+* Modeler pins an exact `c8ctl` version.
+* `c8ctl` CI tests the internal API as Modeler uses it, so a breaking change fails before release.
+* A guard test restricts the internal entry to the runtime-free core.
+* The name says internal.
+
+__Recommendation:__ start with 1; switch to 2 if dependency coupling hurts; consider 3 once there is a second consumer (VS Code).
+
 ## Rollout
 
 1. __Option-independent requirements__ - handler `ctx` (progress, prompts, cancellation), explicit context, error codes, bounded results. Immediate value for CLI users and agents.
-2. __Align the divergences__ - deploy set (Modeler adopts `.c8ignore`), OOTB template source, lint rule set. Then __extract the runtime-free core__ and export a first library: project deploy-set resolution - small, pure, and already divergent. __Spike in Modeler__ to validate D, including `require(esm)` and dependency size.
+2. __Align the divergences__ - deploy set (Modeler adopts `.c8ignore`), OOTB template source, lint rule set. Then __draft the internal API__, extract the runtime-free core, and export a first library: deploy resources (project deploy-set resolution + deployment) - Modeler needs it next, and the two implementations already diverge. __Spike in Modeler__ to validate D, including dependency size.
 3. __`c8ctl mcp`__ exposing `c8ctl`'s own commands to agent hosts.
 4. __Local cluster + hub login__ as libraries consumed by Modeler. These are the highest-value capabilities Modeler lacks today. Migrate connections into `c8ctl` profiles.
 5. __Close the `zeebe-api` gaps__ (start and runtime instructions, element instance search, cluster variables, secret names, CA configuration), then retire `zeebe-api` in favor of `c8ctl` libraries.
 
 ## Open questions
 
-* __Does the Modeler spike confirm D?__ If dependency coupling or `require(esm)` proves painful, fall back to A for Modeler (B if prompts/progress over A prove too ad-hoc).
-* __Library packaging__ - subpath exports of one package, or separate packages? Which utilities are worth the semver commitment?
+* __Does the Modeler spike confirm D?__ If dependency coupling proves painful, fall back to A for Modeler (B if prompts/progress over A prove too ad-hoc).
+* __Internal API shape__ - which functions does Modeler need first, and with which signatures? Entry point, bundle or separate package (see [Internal API](#internal-api))?
 * __Credential storage__ for hub login - keep tokens with profiles, or OS keychain?
 * __Relation to `mcp-proxy`__ - fold into `c8ctl mcp`, or keep separate?
 * __Hub login and Modeler__ - which Modeler connection types migrate as-is, which are superseded by hub login?
