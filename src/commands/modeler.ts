@@ -6,6 +6,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 } from "node:fs";
@@ -108,6 +109,31 @@ function findInstalledModeler(): string | undefined {
 	return [SYSTEM_APPLICATIONS_DIR, userApplicationsDir()]
 		.map((dir) => join(dir, APP_BUNDLE_NAME))
 		.find((location) => existsSync(location));
+}
+
+function resolveHomebrewModelerPath(): string {
+	const failureMessage =
+		"Could not locate the Camunda Modeler app installed by Homebrew";
+	const result = spawnSync("brew", ["list", "--cask", "camunda-modeler"], {
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", process.stderr.fd],
+	});
+	if (result.error) {
+		throw new Error(`${failureMessage}: ${result.error.message}`);
+	}
+	if (result.status !== 0) {
+		throw new Error(`${failureMessage} (exit code ${String(result.status)}).`);
+	}
+	const appPath = result.stdout
+		.split(/\r?\n/)
+		.find((path) => path.endsWith(`/${APP_BUNDLE_NAME}`));
+	if (!appPath) {
+		throw new Error(
+			`${failureMessage}. Run \`brew list --cask camunda-modeler\` to check the installation.`,
+		);
+	}
+	// Homebrew keeps a Caskroom symlink to the configured app directory.
+	return realpathSync(appPath);
 }
 
 /** Standard (non-admin) users cannot write to /Applications. */
@@ -348,10 +374,9 @@ export const modelerInstallCommand = defineCommand(
 				"Homebrew could not install Camunda Modeler",
 			);
 			// Homebrew does not register new apps with Launch Services.
-			const brewInstalledPath = findInstalledModeler();
-			if (brewInstalledPath) {
-				registerWithLaunchServices(brewInstalledPath, ctx.logger);
-			}
+			const brewInstalledPath =
+				findInstalledModeler() ?? resolveHomebrewModelerPath();
+			registerWithLaunchServices(brewInstalledPath, ctx.logger);
 			return {
 				kind: "success",
 				message: "Installed Camunda Modeler with Homebrew.",

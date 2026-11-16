@@ -6,6 +6,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -318,6 +319,88 @@ describe("CLI behavioural: modeler install", () => {
 			assert.deepStrictEqual(sandbox.toolCalls(), brewChecks);
 		} finally {
 			sandbox.cleanup();
+		}
+	});
+
+	test("registers the Homebrew bundle in a custom application directory", {
+		skip: !isMac,
+	}, async () => {
+		const sandbox = createSandbox();
+		const appDir = join(realpathSync(sandbox.home), "custom-apps");
+		const appPath = join(appDir, MODELER_BUNDLE);
+		const caskDir = join(sandbox.home, "Caskroom", "camunda-modeler", "5.52.0");
+		try {
+			mkdirSync(caskDir, { recursive: true });
+			symlinkSync(appPath, join(caskDir, MODELER_BUNDLE));
+			sandbox.fakeTool(
+				"brew",
+				[
+					'case "$*" in',
+					"  --version) exit 0 ;;",
+					'  "list --cask --versions camunda-modeler") exit 1 ;;',
+					`  "install --cask camunda-modeler") /bin/mkdir -p "${appPath}" ;;`,
+					'  "list --cask camunda-modeler")',
+					'    printf "%s\\n" "$HOME/Caskroom/camunda-modeler/5.52.0/INSTALL_RECEIPT.json" "$HOME/Caskroom/camunda-modeler/5.52.0/Camunda Modeler.app" ;;',
+					"  *) exit 1 ;;",
+					"esac",
+				].join("\n"),
+			);
+
+			const result = await sandbox.install({
+				HOMEBREW_CASK_OPTS: `--appdir=${appDir}`,
+			});
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /Installed Camunda Modeler with Homebrew/);
+			assert.deepStrictEqual(readdirSync(sandbox.applicationsRoot), []);
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"brew --version",
+				"brew list --cask --versions camunda-modeler",
+				"brew install --cask camunda-modeler",
+				"brew list --cask camunda-modeler",
+				`lsregister -f ${appPath}`,
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("reports when Homebrew cannot locate the installed bundle", {
+		skip: !isMac,
+	}, async () => {
+		for (const listing of [
+			"exit 2",
+			'printf "%s\\n" "$HOME/INSTALL_RECEIPT.json"',
+		]) {
+			const sandbox = createSandbox();
+			try {
+				sandbox.fakeTool(
+					"brew",
+					[
+						'case "$*" in',
+						'  --version|"install --cask camunda-modeler") exit 0 ;;',
+						'  "list --cask --versions camunda-modeler") exit 1 ;;',
+						`  "list --cask camunda-modeler") ${listing} ;;`,
+						"  *) exit 1 ;;",
+						"esac",
+					].join("\n"),
+				);
+
+				const result = await sandbox.install();
+
+				assert.strictEqual(result.status, 1, result.stdout);
+				assert.match(
+					result.stdout + result.stderr,
+					/Could not locate the Camunda Modeler app installed by Homebrew/,
+				);
+				assert.doesNotMatch(result.stdout, /Installed Camunda Modeler/);
+				assert.strictEqual(
+					sandbox.toolCalls().at(-1),
+					"brew list --cask camunda-modeler",
+				);
+			} finally {
+				sandbox.cleanup();
+			}
 		}
 	});
 
