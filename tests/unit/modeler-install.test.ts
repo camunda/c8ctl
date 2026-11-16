@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -19,7 +20,8 @@ import {
 	modelerMacArchiveName,
 	renderDownloadProgress,
 } from "../../src/utils/command-local/modeler-helpers.ts";
-import { c8, c8WithOptions } from "../utils/cli.ts";
+import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
+import { pollUntilValue } from "../utils/polling.ts";
 
 const MODELER_BUNDLE = "Camunda Modeler.app";
 const MB = 1_048_576;
@@ -70,6 +72,14 @@ globalThis.fetch = async (input, init) => {
 		return new Response('<a href="5.52.0/">5.52.0/</a><a href="nightly/">nightly/</a>');
 	}
 	if (url.startsWith(releaseUrl + "5.52.0/")) {
+		if (process.env.STALL_DOWNLOAD === "1") {
+			fs.writeFileSync(process.env.DOWNLOAD_PID_FILE, String(process.pid));
+			return new Response(new ReadableStream({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode("partial archive"));
+				},
+			}));
+		}
 		return new Response("archive", { headers: { "content-length": "7" } });
 	}
 	return fetch(input, init);
@@ -269,6 +279,49 @@ describe("CLI behavioural: modeler install", () => {
 			sandbox.cleanup();
 		}
 	});
+
+	for (const homebrew of [true, false]) {
+		test(`emits a JSON dry-run preview for ${homebrew ? "Homebrew" : "direct download"}`, {
+			skip: !isMac,
+		}, async () => {
+			const sandbox = createSandbox();
+			try {
+				if (homebrew) {
+					sandbox.fakeTool(
+						"brew",
+						'if [ "$1" = --version ]; then exit 0; fi\nexit 1',
+					);
+				}
+
+				const result = await sandbox.install(
+					{},
+					"--dry-run",
+					"--json",
+					"--profile=not-configured",
+				);
+
+				assert.strictEqual(result.status, 0, result.stderr);
+				const preview = parseJson(result);
+				assert.strictEqual(preview.dryRun, true);
+				assert.strictEqual(preview.command, "modeler install");
+				assert.ok(typeof preview.message === "string");
+				assert.match(
+					preview.message,
+					homebrew ? /brew install --cask/ : /would download .*Camunda Modeler/,
+				);
+				assert.strictEqual(result.stderr, "");
+				assert.deepStrictEqual(
+					sandbox.toolCalls(),
+					homebrew
+						? ["brew --version", "brew list --cask --versions camunda-modeler"]
+						: [],
+				);
+				assert.deepStrictEqual(readdirSync(sandbox.applicationsRoot), []);
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
 
 	test("installs with Homebrew when available and registers the app", {
 		skip: !isMac,
@@ -488,4 +541,46 @@ describe("CLI behavioural: modeler install", () => {
 			sandbox.cleanup();
 		}
 	});
+
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		test(`cleans up a partial download before exiting on ${signal}`, {
+			skip: !isMac,
+		}, async () => {
+			const sandbox = createSandbox();
+			const downloadTmp = join(sandbox.home, "download-tmp");
+			const pidFile = join(sandbox.home, "download.pid");
+			mkdirSync(downloadTmp);
+			const resultPromise = sandbox.install({
+				TMPDIR: downloadTmp,
+				STALL_DOWNLOAD: "1",
+				DOWNLOAD_PID_FILE: pidFile,
+			});
+			try {
+				const archiveName = modelerMacArchiveName("5.52.0", process.arch);
+				await pollUntilValue(
+					async () =>
+						readdirSync(downloadTmp)
+							.map((dir) => join(downloadTmp, dir, archiveName))
+							.find((path) => existsSync(path) && statSync(path).size > 0),
+					15_000,
+					25,
+					"a partially written Modeler archive",
+				);
+				const pid = Number(readFileSync(pidFile, "utf8"));
+				assert.ok(Number.isInteger(pid) && pid > 0);
+				process.kill(pid, signal);
+
+				const result = await resultPromise;
+				assert.strictEqual(result.timedOut, false, result.stderr);
+				assert.strictEqual(result.status, null, result.stderr);
+				assert.strictEqual(result.signal, signal, result.stderr);
+				assert.deepStrictEqual(readdirSync(downloadTmp), []);
+				assert.deepStrictEqual(readdirSync(sandbox.applicationsRoot), []);
+				assert.deepStrictEqual(sandbox.toolCalls(), []);
+			} finally {
+				await resultPromise;
+				sandbox.cleanup();
+			}
+		});
+	}
 });

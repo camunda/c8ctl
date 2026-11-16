@@ -184,13 +184,16 @@ async function downloadArchive({
 	url,
 	destination,
 	logger,
+	signal: interruptionSignal,
 }: {
 	url: string;
 	destination: string;
 	logger: Logger;
+	signal: AbortSignal;
 }): Promise<void> {
-	// Abort only when the transfer stalls, so slow connections can still finish.
+	// Only time out on stalls, so slow connections can still finish.
 	const controller = new AbortController();
+	const signal = AbortSignal.any([interruptionSignal, controller.signal]);
 	const stallTimer = setTimeout(
 		() =>
 			controller.abort(
@@ -224,7 +227,7 @@ async function downloadArchive({
 		const response = await fetchResponse(
 			url,
 			"Could not download Camunda Modeler",
-			controller.signal,
+			signal,
 		);
 		if (!response.body) {
 			throw manualDownloadError("The Modeler download returned no file");
@@ -243,11 +246,10 @@ async function downloadArchive({
 					},
 				}),
 				createWriteStream(destination),
+				{ signal },
 			);
 		} catch (error) {
-			const reason = controller.signal.aborted
-				? controller.signal.reason
-				: error;
+			const reason = signal.aborted ? signal.reason : error;
 			throw manualDownloadError(
 				`Could not download Camunda Modeler: ${errorMessage(reason)}`,
 			);
@@ -281,6 +283,16 @@ async function installFromOfficialDownload({
 	).toString();
 	const destination = join(applicationsDir, APP_BUNDLE_NAME);
 	const tempDir = mkdtempSync(join(tmpdir(), "c8ctl-modeler-"));
+	const controller = new AbortController();
+	let interruptedSignal: NodeJS.Signals | undefined;
+	const interrupt = (signal: NodeJS.Signals): void => {
+		interruptedSignal ??= signal;
+		controller.abort(new Error(`Installation interrupted by ${signal}`));
+	};
+	const onSigint = (): void => interrupt("SIGINT");
+	const onSigterm = (): void => interrupt("SIGTERM");
+	process.on("SIGINT", onSigint);
+	process.on("SIGTERM", onSigterm);
 
 	try {
 		const archivePath = join(tempDir, archiveName);
@@ -289,6 +301,7 @@ async function installFromOfficialDownload({
 			url: archiveUrl,
 			destination: archivePath,
 			logger,
+			signal: controller.signal,
 		});
 
 		if (applicationsDir !== SYSTEM_APPLICATIONS_DIR) {
@@ -329,7 +342,11 @@ async function installFromOfficialDownload({
 		registerWithLaunchServices(destination, logger);
 		return { version, destination };
 	} finally {
+		process.off("SIGINT", onSigint);
+		process.off("SIGTERM", onSigterm);
 		rmSync(tempDir, { recursive: true, force: true });
+		// Re-raise after cleanup so the shell still sees the original signal.
+		if (interruptedSignal) process.kill(process.pid, interruptedSignal);
 	}
 }
 
@@ -361,9 +378,13 @@ export const modelerInstallCommand = defineCommand(
 			}
 			if (ctx.isDryRun) {
 				return {
-					kind: "info",
-					message:
-						"Dry run: would install Camunda Modeler with `brew install --cask camunda-modeler`.",
+					kind: "dryRun",
+					info: {
+						dryRun: true,
+						command: "modeler install",
+						message:
+							"Dry run: would install Camunda Modeler with `brew install --cask camunda-modeler`.",
+					},
 				};
 			}
 
@@ -386,8 +407,12 @@ export const modelerInstallCommand = defineCommand(
 		const applicationsDir = installApplicationsDir();
 		if (ctx.isDryRun) {
 			return {
-				kind: "info",
-				message: `Dry run: would download the latest stable Camunda Modeler and install it to ${join(applicationsDir, APP_BUNDLE_NAME)}.`,
+				kind: "dryRun",
+				info: {
+					dryRun: true,
+					command: "modeler install",
+					message: `Dry run: would download the latest stable Camunda Modeler and install it to ${join(applicationsDir, APP_BUNDLE_NAME)}.`,
+				},
 			};
 		}
 		if (applicationsDir !== SYSTEM_APPLICATIONS_DIR) {
