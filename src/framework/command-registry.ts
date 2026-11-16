@@ -1900,6 +1900,45 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	skills: {
+		description: "Install Camunda AI coding skills",
+		helpDescription: "Install Camunda skills into AI coding harnesses",
+		helpFooterLabel: "Install Camunda skills",
+		helpNotes: [
+			"Requires GitHub CLI 2.90 or later; its skill commands are in preview.",
+			"Re-run to update the same skill directories; local edits to Camunda skills are overwritten.",
+			"Use a GitHub CLI agent ID for --harness. See `gh skill install --help` for supported IDs.",
+		],
+		hasDetailedHelp: true,
+		helpExamples: [
+			{
+				command: "c8ctl skills install",
+				description: "Install or update skills for detected harnesses",
+			},
+			{
+				command: "c8ctl skills install --harness claude-code",
+				description: "Install or update skills for Claude Code",
+			},
+			{
+				command: "c8ctl skills install --harness github-copilot",
+				description: "Install or update skills for GitHub Copilot CLI",
+			},
+		],
+		mutating: true,
+		requiresResource: true,
+		resources: ["install"],
+		flags: {},
+		resourceFlags: {
+			install: {
+				harness: {
+					type: "string",
+					description:
+						"GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted)",
+				},
+			},
+		},
+	},
+
 	load: {
 		description: "Load a c8ctl plugin",
 		helpResource: "plugin [name|--from url]",
