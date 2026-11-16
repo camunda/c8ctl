@@ -1932,6 +1932,7 @@ export const COMMAND_REGISTRY = {
 			install: {
 				harness: {
 					type: "string",
+					rejectEmpty: true,
 					description:
 						"GitHub CLI agent ID to target (auto-detects Claude Code and GitHub Copilot CLI when omitted)",
 				},
