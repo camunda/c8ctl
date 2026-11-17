@@ -41,6 +41,7 @@ import { isRecord, normalizeToError } from "../../core/index.ts";
 import {
 	CAMUNDA_PROJECT_FILE,
 	type CamundaProject,
+	DeployResourcesError,
 	decodeCamundaJson,
 	parseCamundaJson,
 } from "./camunda-json.ts";
@@ -64,26 +65,6 @@ export const DEPLOY_RESOURCES_DEFAULT_EXCLUSIONS: readonly string[] = [
 	".git/",
 	"/camunda.json",
 ];
-
-/** Tool-agnostic error codes, shared with the parity fixtures. */
-export type DeployResourcesErrorCode =
-	| "invalid-config"
-	| "empty-selection"
-	| "read-error";
-
-/**
- * Raised for an invalid `deployResources` configuration, an empty final
- * selection, or a selected path that cannot be read (`read-error`). `code` matches the `error` value used by the shared parity
- * fixtures.
- */
-export class DeployResourcesError extends Error {
-	readonly code: DeployResourcesErrorCode;
-	constructor(code: DeployResourcesErrorCode, message: string) {
-		super(message);
-		this.name = "DeployResourcesError";
-		this.code = code;
-	}
-}
 
 /** Describe why a single pattern is invalid, or `null` when it is valid. */
 function patternProblem(pattern: string): string | null {
@@ -171,7 +152,8 @@ export function parseDeployResources(
  *   exists.
  * @throws {DeployResourcesError} `invalid-config` when the file exists but
  *   cannot be read.
- * @throws {Error} When `camunda.json` is not valid JSON.
+ * @throws {DeployResourcesError} `invalid-config` when `camunda.json` is
+ *   not valid JSON or not a JSON object.
  */
 export function readProjectDescriptor(dirPath: string): CamundaProject | null {
 	const file = join(dirPath, CAMUNDA_PROJECT_FILE);
@@ -215,7 +197,8 @@ export type DeployResourcesState =
  *
  * @throws {DeployResourcesError} `invalid-config` when the descriptor
  *   cannot be read or the field is invalid.
- * @throws {Error} When `camunda.json` is not valid JSON.
+ * @throws {DeployResourcesError} `invalid-config` when `camunda.json` is
+ *   not valid JSON or not a JSON object.
  */
 export function readDeployResourcesState(
 	projectRoot: string,
@@ -255,7 +238,8 @@ export function deployResourcesStateOf(
  *
  * @returns The patterns, or `null` when there is no descriptor or the
  *   descriptor has no `deployResources` key (default scan applies).
- * @throws {Error} When `camunda.json` is not valid JSON.
+ * @throws {DeployResourcesError} `invalid-config` when `camunda.json` is
+ *   not valid JSON or not a JSON object.
  * @throws {DeployResourcesError} `invalid-config` when the descriptor
  *   cannot be read or the field is invalid.
  */

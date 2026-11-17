@@ -29,6 +29,27 @@ export const CAMUNDA_PROJECT_FILE = "camunda.json";
 /** Legacy marker, superseded by {@link CAMUNDA_PROJECT_FILE}. */
 export const PROCESS_APPLICATION_FILE = ".process-application";
 
+/** Tool-agnostic error codes, shared with the parity fixtures. */
+export type DeployResourcesErrorCode =
+	| "invalid-config"
+	| "empty-selection"
+	| "read-error";
+
+/**
+ * Raised for an invalid `camunda.json` or `deployResources` configuration
+ * (including malformed JSON), an empty final selection, or a selected
+ * path that cannot be read (`read-error`). `code` matches the `error`
+ * value used by the shared parity fixtures.
+ */
+export class DeployResourcesError extends Error {
+	readonly code: DeployResourcesErrorCode;
+	constructor(code: DeployResourcesErrorCode, message: string) {
+		super(message);
+		this.name = "DeployResourcesError";
+		this.code = code;
+	}
+}
+
 /**
  * Parsed contents of a `camunda.json` descriptor. Mirrors the JSON shape
  * of the file so future fields can be added in place.
@@ -66,8 +87,8 @@ export function decodeCamundaJson(buffer: Buffer): string {
  *
  * @param content - Raw file contents (after {@link decodeCamundaJson}).
  * @param source - Path used in error messages.
- * @throws {Error} When the content is not valid JSON or the top level is
- *   not an object.
+ * @throws {DeployResourcesError} `invalid-config` when the content is not
+ *   valid JSON or the top level is not an object.
  */
 export function parseCamundaJson(
 	content: string,
@@ -83,14 +104,16 @@ export function parseCamundaJson(
 	try {
 		parsed = JSON.parse(content);
 	} catch (error) {
-		throw new Error(
+		throw new DeployResourcesError(
+			"invalid-config",
 			`Invalid JSON in ${source}: ${normalizeToError(error).message}. ` +
 				"camunda.json must contain a JSON object; use {} for an empty descriptor",
 		);
 	}
 
 	if (!isRecord(parsed)) {
-		throw new Error(
+		throw new DeployResourcesError(
+			"invalid-config",
 			`${source} must contain a single JSON object; use {} for an empty descriptor`,
 		);
 	}
@@ -114,7 +137,8 @@ export function parseCamundaJson(
  * Read and parse the `camunda.json` descriptor in a directory.
  * Returns `null` when no readable descriptor exists.
  *
- * @throws {Error} When the file exists but is not valid JSON.
+ * @throws {DeployResourcesError} `invalid-config` when the file exists but
+ *   is not valid JSON.
  */
 export function readCamundaProject(dirPath: string): CamundaProject | null {
 	const filePath = join(dirPath, CAMUNDA_PROJECT_FILE);
