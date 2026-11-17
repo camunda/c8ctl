@@ -22,6 +22,25 @@ c8 watch --profile=local
 
 :::
 
+## Install Camunda AI skills
+
+Install the official Camunda skills from [`camunda/skills`](https://github.com/camunda/skills) into detected AI coding harnesses:
+
+```bash
+c8ctl skills install
+c8ctl skills install --harness claude-code
+c8ctl skills install --harness github-copilot
+c8ctl skills install --harness cursor
+```
+
+Without `--harness`, c8ctl detects Claude Code (`claude` or `~/.claude`) and GitHub Copilot CLI (`copilot` or `~/.copilot`) and installs into each detected harness. Explicit harness values are GitHub CLI agent IDs; use `gh skill install --help` for the supported list. c8ctl passes the selected ID and user scope to GitHub CLI, which resolves the host-specific skill directory for the current OS.
+
+GitHub CLI 2.90 or later is required; its skill commands are currently in preview. GitHub CLI resolves the latest tagged version of `camunda/skills`, or the default branch's current commit when the repository has no release tags. Re-running the command updates the same skill directories without duplicates. It overwrites local edits to the Camunda skill files.
+
+The harness adapter contract is a GitHub CLI agent ID: c8ctl passes it to `gh skill install --agent` and uses user scope, while GitHub CLI resolves the OS-specific skill directory and records source metadata. Auto-detection currently covers Claude Code and GitHub Copilot CLI. To add automatic detection for another harness, add its executable and user config directory to the detector table in `skills-install-helpers.ts`; other agent IDs supported by GitHub CLI can already be selected explicitly with `--harness`.
+
+To review installed skill paths or remove skills manually, use `gh skill list --scope user --agent <agent-id>` and remove only the Camunda skill directories from its output.
+
 ## Deploy
 
 Deploy resources to the active cluster.
