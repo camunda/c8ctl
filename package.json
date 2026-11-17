@@ -79,6 +79,7 @@
   "dependencies": {
     "@camunda8/orchestration-cluster-api": "^10.0.0-alpha.43",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "jsonc-parser": "^3.3.1",
     "semver": "^7.6.3"
   },
   "devDependencies": {

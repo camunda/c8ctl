@@ -2181,6 +2181,64 @@ export const COMMAND_REGISTRY = {
 		},
 	},
 
+	mcp: {
+		description: "Install or uninstall Camunda MCP connections in AI harnesses",
+		helpResource: "install|uninstall [harness...]",
+		helpDescription:
+			"Configure user-scoped Camunda orchestration and docs MCP servers",
+		helpFooterLabel: "Configure MCP connections",
+		hasDetailedHelp: true,
+		mutating: true,
+		requiresResource: true,
+		resources: ["install", "uninstall"],
+		flags: {
+			orchestration: {
+				type: "boolean",
+				description:
+					"Select the orchestration MCP server (default when --docs is absent)",
+			},
+			docs: {
+				type: "boolean",
+				description:
+					"Select the Camunda docs MCP server; combine with --orchestration for both",
+			},
+			alias: {
+				type: "string",
+				rejectEmpty: true,
+				description: "Orchestration server entry name (default: camunda)",
+			},
+		},
+		helpNotes: [
+			"Harnesses: claude-code, github-copilot, cursor, vscode, claude-desktop (macOS/Windows).",
+			"Omit harness names to configure all detected supported harnesses.",
+			"Aliases: claude = claude-code, copilot = github-copilot, code = vscode.",
+			"Targets: orchestration by default; --docs selects only docs; --docs --orchestration selects both.",
+			"Orchestration references --profile, the active saved profile, or the default local profile; credentials are not copied.",
+			"Docs uses camunda-docs, needs no cluster profile, and requires sign-in on first use.",
+			"Claude Desktop docs uses npx mcp-remote; other harnesses connect over HTTP.",
+			"VS Code's editor-managed config uses servers. For the newer Copilot harness, select github-copilot.",
+			"--dry-run previews selected entries without writing or exposing unrelated config values.",
+		],
+		helpExamples: [
+			{
+				command: "c8ctl mcp install",
+				description: "Install orchestration MCP for detected harnesses",
+			},
+			{
+				command: "c8ctl mcp install --docs",
+				description: "Install only docs MCP for detected harnesses",
+			},
+			{
+				command: "c8ctl mcp install claude-code cursor --docs --orchestration",
+				description: "Install both MCP servers for selected harnesses",
+			},
+			{
+				command: "c8ctl mcp uninstall claude-code --docs",
+				description: "Remove only the docs MCP entry",
+			},
+		],
+	},
+
 	"mcp-proxy": {
 		description: "Start a STDIO to remote HTTP MCP proxy server",
 		helpDescription:

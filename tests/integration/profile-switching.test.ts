@@ -7,13 +7,18 @@ import assert from "node:assert";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { afterEach, before, beforeEach, describe, test } from "node:test";
+import { c8ctl } from "../../src/core/runtime.ts";
 import { makeTestEnv } from "../utils/mocks.ts";
 import { pollUntil } from "../utils/polling.ts";
 import { asyncSpawn } from "../utils/spawn.ts";
 
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 const CLI = join(PROJECT_ROOT, "src", "index.ts");
+const CLUSTER_BASE_URL =
+	process.env.CAMUNDA_BASE_URL ??
+	process.env.CAMUNDA_REST_ADDRESS ??
+	"http://localhost:8080";
 
 function cli(dataDir: string, ...args: string[]) {
 	return asyncSpawn("node", ["--experimental-strip-types", CLI, ...args], {
@@ -22,28 +27,47 @@ function cli(dataDir: string, ...args: string[]) {
 	});
 }
 
+function runtimeSession() {
+	return {
+		activeProfile: c8ctl.activeProfile,
+		activeTenant: c8ctl.activeTenant,
+		outputMode: c8ctl.outputMode,
+		resolvedBaseUrl: c8ctl.resolvedBaseUrl,
+	};
+}
+
 describe("Profile Switching Integration Tests", () => {
 	let testDir: string;
 	let originalEnv: NodeJS.ProcessEnv;
+	let initialSession: ReturnType<typeof runtimeSession>;
+	let originalSession: ReturnType<typeof runtimeSession>;
+
+	before(() => {
+		initialSession = runtimeSession();
+	});
 
 	beforeEach(async () => {
 		testDir = mkdtempSync(join(tmpdir(), "c8ctl-profile-switch-test-"));
 		originalEnv = { ...process.env };
+		originalSession = runtimeSession();
 		process.env.C8CTL_DATA_DIR = testDir;
+		// These cases select saved profiles rather than ambient cluster addresses.
+		delete process.env.CAMUNDA_BASE_URL;
+		delete process.env.CAMUNDA_REST_ADDRESS;
 
 		// Create test profiles in-process (CLI `add profile` doesn't wire --username/--password)
 		const { addProfile } = await import("../../src/core/config.ts");
 
 		addProfile({
 			name: "one",
-			baseUrl: "http://localhost:8080",
+			baseUrl: CLUSTER_BASE_URL,
 			username: "demo",
 			password: "demo",
 		});
 
 		addProfile({
 			name: "two",
-			baseUrl: "http://localhost:8080",
+			baseUrl: CLUSTER_BASE_URL,
 			username: "demo",
 			password: "demo",
 		});
@@ -57,10 +81,11 @@ describe("Profile Switching Integration Tests", () => {
 	});
 
 	afterEach(() => {
+		Object.assign(c8ctl, originalSession);
+		process.env = originalEnv;
 		if (existsSync(testDir)) {
 			rmSync(testDir, { recursive: true, force: true });
 		}
-		process.env = originalEnv;
 	});
 
 	test("profile switching affects deployment and queries", async () => {
@@ -157,8 +182,6 @@ describe("Profile Switching Integration Tests", () => {
 		const { loadSessionState, resolveClusterConfig } = await import(
 			"../../src/core/config.ts"
 		);
-		const { c8ctl } = await import("../../src/core/runtime.ts");
-
 		// Drive profile switches via the CLI (writes session state to disk),
 		// then reload session state in-process so resolveClusterConfig() and
 		// c8ctl.activeProfile reflect the change. This avoids importing the
@@ -178,7 +201,7 @@ describe("Profile Switching Integration Tests", () => {
 		let config = resolveClusterConfig();
 		assert.strictEqual(
 			config.baseUrl,
-			"http://localhost:8080",
+			CLUSTER_BASE_URL,
 			"Should use profile one baseUrl",
 		);
 		assert.strictEqual(
@@ -192,7 +215,7 @@ describe("Profile Switching Integration Tests", () => {
 		config = resolveClusterConfig();
 		assert.strictEqual(
 			config.baseUrl,
-			"http://localhost:8080",
+			CLUSTER_BASE_URL,
 			"Should use profile two baseUrl",
 		);
 		assert.strictEqual(
@@ -224,5 +247,9 @@ describe("Profile Switching Integration Tests", () => {
 			"invalid",
 			"Invalid profile should be active",
 		);
+	});
+
+	test("restores shared runtime between profile tests", () => {
+		assert.deepStrictEqual(runtimeSession(), initialSession);
 	});
 });
