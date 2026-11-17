@@ -374,6 +374,29 @@ describe('Spec: Watch and live updates — "c8ctl watch --project: watches the r
 	});
 });
 
+describe('Spec: Watch and live updates — "Removing deployResources stops descriptor-mode watching"', () => {
+	for (const { label, extraArgs } of [
+		{ label: "without --force", extraArgs: [] },
+		{ label: "with --force", extraArgs: ["--force"] },
+	]) {
+		test(`removing deployResources ${label} stops watching and asks for a restart`, async () => {
+			const root = makeProject();
+			const { w, baseline } = await startWatch(root, extraArgs);
+			writeDescriptor(root, "{}");
+
+			const code = await w.waitForExit(SAFETY_NET_MS);
+			assert.strictEqual(code, 1, w.getOutput());
+			assert.match(w.getOutput(), /"deployResources" was removed/);
+			assert.match(
+				w.getOutput(),
+				/Restart `c8 watch --project` to watch the default resource scan/,
+			);
+			assert.doesNotMatch(w.getOutput(), /Continuing to watch \(--force\)/);
+			assert.strictEqual(mock.deployments.length, baseline);
+		});
+	}
+});
+
 describe('Spec: Watch and live updates — "Invalid configuration or an empty selection surfaces an error; with --force, watching continues"', () => {
 	test("an invalid deployResources edit without --force surfaces the error and stops watching", async () => {
 		const root = makeProject();
