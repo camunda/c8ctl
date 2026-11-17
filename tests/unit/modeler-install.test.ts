@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { describe, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
 	latestStableModelerVersion,
 	modelerMacArchiveName,
@@ -24,9 +25,11 @@ import { c8, c8WithOptions, parseJson } from "../utils/cli.ts";
 import { pollUntilValue } from "../utils/polling.ts";
 
 const MODELER_BUNDLE = "Camunda Modeler.app";
+const MODELER_EXECUTABLE = "Camunda Modeler.exe";
 const MB = 1_048_576;
 const PROGRESS_COLUMNS = 60;
 const isMac = process.platform === "darwin";
+const isWindows = process.platform === "win32";
 
 /**
  * Loaded into the CLI subprocess: maps /Applications to APPLICATIONS_ROOT
@@ -86,6 +89,57 @@ globalThis.fetch = async (input, init) => {
 };
 `;
 
+/**
+ * Loaded into the CLI subprocess on Windows: stands in for winget, reg and
+ * PowerShell and records their calls in TOOL_LOG. WINGET=missing|installed|
+ * failing selects the winget state; an install creates the executable under
+ * --location, and the shortcut script writes its target into the shortcut.
+ */
+const WINDOWS_PRELOAD = `
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { join } from "node:path";
+
+const { spawnSync } = childProcess;
+childProcess.spawnSync = (command, args, options) => {
+	if (!["winget", "reg", "powershell"].includes(command)) {
+		return spawnSync(command, args, options);
+	}
+	fs.appendFileSync(process.env.TOOL_LOG, [command, ...args].join(" ") + "\\n");
+	const winget = process.env.WINGET;
+	if (command === "winget" && winget === "missing") {
+		return { error: Object.assign(new Error("spawnSync winget ENOENT"), { code: "ENOENT" }) };
+	}
+	if (command === "winget" && args[0] === "list") {
+		return { status: winget === "installed" ? 0 : 0x8a150014 };
+	}
+	if (command === "winget" && args[0] === "install") {
+		const chatter = process.env.TOOL_CHATTER === "1";
+		const stdout = chatter ? "winget routine stdout\\n" : "";
+		const stderr = chatter ? "winget routine stderr\\n" : "";
+		if (stdout && options.stdio[1] !== "pipe") process.stderr.write(stdout);
+		if (stderr && options.stdio[2] !== "pipe") process.stderr.write(stderr);
+		if (winget === "failing") return { status: 0x8a150010, stdout, stderr };
+		const location = args[args.indexOf("--location") + 1];
+		fs.mkdirSync(location, { recursive: true });
+		fs.writeFileSync(join(location, "Camunda Modeler.exe"), "");
+		return { status: 0, stdout, stderr };
+	}
+	if (command === "powershell") {
+		fs.writeFileSync(options.env.C8CTL_SHORTCUT, options.env.C8CTL_TARGET);
+	}
+	return { status: 0 };
+};
+syncBuiltinESMExports();
+`;
+
+function readToolLog(toolLog: string): string[] {
+	return existsSync(toolLog)
+		? readFileSync(toolLog, "utf-8").trim().split("\n")
+		: [];
+}
+
 function createSandbox() {
 	const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
 	const binDir = join(home, "bin");
@@ -118,9 +172,7 @@ ${body}
 			chmodSync(path, 0o755);
 		},
 		toolCalls(): string[] {
-			return existsSync(toolLog)
-				? readFileSync(toolLog, "utf-8").trim().split("\n")
-				: [];
+			return readToolLog(toolLog);
 		},
 		resetToolCalls(): void {
 			rmSync(toolLog, { force: true });
@@ -162,6 +214,43 @@ function fakeReleaseTools(sandbox: ReturnType<typeof createSandbox>): void {
 		].join("\n"),
 	);
 	sandbox.fakeTool("codesign", 'if [ "$FAIL_AT" = verify ]; then exit 3; fi');
+}
+
+/** Points %LOCALAPPDATA% and %APPDATA% into a temp dir with faked Windows tools. */
+function createWindowsSandbox() {
+	const home = mkdtempSync(join(tmpdir(), "c8ctl-modeler-test-"));
+	const localAppData = join(home, "AppData", "Local");
+	const appData = join(home, "AppData", "Roaming");
+	const startMenu = join(appData, "Microsoft", "Windows", "Start Menu");
+	const toolLog = join(home, "tools.log");
+	const preload = join(home, "preload.mjs");
+	mkdirSync(join(startMenu, "Programs"), { recursive: true });
+	writeFileSync(preload, WINDOWS_PRELOAD);
+
+	return {
+		installDir: join(localAppData, "Programs", "Camunda Modeler"),
+		shortcut: join(startMenu, "Programs", "Camunda Modeler.lnk"),
+		toolCalls: (): string[] => readToolLog(toolLog),
+		resetToolCalls: (): void => rmSync(toolLog, { force: true }),
+		install: (env: Record<string, string> = {}, ...args: string[]) =>
+			c8WithOptions(
+				{
+					nodeArgs: ["--import", pathToFileURL(preload).href],
+					env: {
+						LOCALAPPDATA: localAppData,
+						APPDATA: appData,
+						TOOL_LOG: toolLog,
+						C8CTL_DATA_DIR: join(home, "data"),
+						C8CTL_OUTPUT_MODE: "text",
+						...env,
+					},
+				},
+				"modeler",
+				"install",
+				...args,
+			),
+		cleanup: (): void => rmSync(home, { recursive: true, force: true }),
+	};
 }
 
 describe("Modeler installer helpers", () => {
@@ -254,14 +343,16 @@ describe("CLI behavioural: modeler install", () => {
 		assert.ok(!result.stdout.includes("--force"));
 	});
 
-	test("prints manual download instructions on non-macOS", {
-		skip: isMac,
+	test("prints manual download instructions on unsupported platforms", {
+		skip: isMac || isWindows,
 	}, async () => {
 		const result = await c8("modeler", "install");
 
 		assert.strictEqual(result.status, 1);
 		assert.ok(
-			(result.stdout + result.stderr).includes("currently supports macOS only"),
+			(result.stdout + result.stderr).includes(
+				"currently supports macOS and Windows only",
+			),
 		);
 		assert.ok(
 			(result.stdout + result.stderr).includes(
@@ -588,6 +679,124 @@ describe("CLI behavioural: modeler install", () => {
 		}
 	});
 
+	test("skips an existing Windows installation", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			mkdirSync(sandbox.installDir, { recursive: true });
+			writeFileSync(join(sandbox.installDir, MODELER_EXECUTABLE), "");
+
+			const result = await sandbox.install();
+
+			assert.strictEqual(result.status, 0, result.stderr);
+			assert.match(result.stdout, /already installed at .*; skipping/);
+			assert.deepStrictEqual(sandbox.toolCalls(), []);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("emits a JSON dry-run preview for winget", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		try {
+			const result = await sandbox.install(
+				{ C8CTL_OUTPUT_MODE: "json" },
+				"--dry-run",
+			);
+			assert.strictEqual(result.status, 0, result.stderr);
+			const preview = parseJson(result);
+			assert.strictEqual(preview.dryRun, true);
+			assert.strictEqual(preview.command, "modeler install");
+			assert.deepStrictEqual(sandbox.toolCalls(), [
+				"winget --version",
+				"winget list --id Camunda.Modeler --exact --source winget",
+			]);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	for (const mode of ["text", "json"]) {
+		test(`quiet winget installs hide chatter but keep failure details in ${mode} mode`, {
+			skip: !isWindows,
+		}, async () => {
+			const sandbox = createWindowsSandbox();
+			try {
+				const env = { TOOL_CHATTER: "1", C8CTL_OUTPUT_MODE: mode };
+				const failed = await sandbox.install(
+					{ ...env, WINGET: "failing" },
+					"--quiet",
+				);
+				assert.strictEqual(failed.status, 1, failed.stderr);
+				assert.match(failed.stderr, /winget routine stdout/);
+				assert.match(failed.stderr, /winget routine stderr/);
+
+				const installed = await sandbox.install(env, "--quiet");
+				assert.strictEqual(installed.status, 0, installed.stderr);
+				assert.strictEqual(installed.stdout, "");
+				assert.strictEqual(installed.stderr, "");
+			} finally {
+				sandbox.cleanup();
+			}
+		});
+	}
+
+	test("installs with winget, then registers file types and a Start Menu shortcut", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		const executable = join(sandbox.installDir, MODELER_EXECUTABLE);
+		const wingetChecks = [
+			"winget --version",
+			"winget list --id Camunda.Modeler --exact --source winget",
+		];
+		try {
+			const dryRun = await sandbox.install({}, "--dry-run");
+			assert.strictEqual(dryRun.status, 0, dryRun.stderr);
+			assert.match(dryRun.stdout, /would install .* with `winget install/);
+			assert.deepStrictEqual(sandbox.toolCalls(), wingetChecks);
+
+			sandbox.resetToolCalls();
+			const installed = await sandbox.install();
+			assert.strictEqual(installed.status, 0, installed.stderr);
+			assert.ok(
+				installed.stdout.includes(
+					`Installed Camunda Modeler with winget to ${sandbox.installDir}`,
+				),
+				installed.stdout,
+			);
+			const calls = sandbox.toolCalls();
+			assert.deepStrictEqual(calls.slice(0, 3), [
+				...wingetChecks,
+				`winget install --id Camunda.Modeler --exact --source winget --scope user --location ${sandbox.installDir}`,
+			]);
+			for (const type of ["bpmn", "dmn", "form", "rpa"]) {
+				const progId = `CamundaModeler.${type.toUpperCase()}`;
+				for (const [key, value] of [
+					[`.${type}`, progId],
+					[`${progId}\\shell\\open\\command`, `"${executable}" "%1"`],
+				]) {
+					const call = `reg add HKCU\\Software\\Classes\\${key} /ve /d ${value} /f`;
+					assert.ok(calls.includes(call), `missing: ${call}`);
+				}
+			}
+			assert.strictEqual(readFileSync(sandbox.shortcut, "utf-8"), executable);
+
+			// A package installed with winget elsewhere is found via winget.
+			rmSync(sandbox.installDir, { recursive: true });
+			sandbox.resetToolCalls();
+			const alreadyInstalled = await sandbox.install({ WINGET: "installed" });
+			assert.strictEqual(alreadyInstalled.status, 0, alreadyInstalled.stderr);
+			assert.match(alreadyInstalled.stdout, /already installed with winget/);
+			assert.deepStrictEqual(sandbox.toolCalls(), wingetChecks);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
 	test("quiet TTY downloads hide progress and tool chatter but keep failure details", {
 		skip: !isMac,
 	}, async () => {
@@ -618,6 +827,29 @@ describe("CLI behavioural: modeler install", () => {
 					),
 				),
 			);
+		} finally {
+			sandbox.cleanup();
+		}
+	});
+
+	test("prints manual download instructions when winget is missing or fails", {
+		skip: !isWindows,
+	}, async () => {
+		const sandbox = createWindowsSandbox();
+		const failures = {
+			missing: /winget is not available/,
+			failing:
+				/winget could not install Camunda Modeler \(exit code 0x8A150010\)/,
+		};
+		try {
+			for (const [winget, message] of Object.entries(failures)) {
+				const result = await sandbox.install({ WINGET: winget });
+				const output = result.stdout + result.stderr;
+				assert.strictEqual(result.status, 1, `${winget}: ${output}`);
+				assert.match(output, message);
+				assert.match(output, /Download manually from /);
+				assert.ok(!existsSync(sandbox.shortcut));
+			}
 		} finally {
 			sandbox.cleanup();
 		}
