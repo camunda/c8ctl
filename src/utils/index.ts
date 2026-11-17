@@ -4,6 +4,7 @@
 // barrel (`../utils/index.ts`), never from deep utils files. Intra-utils imports
 // use direct sibling paths. Enforced by
 // tests/unit/layering-import-boundary.test.ts (Rules A and B).
+export * from "./command-local/blueprint-scaffold.ts";
 export * from "./command-local/deploy-version.ts";
 export * from "./command-local/mcp-install-helpers.ts";
 export * from "./command-local/mcp-proxy-helpers.ts";
