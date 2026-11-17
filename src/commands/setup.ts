@@ -36,13 +36,16 @@ export const setupCommand = defineCommand("setup", "", async (ctx) => {
 		return { kind: "none" };
 	}
 
-	const interactive = isInteractive() && !ctx.yes && !ctx.quiet;
-	const color = interactive;
 	const jsonMode = logger.mode === "json";
+	// JSON mode never prompts: the plan payload must not block on a TTY menu.
+	const interactive = !jsonMode && isInteractive() && !ctx.yes && !ctx.quiet;
+	// The plan goes to stdout — color it only when stdout is a terminal,
+	// so `c8ctl setup > plan.txt` stays plain text.
+	const planColor = process.stdout.isTTY === true;
 
 	// The banner is UI chrome: hidden by --quiet, omitted in JSON mode.
 	if (!jsonMode && !ctx.quiet) {
-		const banner = renderWelcomeBanner({ color });
+		const banner = renderWelcomeBanner({ color: interactive });
 		if (interactive) {
 			process.stderr.write(`${banner}\n`);
 		} else {
@@ -73,7 +76,7 @@ export const setupCommand = defineCommand("setup", "", async (ctx) => {
 	if (jsonMode) {
 		logger.json(setupPlanPayload(selected));
 	} else {
-		logger.output(renderSetupPlan(selected, { color }));
+		logger.output(renderSetupPlan(selected, { color: planColor }));
 		if (!interactive && !ctx.yes) {
 			logger.info("Hint: run interactively to choose what gets installed.");
 		}

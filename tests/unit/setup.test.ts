@@ -6,7 +6,9 @@
 
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -30,11 +32,23 @@ interface InteractiveResult {
  * Spawn `c8ctl setup` under a fake TTY, wait for the checkbox list to
  * render, then send the keystrokes. Mirrors the prompt driver in
  * tests/utils/deploy-resources.ts.
+ *
+ * The child env forwards the isolated C8CTL_DATA_DIR from the test
+ * preload (or allocates a dedicated temp dir) so spawned processes never
+ * touch the developer's real session, profiles or completion files.
+ * `fallbackKeys` are sent when no menu appears within 5s, so a
+ * regression that wrongly skips rendering fails fast instead of hitting
+ * the SIGKILL safety net.
  */
 function runInteractive(
 	keys: string,
 	args: string[] = [],
+	fallbackKeys = "\x1b",
 ): Promise<InteractiveResult> {
+	const forwardedDataDir = process.env.C8CTL_DATA_DIR;
+	const ownDataDir = forwardedDataDir
+		? undefined
+		: mkdtempSync(join(tmpdir(), "c8ctl-setup-test-"));
 	return new Promise((resolveRun, rejectRun) => {
 		const child = spawn(
 			"node",
@@ -51,6 +65,7 @@ function runInteractive(
 				env: {
 					PATH: process.env.PATH,
 					HOME: "/tmp/c8ctl-test-nonexistent-home",
+					C8CTL_DATA_DIR: forwardedDataDir ?? ownDataDir,
 					C8CTL_INTERACTIVE: "true",
 					C8CTL_OUTPUT_MODE: "text",
 				},
@@ -59,6 +74,12 @@ function runInteractive(
 		let stdout = "";
 		let stderr = "";
 		let sent = false;
+		const sendKeys = (value: string) => {
+			if (!sent) {
+				sent = true;
+				child.stdin.end(value);
+			}
+		};
 		child.stdout.setEncoding("utf-8");
 		child.stderr.setEncoding("utf-8");
 		child.stdout.on("data", (chunk: string) => {
@@ -68,16 +89,18 @@ function runInteractive(
 			stderr += chunk;
 			// The last menu row signals the list has rendered; piped stdin
 			// buffers, so the keys are delivered once the prompt listens.
-			if (!sent && stderr.includes("Docs MCP server")) {
-				sent = true;
-				child.stdin.end(keys);
-			}
+			if (stderr.includes("Docs MCP server")) sendKeys(keys);
 		});
+		// If no menu renders (e.g. a mode that must not prompt), close
+		// stdin with the fallback keys so the child can exit on its own.
+		const fallback = setTimeout(() => sendKeys(fallbackKeys), 5_000);
 		// Safety net only: a stuck prompt must not hang the test runner.
 		const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
 		child.on("error", rejectRun);
 		child.on("close", (status) => {
+			clearTimeout(fallback);
 			clearTimeout(timer);
+			if (ownDataDir) rmSync(ownDataDir, { recursive: true, force: true });
 			resolveRun({ status, stdout, stderr });
 		});
 	});
@@ -187,12 +210,25 @@ describe("c8ctl setup", () => {
 			result.stderr.includes(BRAND_BLUE),
 			"banner is not brand-colored",
 		);
+		// stdout is piped here: the plan must stay plain text even though
+		// the session is interactive and the banner on stderr is colored.
+		assert.strictEqual(result.stdout, stripVTControlCharacters(result.stdout));
 		const plan = stripVTControlCharacters(result.stdout);
 		assert.match(plan, /01\. Check prerequisites/);
 		assert.match(plan, /- Install Camunda 8 Run — skipped/);
 		assert.match(plan, /- Start the local cluster — skipped/);
 		assert.match(plan, /02\. Install Desktop Modeler/);
 		assert.match(plan, /Nothing was installed/);
+	});
+
+	test("interactive terminal with --json never prompts and prints the plan", async () => {
+		const result = await runInteractive("\x1b", ["--json"]);
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.doesNotMatch(result.stderr, new RegExp(PROMPT_TEXT));
+		const payload = JSON.parse(result.stdout);
+		assert.strictEqual(payload.command, "setup");
+		assert.strictEqual(payload.preview, true);
+		assert.strictEqual(payload.steps.length, 10);
 	});
 
 	test("interactive: Escape cancels without printing a plan", async () => {
